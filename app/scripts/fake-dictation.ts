@@ -1,6 +1,7 @@
 import { json } from "./component-kit.tsx"
 
 export class FakeRecorder {
+  static slices = 0
   static isTypeSupported() {
     return true
   }
@@ -15,11 +16,12 @@ export class FakeRecorder {
     if (name === "stop") this.listeners.push(listener)
   }
   start(ms: number) {
+    FakeRecorder.slices = 0
     this.state = "recording"
-    this.timer = setInterval(
-      () => this.ondataavailable?.({ data: new Blob(["slice"], { type: "audio/webm" }) }),
-      Math.max(ms, 40),
-    )
+    this.timer = setInterval(() => {
+      FakeRecorder.slices += 1
+      this.ondataavailable?.({ data: new Blob(["slice"], { type: "audio/webm" }) })
+    }, Math.max(ms, 40))
   }
   stop() {
     if (this.state === "inactive") return
@@ -46,39 +48,25 @@ export function installFakeMedia() {
   })
 }
 
-/** A call the fake host was asked, with what it carried and the bot's words on its query. */
 export interface DictationCall {
   method: string
   path: string
-  /** The request's body: parsed when it was JSON, and the recording itself when it was audio. */
   body: unknown
   vocabulary: string[]
 }
 
 export interface DictationHostOptions {
-  /** What a clip answers: the words the speech model heard, filler and all. */
   heard?: string
-  /** A clip's answer: the words, a host that fails it, or one that never answers it. */
   clip?: "ok" | "fail" | "hang"
   /** Which clips fail, 1-based, so a Retry hears the next one. */
   clipFails?: number[]
-  /** What a failed clip says. */
   clipError?: string
-  /** How long the host takes over a clip. */
   clipAfter?: number
-  /** The end cleanup: a tidied answer, a refusal, an answer in the wrong shape, or none at all. */
   cleanup?: "ok" | "fail" | "junk" | "hang"
-  /** What the cleanup answers. */
   tidied?: string
-  /** How long the cleanup takes, so a Cancel can land inside it. */
   cleanupAfter?: number
 }
 
-/**
- * The host's dictation routes, faked for one take: its info, its warm, its clips and the cleanup
- * that tidies a finished one. Every call is kept, so a test can assert what was asked for — and
- * the knobs are the shapes the flows differ by, so a take's words and failures are stated once.
- */
 export function dictationHost(options: DictationHostOptions = {}) {
   const {
     heard = "hello there",

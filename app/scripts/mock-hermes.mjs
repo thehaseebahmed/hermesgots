@@ -91,19 +91,6 @@
 // ends comes back as the run's `pending_steer`. Say "long" for a turn with a tool call every few steps.
 // POST /api/plugins/memento/sessions/{id}/attachments saves an attached file under the temp dir, and a
 // message that carries attachments (inline images, `<attachment>` lines) gets a reply naming them.
-// POST /api/plugins/memento/dictation turns a recorded clip into a fixed sentence after a moment, like
-// plugin/dictation.py with faster-whisper, and answers it as the model heard it — filler and all.
-// MOCK_DICTATION=off reports it unavailable (the mic hides) and MOCK_DICTATION=fail answers every clip
-// with an error. GET /__mock/dictation lists the clips it was sent (size, type, hint, the text before
-// each and the bot's vocabulary) and the end cleanups it was asked for, for the regression script.
-// POST dictation/cleanup tidies a finished dictation whole (#460, ADR 0038: fillers out, spacing
-// repaired, a capital and a full stop) after a moment; MOCK_DICTATION_TIDY=fail refuses it and
-// POST /__mock/dictation-tidy { mode } turns refusing ("fail") or never answering ("hang") on while
-// the mock runs.
-// GET /api/plugins/memento/speech is the host's own speech model with the models a pick is made from
-// (size, speed, whether the host has each one, which is in play) and the model a dictation's
-// cleanup runs on; POST speech { model?, cleanup_model? } writes a pick and answers the whole reading back,
-// so a model picked on the Bot's Dictation tab is the one a reload finds in play (plugin/speech.py).
 // GET /api/plugins/memento/workflows lists the workflow library (presets first, read-only), POST
 // adds one, POST to its id rewrites one of the account's own — forking a preset into a copy — and DELETE takes
 // one away; each answers the whole list. A project names the workflow its work runs under through
@@ -2372,13 +2359,8 @@ async function streamCompletion(req, res, body) {
 const runs = new Map()
 const PLUGIN_VERSION = process.env.MOCK_PLUGIN_VERSION || "0.29.1"
 const DICTATION = process.env.MOCK_DICTATION ?? "on"
-// The end cleanup a finished dictation is tidied by: "ok" answers the tidied text, "fail" refuses
-// and "hang" never answers, so a flow can see a dictation land the words as it heard them (#460).
 let DICTATION_TIDY = process.env.MOCK_DICTATION_TIDY ?? "ok"
 const TIDY_MS = 400
-// plugin/dictation_cleanup.py's whole-text tidy, in two lines: fillers out, spacing repaired, a
-// capital at the start and a full stop at the end. Deterministic, so a flow can assert the tidied
-// words exactly; the app calls it once, when the take ends (#460, ADR 0038).
 function tidyWhole(text) {
   const out = String(text)
     .replace(/\s+/g, " ")
@@ -4109,7 +4091,6 @@ http
         })
       return json(res, 200, {
         object: "memento.dictation",
-        // As the model heard it: the filler is the cleanup's to take out (#460).
         text: "um Let's ship the dictation feature today.",
         ms: 700,
       })
@@ -4498,9 +4479,6 @@ http
     if (url.pathname === "/__mock/dictation" && req.method === "GET") {
       return json(res, 200, { clips: dictationClips, cleanups: dictationCleanups })
     }
-    // Dev only: POST { mode } "ok" | "fail" | "hang" is the end cleanup of a finished dictation —
-    // the host refusing to tidy it, or never answering — so a flow sees the words as they were
-    // heard land instead (#460, ADR 0038).
     if (url.pathname === "/__mock/dictation-tidy" && req.method === "POST") {
       const { mode = "ok" } = await readBody(req)
       DICTATION_TIDY = ["ok", "fail", "hang"].includes(mode) ? mode : "ok"

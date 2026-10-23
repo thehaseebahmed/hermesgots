@@ -79,7 +79,6 @@ class InstructionsTest(unittest.TestCase):
         self.assertEqual(call["json_schema"], dictation_cleanup.SCHEMA)
 
     def test_a_phrase_s_answer_budget_stays_a_phrase_s(self) -> None:
-        # A phrase is short, and its budget is what keeps a model from writing an essay about it.
         llm, patch = with_model({"text": "Hello there."})
         with patch:
             dictation_cleanup.Cleaner()("um hello there")

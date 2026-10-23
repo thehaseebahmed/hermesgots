@@ -357,9 +357,6 @@ export function Composer({
 
   const endDictation = async (send: boolean) => {
     dictationSends.current = send
-    // A Send waits shorter for the pieces still with the host and the cleanup that tidies them,
-    // and sends what it has when the wait misses; a Stop is the user asking for the whole take, so
-    // it waits longer. Neither holds the composer past its wait (ADR 0038).
     const heard = await dictation.finish(send ? SEND_WAIT_MS : STOP_WAIT_MS)
     if (heard) placeDictation(heard)
   }

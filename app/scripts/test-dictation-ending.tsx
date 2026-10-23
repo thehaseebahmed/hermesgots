@@ -15,18 +15,20 @@ import {
   type,
   until,
 } from "./component-kit.tsx"
-import { dictationHost, installFakeMedia, type DictationHostOptions } from "./fake-dictation.ts"
+import {
+  FakeRecorder,
+  dictationHost,
+  installFakeMedia,
+  type DictationHostOptions,
+} from "./fake-dictation.ts"
 
 installFakeMedia()
 
 const bot = connection("dictation-ending")
-/** What the host heard, filler and all: what a clip answers before anything tidies it. */
 const HEARD = "um Let us ship the dictation"
-/** What the end cleanup makes of it, and so what lands. */
 const TIDIED = "Let us ship the dictation."
 const VOCABULARY = ["Gots"]
 
-/** This take's host: the words it hears and the tidied words it answers with. */
 function host(options: DictationHostOptions = {}) {
   return dictationHost({ heard: HEARD, tidied: TIDIED, ...options })
 }
@@ -63,8 +65,7 @@ async function openTake(scope: ParentNode = document) {
   await settle()
   await click(button("Voice", scope))
   await until(async () => Boolean(bar(scope)), "the bar")
-  // The fake recorder's first slice is a second in: without it the take has nothing to send.
-  await new Promise((done) => setTimeout(done, 1200))
+  await until(async () => FakeRecorder.slices > 0, "the take's first slice")
 }
 
 async function reset(...keys: string[]) {

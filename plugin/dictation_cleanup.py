@@ -39,8 +39,6 @@ logger = logging.getLogger(__name__)
 ctx: Any = None
 
 DEADLINE_S = 2.0
-# A finished dictation's whole text is one call, not a phrase: it is longer to read and to answer
-# (ADR 0038's ~8 s), so it gets a budget of its own.
 WHOLE_TEXT_DEADLINE_S = 8.0
 SHORTER = 0.5
 LONGER = 1.5
@@ -62,8 +60,6 @@ WHOLE_TEXT_SYSTEM = (
     "You make the dictation read as writing, and you change nothing about what it says."
 )
 
-# The rules are one text with the unit they tidy named in it, so a phrase's pass and a whole
-# dictation's ask for the same tidying and differ only in what they say they are tidying.
 _RULES = (
     "Tidy the {unit} in the input and answer {\"text\": \"<the tidied {unit}>\"} as one JSON "
     "object, with no other key and no other text.\n"
@@ -82,7 +78,6 @@ _RULES = (
 
 
 def _instructions(unit: str) -> str:
-    """The rules with the unit this pass tidies named in their frame (``phrase``/``dictation``)."""
     return _RULES.replace("{unit}", unit)
 
 
@@ -111,7 +106,6 @@ def _prompt(text: str, vocabulary: Sequence[str], label: str = "Phrase") -> str:
 
 
 def _max_tokens(text: str, whole_text: bool) -> int:
-    """A phrase's answer fits ``PHRASE_TOKENS``; a whole dictation's is sized from its own words."""
     if not whole_text:
         return PHRASE_TOKENS
     return min(MAX_TOKENS, max(PHRASE_TOKENS, len(str(text or "").split()) * TOKENS_PER_WORD))
@@ -141,7 +135,6 @@ def complete(
 def complete_whole_text(
     text: str, vocabulary: Sequence[str], model: Optional[Dict[str, str]] = None
 ) -> Optional[str]:
-    """The same call over a finished dictation's whole text, framed as the dictation it is."""
     return _complete(text, vocabulary, model, whole_text=True)
 
 

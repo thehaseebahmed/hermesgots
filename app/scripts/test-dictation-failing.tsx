@@ -18,14 +18,9 @@ import { dictationHost, installFakeMedia, type DictationHostOptions } from "./fa
 installFakeMedia()
 
 const bot = connection("dictation-failing")
-/** What the speech model wrote down, before the cleanup tidies it. */
 const HEARD = "um Let's ship the dictation feature today."
 const SENTENCE = "Let's ship the dictation feature today."
 
-/**
- * The host this take meets: the first clip runs out of memory, and the second is heard — the
- * failure Retry is offered for, and the words that land once it is.
- */
 function host(options: DictationHostOptions = {}) {
   return dictationHost({
     heard: HEARD,

@@ -22,7 +22,6 @@ const CARET = 7
 
 const config = connection("kept-take")
 
-/** The host a restored take asks: the words it hears, and nothing else it needs. */
 const host = () => dictationHost({ heard: "hello there" })
 
 async function seed(name: string, patch: Partial<SavedDictation> = {}) {

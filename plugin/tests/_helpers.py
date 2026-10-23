@@ -15,8 +15,6 @@ from plugin.tasks import READY_LABEL
 
 
 class FakeLlm:
-    """A model that answers the calls scripted for it, in order: an answer, or the error it raises."""
-
     def __init__(self, *answers: Any) -> None:
         self.answers = list(answers)
         self.calls: List[Dict[str, Any]] = []
@@ -30,7 +28,6 @@ class FakeLlm:
 
 
 def with_model(*answers: Any):
-    """The cleanup's model scripted with ``answers``: the fake, and the patch that plants it."""
     llm = FakeLlm(*answers)
     return llm, patch.object(dictation_cleanup, "ctx", SimpleNamespace(llm=llm))
 

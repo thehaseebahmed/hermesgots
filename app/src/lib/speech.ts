@@ -1,18 +1,4 @@
 /**
- * The host's speech model, and the model a finished dictation's cleanup runs on: the two settings
- * the Dictation tab writes that live on the bot's host, not in the bot's own record.
- *
- * The speech model is Hermes's `stt.local.model`; the plugin lists the models a pick can be made
- * from with the size and speed it is weighed on, whether the host already has each one, and which
- * is in play. A pick that isn't on disk loads inside the next clip's request, so that clip waits
- * for the download before it is heard. A model the host can't load fails that clip with the host's
- * own reason, so the bar says what the host said rather than a guess of ours.
- *
- * The cleanup model is the bot's, read by the host as each dictation's cleanup runs, so it survives
- * a plugin restart. It only overrides the model of a model call, which the host has to allow
- * (`llm.model_override` and `llm.provider_override`); where it doesn't, the tab says so and the
- * host ignores the pick, tidying every dictation on the bot's own model.
- *
  * Both are one record on the host, so one read and one write carry them: `GET speech` and
  * `POST speech` with only the fields that moved. `host-speech.ts` makes those calls; this file is
  * the shape and the words a row is read with, so the unit tier can pin them without a host.

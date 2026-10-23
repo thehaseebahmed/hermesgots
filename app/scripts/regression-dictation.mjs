@@ -12,7 +12,6 @@ const mock = process.env.MOCK_URL ?? "http://localhost:18642"
 const offMock = process.env.OFF_MOCK_URL
 const shots = process.env.SHOTS_DIR
 const SENTENCE = "Let's ship the dictation feature today."
-// What the mock host heard, filler and all: the words a piece carries until the end cleanup tidies them.
 const HEARD = `um ${SENTENCE}`
 // Long enough for the stop a dead recorder never sends (STOP_MS) plus the state to render.
 const FAILED_MS = 2500
@@ -64,7 +63,6 @@ function speech() {
   return path
 }
 
-/** What the mock host was asked for: the clips it heard, and the cleanups it tidied them with. */
 async function mockDictation() {
   const { clips, cleanups } = await (await fetch(`${mock}/__mock/dictation`)).json()
   return { clips, cleanups }
@@ -76,7 +74,6 @@ const PHONE = { width: 390, height: 844 }
 const botId = (page) =>
   page.evaluate(async () => (await (await import("/src/lib/db.ts")).db.profiles.toArray())[0].id)
 
-/** Adds a word on the bot's Dictation tab, where the words its dictation is written with are kept. */
 async function addWord(page, word) {
   await page.goto(`${app}/settings/bots/${await botId(page)}/dictation`)
   const tab = page.locator("[data-bot-dictation]")
@@ -228,8 +225,6 @@ try {
     await page.getByRole("button", { name: "Voice", exact: true }).waitFor()
     const all = (await mockDictation()).clips.slice(before)
     assert.equal(all.length, 3)
-    // One cleanup tidies the joined text, so the filler comes out at its start and the two pieces
-    // that carried on from it are read as the host heard them.
     assert.equal(
       await page.getByRole("textbox").last().inputValue(),
       [SENTENCE, HEARD, HEARD].join(" "),
@@ -344,8 +339,6 @@ try {
     await page.close()
   }
 
-  // The bot's Dictation tab: a word added there is kept on the device across a reload, and the
-  // host's speech model picked there is the model in play after one (plugin/speech.py, #295).
   {
     const page = await open(mock, PHONE)
     const tab = page.locator("[data-bot-dictation]")
@@ -375,7 +368,6 @@ try {
     assert.equal(await row("small").getAttribute("aria-pressed"), "false", "the old one steps down")
     await shot(page, "phone-light-19-dictation-model")
 
-    // The host answered the write, so a reload reads the pick back rather than the one before it.
     await page.reload()
     await models.first().waitFor({ timeout: 15_000 })
     assert.equal(
@@ -386,10 +378,6 @@ try {
     await page.close()
   }
 
-
-  // The bot's words ride on the piece that is transcribed and on the cleanup that ends the
-  // dictation, and what lands in the composer is the tidied text — the surviving path whole
-  // (#461, ADR 0038).
   {
     const page = await open(mock, PHONE)
     await addWord(page, "Gots")

@@ -125,6 +125,14 @@ def _error(web: Any, message: str, status: int):
     return web.json_response({"error": {"message": message}}, status=status)
 
 
+def _cleanup_pick(path: Path) -> Optional[Dict[str, str]]:
+    try:
+        return speech.applied_cleanup(path, research.llm_gate())
+    except Exception:
+        logger.warning("memento: couldn't read the dictation cleanup model", exc_info=True)
+        return None
+
+
 def mirror_for_profiles(app: Any, web: Any) -> None:
     """Serve every route again at ``PREFIX/p/{profile}/...`` for bots at ``/p/<profile>``.
 
@@ -1608,9 +1616,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "The recording is too long.", 413)
         hint = dictation.clean_hint(request.query.get("hint"))
         context = dictation.clean_context(request.query.get("context"))
-        # The bot's words go through raw: `transcribe` is the seam every caller shares, so it is the
-        # one owner of cleaning them, and cleaning them here as well only said so twice.
-        vocabulary = request.query.getall("vocabulary", [])
+        vocabulary = dictation.clean_vocabulary(request.query.getall("vocabulary", []))
         async with dictating:
             try:
                 result = await asyncio.to_thread(
@@ -1644,17 +1650,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if body is None:
             return _error(web, "Body must be a JSON object", 400)
         vocabulary = dictation.clean_vocabulary(body.get("vocabulary"))
-        cleanup_model = None
-        try:
-            # One switch to the worker, with the pick's read and the gate inside it: this runs on
-            # the app's own shrinking deadline, and two hops spend part of it.
-            path = store_path()
-            cleanup_model = await asyncio.to_thread(
-                lambda: speech.applied_cleanup(path, research.llm_gate())
-            )
-        except Exception:
-            # A pick this host can't read costs the tidying its model, never the words themselves.
-            logger.warning("memento: couldn't read the dictation cleanup model", exc_info=True)
+        cleanup_model = await asyncio.to_thread(_cleanup_pick, store_path())
         try:
             result = await asyncio.to_thread(
                 dictation_cleanup.finish, body.get("text"), vocabulary, model=cleanup_model
@@ -1711,10 +1707,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except Exception:
             return None
 
-    # The host's speech model, and the model a finished phrase's cleanup runs on (speech.py). The
-    # model is Hermes's own `stt.local.model`, written through its round-trip YAML writer; the
-    # cleanup pick is the bot's, kept in the host's settings store and read when a finished
-    # dictation is tidied, so it survives a plugin restart.
     async def get_speech(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:

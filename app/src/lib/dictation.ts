@@ -93,10 +93,6 @@ const TRANSCRIBE_MS = 120_000
  * Retry, which has nothing else to be bounded by.
  */
 const TIDY_MS = 12_000
-/**
- * The least of a wait worth spending on a cleanup: below this the model call would be fired only
- * to be discarded when the wait runs out, so the take lands the words as they were heard instead.
- */
 const MIN_TIDY_MS = 1000
 const TYPES = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4", "audio/webm"]
 export const BARS = 32
@@ -110,7 +106,6 @@ export const QUIET_MIN = 0.012
 export const QUIET_MAX = 0.05
 /** A stop event that hasn't come by now isn't coming: the take goes with what it flushed. */
 export const STOP_MS = 1500
-/** The feature a host advertises when it can hear a dictation at all. */
 export const DICTATION = "dictation"
 
 /**
@@ -234,9 +229,7 @@ export function joinText(...parts: string[]) {
     .join(" ")
 }
 
-/** A take's words as they stand: every piece's text so far, joined. */
-const takeText = (pieces: DictationPiece[]) =>
-  joinText(...pieces.map((piece) => piece.text ?? ""))
+const takeText = (pieces: DictationPiece[]) => joinText(...pieces.map((piece) => piece.text ?? ""))
 
 /**
  * A promise given at most `ms` to resolve: what it answers, or undefined when the wait is up. A
@@ -622,16 +615,6 @@ export function useChunkedDictation(
     }, MAX_MS)
   }
 
-  /**
-   * The take's text tidied whole by the host, inside the same wait as its pieces (ADR 0038).
-   *
-   * `budgetMs` is what is left of the caller's wait, resolved to a budget by the caller. Under
-   * `MIN_TIDY_MS` there is no room for a model call — it would be fired only to be discarded, and
-   * the host would run on past the client's abort — so the words land as they were heard. A
-   * refusal, a host without the route, an answer that isn't text or a wait that runs out lands
-   * them too, and never fails a take. The request is the take's own `upload`, so a Cancel lets it
-   * go as well.
-   */
   const tidy = useCallback(async (current: Session, text: string, budgetMs = TIDY_MS) => {
     if (!text || budgetMs < MIN_TIDY_MS) return text
     const controller = new AbortController()
@@ -645,12 +628,10 @@ export function useChunkedDictation(
     const tidied = await within(asking, budgetMs)
     if (current.upload !== controller) return text
     current.upload = null
-    // The wait ran out, not the host's answer: the request is let go rather than landing late.
-    if (tidied === undefined) controller.abort()
+    controller.abort()
     return tidied ?? text
   }, [])
 
-  /** The take is over: its words land in the composer, it keeps nothing and the bar idles again. */
   const land = useCallback(
     (current: Session, text: string) => {
       forget(current)
@@ -661,16 +642,6 @@ export function useChunkedDictation(
     [showIdle],
   )
 
-  /**
-   * Waits for every piece's text and the cleanup that tidies it: the whole of it, or null with the
-   * recording kept for `retry`.
-   *
-   * `deadline` is when the caller stops waiting — a Send's short wait, a Stop's longer one — and
-   * it is one deadline for both: the pieces still with the host first, then the cleanup, and
-   * whatever is left of it, which is the budget the cleanup is resolved to. A wait that runs out
-   * abandons the take rather than holding the composer: the pieces whose text is in are the take,
-   * and the ones still with the host are let go (ADR 0038).
-   */
   const settle = useCallback(
     async (current: Session, deadline?: number) => {
       setStatus("transcribing")
@@ -690,8 +661,6 @@ export function useChunkedDictation(
         return land(current, text)
       }
       if (done === undefined && deadline !== undefined) {
-        // The wait is up, not the host's answer: what has its text is the take, and a piece still
-        // being heard is let go rather than holding the field. There is no room left to tidy it.
         stopUpload(current)
         return land(current, takeText(current.pieces))
       }
@@ -702,7 +671,11 @@ export function useChunkedDictation(
         save(current, true)
         if (text) latest.current.onCommitted?.(text)
       }
-      showFailure(current.error !== null ? clipFailure(current.error) : (current.failure ?? clipFailure(undefined)))
+      showFailure(
+        current.error !== null
+          ? clipFailure(current.error)
+          : (current.failure ?? clipFailure(undefined)),
+      )
       // The host may have lost faster-whisper since; ask again so the mic hides if so.
       void readDictationInfo(latest.current.config, true)
       return null
@@ -757,10 +730,6 @@ export function useChunkedDictation(
   /**
    * Ends the recording and returns its text: `""` for a recording too short to hold speech, null
    * when the host couldn't transcribe it (it's kept for `retry`).
-   *
-   * `waitMs` is how long the take's ending is given — the pieces still being heard and the one
-   * cleanup that tidies the whole of it — so a Send waits shorter and a Stop longer (ADR 0038). A
-   * wait that runs out lands what the take already has, so a slow host never holds the composer.
    */
   const finish = useCallback(
     (waitMs = STOP_WAIT_MS) => {

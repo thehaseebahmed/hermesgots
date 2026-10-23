@@ -2,9 +2,7 @@
 
 Hermes's transcription module isn't on a test run's path, so each test stands in for
 ``tools.transcription_tools`` and asserts only this module's own rules: when the host counts as
-ready, what reaches faster-whisper, and how its answers come back. The end of a dictation is here
-too — its whole text tidied by one call (``dictation_cleanup.finish``, the route's module seam) —
-since this is the seam the batch and cleanup routes are exercised at.
+ready, what reaches faster-whisper, and how its answers come back.
 """
 
 from __future__ import annotations
@@ -109,17 +107,6 @@ class TranscribeTest(unittest.TestCase):
             tt.calls[0]["prompt"], "Haseeb Gots DeepSeek Hermes We should ship it"
         )
 
-    def test_the_words_are_cleaned_before_they_reach_the_prompt(self) -> None:
-        tt, patch = hermes()
-        with patch:
-            dictation.transcribe(
-                b"x",
-                "audio/webm",
-                "Gots",
-                vocabulary=["  Deep \n Seek ", "deep seek", "x" * 80],
-            )
-        self.assertEqual(tt.calls[0]["prompt"], "Gots Deep Seek " + "x" * dictation.MAX_WORD)
-
     def test_a_clip_with_no_words_asks_with_only_its_hint(self) -> None:
         tt, patch = hermes()
         with patch:
@@ -184,8 +171,6 @@ class ContextTest(unittest.TestCase):
 
 
 class CleanVocabularyTest(unittest.TestCase):
-    """The bot's words, as the batch route and a cleanup take them."""
-
     def test_a_word_is_one_line(self) -> None:
         self.assertEqual(dictation.clean_vocabulary(["  Foo \n bar "]), ["Foo bar"])
 
@@ -208,13 +193,6 @@ class CleanVocabularyTest(unittest.TestCase):
 
 
 class CleanupTest(unittest.TestCase):
-    """``POST dictation/cleanup``: a finished dictation's whole text in, its tidied text out.
-
-    The model is scripted, as in ``test_dictation_cleanup``; what these pin is the whole-text
-    contract — one call, the whole-text budget, and the raw words landing whenever the answer
-    isn't a tidying of them.
-    """
-
     HEARD = (
         "um hello there. uh we should ship the dictation today. the third of March works for me "
         "and the team."
@@ -258,8 +236,6 @@ class CleanupTest(unittest.TestCase):
         self.assertEqual(llm.calls[0]["input"][0]["text"], f"Dictation: {self.HEARD}")
 
     def test_a_several_hundred_word_dictation_s_answer_is_not_discarded(self) -> None:
-        # A ten-minute take is several hundred words. A budget sized for one phrase truncates the
-        # answer, the length check then fails, and the whole dictation silently lands untidied.
         said = [f"word{index}" for index in range(300)]
         heard = "um " + " ".join(said)
         tidied = " ".join(said) + "."

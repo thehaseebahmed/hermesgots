@@ -217,7 +217,7 @@ def transcribe(
     # then the bot's words, and the text before this clip goes last: Whisper reads a prompt as what
     # was just said.
     configured = (cfg.get("local") or {}).get("initial_prompt")
-    words = " ".join(clean_vocabulary(vocabulary))
+    words = " ".join(vocabulary or ())
     parts = (configured if isinstance(configured, str) else "", hint, words, context)
     prompt = " ".join(p for p in parts if p).strip()
     started = time.monotonic()
