@@ -76,11 +76,15 @@ const mainScreen = (
 const headerLine = () => find('[data-slot="header-line"]')?.textContent
 const menuItems = () => findAll('[role="menuitem"]').map((item) => item.textContent?.trim() ?? "")
 
-test("Main's header is the bot's face: the title Main, its thread count, and the bot's menu", async () => {
+test("Main's header is the bot's face: the bot's name, its thread count, and the bot's menu", async () => {
   await seedMain()
   globalThis.fetch = async () => json({})
   await mount(mainScreen, async () => {
-    assert.equal(find('[data-slot="header-title"]')?.textContent, "Main", "the title is Main")
+    assert.equal(
+      find('[data-slot="header-title"]')?.textContent,
+      "Chrome",
+      "the title is the bot's name, not the \"Main\" its record is stored under",
+    )
     assert.equal(headerLine(), "2 threads", "the bot's threads, Main not counted as one")
 
     await click(find('[aria-label="Bot options"]'))
@@ -88,7 +92,11 @@ test("Main's header is the bot's face: the title Main, its thread count, and the
     const items = menuItems()
     assert.ok(items.includes("Mute notifications"), "the bot can be muted from here")
     assert.ok(items.includes("Bot settings"), "and its settings opened")
-    assert.ok(items.includes("Rename"), "and the chat is still named from here, as it always was")
+    assert.ok(
+      !items.includes("Rename"),
+      "its name is edited in Bot settings, so Main is never renamed from here",
+    )
+    assert.ok(!items.includes("Context"), "and Main carries no reading of the context window")
     assert.ok(
       !items.some((label) => /Delete|Discard/.test(label)),
       "but a bot's Main is never deleted or discarded",

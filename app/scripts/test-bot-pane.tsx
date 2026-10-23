@@ -1,12 +1,13 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { MemoryRouter, Route, Routes } from "react-router"
+import { MemoryRouter, Route, Routes, useLocation } from "react-router"
 
 import { AppShell } from "@/components/app-shell"
 import { ChatPage } from "@/routes/chat"
 import { db, ensureMainThread, mainThreadId } from "@/lib/db"
 import {
   botProfile,
+  click,
   find,
   findAll,
   json,
@@ -65,8 +66,12 @@ const laptop = (body: () => Promise<void>) => async () => {
   }
 }
 
+const Where = () => <p data-path>{useLocation().pathname}</p>
+const where = () => find("[data-path]")?.textContent ?? ""
+
 const screen = (entry: string) => (
   <MemoryRouter initialEntries={[entry]}>
+    <Where />
     <Routes>
       <Route element={<AppShell />}>
         <Route path="c/:id" element={<ChatPage />} />
@@ -89,7 +94,7 @@ test(
     })
     await mount(screen(`/c/${MAIN}`), async () => {
       await until(async () => titles().includes("Thread t-a"), "the remembered thread beside Main")
-      assert.deepEqual(titles(), ["Main", "Thread t-a"], "Main is the pane, the thread its item")
+      assert.deepEqual(titles(), ["Mainly", "Thread t-a"], "Main is the pane, the thread its item")
     })
   }),
 )
@@ -103,7 +108,7 @@ test(
     await mount(screen(`/c/${MAIN}`), async () => {
       await until(async () => text().includes("1 thread"), "Main's own threads to load")
       await settle()
-      assert.deepEqual(titles(), ["Main"], "Main alone is better than a chat nothing holds")
+      assert.deepEqual(titles(), ["Mainly"], "Main alone is better than a chat nothing holds")
       assert.equal(
         find('[data-slot="bot-pane-empty"]'),
         null,
@@ -130,7 +135,7 @@ test(
     localStorage.setItem(`memento:last-thread:${bot.id}`, "t-other")
     await mount(screen(`/c/${MAIN}`), async () => {
       await until(async () => Boolean(find('[data-slot="thread-card"]')), "the bot's threads")
-      assert.deepEqual(titles(), ["Main"], "the other bot's thread stays out of this pane")
+      assert.deepEqual(titles(), ["Mainly"], "the other bot's thread stays out of this pane")
     })
   }),
 )
@@ -158,6 +163,75 @@ test(
       await until(async () => titles().length === 1, "one screen")
       await settle()
       assert.deepEqual(titles(), ["Thread t-a"], "one chat, and nothing beside it")
+    })
+  }),
+)
+
+test(
+  "a thread beside Main carries no control of its own and no picture",
+  laptop(async () => {
+    localStorage.clear()
+    await seed(["t-a"])
+    await mount(screen("/c/t-a"), async () => {
+      await until(async () => titles().includes("Thread t-a"), "the thread beside Main")
+      const [main, thread] = findAll('[data-slot="header-row"]')
+      assert.ok(main?.querySelector('[role="img"]'), "Main keeps the bot's picture beside its name")
+      assert.equal(thread?.querySelector('[role="img"]'), null, "the thread beside it carries none")
+      assert.equal(
+        thread?.querySelector('[aria-label="Close thread"]'),
+        null,
+        "and no close control: the bot is beside it either way",
+      )
+      assert.equal(
+        thread?.querySelector('[aria-label^="Back to"]'),
+        null,
+        "and no way back, which it doesn't need where its bot is on screen",
+      )
+      assert.ok(thread?.querySelector('[aria-label="Chat options"]'), "its own menu is still there")
+    })
+  }),
+)
+
+test(
+  "the thread beside Main is the card Main marks open, and naming it keeps the pane it is in",
+  laptop(async () => {
+    localStorage.clear()
+    await seed(["t-a", "t-b"])
+    localStorage.setItem(`memento:last-thread:${bot.id}`, "t-a")
+    const openCards = () => findAll('[data-slot="thread-card"] [aria-current="page"]')
+    await mount(screen(`/c/${MAIN}`), async () => {
+      await until(async () => titles().includes("Thread t-a"), "the thread beside Main")
+      await until(async () => openCards().length === 1, "the card marked open")
+      assert.equal(openCards()[0]?.getAttribute("href"), "/c/t-a", "the card of the thread on screen")
+      const pane = findAll('[data-slot="header-row"]')[1]
+
+      await click(openCards()[0])
+      await until(async () => where() === "/c/t-a", "the address names the thread")
+      assert.deepEqual(titles(), ["Mainly", "Thread t-a"], "Main and its thread are both still there")
+      assert.equal(
+        findAll('[data-slot="header-row"]')[1]?.isSameNode(pane),
+        true,
+        "the same pane is still on screen: naming the thread it already held drew it again",
+      )
+    })
+  }),
+)
+
+test(
+  "a card whose thread is already the screen says so and goes nowhere",
+  laptop(async () => {
+    localStorage.clear()
+    await seed(["t-a", "t-b"])
+    localStorage.setItem(`memento:last-thread:${bot.id}`, "t-a")
+    await mount(screen("/c/t-a"), async () => {
+      await until(
+        async () => findAll('[data-slot="thread-card"] [aria-current="page"]').length === 1,
+        "the card marked open",
+      )
+      const open = findAll('[data-slot="thread-card"] [aria-current="page"]')[0]
+
+      await click(open)
+      assert.equal(where(), "/c/t-a", "the address doesn't move: the thread is the screen")
     })
   }),
 )

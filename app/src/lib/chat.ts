@@ -1234,7 +1234,7 @@ async function queueOnHost(
 
 /**
  * Sends a message typed in a bot's Main thread. The host triages it first when it can: the message
- * wears a routing state meanwhile, and it stays in Main — sent as any message is — unless the host
+ * wears a triaging state meanwhile, and it stays in Main — sent as any message is — unless the host
  * answers in time that it belongs to an older thread or opens a new one, where the plugin has then
  * queued it. A timeout, a failure or a bot without the feature is just a send to Main. Returns the
  * thread it moved to, and whether the host made that thread for it.
@@ -1255,18 +1255,18 @@ export async function sendFromMain(
   const triaged =
     host?.conversation.main &&
     content &&
-    !routing.has(conversationId) &&
+    !triaging.has(conversationId) &&
     (await hostQueue(host.config)) &&
     (await hasPluginFeature(host.config, "triage"))
   if (!host || !triaged) {
-    if (routing.has(conversationId) && content)
+    if (triaging.has(conversationId) && content)
       await queueMessage(conversationId, text, attachments)
     else if (content && controllers.has(conversationId))
       await steerOrQueue(conversationId, content, attachments, options.steer)
     else await sendMessage(conversationId, text, { attachments })
     return undefined
   }
-  routing.add(conversationId)
+  triaging.add(conversationId)
   let heldId: string | undefined
   try {
     // Saved on the host before the ask, as any send does, so whichever thread the message lands in
@@ -1280,7 +1280,7 @@ export async function sendFromMain(
       role: "user",
       content,
       ...(sent.length ? { attachments: sent } : {}),
-      status: "routing",
+      status: "triaging",
       createdAt: nextAt(await getMessages(conversationId)),
     }
     heldId = held.id
@@ -1311,7 +1311,7 @@ export async function sendFromMain(
       // Main it is.
     }
     if (moved) return moved
-    routing.delete(conversationId)
+    triaging.delete(conversationId)
     if (controllers.has(conversationId)) {
       // A reply started while the host decided: this goes after it.
       await steerOrQueue(conversationId, content, sent, options.steer)
@@ -1321,13 +1321,13 @@ export async function sendFromMain(
     }
     return undefined
   } finally {
-    routing.delete(conversationId)
+    triaging.delete(conversationId)
     // Whatever happened, the held row doesn't outlive the attempt.
     if (heldId)
       await db.messages
         .where("id")
         .equals(heldId)
-        .filter((m) => m.status === "routing")
+        .filter((m) => m.status === "triaging")
         .delete()
   }
 }
@@ -1345,18 +1345,18 @@ function steerOrQueue(
 }
 
 /** Chats whose Main message is being triaged on this page. */
-const routing = new Set<string>()
+const triaging = new Set<string>()
 
 /**
- * A routing message that nothing here is deciding on (the page reloaded or closed mid-triage) was
+ * A triaging message that nothing here is deciding on (the page reloaded or closed mid-triage) was
  * never sent: it becomes a failed message to send again or take back.
  */
-export async function settleRouting(conversationId: string) {
-  if (routing.has(conversationId)) return
+export async function settleTriaging(conversationId: string) {
+  if (triaging.has(conversationId)) return
   await db.messages
     .where("conversationId")
     .equals(conversationId)
-    .filter((m) => m.status === "routing")
+    .filter((m) => m.status === "triaging")
     .modify({ status: "error", statusText: "Not sent" })
 }
 
