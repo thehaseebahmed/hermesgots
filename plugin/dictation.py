@@ -106,8 +106,8 @@ def info() -> Dict[str, Any]:
 def warm(model: Optional[str] = None) -> Dict[str, Any]:
     """Loads the model into Hermes's own cache slot while the user is still talking. Never raises.
 
-    ``model`` names the one to load rather than the one ``config.yaml`` holds, which is how a take
-    tries the pick the Gots app just wrote; without it, the host's own setting is what warms.
+    ``model`` names the one to load rather than the one ``config.yaml`` holds, which is how a caller
+    can load a pick the Gots app just wrote; without it, the host's own setting is what warms.
     """
     started = time.monotonic()
     try:

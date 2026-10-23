@@ -2,12 +2,11 @@
  * One take at a time per profile: the microphone a take holds belongs to the bot's profile, not to
  * the chat that opened it.
  *
- * The host refuses a second take for a profile it is already hearing (`Takes.open` answers 409), and
- * one take is one profile because decoding holds the CPU that profile's own turns need (ADR 0015).
  * Two composers on one profile — a chat and another, the chat and a session's screen — would
  * otherwise each open the mic, and the second would only be refused after it had started recording.
- * This is the app's side of the same rule: the take that starts first holds the profile, and a
- * second `start` is refused before the microphone is asked for.
+ * The take that starts first holds the profile, and a second `start` is refused before the
+ * microphone is asked for; one take is one profile because a dictation holds the CPU that the
+ * profile's own turns need.
  *
  * The token is what makes the release safe: a take that ends late, after a newer one has begun,
  * cannot let go of the newer one.

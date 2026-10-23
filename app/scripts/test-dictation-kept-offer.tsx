@@ -29,7 +29,7 @@ function host() {
     if (path.endsWith("/api/plugins/memento/info"))
       return json({
         name: "memento",
-        features: ["dictation", "dictation_stream"],
+        features: ["dictation"],
         dictation: { ready: true, model: "base" },
       })
     if (path.endsWith("/api/plugins/memento/dictation") && init?.method === "POST") {

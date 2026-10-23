@@ -18,7 +18,7 @@ import {
   microphoneFailure,
   type DictationFailure,
 } from "@/lib/dictation-failure"
-import { RESTORED, SAVE_MS, keptAudio, keeper, type KeptTake } from "@/lib/dictation-kept"
+import { RESTORED, SAVE_MS, keptAudio } from "@/lib/dictation-kept"
 import { holdTake, releaseTake } from "@/lib/dictation-lock"
 import {
   getDictationInfo,
@@ -273,23 +273,6 @@ function save(session: Session, now = false) {
       else await db.dictations.delete(key)
     })
     .catch(() => undefined)
-}
-
-export function keptStore(key: string) {
-  return (take: KeptTake | null) =>
-    take
-      ? db.dictations.put({
-          id: key,
-          pieces: take.pieces,
-          caret: take.caret,
-          at: Date.now(),
-          kind: "stream",
-        })
-      : db.dictations.delete(key)
-}
-
-export function keptKeeper(key: string | undefined) {
-  return keeper(key, key ? keptStore(key) : () => Promise.resolve())
 }
 
 export async function readKept(key: string): Promise<SavedDictation | undefined> {

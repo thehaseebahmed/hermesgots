@@ -36,7 +36,6 @@ from . import (
     delegation,
     dictation,
     dictation_cleanup,
-    dictation_stream,
     meetings,
     events,
     findings,
@@ -329,7 +328,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "delegation_model",
                     "queue",
                     "dictation",
-                    "dictation_stream",
                     "speech_model",
                     "usage",
                     "research",
@@ -1708,119 +1706,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except Exception:
             return None
 
-    dictation_takes = dictation_stream.Takes(reap=True)
-
-    def dictation_profile() -> str:
-        """Which profile the take belongs to: one take at a time is one per profile."""
-        return str(request_profile() or "")
-
-    async def dictation_take_start(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        body = await json_body(request)
-        hint = dictation.clean_hint(body.get("hint") if body else None)
-        vocabulary = body.get("vocabulary") if body else None
-        path = store_path()
-        gate = await asyncio.to_thread(research.llm_gate)
-        cleanup_model = await asyncio.to_thread(speech.applied_cleanup, path, gate)
-        try:
-            started = await asyncio.to_thread(
-                dictation_stream.start,
-                dictation_takes,
-                dictation_profile(),
-                hint,
-                vocabulary,
-                cleanup_model,
-            )
-        except (dictation.DictationError, dictation_stream.TakeError) as error:
-            return _error(web, str(error), error.status)
-        except Exception:
-            logger.warning("memento: couldn't start a dictation take", exc_info=True)
-            return _error(web, "Couldn't start the dictation.", 502)
-        return web.json_response({"object": "memento.dictation_take", **started})
-
-    async def dictation_slice(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        profile = dictation_profile()
-        try:
-            take = await asyncio.to_thread(
-                dictation_takes.get, profile, request.match_info.get("take_id", "")
-            )
-        except dictation_stream.TakeError as error:
-            return _error(web, str(error), error.status)
-        try:
-            data = await request.read()
-        except web.HTTPRequestEntityTooLarge:
-            return _error(web, "The recording is too long.", 413)
-        if not data:
-            return _error(web, "The recording is empty.", 400)
-        if len(data) > dictation.MAX_BYTES:
-            return _error(web, "The recording is too long.", 413)
-        pause = request.query.get("pause") == "1"
-        try:
-            answer = await asyncio.to_thread(take.add, data, pause)
-        except (dictation.DictationError, dictation_stream.TakeError) as error:
-            await asyncio.to_thread(dictation_takes.release, profile, take)
-            return _error(web, str(error), error.status)
-        except Exception:
-            await asyncio.to_thread(dictation_takes.release, profile, take)
-            logger.warning("memento: dictation take failed", exc_info=True)
-            return _error(web, "Transcription failed.", 502)
-        if take.dropped:
-            await asyncio.to_thread(dictation_takes.release, profile, take)
-        return web.json_response({"object": "memento.dictation_audio", "take": take.id, **answer})
-
-    async def dictation_take_stop(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        profile = dictation_profile()
-        try:
-            take = await asyncio.to_thread(
-                dictation_takes.get, profile, request.match_info.get("take_id", "")
-            )
-        except dictation_stream.TakeError as error:
-            return _error(web, str(error), error.status)
-        try:
-            answer = await asyncio.to_thread(take.stop)
-        except (dictation.DictationError, dictation_stream.TakeError) as error:
-            return _error(web, str(error), error.status)
-        except Exception:
-            logger.warning("memento: a dictation take couldn't finish", exc_info=True)
-            return _error(web, "Transcription failed.", 502)
-        finally:
-            await asyncio.to_thread(dictation_takes.release, profile, take)
-        return web.json_response({"object": "memento.dictation_stop", "take": take.id, **answer})
-
-    async def dictation_take_cancel(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        profile = dictation_profile()
-        try:
-            take = await asyncio.to_thread(
-                dictation_takes.get, profile, request.match_info.get("take_id", "")
-            )
-        except dictation_stream.TakeError:
-            return web.json_response({"object": "memento.dictation_cancel", "cancelled": True})
-        try:
-            await asyncio.to_thread(take.cancel)
-        finally:
-            await asyncio.to_thread(dictation_takes.release, profile, take)
-        return web.json_response({"object": "memento.dictation_cancel", "cancelled": True})
-
-    app.router.add_post(f"{PREFIX}/dictation/take", dictation_take_start)
-    app.router.add_post(f"{PREFIX}/dictation/take/{{take_id}}/audio", dictation_slice)
-    app.router.add_post(f"{PREFIX}/dictation/take/{{take_id}}/stop", dictation_take_stop)
-    app.router.add_post(f"{PREFIX}/dictation/take/{{take_id}}/cancel", dictation_take_cancel)
-
     # The host's speech model, and the model a finished phrase's cleanup runs on (speech.py). The
     # model is Hermes's own `stt.local.model`, written through its round-trip YAML writer; the
-    # cleanup pick is the bot's, kept in the host's settings store and read at the start of each
-    # take, so it survives a plugin restart.
+    # cleanup pick is the bot's, kept in the host's settings store and read when a finished
+    # dictation is tidied, so it survives a plugin restart.
     async def get_speech(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:

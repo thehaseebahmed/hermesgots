@@ -100,18 +100,9 @@
 // repaired, a capital and a full stop) after a moment; MOCK_DICTATION_TIDY=fail refuses it and
 // POST /__mock/dictation-tidy { mode } turns refusing ("fail") or never answering ("hang") on while
 // the mock runs.
-// MOCK_DICTATION_STREAM=on is a plugin that advertises `dictation_stream` and hears a take while it is
-// spoken: POST dictation/take opens one after a moment (so the bar says "Preparing…"), each slice at
-// dictation/take/{take}/audio answers the next words of a fixed sentence, and the third slice closes a
-// phrase — tidied, as a finished phrase's cleanup leaves it — and says it is behind. The tail
-// phrase closes at Stop. Off by default, so every other flow sees the chunked host it expects.
-// POST /__mock/dictation-cleanup { fail } is a host whose phrase cleanup fails: the phrases a take
-// closes then read as the words the host heard, filler and all, and the take carries on (#290).
-// GET /__mock/dictation-take lists the slices a take was sent, and `peak`, the most that were ever
-// being answered at once (1 when the app keeps one request in flight).
 // GET /api/plugins/memento/speech is the host's own speech model with the models a pick is made from
-// (size, speed, whether the host has each one, which is in play) and the model a phrase's cleanup
-// runs on; POST speech { model?, cleanup_model? } writes a pick and answers the whole reading back,
+// (size, speed, whether the host has each one, which is in play) and the model a dictation's
+// cleanup runs on; POST speech { model?, cleanup_model? } writes a pick and answers the whole reading back,
 // so a model picked on the Bot's Dictation tab is the one a reload finds in play (plugin/speech.py).
 // GET /api/plugins/memento/workflows lists the workflow library (presets first, read-only), POST
 // adds one, POST to its id rewrites one of the account's own — forking a preset into a copy — and DELETE takes
@@ -2381,55 +2372,10 @@ async function streamCompletion(req, res, body) {
 const runs = new Map()
 const PLUGIN_VERSION = process.env.MOCK_PLUGIN_VERSION || "0.29.1"
 const DICTATION = process.env.MOCK_DICTATION ?? "on"
-const DICTATION_STREAM = process.env.MOCK_DICTATION_STREAM === "on"
 // The end cleanup a finished dictation is tidied by: "ok" answers the tidied text, "fail" refuses
-// and "hang" never answers, so a flow can see a take land the words as it heard them (#460).
+// and "hang" never answers, so a flow can see a dictation land the words as it heard them (#460).
 let DICTATION_TIDY = process.env.MOCK_DICTATION_TIDY ?? "ok"
 const TIDY_MS = 400
-// What a take hears, one answer per slice: the words it commits and the phrases it closes. The
-// words arrive as the host heard them, filler and spoken number and all; a closed phrase arrives
-// already tidied, because a finished phrase gets one bounded cleanup on the bot's own model before
-// it is committed (#290, ADR 0017). The third slice closes the first phrase and says the host is
-// behind; an answer that closes a phrase carries no words of its own, because the phrase holds
-// them.
-const TAKE_ANSWERS = [
-  { words: "um Let us", phrases: [] },
-  { words: " ship the dictation", phrases: [] },
-  {
-    words: "",
-    phrases: [{ id: 1, text: "Let us ship 25 things." }],
-    behind: true,
-  },
-  { words: " and then two more items", phrases: [] },
-]
-const TAKE_TAIL = {
-  words: "",
-  phrases: [{ id: 2, text: "and then two more items" }],
-  behind: false,
-}
-// What a phrase reads as when its cleanup didn't happen: the words as the host heard them, filler and
-// all, with nothing tidied. POST /__mock/dictation-cleanup { fail } makes the next takes answer this
-// way, so a flow sees the raw phrase committed and the take carry on (#290, ADR 0017).
-const UNTIDIED_PHRASE = "um Let us ship the dictation"
-let CLEANUP_FAILS = process.env.MOCK_DICTATION_CLEANUP === "fail"
-function takeAnswers(vocabulary, tidied = true) {
-  const lead = vocabulary.join(" ")
-  if (!lead && tidied) return TAKE_ANSWERS
-  return TAKE_ANSWERS.map((answer, index) => ({
-    ...answer,
-    words: index === 0 ? [lead, answer.words].filter(Boolean).join(" ") : answer.words,
-    phrases: answer.phrases.map((phrase) =>
-      index === 2
-        ? {
-            ...phrase,
-            text: tidied
-              ? `${lead} ${phrase.text}`.trim()
-              : [lead, UNTIDIED_PHRASE].filter(Boolean).join(" "),
-          }
-        : phrase,
-    ),
-  }))
-}
 // plugin/dictation_cleanup.py's whole-text tidy, in two lines: fillers out, spacing repaired, a
 // capital at the start and a full stop at the end. Deterministic, so a flow can assert the tidied
 // words exactly; the app calls it once, when the take ends (#460, ADR 0038).
@@ -2471,12 +2417,6 @@ function speechReading() {
     },
   }
 }
-const dictationTakes = new Map()
-const dictationSlices = []
-const dictationStarts = []
-const SLICE_MS = 150
-let dictationBusy = 0
-let dictationPeak = 0
 // plugin/moves.py: the messages triage moved out of each Main session, for its Moved markers.
 const moves = new Map()
 let openuiOn = true
@@ -3025,7 +2965,6 @@ http
           "skills",
           "queue",
           "dictation",
-          ...(DICTATION_STREAM ? ["dictation_stream"] : []),
           "speech_model",
           "afk",
           "afk_switch",
@@ -4175,73 +4114,6 @@ http
         ms: 700,
       })
     }
-    if (PLUGIN && !profile && DICTATION_STREAM && req.method === "POST") {
-      if (url.pathname === "/api/plugins/memento/dictation/take") {
-        const body = await readBody(req).catch(() => ({}))
-        const vocabulary = Array.isArray(body?.vocabulary)
-          ? body.vocabulary.filter((word) => typeof word === "string" && word.trim())
-          : []
-        if (DICTATION === "off")
-          return json(res, 409, {
-            error: { message: "faster-whisper isn't installed on the host." },
-          })
-        await new Promise((resolve) => setTimeout(resolve, 600))
-        if (DICTATION === "fail")
-          return json(res, 502, { error: { message: "The host's speech model didn't load." } })
-        const take = `dt_mock_${dictationTakes.size + 1}`
-        dictationTakes.set(take, {
-          answers: TAKE_ANSWERS.length,
-          vocabulary,
-          script: takeAnswers(vocabulary, !CLEANUP_FAILS),
-        })
-        dictationStarts.push({ take, vocabulary, cleanup: CLEANUP_FAILS ? "failed" : "tidied" })
-        return json(res, 200, {
-          object: "memento.dictation_take",
-          take,
-          ready: true,
-          model: "base",
-          language: "en",
-        })
-      }
-      const takeRoute =
-        /^\/api\/plugins\/memento\/dictation\/take\/([^/]+)\/(audio|stop|cancel)$/.exec(
-          url.pathname,
-        )
-      if (takeRoute) {
-        const [, take, action] = takeRoute
-        if (!dictationTakes.has(take))
-          return json(res, 410, { error: { message: "This dictation has ended." } })
-        if (action === "cancel") {
-          dictationTakes.delete(take)
-          return json(res, 200, { object: "memento.dictation_cancel", cancelled: true })
-        }
-        if (action === "stop") {
-          dictationTakes.delete(take)
-          return json(res, 200, { object: "memento.dictation_stop", take, ...TAKE_TAIL })
-        }
-        const data = await readRaw(req)
-        if (!data.length) return json(res, 400, { error: { message: "The recording is empty." } })
-        const held = dictationTakes.get(take)
-        dictationSlices.push({
-          bytes: data.length,
-          type: req.headers["content-type"],
-          pause: url.searchParams.get("pause") === "1",
-        })
-        dictationBusy += 1
-        dictationPeak = Math.max(dictationPeak, dictationBusy)
-        try {
-          await new Promise((resolve) => setTimeout(resolve, SLICE_MS))
-        } finally {
-          dictationBusy -= 1
-        }
-        const answer = held.script[TAKE_ANSWERS.length - held.answers] ?? {
-          words: "",
-          phrases: [],
-        }
-        held.answers = Math.max(0, held.answers - 1)
-        return json(res, 200, { object: "memento.dictation_audio", take, behind: false, ...answer })
-      }
-    }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/speech") {
       if (req.method === "GET")
         return json(res, 200, { object: "memento.speech", speech: speechReading() })
@@ -4633,22 +4505,6 @@ http
       const { mode = "ok" } = await readBody(req)
       DICTATION_TIDY = ["ok", "fail", "hang"].includes(mode) ? mode : "ok"
       return json(res, 200, { ok: true, tidy: DICTATION_TIDY })
-    }
-    if (url.pathname === "/__mock/dictation-take" && req.method === "GET") {
-      return json(res, 200, {
-        slices: dictationSlices,
-        takes: [...dictationTakes.keys()],
-        peak: dictationPeak,
-        starts: dictationStarts,
-      })
-    }
-    // Dev only: POST { fail } is a host whose phrase cleanup fails — a phrase a take closes then
-    // reads as the words the host heard, filler and all, and the take carries on (#290, ADR 0017).
-    // Takes opened afterwards answer that way; one already open keeps the script it started on.
-    if (url.pathname === "/__mock/dictation-cleanup" && req.method === "POST") {
-      const { fail = true } = await readBody(req)
-      CLEANUP_FAILS = Boolean(fail)
-      return json(res, 200, { ok: true, cleanup: CLEANUP_FAILS ? "failed" : "tidied" })
     }
     // Dev only: POST { outcome } ends every pending approval without the app. "timeout" is a host
     // with the plugin (the run says so and carries on); "lost" one without it, which keeps the

@@ -1,7 +1,7 @@
-"""Cleanup: a finished phrase tidied on the bot's own model before it is committed (ADR 0017).
+"""Cleanup: a finished dictation tidied on the bot's own model before its words land (ADR 0038).
 
 A speech model writes down what it heard, not what was meant: it keeps every filler, cannot tell a
-list from a run-on, and punctuates by pause rather than by grammar. Each finished phrase therefore
+list from a run-on, and punctuates by pause rather than by grammar. A finished dictation therefore
 gets one small call on the bot's own model, through the plugin's model access (``ctx.llm``), with
 instructions that allow tidying — fillers out, punctuation, casing and spacing repaired, numbers and
 dates written as digits, a spoken list set out as a list, the bot's vocabulary spelled as it is
@@ -15,8 +15,8 @@ more of it to read.
 The call is bounded: one that misses its budget, fails, answers in another shape, or comes back much
 longer or shorter than the phrase is discarded, and the phrase is committed as the host heard it. A
 cleanup that arrives late is worse than one that did not arrive, and a model that decides to help is
-not allowed to rewrite the message, so it is the phrase — never the cleanup — that a take can rely
-on.
+not allowed to rewrite the message, so it is the words as heard — never the cleanup — that a
+dictation can rely on.
 
 The model is the bot's own, which costs nothing extra and needs no key. A phrase tidied by another
 model is the seam the Dictation tab's pick fits into (``Cleaner(model=…)``), and that pick needs the
