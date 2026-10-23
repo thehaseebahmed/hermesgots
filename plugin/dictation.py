@@ -103,27 +103,12 @@ def info() -> Dict[str, Any]:
     return {"ready": True, "model": model, "language": language}
 
 
-def warm(model: Optional[str] = None) -> Dict[str, Any]:
-    """Loads the model into Hermes's own cache slot while the user is still talking. Never raises.
-
-    ``model`` names the one to load rather than the one ``config.yaml`` holds, which is how a caller
-    can load a pick the Gots app just wrote; without it, the host's own setting is what warms.
-    """
+def warm() -> Dict[str, Any]:
+    """Loads the model into Hermes's own cache slot while the user is still talking. Never raises."""
     started = time.monotonic()
     try:
         if not info().get("ready"):
             return {"warmed": False}
-        if model:
-            tt = _tools()
-            cfg = _local_config(tt)
-            load = getattr(tt, "_get_or_load_local_model", None)
-            if not callable(load):
-                return {"warmed": False, "error": "This Hermes can't load a speech model by name."}
-            load(model, cfg.get("local") or {})
-            touch = getattr(tt, "_touch_transcription_time", None)
-            if callable(touch):
-                touch()
-            return {"warmed": True, "model": model, "ms": int((time.monotonic() - started) * 1000)}
         try:
             from tools.stt_lease import warm_stt_provider
         except ImportError:
@@ -160,10 +145,12 @@ def clean_context(context: Optional[str]) -> str:
 
 
 def clean_vocabulary(words: Any) -> List[str]:
-    """The bot's own words for a decode's prompt: one line each, once each, at most fifty.
+    """The bot's own words for a decode's prompt: one line each, once each, the newest fifty.
 
     They are the names, product words and jargon the bot's dictation is written with (its Dictation
-    tab's Words), so a decoder spells them as the bot does rather than as it hears them.
+    tab's Words), so a decoder spells them as the bot does rather than as it hears them. Past the
+    cap the oldest word goes, so the list is what the bot added last, as the app caps it; memory
+    stays the cap's however long the input is.
     """
     kept: List[str] = []
     seen = set()
@@ -171,12 +158,13 @@ def clean_vocabulary(words: Any) -> List[str]:
         if not isinstance(raw, str):
             continue
         word = " ".join(raw.split())[:MAX_WORD]
-        if not word or word.casefold() in seen:
+        folded = word.casefold()
+        if not word or folded in seen:
             continue
-        seen.add(word.casefold())
+        seen.add(folded)
         kept.append(word)
-        if len(kept) >= MAX_VOCABULARY:
-            break
+        if len(kept) > MAX_VOCABULARY:
+            seen.discard(kept.pop(0).casefold())
     return kept
 
 

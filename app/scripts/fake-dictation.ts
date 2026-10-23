@@ -49,7 +49,6 @@ export function installFakeMedia() {
 }
 
 export interface DictationCall {
-  method: string
   path: string
   body: unknown
   vocabulary: string[]
@@ -61,7 +60,6 @@ export interface DictationHostOptions {
   /** Which clips fail, 1-based, so a Retry hears the next one. */
   clipFails?: number[]
   clipError?: string
-  clipAfter?: number
   cleanup?: "ok" | "fail" | "junk" | "hang"
   tidied?: string
   cleanupAfter?: number
@@ -73,7 +71,6 @@ export function dictationHost(options: DictationHostOptions = {}) {
     clip = "ok",
     clipFails = [],
     clipError = "Local transcription failed.",
-    clipAfter = 50,
     cleanup = "ok",
     tidied,
     cleanupAfter = 0,
@@ -85,7 +82,6 @@ export function dictationHost(options: DictationHostOptions = {}) {
     const url = new URL(String(input))
     const method = (init?.method ?? "GET").toUpperCase()
     calls.push({
-      method,
       path: url.pathname,
       body: typeof init?.body === "string" ? JSON.parse(init.body) : init?.body,
       vocabulary: url.searchParams.getAll("vocabulary"),
@@ -114,7 +110,6 @@ export function dictationHost(options: DictationHostOptions = {}) {
     if (url.pathname.endsWith("/dictation") && method === "POST") {
       const number = clips().length
       if (clip === "hang") return new Promise<Response>(() => {})
-      if (clipAfter) await new Promise((done) => setTimeout(done, clipAfter))
       if (clip === "fail" || clipFails.includes(number))
         return json({ error: { message: clipError } }, 502)
       return json({ object: "memento.dictation", text: heard, ms: 50 })

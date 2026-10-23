@@ -30,7 +30,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Sequence
 
 from .dictation import DictationError
 
@@ -84,6 +84,27 @@ def _instructions(unit: str) -> str:
 INSTRUCTIONS = _instructions("phrase")
 WHOLE_TEXT_INSTRUCTIONS = _instructions("dictation")
 
+
+class Unit(NamedTuple):
+    """One kind of cleanup: the rules and system line it is told, and how it labels and sizes it."""
+
+    rules: str
+    system: str
+    label: str
+    tokens: Callable[[str], int]
+
+
+def _phrase_tokens(_text: str) -> int:
+    return PHRASE_TOKENS
+
+
+def _whole_text_tokens(text: str) -> int:
+    return min(MAX_TOKENS, max(PHRASE_TOKENS, len(str(text or "").split()) * TOKENS_PER_WORD))
+
+
+PHRASE = Unit(INSTRUCTIONS, SYSTEM, "Phrase", _phrase_tokens)
+WHOLE_TEXT = Unit(WHOLE_TEXT_INSTRUCTIONS, WHOLE_TEXT_SYSTEM, "Dictation", _whole_text_tokens)
+
 SCHEMA = {
     "type": "object",
     "properties": {"text": {"type": "string"}},
@@ -103,12 +124,6 @@ def _prompt(text: str, vocabulary: Sequence[str], label: str = "Phrase") -> str:
     if not words:
         return f"{label}: {text}"
     return f"Vocabulary: {words}\n{label}: {text}"
-
-
-def _max_tokens(text: str, whole_text: bool) -> int:
-    if not whole_text:
-        return PHRASE_TOKENS
-    return min(MAX_TOKENS, max(PHRASE_TOKENS, len(str(text or "").split()) * TOKENS_PER_WORD))
 
 
 def is_tidying(phrase: str, cleaned: str) -> bool:
@@ -135,7 +150,7 @@ def complete(
 def complete_whole_text(
     text: str, vocabulary: Sequence[str], model: Optional[Dict[str, str]] = None
 ) -> Optional[str]:
-    return _complete(text, vocabulary, model, whole_text=True)
+    return _complete(text, vocabulary, model, unit=WHOLE_TEXT)
 
 
 def _complete(
@@ -143,28 +158,22 @@ def _complete(
     vocabulary: Sequence[str],
     model: Optional[Dict[str, str]] = None,
     *,
-    whole_text: bool = False,
+    unit: Unit = PHRASE,
 ) -> Optional[str]:
     llm = getattr(ctx, "llm", None)
     if llm is None:
         return None
-    unit = "dictation" if whole_text else "phrase"
     options = {
         key: value
         for key, value in (model or {}).items()
         if key in ("provider", "model") and value
     }
     call = dict(
-        instructions=WHOLE_TEXT_INSTRUCTIONS if whole_text else INSTRUCTIONS,
-        input=[
-            {
-                "type": "text",
-                "text": _prompt(text, vocabulary, "Dictation" if whole_text else "Phrase"),
-            }
-        ],
+        instructions=unit.rules,
+        input=[{"type": "text", "text": _prompt(text, vocabulary, unit.label)}],
         json_schema=SCHEMA,
-        system_prompt=WHOLE_TEXT_SYSTEM if whole_text else SYSTEM,
-        max_tokens=_max_tokens(text, whole_text),
+        system_prompt=unit.system,
+        max_tokens=unit.tokens(text),
         temperature=0,
         purpose="memento.dictation.cleanup",
     )
@@ -172,13 +181,13 @@ def _complete(
         result = llm.complete_structured(**call, **options)
     except Exception:
         if not options:
-            logger.debug(f"memento: a {unit}'s cleanup failed", exc_info=True)
+            logger.debug(f"memento: a {unit.label.lower()}'s cleanup failed", exc_info=True)
             return None
         logger.debug("memento: the picked cleanup model failed, using the bot's own", exc_info=True)
         try:
             result = llm.complete_structured(**call)
         except Exception:
-            logger.debug(f"memento: a {unit}'s cleanup failed", exc_info=True)
+            logger.debug(f"memento: a {unit.label.lower()}'s cleanup failed", exc_info=True)
             return None
     parsed = getattr(result, "parsed", None)
     if not isinstance(parsed, dict):

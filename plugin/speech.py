@@ -211,7 +211,7 @@ def set_model(config_path: Path, value: Any) -> str:
 
 
 def read_cleanup(path: Path) -> Optional[Dict[str, str]]:
-    """The model phrases are tidied on, or None when they are tidied on the bot's own."""
+    """What a dictation's cleanup runs on, or None when it runs on the bot's own model."""
     held = get_setting(path, CLEANUP_KEY)
     if not isinstance(held, dict):
         return None
@@ -233,7 +233,7 @@ def set_cleanup(
     gate: Dict[str, bool],
     config_path: Optional[Path] = None,
 ) -> Optional[Dict[str, str]]:
-    """Keeps ``pick`` as the model phrases are tidied on; None clears it.
+    """Keeps ``pick`` as the model a dictation's cleanup runs on; None clears it.
 
     A pick overrides the model of a model call, which the host's config has to allow (``gate``,
     from ``research.llm_gate``): ``Withheld`` otherwise, and nothing is stored. Hermes checks a pick

@@ -1,7 +1,9 @@
 /**
- * Both are one record on the host, so one read and one write carry them: `GET speech` and
- * `POST speech` with only the fields that moved. `host-speech.ts` makes those calls; this file is
- * the shape and the words a row is read with, so the unit tier can pin them without a host.
+ * A bot's two speech settings — the model its dictation is heard on, and the one a finished
+ * dictation's cleanup runs on — are one record on the host, so one read and one write carry both:
+ * `GET speech` and `POST speech` with only the fields that moved. `host-speech.ts` makes those
+ * calls; this file is the shape and the words a row is read with, so the unit tier can pin them
+ * without a host.
  */
 
 /** The feature a host advertises when it has the host speech settings at all. */
@@ -24,7 +26,7 @@ export interface SpeechModel {
 }
 
 export interface SpeechCleanup {
-  /** The model phrases are tidied on, or null for the bot's own. */
+  /** What a dictation's cleanup runs on, or null for the bot's own model. */
   model: SpeechPick | null
   /** Whether the host lets Gots pick the model of a model call at all. */
   allowed: boolean

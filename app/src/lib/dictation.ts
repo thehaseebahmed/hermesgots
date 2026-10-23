@@ -185,7 +185,7 @@ interface Session {
   pieces: DictationPiece[]
   caret?: number
   recording: Recording | null
-  upload: AbortController | null
+  inflight: AbortController | null
   draining: Promise<boolean> | null
   finishing: Promise<string | null> | null
   error: unknown
@@ -212,7 +212,7 @@ const newSession = (
   pieces,
   caret,
   recording: null,
-  upload: null,
+  inflight: null,
   draining: null,
   finishing: null,
   error: null,
@@ -307,10 +307,10 @@ export async function keptText(
 }
 
 /** A take that ended stops transcribing: whatever is in flight is dropped. */
-function stopUpload(current: Session) {
-  const upload = current.upload
-  current.upload = null
-  upload?.abort()
+function stopInflight(current: Session) {
+  const inflight = current.inflight
+  current.inflight = null
+  inflight?.abort()
 }
 
 function forget(session: Session) {
@@ -397,7 +397,7 @@ export function useChunkedDictation(
         const piece = current.pieces[index]
         const before = takeText(current.pieces.slice(0, index))
         const controller = new AbortController()
-        current.upload = controller
+        current.inflight = controller
         const timer = window.setTimeout(() => controller.abort(), TRANSCRIBE_MS)
         try {
           const { config, hint, vocabulary } = latest.current
@@ -409,15 +409,15 @@ export function useChunkedDictation(
             vocabulary,
             controller.signal,
           )
-          if (current.upload !== controller) return false
+          if (current.inflight !== controller) return false
           piece.text = text
           current.error = null
         } catch (failure) {
-          if (current.upload === controller) current.error = failure
+          if (current.inflight === controller) current.error = failure
           return false
         } finally {
           window.clearTimeout(timer)
-          if (current.upload === controller) current.upload = null
+          if (current.inflight === controller) current.inflight = null
         }
         save(current, true)
       }
@@ -438,7 +438,7 @@ export function useChunkedDictation(
       current.failure = failed
       current.recording = null
       current.stopping = end(recording)
-      stopUpload(current)
+      stopInflight(current)
       releaseTake(current.profile, current.lock)
       current.lock = null
       setLevels(null)
@@ -618,7 +618,7 @@ export function useChunkedDictation(
   const tidy = useCallback(async (current: Session, text: string, budgetMs = TIDY_MS) => {
     if (!text || budgetMs < MIN_TIDY_MS) return text
     const controller = new AbortController()
-    current.upload = controller
+    current.inflight = controller
     const asking = tidyDictation(
       latest.current.config,
       text,
@@ -626,8 +626,8 @@ export function useChunkedDictation(
       controller.signal,
     ).catch(() => null)
     const tidied = await within(asking, budgetMs)
-    if (current.upload !== controller) return text
-    current.upload = null
+    if (current.inflight !== controller) return text
+    current.inflight = null
     controller.abort()
     return tidied ?? text
   }, [])
@@ -661,7 +661,7 @@ export function useChunkedDictation(
         return land(current, text)
       }
       if (done === undefined && deadline !== undefined) {
-        stopUpload(current)
+        stopInflight(current)
         return land(current, takeText(current.pieces))
       }
       const heard = current.pieces.filter((piece) => piece.text !== null)
@@ -689,7 +689,7 @@ export function useChunkedDictation(
       setLevels(null)
       setFailure(null)
       const controller = new AbortController()
-      current.upload = controller
+      current.inflight = controller
       try {
         const text = await keptText(
           latest.current.config,
@@ -698,19 +698,19 @@ export function useChunkedDictation(
           latest.current.vocabulary,
           controller.signal,
         )
-        if (current.upload !== controller) return null
+        if (current.inflight !== controller) return null
         forget(current)
         session.current = null
         showIdle()
         return text
       } catch (failure) {
-        if (current.upload !== controller) return null
+        if (current.inflight !== controller) return null
         current.error = failure
         showFailure(clipFailure(failure))
         void readDictationInfo(latest.current.config, true)
         return null
       } finally {
-        if (current.upload === controller) current.upload = null
+        if (current.inflight === controller) current.inflight = null
       }
     },
     [showFailure, showIdle],
@@ -721,7 +721,7 @@ export function useChunkedDictation(
     session.current = null
     if (current) {
       forget(current)
-      stopUpload(current)
+      stopInflight(current)
       if (current.recording) void end(current.recording)
     }
     showIdle()
@@ -802,8 +802,8 @@ export function useChunkedDictation(
       const current = session.current
       session.current = null
       if (!current) return
-      current.upload?.abort()
-      current.upload = null
+      current.inflight?.abort()
+      current.inflight = null
       releaseTake(current.profile, current.lock)
       current.lock = null
       const recording = current.recording

@@ -145,14 +145,6 @@ class WarmTest(unittest.TestCase):
         with patch:
             self.assertEqual(dictation.warm(), {"warmed": False, "error": "no network"})
 
-    def test_warms_the_model_it_is_named_rather_than_the_one_configured(self) -> None:
-        tt, patch = hermes()
-        with patch:
-            warmed = dictation.warm("large-v3")
-        self.assertEqual(warmed["warmed"], True)
-        self.assertEqual(warmed["model"], "large-v3")
-        tt._get_or_load_local_model.assert_called_once_with("large-v3", {"model": "small"})
-
 
 class HintTest(unittest.TestCase):
     def test_squashes_and_caps(self) -> None:
@@ -177,9 +169,20 @@ class CleanVocabularyTest(unittest.TestCase):
     def test_a_word_the_list_already_holds_is_not_added_again(self) -> None:
         self.assertEqual(dictation.clean_vocabulary(["Gots", "gots", "GOTS"]), ["Gots"])
 
-    def test_the_list_is_capped(self) -> None:
+    def test_the_list_is_capped_keeping_the_newest(self) -> None:
         many = [f"word{index}" for index in range(dictation.MAX_VOCABULARY + 20)]
-        self.assertEqual(len(dictation.clean_vocabulary(many)), dictation.MAX_VOCABULARY)
+        kept = dictation.clean_vocabulary(many)
+        self.assertEqual(kept, many[-dictation.MAX_VOCABULARY:])
+
+    def test_a_word_the_cap_dropped_can_come_back_as_the_newest(self) -> None:
+        many = [f"word{index}" for index in range(dictation.MAX_VOCABULARY + 1)]
+        # The cap drops the first word; naming it again makes it the newest and drops the next.
+        self.assertEqual(dictation.clean_vocabulary(many + ["word0"]), many[2:] + ["word0"])
+
+    def test_a_long_list_stays_bounded(self) -> None:
+        many = [f"word{index}" for index in range(dictation.MAX_VOCABULARY * 100)]
+        kept = dictation.clean_vocabulary(many)
+        self.assertEqual(kept, many[-dictation.MAX_VOCABULARY:])
 
     def test_anything_that_is_not_a_list_of_words_is_no_vocabulary(self) -> None:
         self.assertEqual(dictation.clean_vocabulary(None), [])
