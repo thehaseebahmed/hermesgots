@@ -69,7 +69,7 @@ A conversation's messages in the order they happened, as the screen draws them �
 _Avoid_: transcript, message log, feed, timeline
 
 **Thinking**:
-What a model worked out before it answered, drawn above a chat's reply as a line that streams open while it thinks and folds at the answer, a tap opening it again. It reads "Thinking…" while it thinks, "Thought for 12s" where this device watched it think and bare "Thought" where it didn't; the reasoning is kept with the reply, the span is not, and a coding session's own thread draws none — a delegated agent's sub-thread keeps it, drawn as a chat's thread is.
+What a model worked out before it answered, drawn in a thread as one row per run of thinking — a run a tool call broke is drawn after that call. A row streams open while its run thinks and folds when the run ends, a tap opening it again. It reads "Thinking…" while it thinks, "Thought for 12s" where this device watched it think, and "Thought it through" where it didn't; the reasoning is kept with the reply, and the span with it on the device that watched. Every thread draws it the same way — a chat's, a delegated agent's sub-thread, a coding session's own thread.
 _Avoid_: chain of thought, scratchpad, reasoning trace
 
 **Command**:
