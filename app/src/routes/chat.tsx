@@ -277,6 +277,9 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
   const params = useParams()
   const { pathname } = useLocation()
   const id = chatId ?? params.id
+  // The id the address names, which differs from this instance's own: a Main drawn beside a
+  // thread is keyed to the Main while the address holds the thread.
+  const routeChat = matchPath("/c/:id", pathname)?.params.id
   // A message left triaging by a page that closed mid-triage was never sent.
   useEffect(() => {
     if (id) void settleTriaging(id)
@@ -693,22 +696,22 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
     })()
   }, [id])
   const isMain = Boolean(conversation?.main)
-  const routeChat = matchPath("/c/:id", pathname)?.params.id
-  // The thread the address itself names, when this instance is a bot's Main drawn beside it.
-  const routeThread = chatId && routeChat !== id ? routeChat : undefined
+  // The thread the address itself names, when this instance is a bot's Main drawn beside it: a
+  // Main id is never a thread, so a Main drawn beside another Main carries no item of its own.
+  const routeThread =
+    chatId && routeChat && routeChat !== id && !mainThreadProfile(routeChat) ? routeChat : undefined
   const mainPath =
     botThreads && conversation && !session && !isMain
       ? `/c/${mainThreadId(conversation.profileId)}`
       : undefined
-  // Main's flow marks the thread open that is really beside it: the one the address names while it
-  // names one, and the one the third pane holds while the address is Main. `beside` stays on the
-  // address alone, so a card tapped from Main still pushes a history entry that Back can return to.
+  // `beside` stays on the address alone, so a card tapped from Main still pushes a history entry
+  // Back can return to, while the thread the pane really holds is still the one marked open.
   const openThread = routeThread ?? (isMain ? paneThread : undefined)
-  // From `xl` a thread opens beside its bot and stays beside it, so the thread needs no control of
-  // its own there; below that it is a screen over Main, and leads back to it. A session opens beside
-  // Code's list where there's room, and is then a top-level screen with nothing to go back to.
+  // A session opens beside Code's list where there's room, and is then a top-level screen with
+  // nothing to go back to.
   const xl = useXLarge()
   const wide = useWide()
+  const besideMain = Boolean(mainPath) && xl
   const beside = Boolean(useCodePane()) && Boolean(session)
   useRememberOpened("code", session?.id)
   // A thread beside Main says how many replies it has under its title.
@@ -913,7 +916,15 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
 
   // A session is a place in a project, and a thread beside Main is a place within the bot, so both
   // are centred; the bot's own face reads from the left.
-  const centered = Boolean(session) || Boolean(mainPath && xl)
+  const centered = Boolean(session) || besideMain
+  // Nothing started has no title yet, and its bot is the big one in the middle. Main is the bot's
+  // face, so its title is the bot's name rather than the `Main` its record is stored under: the
+  // name Bot settings edits, so a rename shows here at once.
+  const headerTitle = unstarted
+    ? ""
+    : isMain
+      ? profile?.name || conversation?.title || ""
+      : (conversation?.title ?? "New chat")
   const mainLine = botThreads && isMain ? threadsLine(threadCount(threadList)) : undefined
   let subtitle: string | undefined
   if (!unstarted)
@@ -929,30 +940,21 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       <ChatHeader
-        // Nothing started has no title yet, and its bot is the big one in the middle. Main is the
-        // bot's face, so its title is the bot's name rather than the "Main" its record is stored
-        // under: the name Bot settings edits, so a rename shows here at once.
-        title={
-          unstarted
-            ? ""
-            : isMain
-              ? profile?.name || conversation?.title || ""
-              : (conversation?.title ?? "New chat")
-        }
+        title={headerTitle}
         subtitle={subtitle}
         botId={profile?.botId}
         muted={Boolean(conversation?.muted || profile?.muted)}
         centered={centered}
         // A chat is with its bot, so its picture stays — until the bot is drawn beside its own
         // thread, where the picture is Main's and the thread is within it.
-        showBot={!session && !unstarted && !(mainPath && xl)}
+        showBot={!session && !unstarted && !besideMain}
         actions={actions}
         leading={
           mainPath ? (
             // Beside Main a thread needs no control of its own: the bot is on screen with it, and
             // the pane keeps the thread wherever the address goes. Below `xl` it is a screen over
             // Main, and leads back to it.
-            !xl && (
+            !besideMain && (
               <Button
                 variant="outline"
                 size="icon-lg"

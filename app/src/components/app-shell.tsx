@@ -155,11 +155,10 @@ export function AppShell({ children }: { children?: ReactNode }) {
   const projects = useProjectsPane()
   const meetings = useMeetingsPane()
   const research = useResearchPane()
-  // A bot's third pane holds a thread: the one the address names, else the last one this device
-  // opened for the bot, else the line that says it has none — since Main is the pane and must never
-  // be drawn twice. It is keyed by the conversation it shows, so the thread the address names and
-  // the thread the pane remembers are one pane when they are one chat: naming it in the address, or
-  // leaving it for Main again, doesn't remount it.
+  // Keyed by the conversation it shows, so the thread the address names and the one this device
+  // remembers are one pane when they are one chat: naming it in the address, or leaving it for
+  // Main again, doesn't remount it. Main is the pane and is never drawn twice, so this holds the
+  // address's thread, else the last opened, else nothing at all.
   const shown = bot && (bot.thread ?? bot.last)
   const botItem = shown ? (
     <ChatPage key={shown} chatId={shown} />
@@ -171,9 +170,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
         screen: `/c/${mainThreadId(bot.profileId)}`,
         open: Boolean(bot.thread || bot.last || !bot.threads),
         // Main is told what the third pane holds, so its own flow can mark that thread open.
-        node: (
-          <ChatPage key={bot.profileId} chatId={mainThreadId(bot.profileId)} paneThread={bot.last} />
-        ),
+        node: <ChatPage key={bot.profileId} chatId={mainThreadId(bot.profileId)} paneThread={shown} />,
         item: botItem,
       }
     : code

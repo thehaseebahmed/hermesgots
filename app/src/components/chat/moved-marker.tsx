@@ -1,6 +1,7 @@
-import type { MouseEvent } from "react"
 import { Link } from "react-router"
 import { MessagesSquareIcon, Undo2Icon } from "lucide-react"
+
+import { stayHere } from "@/lib/nav"
 
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import type { Move } from "@/lib/hermes"
@@ -23,9 +24,6 @@ export function MovedMarker({
   current?: boolean
   onUndo?: (move: Move) => void
 }) {
-  // Where the thread is already the screen, the name stays a link — the sentence reads the same —
-  // but goes nowhere: reopening it would only remount the pane the thread is already in.
-  const follow = current ? (event: MouseEvent) => event.preventDefault() : undefined
   return (
     <div className="flex flex-col gap-1">
       <Bubble variant="default" align="end" className="self-end">
@@ -42,7 +40,7 @@ export function MovedMarker({
             <Link
               to={`/c/${move.threadId}`}
               state={{ bot: profileId }}
-              onClick={follow}
+              onClick={stayHere(current)}
               className="font-medium text-info underline-offset-2 outline-none hover:underline focus-visible:underline"
             >
               <MessagesSquareIcon className="mr-1 inline size-3.5 align-[-2px]" />
@@ -56,7 +54,7 @@ export function MovedMarker({
             <Link
               to={`/c/${move.threadId}`}
               state={{ bot: profileId }}
-              onClick={follow}
+              onClick={stayHere(current)}
               className="font-medium text-info underline-offset-2 hover:underline"
             >
               a thread

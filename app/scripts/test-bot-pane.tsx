@@ -1,10 +1,11 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { MemoryRouter, Route, Routes, useLocation } from "react-router"
+import { Link, MemoryRouter, Route, Routes } from "react-router"
 
 import { AppShell } from "@/components/app-shell"
 import { ChatPage } from "@/routes/chat"
 import { db, ensureMainThread, mainThreadId } from "@/lib/db"
+import { lastThreadKey } from "@/lib/threads"
 import {
   botProfile,
   click,
@@ -12,6 +13,8 @@ import {
   findAll,
   json,
   mount,
+  Path,
+  path,
   seedSettings,
   settle,
   text,
@@ -66,12 +69,13 @@ const laptop = (body: () => Promise<void>) => async () => {
   }
 }
 
-const Where = () => <p data-path>{useLocation().pathname}</p>
-const where = () => find("[data-path]")?.textContent ?? ""
-
 const screen = (entry: string) => (
   <MemoryRouter initialEntries={[entry]}>
-    <Where />
+    <Path />
+    {/* The way back to Main, which the thread beside it deliberately no longer draws. */}
+    <Link to={`/c/${MAIN}`} data-to-main>
+      Main
+    </Link>
     <Routes>
       <Route element={<AppShell />}>
         <Route path="c/:id" element={<ChatPage />} />
@@ -82,7 +86,10 @@ const screen = (entry: string) => (
 
 /** Every header on screen, the pane's first and the item beside it second. */
 const titles = () => findAll('[data-slot="header-title"]').map((node) => node.textContent)
-const remembered = (profileId: string) => localStorage.getItem(`memento:last-thread:${profileId}`)
+/** The card of the thread the pane is showing: the only one that says it is here. */
+const openCards = () => findAll('[data-slot="thread-card"] [aria-current="page"]')
+const cardLink = (id: string) => find(`[data-slot="thread-card"] a[href="/c/${id}"]`)
+const remembered = (profileId: string) => localStorage.getItem(lastThreadKey(profileId))
 
 test(
   "a thread opened for a bot is the one its pane keeps",
@@ -100,11 +107,34 @@ test(
 )
 
 test(
+  "the thread that was open is the one beside Main when the user comes back to it",
+  laptop(async () => {
+    localStorage.clear()
+    await seed(["t-a", "t-b"])
+    localStorage.setItem(lastThreadKey(bot.id), "t-b")
+    await mount(screen(`/c/${MAIN}`), async () => {
+      await until(async () => titles().includes("Thread t-b"), "the thread left beside Main")
+      await click(cardLink("t-a"))
+      await until(async () => path() === "/c/t-a", "the address to name the thread")
+      await until(async () => remembered(bot.id) === "t-a", "the thread this device opened last")
+      await click(find("[data-to-main]"))
+      await until(async () => path() === `/c/${MAIN}`, "Main again")
+      await until(async () => titles().includes("Thread t-a"), "the thread that was open")
+      assert.deepEqual(
+        titles(),
+        ["Mainly", "Thread t-a"],
+        "the pane keeps the thread that was open, not the one before it",
+      )
+    })
+  }),
+)
+
+test(
   "a remembered thread that is gone leaves the pane closed",
   laptop(async () => {
     localStorage.clear()
     await seed(["t-a"])
-    localStorage.setItem(`memento:last-thread:${bot.id}`, "t-gone")
+    localStorage.setItem(lastThreadKey(bot.id), "t-gone")
     await mount(screen(`/c/${MAIN}`), async () => {
       await until(async () => text().includes("1 thread"), "Main's own threads to load")
       await settle()
@@ -132,7 +162,7 @@ test(
       updatedAt: 30,
       changedAt: 30,
     })
-    localStorage.setItem(`memento:last-thread:${bot.id}`, "t-other")
+    localStorage.setItem(lastThreadKey(bot.id), "t-other")
     await mount(screen(`/c/${MAIN}`), async () => {
       await until(async () => Boolean(find('[data-slot="thread-card"]')), "the bot's threads")
       assert.deepEqual(titles(), ["Mainly"], "the other bot's thread stays out of this pane")
@@ -158,7 +188,7 @@ test(
   laptop(async () => {
     localStorage.clear()
     await seed(["t-a", "t-b"], { botThreads: false })
-    localStorage.setItem(`memento:last-thread:${bot.id}`, "t-b")
+    localStorage.setItem(lastThreadKey(bot.id), "t-b")
     await mount(screen("/c/t-a"), async () => {
       await until(async () => titles().length === 1, "one screen")
       await settle()
@@ -197,8 +227,7 @@ test(
   laptop(async () => {
     localStorage.clear()
     await seed(["t-a", "t-b"])
-    localStorage.setItem(`memento:last-thread:${bot.id}`, "t-a")
-    const openCards = () => findAll('[data-slot="thread-card"] [aria-current="page"]')
+    localStorage.setItem(lastThreadKey(bot.id), "t-a")
     await mount(screen(`/c/${MAIN}`), async () => {
       await until(async () => titles().includes("Thread t-a"), "the thread beside Main")
       await until(async () => openCards().length === 1, "the card marked open")
@@ -206,7 +235,7 @@ test(
       const pane = findAll('[data-slot="header-row"]')[1]
 
       await click(openCards()[0])
-      await until(async () => where() === "/c/t-a", "the address names the thread")
+      await until(async () => path() === "/c/t-a", "the address names the thread")
       assert.deepEqual(titles(), ["Mainly", "Thread t-a"], "Main and its thread are both still there")
       assert.equal(
         findAll('[data-slot="header-row"]')[1]?.isSameNode(pane),
@@ -222,16 +251,16 @@ test(
   laptop(async () => {
     localStorage.clear()
     await seed(["t-a", "t-b"])
-    localStorage.setItem(`memento:last-thread:${bot.id}`, "t-a")
+    localStorage.setItem(lastThreadKey(bot.id), "t-a")
     await mount(screen("/c/t-a"), async () => {
       await until(
-        async () => findAll('[data-slot="thread-card"] [aria-current="page"]').length === 1,
+        async () => openCards().length === 1,
         "the card marked open",
       )
-      const open = findAll('[data-slot="thread-card"] [aria-current="page"]')[0]
+      const open = openCards()[0]
 
       await click(open)
-      assert.equal(where(), "/c/t-a", "the address doesn't move: the thread is the screen")
+      assert.equal(path(), "/c/t-a", "the address doesn't move: the thread is the screen")
     })
   }),
 )

@@ -1,5 +1,13 @@
-import { useCallback } from "react"
+import { useCallback, type MouseEvent } from "react"
 import { useNavigate } from "react-router"
+
+/**
+ * The `onClick` for a link to the thread the address already is: it stays an anchor — the sentence
+ * reads the same and `aria-current` marks it here — but goes nowhere, since reopening would only
+ * redraw the pane the thread is already in.
+ */
+export const stayHere = (current: boolean) =>
+  current ? (event: MouseEvent<HTMLAnchorElement>) => event.preventDefault() : undefined
 
 /**
  * History mirrors the screen hierarchy: a top-level screen (a chat, Code, Routines, Settings) is

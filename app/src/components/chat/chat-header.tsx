@@ -57,8 +57,6 @@ export function ChatHeader({
         data-slot="header-row"
         className={cn(
           "mx-auto max-w-3xl",
-          // Both flanks are the same share of the row, so the block in the middle sits on the row's
-          // exact centre however wide the actions are, and however little leads it.
           centered
             ? "grid grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(0,1fr)] items-center gap-3"
             : "flex items-center gap-3",
@@ -67,15 +65,21 @@ export function ChatHeader({
         {leading ? (
           <div className="pointer-events-auto shrink-0">{leading}</div>
         ) : (
-          <Button
-            variant="outline"
-            size="icon-lg"
-            className="pointer-events-auto size-11 shrink-0 rounded-full bg-background/80 backdrop-blur md:hidden"
-            onClick={openDrawer}
-            aria-label="Open conversations"
-          >
-            <MenuIcon />
-          </Button>
+          <>
+            <Button
+              variant="outline"
+              size="icon-lg"
+              className="pointer-events-auto size-11 shrink-0 rounded-full bg-background/80 backdrop-blur md:hidden"
+              onClick={openDrawer}
+              aria-label="Open conversations"
+            >
+              <MenuIcon />
+            </Button>
+            {/* The centred arrangement holds the row's centre by both flanks sharing it, so where
+                nothing leads the row — a thread beside its bot — the leading track still takes a
+                box. Below `md` the drawer above is that box. */}
+            {centered && <div aria-hidden className="hidden size-11 md:block" />}
+          </>
         )}
         {showBot && <Bot id={botId} animate className="pointer-events-auto size-11" />}
         <div

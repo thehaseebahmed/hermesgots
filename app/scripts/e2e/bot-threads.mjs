@@ -388,10 +388,7 @@ await flow(
       "Main and a thread, side by side on a laptop",
     )
     // The started thread's card, in the Main that stays on screen beside whatever the pane holds.
-    const startedCard = page
-      .locator('[data-slot="thread-card"]')
-      .filter({ hasText: STARTED })
-      .first()
+    const startedCard = cardWith(page, STARTED)
     await startedCard.getByRole("link", { name: /View thread/ }).click()
     await page.waitForURL(`**/c/${threadId}`, { timeout: 15_000 })
     await page.waitForTimeout(400)
@@ -435,6 +432,28 @@ await flow(
       heads.map((head) => head.pictures),
       [1, 0],
       "Main keeps the bot's picture, and the thread beside it carries none",
+    )
+    const boxes = await page.evaluate(() => {
+      const row = document.querySelectorAll('[data-slot="header-row"]')[1]
+      const box = (element) => {
+        if (!element) return null
+        const { x, width } = element.getBoundingClientRect()
+        return { x, width }
+      }
+      return {
+        row: box(row),
+        title: box(row?.querySelector('[data-slot="header-title"]')),
+        actions: box(row?.lastElementChild),
+      }
+    })
+    const centre = (rect) => (rect ? rect.x + rect.width / 2 : 0)
+    assert.ok(
+      Math.abs(centre(boxes.title) - centre(boxes.row)) < 4,
+      `the thread's title sits on its pane's centre (title at ${Math.round(centre(boxes.title))}, row at ${Math.round(centre(boxes.row))})`,
+    )
+    assert.ok(
+      boxes.actions.x + boxes.actions.width <= boxes.row.x + boxes.row.width + 1,
+      "the thread's actions end at the row's own edge",
     )
     await shot("laptop")
     pass(

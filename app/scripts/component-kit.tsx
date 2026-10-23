@@ -7,7 +7,7 @@
 import assert from "node:assert/strict"
 import { act } from "react"
 import { createRoot } from "react-dom/client"
-import { MemoryRouter, Route, Routes } from "react-router"
+import { MemoryRouter, Route, Routes, useLocation } from "react-router"
 
 import { AfkPopup } from "@/components/afk"
 import { DEFAULT_SETTINGS, db, type Message, type Profile, type Settings } from "@/lib/db"
@@ -152,6 +152,10 @@ export const find = (selector: string) => document.querySelector(selector)
 export const findAll = (selector: string) => [...document.querySelectorAll(selector)]
 export const findText = (selector: string, label: string) =>
   findAll(selector).find((one) => one.textContent?.includes(label)) ?? null
+
+/** The address on screen, drawn beside the router so a test can read it without asking one. */
+export const Path = () => <p data-path>{useLocation().pathname}</p>
+export const path = () => find("[data-path]")?.textContent ?? ""
 
 const THINKING_LABEL = /^(Thinking…|Thought|Thought for \d+[sm].*)$/
 

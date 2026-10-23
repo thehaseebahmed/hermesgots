@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { MemoryRouter, Route, Routes, useLocation } from "react-router"
+import { MemoryRouter, Route, Routes } from "react-router"
 
 import { ConversationList } from "@/components/conversation-list"
 import { ChatPage } from "@/routes/chat"
@@ -14,6 +14,8 @@ import {
   findText,
   json,
   mount,
+  Path,
+  path,
   seedSettings,
   settle,
   text,
@@ -53,9 +55,6 @@ async function seedMain() {
   )
 }
 
-const Where = () => <p data-path>{useLocation().pathname}</p>
-const where = () => find("[data-path]")?.textContent ?? ""
-
 const mainScreen = (
   <MemoryRouter initialEntries={[`/c/${MAIN}`]}>
     <Routes>
@@ -64,11 +63,11 @@ const mainScreen = (
         element={
           <>
             <ChatPage />
-            <Where />
+            <Path />
           </>
         }
       />
-      <Route path="/settings/bots" element={<Where />} />
+      <Route path="/settings/bots" element={<Path />} />
     </Routes>
   </MemoryRouter>
 )
@@ -124,7 +123,7 @@ test("Bot settings from Main's menu opens the bots screen", async () => {
   await mount(mainScreen, async () => {
     await click(find('[aria-label="Bot options"]'))
     await click(findText('[role="menuitem"]', "Bot settings"))
-    await until(async () => where() === "/settings/bots", "the bots screen")
+    await until(async () => path() === "/settings/bots", "the bots screen")
   })
 })
 

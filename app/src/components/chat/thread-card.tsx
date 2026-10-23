@@ -12,6 +12,7 @@ import { Bot } from "@/components/bot"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Spinner } from "@/components/ui/spinner"
 import type { Move } from "@/lib/hermes"
+import { stayHere } from "@/lib/nav"
 import type { Thread } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { reasonText } from "@/lib/waiting"
@@ -38,7 +39,7 @@ export function ThreadCard({
   profileId: string
   open?: boolean
   beside?: boolean
-  /** Whether the address already is this thread, so its link leads nowhere and says it is here. */
+  /** Whether the address already is this thread, so its link leads nowhere; `open` marks it here. */
   current?: boolean
   move?: Move
   onUndo?: (move: Move) => void
@@ -85,10 +86,7 @@ export function ThreadCard({
           replace={beside}
           state={{ bot: profileId }}
           aria-current={open ? "page" : undefined}
-          // Where the thread is already the screen the link stays — the sentence reads the same and
-          // `aria-current` says it is here — but it goes nowhere: reopening it would only remount
-          // the pane the thread is already in.
-          onClick={current ? (event) => event.preventDefault() : undefined}
+          onClick={stayHere(current)}
           className="flex min-h-11 items-center gap-1 rounded-full px-2 text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <span className="font-medium text-info">View thread</span>

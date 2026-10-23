@@ -235,7 +235,7 @@ export function useBotSummaries(): BotSummary[] | undefined {
 export const lastThreadKey = (profileId: string) => `memento:last-thread:${profileId}`
 
 /**
- * What a bot's third pane holds while the route is Main: the thread this device opened last for
+ * What a bot's third pane holds while the address is Main: the thread this device opened last for
  * that bot, the thread storage holds even where the pane refuses it, and how many threads the bot
  * has at all. A remembered thread that is gone, or is one of another bot's, is no thread of this
  * pane's — Main alone is better than the wrong chat.
@@ -259,7 +259,7 @@ export async function lastOpened(profileId: string) {
 }
 
 /** What a chat's row says about who owns it: its bot, and whether it is a project session. */
-type ChatOwner = { profileId: string; projectId?: string }
+type ChatOwner = Pick<Conversation, "profileId" | "projectId">
 
 export interface BotPane {
   profileId: string
@@ -288,9 +288,8 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
   const chat = matchPath("/c/:id", pathname)?.params.id
   const main = chat ? mainThreadProfile(chat) : undefined
   const hint = (state as { bot?: string } | null)?.bot
-  // The bot this address is for, and whether the chat is one of that bot's at all: a Main id names
-  // its own bot without asking, and a thread asks its row. The query answers with the address it ran
-  // for, so an answer for the one before it can't pass for this one's.
+  // A Main id names its own bot, so only a thread's id costs a row read. The query answers with
+  // the address it ran for, so an answer for the one before it can't pass for this one's.
   const owner = useLiveQuery(
     async (): Promise<{ chat?: string; found?: ChatOwner | null }> => {
       if (!chat) return { found: null }
@@ -304,7 +303,7 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
     [chat, main],
   )
   const found = owner && owner.chat === chat ? owner.found : undefined
-  // The bot this pane is for, and the thread the route itself is, if it is one of the bot's.
+  // The bot this pane is for, and the thread the address itself is, if it is one of the bot's.
   let profileId: string | undefined
   let thread: string | undefined
   if (main) {
@@ -317,13 +316,18 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
     profileId = hint
     thread = chat
   }
-  // The thread this device opened last for the bot, and how many threads it has at all. Only a wide
-  // screen with the switch on has a third pane to fill, so only it pays for the count.
+  // Only a wide screen with the switch on has a third pane to fill, so only it pays for the count.
+  // The address is a dependency so the read follows the thread this page just opened — the storage
+  // it comes from isn't reactive — and Dexie keeps the answer it has until the new one lands, so
+  // the pane never empties between the two.
   const kept = useLiveQuery(
-    async () => (large && enabled && profileId ? await lastOpened(profileId) : undefined),
-    [large, enabled, profileId],
+    async () =>
+      large && enabled && profileId ? { profileId, ...(await lastOpened(profileId)) } : undefined,
+    [large, enabled, profileId, thread],
   )
-  // The pane reopens a bot's threads where this device last left them.
+  // The answer names the bot it ran for, so one bot's answer can never pass for another's.
+  const answer = kept && kept.profileId === profileId ? kept : undefined
+  // Remembers the thread the address is, so the pane reopens it the next time the bot opens on Main.
   useEffect(() => {
     if (!profileId || !thread) return
     try {
@@ -336,5 +340,5 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
   if (!large || !enabled || !profileId) return undefined
   if (thread) return { profileId, thread, threads: true }
   // Nothing remembered yet reads as no thread to show, never as a bot without threads.
-  return { profileId, last: kept?.last, threads: kept?.threads !== 0 }
+  return { profileId, last: answer?.last, threads: answer?.threads !== 0 }
 }
