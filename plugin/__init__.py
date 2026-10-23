@@ -5,7 +5,8 @@ can read cron run history from Hermes's execution ledger instead of piecing it t
 device, keep its chat list on the server (``chats.py``), report each chat's context use
 (``context.py``) and the agent's todo list (``todos.py``), list and create Hermes Projects (``projects.py``) with GitHub repos cloned into
 them in the background (``clones.py``, ``github.py``), add and remove a project's repos (``repos.py``), run project sessions in their own worktrees with a permission mode and save their plans
-(``sessions.py``), let the agent push and open its pull requests, close them when a session is dropped (``ship.py``), file the files it generates in the project's library (``library.py``) and resolve a session once its pull request merges (``merges.py``), research a question into a cited guide, quiz or glossary (``research.py``), let the agent ask the user questions with Hermes's ``clarify`` tool (``clarify.py``), keep its delegations in the turn that made them (``delegation.py``) and
+(``sessions.py``), let the agent push and open its pull requests, close them when a session is dropped (``ship.py``), file the files it generates in the project's library (``library.py``) and resolve a session once its pull request merges (``merges.py``), research a question into a cited guide, quiz or glossary (``research.py``), let the agent ask the user questions with Hermes's ``clarify`` tool (``clarify.py``), list a chat's
+subagents for the app (``delegation.py``) and
 set the profile's main model from a bot's Default model (``host_model.py``), label its chats as Gots's, tell the app what changed as it happens (``events.py``, ``stream.py``), and links the profile to a Gots account (``link.py``). The dashboard half lives in ``dashboard/``.
 """
 
@@ -185,8 +186,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     findings.wire(adapter)
     # The agent files its generated files in the project's library; see library.py.
     library.wire(adapter)
-    # A background delegation's result would wait for the user's next message; see delegation.py.
-    delegation.wire(adapter)
+    # Delegation is core's: a keyed /v1/runs turn dispatches it in the background and the turn
+    # carries on, so a question raised in that turn reaches the user while the subagents work.
     # Research missions' researchers record their claims; see research.py.
     research.wire(adapter)
     meetings.wire(adapter)
@@ -330,7 +331,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "merge_resolve",
                     "events",
                     "push",
-                    "sync_delegation",
                     "host_model",
                     "fallbacks",
                     "delegation_model",
