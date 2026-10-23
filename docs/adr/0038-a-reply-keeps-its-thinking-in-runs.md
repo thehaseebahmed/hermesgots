@@ -18,6 +18,14 @@ reply from before this change migrates as one run at the top, which is where its
 anyway. An opened run reads as a reply does — markdown, not raw pre-wrapped text — capped with a fade
 and Show more, scrolled to its newest words and following them while the run still streams.
 
+Runs break only where a tool call starts. A steer the user sends mid-reply, or an approval they answer,
+resumes the model with no call in between, so the thinking after it is the same stretch and grows the
+same run: one row, drawn once, however many times the user has spoken. A completion that arrives with
+no start to match also gets its card and also breaks a run, because the turn really did start a call
+there. The runs are built by one rule, used both by the ingest that fills a streaming reply and by the
+rebuild that reads a chat back from its transcript, so a reloaded or synced chat draws the same runs in
+the same places the live one did.
+
 The duration was already measured client-side, the first reasoning delta of the run to its last, and
 0029 held it in memory alone; now it is written to the reply's row on the device that watched, never
 synced and never read off the host. That is the part of 0029 that changes its mind: a reload keeps its
@@ -26,9 +34,34 @@ observation — Hermes's own CLI, TUI and Desktop all measure it the same way an
 nothing in the host's record knows how long thinking took — so a device that never watched a run think
 says "Thought it through" rather than a bare "Thought", words that claim no number it doesn't have.
 The same reply still reads "Thought for 12s" where it ran and "Thought it through" on one that caught
-up, and that asymmetry is still deliberate.
+up, and that asymmetry is still deliberate. A catch-up that replaces the reply's runs from the
+transcript carries the local spans onto the runs whose text sits unchanged in the same place, and
+leaves a run whose stretch was rewritten without one; messages do not sync, so the span never leaves
+the device that measured it, which is the point.
 
 0029's other clause goes with it: a project session's own thread draws thinking now too, like every
 other thread. Hiding it there was about keeping a worktree's thread free of the chat's furniture; what
 changed is that a run's row is now the thread's account of what the model was doing between its tool
 calls, and a coding session that drops it loses the same thing a chat would.
+
+A row says one of three things: "Thinking…" while its run is still streaming, "Thought for 12s" where
+this device measured that run, and "Thought it through" where it did not. A run this device did not
+watch — a reply picked up from a transcript, a run rebuilt from another device's replay — reads the
+third, honestly, rather than wearing a number nobody measured.
+
+One row per run, and only one: a row streams open while its run is the reply's newest and the reply is
+still thinking with no answer begun, folds the moment the run ends (a call starting, the answer
+starting, the turn finishing), and a tap opens it again for as long as the thread is mounted. Every
+thread draws them — a chat's, a delegated agent's sub-thread, which is drawn as a chat's thread is, and
+a coding session's own thread, which is the worktree's conversation and thinks the same way.
+
+## Considered options
+
+Three alternatives were each worse. Keeping a reply's thinking as one string with markers inside it
+saying where each call fell would draw the working-out away from the thing it was about, and would need
+a second format inside the first. Keeping the runs only in the device's row, without deriving them from
+the transcript, would lose them on every other device and on any chat whose rows were rebuilt — reading
+them back from the transcript's rows in order is what makes a synced or reloaded chat draw the same
+runs in the same places. Keeping the span in the page's memory, as ADR 0029 did, costs the number on
+the very reload that keeps the thinking, and reads "Thought it through" over a run this device watched
+think a minute ago.
