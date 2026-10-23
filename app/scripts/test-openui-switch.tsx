@@ -2,7 +2,8 @@
  * The interface switch under Appearance, and the one rule it holds for a thread: the host's value
  * read when the section opens, a write the host makes true, a write it refuses shown as a failure
  * rather than a quiet off, a host that predates the feature shown as offering nothing, and a
- * reply's block drawn as the code it came from while the host says off.
+ * reply's block drawn as the code it came from while the host says off, and nothing drawn as an
+ * interface until the host's answer has landed.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -32,13 +33,22 @@ function host({
   features = ["openui"],
   enabled = true,
   refuse,
+  hold,
 }: {
   features?: string[]
   enabled?: boolean
   refuse?: string
+  /** Keep the switch's answer in flight until `release()`: the window before the app may draw. */
+  hold?: boolean
 } = {}) {
   const calls: Call[] = []
   const state = { enabled }
+  let release: () => void = () => {}
+  const gate = hold
+    ? new Promise<void>((resolve) => {
+        release = resolve
+      })
+    : Promise.resolve()
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input))
     const method = (init?.method ?? "GET").toUpperCase()
@@ -52,12 +62,13 @@ function host({
         if (refuse) return json({ error: { message: refuse } }, 500)
         state.enabled = body?.enabled === true
       }
+      await gate
       return json({ object: "memento.openui", enabled: state.enabled, version: "1.0.1" })
     }
     if (/\/api\/sessions\/[^/]+\/messages$/.test(url.pathname)) return json({ data: [] })
     return json({ error: { message: `No route for ${method} ${url.pathname}` } }, 404)
   }
-  return { calls, state, fetch: fetch as unknown as typeof globalThis.fetch }
+  return { calls, state, release, fetch: fetch as unknown as typeof globalThis.fetch }
 }
 
 const switchOf = () => find("label[for='interfaces'] [data-slot='switch']")
@@ -145,8 +156,8 @@ test("a host that predates the feature offers nothing to switch, rather than rea
   })
 })
 
-async function thread(enabled: boolean) {
-  const fake = host({ enabled })
+async function thread(enabled: boolean, hold = false) {
+  const fake = host({ enabled, hold })
   globalThis.fetch = fake.fetch
   await seedChat({
     id: "chat-1",
@@ -190,4 +201,41 @@ test("off, the same block draws as the code it came from", async () => {
       "the thread asked the host before deciding",
     )
   })
+})
+
+test("unread, a block is the code it came from and never a painted interface", async () => {
+  const fake = await thread(true, true)
+  try {
+    await mount(chatScreen("chat-1"), async () => {
+      const numbers = () => replyRow("Here are the numbers")
+      await drawn(() => Boolean(codeOf(numbers())), "the code while the answer is in flight")
+      assert.equal(cardOf(numbers()), null, "no interface paints before the answer lands")
+      assert.ok(
+        fake.calls.some((call) => call.method === "GET" && call.path.endsWith("/openui")),
+        "the thread asked the host before deciding",
+      )
+      fake.release()
+      await drawn(() => Boolean(cardOf(numbers())), "the interface once the answer says on")
+      assert.equal(codeOf(numbers()), null, "and the code is gone in its place")
+    })
+  } finally {
+    fake.release()
+  }
+})
+
+test("an answer of off that lands late keeps the block as code", async () => {
+  const fake = await thread(false, true)
+  try {
+    await mount(chatScreen("chat-1"), async () => {
+      const numbers = () => replyRow("Here are the numbers")
+      await drawn(() => Boolean(codeOf(numbers())), "the code while the answer is in flight")
+      fake.release()
+      await settle()
+      await settle()
+      assert.equal(cardOf(numbers()), null, "still no interface once the host says off")
+      assert.ok(codeOf(numbers()), "the block is still the code it came from")
+    })
+  } finally {
+    fake.release()
+  }
 })
