@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0038
+---
+
 # A dictation commits words that have stopped changing, and shows them in its bar
 
 Two rules, and they are one decision: a take's words are committed only once they have stopped

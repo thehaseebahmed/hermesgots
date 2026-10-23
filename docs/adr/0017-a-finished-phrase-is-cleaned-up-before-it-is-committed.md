@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0038
+---
+
 # A finished phrase is cleaned up by the bot's model before it is committed
 
 A speech model writes down what it heard, not what was meant. It keeps every "um", it cannot tell a

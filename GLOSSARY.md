@@ -302,31 +302,23 @@ Speaking a message into Gots instead of typing it. Its voice bar holds the compo
 _Avoid_: voice input, speech-to-text, transcription, STT, voice typing
 
 **Voice bar**:
-The strip that holds the composer's place during a dictation: the words heard so far, how loud the room is, and Stop, Send and Cancel.
+The strip that holds the composer's place during a dictation: how long it has been going, how loud the room is, and Stop, Send and Cancel.
 _Avoid_: recorder, overlay, dictation sheet, mic sheet
 
 **Take**:
-One dictation heard by its bot's host while it is spoken, from the call that opens it to the answer that closes it. One take at a time per bot.
+One dictation as the app holds it — from the tap that starts it to the write that lands its words — one at a time per bot.
 _Avoid_: session, stream, job, recording
 
-**Slice**:
-The audio a take sends in one request: about 250 ms of its one recording, carrying the pause the app heard in it.
-_Avoid_: chunk, piece, frame, part
-
-**Phrase**:
-One stretch of a dictation between two pauses: the unit that finishes, is cleaned up, and stops changing.
-_Avoid_: chunk, piece, segment, utterance
-
-**Committed text**:
-The words of a dictation the host has settled on: two windows agreed on them and a later window still had them. Gots never changes them again, so a word is shown once and never replaced, reordered or taken away; the newest word two windows agree on waits for the next window before it counts, and a phrase still being heard is not committed yet.
-_Avoid_: partial, interim, stable prefix, live text
+**Piece**:
+The unit a dictation uploads: one stretch of its recording, cut at a pause or at its length cap, transcribed by the host while the rest is still being spoken.
+_Avoid_: chunk, slice, segment, part
 
 **Cleanup**:
-The pass that tidies a finished phrase — fillers, punctuation, casing, numbers, a spoken list as a list — without rewording it. It runs on the bot's own model as the phrase finishes, bounded, and a cleanup that misses its budget, fails or comes back much longer or shorter than the phrase leaves the phrase as the host heard it.
+The pass that tidies a dictation's finished words — fillers, punctuation, casing, numbers, a spoken list as a list — without rewording them. It runs once over the whole text when the dictation ends, on the bot's own model, bounded; one that misses its budget, fails or comes back much longer or shorter than the text leaves the words as the host heard them.
 _Avoid_: polish, post-processing, formatting, correction
 
 **Vocabulary**:
-The words a bot's dictation leans towards: names, product words, jargon. A short list, the bot's own, edited on its Dictation tab and sent with every take; it biases what the host hears and how a phrase is cleaned up.
+The words a bot's dictation leans towards: names, product words, jargon. A short list, the bot's own, edited on its Dictation tab; it biases what the host hears and how the finished text is cleaned up.
 _Avoid_: dictionary, custom words, hint, keyterms
 
 **Host speech model**:
