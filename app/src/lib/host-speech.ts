@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from "react"
 
 import { connectionKey } from "@/lib/connection"
 import { READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
-import { getPluginFeatureList, getSpeechSettings, setSpeechSettings } from "@/lib/hermes"
+import { getSpeechSettings, setSpeechSettings } from "@/lib/hermes"
+import { usePluginFeatureOn } from "@/lib/features"
 import { noteFailure } from "@/lib/report"
 import { readSpeech, SPEECH_MODEL, type SpeechPick, type SpeechSettings } from "@/lib/speech"
 
@@ -25,26 +26,22 @@ export function useSpeech(profile?: (Server & { id?: string }) | null) {
   const apiKey = profile?.apiKey ?? ""
   const key = connectionKey({ baseUrl, apiKey })
   const [state, setState] = useState<{ key: string; settings: SpeechSettings }>()
-  const [supported, setSupported] = useState(false)
+  const supported = usePluginFeatureOn({ baseUrl, apiKey }, SPEECH_MODEL)
   const [saving, setSaving] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!baseUrl) return
+    if (!baseUrl || !supported) return
     let cancelled = false
-    void getPluginFeatureList({ baseUrl, apiKey }).then((features) => {
-      if (cancelled || !features?.includes(SPEECH_MODEL)) return
-      setSupported(true)
-      return getSpeech({ baseUrl, apiKey }, AbortSignal.timeout(READ_TIMEOUT_MS))
-        .then((settings) => {
-          if (!cancelled) setState({ key, settings })
-        })
-        .catch((error: unknown) => noteFailure("Reading the host's speech model", error))
-    })
+    void getSpeech({ baseUrl, apiKey }, AbortSignal.timeout(READ_TIMEOUT_MS))
+      .then((settings) => {
+        if (!cancelled) setState({ key, settings })
+      })
+      .catch((error: unknown) => noteFailure("Reading the host's speech model", error))
     return () => {
       cancelled = true
     }
-  }, [key, baseUrl, apiKey])
+  }, [key, baseUrl, apiKey, supported])
 
   const write = useCallback(
     async (patch: { model?: string; cleanup_model?: SpeechPick | null }) => {

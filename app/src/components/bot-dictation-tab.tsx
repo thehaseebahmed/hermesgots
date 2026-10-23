@@ -60,12 +60,12 @@ export function DictationTab({ profile }: { profile: Profile }) {
             <li key={word}>
               <span className="flex h-9 items-center gap-1 rounded-full bg-muted pr-0.5 pl-3 text-sm">
                 <span className="max-w-56 truncate">{word}</span>
-                {/* The chip is 36px; the button's hit area reaches 44px past it. */}
+                {/* The inset widens the 36px button's hit area to the 44px the floor asks for. */}
                 <button
                   type="button"
                   onClick={() => save(removeWord(words, word))}
                   aria-label={`Remove ${word}`}
-                  className="relative flex size-8 items-center justify-center rounded-full text-muted-foreground outline-none after:absolute after:-inset-1 hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                  className="relative flex size-9 items-center justify-center rounded-full text-muted-foreground outline-none after:absolute after:-inset-1 hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <XIcon className="size-4" />
                 </button>
@@ -111,9 +111,6 @@ function SpeechModelField({
   return (
     <Field aria-labelledby="speech-model-label" aria-busy={saving || undefined}>
       <FieldLabel id="speech-model-label">Speech model</FieldLabel>
-      <p className="text-sm text-muted-foreground">
-        What hears a dictation on this bot's host. A change lands on the next take.
-      </p>
       {settings.warning && (
         <Banner tone="warning">
           {settings.warning.model} didn't load, so dictation is heard on {settings.model}:{" "}
@@ -175,9 +172,6 @@ function CleanupModelField({
         </Banner>
       ) : (
         <>
-          <p className="text-sm text-muted-foreground">
-            The model a finished phrase is tidied on. Default uses the bot's own model.
-          </p>
           <Button
             ref={field}
             id="cleanup-model"
