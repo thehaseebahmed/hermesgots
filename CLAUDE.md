@@ -4,7 +4,7 @@
 
 ### Issue tracker
 
-Issues and specs live as GitHub issues on `thehaseebahmed/memento`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Issues and specs live as GitHub issues on `thehaseebahmed/hermesgots` (the repo was renamed; `thehaseebahmed/memento` redirects there), via the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

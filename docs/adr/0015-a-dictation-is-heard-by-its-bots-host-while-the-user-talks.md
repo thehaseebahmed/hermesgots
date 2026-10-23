@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0038
+---
+
 # A dictation is heard by its bot's host while the user talks
 
 Dictation was a batch: the app recorded Opus pieces cut at pauses and sent each one after it ended, so
