@@ -265,6 +265,11 @@ const FLOWS = {
     mock: "polling",
     about: "An idle open chat makes at most 12 requests in 65s",
   },
+  openui: {
+    script: "e2e/openui.mjs",
+    about:
+      "A reply's interface draws at 390 and 768px, light and dark; a block that can't draw stays code; a patch landing while the thread is scrolled up doesn't move the reader",
+  },
   screens: {
     script: "e2e/screens.mjs",
     about:

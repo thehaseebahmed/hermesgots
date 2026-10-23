@@ -59,6 +59,15 @@
 // Say "think out loud" for the turn's working-out before any of its answer: four reasoning pieces,
 // paced, as a run's `reasoning.available` events or a completion's `reasoning_content` deltas. Say
 // "stall" as well and the turn then holds 2.5s with nothing else on the wire.
+// Say "draw the interface" for a reply that carries one: an `openui-lang` block naming itself with
+// `# id: sales`, the receipt under it long enough to scroll a phone's thread, then a patch block
+// reusing that id (it changes the card and table in place, and draws nothing where it sits), then a
+// block naming a component the library doesn't have — which draws as the code the model sent — and a
+// closing line. The whole timeline is one reply, paced so a reader can scroll up before the patch
+// lands: a second user message would jump the thread back to the end. `info` advertises `openui` with
+// the library's version beside it, and GET /api/plugins/memento/openui answers the interface switch
+// on (`{ enabled: true }`) — the route plugin/openui.py serves from the plugin's route root, which a
+// drawing gate reads before it draws a block.
 // Project sessions get a worktree in each of the project's repos on
 // POST /api/plugins/memento/sessions/{id}/workspace (GET reads it back, POST …/mode changes the
 // permission mode, POST …/workspace/remove removes the trees unless a turn mentioned "commit"). In
@@ -1326,6 +1335,60 @@ const REASONING_LEAD_MS = 2500
 const REASONING_PACE_MS = 700
 const REASONING_STALL_MS = 2500
 
+// What a turn asked to draw an interface says. One reply carries the whole timeline, because a patch
+// can't arrive as a second user message: a send jumps the thread to the end (FollowOnSend), and a
+// send while a reply streams is queued. So the interface comes first, then the receipt under it —
+// long enough that a phone's thread scrolls — and only then the patch naming the same `# id:`, which
+// is the one block a reader scrolled up would be moved by if the thread followed its new height.
+// The patch's card is the same sentence with one number changed — same width, so the card's height
+// holds and only the table's new fourth row moves the thread: the change a reader is meant to see
+// arrive without their place moving with it.
+const OPENUI_INTRO = "Here's the quarter as a card, and the receipt behind it.\n\n"
+const OPENUI_INTERFACE = [
+  "```openui-lang",
+  "# id: sales",
+  "root = Stack([c, t, n])",
+  'c = Card("Quarterly sales", "Up 12% on the quarter.")',
+  't = Table(["Region", "Revenue"], [["North", "$18.4k"], ["South", "$11.9k"], ["West", "$9.2k"]], "Revenue by region")',
+  'n = Callout("good", "Ahead of plan for a third quarter running.")',
+  "```",
+].join("\n")
+const OPENUI_RECEIPT = [
+  "What's in the number:",
+  "",
+  "- North carried the quarter, up $1.2k on the same three months a year ago.",
+  "- South held flat, which for a region that lost its biggest account in March is a win.",
+  "- West came in under plan, mostly because two renewals slipped out of September.",
+  "",
+  "The North figure is the one worth reading twice. It comes from three deals that all closed in the last ten days of the quarter, and none of them had a signed order before the twenty-first, which is why the first read of the quarter was lower than this one.",
+  "",
+  "South is near flat on revenue and up nine per cent on margin, because the account that left was the expensive one to serve. The team has said so for two quarters and this is the first time the numbers agree with them.",
+  "",
+  "West is the only region I would call a miss. Two renewals that were expected in September are now expected in October, and one of them has gone quiet since the third call. If both land next month the quarter ends up eighteen per cent; if neither does it ends where the card started.",
+  "",
+  "One thing the card can't show: the two West renewals are the same two accounts that were flagged in July, so this is the second quarter they have moved. I would rather see them in October with a signed order than in the pipeline again.",
+  "",
+  "Everything else, support, hosting and the two contractors, sits inside the plan by a margin that isn't worth a paragraph of its own.",
+  "",
+  "The short version: the quarter is better than the card said and worse than the pipeline promised, and the whole difference is those three North deals closing inside the last ten days.",
+].join("\n")
+const OPENUI_PATCH = [
+  "```openui-lang",
+  "# id: sales",
+  'c = Card("Quarterly sales", "Up 18% on the quarter.")',
+  't = Table(["Region", "Revenue"], [["North", "$19.6k"], ["South", "$12.4k"], ["West", "$9.8k"], ["East", "$7.1k"]], "Revenue by region")',
+  'n = Callout("good", "Ahead of plan, and by a wider margin than the first read.")',
+  "```",
+].join("\n")
+// A component the library doesn't have: the block can't be drawn, so it draws as the code the model
+// sent — the fallback a reply with a bad block has to still be.
+const OPENUI_FALLBACK = [
+  "```openui-lang",
+  "root = Stack([c])",
+  'c = Sparkline("Revenue by month", [18, 19, 21])',
+  "```",
+].join("\n")
+
 /**
  * The scripted turn behind both endpoints. `out` sends it over the wire: `say` streams a piece of the
  * reply, `status` a status line, `tool` a tool's progress, and `approve` asks and resolves to a choice.
@@ -1411,6 +1474,23 @@ async function playTurn(req, body, last, out) {
   // connection does: the run ends with an error and the transcript holds no answer.
   if (/fail the turn/i.test(last)) {
     return { spoken: "", prompt_tokens: 6000, completion_tokens: 0, failed: true }
+  }
+
+  // "draw the interface": the fixture the interface flow reads — one reply holding a block that
+  // draws, a receipt tall enough to scroll a phone's thread, a patch naming that block, and a block
+  // no component answers for. Paced slowly, so the patch lands while a reader is still reading.
+  if (/\bdraw the interface\b/i.test(last)) {
+    await say(OPENUI_INTRO, 30)
+    await say(`${OPENUI_INTERFACE}\n\n`, 30)
+    await say(OPENUI_RECEIPT, 45)
+    // A pause with a line saying so: the window a reader has to scroll up before the patch lands.
+    await say("\n\nThe West renewal just came in. Give me a moment to redraw the card.\n\n", 60)
+    await sleep(5000)
+    await say(`${OPENUI_PATCH}\n\n`, 30)
+    await say(`${OPENUI_FALLBACK}\n\n`, 30)
+    await say("That's the quarter, from the first read to this one.", 30)
+    record(req, { role: "assistant", content: spoken, finish_reason: "stop" })
+    return { spoken, prompt_tokens: 9000, completion_tokens: pieces }
   }
 
   // In plan mode the plugin blocks every tool that changes anything, so the agent reads and plans.
@@ -2395,6 +2475,11 @@ let dictationBusy = 0
 let dictationPeak = 0
 // plugin/moves.py: the messages triage moved out of each Main session, for its Moved markers.
 const moves = new Map()
+// plugin/openui.py: the interface switch a host keeps. On here, so a reply's block draws rather than
+// falling back to its own source; a drawing gate in the app reads it before it draws. The version is
+// the library the section's text was generated from, which the plugin reads off the artifact's head.
+const openuiOn = true
+const OPENUI_VERSION = "1.0.1"
 // plugin/triage.py: MOCK_TRIAGE=off hides the feature, "new" opens a new thread, "thread" continues
 // the newest plain thread of the bot, "slow" answers after 10s and "fail" answers an error; anything else stays in Main.
 const TRIAGE = process.env.MOCK_TRIAGE ?? "stay"
@@ -2924,6 +3009,7 @@ http
           "clarify",
           "attachments",
           "media",
+          "openui",
           "profile_routes",
           "pr_tool",
           "close",
@@ -2965,6 +3051,9 @@ http
         ],
         clarify: true,
         hooks: true,
+        // The library the section was generated from, beside the bare feature — the client matches
+        // features with `includes`, so the version rides here (plugin/openui.py's `advertised`).
+        openui: { version: OPENUI_VERSION },
         research: {
           ready: true,
           reason: null,
@@ -3516,6 +3605,11 @@ http
         triageModelsOf.delete(key)
         return json(res, 200, { object: "memento.triage_model", triage_model: null })
       }
+    }
+    // The interface switch: a host setting, like the triage model, that answers as on. `plugin/openui.py`
+    // serves it from the same route root, and a drawing gate reads it before it draws a block.
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/openui") {
+      if (req.method === "GET") return json(res, 200, { object: "memento.openui", enabled: openuiOn })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/github") {
       return json(
