@@ -1,9 +1,18 @@
 import { clsx, type ClassValue } from "clsx"
+import { type MouseEvent } from "react"
 import { twMerge } from "tailwind-merge"
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
+
+/**
+ * A link to the screen you are already on stays a link — the sentence reads the same, and
+ * `aria-current` says it is here — but it goes nowhere: reopening it would only remount the pane
+ * the thread is already in.
+ */
+export const stayHere = (here: boolean) =>
+  here ? (event: MouseEvent) => event.preventDefault() : undefined
 
 /** `crypto.randomUUID` only exists in secure contexts (HTTPS or localhost); LAN HTTP lacks it. */
 export function randomId(): string {

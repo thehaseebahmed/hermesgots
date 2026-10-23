@@ -17,7 +17,8 @@ import { cn } from "@/lib/utils"
  * control, or nothing at all beside an open thread. The muted mark moves into the actions, so it
  * cannot pull the title off centre. A session is a place in a project and a thread open beside Main
  * is already somewhere, so both pass `showBot={false}`: the picture stays a caller's decision, and
- * the arrangement doesn't second-guess it.
+ * the arrangement doesn't second-guess it — `centered` is three tracks, so a picture there would
+ * fall onto a second row.
  * `className` can pin it in the page's flow instead.
  */
 export function ChatHeader({
@@ -64,7 +65,7 @@ export function ChatHeader({
             : "flex items-center gap-3",
         )}
       >
-        {leading ? (
+        {leading || centered ? (
           <div className="pointer-events-auto shrink-0">{leading}</div>
         ) : (
           <Button

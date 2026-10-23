@@ -240,11 +240,13 @@ const lastThreadKey = (profileId: string) => `memento:last-thread:${profileId}`
  * another bot's, is no thread of this pane's — Main alone is better than the wrong chat.
  */
 async function lastOpened(profileId: string) {
-  const threads = await db.conversations
-    .where("[profileId+updatedAt]")
-    .between([profileId, -Infinity], [profileId, Infinity])
-    .filter((chat) => !chat.projectId && !chat.main)
-    .count()
+  const threads = Boolean(
+    await db.conversations
+      .where("[profileId+updatedAt]")
+      .between([profileId, -Infinity], [profileId, Infinity])
+      .filter((chat) => !chat.projectId && !chat.main)
+      .first(),
+  )
   let last: string | undefined
   try {
     const id = localStorage.getItem(lastThreadKey(profileId))
@@ -315,11 +317,13 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
     profileId = hint
     thread = chat
   }
-  // The thread this device opened last for the bot, and how many threads it has at all. Only a wide
-  // screen with the switch on has a third pane to fill, so only it pays for the count.
+  // The thread this device opened last for the bot, and whether it has one at all. Only a wide
+  // screen with the switch on has a third pane to fill, and only while the address is Main: a
+  // thread the address names is drawn, so nothing here reads what the pane would have held.
   const kept = useLiveQuery(
-    async () => (large && enabled && profileId ? await lastOpened(profileId) : undefined),
-    [large, enabled, profileId],
+    async () =>
+      large && enabled && profileId && !thread ? await lastOpened(profileId) : undefined,
+    [large, enabled, profileId, thread],
   )
   // The pane reopens a bot's threads where this device last left them.
   useEffect(() => {
@@ -334,5 +338,5 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
   if (!large || !enabled || !profileId) return undefined
   if (thread) return { profileId, thread, threads: true }
   // Nothing remembered yet reads as no thread to show, never as a bot without threads.
-  return { profileId, last: kept?.last, threads: kept?.threads !== 0 }
+  return { profileId, last: kept?.last, threads: kept?.threads !== false }
 }

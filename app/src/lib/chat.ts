@@ -1354,9 +1354,9 @@ const triaging = new Set<string>()
 export async function settleTriaging(conversationId: string) {
   if (triaging.has(conversationId)) return
   await db.messages
-    .where("conversationId")
-    .equals(conversationId)
-    .filter((m) => m.status === "triaging")
+    .where("status")
+    .equals("triaging")
+    .filter((m) => m.conversationId === conversationId)
     .modify({ status: "error", statusText: "Not sent" })
 }
 

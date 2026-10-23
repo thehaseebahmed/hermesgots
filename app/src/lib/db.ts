@@ -718,10 +718,7 @@ db.version(18).stores({ meetingRecordings: "id" })
 // decision the host makes, which the GLOSSARY has always called triage. The field is indexed, so the
 // rows a closed page left behind are rewritten rather than read as a name nothing checks for.
 db.version(19).upgrade((tx) =>
-  tx
-    .table("messages")
-    .filter((message: Record<string, unknown>) => message.status === "routing")
-    .modify({ status: "triaging" }),
+  tx.table("messages").where("status").equals("routing").modify({ status: "triaging" }),
 )
 
 db.on("populate", (tx) => seedProfile(tx))

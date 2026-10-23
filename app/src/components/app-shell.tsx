@@ -169,10 +169,10 @@ export function AppShell({ children }: { children?: ReactNode }) {
   const pane: ListPane | undefined = bot
     ? {
         screen: `/c/${mainThreadId(bot.profileId)}`,
-        open: Boolean(bot.thread || bot.last || !bot.threads),
+        open: Boolean(shown || !bot.threads),
         // Main is told what the third pane holds, so its own flow can mark that thread open.
         node: (
-          <ChatPage key={bot.profileId} chatId={mainThreadId(bot.profileId)} paneThread={bot.last} />
+          <ChatPage key={bot.profileId} chatId={mainThreadId(bot.profileId)} paneThread={shown} />
         ),
         item: botItem,
       }

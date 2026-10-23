@@ -13,7 +13,7 @@ import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Spinner } from "@/components/ui/spinner"
 import type { Move } from "@/lib/hermes"
 import type { Thread } from "@/lib/threads"
-import { cn } from "@/lib/utils"
+import { cn, stayHere } from "@/lib/utils"
 import { reasonText } from "@/lib/waiting"
 
 export function StateIcon({ state }: { state: Thread["state"] }) {
@@ -85,10 +85,7 @@ export function ThreadCard({
           replace={beside}
           state={{ bot: profileId }}
           aria-current={open ? "page" : undefined}
-          // Where the thread is already the screen the link stays — the sentence reads the same and
-          // `aria-current` says it is here — but it goes nowhere: reopening it would only remount
-          // the pane the thread is already in.
-          onClick={current ? (event) => event.preventDefault() : undefined}
+          onClick={stayHere(current)}
           className="flex min-h-11 items-center gap-1 rounded-full px-2 text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <span className="font-medium text-info">View thread</span>

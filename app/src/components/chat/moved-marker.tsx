@@ -1,9 +1,9 @@
-import type { MouseEvent } from "react"
 import { Link } from "react-router"
 import { MessagesSquareIcon, Undo2Icon } from "lucide-react"
 
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import type { Move } from "@/lib/hermes"
+import { stayHere } from "@/lib/utils"
 
 /**
  * A message triage sent out of Main, drawn where it was sent: the user's own bubble with a line
@@ -23,9 +23,7 @@ export function MovedMarker({
   current?: boolean
   onUndo?: (move: Move) => void
 }) {
-  // Where the thread is already the screen, the name stays a link — the sentence reads the same —
-  // but goes nowhere: reopening it would only remount the pane the thread is already in.
-  const follow = current ? (event: MouseEvent) => event.preventDefault() : undefined
+  const follow = stayHere(current)
   return (
     <div className="flex flex-col gap-1">
       <Bubble variant="default" align="end" className="self-end">

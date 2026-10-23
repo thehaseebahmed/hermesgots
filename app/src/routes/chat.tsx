@@ -24,7 +24,7 @@ import {
   SEND_CAUGHT_UP_MS,
 } from "@/lib/freshness"
 import { quietly } from "@/lib/report"
-import { threadCount, threadsLine } from "@/lib/bot-chrome"
+import { mainTitle, threadCount, threadsLine } from "@/lib/bot-chrome"
 import { repoCap, sessionSubtitle } from "@/lib/repo-line"
 import { useBreakReminderEligibility } from "@/components/break-reminder-context"
 import { ApprovalCard } from "@/components/chat/approval-card"
@@ -279,7 +279,7 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
   const id = chatId ?? params.id
   // A message left triaging by a page that closed mid-triage was never sent.
   useEffect(() => {
-    if (id) void settleTriaging(id)
+    if (id) void settleTriaging(id).catch(quietly("Settling a triaged message"))
   }, [id])
   const navigate = useNavigate()
   const { root, up } = useNav()
@@ -710,13 +710,17 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
   const xl = useXLarge()
   const wide = useWide()
   const beside = Boolean(useCodePane()) && Boolean(session)
+  // The thread is drawn beside its own bot: the fact the header's centring, the bot's picture and
+  // the reply count all read, named once rather than re-derived at each.
+  const besideMain = Boolean(mainPath && xl)
   useRememberOpened("code", session?.id)
   // A thread beside Main says how many replies it has under its title.
-  const replyCount = messages?.filter((m) => m.role === "assistant").length ?? 0
+  const replyCount = useMemo(
+    () => messages?.filter((m) => m.role === "assistant").length ?? 0,
+    [messages],
+  )
   const repliesLine =
-    mainPath && xl && replyCount
-      ? `${replyCount} ${replyCount === 1 ? "reply" : "replies"}`
-      : undefined
+    besideMain && replyCount ? `${replyCount} ${replyCount === 1 ? "reply" : "replies"}` : undefined
   useEffect(() => {
     if (!mainPath) return
     return setBackGuard(() => {
@@ -913,7 +917,7 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
 
   // A session is a place in a project, and a thread beside Main is a place within the bot, so both
   // are centred; the bot's own face reads from the left.
-  const centered = Boolean(session) || Boolean(mainPath && xl)
+  const centered = Boolean(session) || besideMain
   const mainLine = botThreads && isMain ? threadsLine(threadCount(threadList)) : undefined
   let subtitle: string | undefined
   if (!unstarted)
@@ -936,7 +940,7 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
           unstarted
             ? ""
             : isMain
-              ? profile?.name || conversation?.title || ""
+              ? mainTitle(profile?.name, conversation?.title)
               : (conversation?.title ?? "New chat")
         }
         subtitle={subtitle}
@@ -945,7 +949,7 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
         centered={centered}
         // A chat is with its bot, so its picture stays — until the bot is drawn beside its own
         // thread, where the picture is Main's and the thread is within it.
-        showBot={!session && !unstarted && !(mainPath && xl)}
+        showBot={!session && !unstarted && !besideMain}
         actions={actions}
         leading={
           mainPath ? (
