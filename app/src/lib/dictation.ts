@@ -10,7 +10,17 @@ import {
 import { DICTATION_INFO_MS } from "@/lib/freshness"
 import { createSignal } from "@/lib/store"
 import { connectionKey } from "@/lib/connection"
-import { db, type DictationPiece } from "@/lib/db"
+import { db, type DictationPiece, type SavedDictation } from "@/lib/db"
+import {
+  blockedMicrophone,
+  clipFailure,
+  failure as failureOf,
+  microphoneFailure,
+  type DictationFailure,
+} from "@/lib/dictation-failure"
+import { RESTORED, SAVE_MS, keptAudio, keeper, type KeptTake } from "@/lib/dictation-kept"
+import { holdTake, releaseTake } from "@/lib/dictation-lock"
+import { EMPTY_TRANSCRIPT } from "@/lib/dictation-transcript"
 import {
   getDictationInfo,
   transcribeClip,
@@ -73,29 +83,41 @@ export function useDictationInfo(config: HermesConfig) {
 }
 
 /** The longest recording; at 24 kbps it stays far under the API server's 10 MB body limit. */
-const MAX_MS = 10 * 60 * 1000
+export const MAX_MS = 10 * 60 * 1000
 const MIN_MS = 300
 /** A cold host may load (or first download) its model inside this request. */
 const TRANSCRIBE_MS = 120_000
 const TYPES = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4", "audio/webm"]
-const BARS = 32
-const SAMPLE_MS = 50
+export const BARS = 32
+export const SAMPLE_MS = 50
 const PIECE_MS = 6000
 const PAUSE_MS = 700
 const LONG_PIECE_MS = 25_000
 const SHORT_PAUSE_MS = 350
 // Loudness (RMS of the wave, 0 to 1) under which the mic counts as quiet.
-const QUIET_MIN = 0.012
-const QUIET_MAX = 0.05
-const SAVE_MS = 2000
-const RESTORED = "This recording hasn't been transcribed yet."
+export const QUIET_MIN = 0.012
+export const QUIET_MAX = 0.05
 /** A stop event that hasn't come by now isn't coming: the take goes with what it flushed. */
-const STOP_MS = 1500
+export const STOP_MS = 1500
+/**
+ * How long a Send waits for a take's tail — the last phrase's words and their cleanup, which the
+ * host bounds at 2 s (ADR 0017) — before it gives up and sends what the take already has. A Send is
+ * in front of the user rather than behind their speaking, so it is the short wait: the words on the
+ * bar are already the message (ADR 0016).
+ */
+export const SEND_WAIT_MS = 1500
+/**
+ * How long a Stop waits for the tail. Longer than a Send because a Stop is the user asking for the
+ * whole take, and the host still has to decode the tail phrase and tidy it; past it the take is
+ * abandoned with what it has, so a wedged host can't hold the composer's place for ever.
+ */
+export const STOP_WAIT_MS = 8000
 /** A live track whose recorder has sent nothing by now is a dead one: silence still encodes. */
-const SILENT_MS = 2500
-const STOPPED = "The recording stopped."
-const TAKEN = "The microphone is in use by another app."
-const SILENT = "The microphone isn't picking up any sound."
+export const SILENT_MS = 2500
+export const STOPPED = "The recording stopped."
+export const TAKEN = "The microphone is in use by another app."
+export const SILENT = "The microphone isn't picking up any sound."
+export const TAKE_RUNNING = "A dictation is already being heard on this bot."
 
 /** A click from Enter or Space: no pointer made it (a touch's click can also have no detail). */
 export function keyboardClick(event: MouseEvent) {
@@ -107,11 +129,11 @@ export const canRecord = () =>
   typeof window.MediaRecorder === "function" &&
   Boolean(navigator.mediaDevices?.getUserMedia)
 
-function recordingType() {
+export function recordingType() {
   return TYPES.find((type) => MediaRecorder.isTypeSupported?.(type))
 }
 
-function micError(error: unknown, otherwise: string) {
+export function micError(error: unknown, otherwise: string) {
   const name = error instanceof DOMException ? error.name : ""
   if (name === "NotAllowedError" || name === "SecurityError") return "Microphone access is blocked."
   if (name === "NotFoundError") return "No microphone found."
@@ -147,28 +169,42 @@ interface Recording {
 }
 
 interface Session {
+  profile: string
+  lock: symbol | null
   key?: string
   pieces: DictationPiece[]
+  caret?: number
   recording: Recording | null
   upload: AbortController | null
   draining: Promise<boolean> | null
+  finishing: Promise<string | null> | null
   error: unknown
   /** Why the take itself died (the recorder errored, the track ended): Retry still sends its phrases. */
-  failure: Error | null
+  failure: DictationFailure | null
   /** The recorders still closing after the take died; a retry waits for them. */
   stopping: Promise<void> | null
   /** Cancelled or done: nothing more is kept. */
   closed: boolean
+  restored?: boolean
   saving: Promise<unknown>
   saveTimer?: number
 }
 
-const newSession = (key: string | undefined, pieces: DictationPiece[] = []): Session => ({
+const newSession = (
+  profile: string,
+  key: string | undefined,
+  pieces: DictationPiece[] = [],
+  caret?: number,
+): Session => ({
+  profile,
+  lock: null,
   key,
   pieces,
+  caret,
   recording: null,
   upload: null,
   draining: null,
+  finishing: null,
   error: null,
   failure: null,
   stopping: null,
@@ -181,6 +217,18 @@ export function joinText(...parts: string[]) {
     .map((part) => part.trim())
     .filter(Boolean)
     .join(" ")
+}
+
+/**
+ * A promise given at most `ms` to resolve: what it answers, or undefined when the wait is up. A
+ * take's ending is bounded by this rather than by the host answering, so a wedged host can't hold
+ * the composer (ADR 0016).
+ */
+export function within<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
+  return Promise.race([
+    promise.catch(() => undefined),
+    new Promise<undefined>((done) => window.setTimeout(done, ms)),
+  ])
 }
 
 function save(session: Session, now = false) {
@@ -201,10 +249,59 @@ function save(session: Session, now = false) {
   const pieces = [...session.pieces.map((piece) => ({ ...piece })), ...live]
   session.saving = session.saving
     .then(async () => {
-      if (pieces.length) await db.dictations.put({ id: key, pieces, at: Date.now() })
+      if (pieces.length)
+        await db.dictations.put({
+          id: key,
+          pieces,
+          at: Date.now(),
+          kind: "pieces",
+          caret: session.caret,
+        })
       else await db.dictations.delete(key)
     })
     .catch(() => undefined)
+}
+
+export function keptStore(key: string) {
+  return (take: KeptTake | null) =>
+    take
+      ? db.dictations.put({
+          id: key,
+          pieces: take.pieces,
+          caret: take.caret,
+          at: Date.now(),
+          kind: "stream",
+        })
+      : db.dictations.delete(key)
+}
+
+export function keptKeeper(key: string | undefined) {
+  return keeper(key, key ? keptStore(key) : () => Promise.resolve())
+}
+
+export async function readKept(key: string): Promise<SavedDictation | undefined> {
+  return db.dictations.get(key).catch(() => undefined)
+}
+
+export async function keptText(
+  config: HermesConfig,
+  pieces: DictationPiece[],
+  hint: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const before = joinText(...pieces.map((piece) => piece.text ?? ""))
+  const audio = keptAudio(pieces)
+  if (!audio) return before
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => controller.abort(), TRANSCRIBE_MS)
+  const stop = () => controller.abort()
+  signal?.addEventListener("abort", stop, { once: true })
+  try {
+    return joinText(before, await transcribeClip(config, audio, hint, before, controller.signal))
+  } finally {
+    window.clearTimeout(timer)
+    signal?.removeEventListener("abort", stop)
+  }
 }
 
 /** A take that ended stops transcribing: whatever is in flight is dropped. */
@@ -217,6 +314,8 @@ function stopUpload(current: Session) {
 function forget(session: Session) {
   session.closed = true
   window.clearTimeout(session.saveTimer)
+  releaseTake(session.profile, session.lock)
+  session.lock = null
   const key = session.key
   if (key) session.saving = session.saving.then(() => db.dictations.delete(key)).catch(() => {})
 }
@@ -259,33 +358,31 @@ function stopSegments(recording: Recording) {
   )
 }
 
-export function useDictation(config: HermesConfig, hint: string, key?: string) {
+export function useChunkedDictation(
+  config: HermesConfig,
+  hint: string,
+  key?: string,
+  onCommitted?: (text: string) => void,
+) {
   const [status, setStatus] = useState<DictationStatus>("idle")
   const [levels, setLevels] = useState<number[] | null>(null)
   const [startedAt, setStartedAt] = useState<number | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [failure, setFailure] = useState<DictationFailure | null>(null)
   const session = useRef<Session | null>(null)
-  const latest = useRef({ config, hint, key })
+  const latest = useRef({ config, hint, key, onCommitted })
   useEffect(() => {
-    latest.current = { config, hint, key }
+    latest.current = { config, hint, key, onCommitted }
   })
 
   const showIdle = useCallback(() => {
     setStatus("idle")
     setLevels(null)
     setStartedAt(null)
-    setError(null)
+    setFailure(null)
   }, [])
 
-  /** Sends each piece still without text, in order, each after the text before it. */
-  const showFailure = useCallback((failure: unknown) => {
-    setError(
-      failure instanceof DOMException && failure.name === "AbortError"
-        ? "The bot took too long to transcribe."
-        : failure instanceof Error
-          ? failure.message
-          : "Couldn't transcribe the recording.",
-    )
+  const showFailure = useCallback((failed: DictationFailure) => {
+    setFailure(failed)
     setStatus("failed")
   }, [])
 
@@ -326,14 +423,16 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
 
   /** Ends a take whose recorder died, keeping the phrases already cut so Retry can send them. */
   const fail = useCallback(
-    (current: Session, recording: Recording, message: string) => {
+    (current: Session, recording: Recording, failed: DictationFailure) => {
       if (session.current !== current || current.recording !== recording || current.stopping) return
-      current.failure = new Error(message)
+      current.failure = failed
       current.recording = null
       current.stopping = end(recording)
       stopUpload(current)
+      releaseTake(current.profile, current.lock)
+      current.lock = null
       setLevels(null)
-      showFailure(current.failure)
+      showFailure({ ...failed, discard: true })
     },
     [showFailure],
   )
@@ -377,14 +476,19 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
       }
       recorder.onstop = close
       recorder.onerror = (event) => {
-        fail(current, recording, micError((event as Event & { error?: unknown }).error, STOPPED))
+        const error = (event as Event & { error?: unknown }).error
+        fail(
+          current,
+          recording,
+          microphoneFailure(micError(error, STOPPED), blockedMicrophone(error)),
+        )
         close()
       }
       recording.segments.push(segment)
       recorder.start(1000)
       // A recorder that has sent nothing by now is dead, not quiet: silence still encodes.
       segment.watch = window.setTimeout(() => {
-        if (!segment.chunks.length) fail(current, recording, SILENT)
+        if (!segment.chunks.length) fail(current, recording, microphoneFailure(SILENT))
       }, SILENT_MS)
       return segment
     },
@@ -442,11 +546,15 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
     [openSegment],
   )
 
-  const start = useCallback(async () => {
+  const start = async (caret?: number | null) => {
     if (session.current || !canRecord()) return
-    const current = newSession(latest.current.key)
+    const profile = connectionKey(latest.current.config)
+    const lock = holdTake(profile)
+    if (!lock) throw new Error(TAKE_RUNNING)
+    const current = newSession(profile, latest.current.key, [], caret ?? undefined)
+    current.lock = lock
     session.current = current
-    setError(null)
+    setFailure(null)
     setStatus("listening")
     void warmDictation(latest.current.config).catch(() => {})
     let stream: MediaStream
@@ -464,6 +572,8 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
         session.current = null
         showIdle()
       }
+      releaseTake(current.profile, current.lock)
+      current.lock = null
       throw new Error(micError(failure, "Couldn't start the microphone."))
     }
     // Cancelled while the mic was asked for.
@@ -484,23 +594,35 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
     // Another app taking the mic, or the device revoking it, ends the track under the recorder.
     stream
       .getAudioTracks()
-      .forEach((track) => track.addEventListener("ended", () => fail(current, recording, TAKEN)))
+      .forEach((track) =>
+        track.addEventListener("ended", () => fail(current, recording, microphoneFailure(TAKEN))),
+      )
     setStartedAt(recording.startedAt)
     // Past the cap the recording stops growing; Stop or Send still turns it into text.
     recording.cap = window.setTimeout(() => {
       void end(recording)
       if (session.current === current) setLevels(null)
     }, MAX_MS)
-  }, [fail, monitor, openSegment, showIdle])
+  }
 
-  /** Waits for every piece's text: the whole of it, or null with the recording kept for `retry`. */
+  /**
+   * Waits for every piece's text: the whole of it, or null with the recording kept for `retry`.
+   *
+   * `deadline` is when the caller stops waiting — a Send's short wait, a Stop's longer one. A wait
+   * that runs out abandons the take rather than holding the composer: the pieces whose text is in
+   * are the take, and the ones still with the host are let go (ADR 0016).
+   */
   const settle = useCallback(
-    async (current: Session) => {
+    async (current: Session, deadline?: number) => {
       setStatus("transcribing")
       setLevels(null)
-      setError(null)
+      setFailure(null)
       if (current.stopping) await current.stopping
-      const done = await drain(current)
+      const draining = drain(current)
+      const done =
+        deadline === undefined
+          ? await draining
+          : await within(draining, Math.max(0, deadline - Date.now()))
       if (session.current !== current) return null
       if (done) {
         forget(current)
@@ -508,12 +630,61 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
         showIdle()
         return joinText(...current.pieces.map((piece) => piece.text ?? ""))
       }
-      showFailure(current.error ?? current.failure)
+      if (done === undefined && deadline !== undefined) {
+        // The wait is up, not the host's answer: what has its text is the take, and a piece still
+        // being heard is let go rather than holding the field (ADR 0016).
+        stopUpload(current)
+        const text = joinText(...current.pieces.map((piece) => piece.text ?? ""))
+        forget(current)
+        session.current = null
+        showIdle()
+        return text
+      }
+      const heard = current.pieces.filter((piece) => piece.text !== null)
+      if (heard.length) {
+        const text = joinText(...heard.map((piece) => piece.text ?? ""))
+        current.pieces = current.pieces.filter((piece) => piece.text === null)
+        save(current, true)
+        if (text) latest.current.onCommitted?.(text)
+      }
+      showFailure(current.error !== null ? clipFailure(current.error) : (current.failure ?? clipFailure(undefined)))
       // The host may have lost faster-whisper since; ask again so the mic hides if so.
       void readDictationInfo(latest.current.config, true)
       return null
     },
     [drain, showFailure, showIdle],
+  )
+
+  const replay = useCallback(
+    async (current: Session) => {
+      setStatus("transcribing")
+      setLevels(null)
+      setFailure(null)
+      const controller = new AbortController()
+      current.upload = controller
+      try {
+        const text = await keptText(
+          latest.current.config,
+          current.pieces,
+          latest.current.hint,
+          controller.signal,
+        )
+        if (current.upload !== controller) return null
+        forget(current)
+        session.current = null
+        showIdle()
+        return text
+      } catch (failure) {
+        if (current.upload !== controller) return null
+        current.error = failure
+        showFailure(clipFailure(failure))
+        void readDictationInfo(latest.current.config, true)
+        return null
+      } finally {
+        if (current.upload === controller) current.upload = null
+      }
+    },
+    [showFailure, showIdle],
   )
 
   const cancel = useCallback(() => {
@@ -530,31 +701,48 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
   /**
    * Ends the recording and returns its text: `""` for a recording too short to hold speech, null
    * when the host couldn't transcribe it (it's kept for `retry`).
+   *
+   * `waitMs` is how long it waits for the last phrase's text, as the stream take's own wait is: a
+   * Send waits short and a Stop longer (ADR 0016). A wait that runs out abandons the take — the
+   * pieces whose text is in are the text — so a slow host never holds the composer.
    */
-  const finish = useCallback(async () => {
-    const current = session.current
-    // Nothing to end: no take, or one that died before Stop with nothing left to send.
-    if (!current || (!current.recording && !current.failure)) {
-      cancel()
-      return ""
-    }
-    // A take that died before Stop (the recorder errored, the track ended) still sends what it recorded.
-    if (!current.recording) return settle(current)
-    const recording = current.recording
-    const last = recording.segments.at(-1)
-    if (last && current.pieces.length && Date.now() - last.startedAt < MIN_MS) last.skip = true
-    const stopping = end(recording)
-    current.stopping = stopping
-    await stopping
-    if (session.current !== current) return null
-    current.recording = null
-    const length = (recording.stoppedAt ?? Date.now()) - recording.startedAt
-    if (length < MIN_MS || !current.pieces.length) {
-      cancel()
-      return ""
-    }
-    return settle(current)
-  }, [cancel, settle])
+  const finish = useCallback(
+    (waitMs = STOP_WAIT_MS) => {
+      const current = session.current
+      if (!current || (!current.recording && !current.failure)) {
+        cancel()
+        return Promise.resolve("")
+      }
+      if (current.finishing) return current.finishing
+      const run = (async () => {
+        const deadline = Date.now() + waitMs
+        if (current.recording) {
+          const recording = current.recording
+          const last = recording.segments.at(-1)
+          if (last && current.pieces.length && Date.now() - last.startedAt < MIN_MS)
+            last.skip = true
+          const stopping = end(recording)
+          current.stopping = stopping
+          await stopping
+          if (session.current !== current) return null
+          current.recording = null
+          const length = (recording.stoppedAt ?? Date.now()) - recording.startedAt
+          if (length < MIN_MS || !current.pieces.length) {
+            cancel()
+            return ""
+          }
+        }
+        return settle(current, deadline)
+      })()
+      current.finishing = run
+      const done = () => {
+        if (current.finishing === run) current.finishing = null
+      }
+      void run.then(done, done)
+      return run
+    },
+    [cancel, settle],
+  )
 
   const retry = useCallback(async () => {
     const current = session.current
@@ -564,22 +752,26 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
       cancel()
       return ""
     }
+    if (current.restored) return replay(current)
     return settle(current)
-  }, [cancel, settle])
+  }, [cancel, replay, settle])
 
-  // A recording left unfinished (another chat, the screen closed) is kept for when it's back.
   useEffect(() => {
     let live = true
     if (key)
-      void db.dictations
-        .get(key)
-        .catch(() => undefined)
-        .then((saved) => {
-          if (!live || session.current || !saved?.pieces.length) return
-          session.current = newSession(key, saved.pieces)
-          setError(RESTORED)
-          setStatus("failed")
-        })
+      void readKept(key).then((saved) => {
+        if (!live || session.current || !saved?.pieces.length || saved.kind === "stream") return
+        session.current = newSession(
+          connectionKey(latest.current.config),
+          key,
+          saved.pieces,
+          saved.caret,
+        )
+        session.current.restored = true
+        session.current.failure = failureOf("clip", RESTORED, { discard: true })
+        setFailure(session.current.failure)
+        setStatus("failed")
+      })
     return () => {
       live = false
       const current = session.current
@@ -587,6 +779,8 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
       if (!current) return
       current.upload?.abort()
       current.upload = null
+      releaseTake(current.profile, current.lock)
+      current.lock = null
       const recording = current.recording
       if (recording) {
         void end(recording).then(() => {
@@ -602,9 +796,11 @@ export function useDictation(config: HermesConfig, hint: string, key?: string) {
     status,
     levels,
     startedAt,
-    error,
+    failure,
+    transcript: EMPTY_TRANSCRIPT,
     /** When the recorder started, for a hold that ends before the mic was granted. */
     recordingSince: () => session.current?.recording?.startedAt ?? null,
+    anchor: () => session.current?.caret ?? null,
     start,
     finish,
     retry,

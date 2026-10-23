@@ -12,6 +12,7 @@ import type {
   TodoProgress,
 } from "@/lib/db"
 import { MAX_TODO_DEPTH } from "@/lib/db"
+import type { DictationPhrase } from "@/lib/dictation-transcript"
 import type { Doc } from "@/lib/merge"
 import type { ModelUsage } from "@/lib/pricing"
 import { parsePipeline, parseStage, type AfkStage, type SessionPipeline } from "@/lib/pipeline"
@@ -1077,6 +1078,34 @@ export async function setTriageModel(
     signal,
   })
   return pickOf((await response.json())?.triage_model)
+}
+
+/**
+ * The host's speech settings (`speech.py`): its speech model, the models a pick can be made from
+ * with their size and speed, the last pick that didn't load, and the model a phrase's cleanup runs
+ * on. The app reads the fields it draws; `speech.ts` is the shape.
+ */
+export async function getSpeechSettings(config: HermesConfig, signal?: AbortSignal) {
+  const response = await request(`${pluginRoot(config.baseUrl)}/speech`, {
+    headers: headers(config),
+    signal,
+  })
+  return ((await response.json())?.speech ?? null) as Record<string, unknown> | null
+}
+
+/** Writes the speech fields that moved, and answers the host's whole record as it now stands. */
+export async function setSpeechSettings(
+  config: HermesConfig,
+  patch: { model?: string; cleanup_model?: { provider: string; model: string } | null },
+  signal?: AbortSignal,
+) {
+  const response = await request(`${pluginRoot(config.baseUrl)}/speech`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify(patch),
+    signal,
+  })
+  return ((await response.json())?.speech ?? null) as Record<string, unknown> | null
 }
 
 export async function checkHealth(config: HermesConfig) {
@@ -2385,6 +2414,110 @@ export async function transcribeClip(
   })
   const text = (await response.json())?.text
   return typeof text === "string" ? text : ""
+}
+
+/** What a started take answers: this is the take to send audio to. */
+export interface DictationTakeStart {
+  take: string
+}
+
+/** A take's answer to a slice: what it newly committed, and whether it is behind. */
+export interface DictationTakeAnswer {
+  words: string
+  phrases: DictationPhrase[]
+  behind: boolean
+}
+
+/** Reads a take's answer, forgivingly: a plugin that answers a shape it doesn't know says nothing. */
+function takeAnswer(raw: unknown): DictationTakeAnswer {
+  const body = (raw ?? {}) as { words?: unknown; phrases?: unknown; behind?: unknown }
+  const phrases = Array.isArray(body.phrases)
+    ? body.phrases
+        .filter((phrase): phrase is { id: unknown; text: unknown } => Boolean(phrase))
+        .map((phrase) => ({ id: Number(phrase.id), text: String(phrase.text ?? "") }))
+        .filter((phrase) => Number.isFinite(phrase.id))
+    : []
+  return {
+    words: typeof body.words === "string" ? body.words : "",
+    phrases,
+    behind: Boolean(body.behind),
+  }
+}
+
+/**
+ * Opens a take on the host — a dictation heard while it is spoken — and waits for its speech model.
+ * The one request of a take that may wait, so the caller bounds it generously and says "Preparing…".
+ * The bot's vocabulary rides in it, which is how the words reach the decoder's prompt; only the
+ * words a take was started with bias it.
+ */
+export async function startDictationTake(
+  config: HermesConfig,
+  hint: string,
+  vocabulary: string[] = [],
+  signal?: AbortSignal,
+): Promise<DictationTakeStart> {
+  const response = await request(`${pluginRoot(config.baseUrl)}/dictation/take`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({
+      ...(hint ? { hint } : {}),
+      ...(vocabulary.length ? { vocabulary } : {}),
+    }),
+    signal,
+  })
+  const body = await response.json()
+  const take = typeof body?.take === "string" ? body.take : ""
+  if (!take) throw new Error("The bot's host didn't start the dictation.")
+  return { take }
+}
+
+/** One slice of a take's audio; `pause` marks the slice a pause in the speech landed in. */
+export async function sendDictationAudio(
+  config: HermesConfig,
+  take: string,
+  slice: Blob,
+  pause: boolean,
+  signal?: AbortSignal,
+): Promise<DictationTakeAnswer> {
+  const search = pause ? "?pause=1" : ""
+  const response = await request(`${takeRoute(config, take)}/audio${search}`, {
+    method: "POST",
+    headers: headers(config, { "Content-Type": slice.type || "audio/webm" }),
+    body: slice,
+    signal,
+  })
+  return takeAnswer(await response.json())
+}
+
+/** Finishes a take: the host hears its tail phrase and answers what it closed. */
+export async function stopDictationTake(
+  config: HermesConfig,
+  take: string,
+  signal?: AbortSignal,
+): Promise<DictationTakeAnswer> {
+  const response = await request(`${takeRoute(config, take)}/stop`, {
+    method: "POST",
+    headers: headers(config),
+    signal,
+  })
+  return takeAnswer(await response.json())
+}
+
+/** Drops a take on the host, at once. A take that already ended is not a failure. */
+export async function cancelDictationTake(
+  config: HermesConfig,
+  take: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  await request(`${takeRoute(config, take)}/cancel`, {
+    method: "POST",
+    headers: headers(config),
+    signal,
+  })
+}
+
+function takeRoute(config: HermesConfig, take: string) {
+  return `${pluginRoot(config.baseUrl)}/dictation/take/${encodeURIComponent(take)}`
 }
 
 /** The session's workspace, or null when it has none (or the plugin predates them). */

@@ -35,13 +35,15 @@ import type { Attachment } from "@/lib/db"
 import { flushDrafts, loadDraft, saveDraft, useDraftText } from "@/lib/drafts"
 import type { HermesConfig } from "@/lib/hermes"
 import {
+  SEND_WAIT_MS,
+  STOP_WAIT_MS,
   canRecord,
   joinText,
   keyboardClick,
-  useDictation,
   useDictationInfo,
   type DictationAvailability,
 } from "@/lib/dictation"
+import { useDictation } from "@/lib/dictation-take"
 import {
   SEND_COMMANDS,
   hoistItem,
@@ -72,6 +74,7 @@ export function Composer({
   connection,
   botName = "Hermes",
   dictationHint,
+  dictationWords,
   model,
   session,
   filesAvailable,
@@ -99,6 +102,8 @@ export function Composer({
   botName?: string
   /** Names the chat may mention (its title, a project's repos), to help the host hear them. */
   dictationHint?: string
+  /** The bot's vocabulary: the names and words its dictation is written with. */
+  dictationWords?: string[]
   /** The model pill, beside the `+` button. */
   model?: ReactNode
   /** A project session: its permission mode, picked in the `+` menu. */
@@ -174,7 +179,14 @@ export function Composer({
   const lastEscape = useRef<number | null>(null)
   const listId = useId()
   const dictationInfo = useDictationInfo(connection)
-  const dictation = useDictation(connection, joinText(botName, dictationHint ?? ""), draftKey)
+  const placeHeard = useRef<(heard: string) => void>(() => {})
+  const dictation = useDictation(
+    connection,
+    joinText(botName, dictationHint ?? ""),
+    draftKey,
+    dictationWords,
+    (heard) => placeHeard.current(heard),
+  )
   const canDictate = dictationInfo?.status === "ready" && canRecord()
   // Where the cursor was when dictation started, and whether the clip goes into the text or is sent.
   const dictationAt = useRef<number | null>(null)
@@ -343,20 +355,30 @@ export function Composer({
 
   const endDictation = async (send: boolean) => {
     dictationSends.current = send
-    const heard = await dictation.finish()
+    // A Send waits short for the tail and sends what the bar already has when it misses; a Stop is
+    // the user asking for the whole take, so it waits longer. Neither holds the composer past its
+    // wait: a wedged host ends in what the take already heard (ADR 0016).
+    const heard = await dictation.finish(send ? SEND_WAIT_MS : STOP_WAIT_MS)
     if (heard) placeDictation(heard)
   }
 
+  placeHeard.current = placeDictation
+
   const retryDictation = async () => {
-    const heard = await dictation.retry()
-    if (heard) placeDictation(heard)
+    dictationAt.current ??= dictation.anchor()
+    try {
+      const heard = await dictation.retry()
+      if (heard) placeDictation(heard)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't start the microphone.")
+    }
   }
 
   const startDictation = () => {
     dictationAt.current = textarea.current?.selectionStart ?? null
     dictationSends.current = false
     dictation
-      .start()
+      .start(dictationAt.current)
       .catch((error: unknown) =>
         toast.error(error instanceof Error ? error.message : "Couldn't start the microphone."),
       )
@@ -392,7 +414,8 @@ export function Composer({
           status={dictation.status}
           levels={dictation.levels}
           startedAt={dictation.startedAt}
-          error={dictation.error}
+          failure={dictation.failure}
+          transcript={dictation.transcript}
           onCancel={dictation.cancel}
           onStop={() => void endDictation(false)}
           onSend={() => void endDictation(true)}

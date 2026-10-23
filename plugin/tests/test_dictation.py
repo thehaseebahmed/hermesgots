@@ -122,6 +122,14 @@ class WarmTest(unittest.TestCase):
         with patch:
             self.assertEqual(dictation.warm(), {"warmed": False, "error": "no network"})
 
+    def test_warms_the_model_it_is_named_rather_than_the_one_configured(self) -> None:
+        tt, patch = hermes()
+        with patch:
+            warmed = dictation.warm("large-v3")
+        self.assertEqual(warmed["warmed"], True)
+        self.assertEqual(warmed["model"], "large-v3")
+        tt._get_or_load_local_model.assert_called_once_with("large-v3", {"model": "small"})
+
 
 class HintTest(unittest.TestCase):
     def test_squashes_and_caps(self) -> None:
