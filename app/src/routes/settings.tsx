@@ -284,7 +284,6 @@ function MenuScreen({
       <Group>
         <CommunityRow />
         <FeedbackRow />
-        <DeviceStateRow />
       </Group>
       <Group>
         <Row to="data" icon={DatabaseIcon} title="Local data" />
@@ -546,6 +545,9 @@ export function DeveloperSettings() {
         {bots?.map((bot) => (
           <LiveRow key={bot.id} bot={bot} />
         ))}
+      </Group>
+      <Group>
+        <DeviceStateRow />
       </Group>
       <Button variant="outline" onClick={() => saveSettings({ developer: false })}>
         Hide developer settings
