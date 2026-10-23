@@ -1610,10 +1610,16 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "The recording is too long.", 413)
         hint = dictation.clean_hint(request.query.get("hint"))
         context = dictation.clean_context(request.query.get("context"))
+        vocabulary = dictation.clean_vocabulary(request.query.getall("vocabulary", []))
         async with dictating:
             try:
                 result = await asyncio.to_thread(
-                    dictation.transcribe, data, request.headers.get("content-type"), hint, context
+                    dictation.transcribe,
+                    data,
+                    request.headers.get("content-type"),
+                    hint,
+                    context,
+                    vocabulary,
                 )
             except dictation.DictationError as error:
                 return _error(web, str(error), error.status)
@@ -1628,6 +1634,34 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return denied
         result = await asyncio.to_thread(dictation.warm)
         return web.json_response({"object": "memento.dictation_warm", **result})
+
+    async def clean_dictation(request: "web.Request") -> "web.Response":
+        """A finished dictation's whole text tidied, on the bot's cleanup model (ADR 0038)."""
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        vocabulary = dictation.clean_vocabulary(body.get("vocabulary"))
+        cleanup_model = None
+        try:
+            path = store_path()
+            gate = await asyncio.to_thread(research.llm_gate)
+            cleanup_model = await asyncio.to_thread(speech.applied_cleanup, path, gate)
+        except Exception:
+            # A pick this host can't read costs the tidying its model, never the words themselves.
+            logger.debug("memento: couldn't read the dictation cleanup model", exc_info=True)
+        try:
+            result = await asyncio.to_thread(
+                dictation_cleanup.finish, body.get("text"), vocabulary, model=cleanup_model
+            )
+        except dictation.DictationError as error:
+            return _error(web, str(error), error.status)
+        except Exception:
+            logger.warning("memento: couldn't tidy a dictation", exc_info=True)
+            return _error(web, "Couldn't tidy the dictation.", 502)
+        return web.json_response({"object": "memento.dictation_cleanup", **result})
 
     async def served_file(request: "web.Request", resolve: Any, allowed: Any = None) -> "web.StreamResponse":
         """Serves the file a query's ``path`` names: ``resolve`` validates it, ``allowed`` may refuse
@@ -1656,6 +1690,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/library/file", serve_library_file)
     app.router.add_post(f"{PREFIX}/dictation", dictate)
     app.router.add_post(f"{PREFIX}/dictation/warm", warm_dictation)
+    app.router.add_post(f"{PREFIX}/dictation/cleanup", clean_dictation)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/attachments", upload_attachment)
     app.router.add_get(f"{PREFIX}/runs/live", live_runs)
     app.router.add_get(f"{PREFIX}/events", stream_events)

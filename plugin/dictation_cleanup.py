@@ -7,6 +7,11 @@ instructions that allow tidying — fillers out, punctuation, casing and spacing
 dates written as digits, a spoken list set out as a list, the bot's vocabulary spelled as it is
 listed — and never allow rewording. The answer is one JSON object holding the text.
 
+The same machinery tidies a whole finished dictation once it ends (``finish``, ADR 0038): the same
+instructions, the same model and the same answer-length check, over the joined text rather than one
+phrase, with ``WHOLE_TEXT_DEADLINE_S`` in place of a phrase's ``DEADLINE_S`` because there is far
+more of it to read.
+
 The call is bounded: one that misses its budget, fails, answers in another shape, or comes back much
 longer or shorter than the phrase is discarded, and the phrase is committed as the host heard it. A
 cleanup that arrives late is worse than one that did not arrive, and a model that decides to help is
@@ -22,13 +27,19 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from typing import Any, Callable, Dict, List, Optional, Sequence
+
+from .dictation import DictationError
 
 logger = logging.getLogger(__name__)
 
 ctx: Any = None
 
 DEADLINE_S = 2.0
+# A finished dictation's whole text is one call, not a phrase: it is longer to read and to answer
+# (ADR 0038's ~8 s), so it gets a budget of its own.
+WHOLE_TEXT_DEADLINE_S = 8.0
 SHORTER = 0.5
 LONGER = 1.5
 SLACK = 1
@@ -171,3 +182,32 @@ class Cleaner:
             logger.debug("memento: a phrase's cleanup missed its %ss budget", self.deadline_s)
             return None
         return box[0] if box else None
+
+
+def finish(
+    text: Any,
+    vocabulary: Sequence[str] = (),
+    *,
+    model: Optional[Dict[str, str]] = None,
+    deadline_s: float = WHOLE_TEXT_DEADLINE_S,
+    ask: Optional[Ask] = None,
+) -> Dict[str, Any]:
+    """A finished dictation's whole text tidied: the answer ``POST dictation/cleanup`` gives.
+
+    One call over the whole text on the bot's own model (``model`` is the Dictation tab's pick),
+    bounded by ``deadline_s`` — the whole-text budget, not a phrase's. The same rules tidy it as
+    tidy a phrase, so the answer-length check is what keeps a model from summarising or expanding
+    it. Nothing here raises on the model's account: an answer that fails, misses its budget or is
+    much longer or shorter than the text lands the raw words, so ``text`` is always usable.
+
+    The caller lands the pick and the deadline it read off the host; tests script ``ask``.
+    """
+    if not isinstance(text, str):
+        raise DictationError("Body needs the dictation's text.", 400)
+    started = time.monotonic()
+    tidied = Cleaner(vocabulary, model=model, deadline_s=deadline_s, ask=ask)(text)
+    return {
+        "text": tidied,
+        "cleaned": tidied != text,
+        "ms": int((time.monotonic() - started) * 1000),
+    }

@@ -2,17 +2,21 @@
 
 Hermes's transcription module isn't on a test run's path, so each test stands in for
 ``tools.transcription_tools`` and asserts only this module's own rules: when the host counts as
-ready, what reaches faster-whisper, and how its answers come back.
+ready, what reaches faster-whisper, and how its answers come back. The end of a dictation is here
+too — its whole text tidied by one call (``dictation_cleanup.finish``, the route's module seam) —
+since this is the seam the batch and cleanup routes are exercised at.
 """
 
 from __future__ import annotations
 
 import os
+import time
 import types
 import unittest
 from unittest import mock
 
-from plugin import dictation
+from plugin import dictation, dictation_cleanup
+from plugin.tests.test_dictation_cleanup import with_model
 
 
 def hermes(**overrides):
@@ -90,6 +94,38 @@ class TranscribeTest(unittest.TestCase):
             dictation.transcribe(b"x", "audio/webm", "Gots", "We should ship it")
         self.assertEqual(tt.calls[0]["prompt"], "Haseeb Gots We should ship it")
 
+    def test_the_bot_s_words_ride_between_the_hint_and_the_text_before(self) -> None:
+        cfg = {"local": {"model": "base", "initial_prompt": "Haseeb"}}
+        tt, patch = hermes(_load_stt_config=lambda: cfg)
+        with patch:
+            dictation.transcribe(
+                b"x",
+                "audio/webm",
+                "Gots",
+                "We should ship it",
+                vocabulary=["DeepSeek", "Hermes"],
+            )
+        self.assertEqual(
+            tt.calls[0]["prompt"], "Haseeb Gots DeepSeek Hermes We should ship it"
+        )
+
+    def test_the_words_are_cleaned_before_they_reach_the_prompt(self) -> None:
+        tt, patch = hermes()
+        with patch:
+            dictation.transcribe(
+                b"x",
+                "audio/webm",
+                "Gots",
+                vocabulary=["  Deep \n Seek ", "deep seek", "x" * 80],
+            )
+        self.assertEqual(tt.calls[0]["prompt"], "Gots Deep Seek " + "x" * dictation.MAX_WORD)
+
+    def test_a_clip_with_no_words_asks_with_only_its_hint(self) -> None:
+        tt, patch = hermes()
+        with patch:
+            dictation.transcribe(b"x", "audio/webm", "Gots", vocabulary=None)
+        self.assertEqual(tt.calls[0]["prompt"], "Gots")
+
     def test_no_speech_is_empty_text(self) -> None:
         empty = lambda path, model, prompt=None: {"success": False, "error": "Empty transcript"}
         _, patch = hermes(_transcribe_local=empty)
@@ -145,6 +181,142 @@ class ContextTest(unittest.TestCase):
         self.assertLessEqual(len(kept), dictation.MAX_CONTEXT)
         self.assertTrue(said.endswith(kept))
         self.assertTrue(kept.startswith("word"))
+
+
+class CleanVocabularyTest(unittest.TestCase):
+    """The bot's words, as the batch route and a cleanup take them."""
+
+    def test_a_word_is_one_line(self) -> None:
+        self.assertEqual(dictation.clean_vocabulary(["  Foo \n bar "]), ["Foo bar"])
+
+    def test_a_word_the_list_already_holds_is_not_added_again(self) -> None:
+        self.assertEqual(dictation.clean_vocabulary(["Gots", "gots", "GOTS"]), ["Gots"])
+
+    def test_the_list_is_capped(self) -> None:
+        many = [f"word{index}" for index in range(dictation.MAX_VOCABULARY + 20)]
+        self.assertEqual(len(dictation.clean_vocabulary(many)), dictation.MAX_VOCABULARY)
+
+    def test_anything_that_is_not_a_list_of_words_is_no_vocabulary(self) -> None:
+        self.assertEqual(dictation.clean_vocabulary(None), [])
+        self.assertEqual(dictation.clean_vocabulary("Gots"), [])
+        self.assertEqual(dictation.clean_vocabulary([1, "", "  ", None, "Gots"]), ["Gots"])
+
+    def test_a_word_carries_no_more_than_the_cap(self) -> None:
+        self.assertEqual(
+            len(dictation.clean_vocabulary(["x" * 200])[0]), dictation.MAX_WORD
+        )
+
+
+class CleanupTest(unittest.TestCase):
+    """``POST dictation/cleanup``: a finished dictation's whole text in, its tidied text out.
+
+    The model is scripted, as in ``test_dictation_cleanup``; what these pin is the whole-text
+    contract — one call, the whole-text budget, and the raw words landing whenever the answer
+    isn't a tidying of them.
+    """
+
+    HEARD = (
+        "um hello there. uh we should ship the dictation today. the third of March works for me "
+        "and the team."
+    )
+
+    def test_a_finished_dictation_comes_back_tidied(self) -> None:
+        llm, patch = with_model({"text": "Gots ships 25 on 3 March."})
+        with patch:
+            answer = dictation_cleanup.finish(
+                "um Gots ships twenty five on the third of March", ["Gots"]
+            )
+        self.assertEqual(answer["text"], "Gots ships 25 on 3 March.")
+        self.assertTrue(answer["cleaned"])
+        self.assertGreaterEqual(answer["ms"], 0)
+        self.assertEqual(len(llm.calls), 1)
+        self.assertEqual(
+            llm.calls[0]["input"],
+            [
+                {
+                    "type": "text",
+                    "text": "Vocabulary: Gots\nPhrase: um Gots ships twenty five on the third of March",
+                }
+            ],
+        )
+
+    def test_a_whole_text_is_tidied_in_one_call(self) -> None:
+        tidied = (
+            "Hello there. We should ship the dictation today. 3 March works for me and the team."
+        )
+        llm, patch = with_model({"text": tidied})
+        with patch:
+            answer = dictation_cleanup.finish(self.HEARD)
+        self.assertEqual(answer["text"], tidied)
+        self.assertEqual(len(llm.calls), 1)
+        self.assertEqual(llm.calls[0]["input"][0]["text"], f"Phrase: {self.HEARD}")
+
+    def test_the_whole_text_budget_outlasts_a_phrase_s(self) -> None:
+        self.assertGreater(
+            dictation_cleanup.WHOLE_TEXT_DEADLINE_S, dictation_cleanup.DEADLINE_S
+        )
+
+    def test_a_cleanup_that_misses_the_whole_text_budget_lands_the_raw_words(self) -> None:
+        def slow(text, vocabulary, model):
+            time.sleep(0.2)
+            return "Tidied."
+
+        started = time.monotonic()
+        answer = dictation_cleanup.finish(self.HEARD, deadline_s=0.02, ask=slow)
+        self.assertEqual(answer["text"], self.HEARD)
+        self.assertFalse(answer["cleaned"])
+        self.assertLess(time.monotonic() - started, 0.2, "the text did not wait for the model")
+
+    def test_a_cleanup_that_fails_lands_the_raw_words(self) -> None:
+        _, patch = with_model(RuntimeError("the host's model is down"))
+        with patch:
+            answer = dictation_cleanup.finish(self.HEARD)
+        self.assertEqual(answer["text"], self.HEARD)
+        self.assertFalse(answer["cleaned"])
+
+    def test_a_host_that_cannot_make_model_calls_lands_the_raw_words(self) -> None:
+        with mock.patch.object(dictation_cleanup, "ctx", None):
+            answer = dictation_cleanup.finish(self.HEARD)
+        self.assertEqual(answer["text"], self.HEARD)
+        self.assertFalse(answer["cleaned"])
+
+    def test_an_answer_much_longer_than_the_text_lands_the_raw_words(self) -> None:
+        _, patch = with_model(
+            {"text": self.HEARD + " " + "And here is a great deal more that nobody said. " * 4}
+        )
+        with patch:
+            answer = dictation_cleanup.finish(self.HEARD)
+        self.assertEqual(answer["text"], self.HEARD)
+        self.assertFalse(answer["cleaned"])
+
+    def test_an_answer_much_shorter_than_the_text_lands_the_raw_words(self) -> None:
+        _, patch = with_model({"text": "Ship it."})
+        with patch:
+            answer = dictation_cleanup.finish(self.HEARD)
+        self.assertEqual(answer["text"], self.HEARD)
+        self.assertFalse(answer["cleaned"])
+
+    def test_the_bot_s_chosen_cleanup_model_tidies_it(self) -> None:
+        llm, patch = with_model({"text": "Hello there."})
+        with patch:
+            dictation_cleanup.finish(
+                "um hello there", model={"provider": "acme", "model": "fast"}
+            )
+        self.assertEqual((llm.calls[0]["provider"], llm.calls[0]["model"]), ("acme", "fast"))
+
+    def test_a_body_without_text_is_a_bad_request(self) -> None:
+        for text in (None, 7, {"text": "no"}):
+            with self.assertRaises(dictation.DictationError) as caught:
+                dictation_cleanup.finish(text)
+            self.assertEqual(caught.exception.status, 400)
+
+    def test_a_dictation_with_no_words_asks_nothing(self) -> None:
+        llm, patch = with_model()
+        with patch:
+            answer = dictation_cleanup.finish("")
+        self.assertEqual(answer["text"], "")
+        self.assertFalse(answer["cleaned"])
+        self.assertEqual(llm.calls, [])
 
 
 if __name__ == "__main__":

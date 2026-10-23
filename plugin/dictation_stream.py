@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from . import dictation, dictation_cleanup, speech
+from .dictation import clean_vocabulary
 
 WINDOW_S = 4.0
 HOP_S = 0.5
@@ -41,28 +42,9 @@ _HEARD_WORDS = 32
 
 QUIET_S = 15.0
 SAMPLE_RATE = 16000
-# A bot's vocabulary is a short list, so the decoder's prompt stays inside the tokens Whisper keeps.
-MAX_VOCABULARY = 50
-MAX_WORD = 40
 
 Transcriber = Callable[[Sequence[float], str], str]
 Decoder = Callable[[bytes, bool], List[float]]
-
-
-def clean_vocabulary(words: Any) -> List[str]:
-    kept: List[str] = []
-    seen = set()
-    for raw in words if isinstance(words, (list, tuple)) else ():
-        if not isinstance(raw, str):
-            continue
-        word = " ".join(raw.split())[:MAX_WORD]
-        if not word or word.casefold() in seen:
-            continue
-        seen.add(word.casefold())
-        kept.append(word)
-        if len(kept) >= MAX_VOCABULARY:
-            break
-    return kept
 
 
 class TakeError(Exception):

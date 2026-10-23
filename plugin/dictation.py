@@ -15,7 +15,7 @@ import importlib.util
 import os
 import tempfile
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 # The API server refuses bodies over 10 MB (``MAX_REQUEST_BYTES``); Opus at 24 kbps is ~180 KB a minute.
 MAX_BYTES = 9 * 1024 * 1024
@@ -23,6 +23,9 @@ MAX_BYTES = 9 * 1024 * 1024
 MAX_HINT = 300
 # The text already heard, for a clip that carries on from the one before it; its end matters most.
 MAX_CONTEXT = 400
+# A bot's vocabulary is a short list, so the decoder's prompt stays inside the tokens Whisper keeps.
+MAX_VOCABULARY = 50
+MAX_WORD = 40
 
 SUFFIXES = {
     "audio/webm": ".webm",
@@ -156,6 +159,27 @@ def clean_context(context: Optional[str]) -> str:
     return tail.split(" ", 1)[1] if " " in tail else tail
 
 
+def clean_vocabulary(words: Any) -> List[str]:
+    """The bot's own words for a decode's prompt: one line each, once each, at most fifty.
+
+    They are the names, product words and jargon the bot's dictation is written with (its Dictation
+    tab's Words), so a decoder spells them as the bot does rather than as it hears them.
+    """
+    kept: List[str] = []
+    seen = set()
+    for raw in words if isinstance(words, (list, tuple)) else ():
+        if not isinstance(raw, str):
+            continue
+        word = " ".join(raw.split())[:MAX_WORD]
+        if not word or word.casefold() in seen:
+            continue
+        seen.add(word.casefold())
+        kept.append(word)
+        if len(kept) >= MAX_VOCABULARY:
+            break
+    return kept
+
+
 def suffix_for(content_type: Optional[str]) -> str:
     kind = (content_type or "").split(";", 1)[0].strip().lower()
     return SUFFIXES.get(kind, ".webm")
@@ -173,18 +197,28 @@ def _hallucination(text: str) -> bool:
 
 
 def transcribe(
-    data: bytes, content_type: Optional[str], hint: str = "", context: str = ""
+    data: bytes,
+    content_type: Optional[str],
+    hint: str = "",
+    context: str = "",
+    vocabulary: Optional[Sequence[str]] = None,
 ) -> Dict[str, Any]:
-    """The clip's text, ``""`` when nobody spoke. DictationError when the host can't."""
+    """The clip's text, ``""`` when nobody spoke. DictationError when the host can't.
+
+    ``vocabulary`` is the bot's own words, so a decoder that only half-heard one spells it the way
+    the bot does; it rides after the hint and before ``context``, which must stay last.
+    """
     state = info()
     if not state.get("ready"):
         raise DictationError(state.get("reason") or "Dictation is off on the host.", 409)
     tt = _tools()
     cfg = _local_config(tt)
-    # Our hint goes after the host's own prompt, which a `pre_transcription` plugin may also fill, and
-    # the text before this clip goes last: Whisper reads a prompt as what was just said.
+    # Our hint goes after the host's own prompt, which a `pre_transcription` plugin may also fill,
+    # then the bot's words, and the text before this clip goes last: Whisper reads a prompt as what
+    # was just said.
     configured = (cfg.get("local") or {}).get("initial_prompt")
-    parts = (configured if isinstance(configured, str) else "", hint, context)
+    words = " ".join(clean_vocabulary(vocabulary))
+    parts = (configured if isinstance(configured, str) else "", hint, words, context)
     prompt = " ".join(p for p in parts if p).strip()
     started = time.monotonic()
     fd, path = tempfile.mkstemp(prefix="memento-dictation-", suffix=suffix_for(content_type))

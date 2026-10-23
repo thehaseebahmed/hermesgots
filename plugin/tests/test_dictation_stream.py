@@ -586,28 +586,6 @@ class VocabularyTest(unittest.TestCase):
         self.assertTrue(scripted.calls[-1]["prompt"].startswith("Gots hello there"))
 
 
-class CleanVocabularyTest(unittest.TestCase):
-    def test_a_word_is_one_line(self) -> None:
-        self.assertEqual(dictation_stream.clean_vocabulary(["  Foo \n bar "]), ["Foo bar"])
-
-    def test_a_word_the_list_already_holds_is_not_added_again(self) -> None:
-        self.assertEqual(dictation_stream.clean_vocabulary(["Gots", "gots", "GOTS"]), ["Gots"])
-
-    def test_the_list_is_capped(self) -> None:
-        many = [f"word{index}" for index in range(dictation_stream.MAX_VOCABULARY + 20)]
-        self.assertEqual(len(dictation_stream.clean_vocabulary(many)), dictation_stream.MAX_VOCABULARY)
-
-    def test_anything_that_is_not_a_list_of_words_is_no_vocabulary(self) -> None:
-        self.assertEqual(dictation_stream.clean_vocabulary(None), [])
-        self.assertEqual(dictation_stream.clean_vocabulary("Gots"), [])
-        self.assertEqual(dictation_stream.clean_vocabulary([1, "", "  ", None, "Gots"]), ["Gots"])
-
-    def test_a_word_carries_no_more_than_the_cap(self) -> None:
-        self.assertEqual(
-            len(dictation_stream.clean_vocabulary(["x" * 200])[0]), dictation_stream.MAX_WORD
-        )
-
-
 class StartTest(unittest.TestCase):
     def test_a_take_reports_the_host_s_model_and_language(self) -> None:
         _, patch = hermes()
