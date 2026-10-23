@@ -63,7 +63,6 @@ export function SheetRow({
 }: {
   icon: LucideIcon
   title: string
-  /** The pop-up this row opens, given the open state this row holds. */
   sheet: (sheetProps: { open: boolean; onOpenChange: (open: boolean) => void }) => ReactNode
 }) {
   const [open, setOpen] = useState(false)

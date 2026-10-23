@@ -39,7 +39,7 @@ async function messageCounts(id: string) {
 async function botState(profile: Profile): Promise<DiagBot> {
   const configured = hasServer(profile)
   const [rows, pane, mainRow, info] = await Promise.all([
-    // Main is the bot's oldest chat, so it is read by its own id, outside this window.
+    // Main is filtered out of this window, so it is read by its own id beside it.
     conversationsOf(profile.id)
       .reverse()
       .filter((chat) => !chat.projectId && !chat.main)

@@ -21,7 +21,6 @@ export interface DiagChat {
   older?: boolean
   /** The moves triage recorded on the host for it (a Main thread's Moved markers). */
   moves?: number
-  /** Its messages, counted through the role index. */
   messages?: { user: number; assistant: number }
 }
 
@@ -43,9 +42,9 @@ export interface DiagBot {
   lastThread: string | null
   /** Its Main thread, read by its own id; null where this device has no Main row for it. */
   main: DiagChat | null
-  /** How many threads it has at all; the threads themselves, most recently touched first, as far
-   * back as the reader's window reached. */
+  /** How many threads the bot has, counted through the index. */
   threads: number
+  /** The threads themselves, most recently touched first, as far back as the window reached. */
   chats: DiagChat[]
 }
 
@@ -104,11 +103,10 @@ export interface DiagHost {
 export function diagBot(input: {
   profile: Profile
   host: DiagHost
-  /** The bot's threads, most recently touched first, as far as the reader's window reached. */
   chats: DiagChat[]
-  /** Main itself, read by its own id: the oldest chat, so the threads window can't hold it. */
+  /** Main itself, read by its own id rather than from the window. */
   main: DiagChat | null
-  /** How many threads the bot has at all, counted through the index. */
+  /** How many threads the bot has, counted through the index. */
   threads: number
 }): DiagBot {
   const { profile, host, chats, main, threads } = input
