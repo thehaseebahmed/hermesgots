@@ -45,11 +45,12 @@ import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { OnlineDot } from "@/components/bot-card"
 import { LinkSheet } from "@/components/link-bots"
-import { AppearanceSettings, SwitchRow } from "@/components/settings/appearance"
+import { AppearanceSettings } from "@/components/settings/appearance"
 import {
   Group,
   RowText,
   SheetRow,
+  SwitchRow,
   linkRowClass,
   rowClass,
   Screen,

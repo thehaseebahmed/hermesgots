@@ -5,7 +5,7 @@
  *
  * It is a host setting, not a device one: it is deliberately not in `APPEARANCE_FIELDS`, because the
  * cost it saves is paid on the host. `useHostRecord` already gates it on the host's own `openui`
- * feature, and `openui-draws.ts` is the one place that decides whether a block draws.
+ * feature.
  */
 import { getOpenUI, setOpenUI } from "@/lib/hermes"
 import type { HostRoute } from "@/lib/host-record"
@@ -16,3 +16,6 @@ export const OPENUI_SWITCH: HostRoute<boolean> = {
   read: getOpenUI,
   write: setOpenUI,
 }
+
+/** A host that can't answer leaves the app drawing, as it did before this switch existed. */
+export const UNANSWERED_IS_ON = true

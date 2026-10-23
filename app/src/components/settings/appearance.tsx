@@ -1,9 +1,6 @@
 /**
- * Appearance: how the app draws. The colour mode, then the switches that follow this device through
- * the account, then the one switch that is the profile's own and lives on its host — whether a
- * reply's interface is drawn at all (ADR 0033). The section is here rather than in
- * `routes/settings.tsx` so a component test can mount it on its own, the way `DeveloperSettings` is
- * mounted; `SwitchRow` comes with it, since the sections that share it are drawn beside this file.
+ * Appearance: how the app draws, and the one switch the profile keeps on its host.
+ * It is here rather than in `routes/settings.tsx` so a component test can mount it on its own.
  */
 import { useLiveQuery } from "dexie-react-hooks"
 import {
@@ -20,13 +17,11 @@ import {
 import { useTheme } from "next-themes"
 import { toast } from "sonner"
 
-import { ExperimentalBadge } from "@/components/experimental-badge"
-import { Group, RowText, rowClass } from "@/components/settings-chrome"
-import { Switch } from "@/components/ui/switch"
+import { Group, RowText, SwitchRow, rowClass } from "@/components/settings-chrome"
 import { DEFAULT_SETTINGS, db, getActiveProfile, saveAppearance } from "@/lib/db"
 import { usePluginFeature, type PluginServer } from "@/lib/features"
 import { useHostRecord } from "@/lib/host-record"
-import { OPENUI_SWITCH } from "@/lib/openui-switch"
+import { OPENUI_SWITCH, UNANSWERED_IS_ON } from "@/lib/openui-switch"
 import { THEMES, type ThemeValue } from "@/lib/theme"
 import { cn } from "@/lib/utils"
 
@@ -36,65 +31,17 @@ const ICONS: Record<ThemeValue, LucideIcon> = {
   dark: MoonIcon,
 }
 
-export function SwitchRow({
-  id,
-  icon: Icon,
-  title,
-  experimental,
-  subtitle,
-  checked,
-  disabled,
-  variant,
-  onCheckedChange,
-}: {
-  id: string
-  icon: LucideIcon
-  title: string
-  experimental?: boolean
-  subtitle?: string
-  checked: boolean
-  disabled?: boolean
-  /** `header` tops a group of switches it controls; `nested` is one of them. */
-  variant?: "header" | "nested"
-  onCheckedChange: (checked: boolean) => void
-}) {
-  return (
-    <label
-      htmlFor={id}
-      className={cn(
-        rowClass,
-        "cursor-pointer",
-        variant === "header" && "bg-muted py-4",
-        variant === "nested" && "pl-9",
-      )}
-    >
-      <Icon className="size-5 shrink-0 text-muted-foreground" />
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span className="flex min-w-0 items-center gap-2">
-          <span className={cn("truncate text-base", variant === "header" && "font-semibold")}>
-            {title}
-          </span>
-          {experimental && <ExperimentalBadge />}
-        </span>
-        {subtitle && <span className="line-clamp-2 text-sm text-muted-foreground">{subtitle}</span>}
-      </span>
-      <Switch id={id} checked={checked} disabled={disabled} onCheckedChange={onCheckedChange} />
-    </label>
-  )
-}
-
 /**
- * The interface switch: profile-wide and kept on the host, because the cost it saves — the library
- * riding in every new chat's system prompt — is paid there. Off draws a reply's blocks as the code
- * they came from, on every device, and the next chat isn't told the library.
- *
- * A host that predates the feature offers nothing to switch, so the row is shown unavailable rather
- * than off, and while its answer is still unknown nothing is acted on. A write the host refuses is
- * a failure the user sees, never a quiet local off: the switch keeps what the host holds.
+ * Profile-wide on the host, because the cost it saves is paid there; a write the host refuses comes
+ * back as the host's truth rather than a quiet local off.
  */
 function InterfaceSwitch({ server }: { server: PluginServer }) {
   const answer = usePluginFeature(server, OPENUI_SWITCH.feature)
-  const { value, supported, saving, save } = useHostRecord(server, OPENUI_SWITCH, true)
+  const { value, settled, supported, saving, save } = useHostRecord(
+    server,
+    OPENUI_SWITCH,
+    UNANSWERED_IS_ON,
+  )
   const offered = answer === "yes" && supported
   return (
     <SwitchRow
@@ -106,7 +53,7 @@ function InterfaceSwitch({ server }: { server: PluginServer }) {
           ? "Not available on this bot's host"
           : "Replies draw the cards and charts they carry"
       }
-      checked={value}
+      checked={settled && value}
       disabled={!offered || saving}
       onCheckedChange={(on) => {
         void save(on).catch((error: unknown) =>
@@ -124,8 +71,6 @@ export function AppearanceSettings() {
     async () => ({ ...DEFAULT_SETTINGS, ...(await db.settings.get("settings")) }),
     [],
   )
-  // The switch is the profile's, and Appearance has no bot in scope: it is the active profile's
-  // host that is asked, and with no profile at all there is nothing to ask.
   const profile = useLiveQuery(getActiveProfile, [])
   return (
     <>

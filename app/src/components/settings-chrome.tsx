@@ -2,6 +2,8 @@ import { useState, type ReactNode } from "react"
 
 import type { LucideIcon } from "lucide-react"
 
+import { ExperimentalBadge } from "@/components/experimental-badge"
+import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 
 /** The chrome every Settings screen wears: a sticky header over one centred column of groups. */
@@ -74,5 +76,53 @@ export function SheetRow({
       </button>
       {sheet({ open, onOpenChange: setOpen })}
     </>
+  )
+}
+
+/** The row every Settings switch wears: an icon, a title over a muted line, and the switch. */
+export function SwitchRow({
+  id,
+  icon: Icon,
+  title,
+  experimental,
+  subtitle,
+  checked,
+  disabled,
+  variant,
+  onCheckedChange,
+}: {
+  id: string
+  icon: LucideIcon
+  title: string
+  experimental?: boolean
+  subtitle?: string
+  checked: boolean
+  disabled?: boolean
+  /** `header` tops a group of switches it controls; `nested` is one of them. */
+  variant?: "header" | "nested"
+  onCheckedChange: (checked: boolean) => void
+}) {
+  return (
+    <label
+      htmlFor={id}
+      className={cn(
+        rowClass,
+        "cursor-pointer",
+        variant === "header" && "bg-muted py-4",
+        variant === "nested" && "pl-9",
+      )}
+    >
+      <Icon className="size-5 shrink-0 text-muted-foreground" />
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className={cn("truncate text-base", variant === "header" && "font-semibold")}>
+            {title}
+          </span>
+          {experimental && <ExperimentalBadge />}
+        </span>
+        {subtitle && <span className="line-clamp-2 text-sm text-muted-foreground">{subtitle}</span>}
+      </span>
+      <Switch id={id} checked={checked} disabled={disabled} onCheckedChange={onCheckedChange} />
+    </label>
   )
 }
