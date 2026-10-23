@@ -1122,29 +1122,29 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
           </div>
         )}
         {session?.discardedAt ? (
-          <div className="mx-auto w-full max-w-3xl">
+          <div>
             <DiscardedCard />
           </div>
         ) : session?.resolvedAt ? (
-          <div className="mx-auto w-full max-w-3xl">
+          <div>
             <ResolvedCard
               onReopen={() => updateConversation(session.id, { resolvedAt: undefined })}
             />
           </div>
         ) : awaitingApproval ? (
-          <div className="mx-auto w-full max-w-3xl">
+          <div>
             <ApprovalCard message={awaitingApproval} />
           </div>
         ) : awaitingClarify ? (
-          <div className="mx-auto w-full max-w-3xl">
+          <div>
             <QuestionCard key={awaitingClarify.clarify!.clarifyId} message={awaitingClarify} />
           </div>
         ) : session?.blocked && !busy ? (
-          <div className="mx-auto w-full max-w-3xl">
+          <div>
             <BlockedCard reason={session.blocked} />
           </div>
         ) : session?.planPending && session.mode === "plan" && !busy ? (
-          <div className="mx-auto w-full max-w-3xl">
+          <div>
             <PlanReadyCard
               autoAvailable={tracked}
               model={modelPill({ display: "block" })}
