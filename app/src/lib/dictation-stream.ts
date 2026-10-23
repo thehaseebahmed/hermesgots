@@ -158,13 +158,13 @@ function abandoned(failure: unknown) {
 type Tail = { answer: DictationAnswer } | { failed: unknown } | null
 
 function tailWithin(asking: Promise<DictationAnswer>, ms: number): Promise<Tail> {
-  return Promise.race([
+  return within(
     asking.then(
       (answer): Tail => ({ answer }),
       (failed): Tail => ({ failed }),
     ),
-    new Promise<null>((done) => window.setTimeout(done, Math.max(1, ms))),
-  ])
+    ms,
+  ).then((timed) => timed ?? null)
 }
 
 function letGo(current: TakeSession) {
