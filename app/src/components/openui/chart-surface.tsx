@@ -20,6 +20,7 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart"
+import { estimateWidth, yAxisOf, yAxisWidth } from "@/lib/openui-chart"
 
 import type { ChartProps, ChartSeries } from "./chart.tsx"
 
@@ -75,14 +76,57 @@ function rowsOf(series: ChartSeries[], columns: Column[]) {
 const slicesOf = (series: ChartSeries[]) =>
   (series[0]?.points ?? []).map((point, i) => ({ ...point, fill: colour(i) }))
 
-const AXIS = { tickLine: false, axisLine: false, tickMargin: 4, fontSize: 11 } as const
+const AXIS = {
+  tickLine: false,
+  axisLine: false,
+  tickMargin: 4,
+  tickSize: 6,
+  fontSize: 11,
+} as const
 
 const MARGIN = { top: 4, right: 8, bottom: 16, left: 0 } as const
+
+/** The stub and margin a tick label keeps from the plot, and a pixel of slack for a loading font. */
+const LABEL_ROOM = AXIS.tickSize + AXIS.tickMargin + 2
+
+/** The narrowest axis drawn: one- and two-digit labels need no less, or the y label crowds them. */
+const LEAST_AXIS = 32
+
+/** The column a rotated y label takes inside the axis, beside the ticks it names. */
+const LABEL_BAND = 12
+
+let painter: CanvasRenderingContext2D | null | undefined
+let family: string | undefined
+
+/** The canvas a label is measured on, or null where the DOM has no 2D one — a test's, by default. */
+function painterOf() {
+  if (painter === undefined)
+    painter =
+      typeof CanvasRenderingContext2D === "undefined"
+        ? null
+        : document.createElement("canvas").getContext("2d")
+  return painter
+}
+
+/**
+ * How wide a tick label draws. The axis has no font of its own — it inherits the thread's — so the
+ * canvas takes the page's, and a page that can't measure gets an estimate that errs wide.
+ */
+function measure(label: string) {
+  const context = painterOf()
+  if (!context) return estimateWidth(label, AXIS.fontSize)
+  family ??= getComputedStyle(document.body).fontFamily || "sans-serif"
+  context.font = `${AXIS.fontSize}px ${family}`
+  return context.measureText(label).width
+}
 
 function ChartSurface({ props }: { props: ChartProps }) {
   const columns = columnsOf(props)
   const config = configOf(props.kind, columns)
   const { xLabel, yLabel } = props
+  const axis = yAxisOf(props.series.flatMap((series) => series.points.map((point) => point.y)))
+  const labels = axis.ticks.map((tick) => String(tick))
+  const axisWidth = yAxisWidth(labels, measure, LABEL_ROOM, LEAST_AXIS) + (yLabel ? LABEL_BAND : 0)
   const frame = (
     <>
       <CartesianGrid vertical={false} />
@@ -94,7 +138,9 @@ function ChartSurface({ props }: { props: ChartProps }) {
       />
       <YAxis
         name={yLabel}
-        width={yLabel ? 44 : 32}
+        width={axisWidth}
+        domain={axis.domain}
+        ticks={axis.ticks}
         label={yLabel ? { value: yLabel, angle: -90, position: "insideLeft" } : undefined}
         {...AXIS}
       />

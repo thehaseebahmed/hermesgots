@@ -67,7 +67,9 @@ function OpenUIBlock(props: Props) {
     return <Markdown className="px-1 text-[15px] leading-relaxed">{fenced(props.source)}</Markdown>
   return (
     <Renderer.Root response={props.source} library={library} isStreaming={props.streaming}>
-      <Renderer.Content className="w-full min-w-0 space-y-3" />
+      {/* The text beside a block carries `px-1` (message-item's Markdown); the drawn box carries the
+          same inset, so a block starting to draw moves nothing, and its edges land on the text's. */}
+      <Renderer.Content className="w-full min-w-0 space-y-3 px-1" />
     </Renderer.Root>
   )
 }

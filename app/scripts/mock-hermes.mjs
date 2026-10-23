@@ -60,10 +60,11 @@
 // paced, as a run's `reasoning.available` events or a completion's `reasoning_content` deltas. Say
 // "stall" as well and the turn then holds 2.5s with nothing else on the wire.
 // Say "draw the interface" for a reply that carries one: an `openui-lang` block naming itself with
-// `# id: sales`, the receipt under it long enough to scroll a phone's thread, then a patch block
-// reusing that id (it changes the card and table in place, and draws nothing where it sits), then a
-// block naming a component the library doesn't have — which draws as the code the model sent — and
-// a closing line.
+// `# id: sales` — a card, a table, a callout and two bar charts whose five-digit ticks have to fit
+// the axes they label, one with both axis labels and one with none — the receipt under it long
+// enough to scroll a phone's thread, then a patch block reusing that id (it changes the card and
+// table in place, and draws nothing where it sits), then a block naming a component the library
+// doesn't have — which draws as the code the model sent — and a closing line.
 // Project sessions get a worktree in each of the project's repos on
 // POST /api/plugins/memento/sessions/{id}/workspace (GET reads it back, POST …/mode changes the
 // permission mode, POST …/workspace/remove removes the trees unless a turn mentioned "commit"). In
@@ -1319,10 +1320,12 @@ const OPENUI_INTRO = "Here's the quarter as a card, and the receipt behind it.\n
 const OPENUI_INTERFACE = [
   "```openui-lang",
   "# id: sales",
-  "root = Stack([c, t, n])",
+  "root = Stack([c, t, n, g, h])",
   'c = Card("Quarterly sales", "Up 12% on the quarter.")',
   't = Table(["Region", "Revenue"], [["North", "$18.4k"], ["South", "$11.9k"], ["West", "$9.2k"]], "Revenue by region")',
   'n = Callout("good", "Ahead of plan for a third quarter running.")',
+  'g = Chart("bar", [{ name: "Revenue", points: [{ x: "Q1", y: 12400 }, { x: "Q2", y: 18300 }, { x: "Q3", y: 15900 }] }], "Quarter", "Revenue", "Revenue peaked at 18,300 in the second quarter.")',
+  'h = Chart("bar", [{ name: "Sessions", points: [{ x: "Q1", y: 21000 }, { x: "Q2", y: 47000 }] }], "", "", "Sessions ran from 21,000 in the first quarter to 47,000 in the second.")',
   "```",
 ].join("\n")
 const OPENUI_RECEIPT = [

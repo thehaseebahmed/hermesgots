@@ -436,6 +436,79 @@ test("a chart draws at phone and tablet widths, its summary the text alternative
   }
 })
 
+const SMALL = "Sales ran 10 to 25 across the two quarters."
+const FIVE_DIGITS = "Revenue ran 12,400 to 18,300 across the two quarters."
+
+test("the y axis is as wide as the widest tick label it carries", async () => {
+  const source = [
+    "# id: both",
+    "root = Stack([a, b])",
+    `a = ${chartCall(
+      "bar",
+      series("Sales", [
+        ["Q1", 10],
+        ["Q2", 25],
+      ]),
+      "",
+      "",
+      SMALL,
+    )}`,
+    `b = ${chartCall(
+      "bar",
+      series("Revenue", [
+        ["Q1", 12400],
+        ["Q2", 18300],
+      ]),
+      "",
+      "",
+      FIVE_DIGITS,
+    )}`,
+  ].join("\n")
+  const restore = measuredChart(390)
+  try {
+    await screen(
+      [ask("Chart both."), reply("reply", `Two scales:\n\n${block(source)}`)],
+      async () => {
+        const row = () => replyRow("Two scales:")
+        await drawn(
+          () => (row()?.querySelectorAll(".recharts-yAxis-tick-labels").length ?? 0) === 2,
+          "both axes",
+        )
+        const yTicks = (summary: string) => [
+          ...(row()?.querySelectorAll(
+            `[role=img][aria-label="${summary}"] .recharts-yAxis-tick-labels .recharts-cartesian-axis-tick-value`,
+          ) ?? []),
+        ]
+        const small = yTicks(SMALL)
+        const large = yTicks(FIVE_DIGITS)
+        assert.ok(small.length >= 2 && large.length >= 2, "both axes label their own values")
+        assert.deepEqual(
+          large.map((tick) => tick.textContent),
+          ["0", "5000", "10000", "15000", "20000"],
+          "the five-digit axis labels round values a reader can hold",
+        )
+        // Recharts hands each tick label the axis' own width: it is the box the label is drawn in.
+        const band = (ticks: Element[]) => Number(ticks[0]?.getAttribute("width"))
+        assert.ok(
+          band(large) >= 40,
+          `the five-digit axis is wide enough for its label (${band(large)}px)`,
+        )
+        assert.ok(
+          band(small) <= 34,
+          `and a two-digit axis doesn't take room it has no use for (${band(small)}px)`,
+        )
+        assert.ok(
+          band(large) > band(small),
+          `the axis grows with the label it carries (${band(small)}px to ${band(large)}px)`,
+        )
+        await settle()
+      },
+    )
+  } finally {
+    restore()
+  }
+})
+
 test("a chart with no summary draws as the fenced source, never as a picture", async () => {
   const source = [
     "# id: trend",
