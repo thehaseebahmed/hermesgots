@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 38
+SCHEMA_VERSION = 39
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -492,6 +492,23 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    cites TEXT NOT NULL DEFAULT '[]',
                    at INTEGER NOT NULL,
                    PRIMARY KEY (meeting_id, n)
+               )"""
+        )
+        # v39: the wake posted for a finished subagent, and the live id a card stops it by — both
+        # keyed by the child's own session id, since that is all the app has (delegation.py).
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS subagent_wakes (
+                   subagent_id TEXT PRIMARY KEY,
+                   parent_id TEXT NOT NULL,
+                   run_id TEXT,
+                   at INTEGER NOT NULL
+               )"""
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS subagent_agents (
+                   subagent_id TEXT PRIMARY KEY,
+                   agent_id TEXT NOT NULL,
+                   at INTEGER NOT NULL
                )"""
         )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
