@@ -36,7 +36,7 @@ const FLOWS = {
   "thinking-line": {
     script: "e2e/thinking-line.mjs",
     about:
-      "A turn whose thinking a tool call breaks: the working line first, then one open row per run either side of the call, both folded at the answer over the span each run measured, and a reload reading the same rows in the same places",
+      "A turn whose thinking a tool call breaks: the working line first, then one open row per run either side of the call, both folded at the answer over the span each run measured, and a reload reading the same rows in the same places; then a long run that lands on its newest words, follows them until the reader's wheel stops it, and draws its cap with a fade and a Show more at two widths",
   },
   "slash-skills": {
     script: "e2e/slash-skills.mjs",
