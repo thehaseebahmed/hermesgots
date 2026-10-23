@@ -62,12 +62,8 @@
 // Say "draw the interface" for a reply that carries one: an `openui-lang` block naming itself with
 // `# id: sales`, the receipt under it long enough to scroll a phone's thread, then a patch block
 // reusing that id (it changes the card and table in place, and draws nothing where it sits), then a
-// block naming a component the library doesn't have — which draws as the code the model sent — and a
-// closing line. The whole timeline is one reply, paced so a reader can scroll up before the patch
-// lands: a second user message would jump the thread back to the end. `info` advertises `openui` with
-// the library's version beside it, and /api/plugins/memento/openui answers the interface switch: GET
-// reads it (on here), POST `{ enabled }` writes it — the route pair plugin/openui.py serves from the
-// plugin's route root, which the app's drawing gate reads before it draws a block.
+// block naming a component the library doesn't have — which draws as the code the model sent — and
+// a closing line.
 // Project sessions get a worktree in each of the project's repos on
 // POST /api/plugins/memento/sessions/{id}/workspace (GET reads it back, POST …/mode changes the
 // permission mode, POST …/workspace/remove removes the trees unless a turn mentioned "commit"). In
@@ -1335,14 +1331,7 @@ const REASONING_LEAD_MS = 2500
 const REASONING_PACE_MS = 700
 const REASONING_STALL_MS = 2500
 
-// What a turn asked to draw an interface says. One reply carries the whole timeline, because a patch
-// can't arrive as a second user message: a send jumps the thread to the end (FollowOnSend), and a
-// send while a reply streams is queued. So the interface comes first, then the receipt under it —
-// long enough that a phone's thread scrolls — and only then the patch naming the same `# id:`, which
-// is the one block a reader scrolled up would be moved by if the thread followed its new height.
-// The patch's card is the same sentence with one number changed — same width, so the card's height
-// holds and only the table's new fourth row moves the thread: the change a reader is meant to see
-// arrive without their place moving with it.
+// What a turn asked to draw an interface says.
 const OPENUI_INTRO = "Here's the quarter as a card, and the receipt behind it.\n\n"
 const OPENUI_INTERFACE = [
   "```openui-lang",
@@ -1380,8 +1369,6 @@ const OPENUI_PATCH = [
   'n = Callout("good", "Ahead of plan, and by a wider margin than the first read.")',
   "```",
 ].join("\n")
-// A component the library doesn't have: the block can't be drawn, so it draws as the code the model
-// sent — the fallback a reply with a bad block has to still be.
 const OPENUI_FALLBACK = [
   "```openui-lang",
   "root = Stack([c])",
@@ -1476,14 +1463,10 @@ async function playTurn(req, body, last, out) {
     return { spoken: "", prompt_tokens: 6000, completion_tokens: 0, failed: true }
   }
 
-  // "draw the interface": the fixture the interface flow reads — one reply holding a block that
-  // draws, a receipt tall enough to scroll a phone's thread, a patch naming that block, and a block
-  // no component answers for. Paced slowly, so the patch lands while a reader is still reading.
   if (/\bdraw the interface\b/i.test(last)) {
     await say(OPENUI_INTRO, 30)
     await say(`${OPENUI_INTERFACE}\n\n`, 30)
     await say(OPENUI_RECEIPT, 45)
-    // A pause with a line saying so: the window a reader has to scroll up before the patch lands.
     await say("\n\nThe West renewal just came in. Give me a moment to redraw the card.\n\n", 60)
     await sleep(5000)
     await say(`${OPENUI_PATCH}\n\n`, 30)
@@ -2475,9 +2458,6 @@ let dictationBusy = 0
 let dictationPeak = 0
 // plugin/moves.py: the messages triage moved out of each Main session, for its Moved markers.
 const moves = new Map()
-// plugin/openui.py: the interface switch a host keeps. On here, so a reply's block draws rather than
-// falling back to its own source; a drawing gate in the app reads it before it draws. The version is
-// the library the section's text was generated from, which the plugin reads off the artifact's head.
 let openuiOn = true
 const OPENUI_VERSION = "1.0.1"
 // plugin/triage.py: MOCK_TRIAGE=off hides the feature, "new" opens a new thread, "thread" continues
@@ -3051,8 +3031,6 @@ http
         ],
         clarify: true,
         hooks: true,
-        // The library the section was generated from, beside the bare feature — the client matches
-        // features with `includes`, so the version rides here (plugin/openui.py's `advertised`).
         openui: { version: OPENUI_VERSION },
         research: {
           ready: true,
@@ -3606,13 +3584,10 @@ http
         return json(res, 200, { object: "memento.triage_model", triage_model: null })
       }
     }
-    // The interface switch: a host setting, like the triage model, that answers as on. `plugin/openui.py`
-    // serves it from the same route root, and a drawing gate reads it before it draws a block.
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/openui") {
       if (req.method === "GET") return json(res, 200, { object: "memento.openui", enabled: openuiOn, version: OPENUI_VERSION })
       if (req.method === "POST") {
         const body = await readBody(req)
-        // One field, and it has to be a boolean: off is stored as off, never as nothing.
         if (typeof body.enabled !== "boolean") {
           return json(res, 400, {
             error: { message: 'Body must be {"enabled": true} or {"enabled": false}' },

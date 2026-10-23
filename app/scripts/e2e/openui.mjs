@@ -1,15 +1,46 @@
-// An interface in a real thread: the reply's block draws from the library at a phone's width and at
-// a tablet's, in both themes; the block no component answers for draws as the code the model sent,
-// with the reply still reaching its end; and a patch that lands while the reader is scrolled up
-// leaves their place where it was. Geometry and a scroll offset are what a DOM without layout cannot
-// reach, which is this flow's argument for its tier (ADR 0019). The mock's "draw the interface"
-// reply carries the whole timeline — interface, a receipt tall enough to scroll, then the patch —
-// because a patch can't arrive as a second message: a send jumps the thread to the end.
+// An interface in a real thread: the reply's block draws from the library at a phone's width and a
+// tablet's, in both themes; the block no component answers for draws as the code the model sent;
+// and a patch that lands while the reader is scrolled up leaves their place where it was.
 import { app, assert, flow, pass, settled } from "./lib.mjs"
 
 const VIEWPORT = "[data-slot=message-scroller-viewport]"
 const TO_END = "[data-slot=message-scroller-button][data-direction=end]"
 const REPLY = "[data-slot=message][data-align=start]"
+
+/**
+ * One walk of the page for every fact this flow reads: the thread's scroll, the interface's box and
+ * the rows the table under it draws. `place` first puts the reader just above the card, the way
+ * someone who has scrolled to it would sit.
+ */
+const facts = (page, place = false) =>
+  page.evaluate((place) => {
+    const viewport = document.querySelector("[data-slot=message-scroller-viewport]")
+    const card = document.querySelector("[data-slot=card]")
+    if (place) {
+      const top =
+        card.getBoundingClientRect().top - viewport.getBoundingClientRect().top + viewport.scrollTop
+      viewport.scrollTop = Math.max(8, Math.round(top) - 80)
+    }
+    const row = card.closest("[data-slot=message]")
+    const table = row.querySelector("table")
+    const box = card.getBoundingClientRect()
+    return {
+      scrollTop: viewport.scrollTop,
+      end: viewport.scrollHeight - viewport.clientHeight,
+      top: Math.round(box.top),
+      width: Math.round(box.width),
+      height: Math.round(box.height),
+      left: Math.round(box.left),
+      right: Math.round(box.right),
+      column: viewport.clientWidth,
+      screen: window.innerWidth,
+      page: document.documentElement.scrollWidth,
+      sideways: table.parentElement.scrollWidth - table.parentElement.clientWidth,
+      rows: row.querySelectorAll("tbody tr").length,
+      aside: Boolean(row.querySelector("[data-slot=alert]")),
+      dark: document.documentElement.classList.contains("dark"),
+    }
+  }, place)
 
 await flow(
   "openui",
@@ -29,7 +60,6 @@ await flow(
       "Quarterly sales",
       "the reply's block drew an interface from the library",
     )
-    // The interface fills in as it streams, so its own body arrives a moment after its root.
     await until(
       async () => /Up 12%/.test((await card.textContent()) ?? ""),
       10_000,
@@ -41,22 +71,6 @@ await flow(
       "with none of its source left on the page",
     )
 
-    // The two samples of the one event: where the reader is, before the patch lands and after.
-    const place = () =>
-      page.evaluate(() => {
-        const viewport = document.querySelector("[data-slot=message-scroller-viewport]")
-        const card = document.querySelector("[data-slot=card]")
-        const row = card.closest("[data-slot=message]")
-        return {
-          scrollTop: viewport.scrollTop,
-          end: viewport.scrollHeight - viewport.clientHeight,
-          top: Math.round(card.getBoundingClientRect().top),
-          rows: row.querySelectorAll("tbody tr").length,
-        }
-      })
-
-    // The receipt under the interface is what fills the thread; the patch follows it after a pause,
-    // which is the window a reader has to scroll up in before it lands.
     await until(
       async () =>
         (await reply.textContent())?.includes("closing inside the last ten days") ?? false,
@@ -64,15 +78,7 @@ await flow(
       "the receipt under the interface",
     )
 
-    // Someone reading a card that has just arrived: the interface in view near the top of the
-    // screen, a little of the thread above it, and the end of the reply well below. The wheel is the
-    // reader's own gesture — it is what tells the thread to stop following its end.
-    await thread.evaluate((viewport) => {
-      const card = viewport.querySelector("[data-slot=card]")
-      const top =
-        card.getBoundingClientRect().top - viewport.getBoundingClientRect().top + viewport.scrollTop
-      viewport.scrollTop = Math.max(8, Math.round(top) - 80)
-    })
+    await facts(page, true)
     await thread.hover()
     await page.mouse.wheel(0, -8)
     await until(
@@ -81,7 +87,7 @@ await flow(
       "the thread to stop following its end",
     )
     await settled(page)
-    const before = await place()
+    const before = await facts(page)
     assert.ok(before.end > 300, `the reply overflows a phone's thread (${before.end}px of scroll)`)
     assert.ok(
       before.scrollTop > 0 && before.scrollTop < before.end - 200,
@@ -89,11 +95,10 @@ await flow(
     )
     assert.equal(before.rows, 3, "the table as the first block drew it")
 
-    // The patch is the last block before the closing text, and the fourth row is what it adds.
-    await until(async () => (await place()).rows === 4, 40_000, "the patch to land")
+    await until(async () => (await facts(page)).rows === 4, 40_000, "the patch to land")
     await settled(page)
 
-    const after = await place()
+    const after = await facts(page)
     assert.match(await card.textContent(), /Up 18%/, "the patch changed the interface it names")
     assert.ok(after.end > before.end, "the thread grew under the reader while it landed")
     assert.equal(after.scrollTop, before.scrollTop, "and the reader's scroll offset held")
@@ -137,27 +142,6 @@ await flow(
     )
     pass("a block no component answers for drew as code, and the reply still reached its end")
 
-    const measure = () =>
-      page.evaluate(() => {
-        const card = document.querySelector("[data-slot=card]")
-        const row = card.closest("[data-slot=message]")
-        const table = row.querySelector("table")
-        const box = card.getBoundingClientRect()
-        return {
-          width: Math.round(box.width),
-          height: Math.round(box.height),
-          left: Math.round(box.left),
-          right: Math.round(box.right),
-          column: document.querySelector("[data-slot=message-scroller-viewport]").clientWidth,
-          screen: window.innerWidth,
-          page: document.documentElement.scrollWidth,
-          sideways: table.parentElement.scrollWidth - table.parentElement.clientWidth,
-          rows: row.querySelectorAll("tbody tr").length,
-          aside: Boolean(row.querySelector("[data-slot=alert]")),
-          dark: document.documentElement.classList.contains("dark"),
-        }
-      })
-
     const widths = new Map()
     for (const width of [390, 768]) {
       await page.setViewportSize({ width, height: width < 768 ? 844 : 768 })
@@ -165,7 +149,7 @@ await flow(
         await page.emulateMedia({ colorScheme: dark ? "dark" : "light" })
         await card.scrollIntoViewIfNeeded()
         await settled(page)
-        const seen = await measure()
+        const seen = await facts(page)
         const at = `${width}px in ${dark ? "dark" : "light"}`
         assert.equal(seen.dark, dark, `the screen is ${dark ? "dark" : "light"} at ${at}`)
         assert.ok(

@@ -20,8 +20,19 @@ import {
   seedChat,
   settle,
   text,
-  until,
 } from "./component-kit.tsx"
+import {
+  SALES,
+  ask,
+  block,
+  cardOf,
+  codeOf,
+  drawn,
+  labelOf,
+  reply,
+  replyRow,
+  warm,
+} from "./openui-kit.tsx"
 
 const bot = botProfile("openui")
 
@@ -31,49 +42,6 @@ function host(transcript: unknown[] = []) {
     if (/\/api\/sessions\/[^/]+\/messages$/.test(url.pathname)) return json({ data: transcript })
     return json({ error: { message: "no route" } }, 404)
   }) as unknown as typeof fetch
-}
-
-async function warm() {
-  await import("@/lib/openui-thread.ts")
-  await import("@/components/openui/openui-block")
-  await import("@/components/chat/markdown-renderer")
-}
-
-const block = (body: string) => ["```openui-lang", body, "```"].join("\n")
-
-const ask = (content: string): Message => ({
-  id: "ask",
-  conversationId: "",
-  role: "user",
-  content,
-  status: "done",
-  createdAt: 1,
-})
-
-const reply = (id: string, content: string, extra: Partial<Message> = {}): Message => ({
-  id,
-  conversationId: "",
-  role: "assistant",
-  content,
-  status: "done",
-  createdAt: 2,
-  ...extra,
-})
-
-const rows = () => findAll("[data-slot=message]")
-const replyRow = (needle: string) =>
-  rows().find(
-    (row) => row.getAttribute("data-align") === "start" && row.textContent?.includes(needle),
-  )
-const codeOf = (row: Element | undefined) => row?.querySelector("div[data-md-code]")
-const cardOf = (row: Element | undefined) => row?.querySelector("[data-slot=card]")
-const labelOf = (code: Element) => code.querySelector("span")?.textContent
-
-async function drawn(check: () => boolean, what: string) {
-  await until(async () => {
-    await settle()
-    return check()
-  }, what)
 }
 
 function watch() {
@@ -110,10 +78,6 @@ async function store(patch: Partial<Message>) {
     await new Promise((resolve) => setTimeout(resolve, 0))
   })
 }
-
-const SALES = ["# id: sales", "root = Stack([c])", 'c = Card("Quarterly sales", "Up 12%.")'].join(
-  "\n",
-)
 
 test("a settled reply's block draws the interface, with no code left behind", async () => {
   const content = `Here are the numbers.\n\n${block(SALES)}\n\nThat is the quarter.`

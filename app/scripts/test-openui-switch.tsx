@@ -3,9 +3,6 @@
  * read when the section opens, a write the host makes true, a write it refuses shown as a failure
  * rather than a quiet off, a host that predates the feature shown as offering nothing, and a
  * reply's block drawn as the code it came from while the host says off.
- *
- * The switch is a host setting, so the faked HTTP boundary is the whole harness here: `info` says
- * whether the host has the feature and `openui` holds the boolean (ADR 0033).
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -13,13 +10,13 @@ import test from "node:test"
 import { toast } from "sonner"
 
 import { AppearanceSettings } from "@/components/settings/appearance"
-import { db, type Message } from "@/lib/db"
+import { db } from "@/lib/db"
 import {
+  type Call,
   botProfile,
   chatScreen,
   click,
   find,
-  findAll,
   json,
   mount,
   seedChat,
@@ -28,8 +25,7 @@ import {
   text,
   until,
 } from "./component-kit.tsx"
-
-type Call = { method: string; path: string; body: Record<string, unknown> | null }
+import { SALES, ask, block, cardOf, codeOf, drawn, reply, replyRow, warm } from "./openui-kit.tsx"
 
 /** A host with the plugin's two answers: what it advertises, and the switch it holds. */
 function host({
@@ -64,7 +60,6 @@ function host({
   return { calls, state, fetch: fetch as unknown as typeof globalThis.fetch }
 }
 
-/** The switch itself: the row is a label around it, and the bare id belongs to its hidden input. */
 const switchOf = () => find("label[for='interfaces'] [data-slot='switch']")
 const checked = (element: Element | null) => element?.getAttribute("aria-checked") === "true"
 const unavailable = (element: Element | null) =>
@@ -150,79 +145,45 @@ test("a host that predates the feature offers nothing to switch, rather than rea
   })
 })
 
-const SALES = ["# id: sales", "root = Stack([c])", 'c = Card("Quarterly sales", "Up 12%.")'].join(
-  "\n",
-)
-
-const ask = (content: string): Message => ({
-  id: "ask",
-  conversationId: "",
-  role: "user",
-  content,
-  status: "done",
-  createdAt: 1,
-})
-
-const reply = (content: string): Message => ({
-  id: "reply",
-  conversationId: "",
-  role: "assistant",
-  content,
-  status: "done",
-  createdAt: 2,
-})
-
-const rows = () => findAll("[data-slot=message]")
-const replyRow = (needle: string) =>
-  rows().find((row) => row.getAttribute("data-align") === "start" && row.textContent?.includes(needle))
-const codeOf = () => replyRow("Here are the numbers")?.querySelector("div[data-md-code]")
-const cardOf = () => replyRow("Here are the numbers")?.querySelector("[data-slot=card]")
-
-async function drawn(check: () => boolean, what: string) {
-  await until(async () => {
-    await settle()
-    return check()
-  }, what)
-}
-
 async function thread(enabled: boolean) {
   const fake = host({ enabled })
   globalThis.fetch = fake.fetch
   await seedChat({
     id: "chat-1",
-    messages: [ask("How did the quarter go?"), reply(`Here are the numbers.\n\n\`\`\`openui-lang\n${SALES}\n\`\`\``)],
+    messages: [
+      ask("How did the quarter go?"),
+      reply("reply", `Here are the numbers.\n\n${block(SALES)}`),
+    ],
     profile: botProfile(`gate-${enabled ? "on" : "off"}`),
   })
-  // The fold, the block and the markdown renderer are lazy chunks: warmed so the assertions are
-  // about the gate and not about a chunk that hasn't landed.
-  await import("@/lib/openui-thread.ts")
-  await import("@/components/openui/openui-block")
-  await import("@/components/chat/markdown-renderer")
+  await warm()
   return fake
 }
 
 test("on, a reply's block draws as the interface it is", async () => {
   await thread(true)
   await mount(chatScreen("chat-1"), async () => {
-    await drawn(() => Boolean(cardOf()), "the interface")
+    const numbers = () => replyRow("Here are the numbers")
+    await drawn(() => Boolean(cardOf(numbers())), "the interface")
     assert.equal(
-      replyRow("Here are the numbers")?.querySelector("[data-slot=card-title]")?.textContent,
+      numbers()?.querySelector("[data-slot=card-title]")?.textContent,
       "Quarterly sales",
       "the card draws from the library",
     )
-    assert.equal(codeOf(), null, "and no code is left in its place")
+    assert.equal(codeOf(numbers()), null, "and no code is left in its place")
   })
 })
 
 test("off, the same block draws as the code it came from", async () => {
   const fake = await thread(false)
   await mount(chatScreen("chat-1"), async () => {
-    await drawn(() => Boolean(codeOf()), "the code")
-    const code = codeOf()
+    const numbers = () => replyRow("Here are the numbers")
+    await drawn(() => Boolean(codeOf(numbers())), "the code")
+    const code = codeOf(numbers())
     assert.ok(code, "the block draws as code")
     assert.equal(code.querySelector("span")?.textContent, "openui-lang", "under the fence's label")
     assert.match(code.textContent ?? "", /Card\("Quarterly sales"/, "as the model wrote it")
-    assert.equal(cardOf(), null, "and no interface anywhere in the reply")
+    assert.equal(cardOf(numbers()), null, "and no interface anywhere in the reply")
     assert.match(text(), /Here are the numbers\./, "the reply is still the reply it was")
     assert.ok(
       fake.calls.some((call) => call.method === "GET" && call.path.endsWith("/openui")),

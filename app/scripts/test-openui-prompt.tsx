@@ -2,10 +2,6 @@
  * The prompt artifact against the library it is generated from: the words a model is told and the
  * components the app can draw are one fact, and ADR 0032 makes a build catch the day they disagree
  * rather than a user reading it as "the model got it wrong".
- *
- * It sits in the component tier because the unit tier runs `node --experimental-strip-types` with
- * no loader, so a `.mjs` test there can never import `library.tsx`; this file reaches it through
- * `component-hooks.mjs` and the app's own transform, which is the cheapest harness that can.
  */
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
@@ -16,13 +12,11 @@ import { ARTIFACT, MAX_CHARS, render } from "./build-openui-prompt.mjs"
 const checkedIn = readFileSync(ARTIFACT, "utf8")
 const generated = render()
 
-/** The first line: the library the words were generated from, and the version that parses them. */
 const HEADER = /^# (@openuidev\/react-lang) (\S+)$/
 
 const pinned = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"))
   .dependencies["@openuidev/react-lang"]
 
-/** Every fence the text opens, with the info string after it: ~~~, ````, ```openui-lang. */
 function fences(text: string) {
   return text
     .split("\n")
@@ -41,8 +35,6 @@ test("the checked-in artifact is the library's own words", () => {
 })
 
 test("the only fence it names is openui-lang", () => {
-  // A closing fence names nothing, so it is a fence the model can't mislabel; every fence that
-  // does name a language must name the one the extractor reads.
   const named = fences(checkedIn)
   assert.ok(named.includes("openui-lang"), "the text names no openui-lang fence at all")
   assert.deepEqual(

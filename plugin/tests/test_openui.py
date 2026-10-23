@@ -20,8 +20,7 @@ from unittest import mock
 from plugin import openui
 
 ARTIFACT = Path(openui.__file__).parent / "openui" / "prompt.txt"
-# What a fresh import answers before any registration, put back before each case.
-UNREGISTERED = openui._refused
+UNREGISTERED = openui._refusal_reason
 
 
 class FakeCtx:
@@ -40,7 +39,7 @@ class FakeCtx:
 
 class SectionState(unittest.TestCase):
     def setUp(self) -> None:
-        state = mock.patch.object(openui, "_refused", UNREGISTERED)
+        state = mock.patch.object(openui, "_refusal_reason", UNREGISTERED)
         state.start()
         self.addCleanup(state.stop)
 
@@ -57,7 +56,6 @@ class RegistrationTest(SectionState):
         openui.register(ctx)
         told = ctx.calls[0]["content"]
         text = ARTIFACT.read_text(encoding="utf-8")
-        # The host hands the callable its session info; what it answers is the checked-in text.
         self.assertEqual(told({"session_id": "s", "profile_name": "default", "cwd": "/tmp"}), text)
         self.assertEqual(told(), text)
         self.assertIn("openui-lang", text)
@@ -83,7 +81,6 @@ class AdvertisementTest(SectionState):
         openui.register(FakeCtx())
         header = ARTIFACT.read_text(encoding="utf-8").splitlines()[0]
         self.assertEqual(openui.advertised(), {"version": header.rsplit(" ", 1)[1]})
-        # `features` is matched with `includes`, so a versioned string would read as absent.
         self.assertEqual(openui.FEATURE, "openui")
         self.assertNotIn(":", openui.FEATURE)
 
@@ -96,8 +93,6 @@ class AdvertisementTest(SectionState):
 
 class ArtifactTest(unittest.TestCase):
     def test_a_missing_artifact_does_not_break_the_import(self) -> None:
-        # `plugin/openui.py` and `plugin/openui/` coexist; the module wins and reads its sibling.
-        # Loaded by file path so the copy's own folder is the one it looks in, with no artifact.
         with tempfile.TemporaryDirectory() as folder:
             copy = Path(folder) / "openui.py"
             shutil.copyfile(openui.__file__, copy)
@@ -112,8 +107,6 @@ class ArtifactTest(unittest.TestCase):
         self.assertIsNone(module.advertised())
 
     def test_an_artifact_over_the_limit_is_not_advertised(self) -> None:
-        # Past the cap the host drops the section whole, so a registration would promise a
-        # vocabulary the prompt doesn't carry.
         with tempfile.TemporaryDirectory() as folder:
             copy = Path(folder) / "openui.py"
             shutil.copyfile(openui.__file__, copy)
