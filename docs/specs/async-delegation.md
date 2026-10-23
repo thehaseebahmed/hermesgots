@@ -1,7 +1,7 @@
 # Delegation that never blocks a question
 
-Status: grilled 2026-10-23, every decision settled and recorded in ADR 0038. The build order at the
-end is the tickets' shape when implementation starts.
+Status: grilled 2026-10-23, every decision settled and recorded in ADR 0038. Published as #464,
+whose children #465–#471 are the build order.
 
 ## Goal
 
@@ -116,20 +116,25 @@ From `app/`: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`. Then
 `pnpm e2e question-during-delegation`, `pnpm e2e stream-writes`, `pnpm e2e idle-requests`. From the
 root: `python3 -m unittest discover -s plugin/tests -t .`.
 
-## Build order
+## Tickets
 
-1. `feat(chat): draw a subagent's result as the bot's message` — `history.ts`, its unit test. Edge:
-   none. Lands first so a host already delegating asynchronously can never show a user bubble.
-2. `feat(plugin): let delegations run beside the turn` — the override deleted, the rewritten
-   delegation tests, `sync_delegation` unadvertised, README and AGENTS.md. Edge: 1.
-3. `feat(plugin): wake the bot when a subagent finishes` — the watcher, the outbox post, the
-   deferral, the session mark, the stop-a-subagent route. Edge: 2.
-4. `feat(plugin): stop a turn's subagents with it` — the stop fan-out. Edge: 2.
-5. `feat(plugin): hold a stage until its subagents end` — the AFK stage hold. Edge: 3.
-6. `feat(chat): read a session working while its subagents run` — the state rule and the card's
-   Stop. Edge: 3, 4.
-7. `test(chat): prove a question during delegation` — the mock's delegation, the flow, the audit
-   row. Edge: 1–6.
+On the tracker: #464 is the spec, and its seven children are the build order — each titled the
+commit that lands it, each blocked by the tickets its edges name. The spec carries
+`ready-for-agent` and the tickets stay bare, so AFK claims the spec and works the whole graph,
+ticket by ticket, in order.
+
+1. #465 `feat(chat): draw a subagent's result as the bot's message` — the transcript-drawing rule,
+   its unit test. Edge: none. Lands first so a host already delegating can never show a user bubble.
+2. #466 `feat(plugin): let delegations run beside the turn` — the override deleted, the rewritten
+   delegation tests, `sync_delegation` unadvertised, README and AGENTS.md. Edge: #465.
+3. #467 `feat(plugin): wake the bot when a subagent finishes` — the watcher, the outbox post, the
+   deferral, the session mark, the stop-a-subagent route. Edge: #466.
+4. #468 `feat(plugin): stop a turn's subagents with it` — the stop fan-out. Edge: #466.
+5. #469 `feat(plugin): hold a stage until its subagents end` — the AFK stage hold. Edge: #467.
+6. #470 `feat(chat): read a session working while its subagents run` — the state rule and the
+   card's Stop. Edge: #467, #468.
+7. #471 `test(chat): prove a question during delegation` — the mock's delegation, the flow, the
+   audit row. Edge: #465–#470.
 
 ## Risks
 
