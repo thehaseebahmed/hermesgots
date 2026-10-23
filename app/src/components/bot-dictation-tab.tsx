@@ -111,12 +111,6 @@ function SpeechModelField({
   return (
     <Field aria-labelledby="speech-model-label" aria-busy={saving || undefined}>
       <FieldLabel id="speech-model-label">Speech model</FieldLabel>
-      {settings.warning && (
-        <Banner tone="warning">
-          {settings.warning.model} didn't load, so dictation is heard on {settings.model}:{" "}
-          {settings.warning.reason}
-        </Banner>
-      )}
       <ul aria-label="Speech models" className="space-y-2">
         {settings.models.map((row) => (
           <li key={row.name}>

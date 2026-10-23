@@ -537,7 +537,6 @@ def start(
     hint: str = "",
     vocabulary: Sequence[str] = (),
     cleanup_model: Optional[Dict[str, str]] = None,
-    speech_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
     state = dictation.info()
     if not state.get("ready"):
@@ -545,7 +544,7 @@ def start(
     tt = dictation._tools()
     cfg = dictation._local_config(tt)
     wanted = dictation._model_name(tt, cfg)
-    played = speech.play(wanted, dictation.warm, speech_path)
+    played = speech.play(wanted, dictation.warm)
     model = played["model"]
     language = str(state.get("language") or "")
     take = Take(
@@ -559,6 +558,4 @@ def start(
     )
     takes.open(profile, take)
     answer = {"take": take.id, "ready": True, "model": model, "language": language}
-    if played.get("warning"):
-        answer["warning"] = played["warning"]
     return answer

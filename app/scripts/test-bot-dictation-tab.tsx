@@ -25,7 +25,6 @@ const speech = (patch: Record<string, unknown> = {}) => ({
     { name: "small", size_mb: 484, speed: 6, slow_on_cpu: false, downloaded: true, in_use: true, downloading: false },
     { name: "large-v3", size_mb: 3090, speed: 0.6, slow_on_cpu: true, downloaded: false, in_use: false, downloading: false },
   ],
-  warning: null,
   cleanup: { model: null, allowed: true, reason: null },
   ...patch,
 })
@@ -210,20 +209,27 @@ test("a model the host refuses leaves the old one in place and shows the host's 
   })
 })
 
-test("a pick that would download says so, and the warning a failed load left is shown", async () => {
+test("a pick the host does not have says it is downloading", async () => {
   await seed(
-    "speech-warning",
+    "speech-downloads",
     ["dictation_stream", "speech_model"],
     {},
-    { speech: speech({ warning: { model: "large-v3", reason: "it could not be downloaded" } }) },
+    {
+      speech: speech({
+        model: "large-v3",
+        models: [
+          { name: "base", size_mb: 145, speed: 16, slow_on_cpu: false, downloaded: true, in_use: false, downloading: false },
+          { name: "small", size_mb: 484, speed: 6, slow_on_cpu: false, downloaded: true, in_use: false, downloading: false },
+          { name: "large-v3", size_mb: 3090, speed: 0.6, slow_on_cpu: true, downloaded: false, in_use: true, downloading: true },
+        ],
+      }),
+    },
   )
   await mount(editor("/settings/bots/bot-1/dictation"), async () => {
-    const warning = findAll("div").find((node) =>
-      node.textContent?.includes("large-v3 didn't load"),
+    const row = findAll("div").find((node) =>
+      node.textContent?.includes("downloads on the next take"),
     )
-    assert.ok(warning, "the model that failed is named")
-    assert.match(warning?.textContent ?? "", /heard on small/)
-    assert.match(warning?.textContent ?? "", /could not be downloaded/)
+    assert.ok(row, "the row says the pick is downloading")
   })
 })
 

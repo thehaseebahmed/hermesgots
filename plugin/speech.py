@@ -37,8 +37,6 @@ logger = logging.getLogger(__name__)
 # Hermes's own default when ``stt.local.model`` is unset.
 DEFAULT_MODEL = "base"
 CLEANUP_KEY = "speech_cleanup_model"
-GOOD_KEY = "speech_good_model"
-WARNING_KEY = "speech_warning"
 STT_KEY = "stt"
 
 # What a pick is weighed on. ``speed`` is roughly how many seconds of speech the model hears in a
@@ -160,7 +158,7 @@ def downloaded(entry: Dict[str, Any], roots: Sequence[Path]) -> bool:
 
 
 def read(config_path: Path, path: Path, gate: Dict[str, bool]) -> Dict[str, Any]:
-    """The host's speech settings as the Dictation tab draws them: the pick, the list, the warning."""
+    """The host's speech settings as the Dictation tab draws them: the pick, the list."""
     stt = _stt(config_path)
     model = _model_of(stt)
     roots = cache_roots(stt)
@@ -197,7 +195,6 @@ def read(config_path: Path, path: Path, gate: Dict[str, bool]) -> Dict[str, Any]
     return {
         "model": model,
         "models": rows,
-        "warning": _warning(path),
         "cleanup": cleanup_state(path, gate),
     }
 
@@ -303,64 +300,15 @@ def _failed(warmed: Any) -> str:
     return ""
 
 
-def good(path: Optional[Path]) -> Optional[str]:
-    if path is None:
-        return None
-    held = get_setting(path, GOOD_KEY)
-    return held if isinstance(held, str) and held else None
+def play(wanted: str, warm: Any) -> Dict[str, Any]:
+    """What a take runs on: ``wanted``, and nothing else.
 
-
-def _warning(path: Optional[Path]) -> Optional[Dict[str, str]]:
-    if path is None:
-        return None
-    held = get_setting(path, WARNING_KEY)
-    if not isinstance(held, dict):
-        return None
-    model, reason = held.get("model"), held.get("reason")
-    if isinstance(model, str) and model and isinstance(reason, str) and reason:
-        return {"model": model, "reason": reason}
-    return None
-
-
-def _remember_good(path: Optional[Path], model: str) -> None:
-    if path is not None and good(path) != model:
-        put_setting(path, GOOD_KEY, model)
-
-
-def _remember_warning(path: Optional[Path], model: str, reason: str) -> None:
-    if path is not None:
-        put_setting(path, WARNING_KEY, {"model": model, "reason": reason})
-
-
-def _clear_warning(path: Optional[Path], model: str) -> None:
-    if path is None:
-        return
-    held = _warning(path)
-    if held is not None and held.get("model") == model:
-        put_setting(path, WARNING_KEY, None)
-
-
-def play(wanted: str, warm: Any, path: Optional[Path] = None) -> Dict[str, Any]:
-    """What a take runs on: ``wanted`` when it loads, else the model that last did, with a warning.
-
-    ``warm`` is ``dictation.warm`` for one model: it answers ``{"warmed": True}`` or an ``error``,
-    and never raises. A failure is never remembered as the model in play, so a pick Hermes can't
-    load can't poison the next take; the model that last loaded is loaded instead, and the take
-    continues on it. When that fails too there is nothing to fall back to, and the take can't
-    start: ``SpeechError`` carries the host's own reason.
+    A pick that won't load fails the take with the host's own reason (#292), so what the user
+    chose is what they hear or the failure line says why not — never a model picked behind them.
+    ``warm`` is ``dictation.warm`` for one model: it answers ``{"warmed": True}`` or an ``error``
+    and never raises.
     """
-    tried = warm(wanted)
-    why = _failed(tried)
-    if not why:
-        _remember_good(path, wanted)
-        _clear_warning(path, wanted)
-        return {"model": wanted, "warning": None}
-    previous = good(path)
-    if previous and previous != wanted:
-        retried = warm(previous)
-        if not _failed(retried):
-            _remember_warning(path, wanted, why)
-            logger.warning("memento: the %s speech model didn't load; hearing on %s", wanted, previous)
-            return {"model": previous, "warning": {"model": wanted, "reason": why}}
-    _remember_warning(path, wanted, why)
-    raise SpeechError(f"The host couldn't load its {wanted} speech model: {why}", 502)
+    why = _failed(warm(wanted))
+    if why:
+        raise SpeechError(f"The host couldn't load its {wanted} speech model: {why}", 502)
+    return {"model": wanted}

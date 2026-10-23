@@ -16,12 +16,10 @@ may wait already. A pick is written to `stt.local.model` in one pass through Her
 writer, so every other speech setting and every comment survives, and it lands on the next take
 because a take snapshots its model when it starts.
 
-A pick that won't load must not cost the user their dictation. The host remembers the model that
-last loaded, beside the pick, and a take that can't load the pick loads that one instead and answers
-the failure as a warning the tab shows. The failed name is never remembered as the model in play, so
-the next take tries the pick again rather than believing it worked; the fallback can't poison
-itself. When there is nothing to fall back to the take fails with the host's own reason, which is
-what it did before this pick existed.
+A pick that won't load fails the take with the host's own reason, so the failure line names it and
+points at the picker — the app reads that sentence as the model failure it is (#292). The host never
+loads a different model behind the user's back: what was chosen is what they hear, or the take says
+why not. A failed pick changes nothing the settings hold, so the next take tries it again.
 
 Cleanup's model is the one line ADR 0017 left a seam for. It is stored in the host's own settings
 store, per bot, not on `POST dictation/take`: the take's start body already carries the bot's

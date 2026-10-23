@@ -34,7 +34,6 @@ const settings = {
       downloading: false,
     },
   ],
-  warning: null,
   cleanup: { model: null, allowed: true, reason: null },
 }
 
@@ -57,7 +56,6 @@ test("a plugin that sends less than the tab knows about is read forgivingly", ()
   assert.deepEqual(readSpeech(null), {
     model: "",
     models: [],
-    warning: null,
     cleanup: { model: null, allowed: false, reason: null },
   })
   const bare = readSpeech({ models: [{ name: "base" }, { size: 3 }] })
@@ -82,15 +80,6 @@ test("the cleanup pick is a provider and model, or the bot's own", () => {
   )
   const half = readSpeech({ ...settings, cleanup: { model: { provider: "acme" }, allowed: true } })
   assert.equal(half.cleanup.model, null, "half a pick is no pick")
-})
-
-test("a warning is the model that failed and the host's reason", () => {
-  const warned = readSpeech({
-    ...settings,
-    warning: { model: "small", reason: "the file is corrupt" },
-  })
-  assert.deepEqual(warned.warning, { model: "small", reason: "the file is corrupt" })
-  assert.equal(readSpeech({ ...settings, warning: { model: 4 } }).warning, null)
 })
 
 test("a size is the download in the units it is read in", () => {

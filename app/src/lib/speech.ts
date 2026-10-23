@@ -5,8 +5,8 @@
  * The speech model is Hermes's `stt.local.model`; the plugin lists the models a pick can be made
  * from with the size and speed it is weighed on, whether the host already has each one, and which
  * is in play. A pick that isn't on disk downloads inside the next take, which is why the next take
- * says "Preparing…" for it the way a cold start does. A pick the host can't load falls back to the
- * model that last did, and the host keeps that failure as a warning the tab shows.
+ * says "Preparing…" for it the way a cold start does. A pick the host can't load fails the take
+ * with the host's own reason, so the failure line says what to try.
  *
  * The cleanup model is the bot's, read by the host at the start of every take, so it survives a
  * plugin restart. It only overrides the model of a model call, which the host has to allow
@@ -55,7 +55,6 @@ export interface SpeechSettings {
   model: string
   models: SpeechModel[]
   /** The last pick that didn't load, with the host's reason, until a take on it succeeds. */
-  warning: { model: string; reason: string } | null
   cleanup: SpeechCleanup
 }
 
@@ -84,19 +83,11 @@ function modelOf(raw: unknown): SpeechModel | null {
 export function readSpeech(raw: unknown): SpeechSettings {
   const speech = (raw ?? {}) as Record<string, unknown>
   const cleanup = (speech.cleanup ?? {}) as Record<string, unknown>
-  const warning = (speech.warning ?? null) as { model?: unknown; reason?: unknown } | null
   return {
     model: typeof speech.model === "string" ? speech.model : "",
     models: Array.isArray(speech.models)
       ? speech.models.map(modelOf).filter((row): row is SpeechModel => row !== null)
       : [],
-    warning:
-      warning && typeof warning.model === "string" && warning.model
-        ? {
-            model: warning.model,
-            reason: typeof warning.reason === "string" ? warning.reason : "",
-          }
-        : null,
     cleanup: {
       model: choice(cleanup.model),
       allowed: Boolean(cleanup.allowed),

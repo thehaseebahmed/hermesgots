@@ -2380,7 +2380,6 @@ function speechReading() {
       in_use: entry.name === speech.model,
       downloading: entry.name === speech.model && !speech.downloaded.has(entry.name),
     })),
-    warning: null,
     cleanup: {
       model: speech.cleanup,
       allowed: RESEARCH_WRITERS,

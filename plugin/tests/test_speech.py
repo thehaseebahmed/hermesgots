@@ -195,64 +195,34 @@ class PlayTest(TempStore):
     def test_a_model_that_loads_is_the_model_in_play(self) -> None:
         loaded = []
         warm, _ = self.warmer(loaded)
-        played = speech.play("small", warm, self.path)
-        self.assertEqual(played, {"model": "small", "warning": None})
-        self.assertEqual(speech.good(self.path), "small")
-        self.assertIsNone(speech.read(self.config, self.path, {})["warning"])
+        self.assertEqual(speech.play("small", warm), {"model": "small"})
 
-    def test_a_model_that_will_not_load_falls_back_with_a_warning(self) -> None:
+    def test_a_pick_that_will_not_load_fails_the_take_with_the_host_s_reason(self) -> None:
         loaded = []
         warm, calls = self.warmer(loaded, fail={"small"})
-        speech.play("base", warm, self.path)
-        played = speech.play("small", warm, self.path)
-        self.assertEqual(played["model"], "base", "the take carries on on the old model")
-        self.assertEqual(played["warning"]["model"], "small")
-        self.assertIn("small", played["warning"]["reason"])
-        self.assertEqual(calls, ["base", "small", "base"], "the old model is asked for again")
-        self.assertEqual(speech.good(self.path), "base")
+        speech.play("base", warm)
+        with self.assertRaises(speech.SpeechError) as caught:
+            speech.play("small", warm)
+        self.assertEqual(caught.exception.status, 502)
+        self.assertIn("small", str(caught.exception))
+        self.assertEqual(calls, ["base", "small"], "no other model is tried behind the pick")
 
-    def test_a_failure_is_never_the_model_in_play(self) -> None:
+    def test_a_failed_take_changes_nothing_the_settings_hold(self) -> None:
         loaded = []
         warm, _ = self.warmer(loaded, fail={"small"})
-        speech.play("base", warm, self.path)
-        speech.play("small", warm, self.path)
-        again = speech.play("small", warm, self.path)
-        self.assertEqual((again["model"], again["warning"]["model"]), ("base", "small"))
+        speech.play("base", warm)
+        before = speech.read(self.config, self.path, {})
+        with self.assertRaises(speech.SpeechError):
+            speech.play("small", warm)
+        self.assertEqual(speech.read(self.config, self.path, {}), before)
 
-    def test_the_fallback_is_kept_across_a_restart(self) -> None:
-        loaded = []
-        warm, _ = self.warmer(loaded, fail={"small"})
-        speech.play("base", warm, self.path)
-        played = speech.play("small", warm, self.path)
-        self.assertEqual(played["model"], "base")
-        self.assertEqual(speech.good(self.path), "base")
-
-    def test_a_model_that_loads_clears_the_warning_it_left(self) -> None:
-        loaded = []
-        warm, _ = self.warmer(loaded, fail={"small"})
-        speech.play("base", warm, self.path)
-        speech.play("small", warm, self.path)
-        self.assertIsNotNone(speech.read(self.config, self.path, {})["warning"])
-        speech.play("small", lambda model: {"warmed": True}, self.path)
-        self.assertIsNone(speech.read(self.config, self.path, {})["warning"])
-        self.assertEqual(speech.good(self.path), "small")
-
-    def test_with_nothing_to_fall_back_to_the_take_cannot_start(self) -> None:
+    def test_a_model_the_host_never_loaded_fails_the_take(self) -> None:
         loaded = []
         warm, _ = self.warmer(loaded, fail={"small"})
         with self.assertRaises(speech.SpeechError) as caught:
-            speech.play("small", warm, self.path)
+            speech.play("small", warm)
         self.assertEqual(caught.exception.status, 502)
         self.assertIn("small", str(caught.exception))
-
-    def test_a_fallback_that_fails_too_says_so(self) -> None:
-        loaded = []
-        warm, _ = self.warmer(loaded)
-        speech.play("base", warm, self.path)
-        broken = lambda model: {"warmed": False, "error": f"{model}: no disk"}
-        with self.assertRaises(speech.SpeechError):
-            speech.play("small", broken, self.path)
-
 
 class CleanupTest(TempStore):
     allowed = {"model": True, "provider": True}

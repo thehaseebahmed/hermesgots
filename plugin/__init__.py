@@ -1669,7 +1669,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 hint,
                 vocabulary,
                 cleanup_model,
-                path,
             )
         except (dictation.DictationError, dictation_stream.TakeError) as error:
             return _error(web, str(error), error.status)

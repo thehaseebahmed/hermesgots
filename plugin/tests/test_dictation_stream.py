@@ -650,7 +650,7 @@ class StartTest(unittest.TestCase):
         heard = profiles.get("haseeb", started["take"])
         self.assertIsNone(heard._clean.model)
 
-    def test_a_pick_that_will_not_load_falls_back_to_the_model_that_did(self) -> None:
+    def test_a_pick_that_will_not_load_fails_the_take_with_the_host_s_reason(self) -> None:
         _, patch = hermes()
         profiles = dictation_stream.Takes()
 
@@ -659,16 +659,11 @@ class StartTest(unittest.TestCase):
                 return {"warmed": False, "error": "the model's file is corrupt"}
             return {"warmed": True, "model": model}
 
-        with tempfile.TemporaryDirectory() as folder:
-            path = Path(folder) / "memento.db"
-            speech.play("base", lambda model: {"warmed": True}, path)
-            with patch, mock.patch.object(dictation, "warm", warm):
-                started = dictation_stream.start(profiles, "haseeb", "Gots", [], None, path)
-        self.assertEqual(started["model"], "base")
-        self.assertEqual(started["warning"]["model"], "small")
-        self.assertIn("corrupt", started["warning"]["reason"])
-        heard = profiles.get("haseeb", started["take"])
-        self.assertEqual(heard.model, "base")
+        with patch, mock.patch.object(dictation, "warm", warm):
+            with self.assertRaises(speech.SpeechError) as caught:
+                dictation_stream.start(profiles, "haseeb", "Gots", [], None)
+        self.assertEqual(caught.exception.status, 502)
+        self.assertIn("corrupt", str(caught.exception))
 
     def test_a_host_that_cannot_dictate_refuses_the_take(self) -> None:
         _, patch = hermes(_load_stt_config=lambda: {"enabled": False})
