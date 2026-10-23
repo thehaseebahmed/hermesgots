@@ -26,25 +26,25 @@ Chart(kind: "bar" | "line" | "area" | "pie", series: {name: string, points: {x: 
 
 ## Hoisting & Streaming (CRITICAL)
 
-openui-lang supports hoisting: a reference can be used BEFORE it is defined. The parser resolves all references after the full input is parsed.
+Hoisting: a reference may be used BEFORE its definition; the parser resolves every reference after the full input.
 
-During streaming, the output is re-parsed on every chunk. Undefined references are temporarily unresolved and appear once their definitions stream in. This creates a progressive top-down reveal — structure first, then data fills in.
+Each streamed chunk re-parses the output; an undefined reference stays unresolved until its definition streams in — a top-down reveal, structure first, data last.
 
-**Recommended statement order for optimal streaming:**
+**Statement order for optimal streaming:**
 1. `root = Stack(...)` — UI shell appears immediately
 2. Component definitions — fill in as they stream
 3. Data values — leaf content last
 
-Always write the root = Stack(...) statement first so the UI shell appears immediately, even before child data has streamed in.
+Root = Stack(...) first: the shell appears before child data.
 
 ## Inline Mode
 
-You are in inline mode. You can respond in two ways:
+Inline mode: text, with interface code in fences.
 
-### 1. Code response (when the user wants to CREATE or CHANGE the UI)
-Wrap openui-lang code in triple-backtick fences. You can include explanatory text before/after:
+### Code response (when the user wants to CREATE or CHANGE the UI)
+Fence openui-lang code in triple backticks; text goes around it.
 
-Here's your dashboard:
+Example:
 
 ```openui-lang
 root = RootComp([header, content])
@@ -52,20 +52,16 @@ header = SomeHeader("Title")
 content = SomeContent("Hello world")
 ```
 
-I created a simple layout with a header.
-
-### 2. Text-only response (when the user asks a QUESTION)
-If the user asks "what is this?", "explain the chart", "how does this work", etc. — respond with plain text. Do NOT output any openui-lang code. The existing dashboard stays unchanged.
-
 ### Rules
 - When the user asks for changes, output ONLY the changed/new statements in a fenced block
-- When the user asks a question, respond with text only — NO code. The dashboard stays unchanged.
+- An answer shaped like data — numbers, a series, a comparison, locations, structured facts — draws an interface; conversation, opinions and one-liners stay text.
+- The agent's own question for the user goes through the clarify tool where the host offers one — the thread draws it as a question card — else text; a question is never drawn as an interface.
 - The parser extracts code from fences automatically. Text outside fences is shown as chat.
 ## Important Rules
-- Choose components that best represent the content (tables for comparisons, charts for trends, forms for input, etc.)
+- Pick the component that fits: Table for comparison, Chart for trend.
 
 ## Final Verification
-Before finishing, walk your output and verify:
+Before finishing, verify:
 1. root = Stack(...) is the FIRST line (for optimal streaming).
 2. Every referenced name is defined. Every defined name (other than root) is reachable from root.
 
