@@ -2440,18 +2440,24 @@ export async function warmDictation(config: HermesConfig) {
   })
 }
 
-/** A recorded clip's text, `""` when nobody spoke. */
+/**
+ * A recorded clip's text, `""` when nobody spoke. `vocabulary` is the bot's own words (its
+ * Dictation tab), sent as one repeated query param each, so a decode spells a name the way the bot
+ * spells it; a plugin that doesn't know the param ignores it.
+ */
 export async function transcribeClip(
   config: HermesConfig,
   clip: Blob,
   hint: string,
   context: string,
+  vocabulary: string[] = [],
   signal?: AbortSignal,
 ) {
   const query = new URLSearchParams()
   if (hint) query.set("hint", hint)
   // A plugin before 0.35 ignores the text heard before this clip.
   if (context) query.set("context", context.slice(-400))
+  for (const word of vocabulary) if (word) query.append("vocabulary", word)
   const search = query.toString() ? `?${query}` : ""
   const response = await request(`${pluginRoot(config.baseUrl)}/dictation${search}`, {
     method: "POST",
@@ -2461,6 +2467,30 @@ export async function transcribeClip(
   })
   const text = (await response.json())?.text
   return typeof text === "string" ? text : ""
+}
+
+/**
+ * A finished dictation tidied whole (`POST dictation/cleanup`, ADR 0038): the words the host heard
+ * and the bot's vocabulary in, the tidied text out.
+ *
+ * The answer is null when the host didn't answer with text at all — a shape the route never sends,
+ * and the take lands the words as it heard them. A refusal, a timeout or a host without the route
+ * throws, as every call here does; a take treats those the same way and never fails over one.
+ */
+export async function tidyDictation(
+  config: HermesConfig,
+  text: string,
+  vocabulary: string[] = [],
+  signal?: AbortSignal,
+): Promise<string | null> {
+  const response = await request(`${pluginRoot(config.baseUrl)}/dictation/cleanup`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ text, vocabulary }),
+    signal,
+  })
+  const tidied = (await response.json())?.text
+  return typeof tidied === "string" && tidied.trim() ? tidied : null
 }
 
 /** What a started take answers: this is the take to send audio to. */

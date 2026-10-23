@@ -4,7 +4,6 @@ import { ArrowUpIcon, RotateCwIcon, SquareIcon, XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { keyboardClick, type DictationStatus } from "@/lib/dictation"
 import { failureLine, type DictationFailure } from "@/lib/dictation-failure"
-import { hearing, transcriptText, type DictationTranscript } from "@/lib/dictation-transcript"
 
 const IDLE_BARS = Array<number>(32).fill(0)
 
@@ -26,36 +25,11 @@ function Elapsed({ since }: { since: number }) {
   )
 }
 
-function Transcript({ transcript }: { transcript: DictationTranscript }) {
-  const box = useRef<HTMLDivElement>(null)
-  const text = transcriptText(transcript)
-  useEffect(() => {
-    const element = box.current
-    if (element) element.scrollTop = element.scrollHeight
-  }, [text, transcript.behind])
-  return (
-    <div
-      ref={box}
-      role="region"
-      aria-label="Dictation"
-      aria-live="off"
-      className="max-h-[4.5rem] overflow-y-auto px-3 pt-2 pb-0.5 text-sm leading-snug"
-    >
-      {transcript.preparing && !text && (
-        <span className="text-muted-foreground motion-safe:animate-pulse">Preparing…</span>
-      )}
-      {text && <p className="break-words whitespace-pre-wrap">{text}</p>}
-      {transcript.behind && <p className="pt-0.5 text-xs text-muted-foreground">Behind</p>}
-    </div>
-  )
-}
-
 export function VoiceBar({
   status,
   levels,
   startedAt,
   failure,
-  transcript,
   onCancel,
   onStop,
   onSend,
@@ -66,8 +40,6 @@ export function VoiceBar({
   startedAt: number | null
   /** Why the take failed, with what to try: the bar's one line while it is failed. */
   failure: DictationFailure | null
-  /** What the take has heard so far; absent for the chunked implementation, which has no words yet. */
-  transcript?: DictationTranscript
   onCancel: () => void
   onStop: () => void
   onSend: () => void
@@ -98,9 +70,6 @@ export function VoiceBar({
       onPointerDownCapture={() => (pressed.current = true)}
       className="flex flex-col rounded-[1.75rem] border border-input bg-background shadow-lg shadow-black/5 dark:bg-input/30"
     >
-      {status !== "failed" && transcript && hearing(transcript) && (
-        <Transcript transcript={transcript} />
-      )}
       <div className="flex items-center gap-2 p-1.5">
         <Button
           type="button"

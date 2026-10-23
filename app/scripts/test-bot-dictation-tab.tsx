@@ -105,8 +105,8 @@ const modelRow = (name: string) =>
     row.textContent?.trim().startsWith(name),
   ) ?? null
 
-test("a host that streams a take has a Dictation tab, and it holds the bot's words", async () => {
-  await seed("streaming", ["dictation", "dictation_stream"], { vocabulary: ["Haseeb"] })
+test("a host that can dictate has a Dictation tab, and it holds the bot's words", async () => {
+  await seed("dictating", ["dictation"], { vocabulary: ["Haseeb"] })
   await mount(editor("/settings/bots/bot-1/dictation"), async () => {
     assert.ok(dictationTab(), "the Dictation tab is on the editor")
     assert.ok(chip("Haseeb"), "the bot's word is on it")
@@ -114,8 +114,8 @@ test("a host that streams a take has a Dictation tab, and it holds the bot's wor
   })
 })
 
-test("a host that can't stream has no Dictation tab, and its address lands on General", async () => {
-  await seed("no-stream", ["dictation"])
+test("a host that can't dictate has no Dictation tab, and its address lands on General", async () => {
+  await seed("no-dictation", ["speech_model"])
   await mount(editor("/settings/bots/bot-1/dictation"), async () => {
     assert.equal(dictationTab(), null, "no Dictation tab")
     assert.equal(here(), "/settings/bots/bot-1", "the address is the bot's own")
@@ -124,7 +124,7 @@ test("a host that can't stream has no Dictation tab, and its address lands on Ge
 })
 
 test("a word added on the screen is written into the bot's record", async () => {
-  await seed("adding", ["dictation_stream"])
+  await seed("adding", ["dictation"])
   await mount(editor("/settings/bots/bot-1/dictation"), async () => {
     await type(find("#vocabulary-word"), "Gots")
     await add()
@@ -137,7 +137,7 @@ test("a word added on the screen is written into the bot's record", async () => 
 })
 
 test("a word the list already holds is not added again", async () => {
-  await seed("repeated", ["dictation_stream"], { vocabulary: ["Gots"] })
+  await seed("repeated", ["dictation"], { vocabulary: ["Gots"] })
   await mount(editor("/settings/bots/bot-1/dictation"), async () => {
     await type(find("#vocabulary-word"), "gots")
     await add()
@@ -147,7 +147,7 @@ test("a word the list already holds is not added again", async () => {
 })
 
 test("a word removed from the tab leaves the record", async () => {
-  await seed("removing", ["dictation_stream"], { vocabulary: ["Gots", "Haseeb"] })
+  await seed("removing", ["dictation"], { vocabulary: ["Gots", "Haseeb"] })
   await mount(editor("/settings/bots/bot-1/dictation"), async () => {
     await click(chip("Haseeb"))
     assert.equal(chip("Haseeb"), null, "the word is gone from the tab")
@@ -157,7 +157,7 @@ test("a word removed from the tab leaves the record", async () => {
 })
 
 test("the tab lists the host's speech models with their size, speed and which is in use", async () => {
-  await seed("speech-list", ["dictation_stream", "speech_model"], {}, { speech: speech() })
+  await seed("speech-list", ["dictation", "speech_model"], {}, { speech: speech() })
   await mount(editor("/settings/bots/bot-1/dictation"), async () => {
     const base = modelRow("base")
     assert.match(base?.textContent ?? "", /145 MB/, "the download is named")
@@ -178,7 +178,7 @@ test("a model picked on the tab is written to the host, and the list says which 
   }))
   const calls = await seed(
     "speech-pick",
-    ["dictation_stream", "speech_model"],
+    ["dictation", "speech_model"],
     {},
     { speech: speech(), next: chosen },
   )
@@ -194,7 +194,7 @@ test("a model picked on the tab is written to the host, and the list says which 
 test("a model the host refuses leaves the old one in place and shows the host's reason", async () => {
   const calls = await seed(
     "speech-refuse",
-    ["dictation_stream", "speech_model"],
+    ["dictation", "speech_model"],
     {},
     {
       speech: speech(),
@@ -212,7 +212,7 @@ test("a model the host refuses leaves the old one in place and shows the host's 
 test("a pick the host does not have says it is downloading", async () => {
   await seed(
     "speech-downloads",
-    ["dictation_stream", "speech_model"],
+    ["dictation", "speech_model"],
     {},
     {
       speech: speech({
@@ -234,7 +234,7 @@ test("a pick the host does not have says it is downloading", async () => {
 })
 
 test("cleanup's model is offered where the host allows it, and explained where it doesn't", async () => {
-  await seed("cleanup-allowed", ["dictation_stream", "speech_model"], {}, { speech: speech() })
+  await seed("cleanup-allowed", ["dictation", "speech_model"], {}, { speech: speech() })
   await mount(editor("/settings/bots/bot-1/dictation"), async () => {
     assert.ok(find("#cleanup-model"), "the one-line override is on the tab")
     assert.match(find("#cleanup-model")?.textContent ?? "", /Default/)
@@ -245,7 +245,7 @@ test("a host that withholds the model-override permission says so instead of off
   const reason = "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable memento`."
   await seed(
     "cleanup-denied",
-    ["dictation_stream", "speech_model"],
+    ["dictation", "speech_model"],
     {},
     { speech: speech({ cleanup: { model: null, allowed: false, reason } }) },
   )

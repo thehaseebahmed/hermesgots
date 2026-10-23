@@ -57,7 +57,7 @@ import { connectionKey } from "@/lib/connection"
 import { formatRelative } from "@/lib/format"
 import { botTabOf, botTabPath, type BotTab } from "@/lib/bot-tabs"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
-import { DICTATION_STREAM } from "@/lib/dictation-take"
+import { DICTATION } from "@/lib/dictation"
 import { usePluginFeature } from "@/lib/features"
 import { checkHealth, getPluginVersion, listModels } from "@/lib/hermes"
 import { useMcpFeatureAnswers } from "@/lib/mcps"
@@ -205,9 +205,9 @@ export function BotEditor({
   // list them, and a Host that hasn't answered yet shows General rather than flashing a tab away.
   const answers = useMcpFeatureAnswers(profile)
   const mcpServers = answers.list === "yes"
-  const streams = usePluginFeature(profile, DICTATION_STREAM)
+  const dictates = usePluginFeature(profile, DICTATION)
   const shown: BotTab =
-    (tab === "mcps" && !mcpServers) || (tab === "dictation" && streams !== "yes") ? "general" : tab
+    (tab === "mcps" && !mcpServers) || (tab === "dictation" && dictates !== "yes") ? "general" : tab
 
   // Local drafts so typing isn't fighting the live query; persisted on every change.
   const [name, setName] = useState(profile.name)
@@ -225,9 +225,9 @@ export function BotEditor({
   useEffect(() => {
     if (tab === "mcps" && answers.list === "no")
       void navigate(`/settings/bots/${profile.id}`, { replace: true })
-    if (tab === "dictation" && streams === "no")
+    if (tab === "dictation" && dictates === "no")
       void navigate(`/settings/bots/${profile.id}`, { replace: true })
-  }, [tab, answers.list, streams, navigate, profile.id])
+  }, [tab, answers.list, dictates, navigate, profile.id])
 
   // One read of the host's model list, for both the tab's own open and General's Test connection.
   const readModels = useCallback(
@@ -302,7 +302,7 @@ export function BotEditor({
       <TabsList>
         <TabsTrigger value="general">General</TabsTrigger>
         <TabsTrigger value="models">Models</TabsTrigger>
-        {streams === "yes" && <TabsTrigger value="dictation">Dictation</TabsTrigger>}
+        {dictates === "yes" && <TabsTrigger value="dictation">Dictation</TabsTrigger>}
         {mcpServers && <TabsTrigger value="mcps">MCP</TabsTrigger>}
       </TabsList>
 
@@ -516,7 +516,7 @@ export function BotEditor({
         </FieldGroup>
       </TabsContent>
 
-      {streams === "yes" && (
+      {dictates === "yes" && (
         <TabsContent value="dictation">
           <DictationTab profile={profile} />
         </TabsContent>

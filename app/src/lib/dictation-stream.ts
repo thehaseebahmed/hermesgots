@@ -595,6 +595,7 @@ export function useStreamDictation(
           latest.current.config,
           current.kept,
           latest.current.hint,
+          latest.current.vocabulary ?? [],
           controller.signal,
         )
         if (session.current !== current || current.upload !== controller) return null

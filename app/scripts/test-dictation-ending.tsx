@@ -2,14 +2,18 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { Composer } from "@/components/chat/composer"
+import { SEND_WAIT_MS } from "@/lib/dictation"
 import { db, type Attachment } from "@/lib/db"
 import {
   click,
   connection,
+  findAll,
+  find,
   json,
   mount,
   seedSettings,
   settle,
+  text,
   type,
   until,
 } from "./component-kit.tsx"
@@ -18,77 +22,71 @@ import { installFakeMedia } from "./fake-dictation.ts"
 installFakeMedia()
 
 const bot = connection("dictation-ending")
+/** What the host heard, filler and all: what a clip answers before anything tidies it. */
+const HEARD = "um Let us ship the dictation"
+/** What the end cleanup makes of it, and so what lands. */
+const TIDIED = "Let us ship the dictation."
+const VOCABULARY = ["Gots"]
 
 interface HostOptions {
-  stop?: "hang" | { after?: number; phrases?: { id: number; text: string }[] }
+  /** A clip answered, a host that fails it, or one that never answers it. */
+  clip?: "ok" | "fail" | "hang"
+  /** How long the host takes over a clip. */
+  clipAfter?: number
+  /** The end cleanup: a tidied answer, a refusal, an answer in the wrong shape, or none at all. */
+  cleanup?: "ok" | "fail" | "junk" | "hang"
+  /** How long the cleanup takes, so a Cancel can land inside it. */
+  cleanupAfter?: number
 }
 
-function host({ stop = {} }: HostOptions = {}) {
-  const calls: string[] = []
-  const answered = new Map<string, number>()
-  let takes = 0
-  let cancels = 0
+function host({ clip = "ok", clipAfter = 50, cleanup = "ok", cleanupAfter = 0 }: HostOptions = {}) {
+  const calls: { method: string; path: string; body: unknown; vocabulary: string[] }[] = []
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    const path = new URL(String(input)).pathname
+    const url = new URL(String(input))
     const method = (init?.method ?? "GET").toUpperCase()
-    calls.push(`${method} ${path}`)
-    if (path.endsWith("/plugins/memento/info"))
+    calls.push({
+      method,
+      path: url.pathname,
+      body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined,
+      vocabulary: url.searchParams.getAll("vocabulary"),
+    })
+    if (url.pathname.endsWith("/plugins/memento/info"))
       return json({
         name: "memento",
-        features: ["dictation", "dictation_stream"],
+        features: ["dictation"],
         dictation: { ready: true, model: "base" },
       })
-    if (path.endsWith("/dictation/take") && method === "POST") {
-      takes += 1
-      return json({ object: "memento.dictation_take", take: `dt_${takes}`, ready: true })
+    if (url.pathname.endsWith("/dictation/warm"))
+      return json({ object: "memento.dictation_warm", warmed: true, ms: 0 })
+    if (url.pathname.endsWith("/dictation/cleanup") && method === "POST") {
+      if (cleanup === "hang") return new Promise<Response>(() => {})
+      if (cleanupAfter) await new Promise((done) => setTimeout(done, cleanupAfter))
+      if (cleanup === "fail")
+        return json({ error: { message: "Couldn't tidy the dictation." } }, 502)
+      if (cleanup === "junk") return json({ object: "memento.dictation_cleanup", text: 42 })
+      return json({ object: "memento.dictation_cleanup", text: TIDIED, cleaned: true, ms: 900 })
     }
-    const route = /\/dictation\/take\/([^/]+)\/(audio|stop|cancel)$/.exec(path)
-    if (route) {
-      const [, take, action] = route
-      if (action === "cancel") {
-        cancels += 1
-        return json({ object: "memento.dictation_cancel", cancelled: true })
-      }
-      if (action === "stop") {
-        if (stop === "hang") return new Promise<Response>(() => {})
-        if (stop.after) await new Promise((done) => setTimeout(done, stop.after))
-        return json({
-          object: "memento.dictation_stop",
-          take,
-          words: "",
-          phrases: stop.phrases ?? [],
-          behind: false,
-        })
-      }
-      const heard = answered.get(take) ?? 0
-      answered.set(take, heard + 1)
-      return json({
-        object: "memento.dictation_audio",
-        take,
-        words: heard ? "" : "hello there",
-        phrases: [],
-        behind: false,
-      })
+    if (url.pathname.endsWith("/dictation") && method === "POST") {
+      if (clip === "hang") return new Promise<Response>(() => {})
+      if (clipAfter) await new Promise((done) => setTimeout(done, clipAfter))
+      if (clip === "fail") return json({ error: { message: "Local transcription failed." } }, 502)
+      return json({ object: "memento.dictation", text: HEARD, ms: 50 })
     }
     return json({}, 404)
   }
   globalThis.fetch = fetch as unknown as typeof globalThis.fetch
   return {
     calls,
-    starts: () => takes,
-    cancels: () => cancels,
-    stops: () => calls.filter((call) => call.endsWith("/stop")).length,
+    clips: () => calls.filter((call) => call.path.endsWith("/dictation")),
+    cleanups: () => calls.filter((call) => call.path.endsWith("/dictation/cleanup")),
   }
 }
-
-const TAIL = { id: 2, text: "hello there and that is all" }
-const TAKEN = "hello there and that is all"
 
 const composer = (draftKey: string, sent: { text: string; attachments: Attachment[] }[]) => (
   <Composer
     busy={false}
-    onSend={(text, attachments) => {
-      sent.push({ text, attachments })
+    onSend={(words, attachments) => {
+      sent.push({ text: words, attachments })
     }}
     onQueue={() => {}}
     onStop={() => {}}
@@ -97,23 +95,36 @@ const composer = (draftKey: string, sent: { text: string; attachments: Attachmen
     filesAvailable={false}
     imagesAvailable
     draftKey={draftKey}
+    dictationWords={VOCABULARY}
   />
 )
 
 const field = (scope: ParentNode = document) =>
   scope.querySelector("textarea") as HTMLTextAreaElement | null
 const bar = (scope: ParentNode = document) =>
+  scope.querySelector('[role="group"][aria-label="Dictation take"]')
+const region = (scope: ParentNode = document) =>
   scope.querySelector('[role="region"][aria-label="Dictation"]')
-const barText = (scope: ParentNode = document) => bar(scope)?.textContent ?? ""
 const button = (label: string, scope: ParentNode = document) =>
   scope.querySelector(`[aria-label="${label}"]`)
+const alert = (scope: ParentNode = document) => scope.querySelector('[role="alert"]')
 
-async function openTake(hosted: ReturnType<typeof host>, scope: ParentNode = document) {
+async function openTake(scope: ParentNode = document) {
   await until(async () => Boolean(button("Voice", scope)), "the microphone")
   await settle()
   await click(button("Voice", scope))
-  await until(async () => hosted.starts() === 1, "the take opened on the host")
-  await until(async () => barText(scope).includes("hello there"), "the take's words in the bar")
+  await until(async () => Boolean(bar(scope)), "the bar")
+  // The fake recorder's first slice is a second in: without it the take has nothing to send.
+  await new Promise((done) => setTimeout(done, 1200))
+}
+
+/** A wait longer than the take's own, for the case where the take spends all of it. */
+async function within(ms: number, check: () => Promise<boolean>, what: string) {
+  for (let end = Date.now() + ms; Date.now() < end; ) {
+    if (await check()) return
+    await new Promise((done) => setTimeout(done, 10))
+  }
+  assert.fail(`waited for ${what}`)
 }
 
 async function reset(...keys: string[]) {
@@ -123,101 +134,175 @@ async function reset(...keys: string[]) {
   for (const key of keys) await db.drafts.put({ id: key, text: "", at: 1 })
 }
 
-test("a Stop finishes the take, and its tail lands where the caret was", async () => {
+test("a take shows its meter, the time and the buttons, and no words at all", async () => {
   const sent: { text: string; attachments: Attachment[] }[] = []
-  const hosted = host({ stop: { after: 50, phrases: [TAIL] } })
+  host()
+  await reset("c:talking")
+  await mount(composer("c:talking", sent), async () => {
+    await openTake()
+    assert.equal(region(), null, "the bar has no transcript region")
+    assert.doesNotMatch(text(), /Let us ship/, "no words anywhere on the bar")
+    assert.doesNotMatch(text(), /Transcribing…/, "it is still listening")
+    assert.ok(
+      button("Stop") && button("Send") && button("Cancel"),
+      "Stop, Send and Cancel are there",
+    )
+    assert.match(bar()?.textContent ?? "", /0:0[0-9]/, "the elapsed time is on the bar")
+    const meter = findAll('[aria-live="polite"]')[0]
+    assert.equal(
+      meter?.querySelectorAll("span").length,
+      32,
+      "the level waveform is still the meter",
+    )
+
+    await click(button("Cancel"))
+    await until(async () => Boolean(button("Voice")), "the bar back to idle")
+  })
+})
+
+test("a Stop lands the tidied take in one write, where the caret was", async () => {
+  const sent: { text: string; attachments: Attachment[] }[] = []
+  const hosted = host()
   await reset("c:stop")
   await mount(composer("c:stop", sent), async () => {
     await type(field(), "Before after")
     field()!.setSelectionRange(7, 7)
-    await openTake(hosted)
+    await openTake()
 
     await click(button("Stop"))
     await until(
-      async () => field()?.value === "Before hello there and that is all after",
-      "the take",
+      async () => field()?.value === "Before Let us ship the dictation. after",
+      "the tidied take at the caret",
     )
-    assert.equal(hosted.stops(), 1, "the host was asked to finish the take once")
+    assert.equal(hosted.cleanups().length, 1, "the host was asked to tidy the take once")
+    assert.deepEqual(
+      hosted.cleanups()[0].body,
+      { text: HEARD, vocabulary: VOCABULARY },
+      "the cleanup carries the words the host heard and the bot's vocabulary",
+    )
+    assert.deepEqual(
+      hosted.clips()[0].vocabulary,
+      VOCABULARY,
+      "every piece's transcription carries the bot's vocabulary",
+    )
     assert.equal(sent.length, 0, "a Stop puts the words in the field, it does not send them")
-    assert.equal(await db.dictations.count(), 0, "a take that ended keeps nothing on the device")
+    await until(
+      async () => (await db.dictations.count()) === 0,
+      "a take that ended keeping nothing on the device",
+    )
   })
 })
 
-test("a Send mid-take waits for the tail and sends the whole take", async () => {
+test("a Send waits for the cleanup and sends the tidied take", async () => {
   const sent: { text: string; attachments: Attachment[] }[] = []
-  const hosted = host({ stop: { after: 50, phrases: [TAIL] } })
+  const hosted = host()
   await reset("c:send")
   await mount(composer("c:send", sent), async () => {
-    await openTake(hosted)
+    await openTake()
 
     await click(button("Send"))
     await until(async () => sent.length === 1, "the message sent")
-    assert.equal(sent[0].text, TAKEN, "the tail the send waited for is in the message")
+    assert.equal(sent[0].text, TIDIED, "the tidied take is the message")
+    assert.equal(hosted.cleanups().length, 1, "the host tidied it before it went")
     await until(async () => Boolean(field()), "the composer is back")
     assert.equal(field()?.value, "", "the message took the words")
-    assert.equal(hosted.cancels(), 0, "a tail that answered is not abandoned")
   })
 })
 
-test("a Send whose tail hangs sends what the bar has, and gives the composer back", async () => {
+test("a cleanup that fails lands the words as the host heard them", async () => {
   const sent: { text: string; attachments: Attachment[] }[] = []
-  const hosted = host({ stop: "hang" })
-  await reset("c:hang")
-  await mount(composer("c:hang", sent), async () => {
-    await openTake(hosted)
+  host({ cleanup: "fail" })
+  await reset("c:cleanup-fail")
+  await mount(composer("c:cleanup-fail", sent), async () => {
+    await type(field(), "Before after")
+    field()!.setSelectionRange(7, 7)
+    await openTake()
+
+    await click(button("Stop"))
+    await until(
+      async () => field()?.value === `Before ${HEARD} after`,
+      "the raw words, filler and all",
+    )
+    assert.equal(sent.length, 0, "a Stop lands them in the field")
+    assert.equal(alert(), null, "a cleanup that fails is not a failed take")
+    await until(
+      async () => (await db.dictations.count()) === 0,
+      "the take ended, keeping nothing",
+    )
+  })
+})
+
+test("a cleanup that answers junk lands the words as the host heard them", async () => {
+  const sent: { text: string; attachments: Attachment[] }[] = []
+  host({ cleanup: "junk" })
+  await reset("c:cleanup-junk")
+  await mount(composer("c:cleanup-junk", sent), async () => {
+    await openTake()
+
+    await click(button("Send"))
+    await until(async () => sent.length === 1, "the message sent")
+    assert.equal(sent[0].text, HEARD, "an answer that isn't text is not the take")
+  })
+})
+
+test("a cleanup that hangs lands the words as the host heard them, inside the wait", async () => {
+  const sent: { text: string; attachments: Attachment[] }[] = []
+  const hosted = host({ cleanup: "hang" })
+  await reset("c:cleanup-hang")
+  await mount(composer("c:cleanup-hang", sent), async () => {
+    await openTake()
     const started = Date.now()
 
     await click(button("Send"))
-    await until(async () => sent.length === 1, "the message sent with what the take had")
+    await within(SEND_WAIT_MS + 3000, async () => sent.length === 1, "the message sent")
     const waited = Date.now() - started
-    assert.equal(sent[0].text, "hello there", "exactly the words the bar had shown, once")
-    assert.ok(waited < 4000, `the send was bounded rather than hanging (${waited} ms)`)
-    assert.equal(hosted.cancels(), 1, "the host is told to forget a take nobody waits for")
+    assert.equal(sent[0].text, HEARD, "the raw words are the fallback")
+    assert.equal(hosted.cleanups().length, 1, "the cleanup was still asked for")
+    assert.ok(waited < SEND_WAIT_MS + 2500, `the Send was bounded by its wait (${waited} ms)`)
     await until(async () => Boolean(field()), "the composer is back")
   })
 })
 
-test("a Stop whose tail hangs gives the composer back with the words it has", async () => {
+test("a clip the host never answers gives the composer back inside the wait", async () => {
   const sent: { text: string; attachments: Attachment[] }[] = []
-  const hosted = host({ stop: "hang" })
-  await reset("c:stop-hang")
-  await mount(composer("c:stop-hang", sent), async () => {
+  const hosted = host({ clip: "hang" })
+  await reset("c:clip-hang")
+  await mount(composer("c:clip-hang", sent), async () => {
     await type(field(), "Before")
-    await openTake(hosted)
+    await openTake()
     const started = Date.now()
 
-    await click(button("Stop"))
-    for (let end = started + 11_000; !field() && Date.now() < end;)
-      await new Promise((done) => setTimeout(done, 20))
-    assert.ok(field(), "the composer came back rather than staying in the ending")
-    assert.ok(Date.now() - started < 11_000, "and inside its bound")
-    assert.equal(field()!.value, "Before hello there", "the words the take had, at the caret")
-    assert.equal(sent.length, 0, "a Stop puts them in the field")
-    assert.equal(hosted.cancels(), 1, "the host is told to forget the take it never finished")
+    await click(button("Send"))
+    await within(SEND_WAIT_MS + 3000, async () => Boolean(field()), "the composer back")
+    const waited = Date.now() - started
+    assert.equal(field()?.value, "Before", "nothing was heard, so nothing lands")
+    assert.equal(hosted.cleanups().length, 0, "a take with no words is not tidied")
+    assert.ok(waited < SEND_WAIT_MS + 2500, `the Send was bounded by its wait (${waited} ms)`)
   })
 })
 
-test("a Cancel while the tail is being waited for inserts nothing, even when it answers", async () => {
+test("a Cancel while the take is being tidied inserts nothing", async () => {
   const sent: { text: string; attachments: Attachment[] }[] = []
-  const hosted = host({ stop: { after: 900, phrases: [TAIL] } })
+  const hosted = host({ cleanupAfter: 900 })
   await reset("c:cancel")
   await mount(composer("c:cancel", sent), async () => {
     await type(field(), "Before")
-    await openTake(hosted)
+    await openTake()
 
     await click(button("Stop"))
+    await until(async () => hosted.cleanups().length === 1, "the cleanup asked for")
     await click(button("Cancel"))
     await until(async () => Boolean(field()), "the composer is back")
     await new Promise((done) => setTimeout(done, 1200))
     assert.equal(field()?.value, "Before", "the draft is as it was")
     assert.equal(sent.length, 0, "nothing was sent")
-    assert.equal(await db.dictations.count(), 0, "a cancelled take keeps nothing")
+    await until(async () => (await db.dictations.count()) === 0, "a cancelled take keeping nothing")
   })
 })
 
 test("a profile hears one take at a time, and the mic is free once it ends", async () => {
   const sent: { text: string; attachments: Attachment[] }[] = []
-  const hosted = host({ stop: { after: 50, phrases: [TAIL] } })
+  host()
   await reset("c:one", "c:two")
   const both = (
     <div>
@@ -228,20 +313,18 @@ test("a profile hears one take at a time, and the mic is free once it ends", asy
   await mount(both, async () => {
     const one = document.querySelector('[data-test="one"]') as HTMLElement
     const two = document.querySelector('[data-test="two"]') as HTMLElement
-    await openTake(hosted, one)
+    await openTake(one)
 
     await until(async () => Boolean(button("Voice", two)), "the second composer's microphone")
     await click(button("Voice", two))
     await settle()
-    assert.equal(hosted.starts(), 1, "the second take never reached the host")
     assert.equal(bar(two), null, "the second composer never took the bar")
     assert.ok(field(two), "its field is still its own")
 
     await click(button("Cancel", one))
     await until(async () => !bar(one), "the first take let go")
     await click(button("Voice", two))
-    await until(async () => hosted.starts() === 2, "the second take opened")
-    await until(async () => barText(two).includes("hello there"), "its words in the bar")
+    await until(async () => Boolean(bar(two)), "the second take opened")
     await click(button("Cancel", two))
     await until(async () => !bar(two), "the second take let go")
   })

@@ -56,7 +56,7 @@ async function seed(name: string, patch: Partial<SavedDictation> = {}) {
       { blob: new Blob(["second"], { type: "audio/webm" }), text: null },
     ],
     at: 1,
-    kind: "stream",
+    kind: "pieces",
     caret: CARET,
     ...patch,
   })
@@ -137,7 +137,7 @@ test("deleting the chat, or the bot, takes its kept takes with it", async () => 
     id: "new:bot-1",
     pieces: [{ blob: new Blob(["slice"], { type: "audio/webm" }), text: null }],
     at: 1,
-    kind: "stream",
+    kind: "pieces",
   })
 
   await deleteConversation("chat-1")
