@@ -433,7 +433,12 @@ export function useStreamDictation(
       .getAudioTracks()
       .forEach((track) => track.addEventListener("ended", () => fail(current, microphoneFailure(TAKEN))))
     setStartedAt(current.startedAt)
-    current.cap = window.setTimeout(() => void stopRecording(current), MAX_MS)
+    // Past the cap the take ends the way a Stop ends it: the tail lands, the microphone is let go,
+    // and nothing is left listening for slices that never come.
+    current.cap = window.setTimeout(() => {
+      void finish()
+      setLevels(null)
+    }, MAX_MS)
 
     try {
       const audio = new AudioContext()

@@ -111,5 +111,6 @@ test("a row says in use before it says slow, and a download before either", () =
   assert.equal(marked(small), "In use · downloads on the next take")
   assert.equal(marked({ ...small, downloading: false }), "In use")
   assert.equal(marked(large), "Too slow on a CPU")
+  assert.equal(marked({ ...large, inUse: true, downloading: false }), "In use · too slow on a CPU")
   assert.equal(marked(base), null)
 })

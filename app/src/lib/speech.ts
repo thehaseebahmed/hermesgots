@@ -122,7 +122,7 @@ export function modelSpeed(speed: number | null): string {
 /** Whether a row is the one in play, and should read as chosen rather than offered. */
 export function marked(row: SpeechModel): string | null {
   if (row.inUse && row.downloading) return "In use · downloads on the next take"
-  if (row.inUse) return "In use"
+  if (row.inUse) return row.slowOnCpu ? "In use · too slow on a CPU" : "In use"
   if (row.slowOnCpu) return "Too slow on a CPU"
   return null
 }
