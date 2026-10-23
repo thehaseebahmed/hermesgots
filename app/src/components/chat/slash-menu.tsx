@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import {
+  MessageSquarePlusIcon,
   CornerDownRightIcon,
   ListPlusIcon,
   PlusIcon,
@@ -14,6 +15,7 @@ import type { SkillsState } from "@/lib/skills"
 
 const COMMAND_ICONS = {
   new: PlusIcon,
+  thread: MessageSquarePlusIcon,
   settings: SettingsIcon,
   steer: CornerDownRightIcon,
   queue: ListPlusIcon,

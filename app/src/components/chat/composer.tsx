@@ -43,11 +43,11 @@ import {
   type DictationAvailability,
 } from "@/lib/dictation"
 import {
-  LOCAL_COMMANDS,
   SEND_COMMANDS,
   hoistItem,
   isSendMode,
   localCommand,
+  localCommands,
   optionId,
   rankSlashItems,
   sendMode,
@@ -81,6 +81,7 @@ export function Composer({
   steerByDefault = false,
   canSteer = false,
   onSteer,
+  main = false,
 }: {
   busy: boolean
   /** Whether a message sent while a reply runs steers it unless it starts with `/queue`. */
@@ -107,11 +108,15 @@ export function Composer({
   /** False when the model doesn't take images. */
   imagesAvailable: boolean
   disabled?: boolean
+  main?: boolean
   onSend: (text: string, attachments: Attachment[]) => Promise<void> | void
   /** Called instead of `onSend` while a reply is streaming: Enter queues the message. */
   onQueue: (text: string, attachments: Attachment[]) => Promise<void> | void
   onStop: () => void
-  onCommand: (command: LocalCommand) => void
+  onCommand: (
+    command: LocalCommand,
+    message?: { text: string; attachments: Attachment[] },
+  ) => Promise<void> | void
 }) {
   const [value, setValue] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -196,7 +201,7 @@ export function Composer({
   const skillItems: SlashItem[] =
     skills.status === "ok" ? skills.skills.map((skill) => ({ kind: "skill", ...skill })) : []
   const items = token
-    ? rankSlashItems([...LOCAL_COMMANDS, ...(busy ? SEND_COMMANDS : []), ...skillItems], token)
+    ? rankSlashItems([...localCommands(main), ...(busy ? SEND_COMMANDS : []), ...skillItems], token)
     : []
   // Escape closes the menu until the text changes: any edit opens it again, and so does a new `/`.
   const menuOpen =
@@ -220,15 +225,23 @@ export function Composer({
     if (field.selectionStart !== caret) setCaret(field.selectionStart)
   }, [value, caret])
 
-  const runCommand = (command: LocalCommand) => {
+  const runCommand = (command: LocalCommand, text = "") => {
+    const carried = command === "thread" ? attachments : []
     setValue("")
-    onCommand(command)
+    if (carried.length) setAttachments([])
+    void Promise.resolve(onCommand(command, { text, attachments: carried })).catch(() => {
+      setValue((current) => current || `/${command}${text ? ` ${text}` : ""}`)
+      setAttachments((current) => (current.length ? current : carried))
+    })
   }
 
   // A picked skill goes to the front of the message, with the rest of what was typed after it; a
   // send mode carries the message the same way, and both are what the host reads as one.
   const pick = (item: SlashItem) => {
-    if (item.kind === "command" && !isSendMode(item.name)) return runCommand(item.name)
+    if (item.kind === "command" && !isSendMode(item.name)) {
+      const run = localCommand(value, main)
+      return runCommand(item.name, run?.command === item.name ? run.text : "")
+    }
     if (!token) return
     const next = hoistItem(value, token, item.name)
     caretWanted.current = next.caret
@@ -304,8 +317,8 @@ export function Composer({
 
   const submit = (event?: FormEvent) => {
     event?.preventDefault()
-    const command = localCommand(value)
-    if (command && !disabled) return runCommand(command)
+    const command = localCommand(value, main)
+    if (command && !disabled) return runCommand(command.command, command.text)
     if (!canSend) return
     submitText(value)
     textarea.current?.focus()

@@ -1,6 +1,6 @@
 import { connectionKey, serverConfig } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
-import { db, type Message } from "@/lib/db"
+import { db } from "@/lib/db"
 import { getMoves, hasPluginFeature, postMoveUndo, type Move } from "@/lib/hermes"
 import { tracked } from "@/lib/tracked"
 
@@ -45,31 +45,4 @@ export async function undoMove(conversationId: string, moveId: string) {
   } finally {
     await refreshMoves(conversationId)
   }
-}
-
-export interface MoveMarks {
-  /** The messages to draw a marker above, each with the moves that happened before it. */
-  before: Map<string, Move[]>
-  /** Moves that came after everything the thread shows. */
-  trailing: Move[]
-}
-
-/**
- * Each marker sits above the first message written after the move, by time, so Main reads in the
- * order things happened; one after every message closes the thread. A message triage left in Main
- * has no move, and an undone one no marker.
- */
-export function moveMarks(messages: Message[], moves?: Move[]): MoveMarks {
-  const marks: MoveMarks = { before: new Map(), trailing: [] }
-  for (const move of moves ?? []) {
-    if (move.undone) continue
-    const next = messages.find((message) => message.createdAt > move.at)
-    if (!next) marks.trailing.push(move)
-    else {
-      const above = marks.before.get(next.id) ?? []
-      above.push(move)
-      marks.before.set(next.id, above)
-    }
-  }
-  return marks
 }

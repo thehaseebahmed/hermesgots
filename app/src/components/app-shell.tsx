@@ -15,22 +15,26 @@ import { CrashBoundary } from "@/components/crash-screen"
 import { KeyboardShortcuts } from "@/components/keyboard-shortcuts"
 import { DrawerContext } from "@/components/drawer-context"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
+import { mainThreadId } from "@/lib/db"
 import { useLarge, useWide } from "@/lib/media"
 import { depth } from "@/lib/nav"
 import { useCodePane, useMeetingsPane, useProjectsPane, useResearchPane } from "@/lib/pane"
 import { useSidebarCollapsed } from "@/lib/sidebar"
 import { useBotPane, useBotThreads } from "@/lib/threads"
 import { cn } from "@/lib/utils"
+import { ChatPage } from "@/routes/chat"
 
 /**
  * A list kept on screen beside what it opened: a bot beside its thread (from `xl`), or Code's
  * sessions, the projects, the meetings or research missions beside one (where `useSplit` says
- * there is room). `screen` is the list's own path.
+ * there is room). `screen` is the list's own path, and `item` is an item the pane carries itself,
+ * in place of the screen the route draws beside it.
  */
 interface ListPane {
   screen: string
   open: boolean
   node: ReactNode
+  item?: ReactNode
 }
 
 /**
@@ -42,9 +46,6 @@ function screenOf(path: string, large: boolean, pane: ListPane | undefined) {
   return large && path.startsWith("/settings") ? "/settings" : path
 }
 
-const BotThreadsPage = lazy(() =>
-  import("@/routes/bot-threads").then((m) => ({ default: m.BotThreadsPage })),
-)
 const MeetingsPane = lazy(() =>
   import("@/routes/meetings").then((m) => ({ default: m.MeetingsPane })),
 )
@@ -90,6 +91,21 @@ function usePageTransition(ref: RefObject<HTMLElement | null>, pane: ListPane | 
 }
 
 /**
+ * The third pane of a bot that has no thread to keep beside Main. It stands at the pane's own width
+ * so the layout doesn't move when the bot's first thread opens, and says the one thing it knows.
+ */
+function BotPaneEmpty() {
+  return (
+    <div
+      data-slot="bot-pane-empty"
+      className="flex min-h-0 flex-1 items-center justify-center px-6 text-center"
+    >
+      <p className="text-sm text-muted-foreground">No threads yet</p>
+    </div>
+  )
+}
+
+/**
  * A list and the item open beside it: the list narrows to a pane and the item slides in to its
  * right. Both stay mounted while items are swapped.
  */
@@ -122,7 +138,7 @@ function Panes({ pane, children }: { pane: ListPane | undefined; children: React
       )}
       <div ref={session} className="flex min-w-0 flex-1 flex-col">
         {/* A list's own route has nothing to add beside it. */}
-        {pane && !open ? null : <Suspense fallback={null}>{children}</Suspense>}
+        {pane && !open ? null : <Suspense fallback={null}>{pane?.item ?? children}</Suspense>}
       </div>
     </div>
   )
@@ -139,11 +155,19 @@ export function AppShell({ children }: { children?: ReactNode }) {
   const projects = useProjectsPane()
   const meetings = useMeetingsPane()
   const research = useResearchPane()
+  // A bot's third pane holds a thread the route isn't — the last one opened for the bot, or the line
+  // that says it has none — since Main is the pane and must never be drawn twice.
+  const botItem = bot?.thread ? undefined : bot?.last ? (
+    <ChatPage key={bot.last} chatId={bot.last} />
+  ) : bot && !bot.threads ? (
+    <BotPaneEmpty />
+  ) : undefined
   const pane: ListPane | undefined = bot
     ? {
-        screen: `/b/${bot.profileId}`,
-        open: Boolean(bot.thread),
-        node: <BotThreadsPage key={bot.profileId} profileId={bot.profileId} thread={bot.thread} />,
+        screen: `/c/${mainThreadId(bot.profileId)}`,
+        open: Boolean(bot.thread || bot.last || !bot.threads),
+        node: <ChatPage key={bot.profileId} chatId={mainThreadId(bot.profileId)} />,
+        item: botItem,
       }
     : code
       ? { screen: "/code", open: code.open, node: <CodePane pane={code} /> }

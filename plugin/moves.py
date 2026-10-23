@@ -119,7 +119,8 @@ def get(path: Path, session_id: str, key: str) -> Optional[Dict[str, Any]]:
 
 
 def public(move: Dict[str, Any], undoable_now: bool) -> Dict[str, Any]:
-    """What the app is told of a move: no session, queue item or body, which are the host's."""
+    """What the app is told of a move: no session, queue item or body, which are the host's. ``new``
+    says the host opened the thread for this message."""
     return {
         "id": move["id"],
         "text": move["text"],
@@ -127,6 +128,7 @@ def public(move: Dict[str, Any], undoable_now: bool) -> Dict[str, Any]:
         "at": move["at"],
         "undone": move["undone"],
         "undoable": undoable_now,
+        "new": move["new"],
     }
 
 

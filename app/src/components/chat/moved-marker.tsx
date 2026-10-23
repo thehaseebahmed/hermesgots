@@ -31,7 +31,7 @@ export function MovedMarker({
         Moved to
         {title ? (
           <>
-            {" \u201c"}
+            {" “"}
             <Link
               to={`/c/${move.threadId}`}
               state={{ bot: profileId }}
@@ -40,7 +40,7 @@ export function MovedMarker({
               <MessagesSquareIcon className="mr-1 inline size-3.5 align-[-2px]" />
               {title}
             </Link>
-            {"\u201d"}
+            {"”"}
           </>
         ) : (
           <>
@@ -55,17 +55,17 @@ export function MovedMarker({
           </>
         )}
         {move.undoable && onUndo && (
-          <>
-            {" \u00b7 "}
-            <button
-              type="button"
-              onClick={() => onUndo(move)}
-              className="inline-flex items-center gap-1 font-medium text-info underline-offset-2 outline-none hover:underline focus-visible:underline"
-            >
-              <Undo2Icon className="size-3.5" />
-              Undo
-            </button>
-          </>
+          // On its own line as a block, so nothing sits between it and the line above. The padding
+          // and matching negative margin keep the target 44px tall without adding any space.
+          <button
+            type="button"
+            onClick={() => onUndo(move)}
+            aria-label="Undo"
+            className="-my-3 flex w-fit items-center gap-1 py-3 font-medium text-info underline-offset-2 outline-none hover:underline focus-visible:underline"
+          >
+            <Undo2Icon className="size-3.5" />
+            Undo
+          </button>
         )}
       </p>
     </div>

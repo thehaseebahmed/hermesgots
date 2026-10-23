@@ -12,7 +12,8 @@ import { MemoryRouter } from "react-router"
 import { MovedMarker } from "@/components/chat/moved-marker"
 import { sendFromMain, settleRouting, stopMessage } from "@/lib/chat"
 import { db, mainThreadId, type Message } from "@/lib/db"
-import { moveMarks, refreshMoves, undoMove } from "@/lib/moves"
+import { moveMarks } from "@/lib/move-marks"
+import { refreshMoves, undoMove } from "@/lib/moves"
 import { TRIAGE_MS } from "@/lib/freshness"
 import { botProfile, json, seedSettings, until } from "./component-kit.tsx"
 
@@ -289,7 +290,15 @@ test("a move is read back from the host and leaves a marker, a stay leaves none"
   host("route-marks", "stay")
   await refreshMoves(MAIN)
   assert.equal((await db.conversations.get(MAIN))?.moves, undefined)
-  const move = { id: "m1", text: "more on Lisbon", thread: "t1", at: 10, undone: false, undoable: true }
+  const move = {
+    id: "m1",
+    text: "more on Lisbon",
+    thread: "t1",
+    at: 10,
+    undone: false,
+    undoable: true,
+    new: false,
+  }
   const fetchWith = globalThis.fetch
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input instanceof Request ? input.url : input))
@@ -297,7 +306,15 @@ test("a move is read back from the host and leaves a marker, a stay leaves none"
   }) as typeof fetch
   await refreshMoves(MAIN)
   assert.deepEqual((await db.conversations.get(MAIN))?.moves, [
-    { id: "m1", text: "more on Lisbon", threadId: "t1", at: 10, undone: false, undoable: true },
+    {
+      id: "m1",
+      text: "more on Lisbon",
+      threadId: "t1",
+      at: 10,
+      undone: false,
+      undoable: true,
+      new: false,
+    },
   ])
   await refreshMoves("t1")
   assert.equal((await db.conversations.get("t1"))?.moves, undefined)

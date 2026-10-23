@@ -858,6 +858,10 @@ export async function createConversation(
 /** A bot's Main thread has an id every device derives, so two devices never make two. */
 export const mainThreadId = (profileId: string) => `main-${profileId}`
 
+/** The bot a Main thread's id names, or undefined for any other chat. */
+export const mainThreadProfile = (id: string) =>
+  id.startsWith("main-") ? id.slice("main-".length) : undefined
+
 /**
  * Makes the bot's Main thread the first time it's asked for. Its change clock is 0, so a record
  * another device already synced always wins the merge over this empty copy.
