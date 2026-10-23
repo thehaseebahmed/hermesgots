@@ -1,5 +1,3 @@
-// A take that failed, as the bar says it: what failed — in the host's own words where it gave them
-// — and the one thing worth trying. `dictation-failure.ts` imports nothing.
 import assert from "node:assert/strict"
 import test from "node:test"
 

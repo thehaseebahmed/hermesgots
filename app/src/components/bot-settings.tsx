@@ -181,15 +181,6 @@ function RemoveBot({ profile, onDeleted }: { profile: Profile; onDeleted?: () =>
 }
 
 /**
- * A bot's settings, in tabs of its own screen — General, Models, Dictation and MCP — with the tab
- * held in the URL, so each is a history entry of its own and back walks the way it was opened.
- *
- * General is what the bot is and how it is reached, the model it answers with is on Models with the
- * default and the fallbacks it falls back to, Dictation is the words its dictation is written with,
- * and MCP is its servers. Dictation and MCP exist only where the bot's plugin advertises that it
- * can stream a take or list servers, so a bot on an older plugin has two tabs and a URL into one it
- * doesn't have lands on General rather than on a screen that can't draw.
- *
  * A linked bot's address and key come from its host and aren't shown; a bot added by hand before
  * linking keeps its own.
  */
@@ -214,7 +205,6 @@ export function BotEditor({
   // list them, and a Host that hasn't answered yet shows General rather than flashing a tab away.
   const answers = useMcpFeatureAnswers(profile)
   const mcpServers = answers.list === "yes"
-  // Dictation's words follow the same rule, on the feature that says the host can hear a take.
   const streams = usePluginFeature(profile, DICTATION_STREAM)
   const shown: BotTab =
     (tab === "mcps" && !mcpServers) || (tab === "dictation" && streams !== "yes") ? "general" : tab

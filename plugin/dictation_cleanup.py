@@ -26,16 +26,9 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
-# Kept by register() for ctx.llm, as meetings keeps it.
 ctx: Any = None
 
-# A phrase's cleanup is given up on after this long. The app waits longer than this for the answer
-# that carries the phrase, so the budget is the host's to keep rather than the app's to enforce.
 DEADLINE_S = 2.0
-# How much of a phrase an answer may lose or gain and still be a tidying of it. Fillers are the
-# words a phrase loses and punctuation adds none, so an answer short of half the words dropped
-# something, and one past half again wrote something; a word of slack at each end keeps a short
-# phrase honest, since "twenty five" is 25.
 SHORTER = 0.5
 LONGER = 1.5
 SLACK = 1
@@ -76,7 +69,6 @@ def register(plugin_ctx: Any) -> None:
 
 
 def _prompt(phrase: str, vocabulary: Sequence[str]) -> str:
-    """The phrase as the model reads it, with the bot's words in front of it, spelled as listed."""
     words = " ".join(str(word) for word in vocabulary or () if word)
     if not words:
         return f"Phrase: {phrase}"
@@ -84,13 +76,7 @@ def _prompt(phrase: str, vocabulary: Sequence[str]) -> str:
 
 
 def is_tidying(phrase: str, cleaned: str) -> bool:
-    """Whether an answer is the phrase tidied rather than a rewrite of it.
-
-    Counted in words, because that is what a phrase is made of: a cleanup loses the fillers and
-    gains nothing to punctuation, so an answer much shorter than what went in dropped something the
-    speaker said, and one much longer wrote something they did not. Nothing else about an answer is
-    second-guessed, since whether a comma belongs is the model's to judge.
-    """
+    """Whether an answer is the phrase tidied rather than a rewrite of it."""
     said = len(str(phrase or "").split())
     tidied = len(str(cleaned or "").split())
     if not said or not tidied:
@@ -144,13 +130,6 @@ def complete(
 
 
 class Cleaner:
-    """A take's cleanup: one bounded call per finished phrase, and the phrase as heard if it fails.
-
-    A ``Cleaner`` answers the text to commit, so a caller never has to decide what a failed cleanup
-    means: it is the phrase itself. ``vocabulary`` is the bot's words, spelled as the user spells
-    them, and is what a name the host heard as a common word is corrected against. ``ask`` is the
-    model call, injected so the rules can be tested with a scripted one.
-    """
 
     def __init__(
         self,
@@ -175,13 +154,6 @@ class Cleaner:
         return answer.strip()
 
     def _within(self, phrase: str) -> Optional[str]:
-        """The model's answer, or None when it isn't back within the budget.
-
-        The plugin's model access takes no timeout of its own, so the bound is this call's: the
-        answer is waited for on a thread that is left to finish by itself when it is too late. The
-        phrase has to be committed either way, and a thread nobody waits for holds nothing the next
-        phrase needs.
-        """
         box: List[Optional[str]] = []
         done = threading.Event()
 

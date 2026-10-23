@@ -1,8 +1,3 @@
-/**
- * A take the app was killed in the middle of: its audio is on the device, the composer offers it in
- * the bar's own voice, and asking for it sends the whole recording to the batch route in one piece
- * and puts the words where the take began — with the draft that was around it.
- */
 import assert from "node:assert/strict"
 import test from "node:test"
 
@@ -23,12 +18,10 @@ import {
 
 const CHAT = "c:chat-1"
 const DRAFT = "Before after"
-/** The caret the take began at: after "Before ". */
 const CARET = 7
 
 const config = connection("kept-take")
 
-/** A host whose plugin hears a take while it is spoken, and answers a clip with a sentence. */
 function host() {
   const clips: Blob[] = []
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -49,7 +42,6 @@ function host() {
   return clips
 }
 
-/** This device with a draft in a chat's composer, and a take the app didn't live to finish. */
 async function seed(name: string, patch: Partial<SavedDictation> = {}) {
   await seedSettings()
   await db.profiles.clear()
@@ -97,8 +89,6 @@ test("a take the app was killed in is offered, and its text lands where it began
 
     await click(button("Retry"))
     await until(async () => field() === `Before hello there after`, "the words in the draft")
-    // One request, the whole recording: a restored take is no longer live, so the batch route
-    // hears it in one piece rather than a slice at a time.
     assert.equal(clips.length, 1, "one clip asked for")
     assert.equal(await clips[0].text(), "first second", "the slices went as one recording")
     assert.equal(await db.dictations.count(), 0, "its text is in, so nothing is kept")

@@ -179,8 +179,6 @@ export function Composer({
   const lastEscape = useRef<number | null>(null)
   const listId = useId()
   const dictationInfo = useDictationInfo(connection)
-  // A take that fails hands back the words it had already heard, so they land in the field the
-  // way a finished take does rather than being taken away with the failure.
   const placeHeard = useRef<(heard: string) => void>(() => {})
   const dictation = useDictation(
     connection,
@@ -364,17 +362,14 @@ export function Composer({
     if (heard) placeDictation(heard)
   }
 
-  // A failed take has already put its words in the field; what is left is to let it go.
   placeHeard.current = placeDictation
 
   const retryDictation = async () => {
-    // A take that came back is put where it was left: the caret it began at, kept with it.
     dictationAt.current ??= dictation.anchor()
     try {
       const heard = await dictation.retry()
       if (heard) placeDictation(heard)
     } catch (error) {
-      // Retry begins a fresh take, so a microphone that won't open now is the start's own refusal.
       toast.error(error instanceof Error ? error.message : "Couldn't start the microphone.")
     }
   }

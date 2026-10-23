@@ -1,12 +1,3 @@
-/**
- * A bot's Dictation tab: the words it is written with, added and removed on the screen and written
- * straight into the bot's own record; the host's speech model and the model cleanup runs on, which
- * are the host's own settings rather than the bot's; and the tab itself, which exists only where the
- * bot's host advertises that it can hear a take, and lands on General where it can't.
- *
- * Each case names its own connection: what a host answered about its features is remembered for the
- * connection, so a host that answers differently needs a server of its own.
- */
 import assert from "node:assert/strict"
 import test from "node:test"
 import { useLiveQuery } from "dexie-react-hooks"
@@ -27,7 +18,6 @@ import {
   type,
 } from "./component-kit.tsx"
 
-/** What the host answered about its speech settings, as `GET speech` would send it. */
 const speech = (patch: Record<string, unknown> = {}) => ({
   model: "small",
   models: [
@@ -42,11 +32,6 @@ const speech = (patch: Record<string, unknown> = {}) => ({
 
 type Speech = ReturnType<typeof speech>
 
-/**
- * A host whose plugin answers `info` with these features, and its speech settings where it is given
- * any. A write is answered with `next` (or what it was sent) so a test can watch the list move; a
- * `refuse` is the plugin's own reason for the write it won't take.
- */
 function host(
   features: string[],
   options: { speech?: Speech; next?: Speech; refuse?: string; writers?: { model: boolean; provider: boolean } } = {},
@@ -75,7 +60,6 @@ function host(
   return { fetch: fetch as unknown as typeof globalThis.fetch, calls }
 }
 
-/** The editor over this device's own record, as the settings screen mounts it. */
 function LiveEditor() {
   const { tab } = useParams()
   const profile = useLiveQuery(() => db.profiles.get("bot-1"), [])
@@ -103,7 +87,6 @@ const dictationTab = () =>
 const chip = (word: string) => find(`[aria-label="Remove ${word}"]`)
 const add = () => click(findAll("button").find((one) => one.textContent?.trim() === "Add") ?? null)
 
-/** Seeds this device's bot, and a host of `name` whose plugin advertises `features`. */
 async function seed(
   name: string,
   features: string[],
@@ -118,7 +101,6 @@ async function seed(
   return server.calls
 }
 
-/** A model's row on the tab, as the user picks it: by the name that starts its text. */
 const modelRow = (name: string) =>
   findAll('[aria-label="Speech models"] button').find((row) =>
     row.textContent?.trim().startsWith(name),
@@ -150,7 +132,6 @@ test("a word added on the screen is written into the bot's record", async () => 
     assert.ok(chip("Gots"), "the word is on the tab")
     const saved = await db.profiles.get("bot-1")
     assert.deepEqual(saved?.vocabulary, ["Gots"])
-    // The bot's change clock moves, which is what sync merges on, as a rename's does.
     assert.ok((saved?.updatedAt ?? 0) > 1, "the record is stamped as changed")
     assert.equal(find("#vocabulary-word")?.getAttribute("value") ?? "", "", "the field is empty")
   })

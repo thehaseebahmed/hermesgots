@@ -1,21 +1,3 @@
-/**
- * A bot's Dictation settings, on the Dictation tab of its editor: the words its dictation is
- * written with, the host speech model that hears it, and the model a finished phrase is tidied on.
- *
- * The words are written straight into the bot's own record — the same record its name lives in,
- * which syncs last-write-wins — so the words taught on one device reach the others. A take reads the
- * list as it stands when the take starts, which is why a removal takes effect on the next one.
- *
- * The speech model is the host's, not the bot's (`GET` and `POST speech`): Hermes's
- * `stt.local.model`, chosen from the models the plugin lists with their size and speed. A pick that
- * isn't on the host downloads inside the next take, which waits for it the way a cold start does; a
- * pick that won't load falls back to the model that last did, and the host's warning is shown here.
- * Both land on the next take, never on one being spoken.
- *
- * The cleanup model is the bot's own line on this tab, kept on the host and read at the start of
- * every take. Where the host withholds the plugin's model-override permission the field is not
- * offered: the host would ignore it, and the notice says how to allow it.
- */
 import { XIcon } from "lucide-react"
 import { useRef, useState } from "react"
 
@@ -117,7 +99,6 @@ export function DictationTab({ profile }: { profile: Profile }) {
   )
 }
 
-/** The host's speech models: what each one costs to hear, and which is in play. */
 function SpeechModelField({
   settings,
   saving,
@@ -167,11 +148,6 @@ function SpeechModelField({
   )
 }
 
-/**
- * The one-line model override for cleanup: the bot's own model unless something else is picked.
- * Where the host withholds the permission the field is replaced by the host's own explanation, so
- * the user is never offered a pick that would be ignored.
- */
 function CleanupModelField({
   profile,
   settings,

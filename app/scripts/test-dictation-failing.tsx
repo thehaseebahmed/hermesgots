@@ -1,13 +1,3 @@
-/**
- * A take that fails says so: a start the host refuses keeps the host's own reason, a speech model
- * that won't load fails the take with a retry rather than sitting on "Preparing…", a host that goes
- * away mid-take ends it with the words it already had and says what happened, and a clip the batch
- * route couldn't transcribe says so too — each with what to try, dismissible, and with nothing left
- * held: the microphone, the profile's take and the host's take are all let go.
- *
- * The microphone and the recorder are faked at the edge the app uses them; the host is faked at
- * `fetch`, so the take really records, slices, pumps and ends.
- */
 import assert from "node:assert/strict"
 import test from "node:test"
 
@@ -26,7 +16,6 @@ import {
   until,
 } from "./component-kit.tsx"
 
-/** A recorder that makes a slice every 40 ms, as a real one makes one every 250. */
 class FakeRecorder {
   static isTypeSupported() {
     return true
@@ -56,7 +45,6 @@ class FakeRecorder {
   }
 }
 
-/** A microphone that hands out a stream with one track, as the browser's does. */
 function fakeMic() {
   const track = () => ({ stop() {}, addEventListener() {}, kind: "audio" })
   return async () => ({
@@ -73,8 +61,6 @@ Object.defineProperty(globalThis.navigator, "mediaDevices", {
 })
 
 const bot = connection("dictation-failing")
-// A host that answers one clip at a time names its own connection: an answer is remembered per
-// connection, so a host that answers differently must not share one with the streaming host.
 const clipBot = connection("dictation-failing-clip")
 const SENTENCE = "Let's ship the dictation feature today."
 const TAIL = { id: 2, text: "hello there and that is all" }
@@ -92,7 +78,6 @@ interface HostOptions {
   gate?: Promise<void>
 }
 
-/** A host, as the app talks to it: the take routes a streaming plugin has, and the batch route. */
 function host({ start, slice, hears = true, clip = "ok", gate }: HostOptions = {}) {
   let starts = 0
   let slices = 0
@@ -194,14 +179,12 @@ const composer = (
 const field = () => find("textarea") as HTMLTextAreaElement | null
 const bar = () => find('[role="region"][aria-label="Dictation"]')
 const alert = () => find('[role="alert"]')
-/** The failure line: the host's own sentence, and what to try beneath it. */
 const line = () => alert()?.parentElement?.textContent ?? ""
 const button = (label: string) =>
   findAll("button").find((one) => one.getAttribute("aria-label") === label) ?? null
 const textButton = (label: string) =>
   findAll("button").find((one) => one.textContent?.trim() === label) ?? null
 
-/** Waits for the bar's failure line, and answers what it says. */
 async function failedWith(says: string) {
   await until(
     async () => line().includes(says),
@@ -271,7 +254,6 @@ test("a speech model that won't load fails the take with a retry rather than pre
     assert.match(line, /speech model on the Dictation tab/, "the picker is what to try")
     assert.equal(document.body.textContent?.includes("Preparing…"), false)
 
-    // Retry is a fresh take from the same composer, and this time the host loads its model.
     await click(textButton("Retry"))
     await until(async () => hosted.starts() === 2, "a fresh take on the host")
     await until(async () => Boolean(button("Stop")), "the bar listening again")
@@ -318,7 +300,6 @@ test("a host that goes away mid-take ends the take with its words, and nothing i
     assert.equal(hosted.cancels(), 1, "dismissing the line does not cancel the take twice")
     assert.equal(await db.dictations.count(), 0, "a failed take keeps nothing on the device")
 
-    // The microphone and the profile's take were let go with it: the next take opens.
     await click(button("Voice"))
     await until(async () => hosted.starts() === 2, "a take after the failure")
     await click(button("Cancel"))
@@ -335,7 +316,6 @@ test("a clip the batch route couldn't transcribe says so, and the recording is r
     await settle()
     await click(button("Voice"))
     await until(async () => Boolean(button("Stop")), "the take recording")
-    // A recorder flushes its first chunk a second in, so the take needs one before Stop closes it.
     await new Promise((done) => setTimeout(done, 1200))
     await click(button("Stop"))
 
@@ -360,12 +340,10 @@ test("a take the host opens after the user let it go is let go on the host too",
     await settle()
     await click(button("Voice"))
     await until(async () => hosted.starts() === 1, "the host asked for a take")
-    // The user lets the take go while the host is still answering.
     await click(button("Cancel"))
     await until(async () => Boolean(button("Voice")), "the bar back to idle")
     answer()
     await until(async () => hosted.cancels() === 1, "the host told to forget the take it opened")
-    // Nothing was inserted and the mic is free: the next take opens.
     assert.equal(field()?.value ?? "", "")
     await click(button("Voice"))
     await until(async () => hosted.starts() === 2, "a take after it")

@@ -1,5 +1,3 @@
-// A bot's vocabulary as a pure rule: a word added, removed, kept once and kept short — and the
-// bot record it rides in, which syncs last-write-wins like the bot's title. No DOM, no host.
 import assert from "node:assert/strict"
 import test from "node:test"
 
@@ -56,8 +54,6 @@ test("a record's words are read back through the rules", () => {
   assert.deepEqual(readVocabulary("Gots"), [])
 })
 
-// The bot record: the words travel in it, and two devices agree on them the way they agree on a
-// title — the record with the later change clock wins whole.
 test("two devices agree on a bot's words after a sync", () => {
   const thisDevice = { "bot-1": { at: 20, value: { name: "Gots", vocabulary: ["Haseeb"] } } }
   const otherDevice = { "bot-1": { at: 10, value: { name: "Gots", vocabulary: [] } } }

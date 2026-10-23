@@ -23,7 +23,6 @@ def stt(model="base", **extra):
 
 
 class Host:
-    """A config.yaml holding ``section``, and a writer that records what it was asked to save."""
 
     def __init__(self, section=None):
         self.section = stt() if section is None else section
@@ -166,8 +165,6 @@ class SetModelTest(TempStore):
         self.assertEqual(host.section["local"]["model"], "base")
 
     def test_a_file_the_host_could_not_read_is_never_written_over(self) -> None:
-        # A config that can't be read is not a config with no speech settings: saving `{local:
-        # {model}}` over it would drop the host's enabled flag, language and device.
         write = mock.Mock()
         with mock.patch.object(speech, "_stt", side_effect=ImportError("no gateway")), \
                 mock.patch.object(speech, "_write_stt", write):
@@ -182,7 +179,6 @@ class SetModelTest(TempStore):
 
 
 class PlayTest(TempStore):
-    """What a take runs on: the pick when it loads, the model that last did when it doesn't."""
 
     def warmer(self, loaded, fail=()):
         calls = []
@@ -220,7 +216,6 @@ class PlayTest(TempStore):
         warm, _ = self.warmer(loaded, fail={"small"})
         speech.play("base", warm, self.path)
         speech.play("small", warm, self.path)
-        # A second take tries the pick again rather than believing it loaded, and falls back again.
         again = speech.play("small", warm, self.path)
         self.assertEqual((again["model"], again["warning"]["model"]), ("base", "small"))
 
@@ -228,7 +223,6 @@ class PlayTest(TempStore):
         loaded = []
         warm, _ = self.warmer(loaded, fail={"small"})
         speech.play("base", warm, self.path)
-        # The plugin goes away and comes back: nothing is in memory, the store still names base.
         played = speech.play("small", warm, self.path)
         self.assertEqual(played["model"], "base")
         self.assertEqual(speech.good(self.path), "base")
@@ -239,7 +233,6 @@ class PlayTest(TempStore):
         speech.play("base", warm, self.path)
         speech.play("small", warm, self.path)
         self.assertIsNotNone(speech.read(self.config, self.path, {})["warning"])
-        # The host has the model now: the same pick loads and the warning goes.
         speech.play("small", lambda model: {"warmed": True}, self.path)
         self.assertIsNone(speech.read(self.config, self.path, {})["warning"])
         self.assertEqual(speech.good(self.path), "small")
@@ -268,7 +261,6 @@ class CleanupTest(TempStore):
     def test_a_pick_is_stored_with_the_bot_and_read_back(self) -> None:
         saved = speech.set_cleanup(self.path, {"provider": "acme", "model": "fast"}, self.allowed)
         self.assertEqual(saved, {"provider": "acme", "model": "fast"})
-        # A new process reads the same store: the pick survives a plugin restart.
         self.assertEqual(speech.read_cleanup(self.path), {"provider": "acme", "model": "fast"})
 
     def test_a_pick_is_cleared_back_to_the_bot_s_own_model(self) -> None:

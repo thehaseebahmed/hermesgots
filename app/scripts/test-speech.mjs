@@ -1,5 +1,3 @@
-// The host's speech model as a pure rule: what a model row says about its size, speed and whether
-// the host has it, which row reads as in use, and what a pick puts on the wire. No DOM, no host.
 import assert from "node:assert/strict"
 import test from "node:test"
 

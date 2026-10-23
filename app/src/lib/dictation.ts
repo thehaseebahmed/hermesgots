@@ -117,7 +117,6 @@ export const SILENT_MS = 2500
 export const STOPPED = "The recording stopped."
 export const TAKEN = "The microphone is in use by another app."
 export const SILENT = "The microphone isn't picking up any sound."
-/** A second take on a profile that is already hearing one: the host's own sentence for it. */
 export const TAKE_RUNNING = "A dictation is already being heard on this bot."
 
 /** A click from Enter or Space: no pointer made it (a touch's click can also have no detail). */
@@ -170,18 +169,14 @@ interface Recording {
 }
 
 interface Session {
-  /** The profile this take holds: one take at a time is one per profile. */
   profile: string
-  /** The profile's microphone, held from the start of the take to its end. */
   lock: symbol | null
   key?: string
   pieces: DictationPiece[]
-  /** Where the caret was when the take began, so a kept take lands where it was left. */
   caret?: number
   recording: Recording | null
   upload: AbortController | null
   draining: Promise<boolean> | null
-  /** The ending in flight, so a second Stop (or a Send behind one) does nothing more. */
   finishing: Promise<string | null> | null
   error: unknown
   /** Why the take itself died (the recorder errored, the track ended): Retry still sends its phrases. */
@@ -190,7 +185,6 @@ interface Session {
   stopping: Promise<void> | null
   /** Cancelled or done: nothing more is kept. */
   closed: boolean
-  /** Read back from the device after a reload: no longer live, so it is asked for whole. */
   restored?: boolean
   saving: Promise<unknown>
   saveTimer?: number
@@ -268,7 +262,6 @@ function save(session: Session, now = false) {
     .catch(() => undefined)
 }
 
-/** Writes a take to the device under its composer's key, or deletes it. */
 export function keptStore(key: string) {
   return (take: KeptTake | null) =>
     take
@@ -282,21 +275,14 @@ export function keptStore(key: string) {
       : db.dictations.delete(key)
 }
 
-/** The writer a streaming take uses to keep its audio, no more often than every `SAVE_MS`. */
 export function keptKeeper(key: string | undefined) {
   return keeper(key, key ? keptStore(key) : () => Promise.resolve())
 }
 
-/** A take kept by an earlier visit, if there is one. */
 export async function readKept(key: string): Promise<SavedDictation | undefined> {
   return db.dictations.get(key).catch(() => undefined)
 }
 
-/**
- * The text of a take that is no longer live: its audio goes to the batch route in one piece, so a
- * host that can't stream still answers it, with the words it already had as its prompt. Bounded by
- * the same wait a whole clip always had for a cold host.
- */
 export async function keptText(
   config: HermesConfig,
   pieces: DictationPiece[],
@@ -328,7 +314,6 @@ function stopUpload(current: Session) {
 function forget(session: Session) {
   session.closed = true
   window.clearTimeout(session.saveTimer)
-  // The take is over: the profile's microphone is free for the next one.
   releaseTake(session.profile, session.lock)
   session.lock = null
   const key = session.key
@@ -373,11 +358,6 @@ function stopSegments(recording: Recording) {
   )
 }
 
-/**
- * The chunked implementation: a recording cut at the user's pauses, each piece sent once it has
- * ended. Kept as it was for a host that doesn't advertise `dictation_stream`, which is why nothing
- * below here knows about a live transcript — `transcript` is always empty.
- */
 export function useChunkedDictation(
   config: HermesConfig,
   hint: string,
@@ -401,13 +381,11 @@ export function useChunkedDictation(
     setFailure(null)
   }, [])
 
-  /** The take's failure, as the bar says it: what failed, and what to try. */
   const showFailure = useCallback((failed: DictationFailure) => {
     setFailure(failed)
     setStatus("failed")
   }, [])
 
-  /** Sends each piece still without text, in order, each after the text before it. */
   const drain = useCallback((current: Session) => {
     const run = async () => {
       for (;;) {
@@ -451,11 +429,9 @@ export function useChunkedDictation(
       current.recording = null
       current.stopping = end(recording)
       stopUpload(current)
-      // Its microphone is free again: a take that died is over, even while Retry can still send it.
       releaseTake(current.profile, current.lock)
       current.lock = null
       setLevels(null)
-      // Its recording is still on the device for Retry, so closing this failure is a real discard.
       showFailure({ ...failed, discard: true })
     },
     [showFailure],
@@ -574,7 +550,6 @@ export function useChunkedDictation(
     if (session.current || !canRecord()) return
     const profile = connectionKey(latest.current.config)
     const lock = holdTake(profile)
-    // One take at a time per profile: the host hears one, and the microphone belongs to it.
     if (!lock) throw new Error(TAKE_RUNNING)
     const current = newSession(profile, latest.current.key, [], caret ?? undefined)
     current.lock = lock
@@ -665,8 +640,6 @@ export function useChunkedDictation(
         showIdle()
         return text
       }
-      // A clip the host couldn't finish ends the take, and the words that are already in stay the
-      // user's: they go to the composer, and only the audio still without text waits for Retry.
       const heard = current.pieces.filter((piece) => piece.text !== null)
       if (heard.length) {
         const text = joinText(...heard.map((piece) => piece.text ?? ""))
@@ -682,10 +655,6 @@ export function useChunkedDictation(
     [drain, showFailure, showIdle],
   )
 
-  /**
-   * Asks for a take that came back: it is no longer live, so the batch route hears it in one piece
-   * and its text settles as any other take's does.
-   */
   const replay = useCallback(
     async (current: Session) => {
       setStatus("transcribing")
@@ -740,16 +709,13 @@ export function useChunkedDictation(
   const finish = useCallback(
     (waitMs = STOP_WAIT_MS) => {
       const current = session.current
-      // Nothing to end: no take, or one that died before Stop with nothing left to send.
       if (!current || (!current.recording && !current.failure)) {
         cancel()
         return Promise.resolve("")
       }
-      // A second Stop (or a Send behind one) while the take is ending does nothing more.
       if (current.finishing) return current.finishing
       const run = (async () => {
         const deadline = Date.now() + waitMs
-        // A take that died before Stop (the recorder errored, the track ended) still sends what it recorded.
         if (current.recording) {
           const recording = current.recording
           const last = recording.segments.at(-1)
@@ -790,8 +756,6 @@ export function useChunkedDictation(
     return settle(current)
   }, [cancel, replay, settle])
 
-  // A recording left unfinished (another chat, the screen closed) is kept for when it's back. The
-  // slices of a take heard while it was spoken are the streaming hook's, and it offers those.
   useEffect(() => {
     let live = true
     if (key)
@@ -815,7 +779,6 @@ export function useChunkedDictation(
       if (!current) return
       current.upload?.abort()
       current.upload = null
-      // A take let go keeps its microphone no longer than it keeps its audio.
       releaseTake(current.profile, current.lock)
       current.lock = null
       const recording = current.recording
@@ -837,7 +800,6 @@ export function useChunkedDictation(
     transcript: EMPTY_TRANSCRIPT,
     /** When the recorder started, for a hold that ends before the mic was granted. */
     recordingSince: () => session.current?.recording?.startedAt ?? null,
-    /** Where a take that came back was left, so its text lands where it began. */
     anchor: () => session.current?.caret ?? null,
     start,
     finish,

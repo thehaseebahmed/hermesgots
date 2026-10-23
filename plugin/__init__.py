@@ -326,13 +326,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "delegation_model",
                     "queue",
                     "dictation",
-                    # A dictation heard while it is spoken: the take routes below, the rolling
-                    # window in dictation_stream.py. Advertised beside the batch clip so an app
-                    # that predates it keeps recording pieces exactly as it does today.
                     "dictation_stream",
-                    # The host's speech model, and the model a phrase's cleanup runs on: the
-                    # Dictation tab's picker and its one-line override (speech.py). Advertised
-                    # apart from dictation_stream, so an older plugin offers the words alone.
                     "speech_model",
                     "usage",
                     "research",
@@ -1651,10 +1645,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except Exception:
             return None
 
-    # A dictation heard while it is spoken (dictation_stream.py). One take per profile, held here
-    # rather than in the app; the words committed since the last slice ride back on the audio
-    # request itself, so a take is one connection to lose instead of two. The batch routes above
-    # are untouched, so a host that is only asked for a clip still answers one.
     dictation_takes = dictation_stream.Takes(reap=True)
 
     def dictation_profile() -> str:
@@ -1667,16 +1657,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return denied
         body = await json_body(request)
         hint = dictation.clean_hint(body.get("hint") if body else None)
-        # The bot's vocabulary rides on the one call that opens a take, so a word removed in the
-        # app is gone from the next take and a word added is there from it.
         vocabulary = body.get("vocabulary") if body else None
-        # The cleanup model is read here, once per take, from the host's own settings: a pick made
-        # while a take runs lands on the next one, and one the host no longer allows is dropped.
         path = store_path()
         gate = await asyncio.to_thread(research.llm_gate)
         cleanup_model = await asyncio.to_thread(speech.applied_cleanup, path, gate)
         try:
-            # The one call of a take that may wait: a cold host loads its model inside it.
             started = await asyncio.to_thread(
                 dictation_stream.start,
                 dictation_takes,
@@ -1714,7 +1699,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "The recording is too long.", 413)
         pause = request.query.get("pause") == "1"
         try:
-            # Decoding holds the CPU the loop needs; a slice with no new window answers at once.
             answer = await asyncio.to_thread(take.add, data, pause)
         except (dictation.DictationError, dictation_stream.TakeError) as error:
             await asyncio.to_thread(dictation_takes.release, profile, take)
@@ -1746,7 +1730,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             logger.warning("memento: a dictation take couldn't finish", exc_info=True)
             return _error(web, "Transcription failed.", 502)
         finally:
-            # Whatever happened, the take is over and the next one may begin.
             await asyncio.to_thread(dictation_takes.release, profile, take)
         return web.json_response({"object": "memento.dictation_stop", "take": take.id, **answer})
 
@@ -1760,7 +1743,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 dictation_takes.get, profile, request.match_info.get("take_id", "")
             )
         except dictation_stream.TakeError:
-            # Cancelling a take that has already ended is not a failure: nothing is heard either way.
             return web.json_response({"object": "memento.dictation_cancel", "cancelled": True})
         try:
             await asyncio.to_thread(take.cancel)
@@ -1822,7 +1804,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except speech.Withheld as error:
             return _error(web, str(error), 403)
         except ValueError as error:
-            # Hermes's own reason, or ours, on a model it can't hear: nothing was written.
             return _error(web, str(error), 400)
         except ImportError:
             return _error(web, "This Hermes version can't read speech settings from here.", 501)

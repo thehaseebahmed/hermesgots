@@ -1,12 +1,3 @@
-/**
- * A take's ending, as the composer's own buttons drive it: a Send waits a short while for the tail
- * and then sends what the bar already had, a Stop finishes the take and puts its tail where the
- * caret was, a Cancel inserts nothing even though the host answers afterwards, and a bot's profile
- * hears one take at a time.
- *
- * The microphone and the recorder are faked at the edge the app uses them — `MediaRecorder` and
- * `getUserMedia` — so the take really records, slices and pumps; the host is faked at `fetch`.
- */
 import assert from "node:assert/strict"
 import test from "node:test"
 
@@ -23,7 +14,6 @@ import {
   until,
 } from "./component-kit.tsx"
 
-/** A recorder that makes a slice every 40 ms, as a real one makes one every 250. */
 class FakeRecorder {
   static isTypeSupported() {
     return true
@@ -53,7 +43,6 @@ class FakeRecorder {
   }
 }
 
-/** A microphone that hands out a stream with one track, as the browser's does. */
 function fakeMic() {
   const track = () => ({ stop() {}, addEventListener() {}, kind: "audio" })
   return async () => ({
@@ -62,7 +51,6 @@ function fakeMic() {
   })
 }
 
-// `canRecord` and the meter are read off the globals the app runs against.
 window.MediaRecorder = FakeRecorder as unknown as typeof MediaRecorder
 Object.assign(globalThis, { MediaRecorder: FakeRecorder })
 Object.defineProperty(globalThis.navigator, "mediaDevices", {
@@ -73,17 +61,11 @@ Object.defineProperty(globalThis.navigator, "mediaDevices", {
 const bot = connection("dictation-ending")
 
 interface HostOptions {
-  /** What the take's stop answers, after `after` ms, or never for "hang". */
   stop?: "hang" | { after?: number; phrases?: { id: number; text: string }[] }
 }
 
-/**
- * A host whose plugin hears a take while it is spoken: each slice is answered with what it newly
- * committed — the same words once, then nothing — and its stop is what each test decides it is.
- */
 function host({ stop = {} }: HostOptions = {}) {
   const calls: string[] = []
-  // How many slices each take has had answered: a take's words are committed once, not once a slice.
   const answered = new Map<string, number>()
   let takes = 0
   let cancels = 0
@@ -140,8 +122,6 @@ function host({ stop = {} }: HostOptions = {}) {
   }
 }
 
-// The tail phrase a stop closes carries the words that were open in front of it, as the host's own
-// close does: the phrase is what the take's text becomes, not an addition to it.
 const TAIL = { id: 2, text: "hello there and that is all" }
 const TAKEN = "hello there and that is all"
 
@@ -169,10 +149,8 @@ const barText = (scope: ParentNode = document) => bar(scope)?.textContent ?? ""
 const button = (label: string, scope: ParentNode = document) =>
   scope.querySelector(`[aria-label="${label}"]`)
 
-/** Opens a take on the composer and waits for the host to have it: a stream take, not a clip. */
 async function openTake(hosted: ReturnType<typeof host>, scope: ParentNode = document) {
   await until(async () => Boolean(button("Voice", scope)), "the microphone")
-  // The feature answer that picks the streaming take is a read of its own: let it land.
   await settle()
   await click(button("Voice", scope))
   await until(async () => hosted.starts() === 1, "the take opened on the host")
@@ -250,7 +228,6 @@ test("a Stop whose tail hangs gives the composer back with the words it has", as
     const started = Date.now()
 
     await click(button("Stop"))
-    // The field is back within the Stop's own wait: a host that never answers can't hold it.
     for (let end = started + 11_000; !field() && Date.now() < end;)
       await new Promise((done) => setTimeout(done, 20))
     assert.ok(field(), "the composer came back rather than staying in the ending")
@@ -272,7 +249,6 @@ test("a Cancel while the tail is being waited for inserts nothing, even when it 
     await click(button("Stop"))
     await click(button("Cancel"))
     await until(async () => Boolean(field()), "the composer is back")
-    // Past the answer the host was already asked for: it must not arrive as words.
     await new Promise((done) => setTimeout(done, 1200))
     assert.equal(field()?.value, "Before", "the draft is as it was")
     assert.equal(sent.length, 0, "nothing was sent")
@@ -295,7 +271,6 @@ test("a profile hears one take at a time, and the mic is free once it ends", asy
     const two = document.querySelector('[data-test="two"]') as HTMLElement
     await openTake(hosted, one)
 
-    // The second composer's mic is refused before it asks for the microphone: the profile is heard.
     await until(async () => Boolean(button("Voice", two)), "the second composer's microphone")
     await click(button("Voice", two))
     await settle()
@@ -303,7 +278,6 @@ test("a profile hears one take at a time, and the mic is free once it ends", asy
     assert.equal(bar(two), null, "the second composer never took the bar")
     assert.ok(field(two), "its field is still its own")
 
-    // The first take ending frees the profile: the second composer can hear one.
     await click(button("Cancel", one))
     await until(async () => !bar(one), "the first take let go")
     await click(button("Voice", two))

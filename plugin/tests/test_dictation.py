@@ -123,8 +123,6 @@ class WarmTest(unittest.TestCase):
             self.assertEqual(dictation.warm(), {"warmed": False, "error": "no network"})
 
     def test_warms_the_model_it_is_named_rather_than_the_one_configured(self) -> None:
-        # The Dictation tab's pick is written to config.yaml, but the take that follows loads it by
-        # name: the host's cached slot is filled with the model the app chose.
         tt, patch = hermes()
         with patch:
             warmed = dictation.warm("large-v3")

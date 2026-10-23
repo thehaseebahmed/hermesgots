@@ -21,7 +21,6 @@ RATE = 16000
 
 
 class Clock:
-    """A clock a test moves by hand, so pacing and expiry are rules rather than sleeps."""
 
     def __init__(self) -> None:
         self.now = 1000.0
@@ -34,7 +33,6 @@ class Clock:
 
 
 class Scripted:
-    """A transcriber that answers the next hypothesis it was given, and can take its time."""
 
     def __init__(self, answers, clock: Clock = None, took: float = 0.0) -> None:
         self.answers = list(answers)
@@ -74,7 +72,6 @@ def take(transcribe=None, clock: Clock = None, **options):
 
 
 def push(heard: dictation_stream.Take, clock: Clock, count: int = 1, pause: bool = False) -> list:
-    """Slices the app would send, a quarter of a second apart."""
     answers = []
     for index in range(count):
         clock.advance(SLICE_S)
@@ -83,7 +80,6 @@ def push(heard: dictation_stream.Take, clock: Clock, count: int = 1, pause: bool
 
 
 class Tidy:
-    """A finished phrase's cleanup with a scripted answer per phrase, and what it was asked."""
 
     def __init__(self, *answers, error=None) -> None:
         self.answers = list(answers)
@@ -108,7 +104,6 @@ class AgreeTest(unittest.TestCase):
         self.assertEqual(dictation_stream.agree(["let", "us", "ship"], ["so", "then"]), [])
 
     def test_a_repeated_phrase_is_agreed_word_for_word(self) -> None:
-        # A repeat is words, not a set: the rule must not fold "no no no" into one "no".
         self.assertEqual(
             dictation_stream.agree(["no", "no", "no", "more"], ["no", "no", "no", "more"]),
             ["no", "no", "no", "more"],
@@ -141,9 +136,6 @@ class SettledTest(unittest.TestCase):
         )
 
     def test_a_revision_of_the_last_word_holds_the_agreement_before_it(self) -> None:
-        # The word the two guesses part on is held back, and so is the word before it, which is the
-        # one the newer window was still weighing: only what both had well behind the frontier
-        # settles, which is why "the" waits a window even though both guesses had it.
         self.assertEqual(
             dictation_stream.settled(
                 ["we", "ship", "the", "boat"], ["we", "ship", "the", "bait"]
@@ -174,8 +166,6 @@ class NewlyCommittedTest(unittest.TestCase):
         self.assertEqual(dictation_stream.newly_committed([], ["a", "b"]), ["a", "b"])
 
     def test_a_window_that_only_re_heard_committed_words_adds_nothing(self) -> None:
-        # The model revised the frontier word, so the run the window holds stops inside what the
-        # take already committed. Committing it again would show the words a second time.
         self.assertEqual(dictation_stream.newly_committed(["a", "b", "c", "d"], ["a", "b"]), [])
         self.assertEqual(
             dictation_stream.newly_committed(
@@ -193,8 +183,6 @@ class NewlyCommittedTest(unittest.TestCase):
         )
 
     def test_a_close_that_re_hears_a_long_run_still_adds_only_what_follows(self) -> None:
-        # A phrase's close passes its whole text at once, and a long phrase's first words sit far
-        # behind the committed end: the run must still be found, or every word is said twice.
         known = [f"w{index}" for index in range(100)]
         stable = [f"w{index}" for index in range(20, 120)]
         self.assertEqual(
@@ -203,8 +191,6 @@ class NewlyCommittedTest(unittest.TestCase):
         )
 
     def test_a_close_whose_first_word_is_a_fragment_commits_only_what_follows(self) -> None:
-        # The close's audio begins at the previous close's overlap, so its first word is often a
-        # committed word heard mid-word ("an" for "and"): that word again, not a new one.
         self.assertEqual(
             dictation_stream.newly_committed(
                 ["and", "then"], ["an", "then", "more"], revise_head=True
@@ -224,17 +210,12 @@ class WindowTest(unittest.TestCase):
         scripted = Scripted(["hello there", "hello there my friend", "hello there my friend how"])
         heard, _, clock = take(scripted)
         answers = push(heard, clock, count=6)
-        # The first window has nothing to agree with. The newest word two windows agree on is held
-        # back, so "hello" arrives only once a third window still has it, and "there my" with the
-        # next: the frontier word never reaches the bar while it can still move.
         self.assertEqual(
             [answer["words"] for answer in answers], ["", "", "", "hello", "", "there my"]
         )
         self.assertEqual(heard.committed, ["hello", "there", "my"])
 
     def test_a_word_the_take_has_committed_is_never_taken_back(self) -> None:
-        # The model revises "dictation" into "dictionary" once it has heard more of the sentence.
-        # What the take already committed does not move: it only ever adds words after it.
         scripted = Scripted(
             [
                 "let us ship the dictation",
@@ -283,18 +264,14 @@ class WindowTest(unittest.TestCase):
         scripted = Scripted(["hello there", "hello there friend", "hello there friend of mine"])
         heard, _, clock = take(scripted, hint="Gots", window_s=1.0)
         push(heard, clock, count=8)
-        # A one-second window is 16000 samples of the take's 8 slices, never the whole take.
         self.assertLessEqual(len(scripted.calls[-1]["samples"]), RATE + 1)
         self.assertTrue(scripted.calls[-1]["prompt"].startswith("Gots"))
-        # The prompt carries the words already committed, so names and casing follow them.
         self.assertEqual(heard.committed, ["hello", "there"])
         self.assertTrue(scripted.calls[-1]["prompt"].endswith("hello there"))
 
 
 class PhraseTest(unittest.TestCase):
     def test_a_pause_closes_the_phrase_the_take_has_heard(self) -> None:
-        # Two windows commit the words they agree on; the pause decodes the phrase whole, which is
-        # the answer "hello there my friend" for a take that only got as far as that.
         scripted = Scripted(["hello there", "hello there my friend", "hello there my friend"])
         heard, _, clock = take(scripted)
         push(heard, clock, count=5)
@@ -309,8 +286,6 @@ class PhraseTest(unittest.TestCase):
                 "hello there my friend",
                 "hello there my friend",
                 "hello there my friend how",
-                # The phrase starts a little before the pause, so it hears a word or two of the
-                # one before it and commits only what follows them.
                 "my friend how are you today",
             ]
         )
@@ -324,9 +299,6 @@ class PhraseTest(unittest.TestCase):
         self.assertEqual(heard.phrases[0], last)
 
     def test_two_phrases_meet_without_losing_or_doubling_the_words_between_them(self) -> None:
-        # The second phrase's audio starts a fraction of a second before the pause, so its decode
-        # hears a word of the first one again. The take's text is the sentence once: nothing lost
-        # at the boundary and nothing said twice.
         scripted = Scripted(
             [
                 "let us ship the dictation",
@@ -360,14 +332,12 @@ class PhraseTest(unittest.TestCase):
         scripted = Scripted(["hello there my friend", "hello there my friend"])
         heard, _, clock = take(scripted)
         push(heard, clock, count=8, pause=True)
-        # A long take holds only what its next decode needs: the overlap the next phrase begins at.
         self.assertLessEqual(
             heard.buffered, int(dictation_stream.OVERLAP_S * heard.rate) + len(slice_samples())
         )
 
 
 class CleanupTest(unittest.TestCase):
-    """A finished phrase is tidied before it is committed, once, and the take goes on after it."""
 
     def test_a_finished_phrase_is_committed_as_its_tidied_text(self) -> None:
         tidy = Tidy("Hello there, my friend.")
@@ -377,15 +347,10 @@ class CleanupTest(unittest.TestCase):
         self.assertEqual(
             [phrase["text"] for phrase in answer["phrases"]], ["Hello there, my friend."]
         )
-        # The model is asked to tidy the phrase as the host heard it, and the words it heard are
-        # still the words the take committed: a phrase's tidying is what the user reads, not a
-        # rewrite of what was said.
         self.assertEqual(tidy.calls, ["um hello there my friend"])
         self.assertEqual(heard.committed, ["um", "hello", "there", "my", "friend"])
 
     def test_the_tail_phrase_is_tidied_before_stop_answers_with_it(self) -> None:
-        # The phrase that closes at Stop is the one the user waits for, so it is tidied inside the
-        # answer Stop gives, not after it.
         heard, _, clock = take(Scripted(["um hello there"] * 4), clean=Tidy("Hello there."))
         push(heard, clock, count=2)
         self.assertEqual(
@@ -407,7 +372,6 @@ class CleanupTest(unittest.TestCase):
             ["Hello there, my friend.", "And then some."],
         )
         self.assertEqual(len(tidy.calls), 2, "one call for each phrase, and none for the take")
-        # A phrase the bar has already been handed does not change when a later one closes.
         self.assertEqual(heard.phrases[0], first)
 
     def test_a_cleanup_that_raises_leaves_the_phrase_as_it_was_heard(self) -> None:
@@ -420,7 +384,6 @@ class CleanupTest(unittest.TestCase):
         self.assertEqual(
             [phrase["text"] for phrase in answer["phrases"]], ["um hello there my friend"]
         )
-        # The take is unaffected: the next phrase closes and Stop still answers.
         push(heard, clock, count=3)
         self.assertEqual(
             [phrase["text"] for phrase in heard.stop()["phrases"]], ["and then some"]
@@ -435,8 +398,6 @@ class CleanupTest(unittest.TestCase):
         )
 
     def test_a_take_s_cleanup_is_asked_with_its_own_words(self) -> None:
-        # The take's vocabulary reaches the cleanup's instructions, through the real cleaner: a name
-        # the host heard as a common word is what the bot's own list corrects.
         llm = FakeLlm({"text": "Gots ships it."})
         with mock.patch.object(dictation_cleanup, "ctx", mock.Mock(llm=llm)):
             heard, _, clock = take(Scripted(["gots ships it"] * 4), vocabulary=["Gots"])
@@ -497,7 +458,6 @@ class TakesTest(unittest.TestCase):
         with self.assertRaises(dictation_stream.TakeError) as caught:
             profiles.open("haseeb", dictation_stream.Take(Scripted([]), clock=clock))
         self.assertEqual(caught.exception.status, 409)
-        # Another profile hears its own take.
         profiles.open("someone-else", dictation_stream.Take(Scripted([]), clock=clock))
 
     def test_a_quiet_take_is_swept_and_its_audio_let_go(self) -> None:
@@ -538,7 +498,6 @@ class PacingTest(unittest.TestCase):
         push(heard, clock, count=2)
         self.assertEqual(heard.committed, [])  # the first window has nothing to agree with
         self.assertEqual(len(scripted.calls), 1)
-        # The hop is now the decode's own two seconds, so the next window is not due at two slices.
         push(heard, clock, count=4)
         self.assertEqual(len(scripted.calls), 1)
         clock.advance(2.0)
@@ -547,7 +506,6 @@ class PacingTest(unittest.TestCase):
 
     def test_a_decode_slower_than_the_audio_it_covers_says_it_is_behind(self) -> None:
         clock = Clock()
-        # A four-second window, and a decode that takes five.
         scripted = Scripted(["hello there", "hello there friend"], clock=clock, took=5.0)
         heard, _, _ = take(scripted, clock=clock)
         push(heard, clock, count=2)
@@ -590,7 +548,6 @@ class FailureTest(unittest.TestCase):
 
 
 class VocabularyTest(unittest.TestCase):
-    """A bot's words reaching the decoder's prompt: every window, spelled as listed."""
 
     def test_every_window_of_a_take_carries_the_bot_s_words(self) -> None:
         scripted = Scripted(["hello there", "hello there my friend", "hello there my friend how"])
@@ -615,8 +572,6 @@ class VocabularyTest(unittest.TestCase):
         self.assertEqual(heard.phrases[-1]["text"], "Gots ships it")
 
     def test_the_host_s_prompt_comes_first_and_the_heard_tail_last(self) -> None:
-        # Two words are settled by the time the frontier is weighed, which is the tail the next
-        # window is prompted with (the frontier word itself waits for the window after it).
         scripted = Scripted(["hello there friend", "hello there friend how"])
         heard, _, clock = take(scripted, hint="Gots, the chat", vocabulary=["Haseeb"], window_s=1.0)
         push(heard, clock, count=8)
@@ -672,8 +627,6 @@ class StartTest(unittest.TestCase):
                 profiles, "haseeb", "Gots", ["Gots", " gots ", "DeepSeek"]
             )
         heard = profiles.get("haseeb", started["take"])
-        # The take holds the list once each, spelled as the user wrote it, for both the prompt and
-        # the cleanup a finished phrase will get.
         self.assertEqual(heard.vocabulary, ["Gots", "DeepSeek"])
         self.assertIn("Gots DeepSeek", heard._prompt())
 
@@ -698,8 +651,6 @@ class StartTest(unittest.TestCase):
         self.assertIsNone(heard._clean.model)
 
     def test_a_pick_that_will_not_load_falls_back_to_the_model_that_did(self) -> None:
-        # The host's config names "small"; the last take ran on "base". The pick stays in the file
-        # for the next app read, and this take is heard on base with a warning, not failed.
         _, patch = hermes()
         profiles = dictation_stream.Takes()
 

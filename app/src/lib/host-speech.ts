@@ -1,13 +1,3 @@
-/**
- * The host's speech settings, made into calls: one read of `GET speech` per connection, and writes
- * that carry only the fields that moved. `speech.ts` is the shape and the words; this file is the
- * host.
- *
- * A plugin that predates the route advertises no `speech_model`, and `supported` stays false, so
- * the tab shows the bot's words alone rather than a picker that could only be refused. A refusal
- * is the plugin's own sentence — a model the host can't hear, a write it couldn't make — and is
- * shown beside the model still in place rather than replacing it with something half-written.
- */
 import { useCallback, useEffect, useState } from "react"
 
 import { connectionKey } from "@/lib/connection"
@@ -22,7 +12,6 @@ export async function getSpeech(config: Server, signal?: AbortSignal): Promise<S
   return readSpeech(await getSpeechSettings(config, signal))
 }
 
-/** Writes the fields that moved; the host answers the whole record, so nothing is guessed. */
 export async function setSpeech(
   config: Server,
   patch: { model?: string; cleanup_model?: SpeechPick | null },
@@ -70,7 +59,6 @@ export function useSpeech(profile?: (Server & { id?: string }) | null) {
         setState({ key, settings })
         return true
       } catch (error) {
-        // The host's own sentence (a model it can't hear, a write it refused), not ours.
         setProblem(error instanceof Error ? error.message : String(error))
         return false
       } finally {

@@ -1,8 +1,3 @@
-/**
- * The host's speech settings put on the wire: one read of `GET speech`, a write that carries only
- * the field that moved, and a refusal read back in the plugin's own words. `speech.ts` is pinned by
- * the unit tier; this is the part that needs the app's own route builder.
- */
 import assert from "node:assert/strict"
 import test from "node:test"
 

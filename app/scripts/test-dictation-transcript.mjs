@@ -1,5 +1,3 @@
-// The take's transcript as a pure rule: what a slice's answer does to the words and phrases a take
-// has heard, and what the take's text is. No DOM, no host — `dictation-transcript.ts` imports nothing.
 import assert from "node:assert/strict"
 import test from "node:test"
 
@@ -79,7 +77,6 @@ test("an answer of an unknown shape changes nothing", () => {
 
 const words = (text) => text.split(/\s+/).filter(Boolean)
 
-/** What the bar showed after each of the take's answers, the first moment before any of them. */
 function moments(answers) {
   let take = settled(openingTranscript())
   const seen = [{ phrases: take.phrases, words: words(take.words), text: transcriptText(take) }]
@@ -90,12 +87,6 @@ function moments(answers) {
   return seen
 }
 
-/**
- * The bar's promise. A phrase reaches the bar already tidied — the host cleans it before it commits
- * it — and a phrase is cleaned once, so its text never changes after the moment it is shown. The
- * words still open only ever grow; the one moment they are replaced is the answer that closes their
- * phrase, which moves them into that phrase's text.
- */
 function assertOnlyAdds(seen) {
   for (const [at, earlier] of seen.slice(0, -1).entries()) {
     const later = seen[at + 1]
@@ -116,9 +107,6 @@ function assertOnlyAdds(seen) {
 }
 
 test("the bar shows a word once and never takes it back", () => {
-  // Answers a host holding the commit rule sends: it holds the newest word until a later window
-  // still has it, an empty answer is a window whose frontier was revised (nothing to add), and a
-  // phrase's close commits the tail whole. Nothing the bar showed before is replaced or removed.
   const seen = moments([
     { words: "let us" },
     { words: " ship" },
@@ -136,8 +124,6 @@ test("the bar shows a word once and never takes it back", () => {
 })
 
 test("a word the windows are still arguing about is never shown and then corrected", () => {
-  // The host sends nothing while its two windows disagree, so the bar goes quiet rather than
-  // showing a guess it would have to take back — and it picks up again when they agree.
   const seen = moments([
     { words: "we ship" },
     { words: "" },

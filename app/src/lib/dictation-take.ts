@@ -1,11 +1,3 @@
-/**
- * The one dictation hook a screen uses, and the choice it makes at the start of a take.
- *
- * A host that advertises `dictation_stream` gets the take heard while it is spoken; any other host
- * gets the chunked implementation exactly as it was, so no bot loses its microphone to this change.
- * Both are mounted — a hook can't be chosen conditionally — and only the one being used ever hears
- * a `start`.
- */
 import type { DictationFailure } from "@/lib/dictation-failure"
 import type { DictationTranscript } from "@/lib/dictation-transcript"
 import { useChunkedDictation, type DictationStatus } from "@/lib/dictation"
@@ -43,13 +35,6 @@ export interface DictationTake {
   cancel: () => void
 }
 
-/**
- * Dictation for this bot. The implementation is picked when a take starts — a live take keeps the
- * one it began on — and anything but a clear `yes` is the chunked one, which is what a host with no
- * answer, or an older plugin, has always had. `vocabulary` is the bot's words, which only the
- * streaming take can use: it rides on the call that opens a take. `onCommitted` is how a take that
- * fails hands back the words it had already heard, so a failure never takes them away.
- */
 export function useDictation(
   config: HermesConfig,
   hint: string,
@@ -60,8 +45,6 @@ export function useDictation(
   const answer = usePluginFeature(config, DICTATION_STREAM)
   const chunked = useChunkedDictation(config, hint, key, onCommitted)
   const stream = useStreamDictation(config, hint, key, vocabulary, onCommitted)
-  // A take kept by the device is offered by the implementation that made it, whatever the host
-  // advertises now: a restored take is transcribed through the batch route either way.
   if (chunked.status !== "idle") return chunked
   if (stream.status !== "idle") return stream
   return answer === "yes" ? stream : chunked

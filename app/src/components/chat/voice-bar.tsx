@@ -26,10 +26,6 @@ function Elapsed({ since }: { since: number }) {
   )
 }
 
-/**
- * The take's words, newest at the bottom, scrolling within a few lines rather than growing. It is
- * not a live region: a screen reader reads it on request, so a take is never announced word by word.
- */
 function Transcript({ transcript }: { transcript: DictationTranscript }) {
   const box = useRef<HTMLDivElement>(null)
   const text = transcriptText(transcript)
@@ -93,8 +89,6 @@ export function VoiceBar({
   const pressedHere = (action: () => void) => (event: MouseEvent) => {
     if (pressed.current || keyboardClick(event)) action()
   }
-  // Closing a failed take discards a recording only when one is still held; a take that already
-  // put its words in the field has nothing left to discard, so its button only dismisses the line.
   const closing = failed ? (failure?.discard ? "Discard" : "Dismiss") : "Cancel"
 
   return (

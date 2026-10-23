@@ -1,12 +1,3 @@
-/**
- * A take that failed, as the voice bar says it: what failed — in the host's own words where it gave
- * them — and what to try, so a broken take reads as a broken take and not a broken app.
- *
- * The kind is what decides the advice, so a take that couldn't open, a speech model that didn't
- * load, a host that went away and a microphone that wouldn't open each tell the user the one thing
- * that might fix them. Import-free, so `scripts/test-dictation-failure.mjs` runs it as a pure rule.
- */
-
 /** What broke, which is what decides what the bar suggests trying. */
 export type DictationFailureKind =
   /** The take couldn't open: the host refused, can't dictate, or never answered. */

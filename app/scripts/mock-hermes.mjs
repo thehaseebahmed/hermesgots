@@ -2308,8 +2308,6 @@ async function streamCompletion(req, res, body) {
 const runs = new Map()
 const PLUGIN_VERSION = process.env.MOCK_PLUGIN_VERSION || "0.29.1"
 const DICTATION = process.env.MOCK_DICTATION ?? "on"
-// A plugin that hears a take while it is spoken (plugin/dictation_stream.py), off by default: the
-// mock's dictation otherwise answers a clip, which is what every other flow expects of it.
 const DICTATION_STREAM = process.env.MOCK_DICTATION_STREAM === "on"
 // What a take hears, one answer per slice: the words it commits and the phrases it closes. The
 // words arrive as the host heard them, filler and spoken number and all; a closed phrase arrives
@@ -2327,19 +2325,11 @@ const TAKE_ANSWERS = [
   },
   { words: " and then two more items", phrases: [] },
 ]
-// The tail phrase, which closes at Stop. Its cleanup failed, so it is committed exactly as the host
-// heard it — no capital, no full stop, the number still in words — which is what a take falls back
-// to.
 const TAKE_TAIL = {
   words: "",
   phrases: [{ id: 2, text: "and then two more items" }],
   behind: false,
 }
-/**
- * The answers a take hears. A bot's words are heard as they were listed, in front of the sentence:
- * a host biased by its prompt spells the name the way the bot does, and the phrase that closes
- * around them carries them, since a closed phrase replaces the words that were open in front of it.
- */
 function takeAnswers(vocabulary) {
   const lead = vocabulary.join(" ")
   if (!lead) return TAKE_ANSWERS
@@ -2353,11 +2343,7 @@ function takeAnswers(vocabulary) {
 }
 const dictationTakes = new Map()
 const dictationSlices = []
-// The vocabulary each take was opened with, kept after the take ends so a flow can read what the
-// app sent: the words a bot's dictation is written with ride on the call that opens a take.
 const dictationStarts = []
-// Audio slices are answered after a moment, like a host decoding, and the most that were ever being
-// answered at once is how a test sees that the app keeps one request in flight.
 const SLICE_MS = 150
 let dictationBusy = 0
 let dictationPeak = 0
@@ -4023,7 +4009,6 @@ http
           return json(res, 409, {
             error: { message: "faster-whisper isn't installed on the host." },
           })
-        // A cold host loads its model inside this call, which is what "Preparing…" is for.
         await new Promise((resolve) => setTimeout(resolve, 600))
         if (DICTATION === "fail")
           return json(res, 502, { error: { message: "The host's speech model didn't load." } })
@@ -4434,8 +4419,6 @@ http
         slices: dictationSlices,
         takes: [...dictationTakes.keys()],
         peak: dictationPeak,
-        // What each take was opened with, kept after it ends: the words the bot's dictation is
-        // written with, as they reached the host.
         starts: dictationStarts,
       })
     }

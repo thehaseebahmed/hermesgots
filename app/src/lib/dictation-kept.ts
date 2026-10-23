@@ -1,11 +1,5 @@
-/**
- * What a take leaves on the device when it is cut short: its audio as it was made, under its
- * composer's key, written at a pace a slice every 250 ms can afford, and asked for whole when the
- * take comes back. Import-free, so `scripts/test-dictation-kept.mjs` runs it as a pure rule.
- */
 import type { DictationPiece } from "@/lib/db"
 
-/** How often a live take's audio is written: a slice every 250 ms is not a write every 250 ms. */
 export const SAVE_MS = 2000
 
 /** Shown when a kept take is offered again, with Retry and Discard. */
@@ -55,8 +49,6 @@ export function keeper(
   let writing: Promise<unknown> = Promise.resolve()
   let held: KeptTake | null = null
   let holding = false
-  // Dropped is the end of the keeper: a slice its recorder sends as it stops must not re-arm one
-  // that was just dropped, or a cancelled take would write itself back to the device.
   let dropped = false
 
   const flush = () => {

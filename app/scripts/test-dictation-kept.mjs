@@ -1,5 +1,3 @@
-// What a take leaves on the device when the app goes away: the audio that has no text yet, asked
-// for whole, and written no faster than a phone needs. `dictation-kept.ts` imports nothing.
 import assert from "node:assert/strict"
 import test from "node:test"
 
@@ -38,7 +36,6 @@ test("a slice every 250 ms is not a write every 250 ms", async () => {
     },
     { ms: 40 },
   )
-  // 60 slices in 120 ms: the pace of a take heard while it is spoken.
   for (let slice = 0; slice < 60; slice += 1) {
     kept.keep({ pieces: [piece(null, String(slice))] })
     await pause(2)
@@ -103,7 +100,6 @@ test("a dropped take is not written back by a slice its recorder sends as it sto
   )
   kept.keep({ pieces: [piece(null, "held")] })
   await kept.drop()
-  // The recorder's last slice lands after the drop: it arrives as the recorder is stopping.
   kept.keep({ pieces: [piece(null, "late")] })
   await kept.flush()
   assert.ok(

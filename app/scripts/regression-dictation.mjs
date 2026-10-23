@@ -10,12 +10,9 @@ import { launch, settleNav } from "./e2e/lib.mjs"
 const app = process.env.APP_URL ?? "http://localhost:15173"
 const mock = process.env.MOCK_URL ?? "http://localhost:18642"
 const offMock = process.env.OFF_MOCK_URL
-// A host that advertises `dictation_stream`: it hears the take while the user talks.
 const streamMock = process.env.STREAM_MOCK_URL
 const shots = process.env.SHOTS_DIR
 const SENTENCE = "Let's ship the dictation feature today."
-// The whole take the streaming mock hears and then closes at Stop: the phrase it tidied, and the
-// tail phrase its cleanup left as it heard it.
 const TAKE = "Let us ship 25 things. and then two more items"
 // Long enough for the stop a dead recorder never sends (STOP_MS) plus the state to render.
 const FAILED_MS = 2500
@@ -68,11 +65,8 @@ function speech() {
 }
 
 const clips = async () => (await (await fetch(`${mock}/__mock/dictation`)).json()).clips
-/** The clips a streaming host was sent: its own mock, since the two hosts keep separate lists. */
 const streamClips = async () => (await (await fetch(`${streamMock}/__mock/dictation`)).json()).clips
-/** The takes a streaming host holds: one it has stopped or cancelled is no longer there. */
 const takeState = async () => await (await fetch(`${streamMock}/__mock/dictation-take`)).json()
-/** Waits until the host holds a take: Cancel a moment earlier and there is nothing to cancel. */
 async function takeHeld(what) {
   for (let end = Date.now() + 10_000; !(await takeState()).takes.length;) {
     assert.ok(Date.now() < end, what)
@@ -80,7 +74,6 @@ async function takeHeld(what) {
   }
 }
 
-/** Waits until the host holds no take: the bar never waits on that request, so a flow doesn't either. */
 async function noTakes(what) {
   for (let end = Date.now() + 5000; (await takeState()).takes.length;) {
     assert.ok(Date.now() < end, what)
@@ -216,8 +209,6 @@ try {
     const before = (await clips()).length
     await page.getByRole("button", { name: "Voice", exact: true }).click()
     await page.getByRole("button", { name: "Stop" }).waitFor()
-    // The fake microphone plays its file in real time, so where the take begins in it moves with the
-    // machine: wait for the second piece to be cut and sent rather than for a wall-clock moment.
     for (let end = Date.now() + 30_000; (await clips()).length - before < 2;) {
       assert.ok(Date.now() < end, "two pieces were cut at the pauses before Stop")
       await page.waitForTimeout(100)
@@ -225,8 +216,6 @@ try {
     const sent = (await clips()).slice(before)
     assert.equal(sent.length, 2, "two pieces sent before Stop")
     assert.equal(sent[1].context, SENTENCE, "the second piece carries on from the first")
-    // A recorder flushes its first chunk a second in, so let the third phrase's piece hold some audio
-    // before Stop closes it: the piece still open is the one that goes with Stop.
     await page.waitForTimeout(1500)
     await page.getByRole("button", { name: "Stop" }).click()
     await page.getByRole("button", { name: "Voice", exact: true }).waitFor()
@@ -253,8 +242,6 @@ try {
       "no transcribing that never ends",
     )
     await page.getByText("The recording stopped.").waitFor()
-    // The line says what failed and what to try, and closing it discards the recording Retry
-    // would have sent.
     await page.getByText("Check the microphone in this app's permissions, then try again.").waitFor()
     await page.getByRole("button", { name: "Discard" }).waitFor()
     await shot(page, "phone-light-9-recorder-failed")
@@ -347,9 +334,6 @@ try {
     assert.equal(await page.getByRole("button", { name: "Voice", exact: true }).count(), 0)
     await page.close()
   }
-  // A host that hears the take while it is spoken: the bar says it is preparing, then fills with
-  // the words as they arrive — a finished phrase tidied, a phrase whose cleanup failed as heard —
-  // says it is behind once, and Stop puts the whole take in the field.
   if (streamMock) {
     for (const [label, viewport, scheme] of [
       ["phone-light", { width: 390, height: 844 }, "light"],
@@ -359,14 +343,12 @@ try {
       await page.waitForLoadState("networkidle").catch(() => {})
       const composer = page.getByRole("textbox").last()
       const mic = page.getByRole("button", { name: "Voice", exact: true })
-      // The bar's transcript: a labelled region a screen reader can read, never a live one.
       const bar = page.getByRole("region", { name: "Dictation" })
 
       await composer.fill("Note:")
       await mic.click()
       await bar.getByText("Preparing…").waitFor()
       await shot(page, `${label}-9-preparing`)
-      // Every text the bar shows, in order, so the flow can read it at any two moments of a take.
       await page.evaluate(() => {
         window.__heard = []
         window.__hearWatcher = window.setInterval(() => {
@@ -386,8 +368,6 @@ try {
 
       await page.getByRole("button", { name: "Stop" }).click()
       await mic.waitFor({ timeout: 15_000 })
-      // The take lands where the caret was: the phrase the host tidied, then the tail phrase its
-      // cleanup couldn't tidy, which is committed exactly as it was heard.
       assert.equal(
         await composer.inputValue(),
         "Note: Let us ship 25 things. and then two more items",
@@ -403,8 +383,6 @@ try {
         "a take that ended keeps nothing on the device",
       )
       await shot(page, `${label}-11-heard`)
-      // Read at two moments: a phrase the bar has shown keeps its text — it arrives tidied and is
-      // cleaned once — so the words still open are the only thing that changes under the reader.
       const moments = await page.evaluate(() => {
         window.clearInterval(window.__hearWatcher)
         return window.__heard
@@ -414,8 +392,6 @@ try {
         moments.some((text) => text.includes("um Let us")),
         `the words arrive as the host heard them (${JSON.stringify(moments)})`,
       )
-      // The phrase arrives tidied, and from that moment it is what the bar keeps saying: a phrase
-      // is cleaned once, before it is committed, so it is never shown twice or tidied again.
       const tidied = moments.findIndex((text) => text.includes("Let us ship 25 things."))
       assert.ok(tidied >= 0, `the phrase arrived tidied (${JSON.stringify(moments)})`)
       for (const text of moments.slice(tidied))
@@ -427,12 +403,10 @@ try {
         moments.some((text) => text.split(" ").length > 1),
         `the take's words arrived over more than one moment (${JSON.stringify(moments)})`,
       )
-      // One request in flight: the host never had two slices to answer at once.
       const heard = await (await fetch(`${streamMock}/__mock/dictation-take`)).json()
       assert.ok(heard.slices.length > 1, "the take was sent slice by slice")
       assert.equal(heard.peak, 1, "one slice in flight at a time")
 
-      // Cancelled: nothing is inserted, nothing is kept, and the mic is back.
       await composer.fill("")
       await mic.click()
       await page.getByRole("button", { name: "Stop" }).waitFor()
@@ -448,7 +422,6 @@ try {
         "a cancelled take keeps nothing on the device",
       )
 
-      // Send mid-take: the tail is waited for, and the take goes out as one message.
       await mic.click()
       await bar.getByText("Let us ship 25 things.").waitFor({ timeout: 15_000 })
       await bar.getByText("and then two more items").waitFor({ timeout: 15_000 })
@@ -466,14 +439,10 @@ try {
       await page.close()
     }
 
-    // A host that refuses the take says why, in its own words, with the one thing to try: the take
-    // stops there rather than leaving the bar preparing for a host that never opened one, and Retry
-    // asks again on a host that answers.
     {
       const page = await open(streamMock, PHONE)
       const composer = page.getByRole("textbox").last()
       const mic = page.getByRole("button", { name: "Voice", exact: true })
-      // The take's whole bar, so its failure line and the buttons beside it are scoped to it.
       const bar = page.getByRole("group", { name: "Dictation take" })
       const refusal = "This Hermes can't decode audio while it is spoken."
       let asked = 0
@@ -504,9 +473,6 @@ try {
       await page.close()
     }
 
-    // A host that goes away mid-take ends the take with the words it already had, says what
-    // happened and what to try, and lets go of the microphone and of its take: the next take opens
-    // on the same page.
     {
       const page = await open(streamMock, PHONE)
       const composer = page.getByRole("textbox").last()
@@ -516,7 +482,6 @@ try {
       let slices = 0
       await page.route("**/api/plugins/memento/dictation/take/**/audio", async (route) => {
         slices += 1
-        // The one slice the host fails, and never again: the take after the failure is a working one.
         if (slices !== 6) return route.continue()
         await route.fulfill({
           status: 502,
@@ -542,14 +507,12 @@ try {
         TAKE,
         "the words the host had committed land where the take began",
       )
-      // The host is told to forget the take without the bar waiting on it, so let that land.
       await noTakes("the failed take is let go on the host")
       assert.equal(
         await page.evaluate(async () => (await import("/src/lib/db.ts")).db.dictations.count()),
         0,
         "a failed take keeps nothing on the device",
       )
-      // The microphone and the profile's take were let go with it: another take opens here.
       await mic.click()
       await bar.getByText("Preparing…").waitFor({ timeout: 15_000 })
       await page.waitForTimeout(1500)
@@ -560,21 +523,16 @@ try {
       await page.close()
     }
 
-    // A take the app was killed in the middle of is kept on the device, offered again after the
-    // reload, and asked for whole through the batch route — which is all a host that can't stream
-    // needs — then put where it began, with the draft that was around it.
     {
       const page = await open(streamMock, PHONE)
       await page.waitForLoadState("networkidle").catch(() => {})
       const composer = page.getByRole("textbox").last()
       const mic = page.getByRole("button", { name: "Voice", exact: true })
       await composer.fill("Before after")
-      // After "Before ": where the take begins, and so where its words go when it comes back.
       await composer.evaluate((field) => field.setSelectionRange(7, 7))
       const before = (await streamClips()).length
       await mic.click()
       await page.getByRole("region", { name: "Dictation" }).waitFor()
-      // The slices are kept on the device as they are made, which is what a reload must find.
       for (let kept = false, end = Date.now() + 10_000; !kept; await page.waitForTimeout(100)) {
         kept = await page.evaluate(async () => {
           const { db } = await import("/src/lib/db.ts")

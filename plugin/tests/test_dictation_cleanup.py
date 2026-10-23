@@ -17,7 +17,6 @@ from plugin import dictation_cleanup
 
 
 class FakeLlm:
-    """A host model whose ``complete_structured`` answers the next entry, or raises it."""
 
     def __init__(self, *answers) -> None:
         self.answers = list(answers)
@@ -32,7 +31,6 @@ class FakeLlm:
 
 
 def with_model(*answers):
-    """The plugin's model access, with a scripted model behind it."""
     llm = FakeLlm(*answers)
     return llm, mock.patch.object(
         dictation_cleanup, "ctx", types.SimpleNamespace(llm=llm)
@@ -40,14 +38,12 @@ def with_model(*answers):
 
 
 def tidied(phrase, answer, vocabulary=(), **options):
-    """What a phrase's cleanup commits: the model's answer, or the phrase as it was heard."""
     llm, patch = with_model(answer)
     with patch:
         return dictation_cleanup.Cleaner(vocabulary, **options)(phrase)
 
 
 class InstructionsTest(unittest.TestCase):
-    """What the bot's model is asked for: the tidying a phrase may get, and never a rewrite."""
 
     def test_fillers_go_and_like_where_it_compares_stays(self) -> None:
         rules = dictation_cleanup.INSTRUCTIONS
@@ -105,7 +101,6 @@ class InstructionsTest(unittest.TestCase):
 
 
 class IsTidyingTest(unittest.TestCase):
-    """How much of a phrase an answer may lose or gain and still be a tidying of it."""
 
     def test_a_phrase_that_lost_its_fillers_is_a_tidying(self) -> None:
         self.assertTrue(
@@ -116,7 +111,6 @@ class IsTidyingTest(unittest.TestCase):
         )
 
     def test_a_number_written_as_digits_is_a_tidying(self) -> None:
-        # Two words become one, which is half of a short phrase: the slack keeps it a tidying.
         self.assertTrue(dictation_cleanup.is_tidying("twenty five", "25"))
 
     def test_an_answer_much_shorter_than_the_phrase_is_not(self) -> None:
@@ -140,7 +134,6 @@ class IsTidyingTest(unittest.TestCase):
 
 
 class CleanTest(unittest.TestCase):
-    """What a phrase commits: the model's tidying, or the words the host heard."""
 
     def test_a_finished_phrase_comes_back_tidied(self) -> None:
         heard = tidied(
@@ -151,7 +144,6 @@ class CleanTest(unittest.TestCase):
         self.assertEqual(heard, "Gots ships 25 on 3 March.")
 
     def test_like_where_it_compares_is_left_alone(self) -> None:
-        # The cleanup keeps what the model answered: what does not reword can't lose a comparison.
         self.assertEqual(
             tidied("it's like a boat uh not a ship", {"text": "It's like a boat, not a ship."}),
             "It's like a boat, not a ship.",
@@ -167,7 +159,6 @@ class CleanTest(unittest.TestCase):
         )
 
     def test_a_listed_name_is_spelled_as_listed(self) -> None:
-        # The words ride in the call, so a model that leans on them corrects what the host misheard.
         self.assertEqual(
             tidied("gots is the app", {"text": "Gots is the app."}, ["Gots"]),
             "Gots is the app.",

@@ -36,8 +36,6 @@ logger = logging.getLogger(__name__)
 
 # Hermes's own default when ``stt.local.model`` is unset.
 DEFAULT_MODEL = "base"
-# The host's settings, one bot each: the cleanup model a phrase is tidied on, the model that last
-# loaded, and the last load that failed.
 CLEANUP_KEY = "speech_cleanup_model"
 GOOD_KEY = "speech_good_model"
 WARNING_KEY = "speech_warning"
@@ -62,7 +60,6 @@ MODELS: Sequence[Dict[str, Any]] = (
 # Hermes resolves these two spellings of a model it knows.
 ALIASES = {"large": "large-v3", "turbo": "large-v3-turbo"}
 
-# The one thing the app shows where the host withholds the override.
 DENIED = "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable memento`."
 
 
@@ -104,15 +101,8 @@ def clean_model(value: Any) -> str:
     return name
 
 
-# --- Hermes's own config -------------------------------------------------------------------------
-
-
 def _stt(config_path: Path, strict: bool = False) -> Dict[str, Any]:
-    """The ``stt`` section of the profile's ``config.yaml``, as Hermes reads it.
-
-    ``strict`` raises rather than answering an empty section: a write must never mistake a file it
-    couldn't read for one with no speech settings, or it would save over them.
-    """
+    """The ``stt`` section of the profile's ``config.yaml``, as Hermes reads it."""
     try:
         from gateway.run import _load_gateway_config
 
@@ -137,9 +127,6 @@ def _model_of(stt: Dict[str, Any]) -> str:
     local = stt.get("local") if isinstance(stt.get("local"), dict) else {}
     name = local.get("model") if isinstance(local, dict) else None
     return name.strip() if isinstance(name, str) and name.strip() else DEFAULT_MODEL
-
-
-# --- what the host already has -------------------------------------------------------------------
 
 
 def cache_roots(stt: Dict[str, Any]) -> List[Path]:
@@ -172,9 +159,6 @@ def downloaded(entry: Dict[str, Any], roots: Sequence[Path]) -> bool:
     return False
 
 
-# --- the settings read ---------------------------------------------------------------------------
-
-
 def read(config_path: Path, path: Path, gate: Dict[str, bool]) -> Dict[str, Any]:
     """The host's speech settings as the Dictation tab draws them: the pick, the list, the warning."""
     stt = _stt(config_path)
@@ -194,14 +178,10 @@ def read(config_path: Path, path: Path, gate: Dict[str, bool]) -> Dict[str, Any]
                 "slow_on_cpu": entry["slow_on_cpu"],
                 "downloaded": have,
                 "in_use": here,
-                # A pick that isn't on disk is downloaded inside the next take's start, the way a
-                # cold host loads one: the tab says so rather than letting it look free.
                 "downloading": here and not have,
             }
         )
     if not seen:
-        # A hand-written model Hermes can hear but this catalogue doesn't list: still say it is the
-        # one in use, rather than marking nothing.
         rows.insert(
             0,
             {
@@ -236,9 +216,6 @@ def set_model(config_path: Path, value: Any) -> str:
     section = {**stt, "local": {**local, "model": name}}
     _write_stt(config_path, section)
     return name
-
-
-# --- cleanup's model -----------------------------------------------------------------------------
 
 
 def read_cleanup(path: Path) -> Optional[Dict[str, str]]:
@@ -316,11 +293,7 @@ def _main_config(config_path: Path) -> Dict[str, Any]:
     return cfg if isinstance(cfg, dict) else {}
 
 
-# --- what a take runs on -------------------------------------------------------------------------
-
-
 def _failed(warmed: Any) -> str:
-    """Why a load didn't happen, or ``""`` when it did. ``dictation.warm`` never raises."""
     if not isinstance(warmed, dict):
         return "it gave no answer"
     if warmed.get("error"):
@@ -331,7 +304,6 @@ def _failed(warmed: Any) -> str:
 
 
 def good(path: Optional[Path]) -> Optional[str]:
-    """The model that last loaded on this host, kept past a restart."""
     if path is None:
         return None
     held = get_setting(path, GOOD_KEY)
@@ -361,7 +333,6 @@ def _remember_warning(path: Optional[Path], model: str, reason: str) -> None:
 
 
 def _clear_warning(path: Optional[Path], model: str) -> None:
-    """A model that has now loaded is no longer a warning: the one it replaced is gone."""
     if path is None:
         return
     held = _warning(path)

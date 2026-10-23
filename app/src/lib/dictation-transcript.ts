@@ -1,13 +1,3 @@
-/**
- * What a take has heard, as the voice bar shows it: the phrases it has finished and the words it
- * has committed since the last one, in the order they were said.
- *
- * A take's answers carry only what is new — the words committed since the last answer, the phrases
- * just closed — so this is the fold that holds a whole take, and the only thing that decides what
- * the take's text is. Import-free, so `scripts/test-dictation-transcript.mjs` runs it as a pure
- * rule.
- */
-
 export interface DictationPhrase {
   id: number
   text: string
@@ -44,7 +34,6 @@ export function openingTranscript(): DictationTranscript {
   return { words: "", phrases: [], behind: false, preparing: true }
 }
 
-/** One space between the parts that have any words in them. */
 function join(...parts: string[]): string {
   return parts
     .map((part) => part.trim())

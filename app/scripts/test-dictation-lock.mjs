@@ -1,6 +1,3 @@
-// One take at a time per profile: the microphone a take holds is the profile's, so a second take is
-// refused before the mic is asked for, and only the take that holds the profile can give it back.
-// `dictation-lock.ts` imports nothing.
 import assert from "node:assert/strict"
 import test from "node:test"
 
@@ -40,7 +37,6 @@ test("a take that ends after a newer one began cannot let go of it", () => {
   const first = holdTake(one)
   releaseTake(one, first)
   const second = holdTake(one)
-  // The take that was let go finishes late and gives its own token back: the newer take keeps the mic.
   releaseTake(one, first)
   assert.equal(takeRunning(one), true, "the newer take still holds the profile")
   releaseTake(one, second)

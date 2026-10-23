@@ -33,18 +33,12 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from . import dictation, dictation_cleanup, speech
 
-# The audio a rolling window covers, and the least time between two decodes.
 WINDOW_S = 4.0
 HOP_S = 0.5
-# A first window shorter than this has nothing worth waking the model for.
 MIN_WINDOW_S = 0.4
-# Kept from the phrase just closed, so the next one doesn't begin mid-word.
 OVERLAP_S = 0.3
-# The most words a window's audio can hold: eight a second over the window's few seconds. Words
-# older than this cannot be in the window, so a commit never looks further back than they are.
 _HEARD_WORDS = 32
 
-# A take that hears no audio for this long is dropped and its buffer let go.
 QUIET_S = 15.0
 SAMPLE_RATE = 16000
 # A bot's vocabulary is a short list, so the decoder's prompt stays inside the tokens Whisper keeps.
@@ -56,11 +50,6 @@ Decoder = Callable[[bytes, bool], List[float]]
 
 
 def clean_vocabulary(words: Any) -> List[str]:
-    """A bot's words as a take keeps them: one line each, once each, and a short list.
-
-    The spelling is kept exactly as the user wrote it — that is the whole point of the list — while
-    two words differing only in case are one word, so "Gots" and "gots" can't both bias the prompt.
-    """
     kept: List[str] = []
     seen = set()
     for raw in words if isinstance(words, (list, tuple)) else ():
@@ -85,7 +74,6 @@ class TakeError(Exception):
 
 
 def agree(first: Sequence[str], second: Sequence[str]) -> List[str]:
-    """The words two hypotheses agree on: their longest common word prefix."""
     out: List[str] = []
     for left, right in zip(first, second):
         if left != right:
@@ -106,7 +94,6 @@ def settled(first: Sequence[str], second: Sequence[str]) -> List[str]:
 
 
 def _near(first: str, second: str) -> bool:
-    """Whether one word may be the other one heard mid-word: the same, or one a prefix of the other."""
     return first == second or (
         len(first) >= 2
         and len(second) >= 2
@@ -136,9 +123,6 @@ def newly_committed(
     if not fresh:
         return []
     began, matched = len(known), 0
-    # The window cannot be covering words older than the most its audio could hold, and a run is
-    # never longer than ``stable`` itself — which is what a phrase's close needs, its whole text
-    # passed at once; of two equally long runs, the later one is where the window is.
     search = range(max(0, len(known) - max(_HEARD_WORDS, len(fresh))), len(known))
     for at in search:
         size = 0
@@ -150,7 +134,6 @@ def newly_committed(
                 break
     if matched or not revise_head:
         return fresh[max(0, len(known) - began) :]
-    # The close's head: a fragment of a committed word, with its run continuing exactly behind it.
     for at in search:
         if not _near(fresh[0], known[at]):
             continue
@@ -224,12 +207,6 @@ def _frames(resampled: Any) -> List[Any]:
 
 
 class Take:
-    """One dictation being heard: its audio, its hypotheses and what it has committed.
-
-    ``transcribe`` is injected — it takes a window of samples and a prompt and answers what it
-    heard, or raises ``dictation.DictationError``. ``decode`` turns a slice into samples. Both being
-    arguments is what lets the commit rule be tested without a model or a microphone.
-    """
 
     def __init__(
         self,
@@ -273,7 +250,6 @@ class Take:
         self._previous: List[str] = []
         self._first = True
         self._closed = 0
-        # Where the phrase being heard began, in samples; the next one starts before its end.
         self._phrase_from = 0
         self._decoded_at = clock()
         self._heard_at = clock()
@@ -281,7 +257,6 @@ class Take:
         self._behind = False
         self._dropped = False
 
-    # -- reading it -------------------------------------------------------
 
     @property
     def dropped(self) -> bool:
@@ -293,7 +268,6 @@ class Take:
 
     @property
     def buffered(self) -> int:
-        """How many samples the take is holding, so a swept take can be seen to let them go."""
         return len(self._samples)
 
     @property
@@ -308,17 +282,14 @@ class Take:
         return self._dropped or self._clock() - self._heard_at > self.quiet_s
 
     def free(self) -> None:
-        """Lets the audio and the hypotheses go. The take is over, whatever the caller does next."""
         with self._lock:
             self._dropped = True
             self._samples = []
             self._previous = []
             self._phrase_words = []
 
-    # -- hearing it -------------------------------------------------------
 
     def add(self, data: bytes, pause: bool = False) -> Dict[str, Any]:
-        """One slice. Answers with what it newly committed; a slice with no new window answers at once."""
         with self._lock:
             self._live()
             if not data:
@@ -336,7 +307,6 @@ class Take:
             return self._quiet()
 
     def stop(self) -> Dict[str, Any]:
-        """Finishes the tail phrase and lets the take go."""
         with self._lock:
             self._live()
             answer = self._close_phrase()
@@ -344,10 +314,8 @@ class Take:
             return answer
 
     def cancel(self) -> None:
-        """Drops everything, at once."""
         self.free()
 
-    # -- the inside of it -------------------------------------------------
 
     def _heard_samples(self, data: bytes) -> List[float]:
         if self._decode is None:
@@ -357,8 +325,6 @@ class Take:
         except TakeError:
             raise
         except Exception as error:
-            # A slice the host can't decode is that slice's failure, not the take's: the next one
-            # may be whole, and the bar has something to say either way.
             raise TakeError(f"Couldn't decode the recording: {error}", 502) from error
 
     def _live(self) -> None:
@@ -407,11 +373,6 @@ class Take:
         return {"words": " ".join(fresh), "phrases": [], "behind": self._behind}
 
     def _close_phrase(self) -> Dict[str, Any]:
-        """Hears the phrase's remaining audio whole, and closes it with the words it holds.
-
-        This decode is the phrase's own audio rather than a window over it, so it is final: all of
-        it is committed, including the frontier word the windows were still holding back.
-        """
         tail = self._samples[self._phrase_from :]
         if tail:
             text = self._transcribe(tail, self._prompt())
@@ -427,8 +388,6 @@ class Take:
             self._phrases.append(phrase)
         self._phrase_words = []
         self._phrase_from = max(0, len(self._samples) - int(OVERLAP_S * self.rate))
-        # The buffer is let go up to the overlap the next phrase begins at: a long take holds only
-        # what its next decode needs, not every second it has heard.
         del self._samples[: self._phrase_from]
         self._phrase_from = 0
         self._previous = []
@@ -519,7 +478,6 @@ class Takes:
             with self._lock:
                 if self._sweep_locked():
                     continue
-                # Nothing is held: the thread ends, and the next take starts another.
                 self._reaper = None
                 return
 
@@ -581,17 +539,6 @@ def start(
     cleanup_model: Optional[Dict[str, str]] = None,
     speech_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
-    """Opens a take for a profile: waits for the host's model, then answers whether it is ready.
-
-    This is the one call of a take that may wait — a cold host loads its model inside it, and a
-    model it doesn't have downloads inside it too — and the voice bar says the take is preparing
-    until it answers. The bot's vocabulary rides in here and is carried by the take, into every
-    window's prompt and into each finished phrase's cleanup. ``cleanup_model`` is that cleanup's
-    model where the bot has picked one and the host allows one (the Dictation tab's field, #295);
-    without one the bot's own model tidies every phrase. ``speech_path`` is where the host keeps
-    the model that last loaded, so a pick that won't load falls back to it with a warning instead
-    of costing the take.
-    """
     state = dictation.info()
     if not state.get("ready"):
         raise dictation.DictationError(state.get("reason") or "Dictation is off on the host.", 409)
