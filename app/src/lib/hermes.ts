@@ -1119,7 +1119,7 @@ export async function getOpenUI(config: HermesConfig, signal?: AbortSignal): Pro
     headers: headers(config),
     signal,
   })
-  return openuiTold(await response.json())
+  return openuiEnabled(await response.json())
 }
 
 /** Turns interfaces on or off for the whole profile, and answers with what the host now holds. */
@@ -1134,12 +1134,11 @@ export async function setOpenUI(
     body: JSON.stringify({ enabled }),
     signal,
   })
-  return openuiTold(await response.json())
+  return openuiEnabled(await response.json())
 }
 
-/** The switch a host's answer carries: off only when it says so, so a host that says nothing
- * (an older route, a body that arrived empty) leaves the app drawing, as it did before. */
-function openuiTold(body: unknown) {
+/** The host's answer as the switch: off only when it says so, so silence leaves the app drawing. */
+function openuiEnabled(body: unknown) {
   return (body as { enabled?: unknown } | null)?.enabled !== false
 }
 

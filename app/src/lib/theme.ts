@@ -13,5 +13,5 @@ export type ThemeValue = (typeof THEMES)[number]["value"]
 
 /** The label of a stored theme, with anything unset read as following the system. */
 export function themeLabel(value: string | undefined) {
-  return THEMES.find((theme) => theme.value === (value ?? "system"))?.label ?? "System"
+  return THEMES.find((theme) => theme.value === (value ?? "system"))?.label ?? THEMES[0].label
 }
