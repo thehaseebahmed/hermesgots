@@ -1268,33 +1268,44 @@ export function pluginRoot(baseUrl: string) {
 export const INSTALL_PLUGIN = `hermes plugins install thehaseebahmed/memento/plugin --enable
 hermes gateway restart`
 
-/**
- * The Gots plugin's version on the bot's server, or null when it doesn't answer. Hermes's 404
- * for an unknown route skips CORS, so a missing plugin usually fails with no status at all.
- */
-export async function getPluginVersion(config: HermesConfig): Promise<string | null> {
-  try {
-    const response = await request(`${pluginRoot(config.baseUrl)}/info`, {
-      headers: headers(config),
-    })
-    const body = await response.json()
-    return typeof body?.version === "string" && body.version ? body.version : null
-  } catch {
-    return null
-  }
+/** What one read of the plugin's `info` answered: its version and features, or nulls. */
+export interface PluginInfo {
+  version: string | null
+  features: string[] | null
 }
 
-/** What the Gots plugin on the bot's server offers (`info`'s `features`). */
-export async function getPluginFeatures(
-  config: HermesConfig,
-  signal?: AbortSignal,
-): Promise<string[]> {
+async function pluginInfoBody(config: HermesConfig, signal?: AbortSignal): Promise<PluginInfo> {
   const response = await request(`${pluginRoot(config.baseUrl)}/info`, {
     headers: headers(config),
     signal,
   })
-  const features: unknown = (await response.json())?.features
-  return Array.isArray(features) ? features.filter((f): f is string => typeof f === "string") : []
+  const body = await response.json()
+  const features: unknown = body?.features
+  return {
+    version: typeof body?.version === "string" && body.version ? body.version : null,
+    features: Array.isArray(features)
+      ? features.filter((feature): feature is string => typeof feature === "string")
+      : null,
+  }
+}
+
+/**
+ * The plugin's `info` in one bounded read, asked anew by every caller: its version and features
+ * from the same answer, so two questions about one host can't disagree, and a caller that wants
+ * the host's state now gets it. `getPluginFeatureList` is the remembered view over this.
+ */
+export const getPluginInfo = (config: HermesConfig): Promise<PluginInfo> =>
+  pluginInfoBody(config, AbortSignal.timeout(READ_TIMEOUT_MS))
+
+/** What the Gots plugin on the bot's server offers (`info`'s `features`). */
+export const getPluginFeatures = (config: HermesConfig, signal?: AbortSignal): Promise<string[]> =>
+  pluginInfoBody(config, signal).then((info) => info.features ?? [])
+
+/** The Gots plugin's version on the bot's server, or null when it doesn't answer. */
+export function getPluginVersion(config: HermesConfig): Promise<string | null> {
+  return getPluginInfo(config)
+    .then((info) => info.version)
+    .catch(() => null)
 }
 
 const pluginFeatures = new Map<string, Promise<string[] | null>>()
@@ -1308,7 +1319,9 @@ export function getPluginFeatureList(config: HermesConfig): Promise<string[] | n
   const key = connectionKey(config)
   let pending = pluginFeatures.get(key)
   if (!pending) {
-    pending = getPluginFeatures(config, AbortSignal.timeout(READ_TIMEOUT_MS)).catch(() => null)
+    pending = getPluginInfo(config)
+      .then((info) => info.features)
+      .catch(() => null)
     pluginFeatures.set(key, pending)
     void pending.then((found) => found || pluginFeatures.delete(key))
   }
