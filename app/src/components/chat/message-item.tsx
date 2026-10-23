@@ -327,7 +327,6 @@ interface MessageItemProps {
   blocks?: ThreadBlock[]
   /** Whether a reply is streaming in this chat, so queued messages know they'll go on their own. */
   busy?: boolean
-  showThinking?: boolean
 }
 
 /**
@@ -340,7 +339,6 @@ export const MessageItem = memo(function MessageItem({
   showStats,
   blocks,
   busy,
-  showThinking = true,
 }: MessageItemProps) {
   // Replies type out a word at a time, however Hermes delivers them.
   const content = useReveal(message.role === "assistant" ? message.content : "")
@@ -456,9 +454,9 @@ export const MessageItem = memo(function MessageItem({
   }
 
   // A reply keeps its thinking in runs, one per stretch between tool calls, and draws one row per
-  // run where it happened. A row stored before runs folds into one at the top, so nothing older has
-  // to be migrated to be drawn.
-  const runs = showThinking ? runsOf(message).filter((run) => run.text.trim()) : []
+  // run where it happened — in every thread: a chat's, a delegated agent's, a coding session's. A row
+  // stored before runs folds into one at the top, so nothing older has to be migrated to be drawn.
+  const runs = runsOf(message).filter((run) => run.text.trim())
   const thinkingOpen = streaming && !message.content
   const thinkingParts: RunPart[] = runs.map((run, index) => ({
     run,

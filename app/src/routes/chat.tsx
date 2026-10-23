@@ -1044,7 +1044,6 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
                           message={message}
                           showStats
                           busy={busy}
-                          showThinking={!session}
                           blocks={draws.get(message.id)}
                         />
                       </MessageScrollerItem>

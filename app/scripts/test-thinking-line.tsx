@@ -483,19 +483,69 @@ test("a reply stored before runs draws its thinking as one row at the top", asyn
   })
 })
 
-test("a coding session draws no line where the same reply in a chat draws one", async () => {
+test("a coding session's thread draws the same rows, in place, as the same reply in a chat", async () => {
   host()
   const reply = {
     id: "session-reply",
-    reasoningRuns: [run(REASONING)],
+    tools: [call("call-1"), call("call-2", "read_file", "parse.ts")],
+    reasoningRuns: [run(REASONING), run(SECOND, { afterToolId: "call-2", spanMs: 12_000 })],
     content: ANSWER,
   }
   await screen(undefined, turn(reply), async () => {
-    assert.equal(lineLabel(onlyThinkingLine()), "Thought it through", "a chat draws the thinking")
+    const chat = thinkingLines()
+    assert.equal(chat.length, 2, "a chat draws one row per run")
+    assert.deepEqual(
+      chat.map(lineLabel),
+      ["Thought it through", "Thought for 12s"],
+      "each run reads its own label",
+    )
+    for (const line of chat) assert.equal(expanded(line), "false", "and both fold over the answer")
   })
   await screen("project-1", turn(reply), async () => {
-    assert.match(screenText(), /The parser reads it/, "the session still draws the reply")
-    assert.equal(thinkingLines().length, 0, "with no thinking line")
+    assert.match(screenText(), /The parser reads it/, "the session draws the reply")
+    const session = thinkingLines()
+    assert.equal(session.length, 2, "and one row per run, as a chat does")
+    assert.deepEqual(
+      session.map(lineLabel),
+      ["Thought it through", "Thought for 12s"],
+      "with the same words",
+    )
+    for (const line of session) assert.equal(expanded(line), "false", "folded over the answer")
+    const box = item(session[0])
+    assert.equal(item(session[1]), box, "both rows belong to the one reply")
+    assert.ok(follows(session[0], toolRow(box)), "the run before the calls is drawn above them")
+    assert.ok(follows(toolRow(box), session[1]), "and the run after them below the call that broke it")
+
+    await db.messages.put({
+      ...(await db.messages.get("session-reply"))!,
+      content: "",
+      status: "streaming",
+    })
+    await settle()
+    const streaming = thinkingLines()
+    assert.equal(streaming.length, 2, "a streaming session keeps one row per run")
+    assert.equal(lineLabel(streaming[0]), "Thought it through", "the run before the calls is done")
+    assert.equal(lineLabel(streaming[1]), "Thinking…", "its newest run streams open, as a chat's does")
+    assert.equal(expanded(streaming[1]), "true", "and is open")
+
+    await db.messages.put({
+      ...(await db.messages.get("session-reply"))!,
+      content: ANSWER,
+      status: "done",
+    })
+    await settle()
+    for (const line of thinkingLines())
+      assert.equal(expanded(line), "false", "the answer folds it, as a chat's folds")
+
+    await click(thinkingLines()[1])
+    assert.equal(expanded(thinkingLines()[1]), "true", "a tap opens it")
+    assert.match(
+      reasoned(thinkingLines()[1]).textContent ?? "",
+      /blocks are what matter/,
+      "with its thinking readable",
+    )
+    await click(thinkingLines()[1])
+    assert.equal(expanded(thinkingLines()[1]), "false", "and a second tap folds it")
   })
 })
 
