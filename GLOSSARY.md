@@ -69,7 +69,7 @@ Something Gots itself does from the composer: opening a thread (a chat, where th
 _Avoid_: slash command, action, app skill
 
 **Skill**:
-One of a bot's named capabilities, written `/name` at the front of a message. Gots offers them from the slash menu; the bot's Hermes profile is what runs them.
+One of a bot's named capabilities, written `/name` in a message — wherever the caret was when the slash menu picked it. Gots offers them from the slash menu; the bot's Hermes profile is what runs them.
 _Avoid_: command, tool, plugin
 
 **Slash menu**:

@@ -4,9 +4,10 @@ import test from "node:test"
 import {
   LOCAL_COMMANDS,
   SEND_COMMANDS,
-  hoistItem,
   localCommand,
   nameSpread,
+  pickItem,
+  pickSendMode,
   rankSlashItems,
   slashToken,
 } from "../src/lib/slash.ts"
@@ -66,7 +67,7 @@ test("a token with text after it isn't the whole message", () => {
   assert.equal(slashToken("/settings dark mode", 9)?.alone, false)
 })
 
-test("the whole token is replaced, but the query is only what is typed before the caret", () => {
+test("the token spans the whole word it sits in, while the query is only what is before the caret", () => {
   const text = "fix /gri please"
   const token = slashToken(text, 8)
   assert.deepEqual(token, { start: 4, end: 8, query: "gri", alone: false })
@@ -158,21 +159,61 @@ test("a skill no longer matches when nothing in it does", () => {
   assert.deepEqual(rankSlashItems(items, tokenAt("/zzz")), [])
 })
 
-test("a picked skill goes to the front of the message, the rest following it", () => {
+test("a picked skill lands where the cursor is, with a space to keep typing", () => {
   const text = "fix the tests /gri"
-  assert.deepEqual(hoistItem(text, slashToken(text, text.length), "grill-with-docs"), {
-    text: "/grill-with-docs fix the tests",
-    caret: 30,
+  assert.deepEqual(pickItem(text, slashToken(text, 18), "grill-with-docs"), {
+    text: "fix the tests /grill-with-docs ",
+    caret: 31,
+  })
+  assert.deepEqual(pickItem("/gri", tokenAt("/gri"), "plan"), { text: "/plan ", caret: 6 })
+})
+
+test("a picked skill keeps the word its token was typed into", () => {
+  const text = "fix the /gritests"
+  assert.deepEqual(pickItem(text, slashToken(text, 12), "grill-me"), {
+    text: "fix the /grill-me tests",
+    caret: 18,
+  })
+})
+
+test("a space that already follows the token isn't doubled", () => {
+  const text = "fix /gri please"
+  assert.deepEqual(pickItem(text, slashToken(text, 8), "grill-with-docs"), {
+    text: "fix /grill-with-docs please",
+    caret: 21,
+  })
+})
+
+test("the letters typed after the cursor inside the token stay", () => {
+  const text = "/grilling"
+  assert.deepEqual(pickItem(text, slashToken(text, 4), "grill-with-docs"), {
+    text: "/grill-with-docs lling",
+    caret: 17,
   })
 })
 
 test("a picked skill at the front leaves the rest of the message where it was", () => {
   const text = "/gri the report"
-  assert.deepEqual(hoistItem(text, slashToken(text, 4), "review"), {
+  assert.deepEqual(pickItem(text, slashToken(text, 4), "review"), {
     text: "/review the report",
-    caret: 18,
+    caret: 8,
   })
-  assert.deepEqual(hoistItem("/gri", tokenAt("/gri"), "plan"), { text: "/plan ", caret: 6 })
+})
+
+test("a send-mode replaces the whole token, wherever the cursor was in it", () => {
+  assert.deepEqual(pickSendMode("/steer", slashToken("/steer", 2), "steer"), {
+    text: "/steer ",
+    caret: 7,
+  })
+  assert.deepEqual(pickSendMode("  /queue", slashToken("  /queue", 4), "queue"), {
+    text: "  /queue ",
+    caret: 9,
+  })
+  const spaced = "  /steer  "
+  assert.deepEqual(pickSendMode(spaced, slashToken(spaced, 4), "steer"), {
+    text: "  /steer  ",
+    caret: 9,
+  })
 })
 
 test("the slash menu offers no goal command", () => {

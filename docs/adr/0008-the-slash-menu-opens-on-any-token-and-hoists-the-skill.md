@@ -5,6 +5,11 @@ no longer one of the commands this record describes — it has left the menu, th
 list and the wizard whose review picker read the skill list. Everything here about commands and
 skills stands.*
 
+*Superseded in part by [ADR 0037](./0037-a-picked-skill-lands-where-the-cursor-is.md): a picked
+skill is no longer hoisted to the front of the message — it lands where the cursor is, because the
+front-of-message rule belongs to host surfaces this app never sends through. The hoist below stood
+on a premise this app's own transport disproves; 0037 carries the evidence.*
+
 The composer's slash menu used to need the slash at the very start of the composer with nothing after
 it but a single word — `/gri` opened it, `/grill the tests` and `fix /grill` did not. Discovery was
 therefore limited to the one position where a skill is also _invocable_, and a skill whose name the
