@@ -41,14 +41,27 @@ test("a chat is named by its shape and clocks, never by what it holds", () => {
 })
 
 test("a bot's state separates Main from its threads and never carries its key or host", () => {
-  const chats = [diagChat(chat("main-bot-1", 1_000, { main: true })), diagChat(chat("t1", 2_000))]
-  const built = diagBot(profile, chats, { plugin: "0.99.0", features: ["triage", "moves"] })
+  const main = diagChat(chat("main-bot-1", 1_000, { main: true }))
+  const chats = [diagChat(chat("t1", 2_000))]
+  const built = diagBot({
+    profile,
+    host: {
+      configured: true,
+      pluginVersion: null,
+      plugin: "0.99.0",
+      features: ["triage", "moves"],
+      lastThread: null,
+    },
+    chats,
+    main,
+    threads: 1,
+  })
   assert.equal(built.main?.id, "main-bot-1", "Main is named as its own field")
-  assert.equal(built.threads, 1)
+  assert.equal(built.threads, 1, "the thread count is what the reader counted")
   assert.deepEqual(
     built.chats.map((one) => one.id),
     ["t1"],
-    "the threads list holds the rest, oldest first",
+    "the threads list holds what the reader read, without Main",
   )
   assert.equal(built.configured, true)
   assert.equal(built.plugin, "0.99.0")
@@ -62,13 +75,21 @@ test("a bot without a Main, or an answer, still reads", () => {
   const blank = ""
   const unconfigured = { ...profile, baseUrl: blank }
   delete unconfigured.apiKey
-  const built = diagBot(unconfigured, [diagChat(chat("t1", 2_000))], {
-    plugin: null,
-    features: null,
-    lastThread: null,
+  const built = diagBot({
+    profile: unconfigured,
+    host: {
+      configured: false,
+      pluginVersion: null,
+      plugin: null,
+      features: null,
+      lastThread: null,
+    },
+    chats: [diagChat(chat("t1", 2_000))],
+    main: null,
+    threads: 1,
   })
-  assert.equal(built.main, undefined)
-  assert.equal(built.configured, false, "no server and key means nothing could be asked")
+  assert.equal(built.main, null, "no Main row reads as null")
+  assert.equal(built.configured, false, "nothing was asked of a bot with no server and key")
   assert.equal(built.plugin, null, "an absent answer reads as null, not as a missing field")
   assert.equal(built.lastThread, null)
   assert.equal(built.disabled, undefined, "a switch that is off rides as no field")

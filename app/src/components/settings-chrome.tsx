@@ -1,4 +1,6 @@
-import type { ReactNode } from "react"
+import { useState, type ReactNode } from "react"
+
+import type { LucideIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
@@ -50,5 +52,28 @@ export function RowText({ title, subtitle }: { title: ReactNode; subtitle?: Reac
       <span className="truncate text-base">{title}</span>
       {subtitle && <span className="line-clamp-2 text-sm text-muted-foreground">{subtitle}</span>}
     </span>
+  )
+}
+
+/** A row that opens a pop-up of its own: the row chrome, and the open state the sheet takes. */
+export function SheetRow({
+  icon: Icon,
+  title,
+  sheet,
+}: {
+  icon: LucideIcon
+  title: string
+  /** The pop-up this row opens, given the open state this row holds. */
+  sheet: (sheetProps: { open: boolean; onOpenChange: (open: boolean) => void }) => ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)} className={linkRowClass}>
+        <Icon className="size-5 shrink-0 text-muted-foreground" />
+        <RowText title={title} />
+      </button>
+      {sheet({ open, onOpenChange: setOpen })}
+    </>
   )
 }

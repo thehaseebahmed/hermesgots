@@ -3,6 +3,7 @@ import test from "node:test"
 
 import { DeviceStateSheet, readDeviceDiagnostics } from "@/components/device-state"
 import { db, ensureMainThread, mainThreadId } from "@/lib/db"
+import { lastThreadKey } from "@/lib/threads"
 import { botProfile, json, mount, seedSettings, until } from "./component-kit.tsx"
 
 const bot = botProfile("device-state", { id: "bot-1", name: "Mainly" })
@@ -53,7 +54,7 @@ async function seed() {
       createdAt: 1_001,
     },
   ])
-  localStorage.setItem("memento:last-thread:bot-1", "t1")
+  localStorage.setItem(lastThreadKey(bot.id), "t1")
 }
 
 test("the device state names a bot's Main, its threads and its host's answers, with no secrets", async () => {

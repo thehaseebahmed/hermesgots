@@ -51,7 +51,14 @@ import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { OnlineDot } from "@/components/bot-card"
 import { LinkSheet } from "@/components/link-bots"
-import { Group, RowText, linkRowClass, rowClass, Screen } from "@/components/settings-chrome"
+import {
+  Group,
+  RowText,
+  SheetRow,
+  linkRowClass,
+  rowClass,
+  Screen,
+} from "@/components/settings-chrome"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { ExperimentalBadge } from "@/components/experimental-badge"
 import { DeviceStateSheet } from "@/components/device-state"
@@ -741,29 +748,11 @@ function SwitchRow({
 }
 
 function FeedbackRow() {
-  const [open, setOpen] = useState(false)
-  return (
-    <>
-      <button type="button" onClick={() => setOpen(true)} className={linkRowClass}>
-        <MessageSquareTextIcon className="size-5 shrink-0 text-muted-foreground" />
-        <RowText title="Send feedback" />
-      </button>
-      <FeedbackSheet open={open} onOpenChange={setOpen} />
-    </>
-  )
+  return <SheetRow icon={MessageSquareTextIcon} title="Send feedback" sheet={FeedbackSheet} />
 }
 
 function DeviceStateRow() {
-  const [open, setOpen] = useState(false)
-  return (
-    <>
-      <button type="button" onClick={() => setOpen(true)} className={linkRowClass}>
-        <SmartphoneIcon className="size-5 shrink-0 text-muted-foreground" />
-        <RowText title="Device state" />
-      </button>
-      <DeviceStateSheet open={open} onOpenChange={setOpen} />
-    </>
-  )
+  return <SheetRow icon={SmartphoneIcon} title="Device state" sheet={DeviceStateSheet} />
 }
 
 /** The signed-in account on top, like the Claude app; hidden where there's no sign-in at all. */

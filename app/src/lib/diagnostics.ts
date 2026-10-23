@@ -33,16 +33,18 @@ export interface DiagBot {
   configured: boolean
   disabled?: boolean
   muted?: boolean
-  /** The plugin version its host last reported, and the one read now (null: it didn't answer). */
-  pluginVersion?: string
-  plugin?: string | null
-  /** The features the plugin advertises, or null where the host couldn't be asked. */
-  features?: string[] | null
-  /** The thread this device's pane last opened for the bot, where it has one. */
-  lastThread?: string | null
-  /** Its Main thread, once this device has made or synced one. */
-  main?: DiagChat
-  /** How many threads it has; the threads themselves, oldest started first. */
+  /** The plugin version this device remembers: the last read that answered. */
+  pluginVersion: string | null
+  /** The plugin version read now; null where the host couldn't be asked or didn't answer. */
+  plugin: string | null
+  /** The features the plugin advertises; null where the host couldn't be asked. */
+  features: string[] | null
+  /** The thread this device's pane last opened for the bot, as the pane itself reads it. */
+  lastThread: string | null
+  /** Its Main thread, read by its own id; null where this device has no Main row for it. */
+  main: DiagChat | null
+  /** How many threads it has at all; the threads themselves, most recently touched first, as far
+   * back as the reader's window reached. */
   threads: number
   chats: DiagChat[]
 }
@@ -85,31 +87,46 @@ export function diagChat(
   return built
 }
 
-/** What the host answered about one bot, where it could be asked at all. */
+/** What this device knows about one bot's host and pane: null is nothing answered, never a guess. */
 export interface DiagHost {
-  plugin?: string | null
-  features?: string[] | null
-  lastThread?: string | null
+  /** Whether the bot could be called at all. */
+  configured: boolean
+  /** The plugin version this device remembers: the last read that answered. */
+  pluginVersion: string | null
+  /** The version read now. */
+  plugin: string | null
+  /** The features the plugin advertises. */
+  features: string[] | null
+  /** The thread the pane last opened for the bot, as the pane itself reads it. */
+  lastThread: string | null
 }
 
-export function diagBot(profile: Profile, chats: DiagChat[], host: DiagHost = {}): DiagBot {
-  const main = chats.find((chat) => chat.main)
-  const threads = chats.filter((chat) => !chat.main)
+export function diagBot(input: {
+  profile: Profile
+  host: DiagHost
+  /** The bot's threads, most recently touched first, as far as the reader's window reached. */
+  chats: DiagChat[]
+  /** Main itself, read by its own id: the oldest chat, so the threads window can't hold it. */
+  main: DiagChat | null
+  /** How many threads the bot has at all, counted through the index. */
+  threads: number
+}): DiagBot {
+  const { profile, host, chats, main, threads } = input
   const built: DiagBot = {
     id: profile.id,
     name: profile.name,
     botId: profile.botId,
-    configured: Boolean(profile.baseUrl?.trim()) && Boolean(profile.apiKey),
-    threads: threads.length,
-    chats: threads,
+    configured: host.configured,
+    pluginVersion: host.pluginVersion,
+    plugin: host.plugin,
+    features: host.features,
+    lastThread: host.lastThread,
+    main,
+    threads,
+    chats,
   }
   if (profile.disabled) built.disabled = true
   if (profile.muted) built.muted = true
-  if (profile.pluginVersion) built.pluginVersion = profile.pluginVersion
-  if (host.plugin !== undefined) built.plugin = host.plugin
-  if (host.features !== undefined) built.features = host.features
-  if (host.lastThread !== undefined) built.lastThread = host.lastThread
-  if (main) built.main = main
   return built
 }
 

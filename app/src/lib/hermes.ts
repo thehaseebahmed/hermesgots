@@ -1315,6 +1315,47 @@ export function getPluginFeatureList(config: HermesConfig): Promise<string[] | n
   return pending
 }
 
+/** What one read of the plugin's `info` answered: its version and features, or nulls. */
+export interface PluginInfo {
+  version: string | null
+  features: string[] | null
+}
+
+const pluginInfo = new Map<string, Promise<PluginInfo>>()
+
+/**
+ * The plugin's `info` in one bounded read: its version and features from the same answer, asked
+ * once per server and key, so two questions about one host cost one request and can't disagree.
+ * A failed ask is dropped, so the next caller asks again; the read throws, and the caller decides
+ * what an absent answer means for it.
+ */
+export function getPluginInfo(config: HermesConfig): Promise<PluginInfo> {
+  const key = connectionKey(config)
+  let pending = pluginInfo.get(key)
+  if (!pending) {
+    pending = readPluginInfo(config)
+    pluginInfo.set(key, pending)
+    void pending.catch(() => pluginInfo.delete(key))
+  }
+  return pending
+}
+
+async function readPluginInfo(config: HermesConfig): Promise<PluginInfo> {
+  const response = await request(`${pluginRoot(config.baseUrl)}/info`, {
+    headers: headers(config),
+    signal: AbortSignal.timeout(READ_TIMEOUT_MS),
+  })
+  const body = await response.json()
+  const version = typeof body?.version === "string" && body.version ? body.version : null
+  const features: unknown = body?.features
+  return {
+    version,
+    features: Array.isArray(features)
+      ? features.filter((feature): feature is string => typeof feature === "string")
+      : null,
+  }
+}
+
 /** `getPluginFeatureList`, for one feature. */
 export async function hasPluginFeature(config: HermesConfig, feature: string) {
   return Boolean((await getPluginFeatureList(config))?.includes(feature))

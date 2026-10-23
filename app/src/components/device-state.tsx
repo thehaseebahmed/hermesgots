@@ -3,7 +3,7 @@ import { useEffect, useState } from "react"
 import { CopyBlock } from "@/components/copy-block"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Spinner } from "@/components/ui/spinner"
-import { serverConfig } from "@/lib/connection"
+import { hasServer, serverConfig } from "@/lib/connection"
 import {
   diagBot,
   diagChat,
@@ -12,9 +12,17 @@ import {
   type DiagChat,
   type DiagDevice,
 } from "@/lib/diagnostics"
-import { conversationsOf, db, getSettings, listProfiles, type Profile } from "@/lib/db"
-import { getPluginFeatureList, getPluginVersion } from "@/lib/hermes"
+import {
+  conversationsOf,
+  db,
+  getSettings,
+  listProfiles,
+  mainThreadId,
+  type Profile,
+} from "@/lib/db"
+import { getPluginInfo } from "@/lib/hermes"
 import { isNative } from "@/lib/native"
+import { lastOpened } from "@/lib/threads"
 import { MIN_PLUGIN_VERSION } from "@/lib/version"
 
 /** The newest chats each bot's state names, so a busy bot can't make the dump unbounded. */
@@ -29,39 +37,57 @@ async function messageCounts(id: string) {
 }
 
 async function botState(profile: Profile): Promise<DiagBot> {
-  const chats = (
-    await conversationsOf(profile.id)
-      .filter((chat) => !chat.projectId)
-      .toArray()
-  )
-    .sort((a, b) => a.createdAt - b.createdAt)
-    .slice(-CHATS)
-  const main = chats.find((chat) => chat.main)
-  const mapped: DiagChat[] = await Promise.all(
-    chats.map(async (chat) =>
-      diagChat(chat, chat.id === main?.id ? await messageCounts(chat.id) : undefined),
-    ),
-  )
-  const configured = Boolean(profile.baseUrl.trim()) && Boolean(profile.apiKey)
-  const [plugin, features] = configured
-    ? await Promise.all([
-        getPluginVersion(serverConfig(profile)),
-        getPluginFeatureList(serverConfig(profile)),
-      ])
-    : []
-  let lastThread: string | null = null
-  try {
-    lastThread = localStorage.getItem(`memento:last-thread:${profile.id}`)
-  } catch {
-    // Storage can be blocked; the state then reads no thread.
-  }
-  return diagBot(profile, mapped, { plugin, features, lastThread })
+  const configured = hasServer(profile)
+  const [rows, pane, mainRow, info] = await Promise.all([
+    // Main is the bot's oldest chat, so it is read by its own id, outside this window.
+    conversationsOf(profile.id)
+      .reverse()
+      .filter((chat) => !chat.projectId && !chat.main)
+      .limit(CHATS)
+      .toArray(),
+    lastOpened(profile.id),
+    db.conversations.get(mainThreadId(profile.id)),
+    configured ? getPluginInfo(serverConfig(profile)).catch(() => null) : null,
+  ])
+  const chats: DiagChat[] = rows.map((chat) => diagChat(chat))
+  const main = mainRow ? await diagChat(mainRow, await messageCounts(mainRow.id)) : null
+  return diagBot({
+    profile,
+    host: {
+      configured,
+      pluginVersion: profile.pluginVersion ?? null,
+      plugin: info?.version ?? null,
+      features: info?.features ?? null,
+      lastThread: pane.last ?? null,
+    },
+    chats,
+    main,
+    threads: pane.threads,
+  })
 }
+
+/** A bot whose own reads failed: named and configured, and nothing claimed about what it holds. */
+const unreadBot = (profile: Profile): DiagBot =>
+  diagBot({
+    profile,
+    host: {
+      configured: hasServer(profile),
+      pluginVersion: profile.pluginVersion ?? null,
+      plugin: null,
+      features: null,
+      lastThread: null,
+    },
+    chats: [],
+    main: null,
+    threads: 0,
+  })
 
 /** Everything the device holds that a bug about a stuck screen needs to be read from afar. */
 export async function readDeviceDiagnostics(): Promise<DiagDevice> {
   const [settings, profiles] = await Promise.all([getSettings(), listProfiles()])
-  const bots = await Promise.all(profiles.map(botState))
+  const bots = await Promise.all(
+    profiles.map((profile) => botState(profile).catch(() => unreadBot(profile))),
+  )
   return {
     at: new Date().toISOString(),
     app: __APP_VERSION__,
@@ -83,23 +109,17 @@ export function DeviceStateSheet({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
-  const [state, setState] = useState<string>()
+  const [text, setText] = useState<string>()
+  const [error, setError] = useState<string>()
   useEffect(() => {
     if (!open) return
     let current = true
-    setState(undefined)
+    setText(undefined)
+    setError(undefined)
     void readDeviceDiagnostics()
-      .then((device) => current && setState(formatDiagnostics(device)))
+      .then((device) => current && setText(formatDiagnostics(device)))
       .catch(
-        (error) =>
-          current &&
-          setState(
-            JSON.stringify(
-              { error: error instanceof Error ? error.message : String(error) },
-              null,
-              2,
-            ),
-          ),
+        (reason) => current && setError(reason instanceof Error ? reason.message : String(reason)),
       )
     return () => {
       current = false
@@ -113,8 +133,12 @@ export function DeviceStateSheet({
           <PopupTitle>Device state</PopupTitle>
         </PopupHeader>
         <div className="flex flex-col gap-3 px-4 pb-4 sm:px-6">
-          {state ? (
-            <CopyBlock text={state} label="Copy device state" />
+          {text ? (
+            <CopyBlock text={text} label="Copy device state" />
+          ) : error ? (
+            <p className="text-sm text-muted-foreground">
+              Could not read the device state: {error}
+            </p>
           ) : (
             <div className="flex items-center justify-center py-8">
               <Spinner className="size-6" />
