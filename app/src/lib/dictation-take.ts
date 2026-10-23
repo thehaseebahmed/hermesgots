@@ -1,9 +1,10 @@
+import { useRef } from "react"
+
 import type { DictationFailure } from "@/lib/dictation-failure"
 import type { DictationTranscript } from "@/lib/dictation-transcript"
 import { useChunkedDictation, type DictationStatus } from "@/lib/dictation"
 import { useStreamDictation } from "@/lib/dictation-stream"
-import { usePluginFeature } from "@/lib/features"
-import type { HermesConfig } from "@/lib/hermes"
+import { getPluginFeatureList, type HermesConfig } from "@/lib/hermes"
 
 /** The feature a host advertises when it can hear a take while it is spoken. */
 export const DICTATION_STREAM = "dictation_stream"
@@ -42,10 +43,39 @@ export function useDictation(
   vocabulary?: string[],
   onCommitted?: (text: string) => void,
 ): DictationTake {
-  const answer = usePluginFeature(config, DICTATION_STREAM)
   const chunked = useChunkedDictation(config, hint, key, onCommitted)
   const stream = useStreamDictation(config, hint, key, vocabulary, onCommitted)
-  if (chunked.status !== "idle") return chunked
-  if (stream.status !== "idle") return stream
-  return answer === "yes" ? stream : chunked
+  // Which one a take opened with, held so Finish, Retry and Cancel answer to the take that is
+  // actually live rather than to a re-read. The pick itself waits for `start`, so opening a chat
+  // asks the host nothing — only a take asks, and it asks once, on the way in.
+  const opened = useRef<DictationTake | null>(null)
+
+  const live = (): DictationTake => {
+    if (chunked.status !== "idle") return chunked
+    if (stream.status !== "idle") return stream
+    return opened.current ?? chunked
+  }
+  const pick = async (): Promise<DictationTake> => {
+    if (chunked.status !== "idle") return chunked
+    if (stream.status !== "idle") return stream
+    const features = await getPluginFeatureList(config)
+    return (opened.current = features?.includes(DICTATION_STREAM) ? stream : chunked)
+  }
+
+  const view = live()
+  return {
+    status: view.status,
+    levels: view.levels,
+    startedAt: view.startedAt,
+    failure: view.failure,
+    transcript: view.transcript,
+    recordingSince: view.recordingSince,
+    anchor: view.anchor,
+    start: async (caret?: number | null) => {
+      await (await pick()).start(caret)
+    },
+    finish: (waitMs?: number) => live().finish(waitMs),
+    retry: () => live().retry(),
+    cancel: () => live().cancel(),
+  }
 }
