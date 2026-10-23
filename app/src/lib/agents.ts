@@ -3,7 +3,7 @@ import { createContext, useContext, useSyncExternalStore } from "react"
 import { AGENT_WORK_MS } from "@/lib/freshness"
 import { quietly } from "@/lib/report"
 import { createSignal } from "@/lib/store"
-import type { Conversation, Profile, ToolEvent } from "@/lib/db"
+import type { Conversation, Profile, SubagentRef, ToolEvent } from "@/lib/db"
 import {
   getSessionAgents,
   listSessionMessages,
@@ -98,6 +98,29 @@ export function agentsOf(tool: ToolEvent, agents: DelegatedAgent[]) {
   return agents.filter(
     (agent) => agent.startedAt !== null && agent.startedAt >= from && agent.startedAt <= to,
   )
+}
+
+/**
+ * The agent a result message stands for: the one the chat's list names by Hermes's own id, else the
+ * one whose goal it carries — a child's first message is its goal, as a card's call is matched. Two
+ * agents sharing a goal make the newest it, since that is the one that just finished.
+ */
+export function agentOfResult(
+  result: Pick<SubagentRef, "ids" | "goals">,
+  agents: DelegatedAgent[],
+) {
+  const named = agents.find((agent) => result.ids.includes(agent.id))
+  if (named) return named
+  for (const goal of result.goals) {
+    const wanted = words(goal)
+    if (wanted.length < 8) continue
+    const matched = agents.filter((agent) => {
+      const own = words(agent.goal)
+      return Boolean(own) && (own.startsWith(wanted) || wanted.startsWith(own))
+    })
+    if (matched.length) return matched[matched.length - 1]
+  }
+  return undefined
 }
 
 const ROLES: [RegExp, string][] = [

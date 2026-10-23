@@ -374,6 +374,16 @@ export interface Steer {
 /** `queued` is a user message waiting for the current reply to finish. */
 export type MessageStatus = "triaging" | "queued" | "streaming" | "done" | "error" | "stopped"
 
+/** The subagent a result the thread draws stands for: how its message finds its sub-thread. */
+export interface SubagentRef {
+  /** The delegation Hermes dispatched it under, off the notification's own header. */
+  delegationId?: string
+  /** Hermes's own ids for the subagents that finished (`sa-<task>-<hex>`), where the rows name them. */
+  ids: string[]
+  /** The goals they were given: how the chat's agent list matches a result to its card. */
+  goals: string[]
+}
+
 export interface Message {
   id: string
   conversationId: string
@@ -386,6 +396,11 @@ export interface Message {
   clarify?: ClarifyRequest
   /** A reply's steers, in order. */
   steers?: Steer[]
+  /**
+   * Set on a message a subagent's finished work drew into the thread, never on a reply: it draws as
+   * the bot's own message, and this is the subagent whose sub-thread a tap on it opens.
+   */
+  subagent?: SubagentRef
   status: MessageStatus
   /** Latest `hermes.status` text while streaming, or the error text. */
   statusText?: string

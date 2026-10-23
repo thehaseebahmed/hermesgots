@@ -24,6 +24,7 @@ import {
 import { splitAttachments } from "@/lib/attachments"
 import { readLiveRuns } from "@/lib/waiting"
 import { failureReason, TODO_TOOLS } from "@/lib/tools"
+import { isSubagentResult, subagentMessage, subagentResults } from "@/lib/subagent-results.ts"
 
 /**
  * Message bodies don't sync; every device's turns live in the chat's Hermes session. Opening a chat
@@ -238,6 +239,8 @@ export function toMessages(
   // Where the reply's text since its last tool call starts, and the notice that text was cut by.
   let segment = 0
   let notice: string | undefined
+  // A subagent's result, and the subagent each one finished for.
+  const results = subagentResults(rows)
   const newReply = (id: string, createdAt: number) => {
     segment = 0
     notice = undefined
@@ -275,6 +278,19 @@ export function toMessages(
       continue
     }
     if (row.role === "user") {
+      // A subagent's result arrives as a user row and is the bot's own message: it closes no reply
+      // and starts no turn, so the thread reads it where it landed.
+      if (isSubagentResult(row)) {
+        messages.push({
+          id,
+          conversationId,
+          status: "done",
+          createdAt,
+          hermesRowId: row.id,
+          ...subagentMessage(row, results.get(row.id)),
+        })
+        continue
+      }
       reply = undefined
       const { text, attachments } = splitAttachments(row.content ?? "")
       messages.push({
@@ -351,7 +367,7 @@ export function toMessages(
         if (t.status === "running") Object.assign(t, { status: "completed", endedAt: t.startedAt })
   }
   return messages.filter(
-    (m) => m.role === "user" || m.content || m.tools?.length || m.status === "error",
+    (m) => m.role === "user" || m.content || m.tools?.length || m.status === "error" || m.subagent,
   )
 }
 
@@ -557,7 +573,11 @@ export function reconcileHistory(conversationId: string, { changed = false } = {
 }
 
 const isTurnStart = (row: SessionMessage) =>
-  row.role === "user" && row.display_kind !== "hidden" && !isSteer(row) && !isNotice(row)
+  row.role === "user" &&
+  row.display_kind !== "hidden" &&
+  !isSteer(row) &&
+  !isNotice(row) &&
+  !isSubagentResult(row)
 
 const isStreaming = (messages: Message[]) => messages.some((m) => m.status === "streaming")
 
@@ -614,9 +634,14 @@ function turnsOf(
   return groups.map((group, i) => {
     const live = liveTail && i === groups.length - 1
     const messages = toMessages(conversationId, sessionId, group, { live })
+    const user = messages.find((m) => m.role === "user")
+    const reply = messages.find((m) => m.role === "assistant" && !m.subagent)
+    // A subagent's result is a message of its own in the turn it arrived after, and a catch-up keeps
+    // one reply per turn: the results ride beside it rather than being dropped.
     return {
-      user: messages.find((m) => m.role === "user"),
-      reply: messages.find((m) => m.role === "assistant"),
+      user,
+      reply,
+      results: messages.filter((m) => m.subagent),
       rows: { first: group[0].id, last: group[group.length - 1].id },
     }
   })
@@ -731,10 +756,20 @@ async function reconcile(conversationId: string) {
     }
     const writes: Message[] = []
     const parts: string[] = []
-    for (const { user, reply, rows: range } of turns) {
+    // A subagent's result lands at the thread's end, in the order it arrived: after the turn it came
+    // in with, and never as a turn of its own.
+    const addResults = (results: Message[]) => {
+      for (const result of results) {
+        result.createdAt = Math.max(result.createdAt, floor)
+        writes.push(result)
+        floor = result.createdAt + 1
+      }
+    }
+    for (const { user, reply, results, rows: range } of turns) {
       if (!user) {
         // A turn longer than every page fetchTail reads: only an empty chat shows its tail.
         if (!current.length && reply) writes.push(reply)
+        if (!current.length) addResults(results)
         continue
       }
       parts.push(...partsOf(current, sessionId, range, reply?.id))
@@ -747,6 +782,7 @@ async function reconcile(conversationId: string) {
           writes.push({ ...reply, createdAt })
           floor = createdAt + 1
         }
+        addResults(results)
         continue
       }
       const at = user.hermesRowId !== undefined ? hostAt.get(user.hermesRowId) : undefined
@@ -778,6 +814,7 @@ async function reconcile(conversationId: string) {
           const merged = withReplyDetails(local, reply)
           if (merged) writes.push(merged)
         }
+        addResults(results)
         continue
       }
       // Hermes's compaction carries the newest turns forward under fresh row ids with their text and
@@ -806,6 +843,7 @@ async function reconcile(conversationId: string) {
           const merged = withReplyDetails(local, reply)
           if (merged) writes.push(merged)
         }
+        addResults(results)
         continue
       }
       user.createdAt = Math.max(user.createdAt, floor)
@@ -816,6 +854,7 @@ async function reconcile(conversationId: string) {
         writes.push(reply)
         floor = reply.createdAt + 1
       }
+      addResults(results)
     }
     await db.messages.bulkDelete(parts)
     await db.messages.bulkPut(writes)

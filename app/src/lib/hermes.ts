@@ -1179,6 +1179,23 @@ export interface SessionMessage {
   reasoning?: string | null
   reasoning_content?: string | null
   display_kind?: string | null
+  /**
+   * Display-only metadata a row carries: on a subagent's result, the delegation it reports from (an
+   * answer from a host that sends it; the API leaves it off, so the notification's own header is
+   * what names the delegation there).
+   */
+  display_metadata?: {
+    delegation_id?: string
+    task_count?: number
+    completed_count?: number
+    failed_count?: number
+    duration_seconds?: number
+    /** `task_failure:<index>` on an early warning from a fan-out still running. */
+    delivery_notice?: string
+    notification_category?: string
+    /** The host keeps the row out of the thread: it is written as `hidden` instead. */
+    presentation_suppressed?: boolean
+  } | null
   finish_reason?: string | null
 }
 

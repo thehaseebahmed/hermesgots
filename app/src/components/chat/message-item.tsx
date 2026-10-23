@@ -12,7 +12,7 @@ import { toast } from "sonner"
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { AttachmentTile, AttachmentViewer } from "@/components/chat/attachments"
 import { Markdown } from "@/components/chat/markdown"
-import { AgentCards } from "@/components/chat/agent-card"
+import { AgentCards, SubagentResultCard } from "@/components/chat/agent-card"
 import { MediaTag } from "@/components/chat/media-image"
 import { ClarifyCard, PlanApprovedCard } from "@/components/chat/session-cards"
 import { ThinkingLine } from "@/components/chat/thinking-line"
@@ -443,6 +443,8 @@ export const MessageItem = memo(function MessageItem({
     statusLine || failed || (message.status === "stopped" && !message.content) || statsShown
   return (
     <div className="flex flex-col gap-3">
+      {/* A subagent's result is the bot's message: the line naming it rides above what it left. */}
+      {message.subagent && <SubagentResultCard subagent={message.subagent} />}
       {reasoning && (
         <ThinkingLine
           reasoning={reasoning}

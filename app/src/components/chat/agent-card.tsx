@@ -9,12 +9,13 @@ import { Spinner } from "@/components/ui/spinner"
 import {
   agentLine,
   agentName,
+  agentOfResult,
   agentsOf,
   agentTranscript,
   useAgentsSource,
   type AgentsSource,
 } from "@/lib/agents"
-import type { Message, ToolEvent } from "@/lib/db"
+import type { Message, SubagentRef, ToolEvent } from "@/lib/db"
 import type { DelegatedAgent, HermesConfig } from "@/lib/hermes"
 import { toMessages } from "@/lib/history"
 import { useDraws } from "@/lib/openui-draws"
@@ -45,12 +46,22 @@ export function AgentCards({ tool }: { tool: ToolEvent }) {
   )
 }
 
-function CardShell({ onClick, children }: { onClick?: () => void; children: React.ReactNode }) {
+function CardShell({
+  onClick,
+  slot,
+  children,
+}: {
+  onClick?: () => void
+  /** What a test (or a style) can name the card by. */
+  slot?: string
+  children: React.ReactNode
+}) {
   const className =
     "mx-auto flex w-full max-w-md flex-col gap-2 rounded-3xl border bg-muted/40 px-4 py-3 text-left"
   return onClick ? (
     <button
       type="button"
+      data-slot={slot}
       onClick={onClick}
       className={cn(
         className,
@@ -60,7 +71,9 @@ function CardShell({ onClick, children }: { onClick?: () => void; children: Reac
       {children}
     </button>
   ) : (
-    <div className={className}>{children}</div>
+    <div data-slot={slot} className={className}>
+      {children}
+    </div>
   )
 }
 
@@ -160,12 +173,59 @@ function AgentCard({ agent, source }: { agent: DelegatedAgent; source: AgentsSou
           {agentLine(agent)}
         </span>
       </CardShell>
-      <Popup open={open} onOpenChange={setOpen}>
-        <PopupContent size="xl">
-          {open && <AgentView agent={agent} server={source.server} />}
-        </PopupContent>
-      </Popup>
+      <AgentPopup agent={agent} server={source.server} open={open} onOpenChange={setOpen} />
     </>
+  )
+}
+
+/**
+ * A subagent's result, as the thread draws it: a line naming the subagent whose work it is, opening
+ * the same sub-thread its card does. A chat that can't name the subagent still draws the line — the
+ * result itself is the message — with nothing to open.
+ */
+export function SubagentResultCard({ subagent }: { subagent: SubagentRef }) {
+  const source = useAgentsSource()
+  const agent = source ? agentOfResult(subagent, source.agents) : undefined
+  const [open, setOpen] = useState(false)
+  const goal = agent?.goal ?? subagent.goals[0]
+  return (
+    <>
+      <CardShell slot="subagent-result" onClick={agent ? () => setOpen(true) : undefined}>
+        <span className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+          <BotIcon className="size-4" />
+          <span className="flex-1 truncate">{goal ? agentTitle(goal) : "Sub-Agent"}</span>
+          {agent && <ChevronRightIcon className="size-4" />}
+        </span>
+        {agent && (
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground tabular-nums">
+            <StatusIcon agent={agent} />
+            {agentLine(agent)}
+          </span>
+        )}
+      </CardShell>
+      {agent && source && (
+        <AgentPopup agent={agent} server={source.server} open={open} onOpenChange={setOpen} />
+      )}
+    </>
+  )
+}
+
+/** The sub-thread pop-up a delegation's card and its result's message both open. */
+function AgentPopup({
+  agent,
+  server,
+  open,
+  onOpenChange,
+}: {
+  agent: DelegatedAgent
+  server: HermesConfig
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  return (
+    <Popup open={open} onOpenChange={onOpenChange}>
+      <PopupContent size="xl">{open && <AgentView agent={agent} server={server} />}</PopupContent>
+    </Popup>
   )
 }
 
