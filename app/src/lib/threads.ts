@@ -235,7 +235,7 @@ export function useBotSummaries(): BotSummary[] | undefined {
 export const lastThreadKey = (profileId: string) => `memento:last-thread:${profileId}`
 
 /**
- * What a bot's third pane holds while the route is Main: the thread this device opened last for
+ * What a bot's third pane holds while the address is Main: the thread this device opened last for
  * that bot, the thread storage holds even where the pane refuses it, and how many threads the bot
  * has at all. A remembered thread that is gone, or is one of another bot's, is no thread of this
  * pane's — Main alone is better than the wrong chat.
@@ -258,11 +258,14 @@ export async function lastOpened(profileId: string) {
   return { last, stored, threads }
 }
 
+/** What a chat's row says about who owns it: its bot, and whether it is a project session. */
+type ChatOwner = Pick<Conversation, "profileId" | "projectId">
+
 export interface BotPane {
   profileId: string
-  /** The thread the route itself is, when it is one of the bot's threads. */
+  /** The thread the address itself is, when it is one of the bot's threads. */
   thread?: string
-  /** The thread the third pane reopens while the route is Main: this bot's last one opened here. */
+  /** The thread the third pane reopens while the address is Main: this bot's last one opened here. */
   last?: string
   /** Whether the bot has a thread at all, since a bot with none gets the pane's empty state. */
   threads: boolean
@@ -270,10 +273,14 @@ export interface BotPane {
 
 /**
  * With bot threads on, the sidebar, Main and a thread are three panes from `xl`, as a project stays
- * beside its sessions: the thread the route is, else the one this device opened last for that bot,
+ * beside its sessions: the thread the address is, else the one this device opened last for that bot,
  * so looking at Main never costs the thread beside it. A bot with no thread yet keeps the pane and
  * says so in it, and a thread that is gone or belongs to another bot leaves it closed. Main is the
  * pane, so a thread picked there swaps in place on the right.
+ *
+ * What the pane holds beside Main is asked of the bot rather than of the address, so the address
+ * moving between Main and a thread answers nothing again: the same chat stays drawn, and leaving a
+ * thread leaves the one beside Main where it was.
  */
 export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
   const large = useXLarge()
@@ -281,15 +288,22 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
   const chat = matchPath("/c/:id", pathname)?.params.id
   const main = chat ? mainThreadProfile(chat) : undefined
   const hint = (state as { bot?: string } | null)?.bot
-  // Only a wide screen with the switch on has a third pane to fill, so only it pays for the count.
-  const read = useLiveQuery(async () => {
-    if (!chat) return undefined
-    const found = (await db.conversations.get(chat)) ?? null
-    if (!main || !large || !enabled) return { chat, found, last: undefined, threads: undefined }
-    return { chat, found, ...(await lastOpened(main)) }
-  }, [chat, main, large, enabled])
-  const found = read && read.chat === chat ? read.found : undefined
-  // The bot this pane is for, and the thread the route itself is, if it is one of the bot's.
+  // A Main id names its own bot, so only a thread's id costs a row read. The query answers with
+  // the address it ran for, so an answer for the one before it can't pass for this one's.
+  const owner = useLiveQuery(
+    async (): Promise<{ chat?: string; found?: ChatOwner | null }> => {
+      if (!chat) return { found: null }
+      if (main) return { chat, found: { profileId: main } }
+      const found = await db.conversations.get(chat)
+      return {
+        chat,
+        found: found ? { profileId: found.profileId, projectId: found.projectId } : null,
+      }
+    },
+    [chat, main],
+  )
+  const found = owner && owner.chat === chat ? owner.found : undefined
+  // The bot this pane is for, and the thread the address itself is, if it is one of the bot's.
   let profileId: string | undefined
   let thread: string | undefined
   if (main) {
@@ -302,7 +316,18 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
     profileId = hint
     thread = chat
   }
-  // The pane reopens a bot's threads where this device last left them.
+  // Only a wide screen with the switch on has a third pane to fill, so only it pays for the count.
+  // The address is a dependency so the read follows the thread this page just opened — the storage
+  // it comes from isn't reactive — and Dexie keeps the answer it has until the new one lands, so
+  // the pane never empties between the two.
+  const kept = useLiveQuery(
+    async () =>
+      large && enabled && profileId ? { profileId, ...(await lastOpened(profileId)) } : undefined,
+    [large, enabled, profileId, thread],
+  )
+  // The answer names the bot it ran for, so one bot's answer can never pass for another's.
+  const answer = kept && kept.profileId === profileId ? kept : undefined
+  // Remembers the thread the address is, so the pane reopens it the next time the bot opens on Main.
   useEffect(() => {
     if (!profileId || !thread) return
     try {
@@ -315,5 +340,5 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
   if (!large || !enabled || !profileId) return undefined
   if (thread) return { profileId, thread, threads: true }
   // Nothing remembered yet reads as no thread to show, never as a bot without threads.
-  return { profileId, last: read?.last, threads: read?.threads !== 0 }
+  return { profileId, last: answer?.last, threads: answer?.threads !== 0 }
 }

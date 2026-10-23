@@ -372,7 +372,7 @@ export interface Steer {
 }
 
 /** `queued` is a user message waiting for the current reply to finish. */
-export type MessageStatus = "routing" | "queued" | "streaming" | "done" | "error" | "stopped"
+export type MessageStatus = "triaging" | "queued" | "streaming" | "done" | "error" | "stopped"
 
 export interface Message {
   id: string
@@ -713,6 +713,14 @@ db.version(17).upgrade((tx) =>
 
 // v18: a meeting recorded in the app is kept on the device while it records.
 db.version(18).stores({ meetingRecordings: "id" })
+
+// v19: the message the host is deciding on is triaging, not routing — the same state, named for the
+// decision the host makes, which the GLOSSARY has always called triage. The field is indexed, so the
+// rows a closed page left behind are read through that index and rewritten, rather than left as a
+// name nothing checks for.
+db.version(19).upgrade((tx) =>
+  tx.table("messages").where("status").equals("routing").modify({ status: "triaging" }),
+)
 
 db.on("populate", (tx) => seedProfile(tx))
 

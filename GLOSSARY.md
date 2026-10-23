@@ -95,6 +95,10 @@ _Avoid_: conversation, session
 A bot's one permanent chat and the screen its bot opens to: its messages land there first, the ones needing no thread stay there, and every thread it has is drawn inside it as a card. It can't be deleted.
 _Avoid_: default chat, general chat, inbox
 
+**Bot Chat**:
+A bot's one chat surface: its Main thread and the threads drawn inside it as cards. A project session is not one.
+_Avoid_: bot screen, chat screen, bot page
+
 **Triage**:
 The host's decision, for each message sent from the Main thread, whether it stays there, continues an older thread or opens a new one. Unsure means it stays.
 _Avoid_: routing, sorting, dispatch

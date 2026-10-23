@@ -12,6 +12,7 @@ import { Bot } from "@/components/bot"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Spinner } from "@/components/ui/spinner"
 import type { Move } from "@/lib/hermes"
+import { stayHere } from "@/lib/nav"
 import type { Thread } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { reasonText } from "@/lib/waiting"
@@ -29,6 +30,7 @@ export function ThreadCard({
   profileId,
   open = false,
   beside = false,
+  current = false,
   move,
   onUndo,
 }: {
@@ -37,6 +39,8 @@ export function ThreadCard({
   profileId: string
   open?: boolean
   beside?: boolean
+  /** Whether the address already is this thread, so its link leads nowhere; `open` marks it here. */
+  current?: boolean
   move?: Move
   onUndo?: (move: Move) => void
 }) {
@@ -82,6 +86,7 @@ export function ThreadCard({
           replace={beside}
           state={{ bot: profileId }}
           aria-current={open ? "page" : undefined}
+          onClick={stayHere(current)}
           className="flex min-h-11 items-center gap-1 rounded-full px-2 text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <span className="font-medium text-info">View thread</span>

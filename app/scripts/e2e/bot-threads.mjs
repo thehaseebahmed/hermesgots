@@ -379,6 +379,86 @@ await flow(
     await marker.waitFor({ timeout: 15_000 })
     await shot("tablet-dark")
     pass("on a tablet in dark mode Main still draws its cards, its heading and the move's line")
+
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.emulateMedia({ colorScheme: "light" })
+    await until(
+      async () => (await count(page, '[data-slot="header-row"]')) === 2,
+      15_000,
+      "Main and a thread, side by side on a laptop",
+    )
+    // The started thread's card, in the Main that stays on screen beside whatever the pane holds.
+    const startedCard = cardWith(page, STARTED)
+    await startedCard.getByRole("link", { name: /View thread/ }).click()
+    await page.waitForURL(`**/c/${threadId}`, { timeout: 15_000 })
+    await page.waitForTimeout(400)
+    const held = await page.locator('[data-slot="header-row"]').nth(1).elementHandle()
+    // Naming the same thread from its card again — which is what a tap on a thread that is already
+    // the screen does — must draw no new pane: redrawing it is what made the thread flicker.
+    await startedCard.getByRole("link", { name: /View thread/ }).click()
+    await page.waitForTimeout(400)
+    assert.equal(
+      new URL(page.url()).pathname,
+      `/c/${threadId}`,
+      "the address stays where the thread already is",
+    )
+    assert.equal(
+      await page.evaluate(
+        (node) => document.querySelectorAll('[data-slot="header-row"]')[1] === node,
+        held,
+      ),
+      true,
+      "and the pane the thread was in is the pane it is still in: nothing was drawn anew",
+    )
+    const heads = await page.evaluate(() =>
+      [...document.querySelectorAll('[data-slot="header-row"]')].map((row) => ({
+        title: row.querySelector('[data-slot="header-title"]')?.textContent ?? "",
+        controls: [...row.querySelectorAll("button")].map((button) =>
+          button.getAttribute("aria-label") ?? "",
+        ),
+        pictures: row.querySelectorAll('[role="img"]').length,
+      })),
+    )
+    assert.equal(heads.length, 2, "both panes draw a header")
+    assert.equal(heads[0].title, "Test bot", "Main reads as the bot, not as \"Main\"")
+    assert.notEqual(heads[1].title, "", "the thread beside it reads with its own title")
+    assert.notEqual(heads[1].title, "Test bot", "which is the thread's, not the bot's")
+    assert.equal(
+      heads[1].controls.some((label) => label.startsWith("Back to") || label === "Close thread"),
+      false,
+      "the thread beside its bot carries no control of its own",
+    )
+    assert.deepEqual(
+      heads.map((head) => head.pictures),
+      [1, 0],
+      "Main keeps the bot's picture, and the thread beside it carries none",
+    )
+    const boxes = await page.evaluate(() => {
+      const row = document.querySelectorAll('[data-slot="header-row"]')[1]
+      const box = (element) => {
+        if (!element) return null
+        const { x, width } = element.getBoundingClientRect()
+        return { x, width }
+      }
+      return {
+        row: box(row),
+        title: box(row?.querySelector('[data-slot="header-title"]')),
+        actions: box(row?.lastElementChild),
+      }
+    })
+    const centre = (rect) => (rect ? rect.x + rect.width / 2 : 0)
+    assert.ok(
+      Math.abs(centre(boxes.title) - centre(boxes.row)) < 4,
+      `the thread's title sits on its pane's centre (title at ${Math.round(centre(boxes.title))}, row at ${Math.round(centre(boxes.row))})`,
+    )
+    assert.ok(
+      boxes.actions.x + boxes.actions.width <= boxes.row.x + boxes.row.width + 1,
+      "the thread's actions end at the row's own edge",
+    )
+    await shot("laptop")
+    pass(
+      "on a laptop the thread beside Main carries no control of its own, and naming it changes nothing",
+    )
   },
   { viewport: { width: 390, height: 844 } },
 )

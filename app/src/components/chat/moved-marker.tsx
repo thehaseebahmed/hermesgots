@@ -1,6 +1,8 @@
 import { Link } from "react-router"
 import { MessagesSquareIcon, Undo2Icon } from "lucide-react"
 
+import { stayHere } from "@/lib/nav"
+
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import type { Move } from "@/lib/hermes"
 
@@ -12,11 +14,14 @@ export function MovedMarker({
   move,
   title,
   profileId,
+  current = false,
   onUndo,
 }: {
   move: Move
   title?: string
   profileId: string
+  /** Whether the address already is the thread that has the message, so its link goes nowhere. */
+  current?: boolean
   onUndo?: (move: Move) => void
 }) {
   return (
@@ -35,6 +40,7 @@ export function MovedMarker({
             <Link
               to={`/c/${move.threadId}`}
               state={{ bot: profileId }}
+              onClick={stayHere(current)}
               className="font-medium text-info underline-offset-2 outline-none hover:underline focus-visible:underline"
             >
               <MessagesSquareIcon className="mr-1 inline size-3.5 align-[-2px]" />
@@ -48,6 +54,7 @@ export function MovedMarker({
             <Link
               to={`/c/${move.threadId}`}
               state={{ bot: profileId }}
+              onClick={stayHere(current)}
               className="font-medium text-info underline-offset-2 hover:underline"
             >
               a thread

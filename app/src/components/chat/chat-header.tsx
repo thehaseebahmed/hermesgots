@@ -10,11 +10,14 @@ import { cn } from "@/lib/utils"
  * Floating header, read from the left: the drawer button (or `leading`), the bot's picture (unless
  * `showBot` is false), then the title with its status under it, both cut with an ellipsis; actions
  * right.
- * `centered` gives a coding session's arrangement instead: the same leading control, then the title
- * centred over its subtitle. Its block is centred in the room the controls leave, which is the row's
- * own centre where they match in width; the muted mark moves into the actions, so it cannot pull the
- * title off centre. A session is a place in a project, not a conversation with a bot, so it passes
- * `showBot={false}`: the picture stays a caller's decision, and the arrangement doesn't second-guess it.
+ * `centered` gives the arrangement of a place rather than a conversation with a bot — a coding
+ * session, or a bot's thread open beside its Main: the same leading control, then the title centred
+ * over its subtitle. The row is three tracks with both flanks the same share, so the block sits on
+ * the row's exact centre however wide the actions are and however little leads it — a session's back
+ * control, or nothing at all beside an open thread. The muted mark moves into the actions, so it
+ * cannot pull the title off centre. A session is a place in a project and a thread open beside Main
+ * is already somewhere, so both pass `showBot={false}`: the picture stays a caller's decision, and
+ * the arrangement doesn't second-guess it.
  * `className` can pin it in the page's flow instead.
  */
 export function ChatHeader({
@@ -50,19 +53,33 @@ export function ChatHeader({
         className,
       )}
     >
-      <div data-slot="header-row" className="mx-auto flex max-w-3xl items-center gap-3">
+      <div
+        data-slot="header-row"
+        className={cn(
+          "mx-auto max-w-3xl",
+          centered
+            ? "grid grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(0,1fr)] items-center gap-3"
+            : "flex items-center gap-3",
+        )}
+      >
         {leading ? (
           <div className="pointer-events-auto shrink-0">{leading}</div>
         ) : (
-          <Button
-            variant="outline"
-            size="icon-lg"
-            className="pointer-events-auto size-11 shrink-0 rounded-full bg-background/80 backdrop-blur md:hidden"
-            onClick={openDrawer}
-            aria-label="Open conversations"
-          >
-            <MenuIcon />
-          </Button>
+          <>
+            <Button
+              variant="outline"
+              size="icon-lg"
+              className="pointer-events-auto size-11 shrink-0 rounded-full bg-background/80 backdrop-blur md:hidden"
+              onClick={openDrawer}
+              aria-label="Open conversations"
+            >
+              <MenuIcon />
+            </Button>
+            {/* The centred arrangement holds the row's centre by both flanks sharing it, so where
+                nothing leads the row — a thread beside its bot — the leading track still takes a
+                box. Below `md` the drawer above is that box. */}
+            {centered && <div aria-hidden className="hidden size-11 md:block" />}
+          </>
         )}
         {showBot && <Bot id={botId} animate className="pointer-events-auto size-11" />}
         <div
