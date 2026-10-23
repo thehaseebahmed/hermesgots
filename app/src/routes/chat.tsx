@@ -572,8 +572,11 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
     Boolean(delegations?.some((t) => t.status === "running")),
   )
   const agentsSource = useMemo(
-    () => (agents && baseUrl && apiKey ? { agents, server: { baseUrl, apiKey } } : null),
-    [agents, baseUrl, apiKey],
+    () =>
+      agents && baseUrl && apiKey
+        ? { agents, server: { baseUrl, apiKey }, sessionId: conversation?.hermesSessionId }
+        : null,
+    [agents, baseUrl, apiKey, conversation?.hermesSessionId],
   )
   // Only persistent /v1/runs work survives losing the app's connection; legacy streams do not.
   useBreakReminderEligibility(

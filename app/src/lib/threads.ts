@@ -15,7 +15,10 @@ import {
   type Profile,
 } from "@/lib/db"
 import { useXLarge } from "@/lib/media"
-import { useWaiting, type WaitingReason } from "@/lib/waiting"
+import { threadState, type ThreadState } from "@/lib/session-work"
+import { useLiveSubagents, useWaiting, type WaitingReason } from "@/lib/waiting"
+
+export type { ThreadState }
 
 /** How many of a bot's newest threads its screen lists, and Main draws as cards. */
 const THREADS = 50
@@ -37,8 +40,6 @@ export function useBotThreads() {
     return Boolean(settings.developer && settings.botThreads)
   }, [])
 }
-
-export type ThreadState = "working" | "waiting" | "failed" | "idle"
 
 export interface Thread {
   chat: Conversation
@@ -69,6 +70,8 @@ async function latestLine(conversationId: string) {
  */
 export function useThreads(profileId: string | undefined): Thread[] | undefined {
   const live = useWaiting()
+  // A thread whose turn ended reads working while a subagent it dispatched still works.
+  const subagents = useLiveSubagents()
   const rows = useLiveQuery(async () => {
     if (!profileId) return []
     const chats = await db.conversations
@@ -128,13 +131,12 @@ export function useThreads(profileId: string | undefined): Thread[] | undefined 
 
   return rows?.map(({ chat, opener, last, replies, streaming, failed, local }) => {
     const reason = local ?? live[chat.hermesSessionId]
-    const state: ThreadState = reason
-      ? "waiting"
-      : streaming
-        ? "working"
-        : failed
-          ? "failed"
-          : "idle"
+    const state = threadState({
+      waiting: Boolean(reason),
+      streaming,
+      failed,
+      subagents: subagents[chat.hermesSessionId],
+    })
     return { chat, opener, last, replies, state, reason }
   })
 }

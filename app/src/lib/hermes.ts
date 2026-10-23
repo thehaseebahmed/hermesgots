@@ -2577,6 +2577,34 @@ export async function getSessionAgents(
   return parseAgents((await response.json())?.agents)
 }
 
+/** What a subagent's stop answered: it stopped, or the host's reason it didn't (nothing left to). */
+export interface AgentStop {
+  stopped: boolean
+  reason?: string
+}
+
+/**
+ * Stops one subagent of a chat — the child's own session id, which is the card's agent id. The
+ * turn's own stop never reaches a child it started (`delegation.stop`), so a card offers this once
+ * that turn has ended. Needs plugin 0.79 (`subagent_stop`), and never answers a 404 for an unknown
+ * session: a host without the route refuses the request itself, which the card never makes.
+ */
+export async function stopAgent(
+  config: HermesConfig,
+  sessionId: string,
+  agentId: string,
+): Promise<AgentStop> {
+  const response = await request(
+    pluginSession(config, sessionId, `/agents/${encodeURIComponent(agentId)}/stop`),
+    { method: "POST", headers: headers(config) },
+  )
+  const body = await response.json()
+  return {
+    stopped: Boolean(body?.stopped),
+    reason: typeof body?.reason === "string" && body.reason ? body.reason : undefined,
+  }
+}
+
 export interface KeptWorktree {
   /** `user/repo`. */
   name: string
@@ -3077,6 +3105,9 @@ export interface LiveRuns {
   runIds: Record<string, string>
   /** Why a session waits on the user, with its project's name for a project session (0.16). */
   waiting: Record<string, WaitingReason & { project?: string }>
+  /** How many subagents each session still runs (0.79): a chat whose turn has ended is still at
+   * work while one is, and no read per session is needed to say so. */
+  subagents: Record<string, number>
 }
 
 /** The server's runs in flight and what waits on the user. Needs the Gots plugin. */
@@ -3123,7 +3154,10 @@ export async function getLiveRuns(config: HermesConfig, signal?: AbortSignal): P
         project,
       }
   }
-  return { sessions, runIds, waiting }
+  const subagents: Record<string, number> = {}
+  for (const [id, count] of Object.entries(object(body?.subagents)))
+    if (typeof count === "number" && count > 0) subagents[id] = count
+  return { sessions, runIds, waiting, subagents }
 }
 
 /** Answers the agent's questions. Needs the Gots plugin, which serves the clarify tool on runs. */

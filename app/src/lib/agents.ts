@@ -26,6 +26,8 @@ const { subscribe, notify } = createSignal()
 export interface AgentsSource {
   agents: DelegatedAgent[]
   server: HermesConfig
+  /** The chat's own Hermes session id, which a subagent's stop is asked through. */
+  sessionId?: string
 }
 
 /** What the chat's agent cards read: the delegated sessions and where to read their work. */
