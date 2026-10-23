@@ -316,8 +316,9 @@ export const MessageItem = memo(function MessageItem({
     const queued = message.status === "queued"
     // A message this device is still holding, waiting its turn or waiting to be sent again, wears the
     // same dimmed bubble: one cue for "not through yet", whether the queue holds it or the send failed.
-    const routing = message.status === "routing"
-    const dim = queued || failed || routing
+    // A message the host is triaging wears nothing: while it decides, the message reads as any other
+    // one the user sent, and becomes that thread's card or its Moved marker if it is moved.
+    const dim = queued || failed
     // The plugin starts a host-queued message itself, so it only waits for a Send when paused.
     const paused = message.hostQueued ? Boolean(message.queuePaused) : !busy
     return (
@@ -348,12 +349,6 @@ export const MessageItem = memo(function MessageItem({
                 </Bubble>
               )}
             </div>
-          )}
-          {routing && (
-            <span className="flex items-center gap-1 text-xs text-muted-foreground">
-              <ClockIcon className="size-3.5" />
-              Routing…
-            </span>
           )}
           {queued && <QueuedActions message={message} paused={paused} />}
           {failed && <FailedActions message={message} />}
