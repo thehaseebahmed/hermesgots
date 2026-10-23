@@ -72,6 +72,26 @@ test("asking from two places yields one record, and a synced one is kept", async
   assert.equal((await ensureMainThread(bot.id)).title, "Renamed elsewhere")
 })
 
+test("a Main row that lost its flag is healed, not left reading as a thread", async () => {
+  await seed()
+  const id = mainThreadId(bot.id)
+  await db.conversations.put({
+    id,
+    profileId: bot.id,
+    title: "Main",
+    titleEdited: true,
+    hermesSessionId: `memento-${id}`,
+    createdAt: 5,
+    updatedAt: 5,
+    changedAt: 5,
+  })
+  const healed = await ensureMainThread(bot.id)
+  assert.equal(healed.main, true, "the returned row carries the flag")
+  assert.equal((await db.conversations.get(id))?.main, true, "and so does the stored one")
+  const again = await ensureMainThread(bot.id)
+  assert.equal(again.changedAt, healed.changedAt, "a healed row is not written again")
+})
+
 function ThreadNames({ profileId }: { profileId: string }) {
   const threads = useThreads(profileId)
   return (
