@@ -722,6 +722,20 @@ db.version(19).upgrade((tx) =>
   tx.table("messages").where("status").equals("routing").modify({ status: "triaging" }),
 )
 
+// v20: a Main row made before the flag existed read as a plain thread and took Main's whole
+// behaviour with it — the shape a real device dump showed on two of four bots.
+db.version(20).upgrade((tx) =>
+  tx
+    .table("conversations")
+    .filter(
+      (conversation: Record<string, unknown>) =>
+        typeof conversation.id === "string" &&
+        conversation.id.startsWith("main-") &&
+        !conversation.main,
+    )
+    .modify({ main: true }),
+)
+
 db.on("populate", (tx) => seedProfile(tx))
 
 export async function getSettings(): Promise<Settings> {
@@ -887,7 +901,13 @@ export async function ensureMainThread(profileId: string): Promise<Conversation>
   const id = mainThreadId(profileId)
   return db.transaction("rw", db.conversations, async () => {
     const existing = await db.conversations.get(id)
-    if (existing) return existing
+    if (existing) {
+      // A Main row that lost the flag reads as a plain thread and takes Main's whole behaviour
+      // with it, so it is healed here — the one place that owns the row.
+      if (existing.main) return existing
+      await updateConversation(id, { main: true })
+      return (await db.conversations.get(id)) ?? existing
+    }
     const now = Date.now()
     const conversation: Conversation = {
       id,
