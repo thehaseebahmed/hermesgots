@@ -1,6 +1,6 @@
 /**
  * Sending from a bot's Main thread, over a seeded device database with the HTTP boundary faked: the
- * message wears a routing state while the host decides, falls back to Main on a timeout or a failure,
+ * message wears a triaging state while the host decides, falls back to Main on a timeout or a failure,
  * is never triaged inside an open thread, and a host without the feature has a plain Main.
  */
 import assert from "node:assert/strict"
@@ -10,7 +10,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { MemoryRouter } from "react-router"
 
 import { MovedMarker } from "@/components/chat/moved-marker"
-import { sendFromMain, settleRouting, stopMessage } from "@/lib/chat"
+import { sendFromMain, settleTriaging, stopMessage } from "@/lib/chat"
 import { db, mainThreadId, type Message } from "@/lib/db"
 import { moveMarks } from "@/lib/move-marks"
 import { refreshMoves, undoMove } from "@/lib/moves"
@@ -123,13 +123,13 @@ const triaged = (seen: { path: string }[]) => seen.filter((r) => r.path.endsWith
 const runsFor = (seen: { path: string; body: any }[], session: string) =>
   seen.filter((r) => r.path.endsWith("/v1/runs") && r.body?.session_id === session)
 
-test("a message holds in a routing state while the host decides", async () => {
+test("a message holds in a triaging state while the host decides", async () => {
   await seed("route-state")
   const seen = host("route-state", "hang")
   const sending = sendFromMain(MAIN, "more on Lisbon")
   await until(
-    async () => (await messagesOf(MAIN)).some((m) => m.status === "routing"),
-    "the routing state",
+    async () => (await messagesOf(MAIN)).some((m) => m.status === "triaging"),
+    "the triaging state",
   )
   assert.equal(triaged(seen).length, 1)
   assert.equal(triaged(seen)[0].body.text, "more on Lisbon")
@@ -145,7 +145,7 @@ test("a timeout sends the message to Main", async () => {
   assert.equal(runsFor(seen, MAIN_SESSION).length, 1)
   const sent = await messagesOf(MAIN)
   assert.ok(sent.some((m) => m.role === "user" && m.content === "hello"))
-  assert.ok(!sent.some((m) => m.status === "routing"))
+  assert.ok(!sent.some((m) => m.status === "triaging"))
 })
 
 test("a failed triage sends the message to Main", async () => {
@@ -191,14 +191,14 @@ test("a message sent while another is triaged waits behind it, untriaged", async
   const seen = host("route-second", "hang")
   const first = sendFromMain(MAIN, "first")
   await until(
-    async () => (await messagesOf(MAIN)).some((m) => m.status === "routing"),
-    "the first to be routing",
+    async () => (await messagesOf(MAIN)).some((m) => m.status === "triaging"),
+    "the first to be triaging",
   )
   await sendFromMain(MAIN, "second")
   assert.equal(triaged(seen).filter((r) => r.body.text === "second").length, 0)
   assert.ok((await messagesOf(MAIN)).some((m) => m.content === "second" && m.status === "queued"))
   await first
-  assert.ok(!(await messagesOf(MAIN)).some((m) => m.status === "routing"))
+  assert.ok(!(await messagesOf(MAIN)).some((m) => m.status === "triaging"))
 })
 
 test("a repeated ask carries the same id, so the host can answer it as before", async () => {
@@ -210,17 +210,17 @@ test("a repeated ask carries the same id, so the host can answer it as before", 
   assert.equal(asks[0].body.id, asks[1].body.id)
 })
 
-test("a message left routing by a closed page becomes one to send again", async () => {
+test("a message left triaging by a closed page becomes one to send again", async () => {
   await seed("route-stale")
   await db.messages.add({
     id: "m1",
     conversationId: MAIN,
     role: "user",
     content: "hi",
-    status: "routing",
+    status: "triaging",
     createdAt: 5,
   })
-  await settleRouting(MAIN)
+  await settleTriaging(MAIN)
   assert.equal((await db.messages.get("m1"))?.status, "error")
 })
 

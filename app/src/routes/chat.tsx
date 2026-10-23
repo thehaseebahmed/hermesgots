@@ -13,7 +13,6 @@ import {
   RotateCcwIcon,
   SettingsIcon,
   Trash2Icon,
-  XIcon,
 } from "lucide-react"
 
 import {
@@ -95,7 +94,7 @@ import {
   refreshQueue,
   reattachRun,
   sendFromMain,
-  settleRouting,
+  settleTriaging,
   sendMessage,
   steerText,
   stopMessage,
@@ -274,13 +273,13 @@ function FollowOnSend({ lastUserId }: { lastUserId?: string }) {
   return null
 }
 
-export function ChatPage({ chatId }: { chatId?: string } = {}) {
+export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?: string } = {}) {
   const params = useParams()
   const { pathname } = useLocation()
   const id = chatId ?? params.id
-  // A message left routing by a page that closed mid-triage was never sent.
+  // A message left triaging by a page that closed mid-triage was never sent.
   useEffect(() => {
-    if (id) void settleRouting(id)
+    if (id) void settleTriaging(id)
   }, [id])
   const navigate = useNavigate()
   const { root, up } = useNav()
@@ -415,6 +414,7 @@ export function ChatPage({ chatId }: { chatId?: string } = {}) {
       move={move}
       title={movedTitles?.get(move.threadId)}
       profileId={conversation?.profileId ?? ""}
+      current={move.threadId === routeChat}
       onUndo={undoMoveOutMain}
     />
   )
@@ -694,13 +694,19 @@ export function ChatPage({ chatId }: { chatId?: string } = {}) {
   }, [id])
   const isMain = Boolean(conversation?.main)
   const routeChat = matchPath("/c/:id", pathname)?.params.id
-  const openThread = chatId && routeChat !== id ? routeChat : undefined
+  // The thread the address itself names, when this instance is a bot's Main drawn beside it.
+  const routeThread = chatId && routeChat !== id ? routeChat : undefined
   const mainPath =
     botThreads && conversation && !session && !isMain
       ? `/c/${mainThreadId(conversation.profileId)}`
       : undefined
-  // From `xl` a thread opens beside its bot, which it closes to. A session opens beside Code's list
-  // where there's room, and is then a top-level screen with nothing to go back to.
+  // Main's flow marks the thread open that is really beside it: the one the address names while it
+  // names one, and the one the third pane holds while the address is Main. `beside` stays on the
+  // address alone, so a card tapped from Main still pushes a history entry that Back can return to.
+  const openThread = routeThread ?? (isMain ? paneThread : undefined)
+  // From `xl` a thread opens beside its bot and stays beside it, so the thread needs no control of
+  // its own there; below that it is a screen over Main, and leads back to it. A session opens beside
+  // Code's list where there's room, and is then a top-level screen with nothing to go back to.
   const xl = useXLarge()
   const wide = useWide()
   const beside = Boolean(useCodePane()) && Boolean(session)
@@ -804,7 +810,11 @@ export function ChatPage({ chatId }: { chatId?: string } = {}) {
   const mainChrome = Boolean(botThreads && isMain && profile)
   const actions = conversation && (
     <div className="flex items-center gap-2">
-      {wide && configured && <ContextRing usage={usage} onClick={() => setUsageOpen(true)} />}
+      {/* Main carries no reading of the context window: it belongs to a chat, and Main is the bot's
+          face — the account's own notice below the composer still answers for the account. */}
+      {wide && configured && !isMain && (
+        <ContextRing usage={usage} onClick={() => setUsageOpen(true)} />
+      )}
       <DropdownMenu>
         <DropdownMenuTrigger
           render={
@@ -819,7 +829,7 @@ export function ChatPage({ chatId }: { chatId?: string } = {}) {
           <EllipsisIcon />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="min-w-44">
-          {configured && !wide && (
+          {configured && !wide && !isMain && (
             <>
               <DropdownMenuItem onClick={() => setUsageOpen(true)}>
                 <ContextIcon usage={usage} />
@@ -829,15 +839,19 @@ export function ChatPage({ chatId }: { chatId?: string } = {}) {
               <DropdownMenuSeparator />
             </>
           )}
-          <DropdownMenuItem
-            onClick={() => {
-              setTitle(conversation.title)
-              setRenaming(true)
-            }}
-          >
-            <PencilIcon />
-            {session ? "Edit" : "Rename"}
-          </DropdownMenuItem>
+          {/* Main has no title of its own to give: its header carries the bot's name, which Bot
+              settings edits. */}
+          {!isMain && (
+            <DropdownMenuItem
+              onClick={() => {
+                setTitle(conversation.title)
+                setRenaming(true)
+              }}
+            >
+              <PencilIcon />
+              {session ? "Edit" : "Rename"}
+            </DropdownMenuItem>
+          )}
           {mainChrome && profile ? (
             <>
               <DropdownMenuItem onClick={() => void setBotMuted(profile.id, !profile.muted)}>
@@ -897,8 +911,9 @@ export function ChatPage({ chatId }: { chatId?: string } = {}) {
     </div>
   )
 
-  // A session is a place in a project, not a conversation with a bot, so its header is centred.
-  const centered = Boolean(session)
+  // A session is a place in a project, and a thread beside Main is a place within the bot, so both
+  // are centred; the bot's own face reads from the left.
+  const centered = Boolean(session) || Boolean(mainPath && xl)
   const mainLine = botThreads && isMain ? threadsLine(threadCount(threadList)) : undefined
   let subtitle: string | undefined
   if (!unstarted)
@@ -914,26 +929,40 @@ export function ChatPage({ chatId }: { chatId?: string } = {}) {
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       <ChatHeader
-        // Nothing started has no title yet, and its bot is the big one in the middle.
-        title={unstarted ? "" : (conversation?.title ?? "New chat")}
+        // Nothing started has no title yet, and its bot is the big one in the middle. Main is the
+        // bot's face, so its title is the bot's name rather than the "Main" its record is stored
+        // under: the name Bot settings edits, so a rename shows here at once.
+        title={
+          unstarted
+            ? ""
+            : isMain
+              ? profile?.name || conversation?.title || ""
+              : (conversation?.title ?? "New chat")
+        }
         subtitle={subtitle}
         botId={profile?.botId}
         muted={Boolean(conversation?.muted || profile?.muted)}
         centered={centered}
-        // A chat is with its bot, so its picture stays — a session's header is a place in a project.
-        showBot={!session && !unstarted}
+        // A chat is with its bot, so its picture stays — until the bot is drawn beside its own
+        // thread, where the picture is Main's and the thread is within it.
+        showBot={!session && !unstarted && !(mainPath && xl)}
         actions={actions}
         leading={
           mainPath ? (
-            <Button
-              variant="outline"
-              size="icon-lg"
-              className="size-11 rounded-full bg-background/80 backdrop-blur"
-              onClick={() => up(mainPath)}
-              aria-label={xl ? "Close thread" : `Back to ${profile?.name ?? "bot"}`}
-            >
-              {xl ? <XIcon /> : <ArrowLeftIcon />}
-            </Button>
+            // Beside Main a thread needs no control of its own: the bot is on screen with it, and
+            // the pane keeps the thread wherever the address goes. Below `xl` it is a screen over
+            // Main, and leads back to it.
+            !xl && (
+              <Button
+                variant="outline"
+                size="icon-lg"
+                className="size-11 rounded-full bg-background/80 backdrop-blur"
+                onClick={() => up(mainPath)}
+                aria-label={`Back to ${profile?.name ?? "bot"}`}
+              >
+                <ArrowLeftIcon />
+              </Button>
+            )
           ) : (
             session &&
             !beside && (
@@ -987,7 +1016,8 @@ export function ChatPage({ chatId }: { chatId?: string } = {}) {
                           botId={profile?.botId}
                           profileId={conversation?.profileId ?? ""}
                           open={entry.thread.chat.id === openThread}
-                          beside={Boolean(openThread)}
+                          beside={Boolean(routeThread)}
+                          current={entry.thread.chat.id === routeChat}
                           move={moveThatOpenedThread.get(entry.thread.chat.id)}
                           onUndo={undoMoveOutMain}
                         />

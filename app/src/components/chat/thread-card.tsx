@@ -29,6 +29,7 @@ export function ThreadCard({
   profileId,
   open = false,
   beside = false,
+  current = false,
   move,
   onUndo,
 }: {
@@ -37,6 +38,8 @@ export function ThreadCard({
   profileId: string
   open?: boolean
   beside?: boolean
+  /** Whether the address already is this thread, so its link leads nowhere and says it is here. */
+  current?: boolean
   move?: Move
   onUndo?: (move: Move) => void
 }) {
@@ -82,6 +85,10 @@ export function ThreadCard({
           replace={beside}
           state={{ bot: profileId }}
           aria-current={open ? "page" : undefined}
+          // Where the thread is already the screen the link stays — the sentence reads the same and
+          // `aria-current` says it is here — but it goes nowhere: reopening it would only remount
+          // the pane the thread is already in.
+          onClick={current ? (event) => event.preventDefault() : undefined}
           className="flex min-h-11 items-center gap-1 rounded-full px-2 text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <span className="font-medium text-info">View thread</span>
