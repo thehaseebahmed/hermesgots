@@ -88,9 +88,15 @@ FORGET_RUNS = 500
 
 def children(hermes_home: Path, session_id: str, live: Collection[str]) -> List[Dict[str, Any]]:
     """The sessions ``session_id`` delegated to, oldest first: its own and those of its compression
-    continuations, since a delegation made after a compression comes from the live tip. ``live`` holds
-    the sessions with a run in flight: a child that never ended is only running while its parent's
-    run is, and stopped otherwise (a stop, or a gateway restart, left its row open)."""
+    continuations, since a delegation made after a compression comes from the live tip.
+
+    ``live`` holds the sessions with a run in flight, which covers a child dispatched microseconds
+    ago, before this process has anything to show for it. A child's own row cannot say whether it is
+    still at work — ``ended_at`` is written when its session closes, and a child the user stopped, or
+    one a restart lost, leaves the row open — so a child that never ended is running only while
+    something really holds it: its parent's run, or core's registry of the subagents this process
+    still runs (``_live_subagents``). Anything else is a row nobody holds, which is stopped.
+    """
     state = hermes_home / "state.db"
     if not state.exists():
         return []
@@ -109,12 +115,15 @@ def children(hermes_home: Path, session_id: str, live: Collection[str]) -> List[
                 parents,
             ).fetchall()
             running = any(parent in live for parent in parents)
+            working = set(_live_subagents())
             found = []
             for row in rows:
                 if _delegated_from(row["model_config"]) not in parents:
                     continue
                 tip = _tip(conn, row)
-                found.append(_child(row, tip, running))
+                # The registry names a child by the session it is writing under, which is its tip
+                # once it has compressed; the row's own id covers the moment before that.
+                found.append(_child(row, tip, running, row["id"] in working or tip["id"] in working))
             return found
     except sqlite3.Error:
         logger.debug("memento: couldn't read %s's delegations", session_id, exc_info=True)
@@ -177,10 +186,10 @@ def _tip(conn: sqlite3.Connection, row: sqlite3.Row) -> Dict[str, Any]:
     return {**current, "tool_calls": calls}
 
 
-def _child(row: sqlite3.Row, tip: Dict[str, Any], live: bool) -> Dict[str, Any]:
+def _child(row: sqlite3.Row, tip: Dict[str, Any], parent_live: bool, child_live: bool) -> Dict[str, Any]:
     reason = tip["end_reason"] or ""
     if tip["ended_at"] is None:
-        status = "running" if live else "stopped"
+        status = "running" if parent_live or child_live else "stopped"
     elif "interrupt" in reason or reason in ("cancelled", "stopped"):
         status = "stopped"
     else:
@@ -196,6 +205,61 @@ def _child(row: sqlite3.Row, tip: Dict[str, Any], live: bool) -> Dict[str, Any]:
         "tool_calls": tip["tool_calls"],
         "status": status,
     }
+
+
+def _live_subagents() -> Dict[str, Dict[str, str]]:
+    """Each subagent this process still runs, by the child session its work is written under.
+
+    Core's registry of live children (``tools.delegate_tool_registry._active_subagents``,
+    tools/delegate_tool_registry.py:20) keeps one record per running child for the lifetime of its
+    run, and the live agent in it carries the child's own session id
+    (``child_session_ref["session_id"]``, tools/delegate_tool.py:306) — the id the child's row in
+    ``state.db`` is keyed by, and the one the app's card holds. The record's
+    ``owner_agent_session_id`` is the conversation that dispatched it (tools/delegate_tool_child_run.py:374).
+
+    In memory, which is exactly what makes it the right signal: it is the only report of a child
+    being *worked on*, and a child a restart lost has no record (nor a ``_run_statuses`` entry, since
+    a child runs inside its parent's process, not as an API run). Imported here, not at module load:
+    the plugin has to import on a host that is missing core's tools.
+    """
+    try:
+        from tools import delegate_tool_registry as registry
+    except ImportError:
+        return {}
+    records = getattr(registry, "_active_subagents", None)
+    if not isinstance(records, dict):
+        return {}
+    found: Dict[str, Dict[str, str]] = {}
+    for agent_id, record in list(records.items()):
+        if not isinstance(record, dict):
+            continue
+        agent = record.get("agent")
+        session_id = str(getattr(agent, "session_id", "") or "")
+        if not session_id:
+            continue
+        owner = str(record.get("owner_agent_session_id") or "") or str(
+            getattr(agent, "_parent_session_id", "") or ""
+        )
+        found[session_id] = {"agent": str(agent_id), "parent": owner}
+    return found
+
+
+def live_sessions(hermes_home: Path) -> Dict[str, int]:
+    """How many subagents each chat still has running, by the session the app knows it as.
+
+    What the app draws its session states from: a chat whose turn has ended is still at work while a
+    subagent it dispatched is, and the app reads that off ``runs/live`` with the runs (and without a
+    read per session). A chat that compressed dispatched from its tip, so the owner is walked back to
+    the chat's root — the id every run of it is reported under (``sessions.chat_session``).
+    """
+    found: Dict[str, int] = {}
+    for live in _live_subagents().values():
+        parent = live["parent"]
+        if not parent:
+            continue
+        root = sessions.chat_session(hermes_home, parent)
+        found[root] = found.get(root, 0) + 1
+    return found
 
 
 def pending(hermes_home: Path) -> List[Dict[str, Any]]:
@@ -610,21 +674,12 @@ def _live_agent(subagent_id: str) -> Optional[str]:
 
     The registry keeps one record per live child, keyed by that id, and each holds the live child
     agent (``tools.delegate_tool_registry.py:20``) — which carries its own session id, the only place
-    the two are written side by side. Read here rather than trusted from a store that may predate the
-    child; a child that has finished is in neither, which is the answer a card is given anyway.
+    the two are written side by side (``_live_subagents``). Read here rather than trusted from a
+    store that may predate the child; a child that has finished is in neither, which is the answer a
+    card is given anyway.
     """
-    try:
-        from tools import delegate_tool_registry as registry
-    except ImportError:
-        return None
-    records = getattr(registry, "_active_subagents", None)
-    if not isinstance(records, dict):
-        return None
-    for agent_id, record in list(records.items()):
-        agent = record.get("agent") if isinstance(record, dict) else None
-        if str(getattr(agent, "session_id", "") or "") == subagent_id:
-            return str(agent_id)
-    return None
+    live = _live_subagents().get(subagent_id)
+    return live["agent"] if live else None
 
 
 def _home() -> Path:

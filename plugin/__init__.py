@@ -1457,8 +1457,21 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             host_side = {}
         for session_id, reason in host_side.items():
             waiting.setdefault(session_id, reason)
+        # The subagents each session still runs: a chat whose turn has ended is still at work while
+        # one is, so every screen's session state reads it from the poll it already makes.
+        try:
+            subagents = await asyncio.to_thread(delegation.live_sessions, home)
+        except Exception:
+            logger.debug("memento: reading live subagents failed", exc_info=True)
+            subagents = {}
         return web.json_response(
-            {"object": "memento.runs", "sessions": live, "run_ids": run_ids, "waiting": waiting}
+            {
+                "object": "memento.runs",
+                "sessions": live,
+                "run_ids": run_ids,
+                "waiting": waiting,
+                "subagents": subagents,
+            }
         )
 
     async def stream_events(request: "web.Request") -> "web.StreamResponse":
