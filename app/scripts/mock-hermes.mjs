@@ -114,6 +114,8 @@
 // plugin that has none of them. POST /__mock/mcp puts back every server a flow removed.
 // Research missions (GET and POST /api/plugins/memento/research, …/research/{id} and its actions)
 // live in mock-research.mjs.
+// Meetings (GET and POST /api/plugins/memento/meetings, …/meetings/{id} and its actions) live in
+// mock-meetings.mjs, which starts with two already-delivered samples.
 //
 //   pnpm mock            # then point Settings at http://localhost:8642/v1
 
@@ -335,7 +337,15 @@ function seedProjects() {
       description: null,
       created_at: now - 40 * 86_400,
       last_active: now - 15 * 60,
-      folders: [{ ...folder("/home/hermes/code/memento"), is_primary: true }],
+      // The four repositories screens.mjs seeds a session's worktree with: a project session's
+      // worktree comes from this host's answer (workspaceRecord below), so the folders and the
+      // seeded repos must name the same ones or the session header loses the extras mid-flow.
+      folders: [
+        { ...folder("/home/hermes/code/memento"), is_primary: true },
+        folder("/home/hermes/code/gots-app"),
+        folder("/home/hermes/code/docs"),
+        folder("/home/hermes/code/website"),
+      ],
     },
     {
       id: "p_5e6f7a8b",

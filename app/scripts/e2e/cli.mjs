@@ -491,7 +491,10 @@ async function runFlow(name, mockName) {
     cwd: appDir,
     env,
     stdio: "inherit",
-    timeout: 300_000,
+    // A hang guard, not a budget: a multi-case flow (panes runs seven) needs headroom on a slow
+    // machine — its cases alone take ten minutes here — and a script killed here dies mid-case as
+    // a closed browser.
+    timeout: 1_200_000,
   })
   return result.status === 0 ? null : label
 }
@@ -502,8 +505,8 @@ async function shot(path) {
   const app = await serveApp()
   const mock = await serveMock(polling ? "polling" : "live")
   process.env.MOCK_URL = mock
-  const { setUpBot } = await import("./lib.mjs")
-  const browser = await chromium.launch({ headless: !headed, args: ["--no-sandbox"] })
+  const { launch, setUpBot } = await import("./lib.mjs")
+  const browser = await launch(chromium, !headed)
   try {
     const page = await browser.newPage({
       viewport: { width, height },
@@ -519,6 +522,36 @@ async function shot(path) {
     mkdirSync(dirname(file), { recursive: true })
     await page.screenshot({ path: file, fullPage: false })
     console.log(file)
+  } finally {
+    await browser.close()
+  }
+}
+
+/**
+ * Walks the app's routes once in a throwaway browser before any flow runs. A lane that hits a cold
+ * dev server competes with the other lanes for the same first module graph, requests back up, and
+ * pages come up blank; warmed, the transforms are already cached. A lane's parent warms it.
+ */
+async function warm() {
+  if (process.env.E2E_LANE) return
+  process.env.PLAYWRIGHT_MODULE ??= playwright()
+  const { chromium } = await import(process.env.PLAYWRIGHT_MODULE)
+  const app = await serveApp()
+  process.env.MOCK_URL = await serveMock(polling ? "polling" : "live")
+  const { launch, setUpBot, settleNav } = await import("./lib.mjs")
+  console.log("warming the app's routes")
+  const browser = await launch(chromium, !headed)
+  try {
+    const page = await settleNav(await browser.newPage())
+    await page.goto(app)
+    await setUpBot(page)
+    // The feature switches open the routes and the chunks the flows drive.
+    await page.evaluate(async () => {
+      const { db } = await import("/src/lib/db.ts")
+      await db.settings.update("settings", { developer: true, meetings: true })
+    })
+    for (const route of ["/projects", "/code", "/routines", "/meetings", "/research", "/settings"])
+      await page.goto(`${app}${route}`)
   } finally {
     await browser.close()
   }
@@ -610,6 +643,7 @@ try {
     )
     if (jobs > 1) {
       await serveApp()
+      await warm()
       const lanes = await Promise.all(
         Array.from({ length: jobs }, (_, lane) => laneRun(lane, jobs, args)),
       )
@@ -622,13 +656,31 @@ try {
         (count, lane) => count + Number(lane.out.match(/^All (\d+) passed$/m)?.[1] ?? 0),
         0,
       )
-      if (failures.length || crashed.length) {
-        if (failures.length) console.log(`FAILED: ${failures.join(", ")}`)
+      // The sweep's own rule made mechanical: a failure under lanes re-runs serially before it
+      // counts. Four browsers sharing one dev server flake where one alone passes.
+      const still = []
+      for (const label of failures) {
+        const name =
+          Object.keys(FLOWS).find((key) => label === key) ??
+          Object.keys(FLOWS).find((key) => label.startsWith(`${key} (`))
+        const mock = name ? (/\((\S+) mock\)/.exec(label)?.[1] ?? FLOWS[name].mock ?? "live") : null
+        console.log(`\n== serial re-run of ${label}`)
+        if (name && (await runFlow(name, mock)) === null) {
+          console.log(`passed serially, a lane flake: ${label}`)
+          continue
+        }
+        still.push(label)
+      }
+      if (still.length || crashed.length) {
+        if (still.length) console.log(`FAILED: ${still.join(", ")}`)
         for (const lane of crashed)
           console.log(`FAILED: lane ${lane.lane} of ${jobs} exited ${lane.code} with no summary`)
         process.exitCode = 1
-      } else console.log(`All ${passed} passed across ${jobs} lanes`)
+      } else if (failures.length)
+        console.log(`All ${passed + failures.length} passed (${failures.length} only serially)`)
+      else console.log(`All ${passed} passed across ${jobs} lanes`)
     } else {
+      await warm()
       const failed = []
       for (const name of names) {
         const mock = polling && !FLOWS[name].mock ? "polling" : (FLOWS[name].mock ?? "live")

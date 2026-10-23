@@ -265,30 +265,39 @@ await flow(
     })
     // Watched from the moment this route is the one in the address bar: what was on screen before the
     // swap belongs to the session it was showing.
-    await page.evaluate((route) => {
-      window.__midSwap = []
-      window.__midThread = []
-      window.__midSamples = 0
-      let routeAt = 0
-      window.__watch = setInterval(() => {
-        if (!location.pathname.endsWith(route)) return
-        // The address bar changes before React commits this route: that instant still shows the
-        // screen the navigation started from, which is not this session showing anything of it.
-        routeAt ||= Date.now()
-        if (Date.now() - routeAt < 150) return
-        window.__midSamples += 1
-        const cards = [...document.querySelectorAll("button")].filter(
-          (button) => button.textContent?.trim() === "Keep planning",
-        )
-        if (cards.length) window.__midSwap.push(Date.now())
-        // The message this session was sent is A's alone: seeing it means A's thread is on screen.
-        const thread = document.querySelector('[aria-label="Messages"]')?.innerText ?? ""
-        if (thread.includes("dry run to the log rotation")) window.__midThread.push(Date.now())
-      }, 50)
-    }, `/c/${b}`)
+    await page.evaluate(
+      ([route, mine]) => {
+        window.__midSwap = []
+        window.__midThread = []
+        window.__midSamples = 0
+        window.__watch = setInterval(() => {
+          if (!location.pathname.endsWith(route)) return
+          // The address bar changes before React commits this route: until this session's own title
+          // is in the header, the screen is still the one the navigation started from — which is not
+          // this session showing anything of the one before it. A fixed grace loses that race on a
+          // slow device, whose swap this is holding open on purpose.
+          if (![...document.querySelectorAll("header")].some((head) => head.innerText.includes(mine)))
+            return
+          window.__midSamples += 1
+          const cards = [...document.querySelectorAll("button")].filter(
+            (button) => button.textContent?.trim() === "Keep planning",
+          )
+          if (cards.length) window.__midSwap.push(Date.now())
+          // The message this session was sent is A's alone: seeing it means A's thread is on screen.
+          const thread = document.querySelector('[aria-label="Messages"]')?.innerText ?? ""
+          if (thread.includes("dry run to the log rotation")) window.__midThread.push(Date.now())
+        }, 50)
+      },
+      [`/c/${b}`, titleB],
+    )
     await group("Today").getByText(titleB).click()
     await page.waitForURL(`**/c/${b}`)
-    await page.waitForTimeout(2500)
+    // The watcher counts only once the swap has committed — this session's own title in a header —
+    // and the row read above holds the swap open by design. Wait for a watched window to accrue
+    // rather than a fixed beat, which a slow swap outruns.
+    await page
+      .waitForFunction(() => window.__midSamples > 10, undefined, { timeout: 20_000 })
+      .catch(() => {})
     const mid = await page.evaluate(() => {
       clearInterval(window.__watch)
       return {

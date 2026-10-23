@@ -3,6 +3,7 @@
 // (`pnpm e2e`, `cli.mjs`) starts the servers and sets these variables; a flow also runs on its own.
 import assert from "node:assert/strict"
 import { mkdirSync } from "node:fs"
+import { statfsSync } from "node:fs"
 
 export { assert }
 export const app = process.env.APP_URL ?? "http://127.0.0.1:15173"
@@ -45,12 +46,112 @@ export async function settled(page, timeout = 5_000) {
 const capture = (page, path) => page.screenshot({ path, animations: "disabled" })
 
 /**
+ * Launches Chromium for a flow or a probe. Playwright passes `--disable-dev-shm-usage` by default —
+ * right for docker's 64MB /dev/shm — which points Chromium's shared memory at /tmp as unlinked
+ * files instead. A page load can hold hundreds of MB of those, a small /tmp fills, and the next
+ * navigation dies with ERR_INSUFFICIENT_RESOURCES. Where /dev/shm has room, Chromium keeps it.
+ */
+export function launch(chromium, headless = true, args = []) {
+  const shm = statfsSync("/dev/shm")
+  const room = shm.bavail * shm.bsize
+  return chromium.launch({
+    headless,
+    args: ["--no-sandbox", ...args],
+    ...(room >= 512 * 1024 * 1024 ? { ignoreDefaultArgs: ["--disable-dev-shm-usage"] } : {}),
+  })
+}
+
+/**
+ * Wraps a page's navigations so each one waits for the module graph before the next can begin. The
+ * module graph finishes after the load event; a second navigation during it exhausts the browser's
+ * pending-request cap, and the new page then fetches nothing at all (a white screen). The wait is
+ * the page's code requests landing — module graphs are what a navigation abandons and what piles
+ * up — and it gives up after 8s, so a module the client has lost simply moves on. A graph that
+ * takes its time under four lanes' contention lands in a couple of seconds once the dev server
+ * is warm; a wait longer than this only ever waits out a lost request.
+ */
+export async function settleNav(page) {
+  // The memory cache keeps every module body the page has ever fetched, each in its own
+  // shared-memory region at 2MB granularity — hundreds per route graph. Five routes in one browser
+  // reach a gigabyte, and when the regions stop being pruned the next navigation dies with
+  // ERR_INSUFFICIENT_RESOURCES (a white page). Re-fetching is Vite's transform cache, not the
+  // network: the dev server already holds every transformed module.
+  const cdp = await page.context().newCDPSession(page)
+  await cdp.send("Network.enable")
+  await cdp.send("Network.setCacheDisabled", { cacheDisabled: true })
+  const streams = /\/events(?:\?|$)/
+  // What must land before the next navigation is the module graph — code the page asked for. A
+  // bot's picture, a host probe or an API read is not part of it, and several of those never settle
+  // client-side at all, so waiting on one burns the whole cap and delays every case for nothing.
+  const code = /\.(?:m?js|[jt]sx|css)(?:\?|$)/
+  const pending = new Map()
+  page.on("request", (request) => {
+    if (!streams.test(request.url()) && code.test(request.url())) pending.set(request, Date.now())
+  })
+  const landed = (request) => pending.delete(request)
+  page.on("requestfinished", landed)
+  page.on("requestfailed", landed)
+  if (process.env.E2E_PROBE_NAV) {
+    page.on("requestfailed", (request) =>
+      console.log(`[req-fail ${request.failure()?.errorText}] ${request.url().split("/").at(-1)}`),
+    )
+    page.on("response", (response) => {
+      if (response.status() === 404) console.log(`[404] ${response.url()}`)
+    })
+  }
+  const settle = async (since) => {
+    for (const end = Date.now() + 8_000; Date.now() < end; ) {
+      // Requests older than this navigation are the last page's stragglers: an abandoned fetch
+      // neither finishes nor fails in the client, and waiting on one burns the whole cap and then
+      // still leaves the page to the next navigation. Only this document's graph counts.
+      for (const [request, at] of pending) if (at < since) pending.delete(request)
+      if (![...pending.values()].some((at) => at >= since)) return
+      await new Promise((done) => setTimeout(done, 100))
+    }
+  }
+  for (const name of ["goto", "reload"]) {
+    const navigate = page[name].bind(page)
+    page[name] = async (...args) => {
+      const since = Date.now()
+      const result = await navigate(...args)
+      await settle(since)
+      if (process.env.E2E_PROBE_NAV) {
+        const mock = process.env.MOCK_URL
+        const state = await page
+          .evaluate(async (mock) => {
+            const race = (work, label) =>
+              Promise.race([work.then(() => `${label}-ok`), new Promise((no) => setTimeout(() => no(`${label}-hung`), 3000))])
+            const db = await race(import("/src/lib/db.ts"), "db")
+            const root = document.querySelector("#root")?.childElementCount
+            const more =
+              root > 0
+                ? ""
+                : ` ${await race(import("/src/routes/routines.tsx"), "route")} ${await race(
+                    fetch(`${mock}/api/jobs?include_disabled=true`).then((r) => r.status),
+                    "jobs",
+                  )}`
+            return `${document.readyState} root=${root} ${db}${more}`
+          }, mock)
+          .catch((error) => error.message.slice(0, 60))
+        console.log(
+          `[nav ${new URL(page.url()).pathname}] ${state} pending=${[...pending.keys()]
+            .map((r) => r.url())
+            .join(",")}`,
+        )
+      }
+      return result
+    }
+  }
+  return page
+}
+
+/**
  * Opens the app with the bot set up, runs `body`, and closes the browser. A failure saves
  * `failed.png` (with SHOTS_DIR set) before it is thrown.
  */
 export async function flow(name, body, { viewport = { width: 1440, height: 900 }, dark } = {}) {
-  const browser = await chromium.launch({ headless: !headed, args: ["--no-sandbox"] })
-  const page = await browser.newPage({ viewport, colorScheme: dark ? "dark" : "light" })
+  const browser = await launch(chromium, !headed)
+  const page = await settleNav(await browser.newPage({ viewport, colorScheme: dark ? "dark" : "light" }))
   const shot = async (step) => {
     if (!shots) return
     mkdirSync(shots, { recursive: true })
@@ -60,9 +161,6 @@ export async function flow(name, body, { viewport = { width: 1440, height: 900 }
   }
   try {
     await page.goto(app)
-    // The module graph finishes after the load event; a second navigation during it exhausts the
-    // browser's pending-request cap, and the new page then fetches nothing at all.
-    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {})
     const profileId = await setUpBot(page)
     await body({ page, profileId, shot, ...helpers(page) })
   } catch (error) {
@@ -101,7 +199,7 @@ const user = { id: "11111111-2222-4333-8444-555555555555", email: "tester@exampl
  * `shot(name)` saves a screenshot. The caller closes `browser`.
  */
 export async function signedIn({ width = 1440, dark = false, vault = "exists" } = {}) {
-  const browser = await chromium.launch({ headless: !headed, args: ["--no-sandbox"] })
+  const browser = await launch(chromium, !headed)
   const context = await browser.newContext({
     viewport: { width, height: width < 768 ? 844 : 768 },
     colorScheme: dark ? "dark" : "light",
@@ -174,7 +272,7 @@ export async function signedIn({ width = 1440, dark = false, vault = "exists" } 
       : route.fulfill({ status: 500, body: "" }),
   )
 
-  const page = await context.newPage()
+  const page = await settleNav(await context.newPage())
   const errors = []
   page.on("pageerror", (error) => errors.push(error.message))
   return {

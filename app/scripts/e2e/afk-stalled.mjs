@@ -45,7 +45,12 @@ const run = (wide) => async ({ page, profileId, shot, until }) => {
     await waiting.getByText(REASON).waitFor({ timeout: 10_000 })
   }
   await shot("waiting")
-  assert.deepEqual(errors, [], `no console error (${errors.join("; ")})`)
+  // A failed fetch the browser logs on its own (a 404 with no CORS headers) isn't the app's error.
+  assert.deepEqual(
+    errors.filter((e) => !/Failed to load resource|CORS policy/.test(e)),
+    [],
+    `no console error (${errors.join("; ")})`,
+  )
 }
 
 for (const width of [390, 1440]) {

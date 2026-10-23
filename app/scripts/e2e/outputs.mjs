@@ -12,9 +12,12 @@ const outputs = (page, id) =>
 
 await flow("outputs", async ({ page, seed, send, stored, until, shot }) => {
   // A session that ships twice: the pull request it opened first is merged by the second, so the
-  // drawer has a live one and a finished one behind it.
+  // drawer has a live one and a finished one behind it. Its project is the one the mock answers
+  // with a single repository — a pull request opens one per repository, and this counts them. The
+  // title is its own: "Rotate the logs" is a Gots session elsewhere, and the mock's long-lived chat
+  // list carries every session into every flow, where panes's project chip counts that name.
   const id = `outputs-${runId()}`
-  await seed([{ id, title: "Rotate the logs", projectId: "p_1a2b3c4d" }])
+  await seed([{ id, title: "Ship the dry-run flag", projectId: "p_5e6f7a8b" }])
   await page.goto(`${app}/c/${id}`)
   await send("ship it")
   await until(async () => (await stored(id))?.length, 30_000, "the first pull request")
@@ -67,7 +70,7 @@ await flow("outputs", async ({ page, seed, send, stored, until, shot }) => {
     "the session's own folders, one row each",
   )
   assert.equal(
-    await drawer.getByText("Rotate the logs").count(),
+    await drawer.getByText("Ship the dry-run flag").count(),
     0,
     "no session name under a folder: this tree is one session's",
   )

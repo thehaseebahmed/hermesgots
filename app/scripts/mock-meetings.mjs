@@ -91,6 +91,39 @@ function notesFor(lines) {
 }
 
 const meetings = new Map()
+// Two meetings already on the host, standing where the design mock's samples stood: the panes flow
+// reads the list beside an open meeting and names them. Newest first in the list, so the product
+// sync is the one that opens beside it.
+const sample = (id, title, kind, transcript, notes, ago) => {
+  const at = Date.now() - ago
+  meetings.set(id, {
+    id,
+    title,
+    project_id: null,
+    kind,
+    stage: "ready",
+    parts: 1,
+    stored: new Map([["0", true]]),
+    done: 1,
+    error: null,
+    flaky: false,
+    transcript,
+    notes,
+    chat: [],
+    duration: transcript.at(-1)?.at ?? 0,
+    created_at: at,
+    updated_at: at,
+  })
+}
+sample("m_sample_sync", "Weekly product sync", "audio", TRANSCRIPT, NOTES, 60_000)
+sample(
+  "m_sample_landing",
+  "Landing page review",
+  "transcript",
+  TRANSCRIPT.slice(0, 3),
+  notesFor(TRANSCRIPT.slice(0, 3)),
+  120_000,
+)
 const WINDOWS = 3
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 

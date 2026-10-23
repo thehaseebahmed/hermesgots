@@ -19,7 +19,7 @@ const CASES = [
 for (const [width, collapsed, panes] of CASES) {
   await flow(
     `panes-${width}${collapsed ? "-rail" : ""}`,
-    async ({ page, profileId, seed, shot }) => {
+    async ({ page, profileId, seed, shot, until }) => {
       page.on("pageerror", (error) => errors.push(`${width}: ${error.message}`))
       page.on("console", (message) => {
         if (message.type() === "error") errors.push(`${width}: ${message.text()}`)
@@ -112,6 +112,12 @@ for (const [width, collapsed, panes] of CASES) {
         assert.equal(new URL(page.url()).pathname, "/code", "stays on the list")
         // A chip picks the project, and New session starts there.
         await page.getByRole("button", { name: "Maze", exact: true }).click()
+        // The filter lands on the next render; reading the list at the click loses the race.
+        await until(
+          async () => (await page.getByText("Rotate the logs").count()) === 0,
+          5_000,
+          "the chip's filter to apply",
+        )
         assert.equal(await page.getByText("Rotate the logs").count(), 0, "the chip filters")
         await page.getByRole("button", { name: "New session" }).click()
         const picked = page.getByRole("radio", { checked: true })
