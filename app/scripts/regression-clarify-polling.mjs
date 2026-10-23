@@ -1,11 +1,12 @@
 // Requires Vite and MOCK_BLOCK_RUN_EVENTS=1 mock on isolated ports, plus Playwright.
 import assert from "node:assert/strict"
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? "playwright")
+import { launch, settleNav } from "./e2e/lib.mjs"
 const app = process.env.APP_URL ?? "http://localhost:15173"
 const mock = process.env.MOCK_URL ?? "http://localhost:18642"
-const browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] })
+const browser = await launch(chromium, true)
 try {
-  const page = await browser.newPage({ viewport: { width: 1024, height: 768 } })
+  const page = await settleNav(await browser.newPage({ viewport: { width: 1024, height: 768 } }))
   page.on("pageerror", (error) => console.log("Page error", error.message))
   let answered = false
   let staleReads = 0

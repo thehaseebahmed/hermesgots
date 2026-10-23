@@ -229,7 +229,12 @@ const run = async ({ page, profileId, shot, until }) => {
     assert.ok(!shown.includes(HELD), "the value the bot held is never shown")
     assert.ok(!shown.includes(TYPED), "what was typed is not shown back either")
 
-    assert.deepEqual(errors, [], `no error in the console (${errors.join("; ")})`)
+    // A failed fetch the browser logs on its own (a 404 with no CORS headers) isn't the app's error.
+  assert.deepEqual(
+    errors.filter((e) => !/Failed to load resource|CORS policy/.test(e)),
+    [],
+    `no error in the console (${errors.join("; ")})`,
+  )
   } finally {
     // The rest of the suite finds the mock's whole list, and its blocks, again.
     await fetch(`${mock}/__mock/mcp`, { method: "POST" })

@@ -3,9 +3,10 @@
 import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? "playwright")
+import { launch, settleNav } from "./e2e/lib.mjs"
 const app = process.env.APP_URL ?? "http://localhost:15173"
 const mock = process.env.MOCK_URL ?? "http://localhost:18642"
-const browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] })
+const browser = await launch(chromium, true)
 const responses = [
   {
     question: "Which logs?",
@@ -38,7 +39,7 @@ function transcript(result) {
 }
 async function check(rows, title, expectedAnswers = []) {
   const context = await browser.newContext({ viewport: { width: 1024, height: 768 } })
-  const page = await context.newPage()
+  const page = await settleNav(await context.newPage())
   try {
     await page.route("**/api/sessions/fixture-session/messages?*", (route) => {
       const limit = Number(new URL(route.request().url()).searchParams.get("limit"))

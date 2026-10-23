@@ -5,6 +5,7 @@ import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? "playwright")
+import { launch, settleNav } from "./e2e/lib.mjs"
 
 const app = process.env.APP_URL ?? "http://localhost:15173"
 const mock = process.env.MOCK_URL ?? "http://localhost:18642"
@@ -14,7 +15,7 @@ const SENTENCE = "Let's ship the dictation feature today."
 // Long enough for the stop a dead recorder never sends (STOP_MS) plus the state to render.
 const FAILED_MS = 2500
 const fakeMic = ["--no-sandbox", "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"]
-const browser = await chromium.launch({ headless: true, args: fakeMic })
+const browser = await launch(chromium, true, fakeMic.slice(1))
 
 function speech() {
   const rate = 48000
@@ -89,7 +90,7 @@ async function open(server, viewport, colorScheme = "light", on = browser, touch
   const context = await on.newContext({ viewport, colorScheme, hasTouch: touch, isMobile: touch })
   if (init) await context.addInitScript(init)
   await context.grantPermissions(["microphone"], { origin: app })
-  const page = await context.newPage()
+  const page = await settleNav(await context.newPage())
   await page.goto(app)
   await page.evaluate(async (server) => {
     const { db } = await import("/src/lib/db.ts")
@@ -174,10 +175,7 @@ try {
 
   // A long recording goes in pieces cut at the pauses, each sent while the voice carries on.
   {
-    const talker = await chromium.launch({
-      headless: true,
-      args: [...fakeMic, `--use-file-for-fake-audio-capture=${speech()}`],
-    })
+    const talker = await launch(chromium, true, [...fakeMic.slice(1), `--use-file-for-fake-audio-capture=${speech()}`])
     const page = await open(mock, PHONE, "light", talker)
     const before = (await clips()).length
     await page.getByRole("button", { name: "Voice", exact: true }).click()

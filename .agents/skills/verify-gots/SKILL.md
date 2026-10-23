@@ -97,8 +97,10 @@ node scripts/e2e/my-drive.mjs
 On a full sweep prefer lanes (`--jobs N`, 2-8) to running `all` serially: lanes split the registry
 round-robin, each with its own mocks and shared app, and the wall time divides by the lanes minus
 one startup. Each concurrent browser wants roughly 150 threads and some headroom — `doctor.sh`
-reports the cgroup budget — and a flow that measures wall-clock pacing can flake when lanes contend;
-run a suspect flow serially (`pnpm e2e <flow>`) and say so, rather than rerunning until green.
+reports the cgroup budget — and a flow that measures wall-clock pacing can flake when lanes contend.
+`all` re-runs its lane failures serially before it reports and marks the ones that pass `passed
+serially, a lane flake: …`; only a failure that reproduces serially counts. For a single suspect
+flow, `pnpm e2e <flow>` is that same serial shape.
 
 A drive script uses the library's real handles — roles and names the app renders, route paths, and
 the helpers:

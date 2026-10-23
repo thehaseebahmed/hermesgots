@@ -2,6 +2,7 @@
 // Run with Vite on APP_URL and an isolated mock on MOCK_URL. Requires Playwright.
 import assert from "node:assert/strict"
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? "playwright")
+import { settleNav } from "./e2e/lib.mjs"
 
 const app = process.env.APP_URL ?? "http://localhost:15173"
 const mock = process.env.MOCK_URL ?? "http://localhost:18642"
@@ -10,7 +11,7 @@ const browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] }
 // back the replies earlier runs left, so the count grew with each run rather than with this one.
 const id = `overlap-${Math.random().toString(36).slice(2, 8)}`
 try {
-  const page = await browser.newPage({ viewport: { width: 1024, height: 768 } })
+  const page = await settleNav(await browser.newPage({ viewport: { width: 1024, height: 768 } }))
   await page.goto(app)
   await page.evaluate(async ({ mock, id }) => {
     const { db } = await import("/src/lib/db.ts")
