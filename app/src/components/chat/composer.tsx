@@ -46,11 +46,12 @@ import {
 import { useDictation } from "@/lib/dictation-take"
 import {
   SEND_COMMANDS,
-  hoistItem,
   isSendMode,
   localCommand,
   localCommands,
   optionId,
+  pickItem,
+  pickSendMode,
   rankSlashItems,
   sendMode,
   slashToken,
@@ -247,15 +248,16 @@ export function Composer({
     })
   }
 
-  // A picked skill goes to the front of the message, with the rest of what was typed after it; a
-  // send mode carries the message the same way, and both are what the host reads as one.
   const pick = (item: SlashItem) => {
     if (item.kind === "command" && !isSendMode(item.name)) {
       const run = localCommand(value, main)
       return runCommand(item.name, run?.command === item.name ? run.text : "")
     }
     if (!token) return
-    const next = hoistItem(value, token, item.name)
+    const next =
+      item.kind === "command" && isSendMode(item.name)
+        ? pickSendMode(value, token, item.name)
+        : pickItem(value, token, item.name)
     caretWanted.current = next.caret
     setDismissed(false)
     setValue(next.text)

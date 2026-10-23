@@ -1,7 +1,5 @@
-// The composer's `/` menu lists the bot's skills from the Gots plugin, not from Hermes's /v1/skills:
-// the list is kept on the device, a slash that begins any word opens it, and picking a skill puts it
-// at the front of the message, which is the only place the host runs one from. It runs twice, as a
-// laptop in the light and as a phone in the dark, where the list is at its shortest.
+// The composer's `/` menu: the plugin's skills, a pick landing at the cursor, and the list kept
+// on the device — as a laptop in the light and as a phone in the dark.
 import { assert, flow, pass } from "./lib.mjs"
 
 const FIXTURE = ["github-pr-workflow", "log-triage", "plan"]
@@ -32,17 +30,23 @@ const run = async ({ page, until, shot }) => {
   assert.equal(hermes.length, 0, "the menu never asked Hermes's /v1/skills")
 
   // A slash that begins a word mid-message opens it, and the query is what follows the slash.
-  await composer.fill("fix the tests /tri")
+  await composer.fill("fix the /tri tests")
+  for (let left = 0; left < " tests".length; left += 1) await composer.press("ArrowLeft")
   await menu.getByRole("option", { name: /\/log-triage\b/ }).waitFor({ timeout: 10_000 })
   await shot("mid-message")
 
-  // Picking one puts it at the front, with the rest of the sentence after it.
   await composer.press("Enter")
   assert.equal(
     await composer.inputValue(),
-    "/log-triage fix the tests",
-    "a picked skill is hoisted to the front of the message",
+    "fix the /log-triage tests",
+    "a picked skill lands at the cursor, keeping the word after it",
   )
+  assert.equal(
+    await composer.evaluate((field) => field.selectionStart),
+    20,
+    "the cursor sits after the skill and its space",
+  )
+  await until(async () => !(await menu.isVisible()), 5_000, "the menu to stay closed on the pick")
 
   // A command is offered only when its token is the whole message: `/new` with text after it isn't,
   // since running it would clear the composer and drop that text — while the skills are still there.

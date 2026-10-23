@@ -140,14 +140,31 @@ export function nameSpread(name: string, query: string): number | null {
 }
 
 /**
- * A picked item goes to the front of the message, with the rest of what was typed after it: a skill
- * runs only from there, and a send-mode command takes the message the same way, so one picked
- * mid-sentence has to move to be one at all.
+ * A picked skill lands where the cursor is: `/name` replaces what was typed of the token up to
+ * the cursor, and everything after the cursor — including a word the token was typed into — stays
+ * where it was.
  */
-export function hoistItem(text: string, token: SlashToken, name: string) {
-  const rest = `${text.slice(0, token.start)}${text.slice(token.end)}`.trim()
-  const next = rest ? `/${name} ${rest}` : `/${name} `
-  return { text: next, caret: next.length }
+export function pickItem(text: string, token: SlashToken, name: string) {
+  return insert(text, token.start, token.start + 1 + token.query.length, name)
+}
+
+/**
+ * A picked send-mode replaces the whole token: it is only ever offered when nothing but
+ * whitespace surrounds the token, so nothing of the user's sits inside it to lose, and it reads
+ * as one command only from the front of the message.
+ */
+export function pickSendMode(text: string, token: SlashToken, name: string) {
+  return insert(text, token.start, token.end, name)
+}
+
+/** The end of the message has no character there, so it needs the space to keep typing with. */
+const needsSpace = (text: string, at: number) => !/\s/.test(text[at] ?? "")
+
+function insert(text: string, from: number, to: number, name: string) {
+  const hadSpace = !needsSpace(text, to)
+  const picked = `/${name}${hadSpace ? "" : " "}`
+  const next = text.slice(0, from) + picked + text.slice(to)
+  return { text: next, caret: from + picked.length + (hadSpace ? 1 : 0) }
 }
 
 export function optionId(listId: string, index: number) {
