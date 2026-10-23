@@ -29,7 +29,7 @@ import { describeActivity, formatDuration } from "@/lib/format"
 import { mediaImages } from "@/lib/media-tags"
 import { openuiParts, REPLY_INSET } from "@/lib/openui-block.ts"
 import type { InterfaceDraw, ThreadBlock } from "@/lib/openui-thread.ts"
-import { thoughtSpan } from "@/lib/thinking"
+import { runsOf, type ReasoningRun } from "@/lib/thinking"
 import { cn } from "@/lib/utils"
 import { useReveal } from "@/lib/reveal"
 import { isPlanApproval } from "@/lib/workspace"
@@ -53,6 +53,15 @@ type Part =
   | { kind: "tools"; tools: ToolEvent[] }
   | { kind: "clarify"; tool: ToolEvent }
   | { kind: "agent"; tool: ToolEvent }
+  | ({ kind: "thinking" } & RunPart)
+
+/** One of a reply's thinking runs, as the thread draws it: a row of its own, open while it thinks. */
+type RunPart = {
+  run: ReasoningRun
+  /** This run's row streams open: it is the reply's newest run and the reply is still thinking. */
+  thinking: boolean
+  key: string
+}
 
 function rowBlocks(content: string, blocks: ThreadBlock[] | undefined, streaming: boolean) {
   const parts = openuiParts(content)
@@ -77,12 +86,45 @@ function rowBlocks(content: string, blocks: ThreadBlock[] | undefined, streaming
 }
 
 /**
+ * Puts each thinking run where it happened: a run with no anchor opens the segment, and a run
+ * anchored to a call follows the part that holds that call — after the whole group when consecutive
+ * calls merged into one, and after everything when the call is drawn on another segment.
+ */
+function placeThinking(parts: Part[], runs: RunPart[]): Part[] {
+  const row = (run: RunPart): Part => ({ kind: "thinking", ...run })
+  const placed: Part[] = [...runs.filter((run) => !run.run.afterToolId).map(row), ...parts]
+  const after = new Map<string, number>()
+  for (const part of runs) {
+    const id = part.run.afterToolId
+    if (!id) continue
+    let at = after.get(id)
+    if (at === undefined) {
+      const found = placed.findIndex(
+        (one) =>
+          (one.kind === "tools" && one.tools.some((tool) => tool.toolCallId === id)) ||
+          ((one.kind === "clarify" || one.kind === "agent") && one.tool.toolCallId === id),
+      )
+      at = found < 0 ? placed.length : found
+    }
+    placed.splice(at + 1, 0, row(part))
+    after.set(id, at + 1)
+  }
+  return placed
+}
+
+/**
  * Interleaves a slice of the reply (starting at `start`) with the tools run during it. A clarify
  * call is a card of its own (its question and the answer) rather than a tool row, so is a
  * delegation (the agent it started), and the images a reply sends together — only whitespace
  * between their `MEDIA:<path>` tags — are one gallery part.
  */
-function toParts(content: string, tools: ToolEvent[], start: number, spans: RowBlock[]): Part[] {
+function toParts(
+  content: string,
+  tools: ToolEvent[],
+  start: number,
+  spans: RowBlock[],
+  runs: RunPart[],
+): Part[] {
   const end = start + content.length
   const parts: Part[] = []
   let cursor = start
@@ -121,7 +163,7 @@ function toParts(content: string, tools: ToolEvent[], start: number, spans: RowB
     else parts.push({ kind: "tools", tools: [tool] })
   }
   if (cursor < end) pushText(end)
-  return parts
+  return placeThinking(parts, runs)
 }
 
 function Stats({ message }: { message: Message }) {
@@ -413,10 +455,31 @@ export const MessageItem = memo(function MessageItem({
     since = b.time
   }
 
-  const reasoning = showThinking ? message.reasoning?.trim() : undefined
+  // A reply keeps its thinking in runs, one per stretch between tool calls, and draws one row per
+  // run where it happened. A row stored before runs folds into one at the top, so nothing older has
+  // to be migrated to be drawn.
+  const runs = showThinking ? runsOf(message).filter((run) => run.text.trim()) : []
   const thinkingOpen = streaming && !message.content
+  const thinkingParts: RunPart[] = runs.map((run, index) => ({
+    run,
+    key: `run-${index}`,
+    thinking: index === runs.length - 1 && thinkingOpen,
+  }))
+  // A run's row is drawn in the segment that holds the call it follows; one whose call this thread
+  // isn't drawing (a question being asked as a form) still belongs where the call was made.
+  const segmentOf = (run: ReasoningRun) => {
+    if (!run.afterToolId) return 0
+    const found = segments.findIndex((segment) =>
+      segment.tools.some((tool) => tool.toolCallId === run.afterToolId),
+    )
+    if (found >= 0) return found
+    const at = tools.find((tool) => tool.toolCallId === run.afterToolId)?.contentOffset ?? 0
+    return Math.max(0, segments.findLastIndex((segment) => at >= segment.start))
+  }
+  const thinkingAt = runs.map(segmentOf)
+  // With a row open, the working line would say what the row already says.
   const thinkingProgress =
-    Boolean(reasoning) && thinkingOpen && !awaitingApproval && !awaitingClarify
+    thinkingParts.some((part) => part.thinking) && !awaitingApproval && !awaitingClarify
 
   // A reply's stats come only once it is done and fully revealed, so they never count up.
   const statsShown = showStats && !streaming && !revealing && Boolean(message.stats)
@@ -444,13 +507,6 @@ export const MessageItem = memo(function MessageItem({
   return (
     <div className="flex flex-col gap-3">
       {message.subagent && <SubagentResultCard subagent={message.subagent} />}
-      {reasoning && (
-        <ThinkingLine
-          reasoning={reasoning}
-          thinking={thinkingOpen}
-          spanMs={thoughtSpan(message.id)}
-        />
-      )}
       {segments.map((segment, i) => {
         const last = i === segments.length - 1
         const parts = toParts(
@@ -458,6 +514,7 @@ export const MessageItem = memo(function MessageItem({
           segment.tools,
           segment.start,
           spans,
+          thinkingParts.filter((_, index) => thinkingAt[index] === i),
         )
         return (
           <Fragment key={breaks[i - 1]?.key ?? "start"}>
@@ -529,6 +586,13 @@ function AssistantRow({
             <div key={part.tools[0].toolCallId} className="w-full max-w-xl">
               <ToolGroup tools={part.tools} />
             </div>
+          ) : part.kind === "thinking" ? (
+            <ThinkingLine
+              key={part.key}
+              reasoning={part.run.text}
+              thinking={part.thinking}
+              spanMs={part.run.spanMs}
+            />
           ) : part.kind === "media" ? (
             <MediaTag key={part.at} conversationId={conversationId} paths={part.paths} />
           ) : part.kind === "openui" ? (

@@ -4,6 +4,7 @@ import { BOTS, LEGACY_BOT_IDS } from "@/components/bots"
 import { connectionKey } from "@/lib/connection"
 import type { Compaction, ModelChange, Move, ProviderUsage, Skill } from "@/lib/hermes"
 import type { SessionPipeline } from "@/lib/pipeline"
+import type { ReasoningRun } from "@/lib/thinking"
 import { randomId } from "@/lib/utils"
 
 export type ThemePreference = "system" | "light" | "dark"
@@ -394,7 +395,17 @@ export interface Message {
   role: "user" | "assistant"
   content: string
   attachments?: Attachment[]
+  /**
+   * The pre-runs shape of a reply's thinking: one string for the whole turn. Nothing writes it any
+   * more — `chat.ts` and `history.ts` fill `reasoningRuns`, and a row that still carries this one is
+   * folded into a single run at the top when it is read (`runsOf` in `thinking.ts`).
+   */
   reasoning?: string
+  /**
+   * A reply's thinking, in runs: one per contiguous stretch between tool calls, anchored to the call
+   * that broke it. Each run keeps the span this device watched it think, on this device only.
+   */
+  reasoningRuns?: ReasoningRun[]
   tools?: ToolEvent[]
   approval?: ApprovalRequest
   clarify?: ClarifyRequest
@@ -753,6 +764,22 @@ db.version(20).upgrade((tx) =>
         !conversation.main,
     )
     .modify({ main: true }),
+)
+
+// v21: a reply's thinking is kept in runs, one per stretch between tool calls, so the thread can
+// draw each where it happened. A row from before runs kept it in one string: it is folded into a
+// single run at the top, and the old key stays beside it — the read fold is what makes the shape
+// change, this pass only spares a device the work for rows it already has.
+db.version(21).upgrade((tx) =>
+  tx
+    .table("messages")
+    .filter(
+      (message: Record<string, unknown>) =>
+        typeof message.reasoning === "string" && !message.reasoningRuns,
+    )
+    .modify((message: Record<string, unknown>) => {
+      message.reasoningRuns = [{ text: message.reasoning as string }]
+    }),
 )
 
 db.on("populate", (tx) => seedProfile(tx))

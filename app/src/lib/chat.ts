@@ -55,7 +55,7 @@ import { isLive } from "@/lib/live"
 import { unknownLastTurn } from "@/lib/model-changes"
 import { refreshMoves } from "@/lib/moves"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
-import { noteAnswer, noteThinking } from "@/lib/thinking"
+import { appendThinking, closeRun, forgetRuns, noteRunThinking } from "@/lib/thinking"
 import { quietly } from "@/lib/report"
 import { randomId } from "@/lib/utils"
 import { knownLiveRun, readLiveRuns } from "@/lib/waiting"
@@ -153,6 +153,7 @@ const turns = new Map<string, Turn>()
 function shape(draft: Draft) {
   const done = draft.tools.filter((t) => t.status !== "running").length
   const { approval, clarify } = draft
+  const runs = draft.reasoningRuns
   return [
     draft.status,
     draft.statusText,
@@ -162,6 +163,9 @@ function shape(draft: Draft) {
     approval?.resolved,
     clarify?.clarifyId,
     Boolean(clarify?.resolved),
+    // A run starting is structural — the row it belongs to is drawn at once — but its text is not.
+    runs?.length,
+    runs?.at(-1)?.afterToolId,
   ].join("|")
 }
 
@@ -173,7 +177,15 @@ function openTurn(
   resumed = false,
   existingController?: AbortController,
 ): Turn {
-  const draft: Draft = { ...reply, tools: [...(reply.tools ?? [])] }
+  // A reply's runs are copied run by run: a draft is mutated as thinking arrives, and a row already
+  // flushed (which holds these very objects) must not change under the screen.
+  const draft: Draft = {
+    ...reply,
+    tools: [...(reply.tools ?? [])],
+    ...(reply.reasoningRuns
+      ? { reasoningRuns: reply.reasoningRuns.map((run) => ({ ...run })) }
+      : {}),
+  }
   let dirty = false
   let closed = false
   let timer: number | undefined
@@ -223,6 +235,19 @@ function openTurn(
   turns.set(conversationId, turn)
   activeDrafts.set(reply.id, { draft, touch })
   return turn
+}
+
+/**
+ * The run a reply's thinking was in has ended — a tool call started, the answer began, the turn
+ * finished. The span this device watched (its first delta to its last) is kept on the run it belongs
+ * to, which the reply's own row carries from here on. A turn picked up mid-thought measures nothing.
+ */
+function closeThinkingRun(turn: Turn) {
+  const runs = turn.draft.reasoningRuns
+  if (turn.resumed || !runs?.length) return
+  const span = closeRun(turn.draft.id, runs.length - 1)
+  if (span === undefined) return
+  turn.draft.reasoningRuns = [...runs.slice(0, -1), { ...runs[runs.length - 1], spanMs: span }]
 }
 
 /** What Hermes's clarify tool returns for the answers given, so a question reads the same live and from the transcript. */
@@ -282,24 +307,32 @@ function streamHandlers(turn: Turn): StreamHandlers {
   const started = () => {
     turn.firstTokenAt ??= Date.now()
   }
+  // The call the next run's thinking follows: the newest call that started, and nothing else. A
+  // completion, a steer, an approval or a question never moves it — only a call breaks a run.
+  let anchor: string | undefined = draft.reasoningRuns?.at(-1)?.afterToolId
+  const addThinking = (text: string, wholeBlock: boolean) => {
+    const next = appendThinking(draft.reasoningRuns, anchor, text, wholeBlock)
+    if (next === draft.reasoningRuns) return
+    draft.reasoningRuns = next
+    if (watchedHere) noteRunThinking(draft.id, next.length - 1)
+  }
   return {
     onContent(delta) {
-      if (watchedHere) noteAnswer(draft.id)
+      // The answer ended the thinking, so the run it was in is measured now.
+      closeThinkingRun(turn)
       started()
       draft.content += delta
       draft.statusText = undefined
       touch()
     },
     onReasoning(delta) {
-      if (watchedHere) noteThinking(draft.id)
       started()
-      draft.reasoning = (draft.reasoning ?? "") + delta
+      addThinking(delta, false)
       touch()
     },
     onReasoningBlock(text) {
-      if (watchedHere) noteThinking(draft.id)
       started()
-      draft.reasoning = draft.reasoning ? `${draft.reasoning}\n\n${text}` : text
+      addThinking(text, true)
       touch()
     },
     onStatus(text) {
@@ -321,9 +354,12 @@ function streamHandlers(turn: Turn): StreamHandlers {
         if (existing.tool === "patch" && event.status === "completed" && event.result)
           Object.assign(existing, patchStats(event.result))
       } else {
-        // A completion with no start to match still happened; it gets its own card.
+        // A completion with no start to match still happened; it gets its own card — and it ends
+        // whatever thinking was open, the same way a call that started does.
+        closeThinkingRun(turn)
+        const toolCallId = event.toolCallId ?? `${event.tool}:${Date.now()}`
         draft.tools.push({
-          toolCallId: event.toolCallId ?? `${event.tool}:${Date.now()}`,
+          toolCallId,
           tool: event.tool,
           emoji: event.emoji,
           label: event.label ?? event.tool,
@@ -332,6 +368,7 @@ function streamHandlers(turn: Turn): StreamHandlers {
           ...(event.status !== "running" ? { endedAt: Date.now(), result: event.result } : {}),
           contentOffset: draft.content.length,
         })
+        anchor = toolCallId
       }
       draft.tools = [...draft.tools]
       touch()
@@ -439,7 +476,10 @@ async function transcriptReader(turn: Turn) {
     for (const tool of draft.tools)
       if (tool.status === "completed" && !done.has(tool.toolCallId))
         void onTodoTool(conversationId, tool.tool)
-    if (reply.reasoning) draft.reasoning = reply.reasoning
+    // The transcript's runs replace the draft's wholesale, anchored to the calls it also replaces;
+    // anything this device measured for the old runs goes with them.
+    draft.reasoningRuns = reply.reasoningRuns
+    forgetRuns(draft.id)
     if (reply.content) draft.content = reply.content
     touch()
   }
@@ -643,6 +683,8 @@ async function finishTurn(turn: Turn, usage: TurnUsage | undefined, sendFailed =
     draft.clarify = { ...draft.clarify, resolved: "expired" }
   }
   if (draft.status !== "error") draft.statusText = undefined
+  // Thinking left open when the turn ends is measured too: its span is the deltas this device saw.
+  closeThinkingRun(turn)
   if (draft.content || usage) {
     // Hermes's counts when it sent them; a stopped turn never gets them, so estimate.
     const tokens = usage?.completionTokens || estimateTokens(draft.content)
@@ -1162,6 +1204,7 @@ async function adoptRun(conversation: Conversation, profile: Profile) {
     tools: [],
     steers: undefined,
     reasoning: undefined,
+    reasoningRuns: undefined,
     status: "streaming",
     runId: live.runId,
     runSeq: undefined,

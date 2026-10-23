@@ -157,7 +157,7 @@ export const findText = (selector: string, label: string) =>
 export const Path = () => <p data-path>{useLocation().pathname}</p>
 export const path = () => find("[data-path]")?.textContent ?? ""
 
-const THINKING_LABEL = /^(Thinking…|Thought|Thought for \d+[sm].*)$/
+const THINKING_LABEL = /^(Thinking…|Thought it through|Thought for \d+[sm].*)$/
 
 export const thinkingLines = () =>
   findAll("button").filter((button) => THINKING_LABEL.test(button.textContent?.trim() ?? ""))

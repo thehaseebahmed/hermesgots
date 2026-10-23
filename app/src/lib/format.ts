@@ -1,4 +1,5 @@
 import type { Message } from "@/lib/db"
+import { runsOf } from "@/lib/thinking"
 import { activityOf } from "@/lib/tools"
 
 export function formatDuration(ms: number) {
@@ -39,7 +40,7 @@ export function describeActivity(message: Message) {
   const tool = message.tools?.findLast((t) => t.status === "running")
   if (tool) return `${activityOf(tool)}…`
   if (message.statusText) return message.statusText
-  if (message.reasoning && !message.content) return "Thinking…"
+  if (runsOf(message).length > 0 && !message.content) return "Thinking…"
   // After a tool round the model works out its next step before it writes anything.
   const last = message.tools?.at(-1)
   if (last && (last.contentOffset ?? 0) >= message.content.length) return "Thinking…"

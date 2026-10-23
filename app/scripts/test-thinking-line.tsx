@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { db, type Message } from "@/lib/db"
-import { noteAnswer, noteThinking } from "@/lib/thinking"
+import { db, type Message, type ToolEvent } from "@/lib/db"
+import type { ReasoningRun } from "@/lib/thinking"
 import {
   botProfile,
   chatScreen,
@@ -20,7 +20,21 @@ const bot = botProfile("thinking", { name: "Thinking" })
 
 const ASK = "Where does the parser read a reply?"
 const REASONING = "Read `parse.ts` first, then its blocks."
+const SECOND = "Its blocks are what matter."
 const ANSWER = "The parser reads it, then keeps its blocks."
+
+const run = (text: string, extra: Partial<ReasoningRun> = {}): ReasoningRun => ({ text, ...extra })
+
+function call(toolCallId: string, tool = "terminal", label = "ls"): ToolEvent {
+  return {
+    toolCallId,
+    tool,
+    label,
+    status: "completed",
+    startedAt: 2,
+    contentOffset: 0,
+  }
+}
 
 function turn(reply: Partial<Message> & { id: string }): Message[] {
   return [
@@ -85,28 +99,33 @@ const leafWith = (root: Element, needle: string) =>
 const follows = (first: Element, second: Element) =>
   Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING)
 
+/** The one row the reply's tool calls are drawn as (calls that ran back to back are one group). */
+const toolRow = (root: Element) => {
+  const found = [...root.querySelectorAll("button[aria-label]")].find((button) =>
+    /command|file|code/i.test(button.getAttribute("aria-label") ?? ""),
+  )
+  assert.ok(found, "the call was drawn")
+  return found
+}
+
 async function stream(id: string) {
   await db.messages.put({ ...(await db.messages.get(id))!, status: "streaming" })
   await settle()
 }
 
-test("a streaming reply's line streams open and the working line stands down", async () => {
+test("a streaming reply's run streams open and the working line stands down", async () => {
   host()
   const id = "streaming"
-  await screen(undefined, turn({ id, reasoning: REASONING }), async () => {
+  await screen(undefined, turn({ id, reasoningRuns: [run(REASONING)] }), async () => {
     await stream(id)
     const line = onlyThinkingLine()
     assert.equal(lineLabel(line), "Thinking…", "still thinking, so no duration yet")
-    assert.equal(expanded(line), "true", "and open, as the reasoning arrives")
-    assert.match(
-      reasoned(line).textContent ?? "",
-      /Read `parse\.ts` first/,
-      "its reasoning readable",
-    )
+    assert.equal(expanded(line), "true", "and open, as the thinking arrives")
+    assert.match(reasoned(line).textContent ?? "", /Read `parse\.ts` first/, "its thinking readable")
     assert.equal(
       document.querySelector('[aria-live="polite"]'),
       null,
-      "with the line open, the working line is gone rather than saying Thinking… again",
+      "with the row open, the working line is gone rather than saying Thinking… again",
     )
   })
 })
@@ -121,12 +140,12 @@ test("a run that streams with no reasoning of its own keeps the working line", a
   })
 })
 
-test("while the turn waits on the user, the working line says so even with the line open", async () => {
+test("while the turn waits on the user, the working line says so even with a run open", async () => {
   host()
   const id = "waiting"
   const messages = turn({
     id,
-    reasoning: REASONING,
+    reasoningRuns: [run(REASONING)],
     approval: {
       runId: "run-1",
       description: "Read parse.ts",
@@ -136,26 +155,22 @@ test("while the turn waits on the user, the working line says so even with the l
   })
   await screen(undefined, messages, async () => {
     await stream(id)
-    assert.equal(expanded(onlyThinkingLine()), "true", "the reasoning is still arriving")
+    assert.equal(expanded(onlyThinkingLine()), "true", "the thinking is still arriving")
     assert.match(screenText(), /Waiting for your approval…/, "but waiting on the user is named")
   })
 })
 
-test("the first answer token folds the line and brings the working line back", async () => {
+test("the first answer token folds the run and brings the working line back", async () => {
   host()
   const id = "first-token"
-  await screen(undefined, turn({ id, reasoning: REASONING }), async () => {
+  await screen(undefined, turn({ id, reasoningRuns: [run(REASONING)] }), async () => {
     await stream(id)
-    assert.equal(
-      lineLabel(onlyThinkingLine()),
-      "Thinking…",
-      "the line streams open while the model thinks",
-    )
+    assert.equal(lineLabel(onlyThinkingLine()), "Thinking…", "the row streams open while it thinks")
     await db.messages.put({ ...(await db.messages.get(id))!, content: ANSWER })
     await settle()
     const line = onlyThinkingLine()
     assert.equal(expanded(line), "false", "the answer starting folds it")
-    assert.equal(lineLabel(line), "Thought", "and no span was watched, so it reads bare")
+    assert.equal(lineLabel(line), "Thought it through", "and nothing measured it here")
     assert.equal(
       reasoned(line).getAttribute("aria-hidden"),
       "true",
@@ -165,9 +180,37 @@ test("the first answer token folds the line and brings the working line back", a
   })
 })
 
-test("a tap opens the folded line, a second folds it, and a remount folds it again", async () => {
+test("only the reply's newest run streams open, and the answer folds them all", async () => {
   host()
-  const messages = turn({ id: "tap-fold", reasoning: REASONING, content: ANSWER })
+  const id = "two-runs"
+  const messages = turn({
+    id,
+    tools: [call("call-1"), call("call-2", "read_file", "parse.ts")],
+    reasoningRuns: [run(REASONING), run(SECOND, { afterToolId: "call-2" })],
+  })
+  await screen(undefined, messages, async () => {
+    await stream(id)
+    const open = thinkingLines()
+    assert.equal(open.length, 2, "one row per run")
+    assert.equal(lineLabel(open[0]), "Thought it through", "the run before the calls is done")
+    assert.equal(expanded(open[0]), "false", "so it is folded")
+    assert.equal(lineLabel(open[1]), "Thinking…", "the run after them is still going")
+    assert.equal(expanded(open[1]), "true", "so it is open")
+
+    await db.messages.put({ ...(await db.messages.get(id))!, content: ANSWER })
+    await settle()
+    const folded = thinkingLines()
+    assert.equal(folded.length, 2, "still one row per run")
+    for (const line of folded) {
+      assert.equal(lineLabel(line), "Thought it through", "both ended with no span measured")
+      assert.equal(expanded(line), "false", "and both folded at the answer")
+    }
+  })
+})
+
+test("a tap opens the folded run, a second folds it, and a remount folds it again", async () => {
+  host()
+  const messages = turn({ id: "tap-fold", reasoningRuns: [run(REASONING)], content: ANSWER })
   await screen(undefined, messages, async () => {
     assert.equal(expanded(onlyThinkingLine()), "false", "an answered reply starts folded")
     await click(onlyThinkingLine())
@@ -175,7 +218,7 @@ test("a tap opens the folded line, a second folds it, and a remount folds it aga
     assert.match(
       reasoned(onlyThinkingLine()).textContent ?? "",
       /parse\.ts/,
-      "and its reasoning is readable",
+      "and its thinking is readable",
     )
     await click(onlyThinkingLine())
     assert.equal(expanded(onlyThinkingLine()), "false", "a second tap folds it")
@@ -189,16 +232,12 @@ test("a tap opens the folded line, a second folds it, and a remount folds it aga
   })
 })
 
-test("a tap while the model is still thinking folds the line, and the answer leaves it folded", async () => {
+test("a tap while the model is still thinking folds the run, and the answer leaves it folded", async () => {
   host()
   const id = "tap-while-thinking"
-  await screen(undefined, turn({ id, reasoning: REASONING }), async () => {
+  await screen(undefined, turn({ id, reasoningRuns: [run(REASONING)] }), async () => {
     await stream(id)
-    assert.equal(
-      lineLabel(onlyThinkingLine()),
-      "Thinking…",
-      "the line streams open while the model thinks",
-    )
+    assert.equal(lineLabel(onlyThinkingLine()), "Thinking…", "the row streams open")
     assert.equal(expanded(onlyThinkingLine()), "true", "and open")
     await click(onlyThinkingLine())
     const folded = onlyThinkingLine()
@@ -212,87 +251,85 @@ test("a tap while the model is still thinking folds the line, and the answer lea
     await db.messages.put({ ...(await db.messages.get(id))!, content: ANSWER })
     await settle()
     const answered = onlyThinkingLine()
-    assert.equal(lineLabel(answered), "Thought", "the first answer token ends the thinking")
-    assert.equal(expanded(answered), "false", "and leaves the line as the user folded it")
+    assert.equal(lineLabel(answered), "Thought it through", "the first answer token ends the thinking")
+    assert.equal(expanded(answered), "false", "and leaves the row as the user folded it")
     await click(onlyThinkingLine())
     assert.equal(expanded(onlyThinkingLine()), "true", "a second tap opens it again")
     assert.match(
       reasoned(onlyThinkingLine()).textContent ?? "",
       /parse\.ts/,
-      "with its reasoning readable",
+      "with its thinking readable",
     )
   })
 })
 
-test("a line the user opens on an answered reply stays open until they fold it", async () => {
+test("a run the user opens on an answered reply stays open while its text grows", async () => {
   host()
   const id = "opened-answered"
-  await screen(undefined, turn({ id, reasoning: REASONING, content: ANSWER }), async () => {
+  await screen(undefined, turn({ id, reasoningRuns: [run(REASONING)], content: ANSWER }), async () => {
     assert.equal(expanded(onlyThinkingLine()), "false", "an answered reply starts folded")
     await click(onlyThinkingLine())
     assert.equal(expanded(onlyThinkingLine()), "true", "a tap opens it")
     await db.messages.put({
       ...(await db.messages.get(id))!,
-      reasoning: `${REASONING} Then its blocks.`,
+      reasoningRuns: [run(`${REASONING} Then its blocks.`)],
     })
     await settle()
     const stillOpen = onlyThinkingLine()
     assert.match(
       reasoned(stillOpen).textContent ?? "",
       /Then its blocks\./,
-      "the redraw brought the newer reasoning",
+      "the redraw brought the newer thinking",
     )
-    assert.equal(expanded(stillOpen), "true", "and the line stays open, as the user left it")
+    assert.equal(expanded(stillOpen), "true", "and the row stays open, as the user left it")
     await click(onlyThinkingLine())
     assert.equal(expanded(onlyThinkingLine()), "false", "until a tap folds it")
   })
 })
 
-test("a span this device watched reads in whole seconds, not the stats line's figure", async () => {
+test("a run this device measured reads in whole seconds, not the stats line's figure", async () => {
   host()
   const id = "watched"
-  noteThinking(id, 1_000)
-  noteAnswer(id, 13_000)
   const reply = {
     id,
-    reasoning: REASONING,
+    reasoningRuns: [run(REASONING, { spanMs: 12_000 })],
     content: ANSWER,
     stats: { tokens: 40, estimated: false, durationMs: 12_000 },
   }
   await screen(undefined, turn(reply), async () => {
-    assert.equal(lineLabel(onlyThinkingLine()), "Thought for 12s", "the span this device watched")
+    assert.equal(lineLabel(onlyThinkingLine()), "Thought for 12s", "the span this device measured")
     assert.equal(expanded(onlyThinkingLine()), "false", "still folded over an answer")
     assert.match(screenText(), /12\.0s/, "and the turn's own duration stays in the stats line")
   })
 })
 
-test("a restored reply reads bare Thought and keeps its duration in the stats", async () => {
+test("a restored reply reads Thought it through and keeps its duration in the stats", async () => {
   host()
   const reply = {
     id: "restored",
-    reasoning: REASONING,
+    reasoningRuns: [run(REASONING)],
     content: ANSWER,
     stats: { tokens: 40, estimated: false, durationMs: 12_000 },
   }
   await screen(undefined, turn(reply), async () => {
     const line = onlyThinkingLine()
-    assert.equal(lineLabel(line), "Thought", "nothing here watched it think, so no number")
+    assert.equal(lineLabel(line), "Thought it through", "nothing here measured it, so no number")
     assert.doesNotMatch(lineLabel(line), /\d/, "no figure at all")
     assert.equal(expanded(line), "false", "and folded")
     assert.match(screenText(), /12\.0s/, "while the reply's stats still show its own duration")
   })
 })
 
-test("a stopped or failed reply keeps its line, folded", async () => {
+test("a stopped or failed reply keeps its run, folded", async () => {
   host()
   const messages: Message[] = [
-    ...turn({ id: "stopped", reasoning: REASONING, status: "stopped" }),
+    ...turn({ id: "stopped", reasoningRuns: [run(REASONING)], status: "stopped" }),
     {
       id: "failed",
       conversationId: "",
       role: "assistant",
       content: "",
-      reasoning: REASONING,
+      reasoningRuns: [run(REASONING)],
       status: "error",
       statusText: "The host dropped the run.",
       createdAt: 3,
@@ -302,25 +339,25 @@ test("a stopped or failed reply keeps its line, folded", async () => {
     const found = thinkingLines()
     assert.equal(found.length, 2, "each reply keeps what arrived")
     for (const line of found) {
-      assert.equal(lineLabel(line), "Thought", "with no span watched")
+      assert.equal(lineLabel(line), "Thought it through", "with no span measured")
       assert.equal(expanded(line), "false", "and folded")
-      assert.match(reasoned(line).textContent ?? "", /parse\.ts/, "its reasoning still there")
+      assert.match(reasoned(line).textContent ?? "", /parse\.ts/, "its thinking still there")
     }
     assert.match(screenText(), /Stopped/, "the stopped reply says so")
     assert.match(screenText(), /The host dropped the run\./, "and the failed one says why")
   })
 })
 
-test("a reply with no thinking of its own draws no line", async () => {
+test("a reply with no thinking of its own draws no row", async () => {
   host()
   const messages: Message[] = [
-    ...turn({ id: "empty", reasoning: "", content: ANSWER }),
+    ...turn({ id: "empty", reasoningRuns: [], content: ANSWER }),
     {
       id: "blank",
       conversationId: "",
       role: "assistant",
       content: ANSWER,
-      reasoning: "  \n\t ",
+      reasoningRuns: [run("  \n\t ")],
       status: "done",
       createdAt: 3,
     },
@@ -330,42 +367,82 @@ test("a reply with no thinking of its own draws no line", async () => {
   })
 })
 
-test("a reply broken by a steer and an answered approval keeps one line, above its first text", async () => {
+test("a reply whose thinking is broken by tool calls draws a row above them and one below", async () => {
+  host()
+  const messages = turn({
+    id: "broken-by-calls",
+    content: "I read the parser first.\n\nThen I kept its blocks.",
+    tools: [call("call-1"), call("call-2", "read_file", "parse.ts")],
+    reasoningRuns: [run(REASONING), run(SECOND, { afterToolId: "call-2" })],
+  })
+  await screen(undefined, messages, async () => {
+    const [before, after] = thinkingLines()
+    assert.ok(before && after, "one row per stretch of thinking")
+    assert.equal(lineLabel(before), "Thought it through", "the first run says it thought it through")
+    assert.match(reasoned(before).textContent ?? "", /parse\.ts/, "and holds the first stretch")
+    assert.match(reasoned(after).textContent ?? "", /blocks are what matter/, "the second its own")
+
+    const box = item(before)
+    const calls = toolRow(box)
+    const text = leafWith(box, "I read the parser first.")
+    assert.ok(text, "the reply's text is in that turn")
+    assert.ok(follows(before, calls), "the thinking before the call is drawn above it")
+    assert.ok(follows(calls, after), "and the thinking after it below, once the calls are one row")
+    assert.ok(follows(after, text), "where it happened, before the text that followed")
+  })
+})
+
+test("a steer and an answered approval leave one row per run, never a row apiece", async () => {
   host()
   const reply = "I read the parser first.\n\nThen I kept its blocks."
-  const messages: Message[] = [
-    ...turn({
-      id: "broken",
-      reasoning: REASONING,
-      content: reply,
-      status: "done",
-      approval: {
-        runId: "run-1",
-        description: "Read parse.ts",
-        choices: ["once", "deny"],
-        resolved: "once",
-        contentOffset: 0,
-        requestedAt: 1_500,
-      },
-      steers: [
-        { id: "steer-1", text: "And its blocks?", contentOffset: reply.indexOf("Then"), at: 2 },
-      ],
-    }),
-  ]
+  const messages = turn({
+    id: "broken",
+    content: reply,
+    status: "done",
+    tools: [call("call-1", "terminal", "ls")],
+    reasoningRuns: [run(REASONING), run(SECOND, { afterToolId: "call-1" })],
+    approval: {
+      runId: "run-1",
+      description: "Read parse.ts",
+      choices: ["once", "deny"],
+      resolved: "once",
+      contentOffset: 0,
+      requestedAt: 1_500,
+    },
+    steers: [{ id: "steer-1", text: "And its blocks?", contentOffset: reply.indexOf("Then"), at: 2 }],
+  })
   await screen(undefined, messages, async () => {
-    const line = onlyThinkingLine()
-    assert.equal(
-      lineLabel(line),
-      "Thought",
-      "the reasoning accumulates across the breaks, as one line",
-    )
-    const box = item(line)
+    const found = thinkingLines()
+    assert.equal(found.length, 2, "two stretches of thinking, two rows — the breaks add none")
+    for (const line of found) assert.equal(expanded(line), "false", "each folded over the answer")
+
+    const box = item(found[0])
+    const boxed = item(found[1])
+    assert.equal(box, boxed, "both rows belong to the one reply")
     const first = leafWith(box, "I read the parser first.")
     assert.ok(first, "the reply's first text is in that turn")
-    assert.ok(follows(line, first), "with the line drawn above it")
+    assert.ok(follows(found[0], first), "with the first row drawn above it")
+    assert.ok(follows(found[0], toolRow(box)), "and above the call it precedes")
     const steer = leafWith(box, "And its blocks?")
     assert.ok(steer, "the steer sits where it reached the agent")
-    assert.ok(follows(line, steer), "and below the one line")
+    assert.ok(follows(toolRow(box), found[1]), "the second row is below the call that broke it")
+  })
+})
+
+test("a reply stored before runs draws its thinking as one row at the top", async () => {
+  host()
+  const messages = turn({
+    id: "old-shape",
+    reasoning: `${REASONING}\n\n${SECOND}`,
+    content: ANSWER,
+    tools: [call("call-1")],
+  })
+  await screen(undefined, messages, async () => {
+    const line = onlyThinkingLine()
+    assert.equal(lineLabel(line), "Thought it through", "the fold keeps it as one run")
+    const box = item(line)
+    assert.ok(follows(line, toolRow(box)), "drawn at the top of the reply, above what it ran")
+    assert.match(reasoned(line).textContent ?? "", /blocks are what matter/, "holding all of it")
   })
 })
 
@@ -373,11 +450,11 @@ test("a coding session draws no line where the same reply in a chat draws one", 
   host()
   const reply = {
     id: "session-reply",
-    reasoning: REASONING,
+    reasoningRuns: [run(REASONING)],
     content: ANSWER,
   }
   await screen(undefined, turn(reply), async () => {
-    assert.equal(lineLabel(onlyThinkingLine()), "Thought", "a chat draws the model's thinking")
+    assert.equal(lineLabel(onlyThinkingLine()), "Thought it through", "a chat draws the thinking")
   })
   await screen("project-1", turn(reply), async () => {
     assert.match(screenText(), /The parser reads it/, "the session still draws the reply")
@@ -385,7 +462,7 @@ test("a coding session draws no line where the same reply in a chat draws one", 
   })
 })
 
-test("with reduced motion asked for, a tap still opens the line and a second folds it", async () => {
+test("with reduced motion asked for, a tap still opens the row and a second folds it", async () => {
   host()
   const media = globalThis.matchMedia
   const reduced = (query: string) => {
@@ -398,7 +475,7 @@ test("with reduced motion asked for, a tap still opens the line and a second fol
   try {
     const messages = turn({
       id: "reduced",
-      reasoning: REASONING,
+      reasoningRuns: [run(REASONING)],
       content: ANSWER,
     })
     await screen(undefined, messages, async () => {
