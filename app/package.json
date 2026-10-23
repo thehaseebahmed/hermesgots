@@ -8,6 +8,7 @@
     "dev:netlify": "pnpm --package=netlify-cli dlx netlify dev",
     "build": "pnpm typecheck && vite build",
     "build:android": "pnpm typecheck && vite build --mode native && cap sync android",
+    "build:openui-prompt": "node --import ./scripts/component-hooks.mjs scripts/build-openui-prompt.mjs",
     "preview": "vite preview",
     "lint": "oxlint",
     "typecheck": "node node_modules/typescript-7/bin/tsc -b",

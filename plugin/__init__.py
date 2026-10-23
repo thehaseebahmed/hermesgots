@@ -50,6 +50,7 @@ from . import (
     model_changes,
     merges,
     moves,
+    openui,
     outbox,
     pipeline,
     projects,
@@ -255,6 +256,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         denied = unauthorized(request)
         if denied is not None:
             return denied
+        # Whether the model is told the component library, which is what the openui feature means.
+        told = openui.advertised()
         # The MCP screen is advertised only where Hermes's own MCP built-ins import, so a bot whose
         # Hermes is too old gets no row rather than an error; the switch, the removal, the Catalogue
         # and adding from it are advertised apart from it and from each other, because each needs a
@@ -336,6 +339,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "meetings",
                     "meetings_ask",
                     "community",
+                    # The component library, told to a new session as a system-prompt section
+                    # (openui.py). Advertised only where this host took it: a host that can't add a
+                    # section says nothing, rather than offering a vocabulary never told.
+                    *([openui.FEATURE] if told else []),
                     # A message sent from Main is sorted into a thread by the host; see triage.py.
                     *(["triage", "moves", "triage_model"] if triage.available() is None else []),
                     # Hermes's own MCP built-ins, and the MCP screen with them; see mcp.py.
@@ -351,6 +358,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # Whether the host lets a mission be written with another model than the profile's.
                     "writers": await asyncio.to_thread(research.llm_gate),
                 },
+                # The library the section was generated from, beside the bare feature: the client
+                # matches features with `includes`, so a versioned string would read as absent.
+                **({"openui": told} if told else {}),
             }
         )
 
@@ -2466,6 +2476,9 @@ def register(ctx) -> None:
     research.register(ctx)
     meetings.register(ctx)
     dictation_cleanup.register(ctx)
+    # The component library is told to every new session where this Hermes takes a section; an
+    # older one has no register_system_prompt_section and the plugin still serves every route.
+    openui.register(ctx)
     register_handler = getattr(ctx, "register_platform_handler", None)
     if register_handler is None:
         logger.warning("memento: this Hermes version can't add API server routes; update Hermes")
