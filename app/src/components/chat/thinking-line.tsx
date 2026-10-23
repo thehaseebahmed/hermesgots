@@ -2,6 +2,7 @@ import { memo, useEffect, useId, useRef, useState } from "react"
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react"
 
 import { Markdown } from "@/components/chat/markdown"
+import { COLUMN } from "@/lib/layout"
 import { thinkingLabel } from "@/lib/thinking"
 import { cn } from "@/lib/utils"
 
@@ -166,7 +167,7 @@ export const ThinkingLine = memo(function ThinkingLine({
   }, [open])
 
   return (
-    <div ref={root} className={cn("flex flex-col", className)} data-slot="thinking-line">
+    <div ref={root} className={cn("flex flex-col", className, COLUMN)} data-slot="thinking-line">
       <button
         type="button"
         className="flex min-h-11 w-full items-center gap-2 text-left text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"

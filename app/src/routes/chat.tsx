@@ -993,7 +993,7 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
         <MessageScrollerProvider autoScroll defaultScrollPosition="end">
           <MessageScroller className="flex-1">
             <MessageScrollerViewport aria-label="Messages">
-              <MessageScrollerContent className="mx-auto w-full max-w-3xl gap-6 px-4 pt-32 pb-6">
+              <MessageScrollerContent className="w-full gap-6 px-4 pt-32 pb-6">
                 {conversation?.olderThan && (
                   <Button
                     variant="outline"

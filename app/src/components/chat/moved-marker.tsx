@@ -1,7 +1,9 @@
 import { Link } from "react-router"
 import { MessagesSquareIcon, Undo2Icon } from "lucide-react"
 
+import { COLUMN } from "@/lib/layout"
 import { stayHere } from "@/lib/nav"
+import { cn } from "@/lib/utils"
 
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import type { Move } from "@/lib/hermes"
@@ -25,7 +27,7 @@ export function MovedMarker({
   onUndo?: (move: Move) => void
 }) {
   return (
-    <div className="flex flex-col gap-1">
+    <div className={cn("flex flex-col gap-1", COLUMN)}>
       <Bubble variant="default" align="end" className="self-end">
         <BubbleContent className="px-4 py-2.5 text-[15px] whitespace-pre-wrap">
           {move.text}

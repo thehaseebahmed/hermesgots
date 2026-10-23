@@ -1,5 +1,7 @@
 import { formatTokens } from "@/lib/format"
 import type { Compaction } from "@/lib/hermes"
+import { COLUMN } from "@/lib/layout"
+import { cn } from "@/lib/utils"
 
 /**
  * What changed in a chat between the turns either side of it: a squiggle broken by a word. The model
@@ -43,7 +45,7 @@ function Squiggle({ side }: { side: "left" | "right" }) {
 
 function Divider({ label, text }: { label: string; text: string }) {
   return (
-    <div role="separator" aria-label={label} className="flex items-center gap-3 py-1">
+    <div role="separator" aria-label={label} className={cn("flex items-center gap-3 py-1", COLUMN)}>
       <Squiggle side="left" />
       <span className="min-w-0 truncate text-sm text-muted-foreground">{text}</span>
       <Squiggle side="right" />
