@@ -220,6 +220,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             asyncio.ensure_future(afk.run(adapter)),
             # A finished subagent wakes its bot with its result; see delegation.py.
             asyncio.ensure_future(delegation.run(adapter)),
+            # A stopped turn takes the subagents it started with it; see delegation.py.
+            asyncio.ensure_future(delegation.watch_stops(adapter)),
         ]
         yield
         for task in tasks:

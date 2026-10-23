@@ -4,6 +4,10 @@ Hermes dispatches ``delegate_task`` in the background on a keyed ``/v1/runs`` tu
 a handle, so the turn carries on and a question or an approval raised in it reaches the user while the
 subagents still work. Nothing here touches that dispatch: the plugin leaves it to core.
 
+What the plugin does own is the stop: a run the user stops never reaches the children it began, since
+core detaches a delegation before dispatching it, so ``sweep_stops`` hands a stopped run's stop to the
+subagents of the session it ran on, through core's own ``interrupt_for_session``.
+
 Hermes keeps every delegated child as a session of its own (``platform="subagent"``, its parent's id
 in ``parent_session_id`` and in ``model_config``'s ``_delegate_from``), so ``children`` lists them for
 the app, which opens each one's transcript.
@@ -26,7 +30,7 @@ import logging
 import sqlite3
 import time
 from pathlib import Path
-from typing import Any, Collection, Dict, List, Optional
+from typing import Any, Collection, Dict, Iterable, List, Optional
 
 from . import events, link, outbox, sessions
 from .store import db_path, get_setting, put_setting
@@ -69,6 +73,13 @@ ERROR_FINISHES = frozenset({"error", "agent_error", "content_filter"})
 
 _event: Optional[asyncio.Event] = None
 _loop: Optional[asyncio.AbstractEventLoop] = None
+# A stopped run's stop, handed to its subagents: core sets the run `stopping` as it interrupts it,
+# then whichever terminal status its unwind reaches. The watch reads those every second.
+STOPPED_STATES = ("stopping", "cancelled", "interrupted")
+STOP_REASON = "run_stop"
+STOP_SECONDS = 1.0
+# How many stopped runs the watch remembers handing over, so a lingering status is done once.
+FORGET_RUNS = 500
 
 
 def children(hermes_home: Path, session_id: str, live: Collection[str]) -> List[Dict[str, Any]]:
@@ -597,3 +608,129 @@ def _home() -> Path:
     from hermes_constants import get_hermes_home
 
     return Path(get_hermes_home())
+
+
+def sweep_stops(
+    adapter: Any, homes: Iterable[Path], handed: Optional[Dict[str, None]] = None
+) -> List[str]:
+    """Hand each stopped run's stop to the subagents it started, once, and name them.
+
+    A run the user stops never reaches its own children: core detaches a delegation before it
+    dispatches it, and the API server's stop interrupts the run's agent and reaps its processes and
+    nothing more (``api_server_runs._handle_stop_run``). So the plugin watches the run statuses it
+    already reads for the app and, for each run that is stopping or stopped, stops the subagents that
+    run started the way core stops a session's own background delegations
+    (``tools.async_delegation.interrupt_for_session``).
+
+    ``handed`` is the watch's memory of the runs it has already done, kept across ticks so a status
+    that lingers is not handed over again and again; it is bounded at ``FORGET_RUNS``.
+    """
+    handed = {} if handed is None else handed
+    statuses = getattr(adapter, "_run_statuses", None)
+    named: List[str] = []
+    for run_id, status in list(statuses.items()) if isinstance(statuses, dict) else []:
+        if not isinstance(run_id, str) or not _stopped(status) or run_id in handed:
+            continue
+        handed[run_id] = None
+        while len(handed) > FORGET_RUNS:
+            handed.pop(next(iter(handed)))
+        for home in homes:
+            named += stop_run(Path(home), status)
+    return named
+
+
+def stop_run(home: Path, run: Dict[str, Any]) -> List[str]:
+    """Stop the subagents ``run`` started that are still at work; returns the ids it named.
+
+    A child of the run is one begun after the run did (``started_at`` against the run's own
+    ``created_at``): a turn that has ended leaves its subagents working, and those belong to their
+    own cards, not to a later turn's stop (ADR 0038). Only live children are named — a child that has
+    ended is left alone, its card and its result already where they belong.
+
+    A run whose start time is unknown names every live child of its session, since there is nothing
+    to tell its own from an older turn's; core's stop is per session anyway, so a session stop that
+    names any child interrupts the session's records, an older turn's included.
+    """
+    session_id = run.get("session_id")
+    if not isinstance(session_id, str) or not session_id:
+        return []
+    began = run.get("created_at")
+    # Its run is the one that started them, so every open child row is a child still at work,
+    # whatever the session's runs are doing now: `children` reads an open row as stopped once its
+    # parent has no run in flight, which is exactly the state a stop leaves it in.
+    named = [
+        child["id"]
+        for child in children(home, session_id, {session_id})
+        if child["status"] == "running" and _since(child["started_at"], began)
+    ]
+    if named:
+        _interrupt(_parents(home, session_id), len(named))
+    return named
+
+
+async def watch_stops(adapter: Any) -> None:
+    """The stop fan-out's watch: a stopped turn takes the subagents it started with it.
+
+    Every run's stop lands in the adapter's run statuses (``stopping``, then the terminal status its
+    unwind reaches), which the plugin already reads for the app, so a watch over them sees a stop
+    whichever client asked for it and whichever route core took. A tick a second, like the outbox's.
+    """
+    handed: Dict[str, None] = {}
+    while True:
+        try:
+            await asyncio.to_thread(sweep_stops, adapter, link.served_homes(adapter), handed)
+        except Exception:
+            logger.debug("memento: couldn't stop a stopped run's subagents", exc_info=True)
+        await asyncio.sleep(STOP_SECONDS)
+
+
+def _stopped(status: Any) -> bool:
+    """Whether a run's status is a stop: the one core sets as it interrupts, or the terminal one
+    its unwind reaches — a turn that completed or failed is not a stop, and its children run on."""
+    return isinstance(status, dict) and status.get("status") in STOPPED_STATES
+
+
+def _since(started: Any, began: Any) -> bool:
+    """Whether a child began while the run was live. A run or a child with no time to compare is
+    taken as the run's: stopping a child that should have run on is a stop from its own card away,
+    while leaving one of the run's own running is the stop the user asked for failing."""
+    if not isinstance(began, (int, float)) or not isinstance(started, (int, float)):
+        return True
+    return started >= began
+
+
+def _parents(home: Path, session_id: str) -> List[str]:
+    """The session and every compression continuation after it: a child's parent is whichever of
+    them was live when it was dispatched, since a delegation made after a compression comes from the
+    tip."""
+    try:
+        state = home / "state.db"
+        with sqlite3.connect(f"{state.as_uri()}?mode=ro", uri=True, timeout=2) as conn:
+            conn.row_factory = sqlite3.Row
+            return _lineage(conn, session_id)
+    except sqlite3.Error:
+        logger.debug("memento: couldn't read %s's compression lineage", session_id, exc_info=True)
+        return [session_id]
+
+
+def _interrupt(parents: Iterable[str], named: int) -> None:
+    """Signal core's record of the children's work, through the sessions that started them.
+
+    Imported here, not at module load: the plugin has to import on a host that is missing it. Core's
+    call touches only records still running, so a child that has ended by the time it lands is left
+    alone; a stop that reaches no record is not an error (the records live in memory and a restart
+    loses them), and a core too old to have the call must not break the watch.
+    """
+    try:
+        from tools.async_delegation import interrupt_for_session
+    except Exception:
+        logger.debug("memento: this Hermes can't stop a subagent; %d left running", named, exc_info=True)
+        return
+    for parent in parents:
+        try:
+            count = interrupt_for_session(parent_session_id=parent, reason=STOP_REASON)
+        except Exception:
+            logger.debug("memento: couldn't stop %s's subagents", parent, exc_info=True)
+            continue
+        if not count:
+            logger.debug("memento: %s stopped no subagent of %d named", parent, named)
