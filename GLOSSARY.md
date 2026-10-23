@@ -49,8 +49,16 @@ A derived fact worked out in the app from what a bot's host holds. Gots doesn't 
 _Avoid_: client-side computation
 
 **Session state**:
-What a project session is doing — idle, working, waiting on the user, or closed by the user as resolved or discarded. Composed from the host's run status and this device's own marks, not derived from one source.
+What a project session is doing — idle, working, waiting on the user, or closed by the user as resolved or discarded. A session whose subagents are still at work is working, whether or not a turn is live. Composed from the host's run status, its subagents and this device's own marks, not derived from one source.
 _Avoid_: status, state machine
+
+**Question**:
+A bot's ask its user must answer before its turn can go on, drawn in place of the composer, and never kept back by work the bot has running.
+_Avoid_: clarify, prompt, ask
+
+**Approval**:
+A bot's request to take a sensitive action, answered Once, Session, Always or Deny, drawn in place of the composer and, like a question, never kept back by running work.
+_Avoid_: permission prompt, consent, authorization
 
 **Conversation**:
 The stored record of one exchange with a bot: the row a chat list shows and sync carries. A coding session's conversation also names its project.
@@ -158,6 +166,18 @@ _Avoid_: model switch, model update, fallback
 **Compaction**:
 A point where Hermes compressed a chat's context, ending the session and continuing in a child. The host records when; the thread draws a divider above the first message written after it.
 _Avoid_: compression event, summary
+
+**Subagent**:
+An agent a bot's turn sets to work on part of it, with its own session and its own sub-thread, whose work outlives the turn that started it.
+_Avoid_: child, delegate, worker, sub-agent
+
+**Subagent result**:
+What a finishing subagent leaves in its bot's thread: its own message at the thread's end when it arrives, opening the sub-thread behind it.
+_Avoid_: completion, delivery, summary message
+
+**Sub-thread**:
+The thread a subagent's own work draws — its thinking, what it ran and what it found — drawn as a chat's thread is.
+_Avoid_: child thread, worker view, agent detail
 
 **Subagent model**:
 The model a bot's delegated tasks run on, set in its settings and held on its host as Hermes's own delegation model. Nothing set means a delegated task inherits the bot's own model.
