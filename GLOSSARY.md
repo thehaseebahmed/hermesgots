@@ -60,6 +60,10 @@ _Avoid_: clarify, prompt, ask
 A bot's request to take a sensitive action, answered Once, Session, Always or Deny, drawn in place of the composer and, like a question, never kept back by running work.
 _Avoid_: permission prompt, consent, authorization
 
+**Card**:
+A block Gots draws for itself inside a chat — a question, an approval, a subagent's work, a session's state — as opposed to a message, a chat drawn in a bot's Main thread, or the blocks of an interface the model drew.
+_Avoid_: panel, box, widget, chip
+
 **Conversation**:
 The stored record of one exchange with a bot: the row a chat list shows and sync carries. A coding session's conversation also names its project.
 _Avoid_: chat object, session record, thread
