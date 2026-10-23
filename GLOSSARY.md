@@ -315,6 +315,20 @@ _Avoid_: pending, awaiting merge, PR open
 The mark Gots leaves on a task it has claimed.
 _Avoid_: claimed, in-progress, assigned, taken
 
+## Media
+
+**Attachment**:
+A file the user adds to a message so the agent can use it — a photo, a clip, a recording, or any document.
+_Avoid_: upload, document, attached file
+
+**Media**:
+An attachment the thread can show rather than only hand over: an image, a video or an audio recording. Everything else is an attachment the thread offers as a download.
+_Avoid_: image, file, rich media
+
+**Gallery**:
+The row of media in a thread: images and video side by side, each opened in the platform's own viewer. Audio is not in it; it sits in the thread as its own row.
+_Avoid_: carousel, thumbnails, media strip, lightbox
+
 ## Dictation
 
 **Dictation**:
