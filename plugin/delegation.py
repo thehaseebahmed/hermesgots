@@ -20,6 +20,10 @@ run on that conversation carrying the result, through the loopback outbox. The b
 subagent's work in a new turn, without the user writing again. One wake per subagent: an idempotency
 key derived from the child's session id, and a mark in the plugin's own store once one is posted, so a
 restart neither doubles nor drops it (``docs/specs/async-delegation.md``, ADR 0038).
+
+A workflow stage is the exception: it keeps its one run, because the stage it moves to is posted on
+the same session by the gate that judged the run before it, so ``wake_one`` posts nothing for a
+stage's subagent — the stage's own gate waits for them instead (``afk.staged_session``).
 """
 
 from __future__ import annotations
@@ -282,14 +286,17 @@ async def sweep(adapter: Any, home: Path) -> int:
 async def wake_one(adapter: Any, home: Path, child: Dict[str, Any]) -> bool:
     """Wakes a conversation for one finished subagent, or declines to (``True`` when it posted).
 
-    The one decision point of the whole feature — check, post, mark — so a later rule that must keep
-    a kind of session from being woken (a workflow stage keeps its one run; #469) is added here and
-    nowhere else.
+    The one decision point of the whole feature — check, post, mark — so a rule that keeps a kind of
+    session from being woken is added here and nowhere else: a workflow stage keeps its one run
+    (#469), whatever else would let a wake through.
     """
     parent = child["parent_id"]
     # The session the chat started as — the id the app posts its own runs with — so Hermes resolves
     # the compression tip forward from it like it does for any run.
     root = await asyncio.to_thread(sessions.chat_session, home, parent)
+    if await asyncio.to_thread(_stage, home, parent):
+        logger.debug("memento: %s's completion doesn't wake it: a stage keeps its one run", parent)
+        return False
     held = await _deferred(adapter, home, root)
     if held:
         logger.debug("memento: the wake for %s waits: %s", child["id"], held)
@@ -358,6 +365,23 @@ async def _deferred(adapter: Any, home: Path, root: str) -> Optional[str]:
     if any(run.get("status") in outbox.ACTIVE for run in outbox.session_runs(adapter, ids)):
         return "the conversation's turn is still running"
     return None
+
+
+def _stage(home: Path, session_id: str) -> bool:
+    """Whether AFK is working a workflow stage on this session, so a completion must not wake it.
+
+    Asked of ``afk`` itself — the module that holds a stage and reads its snapshot — rather than
+    judged again here, so a stage is recognised by the same reading that decides whether it may move
+    on, and only one place has to know what a stage session is. Imported at the call, not at the
+    module's top, because ``afk`` reads this module's ``children``.
+    """
+    from . import afk
+
+    try:
+        return afk.staged_session(home, session_id)
+    except Exception:
+        logger.debug("memento: couldn't tell whether %s is a stage", session_id, exc_info=True)
+        return True
 
 
 def _ending(hermes_home: Path, child: Dict[str, Any]) -> Optional[Dict[str, Any]]:
