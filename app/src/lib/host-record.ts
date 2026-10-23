@@ -51,6 +51,7 @@ export function useHostRecord<T>(
       .catch((error: unknown) => {
         // A read that fails leaves the field off; the rest of the bot's settings still work.
         noteFailure(`Reading ${route.label}`, error)
+        if (!cancelled) setState({ key, held: { supported: false } })
       })
     return () => {
       cancelled = true
@@ -91,6 +92,8 @@ export function useHostRecord<T>(
     value: pendingHere ? pendingHere.value : held?.supported ? held.held : initial,
     /** Shown only once the host has answered: a bot whose plugin predates the route shows nothing. */
     supported: Boolean(held?.supported),
+    /** The host's first read is over, whether it answered or failed. */
+    settled: !baseUrl || state?.key === key,
     /** A write is on its way to the host: the field greys out until its answer lands. */
     saving: pendingHere !== undefined,
     save,

@@ -9,7 +9,6 @@ import {
   BellRingIcon,
   BookOpenCheckIcon,
   CalendarXIcon,
-  CheckIcon,
   ClipboardCheckIcon,
   CircleAlertIcon,
   CircleCheckIcon,
@@ -22,20 +21,15 @@ import {
   SlidersHorizontalIcon,
   TerminalIcon,
   ChevronRightIcon,
-  CornerDownRightIcon,
   DatabaseIcon,
   MenuIcon,
   MessagesSquareIcon,
   MessageSquareTextIcon,
-  MonitorIcon,
-  MoonIcon,
   PaletteIcon,
   PlusIcon,
   SmartphoneIcon,
-  SunIcon,
   TrophyIcon,
   TelescopeIcon,
-  KeyboardIcon,
   TimerIcon,
   UserIcon,
   WorkflowIcon,
@@ -51,16 +45,17 @@ import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { OnlineDot } from "@/components/bot-card"
 import { LinkSheet } from "@/components/link-bots"
+import { AppearanceSettings } from "@/components/settings/appearance"
 import {
   Group,
   RowText,
   SheetRow,
+  SwitchRow,
   linkRowClass,
   rowClass,
   Screen,
 } from "@/components/settings-chrome"
 import { useOpenDrawer } from "@/components/drawer-context"
-import { ExperimentalBadge } from "@/components/experimental-badge"
 import { DeviceStateSheet } from "@/components/device-state"
 import { FeedbackSheet } from "@/components/feedback"
 import {
@@ -76,14 +71,12 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Switch } from "@/components/ui/switch"
 import {
   DEFAULT_SETTINGS,
   clearAllData,
   db,
   getSettings,
   listProfiles,
-  saveAppearance,
   saveSettings,
   type Profile,
 } from "@/lib/db"
@@ -104,16 +97,11 @@ import {
 } from "@/lib/push"
 import type { PushCategory, PushFeature } from "@/lib/push-kinds"
 import { isOnline, siteUrl } from "@/lib/registry"
+import { themeLabel } from "@/lib/theme"
 import { forgetLocalKey, useSyncState } from "@/lib/sync"
 import { useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { APP_VERSION, pluginOutdated } from "@/lib/version"
-
-const THEMES = [
-  { value: "system", label: "System", icon: MonitorIcon },
-  { value: "light", label: "Light", icon: SunIcon },
-  { value: "dark", label: "Dark", icon: MoonIcon },
-]
 
 const SECTIONS: Record<string, { title: string; render: () => ReactNode }> = {
   account: { title: "Account", render: () => <AccountSettings /> },
@@ -279,12 +267,7 @@ function MenuScreen({
         <LinkBotRow onLink={() => setLinking(true)} />
       </Group>
       <Group>
-        <Row
-          to="appearance"
-          icon={PaletteIcon}
-          title="Appearance"
-          subtitle={THEMES.find((t) => t.value === (theme ?? "system"))?.label}
-        />
+        <Row to="appearance" icon={PaletteIcon} title="Appearance" subtitle={themeLabel(theme)} />
         <NotificationsRow />
         <NotificationTypesRow />
       </Group>
@@ -700,53 +683,6 @@ function Row({
   )
 }
 
-function SwitchRow({
-  id,
-  icon: Icon,
-  title,
-  experimental,
-  subtitle,
-  checked,
-  disabled,
-  variant,
-  onCheckedChange,
-}: {
-  id: string
-  icon: LucideIcon
-  title: string
-  experimental?: boolean
-  subtitle?: string
-  checked: boolean
-  disabled?: boolean
-  /** `header` tops a group of switches it controls; `nested` is one of them. */
-  variant?: "header" | "nested"
-  onCheckedChange: (checked: boolean) => void
-}) {
-  return (
-    <label
-      htmlFor={id}
-      className={cn(
-        rowClass,
-        "cursor-pointer",
-        variant === "header" && "bg-muted py-4",
-        variant === "nested" && "pl-9",
-      )}
-    >
-      <Icon className="size-5 shrink-0 text-muted-foreground" />
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span className="flex min-w-0 items-center gap-2">
-          <span className={cn("truncate text-base", variant === "header" && "font-semibold")}>
-            {title}
-          </span>
-          {experimental && <ExperimentalBadge />}
-        </span>
-        {subtitle && <span className="line-clamp-2 text-sm text-muted-foreground">{subtitle}</span>}
-      </span>
-      <Switch id={id} checked={checked} disabled={disabled} onCheckedChange={onCheckedChange} />
-    </label>
-  )
-}
-
 function FeedbackRow() {
   return <SheetRow icon={MessageSquareTextIcon} title="Send feedback" sheet={FeedbackSheet} />
 }
@@ -778,60 +714,6 @@ function AccountRow() {
         subtitle={status ?? (account.user.name ? account.user.email : undefined)}
       />
     </Group>
-  )
-}
-
-function AppearanceSettings() {
-  const { theme, setTheme } = useTheme()
-  const current = theme ?? "system"
-  const chatSettings = useLiveQuery(
-    async () => ({ ...DEFAULT_SETTINGS, ...(await db.settings.get("settings")) }),
-    [],
-  )
-  return (
-    <>
-      <Group>
-        {THEMES.map(({ value, label, icon: Icon }) => (
-          <button
-            key={value}
-            type="button"
-            className={cn(rowClass, "transition-colors hover:bg-muted")}
-            aria-pressed={current === value}
-            onClick={() => setTheme(value)}
-          >
-            <Icon className="size-5 shrink-0 text-muted-foreground" />
-            <RowText title={label} />
-            {current === value && <CheckIcon className="size-5 shrink-0" />}
-          </button>
-        ))}
-      </Group>
-      <Group>
-        <SwitchRow
-          id="steer-by-default"
-          icon={CornerDownRightIcon}
-          title="Steer by default"
-          subtitle="Messages sent mid-reply go straight to it"
-          checked={chatSettings?.steerByDefault ?? DEFAULT_SETTINGS.steerByDefault}
-          onCheckedChange={(checked) => saveAppearance({ steerByDefault: checked })}
-        />
-        <SwitchRow
-          id="break-reminders"
-          icon={TimerIcon}
-          title="Take-a-break reminders"
-          subtitle="Remind me to put the phone away while a task runs"
-          checked={chatSettings?.breakReminders ?? DEFAULT_SETTINGS.breakReminders}
-          onCheckedChange={(checked) => saveAppearance({ breakReminders: checked })}
-        />
-        <SwitchRow
-          id="nav-shortcuts"
-          icon={KeyboardIcon}
-          title="Navigation shortcuts"
-          subtitle="Alt+1 to Alt+9 start a new chat with that bot"
-          checked={chatSettings?.navShortcuts ?? DEFAULT_SETTINGS.navShortcuts}
-          onCheckedChange={(checked) => saveAppearance({ navShortcuts: checked })}
-        />
-      </Group>
-    </>
   )
 }
 

@@ -58,7 +58,7 @@ const Stack = defineComponent({
 const Card = defineComponent({
   name: "Card",
   props: cardProps,
-  description: "Titled card: paragraph, then children.",
+  description: "Title, text, then children.",
   component: ({ props, renderNode }: ComponentRenderProps<z.infer<typeof cardProps>>) => (
     <CardSurface size="sm">
       <CardHeader>
@@ -79,7 +79,7 @@ const Card = defineComponent({
 const Table = defineComponent({
   name: "Table",
   props: tableProps,
-  description: "Plain-text cells, optional caption.",
+  description: "Plain-text cells.",
   component: ({ props }: ComponentRenderProps<z.infer<typeof tableProps>>) => (
     <div className="w-full overflow-x-auto">
       <table className="w-full text-sm">
@@ -111,10 +111,12 @@ const Table = defineComponent({
   ),
 })
 
+// List and Callout keep no description: their props say it all, and the prompt they feed is bounded
+// at 4,000 characters, so a gloss that repeats the signature costs a rule its room.
 const List = defineComponent({
   name: "List",
   props: listProps,
-  description: "Label and optional detail.",
+  description: "",
   component: ({ props }: ComponentRenderProps<z.infer<typeof listProps>>) => {
     const items = props.items.map((item, i) => (
       <li key={i} className="my-1">
@@ -133,7 +135,7 @@ const List = defineComponent({
 const Callout = defineComponent({
   name: "Callout",
   props: calloutProps,
-  description: "A one-line aside: info, warn, good.",
+  description: "",
   component: ({ props }: ComponentRenderProps<z.infer<typeof calloutProps>>) => {
     const { Icon, className } = TONES[props.tone]
     return (

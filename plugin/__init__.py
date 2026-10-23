@@ -50,6 +50,7 @@ from . import (
     model_changes,
     merges,
     moves,
+    openui,
     outbox,
     pipeline,
     projects,
@@ -255,6 +256,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         denied = unauthorized(request)
         if denied is not None:
             return denied
+        # Whether the model is told the component library, which is what the openui feature means.
+        openui_info = openui.advertised()
         # The MCP screen is advertised only where Hermes's own MCP built-ins import, so a bot whose
         # Hermes is too old gets no row rather than an error; the switch, the removal, the Catalogue
         # and adding from it are advertised apart from it and from each other, because each needs a
@@ -336,6 +339,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "meetings",
                     "meetings_ask",
                     "community",
+                    # The component library, told to a new session as a system-prompt section
+                    # (openui.py). Advertised only where this host took it: a host that can't add a
+                    # section says nothing, rather than offering a vocabulary never told.
+                    *([openui.FEATURE] if openui_info else []),
                     # A message sent from Main is sorted into a thread by the host; see triage.py.
                     *(["triage", "moves", "triage_model"] if triage.available() is None else []),
                     # Hermes's own MCP built-ins, and the MCP screen with them; see mcp.py.
@@ -351,6 +358,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # Whether the host lets a mission be written with another model than the profile's.
                     "writers": await asyncio.to_thread(research.llm_gate),
                 },
+                # `features` is matched with `includes`: the version rides in the sibling object.
+                **({"openui": openui_info} if openui_info else {}),
             }
         )
 
@@ -609,6 +618,23 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return denied
         pick = await asyncio.to_thread(triage.read_model, store_path())
         return web.json_response({"object": "memento.triage_model", "triage_model": pick})
+
+    async def get_openui(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        on = await asyncio.to_thread(openui.enabled, store_path())
+        return web.json_response(openui.record(on))
+
+    async def set_openui(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None or not isinstance(body.get("enabled"), bool):
+            return _error(web, 'Body must be {"enabled": true} or {"enabled": false}', 400)
+        on = await asyncio.to_thread(openui.set_enabled, store_path(), body["enabled"])
+        return web.json_response(openui.record(on))
 
     async def set_triage_model(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1491,6 +1517,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/fallbacks", get_fallbacks)
     app.router.add_get(f"{PREFIX}/delegation", get_delegation)
     app.router.add_get(f"{PREFIX}/triage-model", get_triage_model)
+    app.router.add_get(f"{PREFIX}/openui", get_openui)
     app.router.add_get(f"{PREFIX}/skills", list_skills)
     app.router.add_get(f"{PREFIX}/mcp", list_mcp_servers)
     app.router.add_get(f"{PREFIX}/mcp/catalogue", list_mcp_catalogue)
@@ -1510,6 +1537,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/fallbacks", set_fallbacks)
     app.router.add_post(f"{PREFIX}/delegation", set_delegation)
     app.router.add_post(f"{PREFIX}/triage-model", set_triage_model)
+    app.router.add_post(f"{PREFIX}/openui", set_openui)
     app.router.add_get(f"{PREFIX}/github", github_status)
     app.router.add_get(f"{PREFIX}/github/repos", github_repos)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/label", label_session)
@@ -2466,6 +2494,7 @@ def register(ctx) -> None:
     research.register(ctx)
     meetings.register(ctx)
     dictation_cleanup.register(ctx)
+    openui.register(ctx)
     register_handler = getattr(ctx, "register_platform_handler", None)
     if register_handler is None:
         logger.warning("memento: this Hermes version can't add API server routes; update Hermes")

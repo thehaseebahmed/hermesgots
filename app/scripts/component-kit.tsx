@@ -172,7 +172,7 @@ export const lineLabel = (line: Element) => line.textContent?.trim() ?? ""
 
 export const expanded = (line: Element) => line.getAttribute("aria-expanded")
 
-type Call = { method: string; path: string; body: Record<string, unknown> | null }
+export type Call = { method: string; path: string; body: Record<string, unknown> | null }
 
 export const workflowStage = (name: string, extra: Record<string, unknown> = {}) => ({
   name,

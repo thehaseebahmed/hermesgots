@@ -67,6 +67,7 @@ Send these phrases in a chat message to trigger specific mock behaviors:
 | `long` / `slow` | 20-step slow reply (1s per step) — tests stream resume after disconnect |
 | `think out loud` | Four paced reasoning pieces before the answer: one `reasoning.available` event per piece on a run, one `reasoning_content` delta per piece on a completion |
 | `think out loud` + `stall` | The same four pieces, then a 2.5s hold after the last with nothing else on the wire, so a client's thinking line is the only thing on it |
+| `draw the interface` | A reply carrying an interface: an `openui-lang` block with `# id: sales`, the receipt under it (long enough to scroll a phone's thread), a pause, then a patch block reusing that id — it changes the card and table in place and draws nothing where it sits — then a block naming a component the library doesn't have (it draws as the code the model sent), then a closing line. One reply, so a patch never arrives as a second message |
 | `fail` | Tool call fails with "Permission denied" |
 | `ask` | Single clarify question: "Which logs should I count as old?" |
 | `ask five` | Five clarify questions (env, services, name, data handling, reviewers) |
@@ -157,6 +158,7 @@ pnpm mock
 |--------|------|-------------|
 | GET | `/api/plugins/memento/info` | Plugin manifest with features list |
 | GET | `/api/plugins/memento/skills` | The profile's skills for the composer's `/` menu (3 fixtures) |
+| GET | `/api/plugins/memento/openui` | The interface switch on: `{ object: "memento.openui", enabled: true }`, the shape `plugin/openui.py` serves so a reply's block draws |
 | GET | `/api/plugins/memento/cron/runs?per_job=24` | Ledger-style run history per job |
 | GET | `/api/plugins/memento/github` | `{ connected: true, login: "mock-user" }` or `connected: false` |
 | GET | `/api/plugins/memento/github/repos` | 5 mock repos (memento, maze, dotfiles, zigbee-bridge, ha-automations) |
@@ -312,6 +314,18 @@ pnpm mock
 # stream with the thinking line open and nothing else on the wire
 # The first answer token folds the line to "Thought for 7s"; reload the thread and it reads
 # "Thought", with no number
+```
+
+### 14. Test an Interface in a Thread
+
+```bash
+pnpm mock
+# In chat: "draw the interface"
+# The reply draws a card, a table and a callout from Gots's own components; scroll up while the
+# receipt under them still streams, and the patch that lands a few seconds later changes the card
+# and adds the table's fourth row without moving where you are reading
+# Below it, the block naming Sparkline draws as the code the model sent, and the reply still ends
+# GET /api/plugins/memento/openui answers { enabled: true } — the switch a drawing gate reads
 ```
 
 ---

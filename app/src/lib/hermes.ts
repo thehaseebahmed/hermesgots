@@ -1108,6 +1108,40 @@ export async function setSpeechSettings(
   return ((await response.json())?.speech ?? null) as Record<string, unknown> | null
 }
 
+/**
+ * Whether this bot's host tells the model the component library, which is also whether the app
+ * draws a reply's blocks: profile-wide, written from Appearance (the Gots plugin's `openui`). A
+ * host that answers without the flag hasn't said off, and nothing but an off stops the drawing.
+ * Newer plugin only; a host without the route answers 404.
+ */
+export async function getOpenUI(config: HermesConfig, signal?: AbortSignal): Promise<boolean> {
+  const response = await request(`${pluginRoot(config.baseUrl)}/openui`, {
+    headers: headers(config),
+    signal,
+  })
+  return openuiEnabled(await response.json())
+}
+
+/** Turns interfaces on or off for the whole profile, and answers with what the host now holds. */
+export async function setOpenUI(
+  config: HermesConfig,
+  enabled: boolean,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const response = await request(`${pluginRoot(config.baseUrl)}/openui`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ enabled }),
+    signal,
+  })
+  return openuiEnabled(await response.json())
+}
+
+/** The host's answer as the switch: off only when it says so, so silence leaves the app drawing. */
+function openuiEnabled(body: unknown) {
+  return (body as { enabled?: unknown } | null)?.enabled !== false
+}
+
 export async function checkHealth(config: HermesConfig) {
   const response = await request(`${serverRoot(config.baseUrl)}/health`, {
     headers: headers(config),

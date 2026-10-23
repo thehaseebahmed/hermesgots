@@ -73,6 +73,7 @@ elsewhere, set `PLAYWRIGHT_MODULE` to its `index.mjs`. The CommonJS `index.js` l
 | `photo-progress` | A message with a photo shows its reply's tool calls while it runs, on the `legacy` mock where the app follows the turn in the transcript. Main showed none |
 | `stream-writes` | A streaming reply is written to IndexedDB at most 6 times a second on the mock. Main wrote it 7.5 times |
 | `idle-requests` | An open chat with nothing happening makes at most 12 requests in 65s on the `polling` mock (6 of them the sidebar's `runs/live`). Main made 17 |
+| `openui` | A reply's interface draws at 390 and 768px, light and dark; a block no component answers for stays code with the reply still ending; a patch landing while the thread is scrolled up leaves the reader's scrollTop and the interface where they were |
 | `screens` | Projects, a project, Code, Routines, a chat and a started session load at 390 and 1024px, light and dark, with no console errors; the session's header draws no bot picture, centres its title over a line naming the bot and the repositories its width allows, and names no worktree branch |
 | `meetings` | Meetings stays hidden until its Developer switch is on; then a transcript file written up as notes (empty sections saying so), a cited time opening the transcript at that line, an audio file sent in chunks and followed through Uploading and Transcribing to its recap (the timeline, the tally, a note with no source marked, an owner never named said so, a topic opened from a cited time and its Next button), a meeting recorded in the app (a stand-in `getUserMedia`, the clock holding while paused, End meeting sending it), a page reloaded mid-recording offering the unfinished recording to send, an action item's Start opening a session with its text in the composer, a question to the bot answered with cited times, a recording that fails once and Try again, an upload nothing is finishing (stalled, Delete only), search, and Delete, at 390, 1024 (dark) and 1440px (where the list stays beside the meeting as a pane) |
 | `clarify-polling`, `clarify-transcript` | Answered questions survive stale polls, a reload and a fresh transcript |
@@ -168,7 +169,7 @@ Projects, attach it to your reply, or describe what it shows. Never commit scree
    port table above.
    Give it a row in `docs/e2e-flow-audit.md` too, with its verdict and why no lower tier reaches
    it: `app/scripts/test-e2e-registry.mjs` fails the app's gates on a key with no row, and on a
-   stay beyond the eight (ADR 0019).
+   stay beyond the nine (ADR 0019).
 3. Drive the mock with words in a message: `clean up` asks for an approval, `long` streams slowly,
    `ask` asks a question, `plan` writes a plan. The header of `app/scripts/mock-hermes.mjs` lists
    its words and env vars, and `.agents/skills/mock-server-scenarios.md` has recipes. Seeded
