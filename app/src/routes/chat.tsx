@@ -421,7 +421,7 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
       onUndo={undoMoveOutMain}
     />
   )
-  const draws = useDraws(thread ?? NO_ROWS)
+  const draws = useDraws(thread ?? NO_ROWS, profile)
   // Only a run can be steered, and only on a Hermes that has the route.
   const [steerRoute, setSteerRoute] = useState<{ baseUrl: string; ok: boolean }>()
   const runId = streaming?.runId

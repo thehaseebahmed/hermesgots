@@ -65,9 +65,9 @@
 // block naming a component the library doesn't have — which draws as the code the model sent — and a
 // closing line. The whole timeline is one reply, paced so a reader can scroll up before the patch
 // lands: a second user message would jump the thread back to the end. `info` advertises `openui` with
-// the library's version beside it, and GET /api/plugins/memento/openui answers the interface switch
-// on (`{ enabled: true }`) — the route plugin/openui.py serves from the plugin's route root, which a
-// drawing gate reads before it draws a block.
+// the library's version beside it, and /api/plugins/memento/openui answers the interface switch: GET
+// reads it (on here), POST `{ enabled }` writes it — the route pair plugin/openui.py serves from the
+// plugin's route root, which the app's drawing gate reads before it draws a block.
 // Project sessions get a worktree in each of the project's repos on
 // POST /api/plugins/memento/sessions/{id}/workspace (GET reads it back, POST …/mode changes the
 // permission mode, POST …/workspace/remove removes the trees unless a turn mentioned "commit"). In
@@ -2478,7 +2478,7 @@ const moves = new Map()
 // plugin/openui.py: the interface switch a host keeps. On here, so a reply's block draws rather than
 // falling back to its own source; a drawing gate in the app reads it before it draws. The version is
 // the library the section's text was generated from, which the plugin reads off the artifact's head.
-const openuiOn = true
+let openuiOn = true
 const OPENUI_VERSION = "1.0.1"
 // plugin/triage.py: MOCK_TRIAGE=off hides the feature, "new" opens a new thread, "thread" continues
 // the newest plain thread of the bot, "slow" answers after 10s and "fail" answers an error; anything else stays in Main.
@@ -3609,7 +3609,18 @@ http
     // The interface switch: a host setting, like the triage model, that answers as on. `plugin/openui.py`
     // serves it from the same route root, and a drawing gate reads it before it draws a block.
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/openui") {
-      if (req.method === "GET") return json(res, 200, { object: "memento.openui", enabled: openuiOn })
+      if (req.method === "GET") return json(res, 200, { object: "memento.openui", enabled: openuiOn, version: OPENUI_VERSION })
+      if (req.method === "POST") {
+        const body = await readBody(req)
+        // One field, and it has to be a boolean: off is stored as off, never as nothing.
+        if (typeof body.enabled !== "boolean") {
+          return json(res, 400, {
+            error: { message: 'Body must be {"enabled": true} or {"enabled": false}' },
+          })
+        }
+        openuiOn = body.enabled
+        return json(res, 200, { object: "memento.openui", enabled: openuiOn, version: OPENUI_VERSION })
+      }
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/github") {
       return json(

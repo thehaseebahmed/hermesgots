@@ -172,7 +172,7 @@ function AgentCard({ agent, source }: { agent: DelegatedAgent; source: AgentsSou
 /** Everything one delegated agent did, followed while it works. */
 function AgentView({ agent, server }: { agent: DelegatedAgent; server: HermesConfig }) {
   const { messages, failed } = useTranscript(server, agent, 500)
-  const draws = useDraws(messages ?? NO_ROWS)
+  const draws = useDraws(messages ?? NO_ROWS, server)
   const end = useRef<HTMLDivElement>(null)
   const loaded = messages !== undefined
   useEffect(() => {

@@ -620,6 +620,26 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         pick = await asyncio.to_thread(triage.read_model, store_path())
         return web.json_response({"object": "memento.triage_model", "triage_model": pick})
 
+    # The interface switch: profile-wide, on unless the store says off, and the app's Appearance
+    # screen is its only writer (openui.py, ADR 0033). `store_path` is resolved on the loop thread,
+    # where the request's profile scope is visible.
+    async def get_openui(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        on = await asyncio.to_thread(openui.enabled, store_path())
+        return web.json_response(openui.record(on))
+
+    async def set_openui(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None or not isinstance(body.get("enabled"), bool):
+            return _error(web, 'Body must be {"enabled": true} or {"enabled": false}', 400)
+        on = await asyncio.to_thread(openui.set_enabled, store_path(), body["enabled"])
+        return web.json_response(openui.record(on))
+
     async def set_triage_model(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -1501,6 +1521,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/fallbacks", get_fallbacks)
     app.router.add_get(f"{PREFIX}/delegation", get_delegation)
     app.router.add_get(f"{PREFIX}/triage-model", get_triage_model)
+    app.router.add_get(f"{PREFIX}/openui", get_openui)
     app.router.add_get(f"{PREFIX}/skills", list_skills)
     app.router.add_get(f"{PREFIX}/mcp", list_mcp_servers)
     app.router.add_get(f"{PREFIX}/mcp/catalogue", list_mcp_catalogue)
@@ -1520,6 +1541,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/fallbacks", set_fallbacks)
     app.router.add_post(f"{PREFIX}/delegation", set_delegation)
     app.router.add_post(f"{PREFIX}/triage-model", set_triage_model)
+    app.router.add_post(f"{PREFIX}/openui", set_openui)
     app.router.add_get(f"{PREFIX}/github", github_status)
     app.router.add_get(f"{PREFIX}/github/repos", github_repos)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/label", label_session)
