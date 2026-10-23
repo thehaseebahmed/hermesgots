@@ -94,10 +94,15 @@
 // spoken: POST dictation/take opens one after a moment (so the bar says "Preparing…"), each slice at
 // dictation/take/{take}/audio answers the next words of a fixed sentence, and the third slice closes a
 // phrase — tidied, as a finished phrase's cleanup leaves it — and says it is behind. The tail
-// phrase closes at Stop with its cleanup failed, so it reads as the host heard it. Off by default,
-// so every other flow sees the chunked host it expects.
+// phrase closes at Stop. Off by default, so every other flow sees the chunked host it expects.
+// POST /__mock/dictation-cleanup { fail } is a host whose phrase cleanup fails: the phrases a take
+// closes then read as the words the host heard, filler and all, and the take carries on (#290).
 // GET /__mock/dictation-take lists the slices a take was sent, and `peak`, the most that were ever
 // being answered at once (1 when the app keeps one request in flight).
+// GET /api/plugins/memento/speech is the host's own speech model with the models a pick is made from
+// (size, speed, whether the host has each one, which is in play) and the model a phrase's cleanup
+// runs on; POST speech { model?, cleanup_model? } writes a pick and answers the whole reading back,
+// so a model picked on the Bot's Dictation tab is the one a reload finds in play (plugin/speech.py).
 // GET /api/plugins/memento/workflows lists the workflow library (presets first, read-only), POST
 // adds one, POST to its id rewrites one of the account's own — forking a preset into a copy — and DELETE takes
 // one away; each answers the whole list. A project names the workflow its work runs under through
@@ -2330,16 +2335,58 @@ const TAKE_TAIL = {
   phrases: [{ id: 2, text: "and then two more items" }],
   behind: false,
 }
-function takeAnswers(vocabulary) {
+// What a phrase reads as when its cleanup didn't happen: the words as the host heard them, filler and
+// all, with nothing tidied. POST /__mock/dictation-cleanup { fail } makes the next takes answer this
+// way, so a flow sees the raw phrase committed and the take carry on (#290, ADR 0017).
+const UNTIDIED_PHRASE = "um Let us ship the dictation"
+let CLEANUP_FAILS = process.env.MOCK_DICTATION_CLEANUP === "fail"
+function takeAnswers(vocabulary, tidied = true) {
   const lead = vocabulary.join(" ")
-  if (!lead) return TAKE_ANSWERS
+  if (!lead && tidied) return TAKE_ANSWERS
   return TAKE_ANSWERS.map((answer, index) => ({
     ...answer,
     words: index === 0 ? [lead, answer.words].filter(Boolean).join(" ") : answer.words,
     phrases: answer.phrases.map((phrase) =>
-      index === 2 ? { ...phrase, text: `${lead} ${phrase.text}` } : phrase,
+      index === 2
+        ? {
+            ...phrase,
+            text: tidied
+              ? `${lead} ${phrase.text}`.trim()
+              : [lead, UNTIDIED_PHRASE].filter(Boolean).join(" "),
+          }
+        : phrase,
     ),
   }))
+}
+// plugin/speech.py: the host's own speech model (`stt.local.model`) beside the models a pick is made
+// from, with the size and speed a pick is weighed on and whether the host already has each one. A pick
+// is written here and described back whole, so the Dictation tab reads the model it holds after a
+// reload. The cleanup pick is only taken where the host grants the override permission.
+const SPEECH_MODELS = [
+  { name: "tiny", size_mb: 75, speed: 32.0, slow_on_cpu: false },
+  { name: "base", size_mb: 145, speed: 16.0, slow_on_cpu: false },
+  { name: "small", size_mb: 484, speed: 6.0, slow_on_cpu: false },
+  { name: "medium", size_mb: 1530, speed: 1.4, slow_on_cpu: true },
+]
+const SPEECH_DENIED =
+  "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable memento`."
+const speech = { model: "small", cleanup: null, downloaded: new Set(["tiny", "base", "small"]) }
+function speechReading() {
+  return {
+    model: speech.model,
+    models: SPEECH_MODELS.map((entry) => ({
+      ...entry,
+      downloaded: speech.downloaded.has(entry.name),
+      in_use: entry.name === speech.model,
+      downloading: entry.name === speech.model && !speech.downloaded.has(entry.name),
+    })),
+    warning: null,
+    cleanup: {
+      model: speech.cleanup,
+      allowed: RESEARCH_WRITERS,
+      reason: RESEARCH_WRITERS ? null : SPEECH_DENIED,
+    },
+  }
 }
 const dictationTakes = new Map()
 const dictationSlices = []
@@ -2892,6 +2939,7 @@ http
           "queue",
           "dictation",
           ...(DICTATION_STREAM ? ["dictation_stream"] : []),
+          "speech_model",
           "afk",
           "afk_switch",
           "afk_skills",
@@ -4016,9 +4064,9 @@ http
         dictationTakes.set(take, {
           answers: TAKE_ANSWERS.length,
           vocabulary,
-          script: takeAnswers(vocabulary),
+          script: takeAnswers(vocabulary, !CLEANUP_FAILS),
         })
-        dictationStarts.push({ take, vocabulary })
+        dictationStarts.push({ take, vocabulary, cleanup: CLEANUP_FAILS ? "failed" : "tidied" })
         return json(res, 200, {
           object: "memento.dictation_take",
           take,
@@ -4064,6 +4112,42 @@ http
         }
         held.answers = Math.max(0, held.answers - 1)
         return json(res, 200, { object: "memento.dictation_audio", take, behind: false, ...answer })
+      }
+    }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/speech") {
+      if (req.method === "GET")
+        return json(res, 200, { object: "memento.speech", speech: speechReading() })
+      if (req.method === "POST") {
+        const body = await readBody(req).catch(() => ({}))
+        if (!("model" in body) && !("cleanup_model" in body))
+          return json(res, 400, { error: { message: "Body needs a model or a cleanup_model." } })
+        if ("model" in body) {
+          const name = typeof body.model === "string" ? body.model.trim().toLowerCase() : ""
+          const entry = SPEECH_MODELS.find((one) => one.name === name)
+          if (!entry)
+            return json(res, 400, {
+              error: {
+                message: `${String(body.model ?? "")} isn't a speech model this host can use.`,
+              },
+            })
+          speech.model = entry.name
+        }
+        if ("cleanup_model" in body) {
+          const pick = body.cleanup_model
+          if (
+            pick !== null &&
+            (typeof pick?.provider !== "string" || typeof pick?.model !== "string")
+          )
+            return json(res, 400, {
+              error: { message: "The cleanup model needs a provider and a model" },
+            })
+          // The host checks the pick the way it checks its own model, and only where it grants the
+          // plugin the override permission: a refused pick leaves the one in place.
+          if (pick !== null && !RESEARCH_WRITERS)
+            return json(res, 403, { error: { message: SPEECH_DENIED } })
+          speech.cleanup = pick === null ? null : { provider: pick.provider, model: pick.model }
+        }
+        return json(res, 200, { object: "memento.speech", speech: speechReading() })
       }
     }
     const attachmentRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/attachments$/.exec(
@@ -4421,6 +4505,14 @@ http
         peak: dictationPeak,
         starts: dictationStarts,
       })
+    }
+    // Dev only: POST { fail } is a host whose phrase cleanup fails — a phrase a take closes then
+    // reads as the words the host heard, filler and all, and the take carries on (#290, ADR 0017).
+    // Takes opened afterwards answer that way; one already open keeps the script it started on.
+    if (url.pathname === "/__mock/dictation-cleanup" && req.method === "POST") {
+      const { fail = true } = await readBody(req)
+      CLEANUP_FAILS = Boolean(fail)
+      return json(res, 200, { ok: true, cleanup: CLEANUP_FAILS ? "failed" : "tidied" })
     }
     // Dev only: POST { outcome } ends every pending approval without the app. "timeout" is a host
     // with the plugin (the run says so and carries on); "lost" one without it, which keeps the

@@ -83,6 +83,18 @@ async function noTakes(what) {
 
 const PHONE = { width: 390, height: 844 }
 
+/** The bot this device's one profile is, so a flow can open its editor's own screen. */
+const botId = (page) =>
+  page.evaluate(async () => (await (await import("/src/lib/db.ts")).db.profiles.toArray())[0].id)
+
+/** The mock host's phrase cleanup, failed or tidied: what a take opened from then on answers. */
+const cleanupFails = (fail) =>
+  fetch(`${streamMock}/__mock/dictation-cleanup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fail }),
+  })
+
 /** Every recorder errors 1.2 s into its stretch, as an encoder that dies mid-take does. */
 const recorderErrors = () => {
   const Recorder = window.MediaRecorder
@@ -563,6 +575,85 @@ try {
         "its text is in, so it is not kept again",
       )
       await page.close()
+    }
+
+    // The bot's Dictation tab: a word added there is kept on the device across a reload, and the
+    // host's speech model picked there is the model in play after one (plugin/speech.py, #295).
+    {
+      const page = await open(streamMock, PHONE)
+      await page.goto(`${app}/settings/bots/${await botId(page)}/dictation`)
+      const tab = page.locator("[data-bot-dictation]")
+      const words = tab.getByRole("list", { name: "Words" })
+      await tab.waitFor({ timeout: 15_000 })
+      await tab.locator("#vocabulary-word").fill("Gots")
+      await tab.getByRole("button", { name: "Add" }).click()
+      await words.getByRole("button", { name: "Remove Gots" }).waitFor({ timeout: 5000 })
+      await shot(page, "phone-light-18-dictation-word")
+
+      await page.reload()
+      await page.getByRole("button", { name: "Remove Gots" }).waitFor({ timeout: 15_000 })
+      assert.equal(
+        await page.getByRole("button", { name: "Remove Gots" }).count(),
+        1,
+        "the word added on the tab is still the bot's after a reload",
+      )
+
+      const models = tab.locator('[aria-label="Speech models"] button')
+      const row = (name) => models.filter({ hasText: new RegExp(`^${name}`) })
+      await models.first().waitFor({ timeout: 15_000 })
+      assert.match(await row("small").innerText(), /In use/, "the model in play says so")
+      assert.equal(await row("base").getAttribute("aria-pressed"), "false")
+
+      await row("base").click()
+      for (let picked = false, end = Date.now() + 10_000; !picked; await page.waitForTimeout(100)) {
+        picked = (await row("base").getAttribute("aria-pressed")) === "true"
+        assert.ok(picked || Date.now() < end, "the model picked on the tab is the one in use")
+      }
+      assert.match(await row("base").innerText(), /In use/)
+      assert.equal(await row("small").getAttribute("aria-pressed"), "false", "the old one steps down")
+      await shot(page, "phone-light-19-dictation-model")
+
+      // The host answered the write, so a reload reads the pick back rather than the one before it.
+      await page.reload()
+      await models.first().waitFor({ timeout: 15_000 })
+      assert.equal(
+        await row("base").getAttribute("aria-pressed"),
+        "true",
+        "the pick written to the host is the one in play",
+      )
+      await page.close()
+    }
+
+    // A phrase whose cleanup fails is committed as the host heard it, filler and all, and the take
+    // carries on: a take is never failed by its own cleanup (#290, ADR 0017).
+    {
+      const page = await open(streamMock, PHONE)
+      await cleanupFails(true)
+      try {
+        const composer = page.getByRole("textbox").last()
+        const bar = page.getByRole("group", { name: "Dictation take" })
+        await composer.fill("")
+        await page.getByRole("button", { name: "Voice", exact: true }).click()
+        await bar.getByText("um Let us ship the dictation").waitFor({ timeout: 15_000 })
+        assert.equal(
+          await bar.getByText("Let us ship 25 things.").count(),
+          0,
+          "nothing tidied the phrase the cleanup failed on",
+        )
+        assert.equal(await bar.getByRole("alert").count(), 0, "the take carries on")
+        await shot(page, "phone-light-20-cleanup-failed")
+
+        await page.getByRole("button", { name: "Stop" }).click()
+        await page.getByRole("button", { name: "Voice", exact: true }).waitFor({ timeout: 15_000 })
+        assert.equal(
+          await composer.inputValue(),
+          "um Let us ship the dictation and then two more items",
+          "the words the host heard are what the take committed",
+        )
+      } finally {
+        await cleanupFails(false)
+        await page.close()
+      }
     }
   }
   console.log("dictation: ok")
