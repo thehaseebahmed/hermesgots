@@ -15,7 +15,9 @@
  * is one row per task it holds — its number, title and stage — over a count of the holds against the
  * project's pick count, and a pick count of one to five sits under the switch, one write of its own.
  * A host that advertises none of that keeps the sheet it had: one Working row, drawn from the task
- * the read names.
+ * the read names. And where the Prompt was copied from the account's library, the row tells a copy
+ * from an original: an entry rewritten since its pick says `changed in library`, and one tap pulls
+ * the new words in — the rule is `prompt-source.ts`'s, the write is the Prompt's own (ADR 0043).
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react"
@@ -73,7 +75,8 @@ import {
 } from "@/lib/hermes"
 import { STAGE_WORDS, type AfkStage } from "@/lib/pipeline"
 import { usePoll } from "@/lib/poll"
-import { usePromptLibraryReady } from "@/lib/prompt-library-store"
+import { usePromptEntry, usePromptLibraryReady } from "@/lib/prompt-library-store"
+import { promptSourceState } from "@/lib/prompt-source"
 import { noteFailure } from "@/lib/report"
 import { useSkills } from "@/lib/skills"
 import { workflowShape, type Workflow, type WorkflowEntry } from "@/lib/workflow"
@@ -130,11 +133,18 @@ export function AfkPopup({
   onOpenChange,
   config,
   projectId,
+  library,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   config: HermesConfig
   projectId: string
+  /**
+   * The account's prompt library is offered here — signed in, with its vault open on this device.
+   * Where it isn't given, the sheet reads the device's own answer; the component tier hands it over
+   * because it mounts the sheet over a seeded database with no account behind it.
+   */
+  library?: boolean
 }) {
   const [tasks, setTasks] = useState<ProjectTasks>()
   const [error, setError] = useState<string>()
@@ -147,12 +157,14 @@ export function AfkPopup({
   const [savingPicks, setSavingPicks] = useState(false)
   // The workflow library, read when a sheet needs it: the picker and the editor share one list, so a
   // save in either shows at once.
-  const [library, setLibrary] = useState<WorkflowEntry[]>()
+  const [workflowLibrary, setWorkflowLibrary] = useState<WorkflowEntry[]>()
   const [libraryError, setLibraryError] = useState<string>()
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [editing, setEditing] = useState<WorkflowEntry | "new" | null>(null)
   const [savingWorkflow, setSavingWorkflow] = useState(false)
   const [promptOpen, setPromptOpen] = useState(false)
+  // A pull of the library's changed words is on its way: the marker is out of reach until its answer.
+  const [pulling, setPulling] = useState(false)
   const key = connectionKey(config)
   const switchable = usePluginFeature(config, AFK_SWITCH_FEATURE)
   const withSkills = usePluginFeature(config, AFK_SKILLS_FEATURE)
@@ -168,7 +180,13 @@ export function AfkPopup({
   // The account's own prompt library: the host has to advertise the change, and the account has to
   // be signed in with its vault open here — the library lives in that store, not on a host.
   const picks = usePluginFeatureOn(config, AFK_PICKS_FEATURE)
-  const promptLibrary = usePromptLibraryReady()
+  const deviceLibrary = usePromptLibraryReady()
+  const promptLibrary = library ?? deviceLibrary
+  // Where the project's Prompt was copied from the account's library, the row needs the entry to
+  // compare with: read here, so an entry edited or deleted on any device shows without a re-read of
+  // the project. A library this device doesn't hold (signed out, vault locked) finds nothing, and
+  // the copy stands unmarked.
+  const promptEntry = usePromptEntry(afk?.promptId ?? null, picks && promptLibrary)
   // A Prompt names its own skills in its words, so the build and critique pickers are not drawn beside
   // it and their list is not read: it is the workflow's own choice.
   const skillsDrawn = withSkills === "yes" && !promptOffered
@@ -247,7 +265,7 @@ export function AfkPopup({
         .then((next) => {
           if (signal.aborted) return
           setLibraryError(undefined)
-          setLibrary(next)
+          setWorkflowLibrary(next)
         })
         .catch((failure: unknown) => {
           if (signal.aborted) return
@@ -335,14 +353,33 @@ export function AfkPopup({
   const choose = (buildSkill: string | null, critiqueSkills: string[]) =>
     save(() => setProjectAfkSkills(config, projectId, buildSkill, critiqueSkills))
   // A refusal is the host's, said here the way the other writes are, and answered to the editor so it
-  // keeps the words typed rather than closing on a fail.
-  const writePrompt = async (prompt: string): Promise<"saved" | "refused"> => {
+  // keeps the words typed rather than closing on a fail. A source rides with the words it describes:
+  // a pick writes both, and a hand edit writes the words alone, which clears the copy on the host.
+  const writePrompt = async (
+    prompt: string,
+    promptId: string | null = null,
+  ): Promise<"saved" | "refused"> => {
     try {
-      setAfk(await setProjectAfkPrompt(config, projectId, prompt))
+      setAfk(await setProjectAfkPrompt(config, projectId, prompt, promptId))
       return "saved"
     } catch (failure) {
       toast.error(failure instanceof Error ? failure.message : "Couldn't save that Prompt.")
       return "refused"
+    }
+  }
+  // A copy of an entry whose words have moved on: one tap writes the entry's current text and its id
+  // together, which is a pick again and takes the marker with it. A write that can't reach the host
+  // is a toast and nothing more — the copy is still not the entry, so the marker stands.
+  const pullPrompt = async () => {
+    const source = afk?.promptId
+    if (pulling || !source || !promptEntry) return
+    setPulling(true)
+    try {
+      setAfk(await setProjectAfkPrompt(config, projectId, promptEntry.body, source))
+    } catch (failure) {
+      toast.error(failure instanceof Error ? failure.message : "Couldn't pull that Prompt in.")
+    } finally {
+      setPulling(false)
     }
   }
 
@@ -361,12 +398,12 @@ export function AfkPopup({
   // including the copy a preset's save forked.
   const writeWorkflow = async (body: Workflow, id: string | null) => {
     const next = id ? await updateWorkflow(config, id, body) : await createWorkflow(config, body)
-    setLibrary(next)
+    setWorkflowLibrary(next)
     setLibraryError(undefined)
   }
   const removeWorkflow = async (entry: WorkflowEntry) => {
     try {
-      setLibrary(await deleteWorkflow(config, entry.id))
+      setWorkflowLibrary(await deleteWorkflow(config, entry.id))
       setEditing(null)
       // The project may have run under it: the host answers what it holds now.
       setAfk(await getProjectAfk(config, projectId))
@@ -395,7 +432,17 @@ export function AfkPopup({
               onToggle={(on) => void turn(on)}
             />
             {promptOffered && afk && !afkError && (
-              <PromptRow prompt={afk.prompt} onOpen={() => setPromptOpen(true)} />
+              <PromptRow
+                prompt={afk.prompt}
+                // Only a copy whose entry now says other words is marked: an original, a deleted
+                // entry and words the user typed are all silent.
+                changed={
+                  promptSourceState(afk.promptId, afk.prompt, promptEntry) === "changed"
+                }
+                pulling={pulling}
+                onPull={() => void pullPrompt()}
+                onOpen={() => setPromptOpen(true)}
+              />
             )}
             {/* Under the switch, and at the foot of its list where a Prompt row takes the place
                 right under it: how many tasks this project may hold at once. */}
@@ -445,7 +492,7 @@ export function AfkPopup({
             <WorkflowSheet
               open={libraryOpen}
               onOpenChange={setLibraryOpen}
-              entries={library}
+              entries={workflowLibrary}
               error={libraryError}
               chosenId={afk?.workflow?.id}
               saving={savingWorkflow}
@@ -620,19 +667,50 @@ function PickCountRow({
  * How this project's work is carried out, as the host answers it: the row opens the editor, where the
  * words are written. The host answers its default method where the project wrote none, so an
  * untouched project says what its next run will be told rather than reading as empty.
+ *
+ * Where the words were copied from the account's library and that entry has been rewritten since,
+ * the row says so under itself — `changed in library` — and one tap there pulls the entry's new words
+ * in (`onPull`), which is a pick again. Nothing else carries the marker: an original, a copy whose
+ * entry was deleted, and words the user typed are all silent, because none of them is stale.
  */
-function PromptRow({ prompt, onOpen }: { prompt: string; onOpen: () => void }) {
+function PromptRow({
+  prompt,
+  changed,
+  pulling,
+  onPull,
+  onOpen,
+}: {
+  prompt: string
+  /** The entry it was copied from now says other words: the marker, and the pull, are drawn. */
+  changed: boolean
+  /** A pull is on its way: the marker waits rather than writing twice. */
+  pulling: boolean
+  onPull: () => void
+  onOpen: () => void
+}) {
   return (
-    <button
-      type="button"
-      data-afk-prompt
-      aria-label="Prompt"
-      onClick={onOpen}
-      className="flex min-h-11 w-full items-center gap-3 rounded-2xl px-1 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
-    >
-      <RowText title="Prompt" subtitle={promptLine(prompt)} />
-      <ChevronRightIcon className="shrink-0 text-muted-foreground" />
-    </button>
+    <div className="flex flex-col" data-afk-prompt>
+      <button
+        type="button"
+        aria-label="Prompt"
+        onClick={onOpen}
+        className="flex min-h-11 w-full items-center gap-3 rounded-2xl px-1 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <RowText title="Prompt" subtitle={promptLine(prompt)} />
+        <ChevronRightIcon className="shrink-0 text-muted-foreground" />
+      </button>
+      {changed && (
+        <button
+          type="button"
+          data-afk-prompt-changed
+          disabled={pulling}
+          onClick={onPull}
+          className="min-h-9 self-start rounded-full px-1 text-left text-sm text-muted-foreground underline underline-offset-4 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+        >
+          changed in library
+        </button>
+      )}
+    </div>
   )
 }
 

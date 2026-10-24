@@ -112,9 +112,10 @@ export function mountAfk(
   config: { baseUrl: string; apiKey?: string },
   projectId: string,
   body: () => Promise<void>,
+  { library }: { library?: boolean } = {},
 ) {
   return mount(
-    <AfkPopup open onOpenChange={() => {}} config={config} projectId={projectId} />,
+    <AfkPopup open onOpenChange={() => {}} config={config} projectId={projectId} library={library} />,
     body,
   )
 }
@@ -224,6 +225,7 @@ export function afkHost({
   stage = "build",
   stageName = "Build",
   prompt = DEFAULT_AFK_PROMPT,
+  promptId = null,
   promptRefusal = null,
   holds = null,
   pickCount = null,
@@ -235,6 +237,8 @@ export function afkHost({
   stage?: string | null
   stageName?: string | null
   prompt?: string
+  /** The library entry the host says the Prompt was copied from; null is words typed here. */
+  promptId?: string | null
   promptRefusal?: string | null
   /** The holds the host answers, oldest first; null is a host from before the pick count. */
   holds?: HoldRow[] | null
@@ -267,6 +271,8 @@ export function afkHost({
   const calls: Call[] = []
   let chosen: string | null = workflow
   let words = prompt
+  // The entry the Prompt was copied from: a pick names one, a hand edit names none.
+  let source = promptId
   // The holds as the wire spells them: the oldest first, each with the stage its session is in.
   const held =
     holds === null
@@ -301,6 +307,8 @@ export function afkHost({
     stage_name: held === null ? stageName : (held[0]?.stage_name ?? null),
     workflow: library.find((entry) => entry.id === chosen),
     prompt: words,
+    // Null where the words are the project's own: a host from before the library answers none.
+    prompt_id: source,
   })
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input))
@@ -337,6 +345,8 @@ export function afkHost({
         // A Prompt and a pick are one choice between them, as the plugin writes them.
         words = body.prompt.trim() || DEFAULT_AFK_PROMPT
         chosen = null
+        // The source rides the words: a pick names the entry it copied, and a plain write clears it.
+        source = typeof body.prompt_id === "string" ? body.prompt_id : null
       }
       // A pick count is a write of its own, and one the host refuses writes nothing.
       if (typeof body?.pick_count === "number") {
@@ -349,7 +359,10 @@ export function afkHost({
       return json({ repos: [], ready: [], claimed: [], blocked: [] })
     return json({ error: { message: `No route for ${method} ${url.pathname}` } }, 404)
   }
-  /** What the host holds now: the workflow a Prompt's write cleared, and the words it answered. */
-  const state = () => ({ chosen, words })
+  /**
+   * What the host holds now: the workflow a Prompt's write cleared, the words it answered, and the
+   * entry those words were copied from (null for the project's own).
+   */
+  const state = () => ({ chosen, words, source })
   return { calls, fetch, library, state }
 }

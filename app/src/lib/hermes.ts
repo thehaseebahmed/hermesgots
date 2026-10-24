@@ -2904,6 +2904,13 @@ export interface ProjectAfk {
    * why the host answers the default rather than nothing.
    */
   prompt: string
+  /**
+   * The account library's entry this Prompt was copied from, where it was one — the row tells a
+   * copy whose entry has moved on from an original by comparing the two. Null where the host
+   * answers none (a plugin from before picks) and where the words are the user's own: a hand edit
+   * clears it on the host, so the row never calls them a stale copy (ADR 0043).
+   */
+  promptId: string | null
 }
 
 function parseHold(value: unknown): AfkHold | null {
@@ -2958,6 +2965,8 @@ function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
     workflow: parseWorkflowEntry(body.workflow),
     // A plugin from before the Prompt answers none, which is only read where the host advertises it.
     prompt: str(body.prompt),
+    // And one from before the library answers no source: the words stand as the user's own.
+    promptId: str(body.prompt_id) || null,
   }
 }
 
@@ -3034,13 +3043,19 @@ export function setProjectAfkWorkflow(
  * Writes how a project's AFK work is carried out — its Prompt — on its host, answering the setting
  * it now holds. An empty one is the bot's default again, and the answer carries those words, since
  * that is what the project's next run is told.
+ *
+ * `promptId` is the account library's entry the words were copied from, where they were one: a pick
+ * writes the text and its source together, so the row can tell a copy whose entry has moved on. A
+ * write naming none is a plain one — the host clears whatever source the project held, which is how
+ * a hand edit detaches the copy (ADR 0043).
  */
 export function setProjectAfkPrompt(
   config: HermesConfig,
   projectId: string,
   prompt: string,
+  promptId: string | null = null,
 ): Promise<ProjectAfk> {
-  return writeAfk(config, projectId, { prompt })
+  return writeAfk(config, projectId, promptId ? { prompt, prompt_id: promptId } : { prompt })
 }
 
 /**

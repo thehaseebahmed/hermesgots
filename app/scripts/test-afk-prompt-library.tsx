@@ -47,14 +47,15 @@ const entries = () => db.prompts.toArray()
 /**
  * The editor as the sheet draws it: the words are the project's, the write is the AFK route's, and
  * the host's answer comes back as the words the field now holds. `library` is what the sheet passes
- * once the account is signed in with its vault open and the host advertises afk_picks.
+ * once the account is signed in with its vault open and the host advertises afk_picks. A pick hands
+ * the entry's id over with its words; Done hands the words alone, which detaches the copy.
  */
 function Editor({ host, library }: { host: Host; library: boolean }) {
   const [prompt, setPrompt] = useState(DEFAULT_AFK_PROMPT)
   const [open, setOpen] = useState(true)
-  const save = async (next: string) => {
+  const save = async (next: string, id?: string | null) => {
     try {
-      setPrompt((await setProjectAfkPrompt(config, project, next)).prompt)
+      setPrompt((await setProjectAfkPrompt(config, project, next, id ?? null)).prompt)
       return "saved" as const
     } catch {
       return "refused" as const
@@ -133,7 +134,7 @@ test("saving keeps the words on screen under a name and tags, and writes no Prom
   })
 })
 
-test("picking copies the entry's words in and writes them through the Prompt route", async () => {
+test("picking copies the entry's words in and writes them with their source", async () => {
   const body = "# Review\n\n- Read the issue.\n- Then the diff."
   await seedPrompts([{ id: "e-one", name: "Review first", tags: ["review"], body }])
   const host = afkHost({ features: PICKS_FEATURES })
@@ -145,14 +146,15 @@ test("picking copies the entry's words in and writes them through the Prompt rou
 
     assert.deepEqual(
       writes(host).map((call) => call.body),
-      [{ prompt: body }],
-      "one write, of the entry's own words, through the route Done writes",
+      [{ prompt: body, prompt_id: "e-one" }],
+      "one write, of the entry's own words and the entry they came from, through the route Done writes",
     )
     assert.equal(
       host.state().chosen,
       null,
       "a Prompt clears a picked workflow on the host, and a pick is a Prompt",
     )
+    assert.equal(host.state().source, "e-one", "and the copy remembers the entry it came from")
     assert.equal(fieldValue(), body, "and the words are in the field, where they were copied")
     assert.equal(list(), null, "the list closes on the pick")
 

@@ -45,6 +45,19 @@ export function usePromptLibraryReady(): boolean {
   return libraryReady(account.status, vault)
 }
 
+/**
+ * One entry, by the id a project's Prompt says it was copied from — undefined until the read lands,
+ * where the library isn't offered on this device, and where the entry is gone (a delete on this
+ * device or another leaves the copy standing). The row that compares a copy with its entry reads it
+ * here, so a delete or an edit shows without the project being read again.
+ */
+export function usePromptEntry(id: string | null, enabled: boolean): PromptEntry | undefined {
+  return useLiveQuery(
+    async () => (enabled && id ? await db.prompts.get(id) : undefined),
+    [id, enabled],
+  )
+}
+
 export async function addPrompt(draft: PromptDraft): Promise<PromptEntry> {
   const entry: PromptEntry = {
     id: newPromptId(),
