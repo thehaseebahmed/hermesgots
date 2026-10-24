@@ -60,7 +60,11 @@ test("the Working block lists every task it holds, over the count against its pi
       "a row names the task's number, title and stage",
     )
     assert.equal(rows[0].getAttribute("data-stage"), "build", "and the stage it reads as")
-    assert.match(rows[1].textContent ?? "", /Critiquing: Mark the claim/, "a stage with no name of its own")
+    assert.match(
+      rows[1].textContent ?? "",
+      /Critiquing: Mark the claim/,
+      "a stage with no name of its own",
+    )
     assert.match(rows[2].textContent ?? "", /#267\s*Ship the change/, "a task that isn't staged")
     assert.equal(rows[2].getAttribute("data-stage"), null, "and nothing named for it")
     assert.equal(
@@ -108,7 +112,11 @@ test("the pick count is one write, and the count row reads the host's answer", a
       "one write, naming the count alone",
     )
     assert.equal(chosen()?.textContent, "3", "the row reads the count the host answered")
-    assert.equal(find("[data-holds]")?.textContent, "2 of 3 held", "and the count row counts against it")
+    assert.equal(
+      find("[data-holds]")?.textContent,
+      "2 of 3 held",
+      "and the count row counts against it",
+    )
   })
 })
 
@@ -133,7 +141,11 @@ test("a write the host refuses leaves the count it had", async () => {
     await click(pill(5))
     assert.equal(afkWrites(host).length, 1, "the write was made")
     assert.equal(chosen()?.textContent, "2", "and the count the host still holds is what shows")
-    assert.equal(find("[data-holds]")?.textContent, "2 of 2 held", "the count row is the host's too")
+    assert.equal(
+      find("[data-holds]")?.textContent,
+      "2 of 2 held",
+      "the count row is the host's too",
+    )
   })
 })
 
@@ -142,8 +154,7 @@ test("a plugin without afk_picks draws the sheet it always drew", async () => {
     const url = new URL(String(input))
     if (url.pathname.endsWith("/plugins/memento/info"))
       return json({ name: "memento", features: ["afk", "afk_switch", "afk_prompt"] })
-    if (url.pathname.endsWith("/plugins/memento/skills"))
-      return json({ object: "list", data: [] })
+    if (url.pathname.endsWith("/plugins/memento/skills")) return json({ object: "list", data: [] })
     if (url.pathname.endsWith("/afk"))
       return json({
         object: "memento.afk",
@@ -189,7 +200,7 @@ test("a host that holds no list keeps the one Working row from its task", async 
   })
 })
 
-test("the pop-up says how full the bot's budget is, beside the project's pick count", async () => {
+test("the pop-up draws the pick count and no budget line, whatever the bot answers", async () => {
   globalThis.fetch = afkHost({
     features: FEATURES,
     holds: THREE,
@@ -198,36 +209,28 @@ test("the pop-up says how full the bot's budget is, beside the project's pick co
     holdsHeld: 3,
   }).fetch as unknown as typeof fetch
   await picksOn(async () => {
-    const line = find("[data-afk-budget]")
-    assert.equal(line?.textContent, "Pick budget 3 of 5", "the bot's usage, against its budget")
-    assert.equal(line?.getAttribute("data-afk-budget"), "5", "the budget it counts against")
-    assert.equal(line?.getAttribute("data-holds-held"), "3", "and what the bot holds now")
-    assert.ok(
-      find("[data-afk-picks]")?.contains(line ?? null),
-      "the usage sits in the pick count's own block",
-    )
-    assert.equal(chosen()?.textContent, "3", "with the project's own count beside it")
-  })
-})
-
-test("a bot holding nothing draws its budget at none used", async () => {
-  globalThis.fetch = afkHost({ features: FEATURES, pickCount: 2, pickBudget: 5 })
-    .fetch as unknown as typeof fetch
-  await picksOn(async () => {
+    assert.equal(find("[data-afk-budget]"), null, "the usage line is cut from the sheet")
+    assert.equal(find("[data-holds-held]"), null, "and its numbers with it")
+    assert.equal(chosen()?.textContent, "3", "the project's own count is what the row draws")
     assert.equal(
-      find("[data-afk-budget]")?.textContent,
-      "Pick budget 0 of 5",
-      "no holds, all five places free",
+      find("[data-holds]")?.textContent ?? null,
+      "3 of 3 held",
+      "the count row under it still counts the holds",
     )
   })
 })
 
-test("a host that answers no budget draws the count and nothing about the budget", async () => {
-  globalThis.fetch = afkHost({ features: FEATURES, holds: THREE.slice(0, 1), pickCount: 2 })
+test("a host that answers no count draws no pick count row, whatever budget it answers", async () => {
+  globalThis.fetch = afkHost({ features: FEATURES, holds: THREE, pickBudget: 5, holdsHeld: 2 })
     .fetch as unknown as typeof fetch
   await picksOn(async () => {
-    const line = find("[data-afk-budget]")
-    assert.equal(line, null, "no usage line where the host answers no budget")
-    assert.equal(chosen()?.textContent, "2", "the project's own count is still drawn")
+    assert.equal(find("[data-afk-picks]"), null, "no count to draw")
+    assert.equal(find("[data-afk-budget]"), null, "and no budget line in its place")
+    assert.equal(
+      find("[data-holds]")?.textContent ?? null,
+      null,
+      "nor a count row with nothing to count against",
+    )
+    assert.equal(findAll("[data-hold]").length, 3, "the holds themselves are still named")
   })
 })

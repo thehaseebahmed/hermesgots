@@ -1696,7 +1696,7 @@ class PickBudgetTests(unittest.TestCase):
                 self.assertEqual(
                     (found["pick_budget"], found["holds_held"]),
                     (3, 2),
-                    "\"Pick budget 2 of 3\", drawn from whichever project's read the sheet has",
+                    "the bot's two numbers, answered by whichever project's read the sheet has",
                 )
 
     def test_a_refusal_on_one_project_leaves_anothers_claim_standing(self) -> None:

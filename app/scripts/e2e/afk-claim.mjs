@@ -1,8 +1,8 @@
 // AFK's claim: turning a project on has the host claim its oldest ready task — assigned to the
 // account and marked — so the pop-up says what it is working and the frontier no longer offers it.
 // A project that may hold several tasks holds one per place: raising its pick count fills them, the
-// Working block names every task it holds over a count of them against the pick count, and the
-// budget line reads the bot's own two numbers. A GitHub refusal leaves the switch on and shows its
+// Working block names every task it holds over a count of them against the pick count, and a reload
+// reads every count back. A GitHub refusal leaves the switch on and shows its
 // reason in the same pop-up. The read is the plugin's own route, so the whole thing is covered
 // against the mock. Phone, tablet and laptop, light and dark, with no console error.
 import { afkOn, afkRead, app, assert, flow, makeProject, mock, openAfk, pass, say } from "./lib.mjs"
@@ -56,7 +56,10 @@ const run = async ({ page, profileId, shot, until }) => {
   const working = page.locator("[data-working]")
   await working.waitFor({ timeout: 15_000 })
   assert.ok(
-    await working.locator(`[data-task="${HELD}"]`).getByText(HELD_TITLE, { exact: true }).isVisible(),
+    await working
+      .locator(`[data-task="${HELD}"]`)
+      .getByText(HELD_TITLE, { exact: true })
+      .isVisible(),
     "the pop-up names the task AFK is holding",
   )
   // One place, one task: the count row says how many of them are held, against the count of one a
@@ -189,18 +192,14 @@ const run = async ({ page, profileId, shot, until }) => {
     "true",
     "with the pick count it was set to",
   )
-  // The budget line is the bot's own answer, drawn beside the count: the holds this bot has across
-  // its projects, over the budget it works within.
+  // The budget line is cut from the sheet: the bot's own numbers stay on the wire for whatever reads
+  // them next, while the sheet draws the pick count and its count row alone.
   const answered = await afkRead(projectId)
-  const line = page.locator("[data-afk-budget]")
-  assert.equal(await line.getAttribute("data-afk-budget"), String(answered.pick_budget))
-  assert.equal(await line.getAttribute("data-holds-held"), String(answered.holds_held))
-  assert.equal(
-    (await line.innerText()).trim(),
-    `Pick budget ${answered.holds_held} of ${answered.pick_budget}`,
-    "the budget line reads the bot's holds against its budget",
+  assert.ok(
+    answered.holds_held >= 3,
+    `the bot's holds are still counted on the wire (${answered.holds_held})`,
   )
-  assert.ok(answered.holds_held >= 3, `the bot's holds are counted (${answered.holds_held})`)
+  assert.equal(await page.locator("[data-afk-budget]").count(), 0, "no budget line in the sheet")
   await shot("reloaded")
 
   // GitHub refusing leaves the switch on and its reason in the pop-up; nothing turns itself off.
@@ -244,5 +243,5 @@ for (const width of [390, 768, 1024]) {
   }
 }
 pass(
-  "AFK claims the oldest ready task when a project is turned on — and filling its pick count to three makes the pop-up name every task it holds, oldest first and each with the stage of the session working it, over a count row and a budget line the bot answers — with the frontier dropping every task it took and still offering the rest, and a reload reading them back, and a GitHub refusal leaving the switch on with its reason shown, at 390, 768 and 1024px, light and dark",
+  "AFK claims the oldest ready task when a project is turned on — and filling its pick count to three makes the pop-up name every task it holds, oldest first and each with the stage of the session working it, over a count row — with the frontier dropping every task it took and still offering the rest, and a reload reading them back, and a GitHub refusal leaving the switch on with its reason shown, at 390, 768 and 1024px, light and dark",
 )
