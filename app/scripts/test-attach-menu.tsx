@@ -95,3 +95,19 @@ test("a host that was away is asked again, not remembered as a no", async () => 
     assert.equal(source("Files")?.hasAttribute("disabled"), false, "the real answer fills it")
   })
 })
+
+test("the gallery picker offers clips as well as photos, and the camera stays a still", async () => {
+  await seed("attach-menu-clips")
+  host(["attachments", "media"], "attach-menu-clips", [])
+  await mount(chatScreen(CHAT), async () => {
+    await openMenu()
+    const photos = document.querySelector('input[name="photos"]')
+    assert.ok(photos, "the gallery's own picker")
+    assert.match(photos.getAttribute("accept") ?? "", /image\/\*/, "photos")
+    assert.match(photos.getAttribute("accept") ?? "", /video\/\*/, "and clips")
+    assert.equal(photos.hasAttribute("multiple"), true, "as many as the message can hold")
+    const camera = document.querySelector('input[name="camera"]')
+    assert.equal(camera?.getAttribute("accept"), "image/*", "the camera takes a still, not a clip")
+    assert.equal(camera?.hasAttribute("capture"), true)
+  })
+})

@@ -354,7 +354,8 @@ export interface Attachment {
   size: number
   /** Goes to the model inline as well. */
   image: boolean
-  /** The file (an image downscaled), on this device only: Hermes's transcript doesn't keep it. */
+  /** The file the user chose (or the scaled copy that stands in for it), on this device only: the
+   * host's transcript doesn't keep it. */
   blob?: Blob
   /**
    * The scaled copy the model reads inline, when it isn't the file itself. The host keeps `blob`;

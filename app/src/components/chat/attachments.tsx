@@ -14,24 +14,12 @@ import { FullscreenPopup, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
+import { attachmentUrl } from "@/lib/attachment-url"
 import { formatBytes, useUploading } from "@/lib/attachments"
 import type { Attachment } from "@/lib/db"
 import { useImageReady } from "@/lib/image"
 import { isNative } from "@/lib/native"
 import { cn } from "@/lib/utils"
-
-// One URL per attachment for the page's life: live queries hand back a new Blob on every change.
-const urls = new Map<string, string>()
-
-function objectUrl(attachment: Attachment) {
-  if (!attachment.blob) return undefined
-  let url = urls.get(attachment.id)
-  if (!url) {
-    url = URL.createObjectURL(attachment.blob)
-    urls.set(attachment.id, url)
-  }
-  return url
-}
 
 // Types a browser tab shows rather than downloads.
 const VIEWABLE = /^(image\/|text\/|application\/(pdf|json)$)/
@@ -59,7 +47,7 @@ export function AttachmentTile({
   className?: string
 }) {
   const uploading = useUploading(attachment.id)
-  const url = attachment.image ? objectUrl(attachment) : undefined
+  const url = attachment.image ? attachmentUrl(attachment) : undefined
   const Icon = attachment.image ? ImageIcon : action === "download" ? DownloadIcon : FileIcon
   const busy = preparing || uploading
   const tile = url ? (
@@ -194,7 +182,7 @@ export function AttachmentViewer({
   const count = attachments.length
   const step = (by: number) => onIndex((at + by + count) % count)
 
-  const url = shown ? objectUrl(shown) : undefined
+  const url = shown ? attachmentUrl(shown) : undefined
   const image = shown?.image && url
   const details = shown && [
     shown.size ? formatBytes(shown.size) : undefined,

@@ -137,10 +137,6 @@ const FLOWS = {
     about:
       "An agent's images hold their place with a skeleton while they load, in a chat and a project session",
   },
-  "image-viewer": {
-    script: "e2e/image-viewer.mjs",
-    about: "A photo opened from a message holds its place while it decodes, then paints",
-  },
   todos: {
     script: "e2e/todos.mjs",
     about: "The todo list shows while the reply that wrote it runs, from events or the transcript",

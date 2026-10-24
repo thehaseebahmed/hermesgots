@@ -1,14 +1,11 @@
 import { useEffect, useState } from "react"
 
+import { CELL } from "@/components/chat/media-gallery"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useImageReady } from "@/lib/image"
 import { loadMediaImage } from "@/lib/media-tags"
 import { openImageViewer } from "@/lib/native"
 import { cn } from "@/lib/utils"
-
-// Every image in a reply takes this cell — one image alone, a gallery of them, or one written into
-// the reply's own Markdown — and its skeleton takes it too, so nothing moves as it arrives.
-const CELL = "h-24 w-full rounded-xl border md:h-32 xl:h-40"
 
 /** An image in a reply; tapping it opens the larger view. */
 export function MediaImage({ src, alt }: { src: string; alt?: string }) {

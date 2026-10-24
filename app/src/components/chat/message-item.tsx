@@ -11,6 +11,7 @@ import { toast } from "sonner"
 
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { AttachmentTile, AttachmentViewer } from "@/components/chat/attachments"
+import { AudioRow, MediaGallery, type MediaItem } from "@/components/chat/media-gallery"
 import { Markdown } from "@/components/chat/markdown"
 import { AgentCards, SubagentResultCard } from "@/components/chat/agent-card"
 import { MediaTag } from "@/components/chat/media-image"
@@ -22,11 +23,14 @@ import { Button } from "@/components/ui/button"
 import { Message as MessageRow, MessageContent } from "@/components/ui/message"
 import { Spinner } from "@/components/ui/spinner"
 import { DELEGATE_TOOL } from "@/lib/agents"
+import { attachmentUrl } from "@/lib/attachment-url"
 import { downloadAttachment, openable } from "@/lib/attachments"
 import { removeQueued, sendQueued } from "@/lib/chat"
 import type { Attachment, Message, ToolEvent } from "@/lib/db"
 import { describeActivity, formatDuration } from "@/lib/format"
 import { COLUMN } from "@/lib/layout"
+import { mediaCell, mediaKind } from "@/lib/media-kind"
+import { attachmentSources, useMediaSources } from "@/lib/media-source"
 import { mediaImages } from "@/lib/media-tags"
 import { openuiParts, REPLY_INSET } from "@/lib/openui-block.ts"
 import type { InterfaceDraw, ThreadBlock } from "@/lib/openui-thread.ts"
@@ -221,8 +225,11 @@ function Stats({ message }: { message: Message }) {
 }
 
 /**
- * A sent message's attachments; the ones this device still has open in a viewer, and the ones it
- * doesn't hold saved from the host when tapped.
+ * A sent message's media and files: the images and clips in one Gallery, a recording in a row of
+ * its own, and every other file as a row naming it. Each draws from the bytes this device holds
+ * where it has them, else from the host — so a message read on another device still shows what was
+ * sent, and one whose host is unreachable still shows this device's own photos. The files this
+ * device holds open in a viewer; the ones it doesn't are saved from the host when tapped.
  */
 function SentAttachments({
   conversationId,
@@ -234,33 +241,62 @@ function SentAttachments({
   dim: boolean
 }) {
   const [viewing, setViewing] = useState<number | null>(null)
-  const viewable = attachments.filter(openable)
-  // A file another device sent, or one a restored message names, is drawn from what the message
-  // keeps — its name and size — and a tap fetches the bytes through the plugin's media route.
+  const media = attachments.filter(
+    (attachment) => mediaCell(attachment.type, attachment.name) !== "file",
+  )
+  const sources = useMediaSources(conversationId, attachmentSources(media, attachmentUrl))
+  const source = (attachment: Attachment) => sources.get(attachment.id)
+  const cell = (attachment: Attachment) => mediaCell(attachment.type, attachment.name)
+  const item = (attachment: Attachment): MediaItem => ({
+    key: attachment.id,
+    kind: mediaKind(attachment.type, attachment.name),
+    name: attachment.name,
+    type: attachment.type,
+    size: attachment.size,
+    src: source(attachment) ?? undefined,
+  })
+  // A media file whose bytes can't be read anywhere is drawn as the file it is, so a tap still
+  // saves it.
+  const files = [
+    ...attachments.filter((attachment) => cell(attachment) === "file"),
+    ...media.filter((attachment) => source(attachment) === null),
+  ]
+  const drawn = media.filter((attachment) => source(attachment) !== null)
+  const viewable = files.filter(openable)
   const download = (attachment: Attachment) =>
     void downloadAttachment(conversationId, attachment).catch(() =>
       toast.error(`Couldn't download ${attachment.name}.`),
     )
   return (
-    <div className={cn("flex max-w-full flex-wrap justify-end gap-2", dim && "opacity-60")}>
-      {attachments.map((attachment) => {
-        const here = openable(attachment)
-        const remote = !here && Boolean(attachment.path)
-        return (
-          <AttachmentTile
-            key={attachment.id}
-            attachment={attachment}
-            action={remote ? "download" : "open"}
-            onOpen={
-              here
-                ? () => setViewing(viewable.findIndex((a) => a.id === attachment.id))
-                : remote
-                  ? () => download(attachment)
-                  : undefined
-            }
-          />
-        )
-      })}
+    <div className={cn("flex w-full max-w-full flex-col items-end gap-2", dim && "opacity-60")}>
+      <MediaGallery items={drawn.filter((a) => cell(a) === "gallery").map(item)} align="end" />
+      {drawn
+        .filter((attachment) => cell(attachment) === "audio")
+        .map((attachment) => (
+          <AudioRow key={attachment.id} item={item(attachment)} />
+        ))}
+      {files.length > 0 && (
+        <div className="flex max-w-full flex-wrap justify-end gap-2">
+          {files.map((attachment) => {
+            const here = openable(attachment)
+            const remote = Boolean(attachment.path)
+            return (
+              <AttachmentTile
+                key={attachment.id}
+                attachment={attachment}
+                action={remote ? "download" : "open"}
+                onOpen={
+                  here
+                    ? () => setViewing(viewable.findIndex((a) => a.id === attachment.id))
+                    : remote
+                      ? () => download(attachment)
+                      : undefined
+                }
+              />
+            )
+          })}
+        </div>
+      )}
       <AttachmentViewer attachments={viewable} index={viewing} onIndex={setViewing} />
     </div>
   )

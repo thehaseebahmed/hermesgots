@@ -17,8 +17,8 @@ ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
 
-The registry in `app/scripts/e2e/cli.mjs` holds **70 keys**, and every one of them has a row
-below. `pnpm e2e list` prints the same 70 keys, and the rows here are grouped by the ticket that
+The registry in `app/scripts/e2e/cli.mjs` holds **69 keys**, and every one of them has a row
+below. `pnpm e2e list` prints the same 69 keys, and the rows here are grouped by the ticket that
 takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
@@ -26,11 +26,11 @@ takes them rather than by the registry's order, so the count is the thing to che
 | stay | 12 |
 | component | 53 |
 | plugin | 2 |
-| delete | 3 |
-| **total** | **70** |
+| delete | 2 |
+| **total** | **69** |
 
-Of those 70, 64 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
-reuses `todos.mjs`, so 63 distinct files there) and 6 point at the older
+Of those 69, 63 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
+reuses `todos.mjs`, so 62 distinct files there) and 6 point at the older
 `app/scripts/regression-*.mjs`.
 
 #297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**.
@@ -71,12 +71,12 @@ an argument this page has to carry, never a default (ADR 0019).
 Check any of it in one line:
 
 ```bash
-grep -c '^| `' docs/e2e-flow-audit.md                           # 70 rows, one per registry key
+grep -c '^| `' docs/e2e-flow-audit.md                           # 69 rows, one per registry key
 grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 12
 grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 53
-grep -c '^| `[a-z0-9-]*` | delete |' docs/e2e-flow-audit.md    # 3
+grep -c '^| `[a-z0-9-]*` | delete |' docs/e2e-flow-audit.md    # 2
 grep -c '^| `[a-z0-9-]*` | plugin |' docs/e2e-flow-audit.md    # 2
-cd app && pnpm -s e2e list | wc -l                             # 70 keys in the registry
+cd app && pnpm -s e2e list | wc -l                             # 69 keys in the registry
 git show 8a4e842^:app/scripts/e2e/cli.mjs |
   sed -n '/^const FLOWS = {/,/^}$/p' | grep -c '^  [a-z"-]*: {'  # 61, before goal mode left
 ```
@@ -130,15 +130,15 @@ reads, and a question whose window closed.
 ### The composer — #308
 
 Four keys demoted and one deleted: the slash menu, drafts, dictation with a stubbed recording, and
-a reply's images holding their place.
+a reply's images holding their place. The deleted one, `image-viewer`, went with #480, when a sent
+message's media began opening in the platform's own viewer rather than a pop-up of the app's.
 
 | Key | Verdict | What it asserts today | Why it moves | What replaces it |
 | --- | --- | --- | --- | --- |
 | `slash-skills` | component | The composer's `/` menu lists the bot's skills from the plugin rather than Hermes's `/v1/skills`, keeps the list on the device, opens on a slash that begins any word, and lands a picked skill where the caret is, with a space to keep typing — at a laptop width in light and a phone in dark. | A token rule, a cached list and an insert, all the app's; only the menu's height rules are beyond a DOM. | A component test over a seeded skills row asserts the list, a mid-word slash opening it, and the insert on pick; the token parsing and the insert's text stay unit tests and the height cap goes to the snapshots. |
 | `drafts` | component | A composer's unsent text is kept per chat and cleared on send. | A device row read per chat. | A component test types in two chats, asserts each keeps its own text, and that a send leaves none. |
 | `dictation` | component | Dictation in a real browser over the mock: pieces cut at the pauses, sent while the voice carries on and landing tidied at the end with the bot's word on both the clip and the cleanup; a take kept across a reload and retried; a take refused, by a recorder that errored mid-take or a track the device ended, and a host that can't take one, its reason on a tap; a tap that doesn't land on the bar; and the Dictation tab's word and model read back after a reload — with Chromium's fake microphone standing in for a real one. | Every ending is a state machine over a stubbed `MediaRecorder` — Stop, Send, Cancel, a cleanup that fails, answers junk or hangs, a clip the host never answers, one take per profile (`test-dictation-ending.tsx`, `test-dictation-failing.tsx`, `test-dictation-kept-offer.tsx`) — and the pause-cut points are a pure rule. | Those component tests assert the pieces land in order, a failed piece retries, a take ends tidied or raw inside its wait, the recording is kept until its text is in, and the mic is absent without the host; the cut points stay unit tests. The flow stays as the one proof that a real `MediaRecorder`, the mock's own answers and a real reload compose. |
-| `image-skeleton` | component | An agent's images hold their place with a skeleton while they load — in a chat and in a project session — give way to the image or to the tag's text, and a lone image takes the same cell as one in a group. | A placeholder's lifecycle over a seeded reply, with the media route's answers faked. | One component test asserts that lifecycle and absorbs `image-viewer`'s opened-photo leg (#308); the cells' reserved sizes go to the snapshots. |
-| `image-viewer` | delete | A photo opened from a message holds its place while it decodes, then paints — at a fifth of the page's normal speed, so the placeholder is catchable. | A duplicate of the placeholder lifecycle the image test owns; the slowdown is the flow working around the browser, not a claim. | The opened photo's placeholder becomes the image test's second leg. |
+| `image-skeleton` | component | An agent's images hold their place with a skeleton while they load — in a chat and in a project session — give way to the image or to the tag's text, and a lone image takes the same cell as one in a group. | A placeholder's lifecycle over a seeded reply, with the media route's answers faked. | One component test asserts that lifecycle (#308); a sent message's own cells are `test-media-gallery.tsx`'s, and the cells' reserved sizes go to the snapshots. |
 
 ### Settings, sync and usage — #309
 

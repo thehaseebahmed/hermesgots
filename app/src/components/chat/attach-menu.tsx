@@ -18,7 +18,7 @@ const SOURCES: { id: Source; label: string; icon: LucideIcon }[] = [
   { id: "files", label: "Files", icon: FileUpIcon },
 ]
 
-/** The composer's `+` button: photos and files to add to the message, and a session's mode. */
+/** The composer's `+` button: photos, clips and files to add to the message, and a session's mode. */
 export function AttachMenu({
   disabled,
   files,
@@ -90,22 +90,26 @@ export function AttachMenu({
       </Button>
       <input
         ref={(el) => void (inputs.current.camera = el)}
+        name="camera"
         type="file"
         accept="image/*"
         capture="environment"
         className="hidden"
         onChange={picked}
       />
+      {/* The gallery takes clips as well as photos: the Camera is the one that stays a still. */}
       <input
         ref={(el) => void (inputs.current.photos = el)}
+        name="photos"
         type="file"
-        accept="image/*"
+        accept="image/*,video/*"
         multiple
         className="hidden"
         onChange={picked}
       />
       <input
         ref={(el) => void (inputs.current.files = el)}
+        name="files"
         type="file"
         multiple
         className="hidden"

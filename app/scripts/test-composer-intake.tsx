@@ -62,6 +62,17 @@ async function drop(files: File[]) {
   await settle()
 }
 
+/** A pick from the `+` menu's own file input, the way the browser hands one over. */
+async function pick(source: "camera" | "photos" | "files", files: File[]) {
+  const input = document.querySelector(`input[name="${source}"]`)
+  assert.ok(input, "the menu's picker is on screen")
+  Object.defineProperty(input, "files", { value: files, configurable: true })
+  await act(async () => {
+    input.dispatchEvent(new Event("change", { bubbles: true }))
+  })
+  await settle()
+}
+
 const note = (name: string, body = "hello") =>
   new File([body], name, { type: "text/plain", lastModified: 1_700_000_000_000 })
 
@@ -115,6 +126,32 @@ test("a file over nine megabytes is refused by name instead of landing", async (
       assert.deepEqual(said, ["big.bin is over the 9 MB limit."])
       assert.deepEqual(tileNames(), [], "it never lands")
       assert.deepEqual(sent, [])
+    })
+  } finally {
+    toast.error = original
+  }
+})
+
+test("a clip picked from the gallery lands, and one over nine megabytes is refused there", async () => {
+  const said: string[] = []
+  const original = toast.error
+  const sent: { text: string; attachments: Attachment[] }[] = []
+  toast.error = ((message: unknown) => {
+    said.push(String(message))
+  }) as typeof toast.error
+  const clip = (name: string, bytes = 4) =>
+    new File([new Uint8Array(bytes)], name, {
+      type: "video/mp4",
+      lastModified: 1_700_000_000_000,
+    })
+  try {
+    await mount(composer(sent), async () => {
+      await pick("photos", [clip("clip.mp4")])
+      assert.deepEqual(tileNames(), ["clip.mp4"], "the clip is on the message, ready to send")
+      await pick("photos", [clip("long-take.mp4", MAX_FILE_BYTES + 1)])
+      assert.deepEqual(said, ["long-take.mp4 is over the 9 MB limit."], "refused at the pick")
+      assert.deepEqual(tileNames(), ["clip.mp4"], "and it never lands")
+      assert.deepEqual(sent, [], "nothing is sent by a pick")
     })
   } finally {
     toast.error = original
