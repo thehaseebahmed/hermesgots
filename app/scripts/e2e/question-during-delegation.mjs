@@ -59,7 +59,10 @@ await flow("question-during-delegation", async ({ page, seed, send, lastReply, u
   await send(ASK)
 
   const working = page.getByText("Working for", { exact: false })
-  await page.getByText(/Sub-Agent: /).first().waitFor({ timeout: 20_000 })
+  await page
+    .getByText(/Sub-Agent: /)
+    .first()
+    .waitFor({ timeout: 20_000 })
   await working.first().waitFor({ timeout: 20_000 })
   const listed = await until(
     async () => {
@@ -154,11 +157,7 @@ await flow("question-during-delegation", async ({ page, seed, send, lastReply, u
     0,
     "the footer the wake prompt arrived with is drawn nowhere",
   )
-  assert.equal(
-    await page.getByText(/ASYNC DELEGATION COMPLETE/).count(),
-    0,
-    "nor is the header",
-  )
+  assert.equal(await page.getByText(/ASYNC DELEGATION COMPLETE/).count(), 0, "nor is the header")
   pass("the wake prompt drew nothing of the thread")
 
   const drawn = () =>
@@ -168,7 +167,7 @@ await flow("question-during-delegation", async ({ page, seed, send, lastReply, u
   const lengths = new Set()
   let woken = null
   let liveWhenDrawn = false
-  for (const end = Date.now() + 45_000; Date.now() < end; ) {
+  for (const end = Date.now() + 45_000; Date.now() < end;) {
     const last = await lastReply(chat)
     if (last?.content.startsWith(WAKE_OPEN)) {
       if (!lengths.size) liveWhenDrawn = Boolean((await live()).session)
@@ -193,18 +192,11 @@ await flow("question-during-delegation", async ({ page, seed, send, lastReply, u
   await page.getByText(WAKE_END).first().waitFor({ timeout: 15_000 })
   const wakeRow = page.locator("[data-slot=message]", { hasText: WAKE_END }).last()
   assert.equal(await wakeRow.getAttribute("data-align"), "start", "the bot's own side")
-  assert.equal(
-    await wakeRow.locator("[data-slot=bubble-content]").count(),
-    0,
-    "with no bubble",
-  )
+  assert.equal(await wakeRow.locator("[data-slot=bubble-content]").count(), 0, "with no bubble")
   await row.getByText(RESULT_END).waitFor()
   const wokeTool = page.getByText("Ran a command", { exact: false }).last()
   await wokeTool.waitFor({ timeout: 15_000 })
-  assert.ok(
-    await precedes(row, wokeTool),
-    "the wake turn ran a tool of its own, below the result",
-  )
+  assert.ok(await precedes(row, wokeTool), "the wake turn ran a tool of its own, below the result")
   pass("the wake turn ran a tool and drew it")
   await shot("wake-turn")
   pass("the wake turn streamed in as a message of its own")
