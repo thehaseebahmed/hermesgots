@@ -146,12 +146,6 @@ def frontier(hermes_home: Path, folders: Iterable[Any]) -> List[Dict[str, Any]]:
     ]
 
 
-def next_ready(hermes_home: Path, folders: Iterable[Any]) -> Optional[Dict[str, Any]]:
-    """The oldest task in the frontier with its issue's body, or None when there is none."""
-    ready = frontier(hermes_home, folders)
-    return ready[0] if ready else None
-
-
 def _gather(hermes_home: Path, folders: Iterable[Any]) -> Tuple[List[str], List[Dict[str, Any]]]:
     """Every candidate task the project's repositories hold, with its blockers, and the repos read."""
     repos = repos_of(folders)
