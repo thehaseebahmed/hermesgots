@@ -498,11 +498,12 @@ class SkillCatalogTests(unittest.TestCase):
             skill_catalog.read(None)
         self.assertEqual(host.scopes, ["bot-a", None])
 
-    def test_a_host_without_the_provenance_reads_calls_every_local_skill_yours(self):
+    def test_a_host_without_the_provenance_read_says_nothing_about_where_a_skill_came_from(self):
         host = hermes(catalog=[scanned("plan")], bundled=("plan",), omit=("tools.skill_usage",))
         with mock.patch.dict(sys.modules, host.modules):
             got = skill_catalog.read("bot-a")
-        self.assertEqual([row["origin"] for row in got], ["yours"])
+        self.assertEqual([row["name"] for row in got], ["plan"])
+        self.assertNotIn("origin", got[0])
 
     def test_a_host_without_the_skills_config_leaves_enabled_out(self):
         host = hermes(catalog=[scanned("plan")], omit=("hermes_cli.skills_config",))

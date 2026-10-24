@@ -173,14 +173,17 @@ def _row(
     """One row in the shape the app reads, leaving out a field whose host reader is missing.
 
     An absent ``enabled`` is on and an absent ``switchable`` is switchable, which is what the app
-    assumes: an older Hermes answers less, never something else.
+    assumes: an older Hermes answers less, never something else. An absent ``origin`` is left out
+    rather than guessed, for the same reason: a row that says where it came from has to know, since
+    Remove appears only where the origin has a removal behind it.
     """
     row: Dict[str, Any] = {
         "name": name,
         "description": scanned.get("description", ""),
         "category": scanned.get("category"),
-        "origin": scan.origin(name) if scan.origin is not None else "yours",
     }
+    if scan.origin is not None:
+        row["origin"] = scan.origin(name)
     if scan.disabled is not None:
         row["enabled"] = not _is_disabled(scanned, name, scan.disabled)
     row["loadError"] = load_error
