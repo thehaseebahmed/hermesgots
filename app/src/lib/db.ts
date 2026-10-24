@@ -2,6 +2,7 @@ import Dexie, { type EntityTable, type Transaction } from "dexie"
 
 import { BOTS, LEGACY_BOT_IDS } from "@/components/bots"
 import { connectionKey } from "@/lib/connection"
+import { forgetRead } from "@/lib/read-marks"
 import type { Compaction, ModelChange, Move, ProviderUsage, Skill } from "@/lib/hermes"
 import type { SessionPipeline } from "@/lib/pipeline"
 import type { PromptEntry } from "@/lib/prompt-library"
@@ -1082,10 +1083,10 @@ export async function updateConversation(
 
 export async function deleteConversation(id: string, { remote = false } = {}) {
   const tables = [db.conversations, db.messages, db.tombstones, db.drafts, db.dictations]
-  await db.transaction("rw", tables, async () => {
+  const dropped = await db.transaction("rw", tables, async () => {
     const conversation = await db.conversations.get(id)
     // Main goes only when another device says so (`remote`), never from here.
-    if (conversation?.main && !remote) return
+    if (conversation?.main && !remote) return false
     await db.messages.where("conversationId").equals(id).delete()
     await db.drafts.delete(`c:${id}`)
     await db.dictations.delete(`c:${id}`)
@@ -1097,7 +1098,9 @@ export async function deleteConversation(id: string, { remote = false } = {}) {
         profileId: conversation.profileId,
       })
     }
+    return true
   })
+  if (dropped) forgetRead(id)
 }
 
 export async function getMessages(conversationId: string) {

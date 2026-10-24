@@ -29,6 +29,14 @@ const load = (): Record<string, number> => {
 
 const marks = createStore<Record<string, number>>(load())
 
+const persist = (next: Record<string, number>) => {
+  try {
+    localStorage.setItem(KEY, JSON.stringify(next))
+  } catch {
+    // Storage full or blocked: the in-memory marks still hold for this session's life.
+  }
+}
+
 /**
  * The thread has rendered on this device as of `at`: what clears its row's dot. Monotonic — a
  * mark never moves back — and the oldest marks drop once the store is full, so a device that
@@ -44,11 +52,17 @@ export function markRead(sessionId: string, at = Date.now()) {
     next = Object.fromEntries(entries.slice(0, KEEP))
   }
   marks.set(next)
-  try {
-    localStorage.setItem(KEY, JSON.stringify(next))
-  } catch {
-    // Persisting failed; the in-memory marks still clear this session's dots.
-  }
+  persist(next)
+}
+
+/** A deleted session takes its mark: `deleteConversation` drops it with the row. */
+export function forgetRead(sessionId: string) {
+  const current = marks.get()
+  if (!(sessionId in current)) return
+  const next = { ...current }
+  delete next[sessionId]
+  marks.set(next)
+  persist(next)
 }
 
 /** Re-renders whatever draws the dots when a mark moves. */

@@ -10,7 +10,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { MemoryRouter } from "react-router"
 
-import { markRead } from "@/lib/read-marks"
+import { forgetRead, markRead } from "@/lib/read-marks"
 import type { Conversation } from "@/lib/db"
 import { db } from "@/lib/db"
 import { SessionItem } from "@/routes/code"
@@ -189,4 +189,9 @@ test("a mark never moves back, and the oldest drop once the store is full", () =
   assert.equal(Object.keys(store()).length, 500, "the store holds only its cap")
   assert.equal(store()["mono"], undefined, "the oldest mark drops once it is full")
   assert.ok(store()["bulk-499"], "the newest survive")
+
+  forgetRead("bulk-499")
+  assert.equal(store()["bulk-499"], undefined, "a deleted session takes its mark with it")
+  forgetRead("never-marked")
+  assert.equal(Object.keys(store()).length, 499, "forgetting nothing leaves the rest alone")
 })
