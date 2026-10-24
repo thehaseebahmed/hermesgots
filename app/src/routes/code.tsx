@@ -42,11 +42,13 @@ import {
   type WaitingReason,
 } from "@/lib/waiting"
 import {
+  isUnread,
   lastActivityAt,
   rowTone,
   sessionGroup,
   type SessionState,
 } from "@/lib/workspace"
+import { readMark, useReadMarks } from "@/lib/read-marks"
 
 const DAY_MS = 86_400_000
 const LAST_PROJECT = "memento:last-session-project"
@@ -116,6 +118,8 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
   const waits = useWaiting()
   const lists = useAllProjects()
   const changes = useAnyChange("projects")
+  // Re-draws the rows' unread dots when a mark moves (the thread rendered in the pane beside).
+  useReadMarks()
   const [query, setQuery] = useState("")
   const [chip, setChip] = useState<string>()
   const [starting, setStarting] = useState(false)
@@ -452,6 +456,7 @@ function SessionItem({
         )
       }
       tone={rowTone(session, { state, prTick: prTick ?? false })}
+      unread={isUnread(session, readMark(session.id))}
       botId={botId}
       title={session.title}
       badge={

@@ -28,6 +28,7 @@ import {
 } from "@/lib/hermes"
 import { syncNow } from "@/lib/sync"
 import {
+  isUnread,
   lastActivityAt,
   rowTone,
   sessionGroup,
@@ -45,6 +46,7 @@ import {
  * the row's trailing time.
  */
 export {
+  isUnread,
   lastActivityAt,
   rowTone,
   sessionGroup,

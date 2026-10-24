@@ -94,6 +94,7 @@ const TONES = {
 export function ItemRow({
   icon,
   tone,
+  unread,
   waiting,
   botId,
   title,
@@ -112,6 +113,8 @@ export function ItemRow({
    * done or healthy, muted for at rest).
    */
   tone?: "warning" | "success" | "muted"
+  /** New activity since this device last rendered the thread: the blue dot on the icon's corner. */
+  unread?: boolean
   /** Waits on the user: the icon takes the warning tone. Ignored where `tone` is given. */
   waiting?: boolean
   botId?: string
@@ -146,6 +149,16 @@ export function ItemRow({
           <span className="absolute -right-1 -bottom-1 flex size-5 items-center justify-center overflow-hidden rounded-full bg-background ring-2 ring-background">
             <Bot id={botId} className="size-[85%]" />
           </span>
+        )}
+        {unread && (
+          <>
+            <span className="sr-only">New activity</span>
+            <span
+              data-unread
+              aria-hidden
+              className="absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-info ring-2 ring-background"
+            />
+          </>
         )}
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-1">

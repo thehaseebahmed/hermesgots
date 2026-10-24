@@ -145,6 +145,17 @@ export function lastActivityAt(
 }
 
 /**
+ * Whether the Code row shows its unread dot: the session's last activity is newer than this
+ * device's read mark — and a session this device has never opened has no mark, so it is unread.
+ */
+export function isUnread(
+  session: Pick<Conversation, "updatedAt" | "resolvedAt" | "discardedAt" | "prs">,
+  mark: number | undefined,
+): boolean {
+  return lastActivityAt(session) > (mark ?? 0)
+}
+
+/**
  * A thread's state as its card draws it: the session's own ladder, with no session of its own to be
  * resolved or discarded, and a reply that failed saying so only once nothing of the thread's is at
  * work. A subagent still writing is the thread still working, and its failure is the turn that is

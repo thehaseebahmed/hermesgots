@@ -8,6 +8,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import {
+  isUnread,
   lastActivityAt,
   rowTone,
   sessionGroup,
@@ -188,6 +189,20 @@ test("a resolve or discard carries the time when it is the newest", () => {
     30,
     "an older resolve never drags it back",
   )
+})
+
+// The unread dot: activity newer than this device's read mark, no mark meaning never read here.
+
+test("a session this device has never opened is unread", () => {
+  assert.equal(isUnread(session({ updatedAt: 10 }), undefined), true, "no mark at all")
+  assert.equal(isUnread(session({ updatedAt: 10 }), 0), true, "a zero mark reads as none")
+})
+
+test("the dot shows only while activity is newer than the mark", () => {
+  const seen = session({ updatedAt: 40, prs: [pr("open", "success", 35)] })
+  assert.equal(isUnread(seen, 50), false, "the thread rendered after everything")
+  assert.equal(isUnread(seen, 40), false, "the moment the last activity landed counts as read")
+  assert.equal(isUnread(seen, 30), true, "something landed since")
 })
 
 // The icon's colour: what the round icon behind the glyph wears, top rule winning.
