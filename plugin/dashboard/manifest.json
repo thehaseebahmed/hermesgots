@@ -3,7 +3,7 @@
   "label": "Gots",
   "description": "Status of the Gots plugin, which serves cron run history to the Gots app, reads a project's GitHub tasks as AFK's frontier, claims the oldest ready one, works it in a session of its own whose draft pull request closes the task, gives that claim back when the session is closed or its run never started, says when one stalled, holds AFK's switch for a project and the skills its work follows, and labels its chats.",
   "icon": "Smartphone",
-  "version": "0.80.0",
+  "version": "0.81.0",
   "tab": { "path": "/memento", "position": "end" },
   "entry": "dist/index.js",
   "api": "plugin_api.py"

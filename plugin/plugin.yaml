@@ -1,5 +1,5 @@
 name: memento
-version: "0.80.0"
+version: "0.81.0"
 description: Keeps the Gots app's chat list and context use, reads its chats' todo lists, serves it cron run history and Hermes Projects, creates projects with their GitHub repos cloned in, runs its project sessions in git worktrees with a permission mode, reads a project's GitHub tasks as AFK's frontier, claims the oldest ready one and works it in a session of its own, whose draft pull request closes its task, gives the claim back when that session is closed or its run never started and says when one stalled, holds AFK's switch for the project, the Prompt its work is told and the skills it follows, gives the agent a tool that pushes its work and opens the pull request, resolves a session once its pull request merges, closes its pull request and branch when it is discarded, lets the agent ask the user questions, researches questions into cited guides, and labels its chats in Hermes.
 author: Gots
 # A research mission can be written with a model or provider other than the profile's, so the plugin
