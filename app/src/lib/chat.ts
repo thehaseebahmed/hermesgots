@@ -1643,14 +1643,35 @@ export async function removeQueued(message: Message) {
 }
 
 /**
+ * The attachments a steer's markers name, saved on the host first: the marker carries the path the
+ * model opens, so a file the host hasn't taken yet would name nothing. A save that fails throws,
+ * which leaves the message in the queue rather than steering a marker that points nowhere.
+ */
+async function savedForSteer(message: Message, attachments: Attachment[]) {
+  if (!attachments.some((attachment) => !attachment.path && attachment.blob)) return attachments
+  const host = await hostOf(message.conversationId)
+  if (!host) throw new HermesError("This reply can't be steered.")
+  const saved = await uploadAttachments(
+    host.config,
+    host.conversation.hermesSessionId,
+    attachments,
+    true,
+  )
+  await db.messages.update(message.id, { attachments: saved })
+  return saved
+}
+
+/**
  * Hands a queued message to the reply that's running, which reads it after its current tool calls
  * instead of after it finishes. It then sits in the reply where it was sent.
  */
 export async function steerQueued(message: Message) {
-  const said = attachmentsText(message.content, message.attachments ?? [])
   const turn = turns.get(message.conversationId)
   let runId = turn?.draft.runId
+  let carried = message.attachments ?? []
+  let said: string
   if (message.hostQueued) {
+    said = attachmentsText(message.content, carried)
     const host = await hostOf(message.conversationId)
     if (!host) throw new HermesError("This reply can't be steered.")
     const steered = await queueAction(
@@ -1661,8 +1682,10 @@ export async function steerQueued(message: Message) {
     )
     if (typeof steered.run_id === "string") runId = steered.run_id
   } else {
-    if (!turn || !runId || !canSteer(message.attachments ?? []))
+    if (!turn || !runId || !canSteer(carried))
       throw new HermesError("This reply can't be steered.")
+    carried = await savedForSteer(message, carried)
+    said = attachmentsText(message.content, carried)
     await steerRun(turn.config, runId, said)
   }
   await db.messages.delete(message.id)
@@ -1694,8 +1717,10 @@ export async function steerText(
   if (!queued) return
   try {
     await steerQueued(queued)
-  } catch {
-    toast.error("Couldn't steer this reply, so it's queued.")
+  } catch (error) {
+    // A file the host wouldn't take is why it couldn't steer, so its own words come first.
+    const because = error instanceof AttachmentError ? `${error.message} ` : ""
+    toast.error(`${because}Couldn't steer this reply, so it's queued.`)
   }
 }
 

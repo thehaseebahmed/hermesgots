@@ -6,6 +6,7 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
+import { toast } from "sonner"
 
 import { attachmentsText } from "@/lib/attachment-text"
 import { removeQueued, requeueSteer, sendFromMain, sendQueued, stopMessage } from "@/lib/chat"
@@ -27,7 +28,7 @@ function endRuns() {
 }
 
 /** One host with the plugin's queue: what it was asked, and the item it says it queued. */
-function host(name: string) {
+function host(name: string, { features = ["queue"], upload = true } = {}) {
   const seen: Seen[] = []
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input instanceof Request ? input.url : input))
@@ -36,9 +37,10 @@ function host(name: string) {
     seen.push({ path: url.pathname, method: init?.method, body })
     if (url.pathname.endsWith("/capabilities"))
       return json({ features: { run_submission: true, run_events_sse: true } })
-    if (url.pathname.endsWith("/plugins/memento/info")) return json({ features: ["queue"] })
+    if (url.pathname.endsWith("/plugins/memento/info")) return json({ features })
     if (url.pathname.endsWith("/attachments") && init?.method === "POST") {
       const file = url.searchParams.get("name")
+      if (!upload) return json({ error: { message: "The host is full." } }, 507)
       return json({ name: file, path: `/host/${file}`, size: 3 })
     }
     if (url.pathname.endsWith("/queue") && init?.method === "POST")
@@ -53,7 +55,12 @@ function host(name: string) {
     if (url.pathname.endsWith("/queue/q_1/steer")) return json({ run_id: "r2", text: body })
     if (url.pathname.endsWith("/queue/q_1") && init?.method === "GET")
       return json({ items: [], sent: [], paused: false })
-    if (url.pathname.endsWith("/v1/runs") && init?.method === "POST" && hangingRuns.has(name))
+    // Hermes's own steer route, which a message the device holds goes through.
+    if (/\/runs\/[^/]+\/steer$/.test(url.pathname)) return json({ ok: true })
+    if (url.pathname.endsWith("/v1/runs") && init?.method === "POST")
+      return json({ run_id: "r1", status: "running" })
+    // A reply that goes on running: its events stream stays open until the turn is stopped.
+    if (/\/runs\/r1\/events$/.test(url.pathname) && hangingRuns.has(name))
       return new Promise<Response>((_, reject) => {
         const keep = setInterval(() => {}, 100)
         hung.add(() => {
@@ -61,8 +68,6 @@ function host(name: string) {
           reject(new DOMException("stopped", "AbortError"))
         })
       })
-    if (url.pathname.endsWith("/v1/runs") && init?.method === "POST")
-      return json({ run_id: "r1", status: "running" })
     return json({})
   }) as typeof fetch
   return seen
@@ -126,7 +131,8 @@ const photo = (): Attachment => ({
 async function startReply(name: string, seen: Seen[]) {
   hangingRuns.add(name)
   void sendFromMain(MAIN, "first")
-  await until(async () => seen.some((r) => r.path.endsWith("/v1/runs")), "Main's reply to run")
+  // The turn has its run once its events stream is opened, which is what a steer reaches.
+  await until(async () => seen.some((r) => /\/runs\/r1\/events$/.test(r.path)), "Main's reply to run")
 }
 
 async function finishReply() {
@@ -172,6 +178,63 @@ test("a mid-reply message carrying a photo waits in the queue instead of steerin
       "it waits with the photo it carries",
     )
   } finally {
+    await finishReply()
+  }
+})
+
+test("a steer on a host without the queue saves the file before its marker names the path", async () => {
+  // The plugin's queue is what uploads for a host that has it; without one, the device composes
+  // the markers, and a marker naming no path names no file the model can read.
+  await seed("steer-no-queue")
+  const seen = host("steer-no-queue", { features: [] })
+  try {
+    await startReply("steer-no-queue", seen)
+    await sendFromMain(MAIN, "read this", [note()], { steer: true })
+    assert.ok(
+      seen.some((r) => r.path.endsWith("/attachments") && r.method === "POST"),
+      "the file is saved on the host first",
+    )
+    const steer = seen.find((r) => /\/runs\/[^/]+\/steer$/.test(r.path))
+    assert.ok(steer, "the message reaches the running reply as a steer")
+    const said = String(steer.body?.input ?? "")
+    assert.match(said, /name="notes.txt"/)
+    assert.match(said, /path="\/host\/notes.txt"/, "and the path the model opens")
+    const held = (await messagesOf(MAIN)).filter((m) => m.content === "read this")
+    assert.deepEqual(held, [], "it is in the reply now, not waiting behind it")
+  } finally {
+    await finishReply()
+  }
+})
+
+test("a steer whose file the host won't take stays in the queue, with the reason", async () => {
+  await seed("steer-unuploaded")
+  const seen = host("steer-unuploaded", { features: [], upload: false })
+  const said: string[] = []
+  const original = toast.error
+  toast.error = ((message: unknown) => {
+    said.push(String(message))
+  }) as typeof toast.error
+  try {
+    await startReply("steer-unuploaded", seen)
+    await sendFromMain(MAIN, "read this", [note()], { steer: true })
+    assert.deepEqual(
+      seen.filter((r) => /\/runs\/[^/]+\/steer$/.test(r.path)),
+      [],
+      "a marker with no path behind it is never steered",
+    )
+    assert.deepEqual(said, [
+      "Couldn't attach notes.txt: The host is full. Couldn't steer this reply, so it's queued.",
+    ])
+    const held = (await messagesOf(MAIN)).filter((m) => m.content === "read this")
+    assert.equal(held.length, 1, "nothing the user said is lost")
+    assert.equal(held[0].status, "queued")
+    assert.deepEqual(
+      held[0].attachments?.map((a) => a.name),
+      ["notes.txt"],
+      "and it waits with its file",
+    )
+  } finally {
+    toast.error = original
     await finishReply()
   }
 })
