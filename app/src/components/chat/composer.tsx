@@ -60,6 +60,7 @@ import {
 import { isDoubleEscape, isInterrupt } from "@/lib/keys"
 import { useSkills } from "@/lib/skills"
 import { midReply, steerAsked } from "@/lib/steer"
+import { runnableSkills } from "@/lib/skills-cache"
 import { cn, randomId } from "@/lib/utils"
 
 const HOLD_MS = 400
@@ -213,8 +214,12 @@ export function Composer({
   // The menu follows the caret: a `/` that begins a word opens it, wherever in the message it is.
   const token = slashToken(value, caret)
   const skills = useSkills(connection, Boolean(token) && !disabled)
+  // Only what the bot can run: a skill switched off or broken is not offered, and the same rule
+  // takes it out of every picker, since they read the one list.
   const skillItems: SlashItem[] =
-    skills.status === "ok" ? skills.skills.map((skill) => ({ kind: "skill", ...skill })) : []
+    skills.status === "ok"
+      ? runnableSkills(skills.skills).map((skill) => ({ kind: "skill", ...skill }))
+      : []
   const items = token
     ? rankSlashItems([...localCommands(main), ...(busy ? SEND_COMMANDS : []), ...skillItems], token)
     : []

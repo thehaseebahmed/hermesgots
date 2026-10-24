@@ -27,3 +27,15 @@ export function skillsState({
   // The read is over and brought nothing: the commands alone, never a panel left holding a spinner.
   return settled === key ? { status: "ok", skills: [] } : { status: "loading" }
 }
+
+/**
+ * The skills the bot can run right now: what the composer's `/` menu and every picker offer.
+ *
+ * One rule over the one list, so a skill switched off or broken leaves all of them at once — the
+ * rule ADR 0044 states. A row that says neither (`enabled`/`loadError` absent: an older plugin, or
+ * a device row cached before it) is runnable, because an unanswered host must never take a skill
+ * away. This is not `useSkills`' filter: the Skills tab reads the whole list from the same hook.
+ */
+export function runnableSkills(skills: Skill[]): Skill[] {
+  return skills.filter((skill) => skill.enabled !== false && !skill.loadError)
+}

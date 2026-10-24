@@ -359,10 +359,24 @@ export async function listModels(config: HermesConfig, signal?: AbortSignal): Pr
   return Array.isArray(body?.data) ? body.data.map((m: { id: string }) => m.id) : []
 }
 
+/** Where a skill came from, as the plugin words it: Hermes's own seeding, a Hub install, one the
+ * bot's profile holds, or a Hermes plugin on the host. */
+export type SkillOrigin = "builtin" | "hub" | "yours" | "plugin"
+
 export interface Skill {
   name: string
   description?: string | null
   category?: string | null
+  // The four below are the plugin's richer row. Each is optional because a device row cached before
+  // it, or an older plugin, answers the old three keys — and an absent field has to mean "nothing
+  // known", never "off".
+  origin?: SkillOrigin | null
+  /** Whether the bot's profile has it switched on; absent where the host couldn't say, which is on. */
+  enabled?: boolean | null
+  /** Why the host can't load it, in the host's own words; null when it loads. */
+  loadError?: string | null
+  /** Whether the host honours a switch for it; absent where the host couldn't say, which is yes. */
+  switchable?: boolean | null
 }
 
 /** The skills the bot's profile can run, for the composer's `/` menu. Hermes's own `/v1/skills`
