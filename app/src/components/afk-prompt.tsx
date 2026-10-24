@@ -30,7 +30,12 @@ export function PromptEditor({
   open: boolean
   onOpenChange: (open: boolean) => void
   prompt: string
-  onSave: (prompt: string) => Promise<"saved" | "refused">
+  /**
+   * Writes the words, and — where they were copied from the account's library — the entry they came
+   * from beside them. Done hands over the words alone, which detaches the copy on the host; a pick
+   * hands over both, so the row can tell a copy whose entry moves on from an original.
+   */
+  onSave: (prompt: string, promptId?: string | null) => Promise<"saved" | "refused">
   /** The account's library is drawn here: signed in, with the vault open on this device. */
   library?: boolean
 }) {
@@ -66,17 +71,18 @@ export function PromptEditor({
   }
 
   /**
-   * A pick is one write of the entry's own words, through the route Done writes: the host answers
-   * with what it holds now — a Prompt, so no workflow — and the sheet stays open on the copy, which
-   * Done then closes without a second write. The entry's id rides along from a later ticket; here the
-   * pick needs nothing the host doesn't already serve.
+   * A pick is one write of the entry's own words and its id, through the route Done writes: the host
+   * answers with what it holds now — a Prompt that remembers the entry it came from, so no workflow —
+   * and the sheet stays open on the copy, which Done then closes without a second write. Typing over
+   * the copy afterwards is a plain write, which clears the source: the row never calls the user's own
+   * words stale (ADR 0043).
    */
   const pick = async (entry: PromptEntry) => {
     setChoosing(false)
     setText(entry.body)
     setSaving(true)
     try {
-      await onSave(entry.body)
+      await onSave(entry.body, entry.id)
     } finally {
       setSaving(false)
     }
