@@ -1,5 +1,12 @@
 # A reply keeps its thinking in runs, each drawn after the tool call that broke it
 
+**Superseded in its row-count, fold and cap clauses by [ADR 0049](0049-thought-rows-that-touch-draw-as-one-and-open-until-the-answer.md)
+(2026-10-24):** rows drawn with nothing between them are one row, every row of a live turn stays open
+until the answer begins, and an open row carries no cap, fade or Show more. Everything else this ADR
+decided — runs in arrival order, each anchored to the call that broke it, the span measured by the
+device that watched, and the honesty of the three labels — stands; 0049 changes how rows are drawn
+and when they open, not what a run is.
+
 Supersedes 0029. The thinking line stopped being one line: long reasoning read as an undifferentiated
 wall of plain text, and a turn that thought between tool calls showed it all hoisted above the work it
 was thinking about. A reply now keeps its thinking in runs — `reasoningRuns: { text, afterToolId?,
