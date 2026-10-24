@@ -1100,7 +1100,10 @@ export function ChatPage({
       />
 
       {hasMessages || hasCards || (thread && moved.trailing.length) ? (
-        <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+        // A chat's scroller is its own. Keyed on the chat, a switch mounts one that has placed
+        // nothing yet, so its single move lands the new chat's whole content at its end instead of
+        // the old chat's position being inherited and corrected afterwards.
+        <MessageScrollerProvider key={id ?? "new"} autoScroll defaultScrollPosition="end">
           <MessageScroller className="flex-1">
             <MessageScrollerViewport aria-label="Messages">
               <MessageScrollerContent className="w-full gap-6 px-4 pt-32 pb-6">
