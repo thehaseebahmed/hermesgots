@@ -2,8 +2,9 @@
 
 Status: grilled 2026-10-24, every decision settled and recorded in ADR 0048. Published as #539
 with tickets #540, #541, #542 and #543; the build order at the end is the tickets' shape when
-implementation starts. The spec carries `ready-for-agent` and the tickets stay bare, so the agent
-claims the spec and works the graph in order.
+implementation starts. #539 is blocked by the gate issue #545 that this docs pull request (#544)
+closes — work starts on that merge. The spec carries `ready-for-agent` and the tickets stay bare,
+so the agent claims the spec and works the graph in order.
 
 ## Goal
 
