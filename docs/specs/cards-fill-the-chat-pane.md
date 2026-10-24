@@ -3,8 +3,18 @@
 Status: grilled 2026-10-23, every decision settled and recorded in ADR 0041. Published as #493 with
 tickets #494, #495, #496 and #497; the build order at the end is the tickets' shape when
 implementation starts. #493 is blocked by the gate issue that the docs PR carrying this file closes —
-work starts on that merge. The spec carries `ready-for-agent` and the tickets stay bare, so the agent
+implementation starts. The spec carries `ready-for-agent` and the tickets stay bare, so the agent
 claims the spec and works the graph in order.
+
+**Revised 2026-10-24 — the width rule inverts.** ADR 0046 supersedes this spec's Solution in its
+width alone: a card never passes the reading column's 768px box (`CARD_BASE` is `COLUMN_BOX` plus
+the surface), and centres inside it on a wide pane, where this spec's pane-fill would have taken it
+to the pane's edges. The goal — one rule every in-chat card follows, with the split widths gone —
+is unchanged, and so is everything the grilling settled about the mechanics: the pane as the
+container, the column as the box's own 736px of text, the gutter on the container, the caps that
+come off. What a card does at 1440px is the opposite of what Decision 1 says below: it stops at
+768px and frames the text column by the box's 16px gutter each side. `card-widths` measures the cap
+where this spec's Tests section asked it to measure the fill.
 
 ## Goal
 

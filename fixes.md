@@ -1831,8 +1831,9 @@ diff, and the two-axis `code-review` (standards and spec). Everything they found
 introduced is applied on it: the 768px box shared as `COLUMN_BOX` beside the column it holds,
 `CARD_BASE` behind every card's surface (the approval's ring included), the footer's lines as the
 list that decides whether the footer is drawn, the slot's dead wrappers gone and the slot named for
-the flows, the flow's three widths in one walk — 1440px now asserting the card fills the pane like
-the others — the comment cuts, the e2e skill's pane arithmetic corrected against what the flow
+the slot, the flow's three widths in one walk — 1440px now asserting the card stops dead at the
+768px cap the reading column's box carries (ADR 0046) — the comment cuts, the e2e skill's pane
+arithmetic corrected against what the flow
 measures, the `FLAT_CARD` rename the `ThreadCard` collision needed, `layout.ts`'s row in AGENTS.md's
 map, and the ADR, spec and audit worded to what was built. The entry below is what remains; the
 rejections follow it.
@@ -1869,14 +1870,31 @@ Declined with the evidence, each for what it is:
 - **`[data-slot="composer-slot"] [data-slot="card"]` measures whatever card is in the slot** — the
   slot's ternary renders one card at a time, and the flow waits on the waiting Question's own button
   before it measures, so any other card fails that wait first.
-- **The flow pins 16, 736 and the slot's gutters as literals** — a test that read them from the
-  source would follow a regression instead of failing on it.
+- **The flow pins 16, 736, 768 and the slot's gutters as literals** — a test that read them from
+  the source would follow a regression instead of failing on it.
 - **`cn` and template literals side by side** — `chat.tsx` and `composer.tsx` never import `cn`;
   each file matches its own style.
 - **`ExchangeCard`** — the name predates this branch; the diff changed its class only.
 - **The Question's interior stretch** — `Card` lays its children out in flex and grid, which stretch
-  across whatever width the card has; the caps changed the width alone, and the spec's Tests section
-  scopes the flow to card-against-pane and text-against-column.
+  across whatever width the card has; the cap changed the width alone, and the spec's revision note
+  scopes the flow to card-against-box and text-against-column.
+
+## Risky, pre-existing
+
+### 2. The openui flow asserts a streamed title without waiting for the stream
+
+`app/scripts/e2e/openui.mjs` (a stay, #389) waits for the interface card to appear and then asserts
+the title's exact text, but the mock streams the title word by word, so the assert can read a
+prefix of it — this branch saw one red run where `Quarterly` was read against `Quarterly sales`,
+and an immediate re-run passed 8/8.
+
+- Cost: a false red on a healthy branch; someone reruns or, worse, investigates a layout regression
+  that is not there.
+- Suggested fix: wait for the full title string the same way the flow already waits for the card
+  (an `until` on the exact text), so the assert reads what the stream settled on.
+- Why it is not applied here: the race is in #389's own wait contract, not in anything this branch
+  wrote; rewriting a stay's waits belongs with the flow's owner, and this branch only observed the
+  flake once while re-taking shots.
 
 ---
 
