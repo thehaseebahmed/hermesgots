@@ -146,7 +146,8 @@ The block is a lazy import, memoised on its resolved source.
 ## Component library v1
 
 Root `Stack`. Read-only, theme tokens only, no hard-coded colour, legible at 390px before it is pretty
-at 768px. Six components, which is what fits the host's 4,000-character section with room to spare.
+at 768px. Seven components, which still fits the host's 4,000-character section: the artifact measures
+3,789 characters with the map's signature in it, 211 characters of room left.
 
 | Component | Props | Drawn with |
 | --- | --- | --- |
@@ -156,6 +157,7 @@ at 768px. Six components, which is what fits the host's 4,000-character section 
 | `List` | `items: { label, detail? }[]`, `ordered?` | The thread's list treatment |
 | `Callout` | `tone: "info" \| "warn" \| "good"`, `text` | `ui/alert` |
 | `Chart` | `kind: "bar" \| "line" \| "area" \| "pie"`, `series`, `xLabel?`, `yLabel?`, `summary` (required) | `chart.tsx`, Recharts, lazy |
+| `Map` | `points: { lat, lng, label, detail? }[]`, `summary` (required) | `map.tsx`, Leaflet over theme-aware CARTO tiles, lazy; pans and zooms once tapped (ADR 0039) |
 
 No explanatory captions: the components say what their data says.
 

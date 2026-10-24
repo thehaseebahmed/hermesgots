@@ -13,10 +13,11 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Card as CardSurface, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
 import { Chart } from "./chart.tsx"
+import { Map } from "./map.tsx"
 import { OPENUI_ROOT } from "./root.ts"
 
 const child: z.ZodType<SubComponentOf<unknown>> = z.lazy(() =>
-  z.union([Card.ref, Table.ref, List.ref, Callout.ref, Chart.ref]),
+  z.union([Card.ref, Table.ref, List.ref, Callout.ref, Chart.ref, Map.ref]),
 )
 
 const stackProps = z.object({ children: z.array(child) })
@@ -148,7 +149,7 @@ const Callout = defineComponent({
 })
 
 export const library = createLibrary({
-  components: [Stack, Card, Table, List, Callout, Chart],
+  components: [Stack, Card, Table, List, Callout, Chart, Map],
   root: OPENUI_ROOT,
 })
 export const parser = createParser(library.toJSONSchema(), OPENUI_ROOT)

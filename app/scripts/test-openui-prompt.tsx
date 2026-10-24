@@ -69,7 +69,13 @@ test("it fits the host's section limit instead of being dropped whole", () => {
     checkedIn.length <= MAX_CHARS,
     `${checkedIn.length} characters, over the host's ${MAX_CHARS}`,
   )
-  assert.ok(generatedText.length <= MAX_CHARS, `the library generates ${generatedText.length}`)
+  // The library's own words may sit over the ceiling — since ADR 0040 the rewrite owns the artifact
+  // and the compression is what buys the room, so the map's signature put them at 4,114 — but the
+  // rewrite has to be the shrink that fits it, and a body it can no longer fit fails here.
+  assert.ok(
+    rewritten.length < generatedText.length,
+    `the rewrite shrinks the library's ${generatedText.length} characters, not grows them`,
+  )
 })
 
 test("the header names the pinned renderer the words were generated for", () => {

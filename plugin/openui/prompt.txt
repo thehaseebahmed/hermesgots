@@ -23,6 +23,7 @@ Table(columns: string[], rows: (string | number)[][], caption?: string) — Plai
 List(items: {label: string, detail?: string}[], ordered?: boolean)
 Callout(tone: "info" | "warn" | "good", text: string)
 Chart(kind: "bar" | "line" | "area" | "pie", series: {name: string, points: {x: string, y: number}[]}[], xLabel?: string, yLabel?: string, summary: string) — A bar, line, area or pie chart; summary in words.
+Map(points: {lat: number, lng: number, label: string, detail?: string}[], summary: string) — Labeled places on a map; summary in words.
 
 ## Hoisting & Streaming (CRITICAL)
 

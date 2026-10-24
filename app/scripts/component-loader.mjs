@@ -30,10 +30,12 @@ async function locate(specifier, parent) {
 }
 
 export async function resolve(specifier, context, next) {
+  // A stylesheet is the build's business, not a test's: a component that imports one still runs.
+  // Both its spellings count — a package's (`leaflet/dist/leaflet.css`) and its own (`./map.css`),
+  // which would otherwise resolve to a file Node has no loader for.
+  if (specifier.endsWith(".css")) return { url: "data:text/javascript,", shortCircuit: true }
   const found = await locate(specifier, context.parentURL ? fileURLToPath(context.parentURL) : root)
   if (found) return { url: pathToFileURL(found).href, shortCircuit: true }
-  // A stylesheet is the build's business, not a test's: a component that imports one still runs.
-  if (specifier.endsWith(".css")) return { url: "data:text/javascript,", shortCircuit: true }
   return next(specifier, context)
 }
 

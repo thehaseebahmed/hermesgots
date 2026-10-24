@@ -709,3 +709,170 @@ test("a bar is drawn with rounded corners, a line as a curve, an area with a fai
     restore()
   }
 })
+
+const WALK = "Four stops along the north waterfront."
+
+const stop = (label: string, lat: number, lng: number, detail: string) =>
+  `{ lat: ${lat}, lng: ${lng}, label: "${label}", detail: "${detail}" }`
+
+const mapSource = (points: string[], summary?: string) =>
+  [
+    "# id: walk",
+    "root = Stack([m])",
+    `m = Map([${points.join(", ")}]${summary === undefined ? "" : `, "${summary}"`})`,
+  ].join("\n")
+
+const mapOf = (row: Element | undefined) => row?.querySelector("[data-slot=map]")
+const mapLabels = (row: Element | undefined) => [
+  ...(row?.querySelectorAll("[data-slot=map] .openui-map-label") ?? []),
+]
+
+const STOPS = [
+  stop("Ferry Building", 37.7955, -122.3937, "Market Street at the Embarcadero"),
+  stop("Coit Tower", 37.8024, -122.4058, "Telegraph Hill"),
+  stop("Pier 39", 37.8107, -122.4103, "The Embarcadero"),
+]
+
+/**
+ * jsdom has no layout, so Leaflet measures a container of nothing and fits no view. The elements
+ * inside the map report the box the screen under test gives them; everything else keeps jsdom's.
+ */
+function mapBox(width: number, height = 224) {
+  const inMap = (element: Element) => Boolean(element.closest("[data-slot=map]"))
+  const own = (name: "clientWidth" | "clientHeight") =>
+    Object.getOwnPropertyDescriptor(HTMLElement.prototype, name)
+  const saved = { clientWidth: own("clientWidth"), clientHeight: own("clientHeight") }
+  Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return inMap(this) ? width : 0
+    },
+  })
+  Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return inMap(this) ? height : 0
+    },
+  })
+  return () => {
+    for (const [name, descriptor] of Object.entries(saved))
+      if (descriptor)
+        Object.defineProperty(HTMLElement.prototype, name, descriptor as PropertyDescriptor)
+      else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name]
+  }
+}
+
+test("a map draws its labelled points, its summary the text alternative", async () => {
+  const restore = mapBox(390)
+  try {
+    const seen = await screen(
+      [ask("Map the walk."), reply("reply", `The walk:\n\n${block(mapSource(STOPS, WALK))}`)],
+      async () => {
+        const row = () => replyRow("The walk:")
+        await drawn(() => mapLabels(row()).length === 3, "the map's labels")
+        const reply = row()
+        assert.ok(reply, "the reply is a row of the thread")
+        assert.ok(mapOf(reply), "the block drew a map")
+        assert.equal(reply.querySelectorAll("pre").length, 0, "no <pre> left behind")
+        assert.equal(reply.querySelectorAll("[data-md-code]").length, 0, "and no code block")
+        const surface = mapOf(reply)?.querySelector("[role=img]")
+        assert.ok(surface, "the map is one image to a reader")
+        assert.equal(surface.getAttribute("aria-label"), WALK, "with its summary as the label")
+        assert.deepEqual(
+          mapLabels(reply).map((label) => label.textContent?.trim()),
+          ["Ferry Building", "Coit Tower", "Pier 39"],
+          "one label on the map for every point, as the model wrote it",
+        )
+        assert.deepEqual(
+          mapLabels(reply).map((label) => label.getAttribute("title")),
+          ["Market Street at the Embarcadero", "Telegraph Hill", "The Embarcadero"],
+          "and the detail a point carries riding with its label's marker",
+        )
+        const attribution = mapOf(reply)?.querySelector(".leaflet-control-attribution")?.textContent
+        assert.match(
+          attribution ?? "",
+          /OpenStreetMap/,
+          "the basemap's attribution is in its chrome",
+        )
+        assert.match(attribution ?? "", /CARTO/, "naming the tiles' provider")
+        assert.match(reply.textContent ?? "", /The walk:/, "the text before the block draws")
+        assert.doesNotMatch(reply.textContent ?? "", /openui-lang/, "the fence draws nothing")
+      },
+    )
+    assert.equal(seen.fallbacks(), 0, "the map drew: nothing was noted")
+  } finally {
+    restore()
+  }
+})
+
+test("a map with one point draws it, the single point no bounds to break", async () => {
+  const restore = mapBox(390)
+  try {
+    const seen = await screen(
+      [
+        ask("Map the one stop."),
+        reply("reply", `One stop:\n\n${block(mapSource([STOPS[1] as string], WALK))}`),
+      ],
+      async () => {
+        const row = () => replyRow("One stop:")
+        await drawn(() => mapLabels(row()).length === 1, "the map's one label")
+        assert.equal(
+          mapLabels(row())[0]?.textContent?.trim(),
+          "Coit Tower",
+          "a one-point map still names its point",
+        )
+        assert.equal(
+          mapOf(row())?.querySelector("[role=img]")?.getAttribute("aria-label"),
+          WALK,
+          "and keeps its summary",
+        )
+      },
+    )
+    assert.equal(seen.fallbacks(), 0, "the one-point map drew: nothing was noted")
+  } finally {
+    restore()
+  }
+})
+
+test("a map with no summary draws as the fenced source, never as a map", async () => {
+  const seen = await screen(
+    [ask("Map it."), reply("reply", `The map:\n\n${block(mapSource(STOPS))}`)],
+    async () => {
+      await drawn(() => Boolean(codeOf(replyRow("The map:"))), "the fallback")
+      const row = replyRow("The map:")
+      assert.ok(row, "the reply is a row of the thread")
+      const code = codeOf(row)
+      assert.ok(code, "a map no one could hear draws as code")
+      assert.equal(labelOf(code), "openui-lang", "with the fence's language label")
+      assert.match(code.textContent ?? "", /Map\(\[/, "as the model wrote it")
+      assert.equal(row.querySelectorAll(".leaflet-container").length, 0, "and no map")
+      assert.equal(mapOf(row), null, "nothing of the map's frame")
+      await settle()
+    },
+  )
+  assert.equal(seen.fallbacks(), 1, "noted once at the console's verbose level")
+})
+
+test("a map missing its points, or a point its numbers, draws as the fenced source", async () => {
+  const broken = [
+    // The points themselves are required, like every signature's own arguments.
+    mapSource([]).replace("m = Map([])", 'm = Map("Ferry Building")'),
+    // A point with no longitude is not a place.
+    mapSource([`{ lat: 37.7955, label: "Ferry Building" }`], WALK),
+    // And a latitude the parser hands over as text is not a number either.
+    mapSource([`{ lat: "37.7955", lng: -122.3937, label: "Ferry Building" }`], WALK),
+  ]
+  for (const [index, source] of broken.entries()) {
+    const seen = await screen(
+      [ask("Map it."), reply("reply", `Broken ${index}:\n\n${block(source)}`)],
+      async () => {
+        const row = () => replyRow(`Broken ${index}:`)
+        await drawn(() => Boolean(codeOf(row())), `fallback ${index}`)
+        assert.ok(codeOf(row()), `map ${index} draws as the source the model sent`)
+        assert.equal(labelOf(codeOf(row()) ?? (row() as Element)), "openui-lang", "under its fence")
+        assert.equal(mapOf(row()), null, `and no map at all (${index})`)
+      },
+    )
+    assert.equal(seen.fallbacks(), 1, `map ${index} was noted once`)
+  }
+})

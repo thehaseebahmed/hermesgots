@@ -147,11 +147,18 @@ export async function settleNav(page) {
 
 /**
  * Opens the app with the bot set up, runs `body`, and closes the browser. A failure saves
- * `failed.png` (with SHOTS_DIR set) before it is thrown.
+ * `failed.png` (with SHOTS_DIR set) before it is thrown. `touch` gives the page a touchscreen, for a
+ * flow that has to send a real finger — off by default, so every other flow keeps a mouse-only page.
  */
-export async function flow(name, body, { viewport = { width: 1440, height: 900 }, dark } = {}) {
+export async function flow(name, body, { viewport = { width: 1440, height: 900 }, dark, touch } = {}) {
   const browser = await launch(chromium, !headed)
-  const page = await settleNav(await browser.newPage({ viewport, colorScheme: dark ? "dark" : "light" }))
+  const page = await settleNav(
+    await browser.newPage({
+      viewport,
+      colorScheme: dark ? "dark" : "light",
+      ...(touch ? { hasTouch: true } : {}),
+    }),
+  )
   const shot = async (step) => {
     if (!shots) return
     mkdirSync(shots, { recursive: true })
