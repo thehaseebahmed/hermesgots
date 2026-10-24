@@ -186,7 +186,7 @@ class StopTest(unittest.TestCase):
         self.session("c1", "s", delegate_from="s", goal="plan the auth refactor")
         self.session("c2", "s", delegate_from="s")
         self.adapter.run("run-1", "stopping", "s")
-        named = delegation.sweep(self.adapter, [self.home])
+        named = delegation.sweep_stops(self.adapter, [self.home])
         self.assertEqual(named, ["c1", "c2"])
         self.assertEqual(self.core.stopped, ["c1", "c2"], "each child core holds was stopped")
         self.assertEqual(self.core.wide, [], "no session-wide stop: that reaches other turns' children")
@@ -284,7 +284,7 @@ class StopTest(unittest.TestCase):
         self.session("c1", "s", delegate_from="s")
         self.adapter.run("run-1", "stopping", "s")
         handed: Dict[str, None] = {}
-        self.assertEqual(delegation.sweep(self.adapter, [self.home], handed), ["c1"])
+        self.assertEqual(delegation.sweep_stops(self.adapter, [self.home], handed), ["c1"])
         # The status lingers while the run unwinds, and the child's row stays open until core
         # finalizes it: the watch must not stop the same run again.
         self.adapter.run("run-1", "cancelled", "s")
@@ -351,7 +351,7 @@ class StopTest(unittest.TestCase):
             delegation.asyncio, "sleep", side_effect=one_tick
         ) as sleep:
             with self.assertRaises(RuntimeError):
-                asyncio.run(delegation.run(self.adapter))
+                asyncio.run(delegation.watch_stops(self.adapter))
         sleep.assert_called_once_with(delegation.STOP_SECONDS)
         self.assertEqual(self.core.stopped, ["c1"])
 
