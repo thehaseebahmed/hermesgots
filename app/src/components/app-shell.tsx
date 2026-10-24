@@ -7,7 +7,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react"
-import { Outlet, useLocation, useNavigationType } from "react-router"
+import { Outlet, matchPath, useLocation, useNavigationType } from "react-router"
 
 import { ConversationList } from "@/components/conversation-list"
 import { BreakReminderProvider } from "@/components/break-reminder-provider"
@@ -22,7 +22,7 @@ import { useCodePane, useMeetingsPane, useProjectsPane, useResearchPane } from "
 import { useSidebarCollapsed } from "@/lib/sidebar"
 import { useBotPane, useBotThreads } from "@/lib/threads"
 import { cn } from "@/lib/utils"
-import { ChatPage } from "@/routes/chat"
+import { ChatPage, onChatSwap } from "@/routes/chat"
 
 /**
  * A list kept on screen beside what it opened: a bot beside its thread (from `xl`), or Code's
@@ -58,8 +58,33 @@ const ProjectsPane = lazy(() =>
 )
 
 /**
+ * The chat a screen draws, if it draws one: `/c/<id>` names its chat, and Home (`/`) is a chat with
+ * no id of its own — it draws one, or sends the reader on to the last bot's Main.
+ */
+function chatOf(screen: string) {
+  const chat = matchPath("/c/:id", screen)?.params.id
+  if (chat) return chat
+  return screen === "/" ? "" : undefined
+}
+
+/**
+ * Both screens are a chat and the chat changed: a switch, which the pane lands by holding the chat
+ * the reader left until the next one is ready. Fading that moment in is the flash the hold exists
+ * to remove, so the transition plays as the held chat is replaced instead (below).
+ */
+function isChatSwitch(from: string, to: string) {
+  const before = chatOf(from)
+  const after = chatOf(to)
+  return before !== undefined && after !== undefined && before !== after
+}
+
+const EASE = "cubic-bezier(0.2, 0, 0, 1)"
+const FADE: Keyframe[] = [{ opacity: 0 }, { opacity: 1 }]
+
+/**
  * Animates the main pane in when the screen changes: from the right when it was opened on top of
  * the last one, from the left when going back to it, and a fade when it took the last one's place.
+ * A chat switch is the exception — it fades when its swap lands, not here.
  */
 function usePageTransition(ref: RefObject<HTMLElement | null>, pane: ListPane | undefined) {
   const location = useLocation()
@@ -67,6 +92,9 @@ function usePageTransition(ref: RefObject<HTMLElement | null>, pane: ListPane | 
   const large = useLarge()
   const screen = screenOf(location.pathname, large, pane)
   const last = useRef({ screen, idx: depth(), key: location.key })
+  // A pane lands its chat when its own answers are in, so two panes of a switch can land commits
+  // apart: the address fades once, not once per pane.
+  const fadedFor = useRef<string | undefined>(undefined)
 
   useLayoutEffect(() => {
     const previous = last.current
@@ -76,6 +104,7 @@ function usePageTransition(ref: RefObject<HTMLElement | null>, pane: ListPane | 
     if (location.key === previous.key) return
     // A new chat taking its id once the first message is sent stays the same screen.
     if (type === "REPLACE" && (location.state as { quiet?: boolean } | null)?.quiet) return
+    if (isChatSwitch(previous.screen, screen)) return
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return
     const step = Math.sign(last.current.idx - previous.idx)
     ref.current?.animate(
@@ -84,10 +113,23 @@ function usePageTransition(ref: RefObject<HTMLElement | null>, pane: ListPane | 
             { opacity: 0, transform: `translateX(${step * 24}px)` },
             { opacity: 1, transform: "none" },
           ]
-        : [{ opacity: 0 }, { opacity: 1 }],
-      { duration: step ? 260 : 200, easing: "cubic-bezier(0.2, 0, 0, 1)" },
+        : FADE,
+      { duration: step ? 260 : 200, easing: EASE },
     )
   }, [location, type, screen, ref])
+
+  // A switch's transition belongs to the swap: the commit the pane stops holding the chat the
+  // reader left and draws the one they asked for.
+  useLayoutEffect(
+    () =>
+      onChatSwap(() => {
+        if (fadedFor.current === location.key) return
+        fadedFor.current = location.key
+        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return
+        ref.current?.animate(FADE, { duration: 200, easing: EASE })
+      }),
+    [location.key, ref],
+  )
 }
 
 /**
