@@ -447,6 +447,56 @@ async def post(adapter: Any, profile: Optional[str], path: str, body: Dict[str, 
         raise StartError(f"Couldn't reach the API server: {error}", False) from error
 
 
+def _files(raw: Any) -> List[Dict[str, Any]]:
+    """The files a waiting row carries, as its own row keeps them (a JSON column, or a list)."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw) if raw else []
+        except ValueError:
+            return []
+    return [file for file in raw if isinstance(file, dict)] if isinstance(raw, list) else []
+
+
+def _body_text(body: Any) -> Optional[str]:
+    """The text a run body carries, its parts in the order the model reads them — or None when the
+    body holds more than text, which a steer, being text, can't carry."""
+    try:
+        run = json.loads(body) if isinstance(body, str) else body
+    except (TypeError, ValueError):
+        return ""
+    if not isinstance(run, dict):
+        return ""
+    messages = run.get("input")
+    if not isinstance(messages, list) or not messages or not isinstance(messages[-1], dict):
+        return ""
+    content = messages[-1].get("content")
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    texts = []
+    for part in content:
+        if not isinstance(part, dict):
+            continue
+        if part.get("type") != "text":
+            return None
+        texts.append(str(part.get("text") or ""))
+    return "\n".join(texts)
+
+
+def steer_text(row: Any) -> Optional[str]:
+    """What a waiting item says when it steers the run that's going, or None when it can't steer.
+
+    A steer is text, so a message carrying files steers as the text its own body holds — the
+    marker line per file, with the path the app saved it at, and the sentence about them. A
+    message carrying a photo the body puts inside it can't: a steer has nowhere to put the bytes.
+    """
+    row = dict(row)
+    files = _files(row.get("attachments"))
+    said = _body_text(row.get("body")) if files else (row.get("text") or "")
+    return (said or "").strip() or None
+
+
 async def steer(
     adapter: Any,
     profile: Optional[str],
@@ -465,18 +515,19 @@ async def steer(
     row = await asyncio.to_thread(take, path, session_id, item_id)
     if row is None:
         return None, ("That message isn't waiting any more.", 404)
-    if row["attachments"] or not row["text"].strip():
+    said = steer_text(row)
+    if said is None:
         await asyncio.to_thread(put_back, path, row)
         return None, ("Only text can steer a reply.", 409)
     try:
         await post(
-            adapter, profile, f"/v1/runs/{run_id}/steer", {"input": row["text"]}, authorization=authorization
+            adapter, profile, f"/v1/runs/{run_id}/steer", {"input": said}, authorization=authorization
         )
     except StartError as error:
         await asyncio.to_thread(put_back, path, row)
         return None, (str(error), 409 if error.permanent else 502)
     # A steer the agent never reads comes back when the run ends; see tick.
-    return {"object": "memento.queue.steered", "id": row["id"], "run_id": run_id, "text": row["text"]}, None
+    return {"object": "memento.queue.steered", "id": row["id"], "run_id": run_id, "text": said}, None
 
 
 async def tick(adapter: Any, session_id: str, profile: Optional[str], path: Path) -> None:

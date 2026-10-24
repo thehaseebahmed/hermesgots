@@ -18,6 +18,15 @@ def body(text: str) -> dict:
     return {"model": "m", "input": [{"role": "user", "content": text}], "session_id": "s1"}
 
 
+def parts(*texts: str) -> dict:
+    """A message the app sends with files: its words, then a marker line per file."""
+    return {
+        "model": "m",
+        "input": [{"role": "user", "content": [{"type": "text", "text": text} for text in texts]}],
+        "session_id": "s1",
+    }
+
+
 class Adapter:
     def __init__(self) -> None:
         self._run_statuses: dict = {}
@@ -122,6 +131,85 @@ class OutboxTest(unittest.TestCase):
     def test_clean_body_keeps_the_run_fields(self) -> None:
         run = outbox.clean_body("s1", {"model": "m", "input": [], "stream": True, "session_id": "x"})
         self.assertEqual(run, {"model": "m", "input": [], "session_id": "s1"})
+
+    def steer(self, item_id: str):
+        return asyncio.run(outbox.steer(self.adapter, None, self.path, "s1", item_id))
+
+    def test_a_file_steers_as_the_markers_its_message_carries(self) -> None:
+        """A file's content reaches the model as a marker line, which a steer can carry."""
+        marker = '<attachment name="notes.txt" type="text/plain" size="3" path="/h/notes.txt" />'
+        item = outbox.add(
+            self.path,
+            "s1",
+            None,
+            "read this",
+            [{"name": "notes.txt", "type": "text/plain", "size": 3, "path": "/h/notes.txt"}],
+            parts("read this", marker, "The content of each file is not included in this message."),
+        )
+        self.adapter.run("r1", "running", 1)
+        steered, refusal = self.steer(item["id"])
+        self.assertIsNone(refusal)
+        self.assertEqual(
+            self.posted[0][:2],
+            (
+                "/v1/runs/r1/steer",
+                {
+                    "input": "read this\n"
+                    f"{marker}\n"
+                    "The content of each file is not included in this message."
+                },
+            ),
+        )
+        self.assertEqual(len(self.posted), 1)
+        self.assertEqual(steered["run_id"], "r1")
+        self.assertEqual(outbox.read(self.path, "s1")["items"], [])
+
+    def test_a_message_carrying_a_photo_waits_instead(self) -> None:
+        """A photo's content rides in the message itself, and a steer is text alone."""
+        item = outbox.add(
+            self.path,
+            "s1",
+            None,
+            "look",
+            [{"name": "cat.png", "type": "image/png", "size": 3, "path": "/h/cat.png"}],
+            {
+                "model": "m",
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "look"},
+                            {"type": "image", "source": {"type": "base64", "data": "aGk="}},
+                        ],
+                    }
+                ],
+                "session_id": "s1",
+            },
+        )
+        self.adapter.run("r1", "running", 1)
+        steered, refusal = self.steer(item["id"])
+        self.assertIsNone(steered)
+        self.assertIsNotNone(refusal)
+        self.assertEqual(self.posted, [], "nothing reaches the run")
+        found = outbox.read(self.path, "s1")
+        self.assertEqual([row["id"] for row in found["items"]], [item["id"]], "it stays queued")
+
+    def test_a_photo_the_message_cant_hold_steers_as_text(self) -> None:
+        """A model that takes no images reads a photo's marker line, which a steer carries."""
+        photo = '<attachment name="scan.png" type="image/png" size="3" path="/h/scan.png" />'
+        item = outbox.add(
+            self.path,
+            "s1",
+            None,
+            "look",
+            [{"name": "scan.png", "type": "image/png", "size": 3, "path": "/h/scan.png"}],
+            parts("look", photo),
+        )
+        self.adapter.run("r1", "running", 1)
+        steered, refusal = self.steer(item["id"])
+        self.assertIsNone(refusal)
+        self.assertEqual(self.posted[0][:2], ("/v1/runs/r1/steer", {"input": f"look\n{photo}"}))
+        self.assertEqual(steered["run_id"], "r1")
 
 
 if __name__ == "__main__":
