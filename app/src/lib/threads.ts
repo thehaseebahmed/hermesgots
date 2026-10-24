@@ -1,5 +1,5 @@
 import Dexie from "dexie"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { matchPath, useLocation } from "react-router"
 
@@ -133,17 +133,21 @@ export function useThreads(profileId: string | undefined): Thread[] | undefined 
     }
   }, [profileId])
 
-  if (!answer || answer.profileId !== profileId) return undefined
-  return answer.rows.map(({ chat, opener, last, replies, streaming, failed, local }) => {
-    const reason = local ?? live[chat.hermesSessionId]
-    const state = threadState({
-      waiting: Boolean(reason),
-      streaming,
-      failed,
-      subagents: subagents[chat.hermesSessionId],
+  // One list per answer: a fresh array each render would invalidate every memo a chat composes over
+  // these threads (its cards, its flow, what moved), for a list that didn't change.
+  return useMemo(() => {
+    if (!answer || answer.profileId !== profileId) return undefined
+    return answer.rows.map(({ chat, opener, last, replies, streaming, failed, local }) => {
+      const reason = local ?? live[chat.hermesSessionId]
+      const state = threadState({
+        waiting: Boolean(reason),
+        streaming,
+        failed,
+        subagents: subagents[chat.hermesSessionId],
+      })
+      return { chat, opener, last, replies, state, reason }
     })
-    return { chat, opener, last, replies, state, reason }
-  })
+  }, [answer, profileId, live, subagents])
 }
 
 export interface BotSummary {
@@ -296,18 +300,15 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
   const hint = (state as { bot?: string } | null)?.bot
   // A Main id names its own bot, so only a thread's id costs a row read. The query answers with
   // the address it ran for, so an answer for the one before it can't pass for this one's.
-  const owner = useLiveQuery(
-    async (): Promise<{ chat?: string; found?: ChatOwner | null }> => {
-      if (!chat) return { found: null }
-      if (main) return { chat, found: { profileId: main } }
-      const found = await db.conversations.get(chat)
-      return {
-        chat,
-        found: found ? { profileId: found.profileId, projectId: found.projectId } : null,
-      }
-    },
-    [chat, main],
-  )
+  const owner = useLiveQuery(async (): Promise<{ chat?: string; found?: ChatOwner | null }> => {
+    if (!chat) return { found: null }
+    if (main) return { chat, found: { profileId: main } }
+    const found = await db.conversations.get(chat)
+    return {
+      chat,
+      found: found ? { profileId: found.profileId, projectId: found.projectId } : null,
+    }
+  }, [chat, main])
   const found = owner && owner.chat === chat ? owner.found : undefined
   // The bot this pane is for, and the thread the address itself is, if it is one of the bot's.
   let profileId: string | undefined

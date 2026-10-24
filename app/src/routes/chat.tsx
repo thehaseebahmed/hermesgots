@@ -1036,8 +1036,9 @@ export function ChatPage({
       : activity || mainLine || repliesLine
 
   // The pane's own children, as they stand. Kept as one element so the next switch can draw exactly
-  // this, unchanged, while its chat answers — a switch lands the new frame in one commit.
-  const frame = (
+  // this, unchanged, while its chat answers — a switch lands the new frame in one commit. Built only
+  // once the chat is ready: a frame not ready to be drawn is one nobody would ever see.
+  const frame = ready ? (
     <>
       <ChatHeader
         title={headerTitle}
@@ -1475,7 +1476,7 @@ export function ChatPage({
         </AlertDialogContent>
       </AlertDialog>
     </>
-  )
+  ) : null
 
   // Written after the commit that landed it, so the next switch has the frame to hold: an effect
   // rather than a render-time write, since only a committed frame is the one on screen.
