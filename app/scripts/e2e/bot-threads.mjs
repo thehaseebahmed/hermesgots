@@ -16,6 +16,9 @@ const LONG_MESSAGES = 24
 
 const SECOND_BOT = "Second bot"
 const SECOND_MESSAGES = ["Stack the firewood", "Twenty logs by the shed", "The axe is put away"]
+// The second bot's own thread: a bot switch has a thread lane to swap as well as Main.
+const SECOND_THREAD = { id: "e2e-second-thread", title: "Firewood stack" }
+const SECOND_THREAD_SAY = "A note only the second bot's thread holds"
 
 const STARTED = "Rotate the greenhouse logs"
 const TRIAGE_NEW = "Clean up the invoice folders"
@@ -118,16 +121,16 @@ function seed(
   )
 }
 
-function watchFrames(page, { chats, pane }) {
+function watchFrames(page, { lanes }) {
   return page.evaluate(
-    async ({ chats, pane }) => {
+    async ({ lanes }) => {
       const { BOTS } = await import("/src/components/bots.tsx")
       const { GREETINGS } = await import("/src/lib/greeting.ts")
       const { SETUP_COPY } = await import("/src/routes/chat.tsx")
       const hero = [...BOTS.flatMap((bot) => bot.lines), ...GREETINGS]
       const rowsIn = (content) =>
         content ? [...content.children].filter((child) => child.hasAttribute("data-slot")) : []
-      const sample = () => {
+      const sample = (pane, chats) => {
         const root = document.querySelector(`[data-pane="${pane}"]`)
         if (!root)
           return {
@@ -135,6 +138,7 @@ function watchFrames(page, { chats, pane }) {
             match: -1,
             wrong: [`no [data-pane="${pane}"]`],
             held: false,
+            empty: false,
             scrollTop: 0,
             atEnd: false,
             bottom: 0,
@@ -155,6 +159,8 @@ function watchFrames(page, { chats, pane }) {
           title,
           match,
           held,
+          // A bot's pane saying it has no threads: what an unanswered list must never be read as.
+          empty: Boolean(root.querySelector('[data-slot="bot-pane-empty"]')),
           wrong: [
             text.includes(SETUP_COPY) && "the setup copy",
             title === "New chat" && 'a "New chat" header',
@@ -180,26 +186,31 @@ function watchFrames(page, { chats, pane }) {
         one.title === other.title &&
         one.match === other.match &&
         one.held === other.held &&
+        one.empty === other.empty &&
         one.scrollTop === other.scrollTop &&
         one.atEnd === other.atEnd &&
         one.bottom === other.bottom &&
         one.count === other.count &&
         one.wrong.length === other.wrong.length
-      window.__frames = []
+      window.__frames = Object.fromEntries(lanes.map((lane) => [lane.pane, []]))
       window.__quiet = 0
       window.__watching = true
-      let before = null
+      const before = {}
       const tick = () => {
         if (!window.__watching) return
-        const frame = sample()
-        window.__quiet = same(before, frame) ? window.__quiet + 1 : 0
-        before = frame
-        window.__frames.push(frame)
+        let quiet = true
+        for (const lane of lanes) {
+          const frame = sample(lane.pane, lane.chats)
+          quiet = quiet && same(before[lane.pane], frame)
+          before[lane.pane] = frame
+          window.__frames[lane.pane].push(frame)
+        }
+        window.__quiet = quiet ? window.__quiet + 1 : 0
         requestAnimationFrame(tick)
       }
       requestAnimationFrame(tick)
     },
-    { chats, pane },
+    { lanes },
   )
 }
 
@@ -280,8 +291,31 @@ function assertSwitchFrames(frames, { what }) {
 
 const SETTLED_FRAMES = 3
 
-async function sampleSwitch(page, { chats, pane = "route", act, what }) {
-  await watchFrames(page, { chats, pane })
+/**
+ * A second pane sampled through the same switch — the thread beside the chat — must only ever draw a
+ * chat of its own across it: the one it had, or the one the bot asked for keeps. Never a frame that
+ * calls the bot thread-less while its list is still answering, and never one with no pane at all.
+ */
+function assertLaneFrames(frames, { what }) {
+  assert.ok(frames.length > 4, `${what}: frames were sampled (${frames.length})`)
+  const seen = [...new Set(frames.map((frame) => frame.title || "(no title)"))]
+  assert.deepEqual(
+    frames.filter((frame) => frame.match < 0).map((frame) => frame.title || "(no title)"),
+    [],
+    `${what}: every frame is one of the two chats, whole (saw ${seen.join(" → ")})`,
+  )
+  assert.deepEqual(
+    frames.filter((frame) => frame.empty).map((frame) => frame.title),
+    [],
+    `${what}: no frame says the bot has no threads`,
+  )
+  assert.equal(frames[0].match, 0, `${what}: the first frame is the chat being left`)
+  assert.equal(frames.at(-1).match, 1, `${what}: and the last is the one it asked for`)
+}
+
+async function sampleSwitch(page, { chats, pane = "route", act, what, also = [] }) {
+  const lanes = [{ pane, chats }, ...also]
+  await watchFrames(page, { lanes })
   await page.evaluate(
     () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))),
   )
@@ -301,7 +335,9 @@ async function sampleSwitch(page, { chats, pane = "route", act, what }) {
     polling: "raf",
   })
   const frames = await stopFrames(page)
-  assertSwitchFrames(frames, { what })
+  assertSwitchFrames(frames[pane], { what })
+  for (const lane of also)
+    assertLaneFrames(frames[lane.pane], { what: `${what}, the ${lane.pane} lane` })
   return frames
 }
 
@@ -372,6 +408,40 @@ async function startedThread(page, mainPath, until) {
     "/thread to open the thread it started",
   )
   return path.split("/").at(-1)
+}
+
+/**
+ * A bot's own thread, the message in it, and the pane's memory of opening it: a bot switch then has
+ * two lanes to swap, Main and the thread beside it.
+ */
+function threadFor(page, profileId, { id, title, says }) {
+  return page.evaluate(
+    async ({ profileId, id, title, says }) => {
+      const { db } = await import("/src/lib/db.ts")
+      const { lastThreadKey } = await import("/src/lib/threads.ts")
+      const now = Date.now()
+      await db.conversations.put({
+        id,
+        profileId,
+        title,
+        titleEdited: true,
+        hermesSessionId: `memento-${id}`,
+        createdAt: now - 2 * 3_600_000,
+        updatedAt: now - 3_600_000,
+        changedAt: now,
+      })
+      await db.messages.put({
+        id: `${id}-open`,
+        conversationId: id,
+        role: "user",
+        content: says,
+        status: "done",
+        createdAt: now - 2 * 3_600_000 + 1,
+      })
+      localStorage.setItem(lastThreadKey(profileId), id)
+    },
+    { profileId, id, title, says },
+  )
 }
 
 await flow(
@@ -651,6 +721,18 @@ await flow(
       15_000,
       "the thread's own pane beside Main",
     )
+    // The pane reads as this thread before it is compared: until the address's thread is the one it
+    // knows, the lane is still the thread it had, and naming this one then lands a pane of its own.
+    await until(
+      () =>
+        page.evaluate((started) => {
+          const pane = document.querySelector('[data-pane="thread"]')
+          const title = pane?.querySelector('[data-slot="header-title"]')?.textContent ?? ""
+          return Boolean(pane && !pane.hasAttribute("inert") && title.includes(started))
+        }, STARTED),
+      15_000,
+      "the started thread's own pane, answered rather than held",
+    )
     await settled(page)
     const held = await page.locator('[data-slot="header-row"]').nth(1).elementHandle()
     // Naming the same thread from its card again — which is what a tap on a thread that is already
@@ -703,12 +785,26 @@ await flow(
 
     const secondBot = await addBot(page, { name: SECOND_BOT, messages: SECOND_MESSAGES })
     const secondMain = `/c/main-${secondBot}`
+    // The second bot keeps a thread beside its Main too, so the switch has two lanes to read.
+    await threadFor(page, secondBot, { ...SECOND_THREAD, says: SECOND_THREAD_SAY })
     const secondRow = page.locator(`aside a[href="${secondMain}"]`).first()
     await secondRow.waitFor({ timeout: 15_000 })
     await until(
       async () => (await secondRow.textContent())?.includes(SECOND_BOT),
       15_000,
       "the second bot's row in the sidebar",
+    )
+    // What the thread beside Main is called now, so the lane's frames can be read as chats.
+    const threadTitle = await page.evaluate(
+      () =>
+        document
+          .querySelectorAll('[data-slot="header-row"]')[1]
+          ?.querySelector('[data-slot="header-title"]')
+          ?.textContent?.trim() ?? "",
+    )
+    assert.ok(
+      threadTitle,
+      `the thread beside Main reads with a title to swap (saw "${threadTitle}")`,
     )
     await sampleSwitch(page, {
       chats: [
@@ -718,6 +814,16 @@ await flow(
       what: "the sidebar's bot switch",
       pane: "main",
       act: () => secondRow.click(),
+      // The thread beside Main swaps with it: the old bot's thread or the new bot's, nothing else.
+      also: [
+        {
+          pane: "thread",
+          chats: [
+            { title: threadTitle, says: STARTED },
+            { title: SECOND_THREAD.title, says: SECOND_THREAD_SAY },
+          ],
+        },
+      ],
     })
     await page.waitForURL(`**${secondMain}`, { timeout: 15_000 })
     pass("switching bots lands the other bot's Main with no frame between them")
@@ -730,9 +836,18 @@ await flow(
       what: "and back to the first bot",
       pane: "main",
       act: () => page.locator(`aside a[href="${mainPath}"]`).first().click(),
+      also: [
+        {
+          pane: "thread",
+          chats: [
+            { title: SECOND_THREAD.title, says: SECOND_THREAD_SAY },
+            { title: threadTitle, says: STARTED },
+          ],
+        },
+      ],
     })
     await page.waitForURL(`**${mainPath}`, { timeout: 15_000 })
-    pass("and switching back paints no frame but the two bots' Mains")
+    pass("and switching back paints no frame but the two bots' Mains and their threads")
 
     await page.emulateMedia({ colorScheme: "dark" })
     await until(
