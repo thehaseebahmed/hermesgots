@@ -394,12 +394,16 @@ def _held_task_stage(hermes_home: Path, hold: Optional["Hold"]) -> HeldStage:
 
 def write_from(body: Dict[str, Any]) -> Tuple[str, Any]:
     """What a write names — ``"on"`` with its flag, ``"workflow"`` with an id, ``"prompt"`` with
-    its text (None for one cleared), or ``"pick_count"`` with how many tasks it may hold — or
-    ValueError.
+    its text and the library entry it was copied from, or ``"pick_count"`` with how many tasks it
+    may hold — or ValueError.
 
     One write, one shape: two fields in one body could write one of them and then be refused, leaving
-    half of it written.
+    half of it written. A Prompt's source is no shape of its own, because an id without words names
+    nothing to write: it rides with the text as that shape's second half, None for a plain write
+    (which clears whatever source the row held — ADR 0043).
     """
+    if "prompt_id" in body and "prompt" not in body:
+        raise ValueError("prompt_id needs a prompt beside it.")
     named = [key for key in ("on", "workflow_id", "prompt", "pick_count") if key in body]
     if len(named) > 1:
         raise ValueError("A write names one of on, workflow_id, prompt or pick_count.")
@@ -414,7 +418,9 @@ def write_from(body: Dict[str, Any]) -> Tuple[str, Any]:
             raise ValueError("workflow_id must be a workflow's id.")
         return "workflow", workflow_id.strip()
     if "prompt" in body:
-        return "prompt", prompt_text(body["prompt"])
+        text = prompt_text(body["prompt"])
+        source = prompt_source(body["prompt_id"]) if "prompt_id" in body else None
+        return "prompt", (text, source)
     if "pick_count" in body:
         return "pick_count", pick_count_of(body["pick_count"])
     raise ValueError("on, workflow_id, prompt or pick_count is needed.")
@@ -442,18 +448,42 @@ def prompt_text(value: Any) -> Optional[str]:
     return pipeline.text(value)
 
 
-def set_prompt(hermes_home: Path, project_id: str, prompt: Optional[str]) -> None:
-    """Writes the project's Prompt, clearing any workflow pick in the same write.
+def prompt_source(value: Any) -> str:
+    """The library entry a Prompt was copied from: its id, trimmed.
+
+    Given beside a Prompt it has to be one: the app only names an entry it really copied from, so a
+    blank or non-text id is a client's mistake rather than a copy without a source — refused, like
+    every other write of a shape this host can't hold. A Prompt written without one clears the
+    source in ``set_prompt``; that is how a hand edit detaches the copy (ADR 0043).
+    """
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("prompt_id must be a library entry's id.")
+    return value.strip()
+
+
+def set_prompt(
+    hermes_home: Path,
+    project_id: str,
+    prompt: Optional[str],
+    prompt_id: Optional[str] = None,
+) -> None:
+    """Writes the project's Prompt and the library entry it was copied from, clearing any workflow
+    pick in the same write.
 
     A project is never both: a Prompt is one run's method and a workflow is the stages its work runs
     through. The skill columns a row from before the picker carries go with the pick: they are what
     ``_workflow`` migrates a project with no pick from, so leaving them would put the old workflow
     back as soon as the Prompt was cleared, and empty has to mean the default.
+
+    ``prompt_id`` rides the same write as the words: a pick writes both, and a plain write (the id
+    left None) clears it, so a Prompt typed by hand never reads as a stale copy of an entry the user
+    didn't choose (ADR 0043).
     """
     _upsert(
         hermes_home,
         project_id,
         prompt=prompt,
+        prompt_id=prompt_id,
         workflow_id=None,
         build_skill=None,
         critique_skills=None,
@@ -467,11 +497,18 @@ def set_workflow(hermes_home: Path, project_id: str, workflow_id: str) -> None:
     The id has to be one the library holds: a project naming nothing would silently run the default
     preset, and the user would have picked a workflow that isn't what works. A Prompt and a pick are
     one choice between them, so picking one drops the Prompt in the same write: a project holding both
-    would show words no run reads.
+    would show words no run reads. The Prompt's library source goes with the words it describes.
     """
     if workflows.get(hermes_home, workflow_id) is None:
         raise ValueError(f'There is no workflow "{workflow_id}" in this bot\'s library.')
-    _upsert(hermes_home, project_id, workflow_id=workflow_id, prompt=None, at=int(time.time()))
+    _upsert(
+        hermes_home,
+        project_id,
+        workflow_id=workflow_id,
+        prompt=None,
+        prompt_id=None,
+        at=int(time.time()),
+    )
 
 
 def set_pick_count(hermes_home: Path, project_id: str, count: int) -> None:
