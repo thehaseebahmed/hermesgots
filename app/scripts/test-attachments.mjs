@@ -143,6 +143,25 @@ test("a placeholder with no marker above it is the user's own text", () => {
   assert.deepEqual(back, { text: "what is [screenshot]?", attachments: [] })
 })
 
+test("a row Hermes kept its photos' lines after the markers still reads back whole", () => {
+  // What the host stores for a message carrying a file and a photo: every marker, then the
+  // sentence, then a `[screenshot]` line for the part it replaced — so the photo's marker is not
+  // the line above its placeholder.
+  const notes = file({ name: "notes.md", type: "text/markdown", size: 48, path: `${HOST}/notes.md` })
+  const chart = photo({ size: 230, path: `${HOST}/chart.png` })
+  const stored = ["here is the plan", marker(notes), marker(chart), NOT_INLINED, "[screenshot]"].join(
+    "\n",
+  )
+  const back = splitAttachments(stored)
+  const shape = ({ name, type, size, image, path }) => ({ name, type, size, image, path })
+  assert.equal(back.text, "here is the plan", "the markers and the sentence never read as the words")
+  assert.deepEqual(
+    back.attachments.map(shape),
+    [notes, chart].map(shape),
+    "both attachments, the photo still a photo",
+  )
+})
+
 test("a size reads in the units a person says", () => {
   assert.equal(formatBytes(512), "512 B")
   assert.equal(formatBytes(2048), "2 KB")

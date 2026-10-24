@@ -70,17 +70,27 @@ export function attachmentParts(text: string, attachments: Attachment[] = []): C
 
 const MARKER = /^<attachment((?:\s+[a-z]+="[^"]*")*)\s*\/>$/
 
-/** Splits a transcript row's text back into what the user typed and what they attached. */
+// A marker naming a type an image is what makes an attachment a photo: Hermes keeps a message's
+// inline photos as `[screenshot]` lines wherever the parts fell, so those lines say how many there
+// were and never which of the markers was one. The type is the file's own.
+const IMAGE_TYPE = /^image\//i
+
+/**
+ * Splits a transcript row's text back into what the user typed and what they attached. The lines
+ * Hermes writes around a message's parts — the "not inlined" sentence and a `[screenshot]` line per
+ * photo — sit at the end of the row in the order the parts landed, so they are read as one trailing
+ * block and dropped; the marker lines above them are the attachments, whatever their order.
+ */
 export function splitAttachments(content: string): { text: string; attachments: Attachment[] } {
   const lines = content.split("\n")
   const attachments: Attachment[] = []
   let end = lines.length
-  if (lines[end - 1]?.trim() === NOT_INLINED) end--
-  let image = false
+  // The row's tail is one block: the marker lines, and the trailer Hermes keeps around them — the
+  // sentence, and a `[screenshot]` line per photo in whichever place its part landed. Read from the
+  // end, the trailer is stepped over and each marker before it is an attachment.
   while (end > 0) {
     const line = lines[end - 1].trim()
-    if (line === IMAGE_PLACEHOLDER && !image) {
-      image = true
+    if (line === NOT_INLINED || line === IMAGE_PLACEHOLDER) {
       end--
       continue
     }
@@ -93,19 +103,17 @@ export function splitAttachments(content: string): { text: string; attachments: 
       ]),
     )
     const size = Number(attrs.size)
+    const type = attrs.type || "application/octet-stream"
     attachments.unshift({
       id: `${end}`,
       name: attrs.name || "file",
-      type: attrs.type || "application/octet-stream",
+      type,
       size: Number.isFinite(size) && size > 0 ? size : 0,
-      image,
+      image: IMAGE_TYPE.test(type),
       path: attrs.path || undefined,
     })
-    image = false
     end--
   }
-  // A placeholder with no attachment line before it is the user's own text.
-  if (image) end++
   return attachments.length
     ? { text: lines.slice(0, end).join("\n"), attachments }
     : { text: content, attachments }
