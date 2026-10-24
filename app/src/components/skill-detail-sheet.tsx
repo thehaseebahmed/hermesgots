@@ -57,13 +57,19 @@ export function SkillDetailSheet({
   const { baseUrl, apiKey } = config
   const [reading, setReading] = useState<Reading>({ status: "reading" })
   const [file, setFile] = useState<OpenFile | null>(null)
-  // The way out is the parent's, drawn afresh on every render of the tab: held here so the read below
-  // runs once per skill and connection rather than once per parent render.
-  const closing = useRef(onClose)
-  useEffect(() => {
-    closing.current = onClose
-  }, [onClose])
+  // Each file read is a request of its own, and this is the one that counts: bumped by the next tap,
+  // by the way back, and by the sheet closing, so the answer to a read this screen has moved on from
+  // is dropped rather than drawn under the wrong file.
+  const opened = useRef(0)
+  useEffect(
+    () => () => {
+      opened.current += 1
+    },
+    [],
+  )
 
+  // One read per skill and connection: `onClose` is the tab's own, held still there, so a render of
+  // the tab around this sheet doesn't read the skill again.
   useEffect(() => {
     let live = true
     getSkillView({ baseUrl, apiKey }, name).then(
@@ -75,19 +81,28 @@ export function SkillDetailSheet({
         // The Host's own sentence, with nothing half-drawn behind it: a sheet that can't read its
         // skill closes rather than sitting there empty.
         toast.error(error instanceof Error ? error.message : "Couldn't open that skill.")
-        closing.current()
+        onClose()
       },
     )
     return () => {
       live = false
     }
-  }, [baseUrl, apiKey, name])
+  }, [baseUrl, apiKey, name, onClose])
+
+  /** Back to the skill itself, which also abandons a file read still in flight. */
+  const back = () => {
+    opened.current += 1
+    setFile(null)
+  }
 
   const openFile = async (path: string) => {
+    const request = (opened.current += 1)
     setFile({ status: "reading", path })
     try {
-      setFile({ status: "ok", file: await getSkillFile({ baseUrl, apiKey }, name, path) })
+      const read = await getSkillFile({ baseUrl, apiKey }, name, path)
+      if (request === opened.current) setFile({ status: "ok", file: read })
     } catch (error) {
+      if (request !== opened.current) return
       // Back to the skill's own sheet, so the refusal leaves the one thing that was read on screen.
       setFile(null)
       toast.error(error instanceof Error ? error.message : "Couldn't read that file.")
@@ -104,7 +119,7 @@ export function SkillDetailSheet({
               size="icon-lg"
               className="absolute top-0 left-3 z-20 size-11"
               aria-label="Back to the skill"
-              onClick={() => setFile(null)}
+              onClick={back}
             >
               <ArrowLeftIcon />
             </Button>

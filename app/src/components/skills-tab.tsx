@@ -1,5 +1,5 @@
 import { SparklesIcon, Trash2Icon } from "lucide-react"
-import { useState } from "react"
+import { useCallback, useState } from "react"
 import { toast } from "sonner"
 
 import { SkillDetailSheet } from "@/components/skill-detail-sheet"
@@ -70,8 +70,11 @@ export function SkillsTab({ profile }: { profile: Profile }) {
   // The row whose write is in flight, by name: only that switch waits, and the rest stay pressable.
   const [saving, setSaving] = useState<string | null>(null)
   // While a removal is in flight both dialogs hold still, so a second tap can't ask twice.
-  const [removing, setRemoving] = useState(false)
+  const [pending, setPending] = useState(false)
   const [sheet, setSheet] = useState<Sheet | null>(null)
+  // The sheet's way out, held still: it is handed to a sheet that reads its skill once per skill and
+  // connection, so a callback drawn afresh on every render of this tab would read it again.
+  const close = useCallback(() => setSheet(null), [])
   if (answer !== "yes") return null
   // The tab arriving, rather than a bot without skills: a first-ever open waits for the read
   // instead of drawing an empty frame the list then fills.
@@ -94,7 +97,7 @@ export function SkillsTab({ profile }: { profile: Profile }) {
   // refused removal closes the confirmation and goes back to the skill's sheet, so the refusal
   // leaves the one thing that was read on screen rather than a dialog with nothing left to answer.
   const confirmRemove = async (name: string) => {
-    setRemoving(true)
+    setPending(true)
     try {
       await state.remove(name)
       setSheet(null)
@@ -102,7 +105,7 @@ export function SkillsTab({ profile }: { profile: Profile }) {
       toast.error(error instanceof Error ? error.message : "Couldn't remove that skill.")
       setSheet({ kind: "skill", name })
     } finally {
-      setRemoving(false)
+      setPending(false)
     }
   }
 
@@ -116,6 +119,9 @@ export function SkillsTab({ profile }: { profile: Profile }) {
   const opened =
     sheet?.kind === "skill" ? state.skills.find((one) => one.name === sheet.name) : undefined
   const offersRemove = opened !== undefined && answers.remove === "yes" && canRemove(opened)
+  // The skill whose Remove is confirmed on screen: the one narrowing of the sheet state that the
+  // dialog's open, its title and its confirm all read.
+  const removing = sheet?.kind === "remove" ? sheet.name : null
   return (
     <div className="flex flex-col gap-4" data-skills-tab>
       {skillSections(state.skills).map((section) => (
@@ -125,7 +131,7 @@ export function SkillsTab({ profile }: { profile: Profile }) {
         <SkillDetailSheet
           config={profile}
           name={sheet.name}
-          onClose={() => setSheet(null)}
+          onClose={close}
           footer={
             offersRemove ? (
               <RemoveSkill onRemove={() => setSheet({ kind: "remove", name: sheet.name })} />
@@ -134,17 +140,17 @@ export function SkillsTab({ profile }: { profile: Profile }) {
         />
       )}
       <AlertDialog
-        open={sheet?.kind === "remove"}
+        open={removing !== null}
         onOpenChange={(next) => {
-          if (next || removing) return
+          if (next || pending) return
           // Cancelling goes back to the skill's own sheet, the one Remove was offered from.
-          setSheet(sheet?.kind === "remove" ? { kind: "skill", name: sheet.name } : null)
+          setSheet(removing === null ? null : { kind: "skill", name: removing })
         }}
       >
         <AlertDialogContent size="sm">
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Remove {sheet?.kind === "remove" ? sheet.name : ""}?
+              {removing === null ? "Remove this skill?" : `Remove ${removing}?`}
             </AlertDialogTitle>
             <AlertDialogDescription>
               The bot stops having it, and its files go with it. A Hub skill is uninstalled, and one
@@ -152,11 +158,11 @@ export function SkillsTab({ profile }: { profile: Profile }) {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={removing}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
-              disabled={removing}
-              onClick={() => sheet?.kind === "remove" && void confirmRemove(sheet.name)}
+              disabled={pending}
+              onClick={() => removing !== null && void confirmRemove(removing)}
             >
               Remove
             </AlertDialogAction>
@@ -188,8 +194,8 @@ function RemoveSkill({ onRemove }: { onRemove: () => void }) {
 
 /**
  * One of the tab's two lists: its heading, then one labelled group per category. A section with no
- * rows at all is left out — a heading over nothing says there are none — and so is a category the
- * rule handed over empty.
+ * rows at all is left out — a heading over nothing says there are none — and it is the only thing
+ * left to check, since the rule never hands over a group with no rows in it.
  */
 function Section({
   section,
@@ -201,13 +207,12 @@ function Section({
   /** Opening a skill's sheet, where the Host offers one: every row of both sections has this. */
   onOpen?: (name: string) => void
 }) {
-  const groups = section.groups.filter((group) => group.skills.length > 0)
-  if (groups.length === 0) return null
+  if (section.groups.length === 0) return null
   return (
     <section className="flex flex-col gap-2" data-skill-section={section.id}>
       <h2 className="px-2 text-sm font-medium text-muted-foreground">{section.title}</h2>
       <div className="flex flex-col gap-3">
-        {groups.map((group) => (
+        {section.groups.map((group) => (
           <div
             key={group.category ?? ""}
             className="flex flex-col gap-1"
