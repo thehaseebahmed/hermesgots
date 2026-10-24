@@ -492,7 +492,8 @@ function removedRepos(c: Conversation, project: HermesProject | undefined) {
   return (c.worktree?.repos ?? []).map((r) => r.name).filter((name) => !current.has(name))
 }
 
-function SessionItem({
+/** One Code row's body, exported so a component test can draw it over a seeded device. */
+export function SessionItem({
   row: { c: session, state, prTick, project },
   botId,
   showProject,

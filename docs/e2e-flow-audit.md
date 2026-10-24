@@ -17,20 +17,20 @@ ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
 
-The registry in `app/scripts/e2e/cli.mjs` holds **70 keys**, and every one of them has a row
-below. `pnpm e2e list` prints the same 70 keys, and the rows here are grouped by the ticket that
+The registry in `app/scripts/e2e/cli.mjs` holds **71 keys**, and every one of them has a row
+below. `pnpm e2e list` prints the same 71 keys, and the rows here are grouped by the ticket that
 takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
 | --- | --- |
-| stay | 13 |
+| stay | 14 |
 | component | 53 |
 | plugin | 2 |
 | delete | 2 |
-| **total** | **70** |
+| **total** | **71** |
 
-Of those 70, 64 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
-reuses `todos.mjs`, so 63 distinct files there) and 6 point at the older
+Of those 71, 65 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
+reuses `todos.mjs`, so 64 distinct files there) and 6 point at the older
 `app/scripts/regression-*.mjs`.
 
 #297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**.
@@ -67,19 +67,22 @@ browser's own download — the file saved under the name the message kept — is
 stands in for (the component test fakes the anchor the browser clicks); and `image-viewer`, a delete,
 left with #480, when a sent message's media began opening in the platform's own viewer rather than a
 pop-up of the app's. So the registry holds 59 + 12 = **71** keys, less `image-viewer`'s own: **70**.
-The component verdicts are still **53**, the stays are the plan's 7 plus six: **13**, and the deletes
-are **3** less one: **2**.
+And a thirteenth with #536: `code-list`, a stay, because where an unread dot sits on an icon's
+corner is geometry, and that opening the thread clears it while new activity brings it back with
+no reload is wiring no DOM test has. So the registry holds 59 + 13 = 72 keys, less
+`image-viewer`'s own: **71**. The component verdicts are still **53**, the stays are the plan's 7
+plus seven: **14**, and the deletes are **3** less one: **2**.
 
 `app/scripts/test-e2e-registry.mjs`, a unit test, holds the registry and this page to each other:
 a key with no row here, a row with no key, a verdict outside the four, a count in the table above
-that its rows don't add up to, or a stay beyond the eleven fails the app's gates. A new flow is then
+that its rows don't add up to, or a stay beyond the twelve fails the app's gates. A new flow is then
 an argument this page has to carry, never a default (ADR 0019).
 
 Check any of it in one line:
 
 ```bash
 grep -c '^| `' docs/e2e-flow-audit.md                           # 70 rows, one per registry key
-grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 13
+grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 14
 grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 53
 grep -c '^| `[a-z0-9-]*` | delete |' docs/e2e-flow-audit.md    # 2
 grep -c '^| `[a-z0-9-]*` | plugin |' docs/e2e-flow-audit.md    # 2
@@ -244,7 +247,7 @@ One key, the only one that walks the whole feature: #417–#421 each brought the
 | --- | --- | --- | --- | --- |
 | `bot-threads` | component | A bot opens its Main from home; its threads are cards at their start times, the first between the messages written either side of it and the last closing the flow; a card opens its thread and back returns to Main; `/thread` with text opens a thread holding that message, whose card is back on Main at its start and drawn without a marker. Then, on a mock answering `MOCK_TRIAGE=new`, the message leaves Main as its new thread's card carrying Undo and no marker; on one answering `MOCK_TRIAGE=thread` it keeps the Moved marker, linking the older thread it went to, with no card carrying the move. Last, at tablet width with the dark theme, a card, Main's day heading and the Moved line still draw, and the move's Undo is still there. | Every rule it walks is a component test's — a card's place in Main (#417), the marker and the triage-opened card's Undo (#419), `/thread` and the name the switch picks (#420) — and none of them needs a browser's layout. What the flow adds is that they compose: a real route change, a real reload onto the mock's chat list, and the mock's own triage and moves answering a send. | `app/scripts/test-main-cards.tsx`, `test-card-undo.tsx`, `test-main-triage.tsx` and `test-slash.mjs` carry the rules, and #417–#421 landed them green. The flow stays in the registry as the one proof the path holds end to end, which no component test mounts. |
 
-## The eleven that stay, and why only a browser can assert each
+## The fourteen that stay, and why only a browser can assert each
 
 Every one of these earns its browser by a mechanism no lower tier reproduces, and a stay is
 replaced by itself. They are what the end-to-end registry holds once the other 57 keys leave
@@ -265,6 +268,7 @@ replaced by itself. They are what the end-to-end registry holds once the other 5
 | `openui-map` | stay | A reply's block is a `Map` of four labelled places. It draws a map at 390px and at 768px, in light and dark, fitted to its own points — every label's box wholly inside the map's box at both widths — its required summary the accessible name, each point's detail on its marker; the basemap follows the theme (tiles asked for from `World_Street_Map` in light and `World_Dark_Gray_Base` in dark) with `Esri` and `OpenStreetMap` attributed in the chrome, inside the map's box, and the map takes the thread's own column with no sideways scroll. Then the gesture contract: over an untouched map a wheel and a real one-finger swipe both change the thread's scrollTop while the map's view holds to the pixel and `data-active` stays false; a tap makes it active and shows a 44px button; a wheel zooms and a drag pans the active map while the thread's scrollTop holds; the button hands the gestures back, the thread scrolling over the map again at the view the pan left. | Geometry and a gesture contract. A DOM without layout has no sizes, so a component test can prove the labels, the summary and the required props (`test-openui.tsx`) but not that the view is fitted, that a label lands inside the frame, or that the tiles asked for are the theme's. And which element takes one finger — the thread scrolling or the map panning — is decided by `touch-action` and Leaflet's handlers inside the browser's own input pipeline; nothing below a browser has a touchscreen, a scroll offset to move or a frame to pan within. |
 | `question-during-delegation` | stay | A bot delegates and asks in the same turn: the subagent's card reads its child still running; the question card takes the composer's place while the agents route still reports that child running; the answer brings the turn's reply, and then the subagent's result lands as the bot's own message at the thread's end, named above the result it carries, with no bubble and never as the user's; the wake prompt the plugin posts for it draws no message at all, no header, no footer and no user row; and the wake turn that answers it acts on the result and draws as a message of its own, below the delivery, arriving while its run is still going, a piece at a time; and the words the reply said before the question are drawn once, live and again after a reload, never once for each half of the turn. | Composer-replacement timing across a live stream. The question card has to take the composer's place at the instant the host raises it while a child is still working, and the result and the wake turn have to land in the thread as the host writes them, in wall-clock order, under the fold that draws a wake prompt as nothing. A component test over a faked host answers every shape in one step: it asserts the card, the delivery and the wake answer, but not that the card replaced the composer while `runs/live` and the agents route both still said the child was running, nor that the result and the wake turn landed after the reply that answered the question rather than inside it. |
 | `card-widths` | stay | A chat's subagent card and its waiting Question fill the box they are given and never pass the reading column's 768px box (ADR 0047): at 390px the pane is narrower than the box, so a 348px card sits on the thread's 16px and a 366px Question on the slot's own 12px; at 1024px the same, 662px and 672px at 16px each; at 1440px, where the 1120px pane clears the box, each stops at 768px and centres — the card at 171px, the Question at 176px — while message text keeps its 736px column at 187px, the capped card framing it exactly, 768px around 736px with the box's 16px gutter each side. A reintroduced pane-fill (ADR 0041) passes the box at 1440px and a reintroduced 448px cap falls short of the text's frame, so both fail there. | Geometry, and nothing else: a card's width and its left edge's offset are layout, so no DOM without a layout engine has them, and a class assertion cannot tell a card that stops at the box from the same card filling the pane or capped at 448px — which is the whole of ADR 0047. The phone and tablet legs keep the fill honest below the box; the laptop leg is the only one where the cap binds, and the one review loses most easily since the text beside the card does not move at all. |
+| `code-list` | stay | The four groups draw in their fixed order under headings with their counts, an empty group staying hidden until a session gives it one, Closed collapsed and holding Resolved and Discarded under their own icons, the sort menu's title order surviving a reload, a search dropping the headers for one flat list in that same order, and the unread dot: on a row this device never opened, at the round icon's top-right corner, gone the moment its thread renders when the row is opened, and back when activity lands on it while the list sits open beside another session. | Where the dot sits is geometry — a corner of a box measured against its box — and clearing it needs the thread really rendering, the mark really written to this device's localStorage, and the list really re-drawing, then a real activity landing under a mark it no longer catches up with. A component test has no layout to measure and no reload to survive; a unit test has no dot at all. |
 
 ## The coverage a demotion leaves with no home
 

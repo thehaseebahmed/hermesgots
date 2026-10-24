@@ -58,6 +58,11 @@ const FLOWS = {
       "A project session waits on an approval in the sidebar and in Code, then lands under Idle",
     alsoPolling: true,
   },
+  "code-list": {
+    script: "e2e/code-list.mjs",
+    about:
+      "The Code list grouped by session state: four headed groups with counts and Closed collapsed, the sort menu kept on the device, one flat list under a search, and the unread dot at the icon's corner cleared by reading",
+  },
   "approval-missed": {
     script: "e2e/approval-missed.mjs",
     about: "An approval the host timed out, or refuses to take an answer for, leaves the composer",
