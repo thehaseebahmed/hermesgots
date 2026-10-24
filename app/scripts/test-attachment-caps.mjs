@@ -130,12 +130,30 @@ test("the host keeps the file the user chose, with the scaled copy as the model'
 test("an original too big to keep is what the scaled copy stands in for", () => {
   const huge = { size: MAX_FILE_BYTES + 1, type: "image/heic" }
   const smaller = { size: 2 * 1024 * 1024, type: "image/jpeg" }
-  assert.deepEqual(keptImage(huge, smaller), { kept: smaller })
+  const stand = keptImage(huge, smaller)
+  assert.deepEqual(stand, { kept: smaller })
+  assert.equal(
+    stand.inline ?? stand.kept,
+    smaller,
+    "and it is the part the model reads too, so a huge photo still rides inline",
+  )
   assert.equal(
     keptImage({ size: MAX_FILE_BYTES }, smaller).kept.size,
     MAX_FILE_BYTES,
     "nine megabytes itself still fits",
   )
+})
+
+test("a photo over the file cap is exempt from it, since scaling is what makes it fit", () => {
+  // A modern camera's photo is past 9 MB, and refusing it would be hostile: the caps measure a
+  // file the host is handed, while a photo is scaled and its kept copy is what rides.
+  const camera = file("IMG_0001.heic", 12 * 1024 * 1024, "image/heic")
+  const shot = { size: 12 * 1024 * 1024, type: "image/heic" }
+  const scaled = { size: 700 * 1024, type: "image/jpeg" }
+  assert.deepEqual(intake([camera]).take, [camera], "a pick takes it")
+  assert.equal(intake([camera]).refusals.length, 0, "and says nothing about its size")
+  assert.equal(keptImage(shot, scaled).kept, scaled, "the scaled JPEG is what the host keeps")
+  assert.equal(sizeRefusal("IMG_0001.heic").limit, "file", "the words are still a file's")
 })
 
 test("a photo that needed no scaling is one copy, not two", () => {
