@@ -116,7 +116,9 @@ function Picture({ src, alt }: { src?: string; alt: string }) {
   const { ready, onLoad, onError } = useImageReady(src ?? "")
   return (
     <>
-      {(!src || !ready) && <Skeleton className="absolute inset-0 rounded-xl" />}
+      {/* The cell's own box, the border included: a placeholder that stopped inside it would be a
+          couple of pixels short of the cell the image lands in. */}
+      {(!src || !ready) && <Skeleton className="absolute -inset-px rounded-xl" />}
       {src && (
         <img
           src={src}
@@ -154,7 +156,7 @@ function Cell({ item }: { item: MediaItem }) {
               draggable={false}
             />
           ) : settled ? null : (
-            <Skeleton className="absolute inset-0 rounded-xl" />
+            <Skeleton className="absolute -inset-px rounded-xl" />
           )}
           <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
             <span className="flex size-9 items-center justify-center rounded-full bg-black/55 text-white">
