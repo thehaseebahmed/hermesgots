@@ -64,7 +64,7 @@ from . import (
     tasks,
     workflows,
 )
-from .store import connect, db_path
+from .store import connect, db_path, get_setting, put_setting
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +90,20 @@ HELD = ("repo", "number", "title", "url", "created_at")
 # (ADR 0025).
 DEFAULT_PICK_COUNT = 1
 MAX_PICK_COUNT = 5
+# The bot's own pick budget: how many tasks the projects of one bot hold together, the range it may
+# be set to, and the settings row it lives under (ADR 0042). One number over the projects, because
+# eight projects at a count of one are eight sessions at once and nothing else says "enough".
+DEFAULT_PICK_BUDGET = 5
+LOWEST_PICK_BUDGET = 1
+HIGHEST_PICK_BUDGET = 10
+PICK_BUDGET_KEY = "afk_pick_budget"
+# Why a project claims nothing when the bot already holds as many tasks as its budget allows: the
+# budget is the bot's, so the sheet has to say so rather than blame the project's own count, and it
+# names both numbers so "full" can't be read as a number the user never set (ADR 0042).
+PICK_BUDGET_FULL = (
+    "This bot's pick budget is full ({held} of {budget} held), so no task is claimed. "
+    "Let one finish, or raise the budget in the bot's Coding tab."
+)
 # How long a claim may sit with nothing running it before the app is told it stalled. A start makes
 # the session's worktrees first, which can take a while on a big repository, so a claim just taken is
 # given that much room; a run that ends says why at once. Every hold has its own clock, so a task
@@ -198,6 +212,10 @@ def read(
     than only masking it is what keeps a restore from resuming work no one asked for — a project
     archived where this plugin didn't do it (Hermes's own dashboard or CLI) still has its old row.
     """
+    # The bot's own numbers, read once here: the budget it works within and the holds against it
+    # belong to the answer for a project with a row and one without, so they come from the bot's
+    # store rather than from the row `_row` reads (ADR 0042).
+    bot = bot_read(hermes_home)
     found = _row(hermes_home, project_id) or {
         "on": False,
         "holds": [],
@@ -233,6 +251,10 @@ def read(
         # Empty and unset are the same thing — the bot's default method — so the app is handed the
         # words a run would read rather than a blank field.
         "prompt": found["prompt"] or prompt_builder.DEFAULT_PROMPT,
+        # The bot's pick budget and the holds against it, answered on the project's read so the
+        # sheet's one read draws the usage line beside the pick count (ADR 0042).
+        "pick_budget": bot["pick_budget"],
+        "holds_held": bot["holds_held"],
         # The stage the oldest task it holds is in, for the sheet's own Working row (ADR 0018):
         # None for a project holding nothing, and for a task that isn't staged. Its own name comes
         # beside it, so a workflow's own words — "Migrate", "Verify" — are what the row says.
@@ -258,6 +280,43 @@ def _pick_count(found: Dict[str, Any]) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         return DEFAULT_PICK_COUNT
     return max(DEFAULT_PICK_COUNT, min(MAX_PICK_COUNT, value))
+
+
+def pick_budget(hermes_home: Path) -> int:
+    """How many tasks this bot's projects hold together: five unless it says, and never outside 1–10.
+
+    The default and the range live here rather than in the stored value, so "nothing set" reads as
+    five the way an empty Prompt reads as the bot's default method: an old store, a row somebody
+    wrote by hand and a bot that never opened its Coding tab all answer the same number (ADR 0042).
+    """
+    value = get_setting(db_path(hermes_home), PICK_BUDGET_KEY)
+    if isinstance(value, bool) or not isinstance(value, int):
+        return DEFAULT_PICK_BUDGET
+    return max(LOWEST_PICK_BUDGET, min(HIGHEST_PICK_BUDGET, value))
+
+
+def holds_held(hermes_home: Path) -> int:
+    """How many tasks this bot holds across all of its projects, stalled ones included.
+
+    Rows are counted, whatever their stall: a hold is the bot's claimed work whether or not
+    something is running it, so five stalled tasks are five places taken (ADR 0042). One read of
+    the bot's own store, and never a question for GitHub.
+    """
+    conn = connect(db_path(hermes_home))
+    try:
+        row = conn.execute("SELECT COUNT(*) FROM holds").fetchone()
+    finally:
+        conn.close()
+    return int(row[0]) if row else 0
+
+
+def bot_read(hermes_home: Path) -> Dict[str, Any]:
+    """The bot's own AFK numbers: the pick budget it works within, and how much of it is held.
+
+    Answered by the bot-level route, and beside the project's own read so one read still draws the
+    sheet: "Pick budget 3 of 5" is these two numbers, whatever project the sheet was opened on.
+    """
+    return {"pick_budget": pick_budget(hermes_home), "holds_held": holds_held(hermes_home)}
 
 
 def _legacy(found: Dict[str, Any]) -> bool:
@@ -426,6 +485,38 @@ def set_pick_count(hermes_home: Path, project_id: str, count: int) -> None:
     wake()
 
 
+def budget_from(body: Dict[str, Any]) -> int:
+    """The pick budget a bot write names: a whole number from one to ten, or ValueError.
+
+    The bot's own one shape, refused rather than clamped like the project's count: a budget the
+    user didn't ask for, silently held, is worse than a Coding tab that says what it takes. Nothing
+    else in the body is read, so a field a later route adds beside the budget isn't a refusal here
+    (ADR 0026's usage threshold is the one expected to land on this route).
+    """
+    value = body.get("pick_budget")
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not LOWEST_PICK_BUDGET <= value <= HIGHEST_PICK_BUDGET
+    ):
+        raise ValueError(
+            f"pick_budget must be a whole number from {LOWEST_PICK_BUDGET} to {HIGHEST_PICK_BUDGET}."
+        )
+    return value
+
+
+def set_pick_budget(hermes_home: Path, budget: int) -> None:
+    """Records how much AFK work the whole bot may hold at once, across all of its projects.
+
+    Lowering it abandons nothing: every hold stays until its own work is done, and the projects that
+    are over the new number simply stop claiming until the bot is under it again — the same rule as
+    lowering a pick count (ADR 0042). Raising it is worth a wake, since the places it just made are
+    the sweep's to fill now.
+    """
+    put_setting(db_path(hermes_home), PICK_BUDGET_KEY, budget)
+    wake()
+
+
 def release(
     hermes_home: Path, project_id: str, task: Optional[Dict[str, Any]] = None
 ) -> None:
@@ -556,6 +647,48 @@ def stalled(
     return found
 
 
+class _Budget:
+    """The bot's pick budget as one pass spends it, counted once before any GitHub read.
+
+    ``total`` is the number the bot is set to and ``held`` how many tasks its projects hold now,
+    read from the bot's own store; the pass then moves ``held`` itself — a claim takes a place, a
+    task a closed session gave back frees one — so a place freed by the first project can be taken
+    by the oldest task of the last, and the numbers a refusal names are the ones the pass arrived
+    at (ADR 0042).
+    """
+
+    def __init__(self, hermes_home: Path) -> None:
+        self.total = pick_budget(hermes_home)
+        self.held = holds_held(hermes_home)
+
+    @property
+    def remaining(self) -> int:
+        return max(0, self.total - self.held)
+
+    def take(self) -> bool:
+        """Takes one place, or answers False when the bot already holds as many as it may."""
+        if self.remaining <= 0:
+            return False
+        self.held += 1
+        return True
+
+    def give_back(self, count: int) -> None:
+        """Credits places whose holds this pass let go of, so the same pass may fill them."""
+        self.held = max(0, self.held - count)
+
+
+class Plan(NamedTuple):
+    """One project's part of a pass: the tasks it could claim, oldest first, and nothing else.
+
+    Read before anything is claimed, because a pass claims in one order over the whole bot: a
+    project's candidates are the frontier's oldest tasks its own free places could hold (ADR 0025),
+    and which of them actually claim is decided across every project at once (ADR 0042).
+    """
+
+    project_id: str
+    candidates: List[Dict[str, Any]]
+
+
 def sweep(
     hermes_home: Path,
     project_id: str,
@@ -569,15 +702,20 @@ def sweep(
     Answers the tasks it just claimed — each carrying the issue's body, which the run that starts it
     opens with — so the caller starts the session for each without a second read, and nothing when
     it claimed nothing. A place is a task: the project holds as many as its pick count says, and a
-    pass takes that many less the holds it already has (ADR 0025). A hold is settled whether or not
-    the project is still switched on, because the claim is on GitHub either way and the switch is
-    only what decides whether a *new* task is taken; a place a settle freed is filled by this same
-    pass, but the task it gave back waits for the next sweep, so it isn't handed out again the
-    moment the user walks away from it.
+    pass takes that many less the holds it already has (ADR 0025), within whatever the bot's pick
+    budget has left (ADR 0042).
+
+    One project's whole pass, which is all a sweep of one project is; ``sweep_all`` is the same two
+    steps over every project of a bot at once, and is where the ordering across projects belongs. A
+    hold is settled whether or not the project is still switched on, because the claim is on GitHub
+    either way and the switch is only what decides whether a *new* task is taken; a place a settle
+    freed is filled by this same pass, but the task it gave back waits for the next sweep, so it
+    isn't handed out again the moment the user walks away from it.
 
     A GitHub refusal — no permission to write issues, a rate limit, no connection — records its
-    reason and stops this pass where it stands, with the tasks it had already claimed held and the
-    switch left on, so the sheet says why; the next sweep is the next attempt, not an immediate one.
+    reason and stops this project's claims where they stand, with the tasks it had already claimed
+    held and the switch left on, so the sheet says why; the next sweep is the next attempt, not an
+    immediate one.
 
     ``skills`` is the names the profile can run, read once for a whole sweep; a project whose chosen
     build or critique skill isn't among them claims nothing and records why, with its switch still
@@ -585,36 +723,65 @@ def sweep(
     0018). It is the caller's to pass, and not defaulted: a sweep that judges no choice has to say
     so, since a forgotten argument would quietly turn the check off.
     """
+    budget = _Budget(hermes_home)
+    plan = _plan(hermes_home, project_id, folders, archived, skills=skills, budget=budget)
+    return [task for _, task in _claims(hermes_home, [plan], budget)]
+
+
+def _plan(
+    hermes_home: Path,
+    project_id: str,
+    folders: Iterable[Any],
+    archived: bool,
+    *,
+    skills: Optional[Iterable[str]],
+    budget: _Budget,
+) -> Plan:
+    """What one project could claim in this pass, and the reason it can claim nothing at all.
+
+    Everything a claim needs is decided here but nothing is claimed: the holds this project's closed
+    sessions gave back, the reason its switch can't claim, the places its pick count and the bot's
+    budget leave it, and the frontier read that fills them — one GitHub read per project per pass,
+    and none at all for a project with no free place or one the bot's budget already holds back.
+    A refusal recorded here is the project's own answer for this pass: GitHub's, a skill the bot has
+    lost, or the bot's budget being full.
+    """
     found = _row(hermes_home, project_id)
     if found is None:
-        return []
+        return Plan(project_id, [])
     # Before anything is claimed: a hold whose session the user closed goes back, and what it gave
-    # back is not claimed again by this pass.
+    # back is not claimed again by this pass — but its place is the pass's to fill again.
     given_back = _settle(hermes_home, project_id, found["holds"])
+    budget.give_back(len(given_back))
     if not found["on"]:
-        return []
+        return Plan(project_id, [])
     why = reason(hermes_home, folders, archived)
     if why is not None:
         # Put away, with no repository to read, or no account to read it with: the sheet's own
         # reason already says so, and it isn't GitHub refusing anything — so a refusal it recorded
         # before would sit beside that reason saying something GitHub no longer says.
         _forget_refusal(hermes_home, project_id, found)
-        return []
+        return Plan(project_id, [])
+    holds = _holds(hermes_home, project_id)
+    places = _pick_count(found) - len(holds)
+    if places <= 0:
+        return Plan(project_id, [])
+    if budget.remaining <= 0:
+        # The bot holds as much as its budget allows and this project would have claimed: its sheet
+        # says so, and the pass reads no frontier for a task it couldn't take — a sweep held back by
+        # the budget never asks GitHub how full it is (ADR 0042).
+        _refuse(hermes_home, project_id, _budget_full(budget))
+        return Plan(project_id, [])
     if skills is not None:
         missing = _missing_skill(hermes_home, project_id, found, skills)
         if missing is not None:
             _refuse(hermes_home, project_id, MISSING_SKILL.format(name=missing))
-            return []
-    holds = _holds(hermes_home, project_id)
-    places = _pick_count(found) - len(holds)
-    if places <= 0:
-        return []
-    auth, _ = github.token(hermes_home)
+            return Plan(project_id, [])
     try:
         ready = tasks.frontier(hermes_home, folders)
     except github.GitHubError as error:
         _refuse(hermes_home, project_id, str(error))
-        return []
+        return Plan(project_id, [])
     # A task the project holds, or one this pass just gave back, is not one to claim now: the
     # release took its marks off GitHub, so it is back in the frontier the read above sees.
     taken = {_key(hold.task) for hold in holds} | {_key(task) for task in given_back}
@@ -622,20 +789,74 @@ def sweep(
     if not candidates:
         # GitHub answered and has nothing to give: whatever it refused before is stale.
         _forget_refusal(hermes_home, project_id, found)
+        return Plan(project_id, [])
+    return Plan(project_id, candidates)
+
+
+def _claims(
+    hermes_home: Path, plans: Iterable[Plan], budget: _Budget
+) -> List[Tuple[str, Dict[str, Any]]]:
+    """Claims the plans' tasks in one order over the whole bot: the oldest ready task first.
+
+    A freed place goes to the oldest ready task of any project, not to the first project the pass
+    happened to look at — the frontier's oldest-first rule, read over the bot instead of over one
+    project (ADR 0042). Each claim still needs a place of its own project's count (which its plan
+    already allowed for) and of the bot's budget, so a task whose place the budget took is left for
+    the next pass, and the project it belonged to records why.
+
+    A GitHub refusal records that project's reason and leaves its remaining tasks for the next pass,
+    while the tasks other projects hold stay claimed: one project's trouble is no reason to stop
+    another's work, and the switch stays on so the sheet says what happened.
+    """
+    ordered = sorted(
+        ((task, plan.project_id) for plan in plans for task in plan.candidates),
+        key=lambda pair: (_created(pair[0]), pair[0].get("number") or 0, pair[1]),
+    )
+    if not ordered:
         return []
-    claimed: List[Dict[str, Any]] = []
-    for task in candidates:
+    auth, _ = github.token(hermes_home)
+    claimed: List[Tuple[str, Dict[str, Any]]] = []
+    stopped: set = set()
+    refused: set = set()
+    for task, project_id in ordered:
+        if project_id in stopped:
+            # GitHub refused this project's last claim: the rest of its tasks wait for the next pass.
+            continue
+        if not budget.take():
+            if project_id not in refused:
+                refused.add(project_id)
+                _refuse(hermes_home, project_id, _budget_full(budget))
+            continue
         try:
             github.claim_issue(
                 task["repo"], task["number"], github.login(auth), tasks.CLAIM_LABEL, auth
             )
         except github.GitHubError as error:
+            # Nothing was taken, so the place the claim would have used is the pass's again.
+            budget.give_back(1)
             _refuse(hermes_home, project_id, str(error))
-            break
+            stopped.add(project_id)
+            continue
         # The hold clears the last refusal in the same write: this sweep just got an answer.
         _hold(hermes_home, project_id, task)
-        claimed.append(task)
+        claimed.append((project_id, task))
     return claimed
+
+
+def _budget_full(budget: _Budget) -> str:
+    """The words a project the bot's budget held back records, naming both numbers."""
+    return PICK_BUDGET_FULL.format(held=budget.held, budget=budget.total)
+
+
+def _created(task: Dict[str, Any]) -> str:
+    """A task's creation time on GitHub, as the order a pass claims in reads it.
+
+    The oldest first, and a task that somehow carries no time sorted ahead: the holds are ordered
+    the same way, a NULL reading as the oldest there (``HOLD_ORDER``), so a bot's holds and its
+    claims answer one order rather than two.
+    """
+    value = task.get("created_at")
+    return value if isinstance(value, str) else ""
 
 
 def new_session_id() -> str:
@@ -838,38 +1059,50 @@ def sweep_all(hermes_home: Path) -> List[Tuple[str, Dict[str, Any]]]:
     holds still have to be settled when the user closes their sessions, or the claims sit on GitHub
     with nothing working them and nothing ever looking again.
 
-    Answers what each project just claimed, a project's oldest first, so the caller can start those
-    sessions one after another; a project that claimed nothing isn't in the list.
+    The bot's pick budget is counted here, once, before any project's frontier is read: how many
+    tasks every project of this bot holds together is a count on the bot's own store, and the pass
+    spends that number as it claims (``_Budget``). Each project is then read into its own plan, and
+    the plans' tasks are claimed in one order over the whole bot — oldest ready first — so a place
+    that frees goes to whoever has waited longest rather than to whichever project the loop reached
+    first (ADR 0042).
+
+    Answers what the pass claimed, in the order it took them, so the caller can start those sessions
+    one after another; a project that claimed nothing isn't in the list.
     """
-    claimed: List[Tuple[str, Dict[str, Any]]] = []
     held = [hold.project_id for hold in _holding_rows(hermes_home)]
     due = list(dict.fromkeys([*enabled_projects(hermes_home), *held]))
     if not due:
-        return claimed
+        return []
+    # Counted once, and before any GitHub read: the budget and the holds against it are this bot's
+    # own store's answer, so a pass never asks GitHub how full it is (ADR 0042).
+    budget = _Budget(hermes_home)
     # One read of the project list, not one per project: a sweep only needs their folders.
     projects = sessions.projects(hermes_home / "projects.db")
     # And one of the skills this bot can run, for every project's choice: a skill the profile no
     # longer has stops that project's sweep (ADR 0018), and a host that can't list its skills
     # judges nothing. Read only when a project has picked one to judge.
     skills = _profile_skills(hermes_home) if workflows.any_steps(hermes_home) else None
+    plans: List[Plan] = []
     for project_id in due:
         project = projects.get(project_id)
         if project is None:
             # A row whose project is gone.
             continue
         try:
-            found = sweep(
-                hermes_home,
-                project_id,
-                project.folders,
-                bool(getattr(project, "archived", False)),
-                skills=skills,
+            plans.append(
+                _plan(
+                    hermes_home,
+                    project_id,
+                    project.folders,
+                    bool(getattr(project, "archived", False)),
+                    skills=skills,
+                    budget=budget,
+                )
             )
         except Exception:
             logger.warning("memento: couldn't sweep AFK's project %s", project_id, exc_info=True)
             continue
-        claimed.extend((project_id, task) for task in found)
-    return claimed
+    return _claims(hermes_home, plans, budget)
 
 
 async def sweep_homes(adapter: Any) -> None:
