@@ -16,9 +16,10 @@
  * project's pick count, and a pick count of one to five sits under the switch, one write of its own.
  * A host that advertises none of that keeps the sheet it had: one Working row, drawn from the task
  * the read names. And where the Prompt was copied from the account's library, the row tells a copy
- * from an original: an entry rewritten since its pick shows an **Update** badge right after the row's
- * title, and tapping it asks before pulling the new words in — the rule is `prompt-source.ts`'s,
- * the write is the Prompt's own (ADR 0043).
+ * from an original: an entry rewritten since its pick shows an **Update available** label right
+ * after the row's title — a label, not a control — and the editor offers the entry's newer words as
+ * a line of its own whose button fills the writing surface (Done writes them; the rule is
+ * `prompt-source.ts`'s, the write is the Prompt's own; ADR 0043).
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react"
@@ -30,17 +31,6 @@ import { Segmented } from "@/components/segmented"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { WorkflowEditor } from "@/components/workflow-editor"
 import { WorkflowSheet } from "@/components/workflow-sheet"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -168,8 +158,6 @@ export function AfkPopup({
   const [editing, setEditing] = useState<WorkflowEntry | "new" | null>(null)
   const [savingWorkflow, setSavingWorkflow] = useState(false)
   const [promptOpen, setPromptOpen] = useState(false)
-  // A pull of the library's changed words is on its way: the badge is out of reach until its answer.
-  const [pulling, setPulling] = useState(false)
   const key = connectionKey(config)
   const switchable = usePluginFeature(config, AFK_SWITCH_FEATURE)
   const withSkills = usePluginFeature(config, AFK_SKILLS_FEATURE)
@@ -359,21 +347,6 @@ export function AfkPopup({
       return "refused"
     }
   }
-  // A copy of an entry whose words have moved on: one tap writes the entry's current text and its id
-  // together, which is a pick again and takes the marker with it. A write that can't reach the host
-  // is a toast and nothing more — the copy is still not the entry, so the marker stands.
-  const pullPrompt = async () => {
-    const source = afk?.promptId
-    if (pulling || !source || !promptEntry) return
-    setPulling(true)
-    try {
-      setAfk(await setProjectAfkPrompt(config, projectId, { text: promptEntry.body, source }))
-    } catch (failure) {
-      toast.error(failure instanceof Error ? failure.message : "Couldn't pull that Prompt in.")
-    } finally {
-      setPulling(false)
-    }
-  }
 
   const pickWorkflow = async (picked: WorkflowEntry) => {
     setSavingWorkflow(true)
@@ -427,8 +400,6 @@ export function AfkPopup({
               <PromptRow
                 prompt={afk.prompt}
                 changed={promptSourceState(afk.promptId, afk.prompt, promptEntry) === "changed"}
-                pulling={pulling}
-                onPull={() => void pullPrompt()}
                 onOpen={() => setPromptOpen(true)}
               />
             )}
@@ -513,6 +484,7 @@ export function AfkPopup({
             open={promptOpen}
             onOpenChange={setPromptOpen}
             prompt={afk?.prompt ?? ""}
+            promptId={afk?.promptId ?? null}
             onSave={writePrompt}
             library={promptOffered && picks && promptLibrary}
           />
@@ -659,26 +631,21 @@ function PickCountRow({
  * untouched project says what its next run will be told rather than reading as empty.
  *
  * Where the words were copied from the account's library and that entry has been rewritten since, an
- * **Update** badge sits right after the row's title, on the title's own line: asking in a dialog
- * before it pulls the entry's new words in (`onPull`), which is a pick again. Nothing else carries
- * the badge — an original, a copy whose entry was deleted, and words the user typed are all silent,
- * because none of them is stale (ADR 0043). The row's own tap is the transparent button laid over
- * the whole row, so the badge beside the title keeps a target of its own without nesting one button
- * in another.
+ * **Update available** label sits right after the row's title, on the title's own line. It is a
+ * label and not a control — the row's whole tap still opens the editor, where the entry's newer
+ * words wait behind their own line's button (ADR 0043). Nothing else carries the label — an
+ * original, a copy whose entry was deleted, and words the user typed are all silent, because none of
+ * them is stale. The row's own tap is the transparent button laid over the whole row, so the title
+ * line is free to end with a label that isn't a target of its own.
  */
 function PromptRow({
   prompt,
   changed,
-  pulling,
-  onPull,
   onOpen,
 }: {
   prompt: string
-  /** The entry it was copied from now says other words: the badge, and the pull, are drawn. */
+  /** The entry it was copied from now says other words: the label is drawn. */
   changed: boolean
-  /** A pull is on its way: the badge waits rather than writing twice. */
-  pulling: boolean
-  onPull: () => void
   onOpen: () => void
 }) {
   return (
@@ -692,39 +659,9 @@ function PromptRow({
             <span className="flex items-center gap-1.5">
               Prompt
               {changed && (
-                <AlertDialog>
-                  <AlertDialogTrigger
-                    render={
-                      <Badge
-                        data-afk-prompt-changed
-                        className="relative z-10 min-h-6"
-                        render={<button type="button" disabled={pulling} />}
-                      />
-                    }
-                  >
-                    Update
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Update this Prompt?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        The library's latest version replaces what this project holds.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel render={<Button type="button" variant="ghost" />}>
-                        Cancel
-                      </AlertDialogCancel>
-                      <AlertDialogAction
-                        render={<Button type="button" />}
-                        disabled={pulling}
-                        onClick={onPull}
-                      >
-                        Update
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
+                <Badge data-afk-prompt-changed className="min-h-6" variant="secondary">
+                  Update available
+                </Badge>
               )}
             </span>
           }

@@ -1,8 +1,8 @@
 /**
- * The rule behind a Prompt row's `Update` badge: a pick is a copy, so the row tells a copy from
- * an original by comparing the project's words with the entry they name. Nothing is stored to know
- * that an entry moved on, which is why every way there is nothing to compare — no source, or an entry
- * this device doesn't hold — reads as no badge at all rather than as a change.
+ * The rule behind a Prompt row's `Update available` label: a pick is a copy, so the row tells a
+ * copy from an original by comparing the project's words with the entry they name. Nothing is
+ * stored to know that an entry moved on, which is why every way there is nothing to compare — no
+ * source, or an entry this device doesn't hold — reads as no label at all rather than as a change.
  */
 import assert from "node:assert/strict"
 import test from "node:test"

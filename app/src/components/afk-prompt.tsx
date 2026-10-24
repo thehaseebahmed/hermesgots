@@ -10,6 +10,13 @@
  * does for any Prompt) and Save to library (which keeps the words on screen under a name and tags),
  * with Done on the right, as the entry sheet's own foot draws its primary action. Without the
  * library this is the editor it always was, Done alone at the foot.
+ *
+ * Where the words this project holds were copied from an entry that has since been rewritten, the
+ * sheet offers the entry's newer words as a line over the field: one button fills the writing
+ * surface with them, which writes nothing until Done — and Done writes the words with the entry id
+ * beside them, so the copy stays the entry's copy; typing anything after that is the user's own
+ * words again and Done writes them alone (ADR 0043). The line shows only while the field still holds
+ * exactly what the host does, so it can never take words the user is part-way through writing.
  */
 import { useState } from "react"
 import { toast } from "sonner"
@@ -21,17 +28,22 @@ import { Textarea } from "@/components/ui/textarea"
 import type { PromptWrite } from "@/lib/hermes"
 import type { PromptDraft, PromptEntry } from "@/lib/prompt-library"
 import { addPrompt, removePrompt, savePrompt, usePromptEntries } from "@/lib/prompt-library-store"
+import { promptSourceState } from "@/lib/prompt-source"
 
 export function PromptEditor({
   open,
   onOpenChange,
   prompt,
+  promptId = null,
   onSave,
   library = false,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   prompt: string
+  /** The entry this project's words were copied from, if the host records one: the offer of the
+   * entry's newer words is drawn only against that id's own entry. */
+  promptId?: string | null
   /**
    * Writes the words, and — where they were copied from the account's library — the entry they came
    * from beside them. Done hands over the words alone, which detaches the copy on the host; a pick
@@ -43,12 +55,18 @@ export function PromptEditor({
 }) {
   const [text, setText] = useState(prompt)
   const [saving, setSaving] = useState(false)
+  // The entry the field was filled from by the offer line, held for Done to write beside the words
+  // — so an update keeps the copy a copy. Any typing is the user's own words again, which clears it.
+  const [updateSource, setUpdateSource] = useState<string | null>(null)
   // Each open starts from the words the row holds rather than from the draft the last one left, and
   // the sheet stays the same instance so its way out still animates.
   const [wasOpen, setWasOpen] = useState(open)
   if (open !== wasOpen) {
     setWasOpen(open)
-    if (open) setText(prompt)
+    if (open) {
+      setText(prompt)
+      setUpdateSource(null)
+    }
   }
 
   const entries = usePromptEntries(library)
@@ -82,9 +100,22 @@ export function PromptEditor({
       return
     }
     await attempt(async () => {
-      if ((await onSave({ text })) === "saved") onOpenChange(false)
+      // A field filled by the offer line writes the words with their entry, so the copy stands; the
+      // user's own words — anything else — are written alone, which is what clears a copy.
+      const draft = updateSource ? { text, source: updateSource } : { text }
+      if ((await onSave(draft)) === "saved") onOpenChange(false)
     }, "Couldn't save that Prompt.")
   }
+
+  /**
+   * The entry whose words moved on, while the field still holds exactly what the host does: the one
+   * state the offer line may fill, so it can never take words the user is part-way through writing.
+   */
+  const entry = promptId ? entries?.find((one) => one.id === promptId) : undefined
+  const offered =
+    entry !== undefined &&
+    promptSourceState(promptId, prompt, entry) === "changed" &&
+    text === prompt
 
   /**
    * A pick is one write of the entry's own words and its id, through the route Done writes: the host
@@ -130,12 +161,34 @@ export function PromptEditor({
           <PopupTitle>Prompt</PopupTitle>
         </PopupHeader>
         <div className="flex min-h-0 flex-1 flex-col gap-3 px-4 pb-4 sm:px-6">
+          {offered && entry && (
+            <div
+              className="flex items-center justify-between gap-2 rounded-2xl bg-muted px-3 py-2"
+              data-prompt-update
+            >
+              <p className="text-sm text-muted-foreground">The library's entry has newer words.</p>
+              <Button
+                type="button"
+                className="h-11 shrink-0 rounded-full px-4"
+                disabled={saving}
+                onClick={() => {
+                  setText(entry.body)
+                  setUpdateSource(entry.id)
+                }}
+              >
+                Update
+              </Button>
+            </div>
+          )}
           <Textarea
             aria-label="Prompt"
             placeholder="How this project's work is carried out"
             className="min-h-[38dvh] resize-none rounded-2xl px-4 py-3 text-base md:text-[15px]"
             value={text}
-            onChange={(event) => setText(event.target.value)}
+            onChange={(event) => {
+              setText(event.target.value)
+              setUpdateSource(null)
+            }}
           />
           {library ? (
             <div className="flex items-center gap-1.5" data-prompt-library-actions>
