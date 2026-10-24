@@ -1,13 +1,10 @@
 import { useSyncExternalStore } from "react"
 
-import {
-  attachmentParts,
-  attachmentsText,
-  splitAttachments,
-} from "@/lib/attachment-text"
+import { attachmentParts, attachmentsText, splitAttachments } from "@/lib/attachment-text"
 import {
   formatBytes,
   isPhoto,
+  keptImage,
   MAX_FILE_BYTES,
   MAX_ATTACHMENTS,
   MAX_INLINE_BYTES,
@@ -62,25 +59,27 @@ function jpegName(name: string) {
 }
 
 /**
- * Reads a picked file into an attachment. Images the browser can decode are scaled down, unless
- * the model can't take images (`inline: false`), when they go as files.
+ * Reads a picked file into an attachment. An image the browser can decode is scaled down for the
+ * model, while the copy kept — the bytes the host stores and this device caches — stays the file
+ * the user chose, unless it is too big to send, when the scaled copy stands in for it. With
+ * `inline: false` (a model that takes no images) every image goes as the file it is.
  */
 export async function prepareAttachment(file: File, inline = true): Promise<Attachment> {
   const name = file.name || "file"
   if (inline && isPhoto(file.type)) {
     const photo = await scaled(file)
     if (photo) {
-      const { blob, width, height } = photo
-      const reencoded = blob !== file
+      const { kept, inline: part } = keptImage<Blob>(file, photo.blob)
       return {
         id: randomId(),
-        name: reencoded ? jpegName(name) : name,
-        type: blob.type || file.type,
-        size: blob.size,
+        name: kept === file ? name : jpegName(name),
+        type: kept.type || file.type,
+        size: kept.size,
         image: true,
-        blob,
-        width,
-        height,
+        blob: kept,
+        ...(part ? { inline: part } : {}),
+        width: photo.width,
+        height: photo.height,
       }
     }
   }
@@ -99,9 +98,13 @@ export async function prepareAttachment(file: File, inline = true): Promise<Atta
 /** Whether there's anything on this device to show for it. */
 export const openable = (attachment: Attachment) => Boolean(attachment.blob)
 
+/** What an attachment adds to a request inline: an image's scaled part, and nothing else. */
+export const inlineSize = (attachment: Attachment) =>
+  attachment.image ? ((attachment.inline ?? attachment.blob)?.size ?? 0) : 0
+
 /** The bytes a message's photos add to its request. */
 export const inlineBytes = (attachments: Attachment[]) =>
-  attachments.reduce((sum, a) => sum + (a.image && a.blob ? a.blob.size : 0), 0)
+  attachments.reduce((sum, attachment) => sum + inlineSize(attachment), 0)
 
 /**
  * Saves a file this device doesn't hold — one another device sent, or one a restored message names
@@ -155,8 +158,11 @@ export async function wireContent(
 ): Promise<string | ContentPart[]> {
   if (!attachments.length) return text
   const parts = attachmentParts(text, attachments)
-  for (const attachment of attachments)
-    if (attachment.image && attachment.blob)
-      parts.push({ type: "image_url", image_url: { url: await blobToDataUrl(attachment.blob) } })
+  // The model reads the scaled copy, never a file too big for the request to carry.
+  for (const attachment of attachments) {
+    const part = attachment.inline ?? attachment.blob
+    if (attachment.image && part)
+      parts.push({ type: "image_url", image_url: { url: await blobToDataUrl(part) } })
+  }
   return parts
 }

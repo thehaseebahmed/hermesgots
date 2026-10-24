@@ -91,6 +91,21 @@ export function intake<T extends CappedFile>(
 }
 
 /**
+ * The bytes an image attachment keeps: `kept` is the file the user chose — the bytes the host
+ * stores and this device caches — and `inline` the scaled copy the model reads, when scaling made
+ * one. An original past the host's cap can't be kept, so the scaled copy is both: it is the only
+ * form of the file that fits a message.
+ */
+export function keptImage<B extends { size: number }>(
+  file: B,
+  scaled: B | null,
+): { kept: B; inline: B | null } {
+  if (!scaled || scaled === file) return { kept: file, inline: null }
+  if (file.size <= MAX_FILE_BYTES) return { kept: file, inline: scaled }
+  return { kept: scaled, inline: null }
+}
+
+/**
  * The files `seen` hasn't taken moments ago, recorded as they are taken. A surface that hears both
  * a paste and the drop of the same file adds it once, and one picked again later still lands.
  */

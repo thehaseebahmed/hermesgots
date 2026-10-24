@@ -7,6 +7,7 @@ import {
   fresh,
   inlineRefusal,
   intake,
+  keptImage,
   MAX_ATTACHMENTS,
   MAX_FILE_BYTES,
   MAX_INLINE_BYTES,
@@ -99,4 +100,29 @@ test("a share's refusals name the limits in the same words", () => {
     unreadableRefusal("clip.mp4").message,
     "Gots couldn't read clip.mp4 from that share.",
   )
+})
+
+test("the host keeps the file the user chose, with the scaled copy as the model's part", () => {
+  const original = { size: 4 * 1024 * 1024, type: "image/png" }
+  const smaller = { size: 900 * 1024, type: "image/jpeg" }
+  const kept = keptImage(original, smaller)
+  assert.equal(kept.kept, original, "the copy kept is the file itself, bytes and all")
+  assert.equal(kept.inline, smaller, "the scaled copy is only the part the model reads")
+})
+
+test("an original too big to keep is what the scaled copy stands in for", () => {
+  const huge = { size: MAX_FILE_BYTES + 1, type: "image/heic" }
+  const smaller = { size: 2 * 1024 * 1024, type: "image/jpeg" }
+  assert.deepEqual(keptImage(huge, smaller), { kept: smaller, inline: null })
+  assert.equal(
+    keptImage({ size: MAX_FILE_BYTES }, smaller).kept.size,
+    MAX_FILE_BYTES,
+    "nine megabytes itself still fits",
+  )
+})
+
+test("a photo that needed no scaling is one copy, not two", () => {
+  const photo = { size: 400 * 1024, type: "image/png" }
+  assert.deepEqual(keptImage(photo, photo), { kept: photo, inline: null })
+  assert.deepEqual(keptImage(photo, null), { kept: photo, inline: null })
 })

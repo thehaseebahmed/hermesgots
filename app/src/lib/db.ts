@@ -356,6 +356,11 @@ export interface Attachment {
   image: boolean
   /** The file (an image downscaled), on this device only: Hermes's transcript doesn't keep it. */
   blob?: Blob
+  /**
+   * The scaled copy the model reads inline, when it isn't the file itself. The host keeps `blob`;
+   * this is only the part a request carries and, for a photo a browser can't draw, the preview.
+   */
+  inline?: Blob
   /** A photo's own size, so a viewer can hold its box before it's read. */
   width?: number
   height?: number

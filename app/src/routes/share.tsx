@@ -11,7 +11,7 @@ import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { fitsInline, inlineRefusal, intake, type Refusal } from "@/lib/attachment-caps"
-import { prepareAttachment } from "@/lib/attachments"
+import { inlineSize, prepareAttachment } from "@/lib/attachments"
 import { queueMessage, sendMessage } from "@/lib/chat"
 import {
   createConversation,
@@ -146,7 +146,7 @@ export function SharePage() {
       for (const file of take) {
         try {
           const attachment = await prepareAttachment(file, true)
-          const size = attachment.image ? attachment.blob!.size : 0
+          const size = inlineSize(attachment)
           if (!fitsInline(size, inline)) {
             said.push(inlineRefusal(attachment.name))
             continue

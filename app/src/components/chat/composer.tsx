@@ -26,7 +26,7 @@ import {
 } from "@/components/ui/input-group"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { fitsInline, fresh, inlineRefusal, intake, MAX_ATTACHMENTS } from "@/lib/attachment-caps"
-import { inlineBytes, prepareAttachment } from "@/lib/attachments"
+import { inlineBytes, inlineSize, prepareAttachment } from "@/lib/attachments"
 import type { Attachment } from "@/lib/db"
 import type { PluginFeatureAnswer } from "@/lib/features"
 
@@ -299,7 +299,7 @@ export function Composer({
     for (const [index, file] of take.entries()) {
       try {
         const attachment = await prepareAttachment(file, imagesAvailable)
-        const size = attachment.image ? attachment.blob!.size : 0
+        const size = inlineSize(attachment)
         if (!fitsInline(size, inline)) {
           toast.error(inlineRefusal(attachment.name).message)
         } else {
