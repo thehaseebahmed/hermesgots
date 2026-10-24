@@ -32,7 +32,7 @@ import {
   type LibraryFile,
   type LibraryFolder,
 } from "@/lib/hermes"
-import { openExternal, openImageViewer } from "@/lib/native"
+import { openExternal, openMediaViewer } from "@/lib/native"
 import { usePoll } from "@/lib/poll"
 import { noteFailure, quietly } from "@/lib/report"
 import { cn } from "@/lib/utils"
@@ -77,7 +77,7 @@ function openFile(config: HermesConfig, file: LibraryFile) {
         return
       }
       try {
-        await openImageViewer(url)
+        await openMediaViewer(url, { type: "image/*" })
       } finally {
         URL.revokeObjectURL(url)
       }

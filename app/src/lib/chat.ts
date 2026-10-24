@@ -47,7 +47,8 @@ import {
   type StreamHandlers,
   type TurnUsage,
 } from "@/lib/hermes"
-import { attachmentsText, setUploading, wireContent } from "@/lib/attachments"
+import { attachmentsText, splitAttachments } from "@/lib/attachment-text"
+import { setUploading, wireContent } from "@/lib/attachments"
 import { refreshContext } from "@/lib/context"
 import { refreshChatProviderUsage } from "@/lib/provider-usage"
 import { liveTurn, noteFollowUps, patchStats, reconcileHistory } from "@/lib/history"
@@ -57,6 +58,7 @@ import { refreshMoves } from "@/lib/moves"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { appendThinking, closeRun, forgetRuns, noteRunThinking } from "@/lib/thinking"
 import { quietly } from "@/lib/report"
+import { canSteer, midReply } from "@/lib/steer"
 import { randomId } from "@/lib/utils"
 import { knownLiveRun, readLiveRuns } from "@/lib/waiting"
 import { onWake } from "@/lib/wake"
@@ -750,13 +752,15 @@ function dropUnread(draft: Draft, pending: string) {
 }
 
 /** Puts a steer the agent never read at the front of the queue, to go as the next turn. */
-async function requeueSteer(conversationId: string, text: string) {
+export async function requeueSteer(conversationId: string, text: string) {
+  const { text: content, attachments } = splitAttachments(text.trim())
   const queued = (await getMessages(conversationId)).find((m) => m.status === "queued")
   await db.messages.add({
     id: randomId(),
     conversationId,
     role: "user",
-    content: text.trim(),
+    content,
+    ...(attachments.length ? { attachments } : {}),
     status: "queued",
     createdAt: queued ? queued.createdAt - 1 : Date.now(),
   })
@@ -1388,15 +1392,15 @@ export async function sendFromMain(
   }
 }
 
-/** A message sent mid-reply: a steer when asked to and it is text alone, else queued. */
+/** A message sent mid-reply: a steer when the send asked to and it can be one, else queued. */
 function steerOrQueue(
   conversationId: string,
   content: string,
   attachments: Attachment[],
   steer?: boolean,
 ) {
-  return steer && !attachments.length
-    ? steerText(conversationId, content)
+  return midReply(attachments, { steer: Boolean(steer), running: true }) === "steer"
+    ? steerText(conversationId, content, attachments)
     : queueMessage(conversationId, content, attachments)
 }
 
@@ -1416,14 +1420,14 @@ export async function settleTriaging(conversationId: string) {
     .modify({ status: "error", statusText: "Not sent" })
 }
 
-/** Holds a message until the current reply finishes. */
+/** Holds a message until the current reply finishes, and answers the row it added. */
 export async function queueMessage(
   conversationId: string,
   text: string,
   attachments: Attachment[] = [],
-) {
+): Promise<string | undefined> {
   const content = text.trim()
-  if (!content && !attachments.length) return
+  if (!content && !attachments.length) return undefined
   const message: Message = {
     id: randomId(),
     conversationId,
@@ -1451,12 +1455,13 @@ export async function queueMessage(
       })
       // The run may have ended while it was being queued, and the plugin started it at once.
       followHostQueue(conversationId)
-      return
+      return item.id
     } catch {
       // It waits here instead, and goes from this device.
     }
   }
   await db.messages.add(message)
+  return message.id
 }
 
 /** Hermes's transcript times are its own clock's, in whole seconds. */
@@ -1498,12 +1503,16 @@ async function syncQueue(conversationId: string) {
     }
     for (const item of items) {
       const mine = byId.get(item.id)
+      const files = mine?.attachments ?? attachmentsOf(item)
+      const carried = files?.length
+        ? { text: item.text, attachments: files }
+        : splitAttachments(item.text)
       const next: Message = {
         id: item.id,
         conversationId,
         role: "user",
-        content: item.text,
-        attachments: mine?.attachments ?? attachmentsOf(item),
+        content: carried.text,
+        attachments: carried.attachments,
         status: "queued",
         statusText: item.error,
         queuePaused: paused || Boolean(item.error),
@@ -1634,13 +1643,35 @@ export async function removeQueued(message: Message) {
 }
 
 /**
+ * The attachments a steer's markers name, saved on the host first: the marker carries the path the
+ * model opens, so a file the host hasn't taken yet would name nothing. A save that fails throws,
+ * which leaves the message in the queue rather than steering a marker that points nowhere.
+ */
+async function savedForSteer(message: Message, attachments: Attachment[]) {
+  if (!attachments.some((attachment) => !attachment.path && attachment.blob)) return attachments
+  const host = await hostOf(message.conversationId)
+  if (!host) throw new HermesError("This reply can't be steered.")
+  const saved = await uploadAttachments(
+    host.config,
+    host.conversation.hermesSessionId,
+    attachments,
+    true,
+  )
+  await db.messages.update(message.id, { attachments: saved })
+  return saved
+}
+
+/**
  * Hands a queued message to the reply that's running, which reads it after its current tool calls
  * instead of after it finishes. It then sits in the reply where it was sent.
  */
 export async function steerQueued(message: Message) {
   const turn = turns.get(message.conversationId)
   let runId = turn?.draft.runId
+  let carried = message.attachments ?? []
+  let said: string
   if (message.hostQueued) {
+    said = attachmentsText(message.content, carried)
     const host = await hostOf(message.conversationId)
     if (!host) throw new HermesError("This reply can't be steered.")
     const steered = await queueAction(
@@ -1651,36 +1682,45 @@ export async function steerQueued(message: Message) {
     )
     if (typeof steered.run_id === "string") runId = steered.run_id
   } else {
-    if (!turn || !runId || message.attachments?.length)
+    if (!turn || !runId || !canSteer(carried))
       throw new HermesError("This reply can't be steered.")
-    await steerRun(turn.config, runId, message.content)
+    carried = await savedForSteer(message, carried)
+    said = attachmentsText(message.content, carried)
+    await steerRun(turn.config, runId, said)
   }
   await db.messages.delete(message.id)
   if (!turn || turn.draft.runId !== runId) return
   const { draft, touch } = turn
+  // Hermes hands an unread steer back as the text the model read, so the markers are what the reply
+  // keeps for `requeueSteer` to read back as the files they name.
   draft.steers = [
     ...(draft.steers ?? []),
-    { id: message.id, text: message.content, contentOffset: draft.content.length, at: Date.now() },
+    { id: message.id, text: said, contentOffset: draft.content.length, at: Date.now() },
   ]
   touch()
 }
 
 /**
- * Sends text straight to the running reply, as a steer. When it can't (the run waits on the user,
- * or the host has no steer route) it queues instead and says so.
+ * Sends a message straight to the running reply, as a steer. It is queued first, so a message the
+ * reply can't take stays waiting with everything it carries. When it can't be steered (the run
+ * waits on the user, or the host has no steer route) it queues instead and says so.
  */
-export async function steerText(conversationId: string, text: string) {
+export async function steerText(
+  conversationId: string,
+  text: string,
+  attachments: Attachment[] = [],
+) {
   const content = text.trim()
-  if (!content) return
-  await queueMessage(conversationId, content)
-  const queued = (await getMessages(conversationId)).findLast(
-    (m) => m.status === "queued" && m.content === content,
-  )
+  if (!content && !attachments.length) return
+  const id = await queueMessage(conversationId, content, attachments)
+  const queued = id ? await db.messages.get(id) : undefined
   if (!queued) return
   try {
     await steerQueued(queued)
-  } catch {
-    toast.error("Couldn't steer this reply, so it's queued.")
+  } catch (error) {
+    // A file the host wouldn't take is why it couldn't steer, so its own words come first.
+    const because = error instanceof AttachmentError ? `${error.message} ` : ""
+    toast.error(`${because}Couldn't steer this reply, so it's queued.`)
   }
 }
 

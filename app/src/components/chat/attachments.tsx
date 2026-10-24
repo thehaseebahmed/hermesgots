@@ -2,6 +2,7 @@ import { useState } from "react"
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
+  DownloadIcon,
   ExternalLinkIcon,
   FileIcon,
   ImageIcon,
@@ -13,49 +14,84 @@ import { FullscreenPopup, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
-import { formatBytes, useUploading } from "@/lib/attachments"
+import { attachmentUrl } from "@/lib/attachment-url"
+import { formatBytes } from "@/lib/attachment-caps"
+import { useUploading } from "@/lib/attachments"
 import type { Attachment } from "@/lib/db"
 import { useImageReady } from "@/lib/image"
 import { isNative } from "@/lib/native"
 import { cn } from "@/lib/utils"
 
-// One URL per attachment for the page's life: live queries hand back a new Blob on every change.
-const urls = new Map<string, string>()
-
-function objectUrl(attachment: Attachment) {
-  if (!attachment.blob) return undefined
-  let url = urls.get(attachment.id)
-  if (!url) {
-    url = URL.createObjectURL(attachment.blob)
-    urls.set(attachment.id, url)
-  }
-  return url
-}
-
 // Types a browser tab shows rather than downloads.
 const VIEWABLE = /^(image\/|text\/|application\/(pdf|json)$)/
 
+/** A file's name over its size: a staged tile, a thread's row that saves it, and a recording's row. */
+export function MediaName({ name, size }: { name: string; size?: number }) {
+  return (
+    <span className="flex min-w-0 flex-col">
+      <span className="line-clamp-1 break-all">{name}</span>
+      {size ? (
+        <span className="text-xs text-muted-foreground tabular-nums">{formatBytes(size)}</span>
+      ) : null}
+    </span>
+  )
+}
+
 /**
- * A photo as a thumbnail, or a file (and a photo another device sent, which Hermes doesn't give
- * back) as its name. With `onRemove`, a button takes it off the message; with `onOpen`, tapping it
- * opens it. `preparing` is a photo still being scaled down.
+ * A file that isn't a photo, as its row: what it's called, what it weighs, and a tap that saves it
+ * from the host. The thread draws a reply's files through this, where there is no attachment of the
+ * message's own to draw.
+ */
+export function FileRow({
+  name,
+  size,
+  onSave,
+  className,
+}: {
+  name: string
+  /** What the host said it weighs, where it said. */
+  size?: number
+  onSave?: () => void
+  className?: string
+}) {
+  return (
+    <div className={cn("relative shrink-0", className)}>
+      <button
+        type="button"
+        onClick={onSave}
+        aria-label={`Download ${name}`}
+        className="flex h-16 max-w-48 min-w-28 items-center gap-2 rounded-xl border bg-muted/50 px-3 text-left text-sm text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+      >
+        <DownloadIcon className="size-5 shrink-0 text-muted-foreground" />
+        <MediaName name={name} size={size} />
+      </button>
+    </div>
+  )
+}
+
+/**
+ * A photo as a thumbnail, or a file as its name and size. With `onRemove`, a button takes it off the
+ * message; with `onOpen`, a tap opens it, or saves it where `action` says a tap saves.
  */
 export function AttachmentTile({
   attachment,
   preparing,
+  action = "open",
   onOpen,
   onRemove,
   className,
 }: {
   attachment: Attachment
   preparing?: boolean
+  /** What a tap does: open it here, or save it from the host. */
+  action?: "open" | "download"
   onOpen?: () => void
   onRemove?: () => void
   className?: string
 }) {
   const uploading = useUploading(attachment.id)
-  const url = attachment.image ? objectUrl(attachment) : undefined
-  const Icon = attachment.image ? ImageIcon : FileIcon
+  const url = attachment.image ? attachmentUrl(attachment) : undefined
+  const Icon = attachment.image ? ImageIcon : action === "download" ? DownloadIcon : FileIcon
   const busy = preparing || uploading
   const tile = url ? (
     <img
@@ -79,7 +115,7 @@ export function AttachmentTile({
       ) : (
         <Icon className="size-5 shrink-0 text-muted-foreground" />
       )}
-      <span className="line-clamp-2 break-all">{attachment.name}</span>
+      <MediaName name={attachment.name} size={attachment.size} />
     </div>
   )
   return (
@@ -88,7 +124,7 @@ export function AttachmentTile({
         <button
           type="button"
           onClick={onOpen}
-          aria-label={`Open ${attachment.name}`}
+          aria-label={`${action === "download" ? "Download" : "Open"} ${attachment.name}`}
           className="block rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
         >
           {tile}
@@ -181,7 +217,7 @@ export function AttachmentViewer({
   const count = attachments.length
   const step = (by: number) => onIndex((at + by + count) % count)
 
-  const url = shown ? objectUrl(shown) : undefined
+  const url = shown ? attachmentUrl(shown) : undefined
   const image = shown?.image && url
   const details = shown && [
     shown.size ? formatBytes(shown.size) : undefined,

@@ -9,7 +9,7 @@ const cli = read("./e2e/cli.mjs")
 const audit = read("../../docs/e2e-flow-audit.md")
 
 const VERDICTS = ["stay", "component", "plugin", "delete"]
-const STAYS = 12
+const STAYS = 13
 
 const registry = () => {
   const start = cli.indexOf("const FLOWS = {")
@@ -62,6 +62,6 @@ test("the audit's own counts are what its rows add up to", () => {
   assert.equal(Number(total?.[1]), all.length, "the total")
 })
 
-test("the flows that stay are the twelve the audit argues for", () => {
+test("the flows that stay are the thirteen the audit argues for", () => {
   assert.equal(rows().filter((row) => row.verdict === "stay").length, STAYS)
 })

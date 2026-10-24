@@ -3,6 +3,8 @@
 // screen to read, which a redirect then opens.
 
 const SHARE_CACHE = "memento-share"
+// What one message carries, so a share of more is said out loud by the share screen.
+const MAX_FILES = 10
 
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url)
@@ -23,16 +25,25 @@ async function receive(request) {
       title: String(form.get("title") || ""),
       text: String(form.get("text") || ""),
       url: String(form.get("url") || ""),
+      // What arrived but is beyond what one message carries, so the screen can say so.
+      leftOut: Math.max(0, files.length - MAX_FILES),
       files: [],
     }
-    for (const [index, file] of files.slice(0, 10).entries()) {
+    for (const [index, file] of files.slice(0, MAX_FILES).entries()) {
       const key = `/__share/${id}/${index}`
       await cache.put(key, new Response(file, { headers: { "content-type": file.type } }))
       meta.files.push({ key, name: file.name, type: file.type })
     }
     await cache.put(`/__share/${id}`, Response.json(meta))
   } catch {
-    // The share screen says there was nothing to share.
+    // A share that couldn't be taken is still the user's: leave the note the screen reads, so it
+    // says why instead of closing as if nothing had been shared.
+    try {
+      const cache = await caches.open(SHARE_CACHE)
+      await cache.put(`/__share/${id}`, Response.json({ files: [], failed: true }))
+    } catch {
+      // Nothing can be kept at all; the screen still opens on what the id answered.
+    }
   }
   return Response.redirect(`/share?id=${id}`, 303)
 }

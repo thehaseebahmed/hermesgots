@@ -82,6 +82,7 @@ elsewhere, set `PLAYWRIGHT_MODULE` to its `index.mjs`. The CommonJS `index.js` l
 | `drafts` | Composer drafts are kept per chat and cleared on send |
 | `submission` | Concurrent sends start one run and get one reply |
 | `image-skeleton` | A reply's images hold their cell while the plugin serves them (the route is held), then land at that size: one image and a gallery alike, phone and tablet, light and dark |
+| `file-message` | A message sent with a file and a photo through the composer's `+` draws the photo in a Gallery cell and the file as a row naming it and its size; the same message read back on a device holding none of its bytes draws the same, and a tap on the row downloads it under the file's own name |
 | `image-viewer` | A photo opened from a message holds its own box while it decodes |
 | `fallback-models` | A bot's fallback models are recorded on its host from its settings: two picks in order, one removed, and no third offered |
 | `delegation-model` | A bot's subagent model is recorded as its host's delegation model and read back, cleared to the bot's own with Default model, and a plugin that never advertised `delegation_model` shows no field at all |

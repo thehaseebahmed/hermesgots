@@ -47,7 +47,7 @@ export default defineConfig(({ mode }) => ({
           { src: "pwa-512x512.png", sizes: "512x512", type: "image/png" },
           { src: "maskable-512x512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
         ],
-        // Android's share sheet (Chrome, once installed) sends links and images here; see share-sw.js.
+        // Android's share sheet (Chrome, once installed) takes any file here; see share-sw.js.
         share_target: {
           action: "/share-target",
           method: "POST",
@@ -56,7 +56,12 @@ export default defineConfig(({ mode }) => ({
             title: "title",
             text: "text",
             url: "url",
-            files: [{ name: "media", accept: ["image/*"] }],
+            files: [
+              {
+                name: "media",
+                accept: ["image/*", "video/*", "audio/*", "text/*", "application/*"],
+              },
+            ],
           },
         },
       },

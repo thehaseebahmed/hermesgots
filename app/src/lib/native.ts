@@ -15,38 +15,50 @@ export async function minimizeAndroidApp() {
 }
 
 interface OpenImagePlugin {
-  open(options: { dataBase64: string; name: string }): Promise<void>
+  open(options: { dataBase64: string; name: string; type?: string }): Promise<void>
 }
 
 const OpenImage = registerPlugin<OpenImagePlugin>("OpenImage")
 
+/** The bytes behind a blob URL, as the base64 string the Android bridge carries, and their type. */
+async function blobBytes(url: string) {
+  const blob = await fetch(url).then((response) => response.blob())
+  const dataBase64 = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result).split(",", 2)[1] ?? "")
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(blob)
+  })
+  return { dataBase64, type: blob.type }
+}
+
 /**
- * Opens an image at full size in the platform's own viewer: the system photo viewer in the Android
- * app (the bridge hands it the bytes), a browser tab in a browser.
+ * Opens media in the platform's own viewer or player: the Android app is handed the bytes and a VIEW
+ * intent for the file's type, and a browser opens the file in a new tab, where it plays the way that
+ * browser plays anything. Nothing is embedded in the thread.
  */
-export async function openImageViewer(url: string) {
+export async function openMediaViewer(
+  url: string,
+  { type, name }: { type: string; name?: string },
+) {
   if (isNative && url.startsWith("blob:")) {
     try {
-      const blob = await fetch(url).then((response) => response.blob())
-      const dataBase64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader()
-        reader.onload = () => resolve(String(reader.result).split(",", 2)[1] ?? "")
-        reader.onerror = () => reject(reader.error)
-        reader.readAsDataURL(blob)
-      })
-      if (dataBase64) {
+      const bytes = await blobBytes(url)
+      const opened = bytes.type || type
+      if (bytes.dataBase64) {
         await OpenImage.open({
-          dataBase64,
-          name: `image.${blob.type.split("/")[1] || "png"}`,
+          dataBase64: bytes.dataBase64,
+          name: name ?? `media.${opened.split("/")[1] || "bin"}`,
+          type: opened,
         })
         return
       }
     } catch {
-      // The tab below still opens the image.
+      // The tab below still opens it.
     }
   }
   if (isNative) {
-    // A link's image isn't ours to hand over; the platform opens the URL itself.
+    // A file that isn't ours to hand over; the platform opens the URL itself.
     void Browser.open({ url })
     return
   }

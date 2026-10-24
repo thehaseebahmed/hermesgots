@@ -2,6 +2,7 @@ import { useEffect } from "react"
 import { Capacitor, registerPlugin, type PluginListenerHandle } from "@capacitor/core"
 import { useNavigate } from "react-router"
 
+import { countRefusal, sizeRefusal, unreadableRefusal, type Refusal } from "@/lib/attachment-caps"
 import { createStore } from "@/lib/store"
 import { skipLaunchRestore } from "@/lib/launch"
 import { isNative } from "@/lib/native"
@@ -15,13 +16,22 @@ export interface IncomingShare {
   /** Shared text, without the links in it. */
   text?: string
   links: string[]
-  images: File[]
+  /** Every file that arrived, whatever its type; the screen reads them into attachments. */
+  files: File[]
+  /** What arrived but couldn't be taken, in the caps' own words. */
+  refused: Refusal[]
 }
 
 const LINK = /\bhttps?:\/\/[^\s<>"']+/gi
 
 /** Splits a share into its links and the rest, the way senders mix them (a title, then the URL). */
-export function toShare(input: { title?: string; text?: string; url?: string; images?: File[] }) {
+export function toShare(input: {
+  title?: string
+  text?: string
+  url?: string
+  files?: File[]
+  refused?: Refusal[]
+}) {
   const links = new Set<string>()
   const add = (link: string) => links.add(link.replace(/[.,;:!?)\]]+$/, ""))
   if (input.url?.trim()) add(input.url.trim())
@@ -39,7 +49,8 @@ export function toShare(input: { title?: string; text?: string; url?: string; im
     title: title || undefined,
     text: rest && rest !== title ? rest : undefined,
     links: [...links],
-    images: input.images ?? [],
+    files: input.files ?? [],
+    refused: input.refused ?? [],
   } satisfies IncomingShare
 }
 
@@ -54,32 +65,62 @@ const setShare = current.set
 
 export const clearShare = () => setShare(null)
 
+/** Puts a share on screen, as the receiver does for one that arrives or launches the app. */
+export const receiveShare = (share: IncomingShare) => setShare(share)
+
 export const useIncomingShare = current.use
 
 const SHARE_CACHE = "memento-share"
 
-/** Reads a share the service worker took (`public/share-sw.js`), then forgets it. */
+/**
+ * Reads a share the service worker took (`public/share-sw.js`), then forgets it. False only where
+ * there was never a share to read here; a share that arrived and couldn't be read back still opens,
+ * carrying the refusal, so nothing a user shared disappears without a word.
+ */
 export async function readWebShare(id: string) {
   if (!("caches" in window)) return false
+  const refused: Refusal[] = []
   try {
     const cache = await caches.open(SHARE_CACHE)
     const meta = await cache.match(`/__share/${id}`)
     if (!meta) return false
-    const { title, text, url, files } = (await meta.json()) as {
+    const { title, text, url, files = [], leftOut, failed } = (await meta.json()) as {
       title?: string
       text?: string
       url?: string
-      files: { key: string; name: string; type: string }[]
+      files?: { key: string; name: string; type: string }[]
+      leftOut?: number
+      /** The service worker couldn't take it: the note it left instead of a share. */
+      failed?: boolean
     }
-    const images: File[] = []
+    if (failed) {
+      setShare(toShare({ refused: [unreadableRefusal("what was shared")] }))
+      return true
+    }
+    const shared: File[] = []
     for (const file of files) {
       const response = await cache.match(file.key)
-      if (response) images.push(new File([await response.blob()], file.name, { type: file.type }))
+      // A file the cache no longer holds is said out loud, so a share loses nothing quietly.
+      if (!response) {
+        refused.push(unreadableRefusal(file.name))
+        continue
+      }
+      shared.push(new File([await response.blob()], file.name, { type: file.type }))
     }
-    setShare(toShare({ title, text, url, images }))
+    setShare(
+      toShare({
+        title,
+        text,
+        url,
+        files: shared,
+        refused: [...(leftOut ? [countRefusal(leftOut)] : []), ...refused],
+      }),
+    )
     return true
   } catch {
-    return false
+    // What was shared is still the user's share: the screen opens on the reason it can't be read.
+    setShare(toShare({ refused: [unreadableRefusal("what was shared")] }))
+    return true
   } finally {
     void caches.delete(SHARE_CACHE).catch(() => {})
   }
@@ -89,6 +130,8 @@ interface NativeShare {
   title: string
   text: string
   files: { path: string; name: string; type: string }[]
+  /** What the copy couldn't take, as the reason it gave: `count`, `size` or `read`. */
+  refused?: { name: string; reason: string }[]
 }
 
 interface ShareTargetPlugin {
@@ -97,29 +140,44 @@ interface ShareTargetPlugin {
 
 const ShareTarget = registerPlugin<ShareTargetPlugin>("ShareTarget")
 
+/** The refusals the copy reported, in the limits' own words — the app's caps, not the copy's. */
+function refusedByCopy(files: { name: string; reason: string }[] = []): Refusal[] {
+  const refused: Refusal[] = []
+  let leftOut = 0
+  for (const file of files) {
+    if (file.reason === "count") leftOut += 1
+    else
+      refused.push(file.reason === "size" ? sizeRefusal(file.name) : unreadableRefusal(file.name))
+  }
+  if (leftOut) refused.unshift(countRefusal(leftOut))
+  return refused
+}
+
 async function fromNative(share: NativeShare) {
-  const images: File[] = []
+  const files: File[] = []
+  const refused = refusedByCopy(share.refused)
   for (const file of share.files) {
     try {
       const blob = await (await fetch(Capacitor.convertFileSrc(file.path))).blob()
-      images.push(new File([blob], file.name, { type: file.type || blob.type }))
+      files.push(new File([blob], file.name, { type: file.type || blob.type }))
     } catch {
-      // A file that can't be read is left out; the rest still goes.
+      // A file that can't be read is said out loud; the rest still goes.
+      refused.push(unreadableRefusal(file.name))
     }
   }
-  return toShare({ title: share.title, text: share.text, images })
+  return toShare({ title: share.title, text: share.text, files, refused })
 }
 
 /**
  * Opens the share screen when another app shares into the Android app, including the share that
- * launched it. In development, `window.mementoShare({ title, text, url, images })` does the same.
+ * launched it. In development, `window.mementoShare({ title, text, url, files })` does the same.
  */
 export function useShareReceiver() {
   const navigate = useNavigate()
   useEffect(() => {
     const open = (share: IncomingShare) => {
       skipLaunchRestore()
-      setShare(share)
+      receiveShare(share)
       navigate("/share")
     }
     if (import.meta.env.DEV) {

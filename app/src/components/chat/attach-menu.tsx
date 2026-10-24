@@ -5,7 +5,9 @@ import { Banner } from "@/components/banner"
 import { ModeIcon, ModeOptions, type ModeSettings } from "@/components/chat/mode-menu"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
+import { filesReason } from "@/lib/attachment-caps"
 import type { SessionMode } from "@/lib/db"
+import type { PluginFeatureAnswer } from "@/lib/features"
 import { cn } from "@/lib/utils"
 import { MODE_LABELS } from "@/lib/workspace"
 
@@ -17,10 +19,10 @@ const SOURCES: { id: Source; label: string; icon: LucideIcon }[] = [
   { id: "files", label: "Files", icon: FileUpIcon },
 ]
 
-/** The composer's `+` button: photos and files to add to the message, and a session's mode. */
+/** The composer's `+` button: photos, clips and files to add to the message, and a session's mode. */
 export function AttachMenu({
   disabled,
-  filesAvailable,
+  filesFeature,
   imagesAvailable,
   onAdd,
   session,
@@ -28,8 +30,7 @@ export function AttachMenu({
   disabled?: boolean
   /** A project session's permission mode, picked in the same sheet. */
   session?: ModeSettings
-  /** Files only reach Hermes through the Gots plugin; photos also go inline. */
-  filesAvailable: boolean
+  filesFeature: PluginFeatureAnswer
   /** Camera and Photos send images the model has to read itself. */
   imagesAvailable: boolean
   onAdd: (files: File[]) => void
@@ -62,6 +63,8 @@ export function AttachMenu({
 
   // The mode isn't on screen any more, so one that changes what the agent may do marks the button.
   const flagged = session && session.mode !== "accept_edits"
+  const filesAvailable = filesFeature === "yes"
+  const because = filesReason(filesFeature)
 
   return (
     <>
@@ -84,22 +87,26 @@ export function AttachMenu({
       </Button>
       <input
         ref={(el) => void (inputs.current.camera = el)}
+        name="camera"
         type="file"
         accept="image/*"
         capture="environment"
         className="hidden"
         onChange={picked}
       />
+      {/* The gallery takes clips as well as photos: the Camera is the one that stays a still. */}
       <input
         ref={(el) => void (inputs.current.photos = el)}
+        name="photos"
         type="file"
-        accept="image/*"
+        accept="image/*,video/*"
         multiple
         className="hidden"
         onChange={picked}
       />
       <input
         ref={(el) => void (inputs.current.files = el)}
+        name="files"
         type="file"
         multiple
         className="hidden"
@@ -110,9 +117,9 @@ export function AttachMenu({
           <PopupHeader className="pb-2">
             <PopupTitle>Add context</PopupTitle>
           </PopupHeader>
-          {!filesAvailable && (
+          {because && (
             <div className="px-4 pb-4 sm:px-6">
-              <Banner>File uploads need the Gots plugin.</Banner>
+              <Banner>{because}</Banner>
             </div>
           )}
           <div

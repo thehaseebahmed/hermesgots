@@ -2,15 +2,16 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useNavigate, useSearchParams } from "react-router"
 import { toast } from "sonner"
-import { ChevronDownIcon, LinkIcon, MessageCircleIcon, PlusIcon, XIcon } from "lucide-react"
+import { ChevronDownIcon, LinkIcon, MessageCircleIcon, PlusIcon } from "lucide-react"
 
 import { Banner } from "@/components/banner"
 import { BotCard } from "@/components/bot-card"
+import { AttachmentTile } from "@/components/chat/attachments"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
-import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
-import { prepareAttachment } from "@/lib/attachments"
+import { isPhoto } from "@/lib/attachment-caps"
+import { prepareIntake } from "@/lib/attachments"
 import { queueMessage, sendMessage } from "@/lib/chat"
 import {
   createConversation,
@@ -18,6 +19,7 @@ import {
   getActiveProfile,
   listEnabledProfiles,
   setActiveProfile,
+  type Attachment,
 } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { reconcileHistory } from "@/lib/history"
@@ -28,6 +30,8 @@ import { useBotThreads, useNow } from "@/lib/threads"
 /** How many of a bot's newest chats are offered before Show more. */
 const FIRST = 5
 const MORE = 30
+/** No files at all, kept as one array so a share with nothing read yet doesn't rebuild on render. */
+const NO_FILES: Attachment[] = []
 
 function hostOf(link: string) {
   try {
@@ -41,39 +45,19 @@ function SectionLabel({ children }: { children: string }) {
   return <h2 className="px-1 text-sm font-medium text-muted-foreground">{children}</h2>
 }
 
-// One URL per shared image for the page's life; StrictMode would revoke a memoized one.
-const urls = new WeakMap<File, string>()
-
-function objectUrl(file: File) {
-  let url = urls.get(file)
-  if (!url) {
-    url = URL.createObjectURL(file)
-    urls.set(file, url)
-  }
-  return url
-}
-
-/** Thumbnails of the shared images, each with a button that leaves it out. */
-function SharedImages({ images, onRemove }: { images: File[]; onRemove: (index: number) => void }) {
+/** Thumbnails of the shared files, each with a button that leaves it out. */
+function SharedFiles({
+  files,
+  onRemove,
+}: {
+  files: Attachment[]
+  onRemove: (attachment: Attachment) => void
+}) {
   return (
-    <ul className="-mx-6 flex gap-2 overflow-x-auto px-6 pt-2 pb-1">
-      {images.map((image, index) => (
-        <li key={objectUrl(image)} className="relative shrink-0">
-          <img
-            src={objectUrl(image)}
-            alt={images[index].name}
-            className="size-28 rounded-2xl object-cover ring-1 ring-foreground/10"
-            draggable={false}
-          />
-          <Button
-            variant="secondary"
-            size="icon"
-            className="absolute -top-2 -right-2 size-7 rounded-full border bg-background shadow-sm after:absolute after:-inset-2"
-            onClick={() => onRemove(index)}
-            aria-label={`Remove ${images[index].name}`}
-          >
-            <XIcon className="size-3.5" />
-          </Button>
+    <ul className="-mx-6 flex gap-2.5 overflow-x-auto px-6 pt-2 pb-1 pl-7">
+      {files.map((attachment) => (
+        <li key={attachment.id} className="shrink-0">
+          <AttachmentTile attachment={attachment} onRemove={() => onRemove(attachment)} />
         </li>
       ))}
     </ul>
@@ -90,7 +74,7 @@ export function SharePage() {
   const [params] = useSearchParams()
   const webId = params.get("id")
   const share = useIncomingShare()
-  const [reading, setReading] = useState(Boolean(webId))
+  const [opening, setOpening] = useState(Boolean(webId))
   const botThreads = useBotThreads()
   const noun = botThreads ? "thread" : "chat"
   const now = useNow()
@@ -101,7 +85,7 @@ export function SharePage() {
     let cancelled = false
     void readWebShare(webId).then(() => {
       if (cancelled) return
-      setReading(false)
+      setOpening(false)
       navigate("/share", { replace: true, state: { quiet: true } })
     })
     return () => {
@@ -111,7 +95,7 @@ export function SharePage() {
 
   // Set once the screen sends or closes, which clears the share on its way out.
   const leaving = useRef(false)
-  const missing = !share && !reading && !webId
+  const missing = !share && !opening && !webId
   useEffect(() => {
     if (missing && !leaving.current) root("/")
   }, [missing, root])
@@ -128,14 +112,20 @@ export function SharePage() {
   const profile = bots?.find((bot) => bot.id === (picked ?? active)) ?? bots?.[0]
   const [showAll, setShowAll] = useState(false)
   const [note, setNote] = useState("")
-  const [removed, setRemoved] = useState<File[]>([])
-  const images = useMemo(
-    () => share?.images.filter((image) => !removed.includes(image)) ?? [],
-    [share, removed],
+  const [removed, setRemoved] = useState<string[]>([])
+  const [read, setRead] = useState<{ share: string; files: Attachment[] } | undefined>(undefined)
+  const readStarted = useRef<string | undefined>(undefined)
+  const readHere = share && read?.share === share.id ? read : undefined
+  const preparing = Boolean(share) && !readHere
+  const prepared = readHere ? readHere.files : NO_FILES
+  const files = useMemo(
+    () => prepared.filter((attachment) => !removed.includes(attachment.id)),
+    [prepared, removed],
   )
+  // A photo is a photo whatever form it lands in: one a model can't take images from goes as a file.
+  const photos = files.filter((attachment) => attachment.image || isPhoto(attachment.type))
   const [sending, setSending] = useState<string | false>(false)
 
-  // Another share can arrive while this one is open; it starts afresh.
   const [shareId, setShareId] = useState(share?.id)
   if (share && share.id !== shareId) {
     setShareId(share.id)
@@ -144,6 +134,24 @@ export function SharePage() {
     setShowAll(false)
     setSending(false)
   }
+
+  // Every file under the same caps a pick is held to, refused out loud where it doesn't fit.
+  const imagesAvailable = profile?.imageInput !== false
+  useEffect(() => {
+    if (!share || !profile || readStarted.current === share.id) return
+    readStarted.current = share.id
+    let live = true
+    void prepareIntake(share.files, { inline: imagesAvailable }).then(
+      ({ attachments, refusals }) => {
+        if (!live) return
+        for (const refusal of [...share.refused, ...refusals]) toast.error(refusal.message)
+        setRead({ share: share.id, files: attachments })
+      },
+    )
+    return () => {
+      live = false
+    }
+  }, [share, profile, imagesAvailable])
 
   const chats = useLiveQuery(async () => {
     if (!profile) return []
@@ -172,18 +180,17 @@ export function SharePage() {
 
   const configured = Boolean(profile?.baseUrl.trim())
   // Without the plugin a model that can't see images has no way to take them as files either.
-  const imagesBlocked = images.length > 0 && profile?.imageInput === false && !profile.apiKey
-  const empty = !note.trim() && !share.text && !share.links.length && !images.length
-  const canSend = Boolean(profile) && configured && !imagesBlocked && !empty && !sending
+  const imagesBlocked = photos.length > 0 && profile?.imageInput === false && !profile.apiKey
+  const empty = !note.trim() && !share.text && !share.links.length && !files.length
+  const canSend =
+    Boolean(profile) && configured && !imagesBlocked && !empty && !sending && !preparing
 
   const send = async (target: string) => {
     if (!profile || !canSend) return
     setSending(target)
     try {
-      const attachments = await Promise.all(
-        images.map((image) => prepareAttachment(image, profile.imageInput !== false)),
-      )
-      const text = shareText({ ...share, images }, note)
+      const text = shareText(share, note)
+      const attachments = files
       const existing = target !== "new" ? await db.conversations.get(target) : undefined
       // As the chat's own composer does, so the message follows another device's latest turn.
       if (existing)
@@ -236,10 +243,10 @@ export function SharePage() {
         </PopupHeader>
         <div className="flex flex-col gap-6 px-6 pt-2">
           <section className="flex flex-col gap-3">
-            {images.length > 0 && (
-              <SharedImages
-                images={images}
-                onRemove={(index) => setRemoved((all) => [...all, images[index]])}
+            {files.length > 0 && (
+              <SharedFiles
+                files={files}
+                onRemove={(attachment) => setRemoved((all) => [...all, attachment.id])}
               />
             )}
             {share.links.map((link) => (

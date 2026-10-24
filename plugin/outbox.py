@@ -67,11 +67,10 @@ def wake() -> None:
 
 
 def _item(row: Any) -> Dict[str, Any]:
-    attachments = json.loads(row["attachments"]) if row["attachments"] else []
     return {
         "id": row["id"],
         "text": row["text"],
-        "attachments": attachments,
+        "attachments": _files(row["attachments"]),
         "created_at": row["created_at"],
         "run_id": row["run_id"],
         "sent_at": row["sent_at"],
@@ -98,8 +97,7 @@ def clean_files(files: Any) -> List[Dict[str, Any]]:
     """The attachment fields a queued item keeps, for at most 20 files."""
     return [
         {key: file[key] for key in ("name", "type", "size", "path") if key in file}
-        for file in (files or [])[:20]
-        if isinstance(file, dict)
+        for file in _objects(files)[:20]
     ]
 
 
@@ -447,6 +445,54 @@ async def post(adapter: Any, profile: Optional[str], path: str, body: Dict[str, 
         raise StartError(f"Couldn't reach the API server: {error}", False) from error
 
 
+def _objects(raw: Any) -> List[Dict[str, Any]]:
+    """The file objects a list holds; anything else in it is not a file."""
+    return [file for file in raw if isinstance(file, dict)] if isinstance(raw, list) else []
+
+
+def _files(raw: Any) -> List[Dict[str, Any]]:
+    """The files a row carries, as its own JSON column keeps them (or a list, already decoded)."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw) if raw else []
+        except ValueError:
+            return []
+    return _objects(raw)
+
+
+def _body_text(body: Any) -> Optional[str]:
+    """The text a run body carries, or None when the body holds more than text."""
+    try:
+        run = json.loads(body) if isinstance(body, str) else body
+    except (TypeError, ValueError):
+        return ""
+    if not isinstance(run, dict):
+        return ""
+    messages = run.get("input")
+    if not isinstance(messages, list) or not messages or not isinstance(messages[-1], dict):
+        return ""
+    content = messages[-1].get("content")
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    texts = []
+    for part in content:
+        if not isinstance(part, dict):
+            continue
+        if part.get("type") != "text":
+            return None
+        texts.append(str(part.get("text") or ""))
+    return "\n".join(texts)
+
+
+def steer_text(row: Any) -> Optional[str]:
+    """What a waiting item says when it steers the run that's going, or None when it can't steer."""
+    item = _item(row)
+    said = _body_text(row["body"]) if item["attachments"] else (row["text"] or "")
+    return (said or "").strip() or None
+
+
 async def steer(
     adapter: Any,
     profile: Optional[str],
@@ -465,18 +511,19 @@ async def steer(
     row = await asyncio.to_thread(take, path, session_id, item_id)
     if row is None:
         return None, ("That message isn't waiting any more.", 404)
-    if row["attachments"] or not row["text"].strip():
+    said = steer_text(row)
+    if said is None:
         await asyncio.to_thread(put_back, path, row)
         return None, ("Only text can steer a reply.", 409)
     try:
         await post(
-            adapter, profile, f"/v1/runs/{run_id}/steer", {"input": row["text"]}, authorization=authorization
+            adapter, profile, f"/v1/runs/{run_id}/steer", {"input": said}, authorization=authorization
         )
     except StartError as error:
         await asyncio.to_thread(put_back, path, row)
         return None, (str(error), 409 if error.permanent else 502)
     # A steer the agent never reads comes back when the run ends; see tick.
-    return {"object": "memento.queue.steered", "id": row["id"], "run_id": run_id, "text": row["text"]}, None
+    return {"object": "memento.queue.steered", "id": row["id"], "run_id": run_id, "text": said}, None
 
 
 async def tick(adapter: Any, session_id: str, profile: Optional[str], path: Path) -> None:

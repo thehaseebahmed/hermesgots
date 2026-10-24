@@ -434,12 +434,56 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(self.posted, [])
         self.assertEqual(len(outbox.read(self.path, "s1")["items"]), 1)
 
-    def test_files_cant_steer_so_they_queue(self):
+    def test_a_message_carrying_a_file_steers_with_its_markers(self):
+        """A file's content reaches the model as marker text, which a steer can carry."""
         self.adapter.run("r1", "running", 1)
+        marker = '<attachment name="a.pdf" type="application/pdf" size="3" path="/h/a.pdf" />'
+        self.body = {
+            "model": "m",
+            "provider": "p",
+            "input": [
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "more"}, {"type": "text", "text": marker}],
+                }
+            ],
+            "session_id": "main",
+        }
         files = [{"name": "a.pdf", "type": "application/pdf", "size": 3, "path": "/h/a.pdf"}]
+        delivered = self.deliver(steer=True, files=files)
+        self.assertTrue(delivered["steered"])
+        self.assertEqual(self.posted, [("/v1/runs/r1/steer", {"input": f"more\n{marker}"})])
+
+    def test_a_message_carrying_a_photo_queues(self):
+        """A photo's content rides in the message itself, and a steer is text alone."""
+        self.adapter.run("r1", "running", 1)
+        self.body["input"] = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "look"},
+                    {"type": "image", "source": {"type": "base64", "data": "aGk="}},
+                ],
+            }
+        ]
+        files = [{"name": "cat.png", "type": "image/png", "size": 3, "path": "/h/cat.png"}]
         delivered = self.deliver(steer=True, files=files)
         self.assertFalse(delivered["steered"])
         self.assertEqual(self.posted, [])
+        self.assertEqual(len(outbox.read(self.path, "s1")["items"]), 1, "it waits there instead")
+
+    def test_a_photo_the_message_cant_hold_steers_as_text(self):
+        """A model that takes no images reads a photo's marker line, which a steer carries."""
+        self.adapter.run("r1", "running", 1)
+        photo = '<attachment name="scan.png" type="image/png" size="3" path="/h/scan.png" />'
+        self.body["input"][0]["content"] = [
+            {"type": "text", "text": "more"},
+            {"type": "text", "text": photo},
+        ]
+        files = [{"name": "scan.png", "type": "image/png", "size": 3, "path": "/h/scan.png"}]
+        delivered = self.deliver(steer=True, files=files)
+        self.assertTrue(delivered["steered"])
+        self.assertEqual(self.posted, [("/v1/runs/r1/steer", {"input": f"more\n{photo}"})])
 
     def test_a_refused_steer_leaves_the_message_queued(self):
         self.adapter.run("r1", "running", 1)

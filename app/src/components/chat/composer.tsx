@@ -3,6 +3,8 @@ import {
   useId,
   useRef,
   useState,
+  type ClipboardEvent,
+  type DragEvent,
   type FormEvent,
   type KeyboardEvent,
   type PointerEvent,
@@ -23,14 +25,10 @@ import {
   InputGroupTextarea,
 } from "@/components/ui/input-group"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import {
-  formatBytes,
-  inlineBytes,
-  MAX_ATTACHMENTS,
-  MAX_INLINE_BYTES,
-  prepareAttachment,
-} from "@/lib/attachments"
+import { filesReason, fresh, isPhoto, MAX_ATTACHMENTS } from "@/lib/attachment-caps"
+import { prepareIntake } from "@/lib/attachments"
 import type { Attachment } from "@/lib/db"
+import type { PluginFeatureAnswer } from "@/lib/features"
 
 import { flushDrafts, loadDraft, saveDraft, useDraftText } from "@/lib/drafts"
 import type { HermesConfig } from "@/lib/hermes"
@@ -61,7 +59,8 @@ import {
 } from "@/lib/slash"
 import { isDoubleEscape, isInterrupt } from "@/lib/keys"
 import { useSkills } from "@/lib/skills"
-import { randomId } from "@/lib/utils"
+import { midReply, steerAsked } from "@/lib/steer"
+import { cn, randomId } from "@/lib/utils"
 
 const HOLD_MS = 400
 const SLIDE_CANCEL_PX = 80
@@ -79,7 +78,7 @@ export function Composer({
   dictationWords,
   model,
   session,
-  filesAvailable,
+  filesFeature,
   imagesAvailable,
   draftKey,
   onDraft,
@@ -93,8 +92,8 @@ export function Composer({
   steerByDefault?: boolean
   /** Whether the running reply can be steered. */
   canSteer?: boolean
-  /** Sends text to the running reply now (`/steer`). */
-  onSteer?: (text: string) => Promise<void> | void
+  /** Sends text to the running reply now (`/steer`), with what it carries. */
+  onSteer?: (text: string, attachments: Attachment[]) => Promise<void> | void
   /** Where the unsent text is kept (`draftKey` in `lib/drafts.ts`), so it's there on return. */
   draftKey?: string
   /** Called with the text as it changes. */
@@ -110,8 +109,7 @@ export function Composer({
   model?: ReactNode
   /** A project session: its permission mode, picked in the `+` menu. */
   session?: ModeSettings
-  /** Whether files can be attached (they need the Gots plugin); photos always can. */
-  filesAvailable: boolean
+  filesFeature: PluginFeatureAnswer
   /** False when the model doesn't take images. */
   imagesAvailable: boolean
   disabled?: boolean
@@ -129,6 +127,10 @@ export function Composer({
   const [attachments, setAttachments] = useState<Attachment[]>([])
   // Picked files still being read, shown as placeholders where they'll land.
   const [preparing, setPreparing] = useState<{ id: string; name: string; image: boolean }[]>([])
+  // Files taken moments ago, so a paste and the drop it can also fire add one copy.
+  const recent = useRef(new Map<string, number>())
+  // A file dragged over the composer, held until it is dropped or leaves.
+  const [over, setOver] = useState(false)
   const [viewing, setViewing] = useState<number | null>(null)
   // The key whose draft the text is; until it has loaded nothing is saved over it.
   const [loaded, setLoaded] = useState<string>()
@@ -195,19 +197,18 @@ export function Composer({
   const dictationSends = useRef(false)
   // A press held past HOLD_MS is push-to-talk: letting go finishes, sliding away cancels.
   const press = useRef<{ x: number; y: number } | null>(null)
-  // `/steer` or `/queue` picks how a message sent mid-reply goes; the setting is the default. Only
-  // text can steer, so a message with files waits in the queue. An explicit `/steer` asks the
-  // host even when the reply looks unsteerable, and falls back to the queue with a toast.
-  const steersNow = (text: string, files: number) => {
-    const chosen = sendMode(text)
-    const mode = chosen?.mode ?? (steerByDefault ? "steer" : "queue")
-    return busy && Boolean(onSteer) && !files && mode === "steer" && (Boolean(chosen) || canSteer)
-  }
+  const midRoute = (raw: string, carrying: Attachment[]) =>
+    midReply(carrying, {
+      steer: steerAsked(sendMode(raw)?.mode, { byDefault: steerByDefault, steerable: canSteer }),
+      running: busy,
+    })
+  const steersNow = (raw: string, carrying: Attachment[]) =>
+    Boolean(onSteer) && midRoute(raw, carrying) === "steer"
 
   const canSend =
     (value.trim().length > 0 || attachments.length > 0) && !disabled && preparing.length === 0
   // What Enter does now, so the button says so.
-  const steering = steersNow(value, attachments.length)
+  const steering = steersNow(value, attachments)
 
   // The menu follows the caret: a `/` that begins a word opens it, wherever in the message it is.
   const token = slashToken(value, caret)
@@ -268,10 +269,10 @@ export function Composer({
     const text = sendMode(raw)?.text ?? raw
     if (!text.trim() && !attachments.length) return
     const sent = attachments
-    const steer = steersNow(raw, sent.length)
+    const steer = steersNow(raw, sent)
     setValue("")
     setAttachments([])
-    const go = () => (steer ? onSteer!(text) : (busy ? onQueue : onSend)(text, sent))
+    const go = () => (steer ? onSteer!(text, sent) : (busy ? onQueue : onSend)(text, sent))
     // Hand the message back if it never made it into the chat, unless something new was added.
     void Promise.resolve(go()).catch(() => {
       setValue((current) => current || raw)
@@ -279,42 +280,65 @@ export function Composer({
     })
   }
 
-  const addFiles = async (files: File[]) => {
-    const room = MAX_ATTACHMENTS - attachments.length - preparing.length
-    const taken = files.slice(0, Math.max(room, 0))
-    if (files.length > taken.length) {
-      const left = files.length - taken.length
-      toast.error(
-        `A message can carry ${MAX_ATTACHMENTS} attachments, so ${left === 1 ? "1 was" : `${left} were`} left out.`,
-      )
-    }
-    const placeholders = taken.map((file) => ({
-      id: randomId(),
-      name: file.name,
-      image: file.type.startsWith("image/"),
-    }))
-    setPreparing((current) => [...current, ...placeholders])
-    let inline = inlineBytes(attachments)
-    for (const [index, file] of taken.entries()) {
-      try {
-        const attachment = await prepareAttachment(file, imagesAvailable)
-        const size = attachment.image ? attachment.blob!.size : 0
-        if (inline + size > MAX_INLINE_BYTES) {
-          toast.error(
-            `${attachment.name} doesn't fit: a message's photos can add up to ${formatBytes(MAX_INLINE_BYTES)}. Send it in the next one.`,
-          )
-        } else {
-          inline += size
-          setAttachments((current) => [...current, attachment].slice(0, MAX_ATTACHMENTS))
-        }
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : `Couldn't attach ${file.name}.`)
-      } finally {
-        const done = placeholders[index].id
-        setPreparing((current) => current.filter((p) => p.id !== done))
-      }
-    }
+  // `picked` is a file chosen on purpose, which lands however recently it was taken.
+  const addFiles = async (files: File[], picked = false) => {
+    // A paste and the drop the browser can also fire carry the same file, which lands once.
+    const added = fresh(files, recent.current, Date.now(), { repeat: !picked })
+    if (!added.length) return
+    // Files need the plugin's upload route; a photo the model reads inline doesn't, and still lands.
+    const because = filesReason(filesFeature)
+    const taken = because ? added.filter((file) => imagesAvailable && isPhoto(file.type)) : added
+    if (taken.length < added.length && because) toast.error(because)
+    if (!taken.length) return
+    let placeholders: { id: string; name: string; image: boolean }[] = []
+    const { attachments: prepared, refusals } = await prepareIntake(taken, {
+      held: attachments,
+      reserved: preparing.length,
+      inline: imagesAvailable,
+      onTake: (take) => {
+        placeholders = take.map((file) => ({
+          id: randomId(),
+          name: file.name,
+          image: file.type.startsWith("image/"),
+        }))
+        setPreparing((current) => [...current, ...placeholders])
+      },
+    })
+    for (const refusal of refusals) toast.error(refusal.message)
+    if (prepared.length)
+      setAttachments((current) => [...current, ...prepared].slice(0, MAX_ATTACHMENTS))
+    setPreparing((current) => current.filter((one) => !placeholders.some((p) => p.id === one.id)))
     textarea.current?.focus()
+  }
+
+  // A pasted photo or file is the same intake as a picked one, and never a send.
+  const pasted = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const data = event.clipboardData
+    // `files` and `items` can each carry a file, and the same one twice; `fresh` takes it once.
+    const files = [...(data?.files ?? [])]
+    for (const item of data?.items ?? [])
+      if (item.kind === "file") {
+        const file = item.getAsFile()
+        if (file) files.push(file)
+      }
+    if (!files.length) return
+    event.preventDefault()
+    void addFiles(files)
+  }
+
+  const dragging = (event: DragEvent<HTMLFormElement>) => {
+    if (!Array.from(event.dataTransfer?.types ?? []).includes("Files")) return
+    event.preventDefault()
+    setOver(true)
+  }
+
+  const dropped = (event: DragEvent<HTMLFormElement>) => {
+    const files = [...(event.dataTransfer?.files ?? [])]
+    // Text dragged into the field is the field's own drop; only files are taken here.
+    if (!files.length) return
+    event.preventDefault()
+    setOver(false)
+    void addFiles(files)
   }
 
   const removeAttachment = (attachment: Attachment) =>
@@ -323,9 +347,9 @@ export function Composer({
   const attach = (
     <AttachMenu
       disabled={disabled}
-      filesAvailable={filesAvailable}
+      filesFeature={filesFeature}
       imagesAvailable={imagesAvailable}
-      onAdd={(files) => void addFiles(files)}
+      onAdd={(files) => void addFiles(files, true)}
       session={session}
     />
   )
@@ -520,7 +544,13 @@ export function Composer({
   )
 
   return (
-    <form onSubmit={submit} className={`${COLUMN_BOX} relative`}>
+    <form
+      onSubmit={submit}
+      onDragOver={dragging}
+      onDragLeave={() => setOver(false)}
+      onDrop={dropped}
+      className={`${COLUMN_BOX} relative`}
+    >
       {menuOpen && (
         <SlashMenu
           id={listId}
@@ -553,7 +583,12 @@ export function Composer({
         onIndex={setViewing}
         onRemove={removeAttachment}
       />
-      <InputGroup className="bg-background shadow-lg shadow-black/5 has-data-[align=block-end]:rounded-[1.75rem] has-[textarea]:rounded-[1.75rem] dark:bg-input/30">
+      <InputGroup
+        className={cn(
+          "bg-background shadow-lg shadow-black/5 has-data-[align=block-end]:rounded-[1.75rem] has-[textarea]:rounded-[1.75rem] dark:bg-input/30",
+          over && "ring-2 ring-ring/40",
+        )}
+      >
         <InputGroupTextarea
           ref={textarea}
           value={value}
@@ -568,6 +603,7 @@ export function Composer({
           }}
           // A caret moved without a keystroke — a click, an arrow key — moves the menu with it.
           onSelect={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}
+          onPaste={pasted}
           onKeyDown={onKeyDown}
           enterKeyHint="send"
           role={menuOpen ? "combobox" : undefined}

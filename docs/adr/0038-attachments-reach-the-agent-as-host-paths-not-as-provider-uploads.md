@@ -31,9 +31,9 @@ the OCR skill — are what turn that path into content when the agent needs it.
 
 ## Consequences
 
-- **The marker line is the contract**, not an implementation detail: `<attachment name type path>`
-  plus the instruction sentence, in every message that carries a file. A steer may carry it because
-  a steer is text; a message carrying inline images queues instead, because a steer cannot.
+- **The marker line is the contract**, not an implementation detail: `<attachment name type size path>`
+  plus the instruction sentence, once in every message that carries a file. A steer may carry it
+  because a steer is text; a message carrying inline images queues instead, because a steer cannot.
 - **The thread renders from the host path.** A device that synced or restored a chat sees the real
   media through the plugin's media route rather than a name and a size of zero; the only bytes the
   device keeps are a local cache of its own images.

@@ -333,12 +333,14 @@ async def deliver(
     authorization: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Queues the message on the thread triage chose, steering it into a reply running there when
-    ``steer`` (the user's setting) says so and it is text alone; ``{ thread, session_id, item, steered }``.
+    ``steer`` (the user's setting) says so and the message can be one; ``{ thread, session_id,
+    item, steered }``.
 
-    A thread waiting on the user, or a message with files, queues behind it, and a refused steer
-    leaves the message queued. A thread whose last run was stopped waits for its user to send again,
-    and a message put behind that would sit unseen, so that is None and the message stays in Main.
-    Raises ``ValueError`` for a run body the queue refuses.
+    A message carrying files steers as their markers, which ``outbox.steer`` composes from the
+    item's own body; one carrying a photo queues, and so does a message a thread waiting on the
+    user, or a refused steer, leaves queued. A thread whose last run was stopped waits for its user
+    to send again, and a message put behind that would sit unseen, so that is None and the message
+    stays in Main. Raises ``ValueError`` for a run body the queue refuses.
     """
     thread = found["session_id"]
     # The thread runs on its own model, not Main's.
@@ -355,7 +357,8 @@ async def deliver(
         return None
     item = await asyncio.to_thread(outbox.add, path, thread, profile, text, files, run)
     steered = None
-    if steer and not files:
+    if steer:
+        # What the item can steer with — and whether it can at all — is the queue's own rule.
         steered, _ = await outbox.steer(adapter, profile, path, thread, item["id"], authorization)
     return {"thread": found["thread"], "session_id": thread, "item": item, "steered": steered is not None}
 

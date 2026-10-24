@@ -18,9 +18,10 @@ import java.util.ArrayList;
 import java.util.UUID;
 
 /**
- * Hands what another app shares into Gots (text, links and images) to the page as a "share"
- * event. Shared images are copied into the cache, since the sender's permission to read them ends
- * with the intent; the page reads the copies through the WebView's file route.
+ * Hands what another app shares into Gots (text, links and any file) to the page as a "share"
+ * event. Shared files are copied into the cache, since the sender's permission to read them ends
+ * with the intent; the page reads the copies through the WebView's file route. A file the copy
+ * can't take is named in `refused`, so the share screen can say why it isn't there.
  */
 @CapacitorPlugin(name = "ShareTarget")
 public class ShareTargetPlugin extends Plugin {
@@ -53,7 +54,9 @@ public class ShareTargetPlugin extends Plugin {
             JSObject share = new JSObject();
             share.put("title", subject != null ? subject : "");
             share.put("text", text != null ? text.toString() : "");
-            share.put("files", copy(uris));
+            JSArray refused = new JSArray();
+            share.put("files", copy(uris, refused));
+            share.put("refused", refused);
             // Kept until the page listens, which on a cold start comes after this.
             notifyListeners("share", share, true);
         }).start();
@@ -82,7 +85,7 @@ public class ShareTargetPlugin extends Plugin {
         return uris;
     }
 
-    private JSArray copy(ArrayList<Uri> uris) {
+    private JSArray copy(ArrayList<Uri> uris, JSArray refused) {
         JSArray files = new JSArray();
         File folder = new File(getContext().getCacheDir(), "shared");
         // Only the latest share is ever read, so earlier copies can go.
@@ -90,16 +93,24 @@ public class ShareTargetPlugin extends Plugin {
         if (old != null) for (File file : old) file.delete();
         folder.mkdirs();
         for (Uri uri : uris) {
-            if (files.length() >= MAX_FILES) break;
+            if (files.length() >= MAX_FILES) {
+                refused.put(refusal(name(uri), "count"));
+                continue;
+            }
             String type = getContext().getContentResolver().getType(uri);
-            if (type == null || !type.startsWith("image/")) continue;
+            // A type the sender didn't state is still a file; the page reads it as one.
+            if (type == null) type = "application/octet-stream";
             String name = name(uri);
             File target = new File(folder, UUID.randomUUID().toString());
             try (
                 InputStream in = getContext().getContentResolver().openInputStream(uri);
                 OutputStream out = new FileOutputStream(target)
             ) {
-                if (in == null) continue;
+                if (in == null) {
+                    refused.put(refusal(name, "read"));
+                    target.delete();
+                    continue;
+                }
                 byte[] buffer = new byte[64 * 1024];
                 long total = 0;
                 int read;
@@ -108,18 +119,30 @@ public class ShareTargetPlugin extends Plugin {
                     if (total > MAX_BYTES) throw new IllegalStateException("Too big");
                     out.write(buffer, 0, read);
                 }
+            } catch (IllegalStateException tooBig) {
+                target.delete();
+                refused.put(refusal(name, "size"));
+                continue;
             } catch (Exception error) {
                 Logger.error("ShareTarget", "Couldn't copy a shared file", error);
                 target.delete();
+                refused.put(refusal(name, "read"));
                 continue;
             }
             JSObject file = new JSObject();
             file.put("path", target.getAbsolutePath());
-            file.put("name", name != null ? name : "image");
+            file.put("name", name != null ? name : "file");
             file.put("type", type);
             files.put(file);
         }
         return files;
+    }
+
+    private JSObject refusal(String name, String reason) {
+        JSObject refusal = new JSObject();
+        refusal.put("name", name != null ? name : "file");
+        refusal.put("reason", reason);
+        return refusal;
     }
 
     private String name(Uri uri) {

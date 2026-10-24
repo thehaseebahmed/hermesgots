@@ -124,6 +124,7 @@ import { moveMarks, openedThread } from "@/lib/move-marks"
 import { undoMove } from "@/lib/moves"
 import { drawnThreadIds, threadCards } from "@/lib/thread-cards"
 import { serverConfig } from "@/lib/connection"
+import { usePluginFeature } from "@/lib/features"
 import { describeActivity } from "@/lib/format"
 import { supportsSteer, type HermesProject, type Move } from "@/lib/hermes"
 import { readProjects, useProjects } from "@/lib/projects"
@@ -330,6 +331,7 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
 
   const resolved = { ...DEFAULT_SETTINGS, ...settings }
   const configured = Boolean(profile?.baseUrl.trim())
+  const filesFeature = usePluginFeature(profile, "attachments")
   const streaming = messages?.find((m) => m.status === "streaming")
   const busy = Boolean(streaming)
   // Queued messages sit faded at the end of the thread until their turn, whichever clock stamped
@@ -1171,23 +1173,21 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
             draftKey={draftKey(id)}
             onDraft={onDraft}
             onSend={send}
-            onQueue={(text, attachments) =>
-              id
-                ? conversation?.main
-                  ? sendMidReply(id, false, text, attachments)
-                  : queueMessage(id, text, attachments)
-                : send(text, attachments)
-            }
+            onQueue={(text, attachments) => {
+              if (!id) return send(text, attachments)
+              if (conversation?.main) return sendMidReply(id, false, text, attachments)
+              void queueMessage(id, text, attachments)
+            }}
             steerByDefault={resolved.steerByDefault}
             canSteer={steerable}
-            onSteer={(text) =>
+            onSteer={(text, attachments) =>
               id
                 ? conversation?.main
-                  ? sendMidReply(id, true, text)
-                  : steerText(id, text)
-                : send(text)
+                  ? sendMidReply(id, true, text, attachments)
+                  : steerText(id, text, attachments)
+                : send(text, attachments)
             }
-            filesAvailable={Boolean(profile?.apiKey)}
+            filesFeature={filesFeature}
             imagesAvailable={profile?.imageInput !== false}
             onStop={() => id && stopMessage(id)}
             main={Boolean(botThreads && isMain)}

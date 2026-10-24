@@ -1,4 +1,4 @@
-import { Fragment, Suspense, lazy, memo, useMemo, useState, type ReactNode } from "react"
+import { Fragment, Suspense, lazy, memo, useMemo, type ReactNode } from "react"
 import {
   AlertCircleIcon,
   ClockIcon,
@@ -10,7 +10,7 @@ import {
 import { toast } from "sonner"
 
 import { ApprovalCard } from "@/components/chat/approval-card"
-import { AttachmentTile, AttachmentViewer } from "@/components/chat/attachments"
+import { MediaItems, type MediaItem } from "@/components/chat/media-gallery"
 import { Markdown } from "@/components/chat/markdown"
 import { AgentCards, SubagentResultCard } from "@/components/chat/agent-card"
 import { MediaTag } from "@/components/chat/media-image"
@@ -22,11 +22,15 @@ import { Button } from "@/components/ui/button"
 import { Message as MessageRow, MessageContent } from "@/components/ui/message"
 import { Spinner } from "@/components/ui/spinner"
 import { DELEGATE_TOOL } from "@/lib/agents"
-import { openable } from "@/lib/attachments"
+import { attachmentUrl } from "@/lib/attachment-url"
+import { downloadAttachment } from "@/lib/attachments"
+import { splitAttachments } from "@/lib/attachment-text"
 import { removeQueued, sendQueued } from "@/lib/chat"
 import type { Attachment, Message, ToolEvent } from "@/lib/db"
 import { describeActivity, formatDuration } from "@/lib/format"
 import { COLUMN } from "@/lib/layout"
+import { mediaCell, mediaKind, type MediaCell } from "@/lib/media-kind"
+import { attachmentSources, mediaRead, useMediaSources } from "@/lib/media-source"
 import { mediaImages } from "@/lib/media-tags"
 import { openuiParts, REPLY_INSET } from "@/lib/openui-block.ts"
 import type { InterfaceDraw, ThreadBlock } from "@/lib/openui-thread.ts"
@@ -155,8 +159,8 @@ function huggingTools(parts: Part[], index: number) {
 /**
  * Interleaves a slice of the reply (starting at `start`) with the tools run during it. A clarify
  * call is a card of its own (its question and the answer) rather than a tool row, so is a
- * delegation (the agent it started), and the images a reply sends together — only whitespace
- * between their `MEDIA:<path>` tags — are one gallery part.
+ * delegation (the agent it started), and the media a reply sends together — only whitespace between
+ * their `MEDIA:<path>` tags — are one part, which draws as one Gallery.
  */
 function toParts(
   content: string,
@@ -220,36 +224,67 @@ function Stats({ message }: { message: Message }) {
   )
 }
 
-/** A sent message's attachments; the ones this device still has open in a viewer. */
-function SentAttachments({ attachments, dim }: { attachments: Attachment[]; dim: boolean }) {
-  const [viewing, setViewing] = useState<number | null>(null)
-  const viewable = attachments.filter(openable)
+/**
+ * A sent message's media: this device's own copy where it has one, the host's otherwise, and a file
+ * whose bytes can't be read anywhere as a row that saves it.
+ */
+function SentAttachments({
+  conversationId,
+  attachments,
+  dim,
+}: {
+  conversationId: string
+  attachments: Attachment[]
+  dim: boolean
+}) {
+  const media = attachments.filter(
+    (attachment) => mediaCell(attachment.type, attachment.name) !== "file",
+  )
+  const sources = useMediaSources(conversationId, attachmentSources(media, attachmentUrl))
+  const state = (attachment: Attachment) => sources.get(attachment.id)
+  const files = [
+    ...attachments.filter((attachment) => mediaCell(attachment.type, attachment.name) === "file"),
+    ...media.filter((attachment) => state(attachment)?.status === "empty"),
+  ]
+  const drawn = media.filter((attachment) => state(attachment)?.status !== "empty")
+  const item = (attachment: Attachment, cell: MediaCell): MediaItem => ({
+    key: attachment.id,
+    kind: mediaKind(attachment.type, attachment.name),
+    cell,
+    name: attachment.name,
+    type: attachment.type,
+    size: attachment.size,
+    src: mediaRead(state(attachment))?.url,
+  })
+  const download = (one: MediaItem) => {
+    const attachment = attachments.find((it) => it.id === one.key)
+    if (attachment) void downloadAttachment(conversationId, attachment)
+  }
   return (
-    <div className={cn("flex max-w-full flex-wrap justify-end gap-2", dim && "opacity-60")}>
-      {attachments.map((attachment) => (
-        <AttachmentTile
-          key={attachment.id}
-          attachment={attachment}
-          onOpen={
-            openable(attachment)
-              ? () => setViewing(viewable.findIndex((a) => a.id === attachment.id))
-              : undefined
-          }
-        />
-      ))}
-      <AttachmentViewer attachments={viewable} index={viewing} onIndex={setViewing} />
+    <div className={cn("flex w-full max-w-full flex-col items-end gap-2", dim && "opacity-60")}>
+      <MediaItems
+        items={[
+          ...drawn.map((attachment) =>
+            item(attachment, mediaCell(attachment.type, attachment.name)),
+          ),
+          ...files.map((attachment) => item(attachment, "file")),
+        ]}
+        align="end"
+        onDownload={download}
+      />
     </div>
   )
 }
 
 /** Something the user steered the reply with, where it reached the agent. */
 function SteerBubble({ text }: { text: string }) {
+  const said = splitAttachments(text).text
   return (
     <MessageRow align="end" className={COLUMN}>
       <MessageContent className="items-end gap-1">
         <Bubble variant="default" align="end">
           <BubbleContent className="px-4 py-2.5 text-[15px] whitespace-pre-wrap">
-            {text}
+            {said}
           </BubbleContent>
         </Bubble>
         <div className="flex items-center gap-1 px-1 text-xs text-muted-foreground">
@@ -420,7 +455,11 @@ export const MessageItem = memo(function MessageItem({
       <MessageRow align="end" className={COLUMN}>
         <MessageContent className="items-end gap-1">
           {message.attachments?.length ? (
-            <SentAttachments attachments={message.attachments} dim={dim} />
+            <SentAttachments
+              conversationId={message.conversationId}
+              attachments={message.attachments}
+              dim={dim}
+            />
           ) : null}
           {(message.content || failed) && (
             <div className="flex w-full min-w-0 items-center justify-end gap-1.5">

@@ -261,6 +261,92 @@ export const workflowStage = (name: string, extra: Record<string, unknown> = {})
 export const DEFAULT_AFK_PROMPT =
   "# Work in checkpoints\n\nSmall slices of the issue, one at a time."
 
+/** One request a faked host was sent, as its route read it. */
+export interface HostAsk {
+  host: string
+  path: string
+  search: string
+  authorization: string | null
+}
+
+/** The type the media route serves a suffix as: its own map, near enough for a test's fixture. */
+const SERVED: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+  ".mp4": "video/mp4",
+  ".mp3": "audio/mpeg",
+  ".pdf": "application/pdf",
+  ".txt": "text/plain",
+  ".md": "text/markdown",
+}
+
+/**
+ * A host's plugin as every media test reads it: `info` advertising `features` ("away" is a host that
+ * never answered), and the media route answering a path's bytes as the type its suffix names, or
+ * refusing it with `failure`'s status — 404 being a route that says it has no such file. Every
+ * request is recorded, so a test can ask which paths were read and with which key.
+ */
+export function mediaHost({
+  host = "",
+  features = ["attachments", "media"],
+  fail = [],
+  failure = 404,
+  type,
+  asked = [],
+}: {
+  /** The host whose URLs this answers; every host when it is left empty. */
+  host?: string
+  /** What `info` advertises, or "away" for a host that didn't answer at all. */
+  features?: string[] | "away"
+  /** Path suffixes the media route refuses. */
+  fail?: string[]
+  /** The status a refused path is answered with. */
+  failure?: number
+  /** What a path is served as, where it isn't the type its suffix names. */
+  type?: (path: string) => string
+  /** Requests recorded so far, so a second host keeps one count going. */
+  asked?: HostAsk[]
+} = {}) {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = input instanceof Request ? input : null
+    const url = new URL(String(request ? request.url : input))
+    if (host && !url.host.startsWith(host)) return json({})
+    const sent = new Headers(init?.headers)
+    asked.push({
+      host: url.host,
+      path: url.pathname,
+      search: url.search,
+      authorization: sent.get("authorization") ?? request?.headers.get("authorization") ?? null,
+    })
+    if (url.pathname.endsWith("/plugins/memento/info"))
+      return features === "away" ? json({}, 503) : json({ name: "memento", features })
+    if (url.pathname.endsWith("/plugins/memento/media")) {
+      const path = url.searchParams.get("path") ?? ""
+      if (fail.some((suffix) => path.endsWith(suffix)))
+        return json({ error: "No such file." }, failure)
+      const served = type?.(path) ?? SERVED[path.slice(path.lastIndexOf(".")).toLowerCase()]
+      const kind = served ?? "application/octet-stream"
+      return new Response(new Blob(["bytes"], { type: kind }), { headers: { "content-type": kind } })
+    }
+    return json({})
+  }) as typeof fetch
+  return asked
+}
+
+/** How many times a faked host was asked for a route, or for one path within it. */
+export const askedFor = (asked: HostAsk[], part: string) =>
+  asked.filter((one) => `${one.path}${one.search}`.includes(part)).length
+
+/** The paths a faked host's media route was asked for, in the order it was asked. */
+export const mediaReads = (asked: HostAsk[]) =>
+  asked
+    .filter((one) => one.path.endsWith("/plugins/memento/media"))
+    .map((one) => new URLSearchParams(one.search).get("path") ?? "")
+
 export function afkHost({
   projectId = "project-1",
   features = ["afk", "afk_switch", "afk_workflows", "afk_pipeline", "afk_prompt"],

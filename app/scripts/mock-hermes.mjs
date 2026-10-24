@@ -19,8 +19,9 @@
 // ollama-cloud (the picker lists that provider too). A read carrying &percent=N sets that figure for
 // every later read — and &percent= clears it — so a flow can move an account from approaching to
 // out without restarting the mock.
-// Images the agent returns come from GET /api/plugins/memento/media?path=… (a .png path, unless it
-// names something missing), and saying "image" has the agent answer with a MEDIA tag: one for the
+// Files a message carries come from GET /api/plugins/memento/media?path=…, whatever their type: a
+// .png (a chart) or one that isn't there, a .pdf or .md shown in place, a .zip handed over as a
+// download named as the file. Saying "image" has the agent answer with a MEDIA tag: one for the
 // chart it serves and one for a file that isn't there.
 // The Library tab reads a project's filed files from GET projects/{id}/library (every session's,
 // merged by folder) and a session's own from GET sessions/{id}/library (the outputs pill counts
@@ -138,7 +139,7 @@ import http from "node:http"
 import { randomUUID } from "node:crypto"
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { basename, join } from "node:path"
+import { basename, extname, join } from "node:path"
 
 import { handleMeetings } from "./mock-meetings.mjs"
 import { handleResearch } from "./mock-research.mjs"
@@ -264,6 +265,30 @@ const MOCK_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAHgAAABLCAIAAAA06NSGAAAAuklEQVR42u3aQQmAABBE0anhxQYW8mIDz0Y0jhFsIII4iDz4Cd5xZzNMiwoFAWjQAg0aNAXQoAX6dsc+Xwf6deI3uEO5Yx3KHetQ7liHcsc6lDvWoEF/T/mJNWjQoEGDBg0aNGjQoEGDBu3W4dYB2j0atIXFZmgFt4L76/CpBNrvHWiBBi3QoEEL9H+gx21VIdCgQQs0aNAIQIMWaNCgKYAGLdCgQVMADVqgQYMWaNACDRq0QIMW6E92AjwFRtd/9tVBAAAAAElFTkSuQmCC",
   "base64",
 )
+// A file a message carries, as the media route answers for it: the type its extension gives it, and
+// whether a browser shows that type in place or saves it.
+const MOCK_MEDIA_TYPES = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".svg": "image/svg+xml",
+  ".mp4": "video/mp4",
+  ".mp3": "audio/mpeg",
+  ".pdf": "application/pdf",
+  ".md": "text/markdown",
+  ".txt": "text/plain",
+  ".json": "application/json",
+  ".zip": "application/octet-stream",
+}
+const mockMediaType = (name) =>
+  MOCK_MEDIA_TYPES[extname(name).toLowerCase()] ?? "application/octet-stream"
+const mockMediaInline = (type) =>
+  /^(image|video|audio|text)\//.test(type) ||
+  type === "application/pdf" ||
+  type === "application/json"
+// What the bytes are: the chart for a png, a line of text for anything a browser reads as text.
+const mockMediaBody = (type) =>
+  type === "image/png" ? MOCK_PNG : Buffer.from(`A file the mock host keeps for ${type}.\n`)
 const githubRepos = [
   { full_name: "mock-user/memento", description: "A PWA companion for Hermes", private: false },
   { full_name: "mock-user/maze", description: "A tiny maze game", private: true },
@@ -3706,11 +3731,16 @@ http
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/media") {
       const path = url.searchParams.get("path") ?? ""
-      if (/\.png$/i.test(path) && !/missing/i.test(path)) {
-        res.writeHead(200, { "Content-Type": "image/png", ...cors })
-        return res.end(MOCK_PNG)
-      }
-      return json(res, 404, { error: { message: "No such image." } })
+      if (!path || /missing/i.test(path))
+        return json(res, 404, { error: { message: "No such file." } })
+      const type = mockMediaType(path)
+      const headers = { "Content-Type": type, ...cors }
+      // What a browser shows comes in place; everything else is handed over as a download named as
+      // the file, the way the plugin's route answers.
+      if (!mockMediaInline(type))
+        headers["Content-Disposition"] = `attachment; filename="${basename(path)}"`
+      res.writeHead(200, headers)
+      return res.end(mockMediaBody(type))
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/library/file") {
       // A filed file for opening it: an image as png bytes, markdown as text, anything else as
@@ -3863,7 +3893,12 @@ http
       }
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/openui") {
-      if (req.method === "GET") return json(res, 200, { object: "memento.openui", enabled: openuiOn, version: OPENUI_VERSION })
+      if (req.method === "GET")
+        return json(res, 200, {
+          object: "memento.openui",
+          enabled: openuiOn,
+          version: OPENUI_VERSION,
+        })
       if (req.method === "POST") {
         const body = await readBody(req)
         if (typeof body.enabled !== "boolean") {
@@ -3872,7 +3907,11 @@ http
           })
         }
         openuiOn = body.enabled
-        return json(res, 200, { object: "memento.openui", enabled: openuiOn, version: OPENUI_VERSION })
+        return json(res, 200, {
+          object: "memento.openui",
+          enabled: openuiOn,
+          version: OPENUI_VERSION,
+        })
       }
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/github") {
@@ -4421,8 +4460,7 @@ http
         ? body.vocabulary.filter((word) => typeof word === "string" && word.trim())
         : []
       dictationCleanups.push({ text, vocabulary })
-      if (!text)
-        return json(res, 400, { error: { message: "Body needs the dictation's text." } })
+      if (!text) return json(res, 400, { error: { message: "Body needs the dictation's text." } })
       if (DICTATION_TIDY === "fail")
         return json(res, 502, { error: { message: "Couldn't tidy the dictation." } })
       if (DICTATION_TIDY === "hang") return new Promise(() => {})

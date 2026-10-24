@@ -137,9 +137,10 @@ const FLOWS = {
     about:
       "An agent's images hold their place with a skeleton while they load, in a chat and a project session",
   },
-  "image-viewer": {
-    script: "e2e/image-viewer.mjs",
-    about: "A photo opened from a message holds its place while it decodes, then paints",
+  "file-message": {
+    script: "e2e/file-message.mjs",
+    about:
+      "A message sent with a file and a photo draws the photo in the Gallery and the file as a row, and a tap on that row downloads the file under its own name",
   },
   todos: {
     script: "e2e/todos.mjs",
