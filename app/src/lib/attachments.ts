@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react"
+import { toast } from "sonner"
 
 import {
   fitsInline,
@@ -11,9 +12,10 @@ import {
   type Refusal,
 } from "@/lib/attachment-caps"
 import { attachmentParts } from "@/lib/attachment-text"
-import { db, type Attachment } from "@/lib/db"
-import { READ_TIMEOUT_MS } from "@/lib/freshness"
-import { getPluginMedia, type ContentPart } from "@/lib/hermes"
+import type { Attachment } from "@/lib/db"
+import type { ContentPart } from "@/lib/hermes"
+import { loadMediaFile } from "@/lib/media-tags"
+import { noteFailure } from "@/lib/report"
 import { createSignal } from "@/lib/store"
 import { randomId } from "@/lib/utils"
 
@@ -92,9 +94,6 @@ export async function prepareAttachment(file: File, inline = true): Promise<Atta
   }
 }
 
-/** Whether there's anything on this device to show for it. */
-export const openable = (attachment: Attachment) => Boolean(attachment.blob)
-
 /** What an attachment adds to a request inline: an image's scaled part, and nothing else. */
 export const inlineSize = (attachment: Attachment) =>
   attachment.image ? ((attachment.inline ?? attachment.blob)?.size ?? 0) : 0
@@ -169,24 +168,34 @@ export async function prepareIntake(
 }
 
 /**
- * Saves a file this device doesn't hold — one another device sent, or one a restored message names
- * — under the file's own name. The bytes come from the bot's plugin media route, which a plain link
- * can't call without the key, so they are fetched and handed to the browser as a download.
+ * Saves an attachment under the file's own name: the bytes this device holds, else the host's own
+ * copy, read the way the thread reads it (`loadMediaFile` — its cache, feature gate and cooldown),
+ * so a file already on screen is never fetched twice. A save that fails is noted at the console's
+ * verbose level and said to the user here, so a caller only says which file to save.
  */
 export async function downloadAttachment(conversationId: string, attachment: Attachment) {
-  const conversation = await db.conversations.get(conversationId)
-  const profile = conversation && (await db.profiles.get(conversation.profileId))
-  if (!profile || !attachment.path) throw new Error(`There is no copy of ${attachment.name}.`)
-  const blob = await getPluginMedia(profile, attachment.path, AbortSignal.timeout(READ_TIMEOUT_MS))
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement("a")
-  link.href = url
-  link.download = attachment.name
-  document.body.append(link)
-  link.click()
-  link.remove()
-  // The browser reads the bytes after the click returns, so the URL outlives it.
-  window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  try {
+    const blob = attachment.blob ?? (await hostCopy(conversationId, attachment))
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.href = url
+    link.download = attachment.name
+    document.body.append(link)
+    link.click()
+    link.remove()
+    // The browser reads the bytes after the click returns, so the URL outlives it.
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  } catch (error) {
+    noteFailure(`saving ${attachment.name}`, error)
+    toast.error(error instanceof Error ? error.message : `Couldn't download ${attachment.name}.`)
+  }
+}
+
+/** The host's copy of a file this device doesn't hold, through the media route's own read. */
+async function hostCopy(conversationId: string, attachment: Attachment) {
+  const file = attachment.path ? await loadMediaFile(conversationId, attachment.path) : null
+  if (!file) throw new Error(`There is no copy of ${attachment.name}.`)
+  return file.blob
 }
 
 // Attachments being saved on the Hermes host right now, so their tiles can say so.

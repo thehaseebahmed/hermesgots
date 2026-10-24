@@ -1,4 +1,4 @@
-import { Fragment, Suspense, lazy, memo, useMemo, useState, type ReactNode } from "react"
+import { Fragment, Suspense, lazy, memo, useMemo, type ReactNode } from "react"
 import {
   AlertCircleIcon,
   ClockIcon,
@@ -10,7 +10,7 @@ import {
 import { toast } from "sonner"
 
 import { ApprovalCard } from "@/components/chat/approval-card"
-import { AttachmentTile, AttachmentViewer } from "@/components/chat/attachments"
+import { AttachmentTile } from "@/components/chat/attachments"
 import { AudioRow, MediaGallery, type MediaItem } from "@/components/chat/media-gallery"
 import { Markdown } from "@/components/chat/markdown"
 import { AgentCards, SubagentResultCard } from "@/components/chat/agent-card"
@@ -24,7 +24,7 @@ import { Message as MessageRow, MessageContent } from "@/components/ui/message"
 import { Spinner } from "@/components/ui/spinner"
 import { DELEGATE_TOOL } from "@/lib/agents"
 import { attachmentUrl } from "@/lib/attachment-url"
-import { downloadAttachment, openable } from "@/lib/attachments"
+import { downloadAttachment } from "@/lib/attachments"
 import { splitAttachments } from "@/lib/attachment-text"
 import { removeQueued, sendQueued } from "@/lib/chat"
 import type { Attachment, Message, ToolEvent } from "@/lib/db"
@@ -227,10 +227,10 @@ function Stats({ message }: { message: Message }) {
 
 /**
  * A sent message's media and files: the images and clips in one Gallery, a recording in a row of
- * its own, and every other file as a row naming it. Each draws from the bytes this device holds
+ * its own, and every other file as a row that saves it. Each draws from the bytes this device holds
  * where it has them, else from the host — so a message read on another device still shows what was
- * sent, and one whose host is unreachable still shows this device's own photos. The files this
- * device holds open in a viewer; the ones it doesn't are saved from the host when tapped.
+ * sent, and one whose host is unreachable still shows this device's own photos. A file's row saves
+ * the file wherever its bytes are, this device's own first.
  */
 function SentAttachments({
   conversationId,
@@ -241,7 +241,6 @@ function SentAttachments({
   attachments: Attachment[]
   dim: boolean
 }) {
-  const [viewing, setViewing] = useState<number | null>(null)
   const media = attachments.filter(
     (attachment) => mediaCell(attachment.type, attachment.name) !== "file",
   )
@@ -263,11 +262,7 @@ function SentAttachments({
     ...media.filter((attachment) => source(attachment) === null),
   ]
   const drawn = media.filter((attachment) => source(attachment) !== null)
-  const viewable = files.filter(openable)
-  const download = (attachment: Attachment) =>
-    void downloadAttachment(conversationId, attachment).catch(() =>
-      toast.error(`Couldn't download ${attachment.name}.`),
-    )
+  const download = (attachment: Attachment) => void downloadAttachment(conversationId, attachment)
   return (
     <div className={cn("flex w-full max-w-full flex-col items-end gap-2", dim && "opacity-60")}>
       <MediaGallery items={drawn.filter((a) => cell(a) === "gallery").map(item)} align="end" />
@@ -278,27 +273,16 @@ function SentAttachments({
         ))}
       {files.length > 0 && (
         <div className="flex max-w-full flex-wrap justify-end gap-2">
-          {files.map((attachment) => {
-            const here = openable(attachment)
-            const remote = Boolean(attachment.path)
-            return (
-              <AttachmentTile
-                key={attachment.id}
-                attachment={attachment}
-                action={remote ? "download" : "open"}
-                onOpen={
-                  here
-                    ? () => setViewing(viewable.findIndex((a) => a.id === attachment.id))
-                    : remote
-                      ? () => download(attachment)
-                      : undefined
-                }
-              />
-            )
-          })}
+          {files.map((attachment) => (
+            <AttachmentTile
+              key={attachment.id}
+              attachment={attachment}
+              action="download"
+              onOpen={() => download(attachment)}
+            />
+          ))}
         </div>
       )}
-      <AttachmentViewer attachments={viewable} index={viewing} onIndex={setViewing} />
     </div>
   )
 }

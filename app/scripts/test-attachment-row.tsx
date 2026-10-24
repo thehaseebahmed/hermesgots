@@ -1,11 +1,12 @@
 /**
  * A message's file in the thread, over a seeded device database with the HTTP boundary faked: a
- * file this device doesn't hold draws as a row naming it and its size, and a tap fetches the bytes
- * through the bot's plugin media route — with the key, which a plain link can't carry — and saves
- * them under the file's own name.
+ * file draws as a row naming it and its size, and a tap saves it under its own name — from this
+ * device's own bytes where it holds them, else from the bot's plugin media route, with the key a
+ * plain link can't carry (spec #478, story 10).
  */
 import assert from "node:assert/strict"
 import test from "node:test"
+import { toast } from "sonner"
 
 import type { Attachment, Message } from "@/lib/db"
 import {
@@ -49,6 +50,8 @@ function host() {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input instanceof Request ? input.url : input))
     if (!url.host.startsWith("attachment-row")) return json({})
+    if (url.pathname.endsWith("/plugins/memento/info"))
+      return json({ name: "memento", features: ["attachments", "media"] })
     if (url.pathname.endsWith("/plugins/memento/media")) {
       reads.push({
         path: url.searchParams.get("path") ?? "",
@@ -111,7 +114,7 @@ test("a message's file draws as a row naming it, and a tap saves it under its ow
   }
 })
 
-test("a file the host never took is drawn, and nothing promises a download", async () => {
+test("a file the host never took is drawn, and a tap says there is no copy of it", async () => {
   const profile = botProfile("attachment-row")
   await seedSettings()
   await seedChat({
@@ -120,8 +123,66 @@ test("a file the host never took is drawn, and nothing promises a download", asy
     messages: [message([{ ...attachment, path: undefined }])],
   })
   host()
-  await mount(chatScreen("c1"), async () => {
-    await until(async () => text().includes(NAME), "the file's name")
-    assert.equal(row(), null, "a file with no bytes anywhere has nothing to open")
+  const said: string[] = []
+  const original = toast.error
+  toast.error = ((message: unknown) => {
+    said.push(String(message))
+  }) as typeof toast.error
+  try {
+    await mount(chatScreen("c1"), async () => {
+      await until(async () => row() !== null, "the file's row")
+      assert.match(text(), /field notes\.pdf/, "the row still names the file")
+      await click(row())
+      await until(async () => said.length > 0, "the refusal")
+      assert.deepEqual(said, [`There is no copy of ${NAME}.`], "the tap is honest about it")
+    })
+  } finally {
+    toast.error = original
+  }
+})
+
+test("a file this device holds is saved from its own bytes, without asking the host", async () => {
+  // The row a message holds the bytes of still saves them: it drew `Download` and its tap saves,
+  // rather than opening the viewer a file this device happens to hold.
+  const profile = botProfile("attachment-row")
+  await seedSettings()
+  await seedChat({
+    id: "c1",
+    profile,
+    messages: [
+      message([
+        {
+          ...attachment,
+          blob: new Blob(["pdf bytes"], { type: "application/pdf" }),
+        },
+      ]),
+    ],
   })
+  const reads = host()
+  const saved: string[] = []
+  const anchor = window.HTMLAnchorElement.prototype
+  const real = {
+    create: URL.createObjectURL,
+    revoke: URL.revokeObjectURL,
+    click: anchor.click,
+  }
+  URL.createObjectURL = () => "blob:local-notes"
+  URL.revokeObjectURL = () => {}
+  anchor.click = function (this: HTMLAnchorElement) {
+    saved.push(this.download)
+  }
+  try {
+    await mount(chatScreen("c1"), async () => {
+      await until(async () => row() !== null, "the file's row")
+      assert.equal(row()!.getAttribute("aria-label"), `Download ${NAME}`, "the row promises a save")
+      await click(row())
+      await until(async () => saved.length > 0, "the download")
+      assert.deepEqual(saved, [NAME], "saved under the file's own name")
+      assert.deepEqual(reads, [], "the bytes this device holds are never asked of the host")
+    })
+  } finally {
+    URL.createObjectURL = real.create
+    URL.revokeObjectURL = real.revoke
+    anchor.click = real.click
+  }
 })

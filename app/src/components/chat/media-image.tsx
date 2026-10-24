@@ -1,7 +1,5 @@
 import { useEffect, useState } from "react"
 
-import { toast } from "sonner"
-
 import { AttachmentTile } from "@/components/chat/attachments"
 import { AudioRow, CELL, MediaGallery, type MediaItem } from "@/components/chat/media-gallery"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -107,7 +105,7 @@ export function MediaTag({ conversationId, paths }: { conversationId: string; pa
       },
     }
   })
-  // The file as the row that downloads it draws it, saved under the name the tag gave.
+  // The file as the row that downloads it draws it: saved under the name the tag gave.
   const asAttachment = (tag: Tagged): Attachment => ({
     id: tag.path,
     name: tag.name,
@@ -116,10 +114,7 @@ export function MediaTag({ conversationId, paths }: { conversationId: string; pa
     image: false,
     path: tag.path,
   })
-  const download = (tag: Tagged) =>
-    void downloadAttachment(conversationId, asAttachment(tag)).catch(() => {
-      toast.error(`Couldn't download ${tag.name}.`)
-    })
+  const download = (tag: Tagged) => void downloadAttachment(conversationId, asAttachment(tag))
   const drawn = tagged.filter((tag) => tag.file !== null)
   const unread = tagged.filter((tag) => tag.file === null)
   return (

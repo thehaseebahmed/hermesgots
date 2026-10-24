@@ -16,6 +16,8 @@ export interface MediaFile {
   /** The type the route served, empty where it named none. */
   type: string
   size: number
+  /** The bytes themselves, so a save hands them over without asking the route again. */
+  blob: Blob
 }
 
 /** One shared fetch per file: a chat re-renders constantly while a reply streams in. */
@@ -28,7 +30,12 @@ export function getMediaFile(config: HermesConfig, path: string): Promise<MediaF
   if (!pending) {
     // A host that goes quiet must not leave a cell pulsing: the read is bounded.
     pending = getPluginMedia(config, path, AbortSignal.timeout(READ_TIMEOUT_MS))
-      .then((blob) => ({ url: URL.createObjectURL(blob), type: blob.type, size: blob.size }))
+      .then((blob) => ({
+        url: URL.createObjectURL(blob),
+        type: blob.type,
+        size: blob.size,
+        blob,
+      }))
       .catch(() => null)
     files.set(key, pending)
   }
