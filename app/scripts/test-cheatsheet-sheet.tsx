@@ -196,8 +196,6 @@ test("with navigation shortcuts on, the sheet opened afterwards names Alt+1…9"
   await mount(screen, async () => {
     await until(async () => Boolean(field()), "the composer")
     await openSheet()
-    // The sheet opens reading nothing else, so the group arriving is the read-on-open landing.
-    await until(async () => groups().includes("Navigation"), "the Navigation group")
     assert.deepEqual(groups(), [
       "Composer",
       "Slash menu",
@@ -220,22 +218,35 @@ test("a switch flipped while the sheet was shut shows the next time it opens", a
     assert.ok(!groups().includes("Navigation"), "absent as it opened, the switch being off")
     await shutSheet()
 
-    // Appearance writes the switch while the sheet is away; nothing tells the sheet.
     await act(async () => {
       await saveAppearance({ navShortcuts: true })
     })
-    await settle()
     await openSheet()
-    await until(async () => groups().includes("Navigation"), "the group the reopened sheet reads")
+    assert.ok(groups().includes("Navigation"), "the group the reopened sheet reads")
 
     await shutSheet()
     await act(async () => {
       await saveAppearance({ navShortcuts: false })
     })
-    await settle()
     await openSheet()
-    await settle()
     assert.ok(!groups().includes("Navigation"), "off again: the next opening reads it afresh")
+  })
+})
+
+test("a sheet whose settings read fails still opens, with the switch as it ships", async () => {
+  await seed({ navShortcuts: true })
+  host()
+  const read = db.settings.get.bind(db.settings)
+  await mount(screen, async () => {
+    await until(async () => Boolean(field()), "the composer")
+    db.settings.get = (() => Promise.reject(new Error("the device is gone"))) as typeof db.settings.get
+    try {
+      await openSheet()
+      assert.ok(sheet(), "the sheet is up anyway")
+      assert.ok(!groups().includes("Navigation"), "and says only what it can stand behind")
+    } finally {
+      db.settings.get = read
+    }
   })
 })
 

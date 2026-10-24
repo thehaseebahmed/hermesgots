@@ -1,36 +1,20 @@
-import { useEffect, useState } from "react"
-
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { cheatsheetGroups } from "@/lib/cheatsheet"
-import { DEFAULT_SETTINGS, getSettings } from "@/lib/db"
 
 /**
  * The keys a hardware keyboard answers in Gots, one group at a time: an unanchored pop-up, so it is
  * a bottom sheet on a phone and a drawer from 1024px, with the header pinned above one scroll
  * region (ADR 0035, ADR 0042).
- *
- * The Navigation group obeys the synced Appearance switch, read once each time the sheet opens and
- * never written back: a switch flipped while the sheet is up shows the next time it is opened.
  */
 export function Cheatsheet({
   open,
   onOpenChange,
+  navShortcuts,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
+  navShortcuts: boolean
 }) {
-  const [navShortcuts, setNavShortcuts] = useState(DEFAULT_SETTINGS.navShortcuts)
-  useEffect(() => {
-    if (!open) return
-    let current = true
-    void getSettings().then((settings) => {
-      if (current) setNavShortcuts(settings.navShortcuts ?? DEFAULT_SETTINGS.navShortcuts)
-    })
-    return () => {
-      current = false
-    }
-  }, [open])
-
   return (
     <Popup open={open} onOpenChange={onOpenChange}>
       <PopupContent size="md">

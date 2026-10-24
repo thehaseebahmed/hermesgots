@@ -112,6 +112,7 @@ import {
   ensureMainThread,
   getActiveProfile,
   getMessages,
+  getSettings,
   mainThreadId,
   mainThreadProfile,
   setActiveProfile,
@@ -319,6 +320,9 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
   const [pendingModel, setPendingModel] = useState<{ profileId?: string; choice?: ModelChoice }>()
   const [todosOpen, setTodosOpen] = useState(false)
   const [cheatsheetOpen, setCheatsheetOpen] = useState(false)
+  const [cheatsheetNavShortcuts, setCheatsheetNavShortcuts] = useState(
+    DEFAULT_SETTINGS.navShortcuts,
+  )
   const [pipelineOpen, setPipelineOpen] = useState(false)
   const [outputsOpen, setOutputsOpen] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
@@ -820,6 +824,14 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
     }
   }
 
+  const openCheatsheet = async () => {
+    const navShortcuts = await getSettings()
+      .then((settings) => settings.navShortcuts)
+      .catch(quietly("Reading the cheatsheet's navigation switch"))
+    setCheatsheetNavShortcuts(navShortcuts ?? DEFAULT_SETTINGS.navShortcuts)
+    setCheatsheetOpen(true)
+  }
+
   const mainChrome = Boolean(botThreads && isMain && profile)
   const actions = conversation && (
     <div className="flex items-center gap-2">
@@ -1188,7 +1200,7 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
                 case "settings":
                   return root("/settings")
                 case "cheatsheet":
-                  return setCheatsheetOpen(true)
+                  return openCheatsheet()
                 default: {
                   const unhandled: never = command
                   return unhandled
@@ -1247,7 +1259,11 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
         progress={todoProgress}
         live={busy}
       />
-      <Cheatsheet open={cheatsheetOpen} onOpenChange={setCheatsheetOpen} />
+      <Cheatsheet
+        open={cheatsheetOpen}
+        onOpenChange={setCheatsheetOpen}
+        navShortcuts={cheatsheetNavShortcuts}
+      />
       {session && (
         <OutputsDrawer
           open={outputsOpen}
