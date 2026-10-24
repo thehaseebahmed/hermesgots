@@ -317,6 +317,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # starts: an app that predates it draws the sheet it has rather than a field the
                     # host would refuse (afk.py, prompt_builder.py).
                     "afk_prompt",
+                    # How many of its tasks a project holds at once, and the read that answers every
+                    # hold rather than one: the sheet's pick stepper and its Working rows are drawn
+                    # only where a host says it holds more than one, so a host that predates picks
+                    # shows the screen it always did (afk.py, ADR 0025).
+                    "afk_picks",
                     # Still advertised while the app draws a staged session's pipeline, which this
                     # host answers from the task's workflow snapshot (`pipeline.for_app`): the pill
                     # is drawn only where a host claims it, so dropping it here would take the
@@ -1149,6 +1154,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             try:
                 if named == "workflow":
                     await asyncio.to_thread(afk.set_workflow, hermes_home(), project_id, value)
+                elif named == "pick_count":
+                    await asyncio.to_thread(afk.set_pick_count, hermes_home(), project_id, value)
                 else:
                     await asyncio.to_thread(afk.set_prompt, hermes_home(), project_id, value)
             except ValueError as why:

@@ -126,20 +126,26 @@ def read(hermes_home: Path, folders: Iterable[Any]) -> Dict[str, Any]:
     return {"repos": repos, **groups(found)} if repos else empty()
 
 
-def next_ready(hermes_home: Path, folders: Iterable[Any]) -> Optional[Dict[str, Any]]:
-    """The oldest task in the frontier with its issue's body, or None when there is none.
+def frontier(hermes_home: Path, folders: Iterable[Any]) -> List[Dict[str, Any]]:
+    """Every task in the frontier with its issue's body, oldest first.
 
-    The sweep's read rather than the sheet's: the one task it claims opens its run with the text it
-    was judged by, so that body comes off this read and no second request fetches it, while the
-    other rows' bodies, which nothing uses, are never copied into an answer.
+    The sweep's read rather than the sheet's: a pass filling several places takes all of them from
+    one read of GitHub rather than reading the repository again for each. The bodies come off the
+    same read, so each task claimed opens its run with the text it was judged by, while the rows
+    nothing claims are dropped by the caller and their bodies never copied into an answer.
     """
     _, found = _gather(hermes_home, folders)
-    ready = groups(found)["ready"]
-    if not ready:
-        return None
-    first = ready[0]
-    task = next(t for t in found if (t["repo"], t["number"]) == (first["repo"], first["number"]))
-    return {**first, "body": task["body"]}
+    bodies = {(row["repo"], row["number"]): row.get("body") or "" for row in found}
+    return [
+        {**row, "body": bodies.get((row["repo"], row["number"]), "")}
+        for row in groups(found)["ready"]
+    ]
+
+
+def next_ready(hermes_home: Path, folders: Iterable[Any]) -> Optional[Dict[str, Any]]:
+    """The oldest task in the frontier with its issue's body, or None when there is none."""
+    ready = frontier(hermes_home, folders)
+    return ready[0] if ready else None
 
 
 def _gather(hermes_home: Path, folders: Iterable[Any]) -> Tuple[List[str], List[Dict[str, Any]]]:
