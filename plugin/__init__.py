@@ -540,6 +540,13 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "This Hermes version can't read models from here.", 501)
         return web.json_response({"object": "memento.fallbacks", "fallbacks": fallbacks})
 
+    async def json_body(request: "web.Request"):
+        try:
+            body = await request.json()
+        except ValueError:
+            return None
+        return body if isinstance(body, dict) else None
+
     def mcp_route(
         call: Any,
         key: Optional[str],
@@ -1380,13 +1387,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     async def session_db():
         open_db = getattr(adapter, "_ensure_session_db_async", None)
         return await open_db() if callable(open_db) else None
-
-    async def json_body(request: "web.Request"):
-        try:
-            body = await request.json()
-        except ValueError:
-            return None
-        return body if isinstance(body, dict) else None
 
     async def workspace_response(record: Dict[str, Any] | None):
         if record is not None:
