@@ -13,11 +13,7 @@ import { cn } from "@/lib/utils"
 // as media arrives. A reply's single image has always taken it, and still does.
 const CELL = "h-24 w-full rounded-xl border md:h-32 xl:h-40"
 
-/**
- * One piece of media in a thread, as a Gallery cell, a row of its own, or a row that saves it: what
- * it is, where it draws, and where the bytes are if they're in. A tap, for a cell or a row of its
- * own, hands it to the platform's viewer or player — nothing plays here.
- */
+/** One piece of media a thread draws: what it is, where it draws, and its bytes where they are in. */
 export interface MediaItem {
   /** Stable where the item came from: an attachment's id, or the index a tag was written at. */
   key: string
@@ -39,64 +35,68 @@ const FRAME_TIMEOUT_MS = 4000
 /** How many frames a page keeps: a few kilobytes each, and a clip's cell scrolls past and back. */
 const FRAME_LIMIT = 64
 
-/**
- * A clip's first frame once it has been read, keyed by the clip: a frame is a data URL, so nothing
- * has to be let go of, and scrolling a clip's cell away and back doesn't decode the whole clip to
- * draw the same frame again.
- */
-const frames = boundedStore<string | null>({ limit: FRAME_LIMIT, dispose: () => {} })
+/** What reading a clip's frame answered: the frame, or the browser's own that it has none. */
+type Frame = { frame: string } | { frame: null }
+
+const frames = boundedStore<Frame>({ limit: FRAME_LIMIT })
 
 /**
- * A clip's first frame, from the browser's own metadata load: an element that is never put on the
- * page seeks a moment in and paints that frame to a canvas. A clip is never played in the thread,
- * so this is the one look at it there is; a browser that can't decode it answers nothing.
+ * A clip's first frame, read once a page: an element that is never put on the page seeks a moment in
+ * and paints it to a canvas. A clip is never played in the thread, so this is the one look at it.
  */
-async function readFrame(src: string, type: string): Promise<string | null> {
+async function firstFrame(src: string, type: string): Promise<string | null> {
+  const known = frames.get(src)
+  if (known) return known.frame
   const video = document.createElement("video")
+  let frame: string | null = null
   // A type this browser can't play has no first frame to give, and asking would only wait.
-  if (!video.canPlayType(type)) return null
-  video.muted = true
-  video.playsInline = true
-  video.preload = "auto"
-  video.src = src
-  const settle = (event: string) =>
-    new Promise<void>((resolve, reject) => {
-      const timer = window.setTimeout(
-        () => reject(new Error("A clip that never loaded.")),
-        FRAME_TIMEOUT_MS,
-      )
-      const done = () => {
-        window.clearTimeout(timer)
-        resolve()
+  if (video.canPlayType(type)) {
+    video.muted = true
+    video.playsInline = true
+    video.preload = "auto"
+    video.src = src
+    const settle = (event: string) =>
+      new Promise<void>((resolve, reject) => {
+        const timer = window.setTimeout(
+          () => reject(new Error("A clip that never loaded.")),
+          FRAME_TIMEOUT_MS,
+        )
+        const done = () => {
+          window.clearTimeout(timer)
+          resolve()
+        }
+        const failed = () => {
+          window.clearTimeout(timer)
+          reject(new Error("A clip that can't be read."))
+        }
+        video.addEventListener(event, done, { once: true })
+        video.addEventListener("error", failed, { once: true })
+      })
+    try {
+      await settle("loadeddata")
+      // The very first frame is often black; a moment in shows what the clip is about.
+      if (Number.isFinite(video.duration) && video.duration > 0.1) {
+        video.currentTime = 0.1
+        await settle("seeked")
       }
-      const failed = () => {
-        window.clearTimeout(timer)
-        reject(new Error("A clip that can't be read."))
+      const canvas = document.createElement("canvas")
+      canvas.width = video.videoWidth
+      canvas.height = video.videoHeight
+      const context = canvas.getContext("2d")
+      if (context && canvas.width && canvas.height) {
+        context.drawImage(video, 0, 0)
+        frame = canvas.toDataURL("image/jpeg", 0.8)
       }
-      video.addEventListener(event, done, { once: true })
-      video.addEventListener("error", failed, { once: true })
-    })
-  try {
-    await settle("loadeddata")
-    // The very first frame is often black; a moment in shows what the clip is about.
-    if (Number.isFinite(video.duration) && video.duration > 0.1) {
-      video.currentTime = 0.1
-      await settle("seeked")
+    } catch {
+      frame = null
+    } finally {
+      // The element is off the page and done with: let go of the clip's bytes.
+      video.removeAttribute("src")
+      video.load()
     }
-    const canvas = document.createElement("canvas")
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
-    const context = canvas.getContext("2d")
-    if (!context || !canvas.width || !canvas.height) return null
-    context.drawImage(video, 0, 0)
-    return canvas.toDataURL("image/jpeg", 0.8)
-  } catch {
-    return null
-  } finally {
-    // The element is off the page and done with: let go of the clip's bytes.
-    video.removeAttribute("src")
-    video.load()
   }
+  frames.set(src, { frame })
+  return frame
 }
 
 /**
@@ -119,15 +119,6 @@ function useFirstFrame(src: string | undefined, type: string) {
     }
   }, [src, type])
   return { frame, settled }
-}
-
-/** A clip's first frame, from the page's frames where it has been read already. */
-async function firstFrame(src: string, type: string): Promise<string | null> {
-  const known = frames.get(src)
-  if (known !== undefined) return known
-  const taken = await readFrame(src, type)
-  frames.set(src, taken)
-  return taken
 }
 
 function open(item: MediaItem) {
@@ -196,10 +187,7 @@ export function Cell({ item }: { item: MediaItem }) {
   )
 }
 
-/**
- * The Gallery: a message's images and clips side by side, one cell each, whatever device the
- * message is read on. Nothing is embedded — a cell is a picture and a tap.
- */
+/** A message's images and clips side by side, one cell each: a cell is a picture and a tap. */
 function MediaGallery({
   items,
   align = "start",
@@ -253,11 +241,7 @@ function AudioRow({ item }: { item: MediaItem }) {
   )
 }
 
-/**
- * A thread's media drawn in one place, wherever it came from: the images and clips in one Gallery,
- * each recording a row of its own, and every other file a row that saves it. What the user sent and
- * what an agent returned read alike, and a reply's tags read the same way.
- */
+/** A thread's media drawn in one place, wherever it came from: a cell, a recording's row, or a file's. */
 export function MediaItems({
   items,
   align = "start",
@@ -288,8 +272,6 @@ export function MediaItems({
           {files.map((item) => (
             <AttachmentTile
               key={item.key}
-              // A file's row is named and sized from what the message kept; its bytes, if this
-              // device holds them, are the tap's own business.
               attachment={{
                 id: item.key,
                 name: item.name,
