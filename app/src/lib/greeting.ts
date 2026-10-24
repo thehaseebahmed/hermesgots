@@ -8,9 +8,15 @@ const ABSENCE_MS = 60 * 60 * 1000
 
 export const GREETINGS = ["Good morning.", "Good afternoon.", "Good evening."]
 
+/** Where the morning ends and the afternoon begins, in the user's own clock. */
+const NOON = 12
+const EVENING = 18
+
 /** The time of day's greeting, in the user's own clock. */
-export const greetingAt = (now: Date) =>
-  GREETINGS[now.getHours() < 12 ? 0 : now.getHours() < 18 ? 1 : 2]
+export const greetingAt = (now: Date) => {
+  const hour = now.getHours()
+  return GREETINGS[hour < NOON ? 0 : hour < EVENING ? 1 : 2]
+}
 
 const read = (key: string) => {
   try {
