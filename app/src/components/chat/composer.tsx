@@ -40,10 +40,10 @@ import {
   canRecord,
   joinText,
   keyboardClick,
+  useChunkedDictation,
   useDictationInfo,
   type DictationAvailability,
 } from "@/lib/dictation"
-import { useDictation } from "@/lib/dictation-take"
 import {
   SEND_COMMANDS,
   isSendMode,
@@ -181,7 +181,7 @@ export function Composer({
   const listId = useId()
   const dictationInfo = useDictationInfo(connection)
   const placeHeard = useRef<(heard: string) => void>(() => {})
-  const dictation = useDictation(
+  const dictation = useChunkedDictation(
     connection,
     joinText(botName, dictationHint ?? ""),
     draftKey,
@@ -357,9 +357,6 @@ export function Composer({
 
   const endDictation = async (send: boolean) => {
     dictationSends.current = send
-    // A Send waits short for the tail and sends what the bar already has when it misses; a Stop is
-    // the user asking for the whole take, so it waits longer. Neither holds the composer past its
-    // wait: a wedged host ends in what the take already heard (ADR 0016).
     const heard = await dictation.finish(send ? SEND_WAIT_MS : STOP_WAIT_MS)
     if (heard) placeDictation(heard)
   }
@@ -417,7 +414,6 @@ export function Composer({
           levels={dictation.levels}
           startedAt={dictation.startedAt}
           failure={dictation.failure}
-          transcript={dictation.transcript}
           onCancel={dictation.cancel}
           onStop={() => void endDictation(false)}
           onSend={() => void endDictation(true)}

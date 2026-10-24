@@ -48,7 +48,6 @@ The CLI reuses any server that is already up, so after `pnpm e2e up` each run st
 | 18645 | Mock `no-dictation`: `MOCK_DICTATION=off` |
 | 18646 | Mock `triage-new`: `MOCK_TRIAGE=new`, so triage opens a new thread |
 | 18647 | Mock `triage-thread`: `MOCK_TRIAGE=thread`, so triage sends into the newest plain thread |
-| 18648 | Mock `stream`: `MOCK_DICTATION_STREAM=on`, a plugin that hears a dictation while it is spoken |
 
 A `--jobs N` sweep runs N lanes at once: lane n takes the mock ports 18642 + 4n (its own mock
 state) and every lane drives the one app on 15173. `pnpm e2e down` stops every lane's servers.
@@ -78,7 +77,7 @@ elsewhere, set `PLAYWRIGHT_MODULE` to its `index.mjs`. The CommonJS `index.js` l
 | `meetings` | Meetings stays hidden until its Developer switch is on; then a transcript file written up as notes (empty sections saying so), a cited time opening the transcript at that line, an audio file sent in chunks and followed through Uploading and Transcribing to its recap (the timeline, the tally, a note with no source marked, an owner never named said so, a topic opened from a cited time and its Next button), a meeting recorded in the app (a stand-in `getUserMedia`, the clock holding while paused, End meeting sending it), a page reloaded mid-recording offering the unfinished recording to send, an action item's Start opening a session with its text in the composer, a question to the bot answered with cited times, a recording that fails once and Try again, an upload nothing is finishing (stalled, Delete only), search, and Delete, at 390, 1024 (dark) and 1440px (where the list stays beside the meeting as a pane) |
 | `clarify-polling`, `clarify-transcript` | Answered questions survive stale polls, a reload and a fresh transcript |
 | `code-sessions` | Project sessions stay out of Recents and open from their project |
-| `dictation` | Dictation pieces, retries, the kept recording, and no mic where the host can't transcribe |
+| `dictation` | Dictation pieces, retries, the kept recording, the bot's words on the clip and on the end cleanup, and no mic where the host can't transcribe |
 | `drafts` | Composer drafts are kept per chat and cleared on send |
 | `submission` | Concurrent sends start one run and get one reply |
 | `image-skeleton` | A reply's images hold their cell while the plugin serves them (the route is held), then land at that size: one image and a gallery alike, phone and tablet, light and dark |

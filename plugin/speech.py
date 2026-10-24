@@ -1,16 +1,16 @@
-"""The host's speech model: what hears a dictation, and the model a phrase's cleanup runs on.
+"""The host's speech model: what hears a dictation, and the model a dictation's cleanup runs on.
 
 A dictation is heard on the host's own faster-whisper, and Hermes names that model in
 ``config.yaml``'s ``stt.local.model`` — a file only Hermes writes. The Dictation tab picks it from
 the models this module lists, so a pick is that one key, written through Hermes's own round-trip
 YAML writer: every other speech setting, and the rest of the file with its comments, stays. The
-model a pick leaves in place is read on the next take, never mid-take, as a bot's vocabulary is.
+model a pick leaves in place is read on the next clip, never mid-clip, as a bot's vocabulary is.
 
 Two things are kept beside it in the host's settings store, per bot:
 
-- the model a phrase's cleanup runs on, where the host grants the plugin its model-override
-  permission (``llm.model_override`` and ``llm.provider_override``; ADR 0017). It is read when a
-  take starts, so it survives a plugin restart, and it is dropped where the permission is not
+- the model a finished dictation's cleanup runs on, where the host grants the plugin its
+  model-override permission (``llm.model_override`` and ``llm.provider_override``; ADR 0036). It is
+  read per request, so it survives a plugin restart, and it is dropped where the permission is not
   granted: cleanup then runs on the bot's own model.
 - the last model that actually loaded. A pick Hermes can't load — a download that failed, a file
   the host can't read — falls back to that model rather than costing the user their dictation, and
@@ -29,7 +29,6 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
-from . import dictation
 from .store import get_setting, put_setting
 
 logger = logging.getLogger(__name__)
@@ -63,10 +62,6 @@ DENIED = "This host doesn't let Gots pick the model. Allow it with `hermes plugi
 
 class Withheld(Exception):
     """The host doesn't grant the plugin the model-override permission (``research.llm_gate``)."""
-
-
-class SpeechError(dictation.DictationError):
-    """A model that couldn't be loaded: the take can't run on it either."""
 
 
 def catalogue() -> List[Dict[str, Any]]:
@@ -216,7 +211,7 @@ def set_model(config_path: Path, value: Any) -> str:
 
 
 def read_cleanup(path: Path) -> Optional[Dict[str, str]]:
-    """The model phrases are tidied on, or None when they are tidied on the bot's own."""
+    """What a dictation's cleanup runs on, or None when it runs on the bot's own model."""
     held = get_setting(path, CLEANUP_KEY)
     if not isinstance(held, dict):
         return None
@@ -238,7 +233,7 @@ def set_cleanup(
     gate: Dict[str, bool],
     config_path: Optional[Path] = None,
 ) -> Optional[Dict[str, str]]:
-    """Keeps ``pick`` as the model phrases are tidied on; None clears it.
+    """Keeps ``pick`` as the model a dictation's cleanup runs on; None clears it.
 
     A pick overrides the model of a model call, which the host's config has to allow (``gate``,
     from ``research.llm_gate``): ``Withheld`` otherwise, and nothing is stored. Hermes checks a pick
@@ -273,9 +268,9 @@ def set_cleanup(
 
 
 def applied_cleanup(path: Path, gate: Dict[str, bool]) -> Optional[Dict[str, str]]:
-    """What a take's cleanup runs on: the pick where the host allows one, else None.
+    """What a dictation's cleanup runs on: the pick where the host allows one, else None.
 
-    Read when the take starts, so a pick made while a take is running lands on the next one, and a
+    Read per request, so a pick made while a dictation is running lands on the next one, and a
     permission taken back is honoured at once even though the pick is still stored.
     """
     if not (gate.get("model") and gate.get("provider")):
@@ -289,26 +284,3 @@ def _main_config(config_path: Path) -> Dict[str, Any]:
     cfg = _load_gateway_config(config_path=config_path)
     return cfg if isinstance(cfg, dict) else {}
 
-
-def _failed(warmed: Any) -> str:
-    if not isinstance(warmed, dict):
-        return "it gave no answer"
-    if warmed.get("error"):
-        return str(warmed["error"])
-    if not warmed.get("warmed"):
-        return "it didn't load"
-    return ""
-
-
-def play(wanted: str, warm: Any) -> Dict[str, Any]:
-    """What a take runs on: ``wanted``, and nothing else.
-
-    A pick that won't load fails the take with the host's own reason (#292), so what the user
-    chose is what they hear or the failure line says why not — never a model picked behind them.
-    ``warm`` is ``dictation.warm`` for one model: it answers ``{"warmed": True}`` or an ``error``
-    and never raises.
-    """
-    why = _failed(warm(wanted))
-    if why:
-        raise SpeechError(f"The host couldn't load its {wanted} speech model: {why}", 502)
-    return {"model": wanted}

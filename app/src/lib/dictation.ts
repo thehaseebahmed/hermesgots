@@ -18,11 +18,11 @@ import {
   microphoneFailure,
   type DictationFailure,
 } from "@/lib/dictation-failure"
-import { RESTORED, SAVE_MS, keptAudio, keeper, type KeptTake } from "@/lib/dictation-kept"
+import { RESTORED, SAVE_MS, keptAudio } from "@/lib/dictation-kept"
 import { holdTake, releaseTake } from "@/lib/dictation-lock"
-import { EMPTY_TRANSCRIPT } from "@/lib/dictation-transcript"
 import {
   getDictationInfo,
+  tidyDictation,
   transcribeClip,
   warmDictation,
   type DictationInfo,
@@ -87,6 +87,13 @@ export const MAX_MS = 10 * 60 * 1000
 const MIN_MS = 300
 /** A cold host may load (or first download) its model inside this request. */
 const TRANSCRIBE_MS = 120_000
+/**
+ * A whole dictation's cleanup is one call, and the host bounds its own at 8 s: past this the words
+ * are landed as they were heard. It only applies to an ending with no wait of its own, such as a
+ * Retry, which has nothing else to be bounded by.
+ */
+const TIDY_MS = 12_000
+const MIN_TIDY_MS = 1000
 const TYPES = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4", "audio/webm"]
 export const BARS = 32
 export const SAMPLE_MS = 50
@@ -99,17 +106,20 @@ export const QUIET_MIN = 0.012
 export const QUIET_MAX = 0.05
 /** A stop event that hasn't come by now isn't coming: the take goes with what it flushed. */
 export const STOP_MS = 1500
+export const DICTATION = "dictation"
+
 /**
- * How long a Send waits for a take's tail — the last phrase's words and their cleanup, which the
- * host bounds at 2 s (ADR 0017) — before it gives up and sends what the take already has. A Send is
- * in front of the user rather than behind their speaking, so it is the short wait: the words on the
- * bar are already the message (ADR 0016).
+ * How long a Send waits for a take's ending — the pieces still with the host and the one cleanup
+ * that tidies the whole of it — before it goes with the words the take already has. A Send is in
+ * front of the user, so it is the shorter wait, but a finished dictation is one call to tidy, not a
+ * phrase's: the host bounds its own at 8 s and the pieces come before it (ADR 0038).
  */
-export const SEND_WAIT_MS = 1500
+export const SEND_WAIT_MS = 4000
 /**
- * How long a Stop waits for the tail. Longer than a Send because a Stop is the user asking for the
- * whole take, and the host still has to decode the tail phrase and tidy it; past it the take is
- * abandoned with what it has, so a wedged host can't hold the composer's place for ever.
+ * How long a Stop waits for the same ending. Longer than a Send because a Stop is the user asking
+ * for the whole take, and the pieces still being heard, the cleanup that tidies them and the
+ * answer all have to fit; past it the take goes with what it has, so a wedged host can't hold the
+ * composer's place for ever.
  */
 export const STOP_WAIT_MS = 8000
 /** A live track whose recorder has sent nothing by now is a dead one: silence still encodes. */
@@ -175,7 +185,7 @@ interface Session {
   pieces: DictationPiece[]
   caret?: number
   recording: Recording | null
-  upload: AbortController | null
+  inflight: AbortController | null
   draining: Promise<boolean> | null
   finishing: Promise<string | null> | null
   error: unknown
@@ -202,7 +212,7 @@ const newSession = (
   pieces,
   caret,
   recording: null,
-  upload: null,
+  inflight: null,
   draining: null,
   finishing: null,
   error: null,
@@ -219,16 +229,21 @@ export function joinText(...parts: string[]) {
     .join(" ")
 }
 
+const takeText = (pieces: DictationPiece[]) => joinText(...pieces.map((piece) => piece.text ?? ""))
+
 /**
  * A promise given at most `ms` to resolve: what it answers, or undefined when the wait is up. A
  * take's ending is bounded by this rather than by the host answering, so a wedged host can't hold
- * the composer (ADR 0016).
+ * the composer (ADR 0038).
  */
 export function within<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
-  return Promise.race([
-    promise.catch(() => undefined),
-    new Promise<undefined>((done) => window.setTimeout(done, ms)),
-  ])
+  let timer: number | undefined
+  const wait = new Promise<undefined>((done) => {
+    timer = window.setTimeout(done, ms)
+  })
+  return Promise.race([promise.catch(() => undefined), wait]).finally(() =>
+    window.clearTimeout(timer),
+  )
 }
 
 function save(session: Session, now = false) {
@@ -262,23 +277,6 @@ function save(session: Session, now = false) {
     .catch(() => undefined)
 }
 
-export function keptStore(key: string) {
-  return (take: KeptTake | null) =>
-    take
-      ? db.dictations.put({
-          id: key,
-          pieces: take.pieces,
-          caret: take.caret,
-          at: Date.now(),
-          kind: "stream",
-        })
-      : db.dictations.delete(key)
-}
-
-export function keptKeeper(key: string | undefined) {
-  return keeper(key, key ? keptStore(key) : () => Promise.resolve())
-}
-
 export async function readKept(key: string): Promise<SavedDictation | undefined> {
   return db.dictations.get(key).catch(() => undefined)
 }
@@ -287,9 +285,10 @@ export async function keptText(
   config: HermesConfig,
   pieces: DictationPiece[],
   hint: string,
+  vocabulary: string[] = [],
   signal?: AbortSignal,
 ): Promise<string> {
-  const before = joinText(...pieces.map((piece) => piece.text ?? ""))
+  const before = takeText(pieces)
   const audio = keptAudio(pieces)
   if (!audio) return before
   const controller = new AbortController()
@@ -297,7 +296,10 @@ export async function keptText(
   const stop = () => controller.abort()
   signal?.addEventListener("abort", stop, { once: true })
   try {
-    return joinText(before, await transcribeClip(config, audio, hint, before, controller.signal))
+    return joinText(
+      before,
+      await transcribeClip(config, audio, hint, before, vocabulary, controller.signal),
+    )
   } finally {
     window.clearTimeout(timer)
     signal?.removeEventListener("abort", stop)
@@ -305,10 +307,10 @@ export async function keptText(
 }
 
 /** A take that ended stops transcribing: whatever is in flight is dropped. */
-function stopUpload(current: Session) {
-  const upload = current.upload
-  current.upload = null
-  upload?.abort()
+function stopInflight(current: Session) {
+  const inflight = current.inflight
+  current.inflight = null
+  inflight?.abort()
 }
 
 function forget(session: Session) {
@@ -362,6 +364,7 @@ export function useChunkedDictation(
   config: HermesConfig,
   hint: string,
   key?: string,
+  vocabulary: string[] = [],
   onCommitted?: (text: string) => void,
 ) {
   const [status, setStatus] = useState<DictationStatus>("idle")
@@ -369,9 +372,9 @@ export function useChunkedDictation(
   const [startedAt, setStartedAt] = useState<number | null>(null)
   const [failure, setFailure] = useState<DictationFailure | null>(null)
   const session = useRef<Session | null>(null)
-  const latest = useRef({ config, hint, key, onCommitted })
+  const latest = useRef({ config, hint, key, vocabulary, onCommitted })
   useEffect(() => {
-    latest.current = { config, hint, key, onCommitted }
+    latest.current = { config, hint, key, vocabulary, onCommitted }
   })
 
   const showIdle = useCallback(() => {
@@ -392,22 +395,29 @@ export function useChunkedDictation(
         const index = current.pieces.findIndex((piece) => piece.text === null)
         if (index < 0) return true
         const piece = current.pieces[index]
-        const before = joinText(...current.pieces.slice(0, index).map((done) => done.text ?? ""))
+        const before = takeText(current.pieces.slice(0, index))
         const controller = new AbortController()
-        current.upload = controller
+        current.inflight = controller
         const timer = window.setTimeout(() => controller.abort(), TRANSCRIBE_MS)
         try {
-          const { config, hint } = latest.current
-          const text = await transcribeClip(config, piece.blob, hint, before, controller.signal)
-          if (current.upload !== controller) return false
+          const { config, hint, vocabulary } = latest.current
+          const text = await transcribeClip(
+            config,
+            piece.blob,
+            hint,
+            before,
+            vocabulary,
+            controller.signal,
+          )
+          if (current.inflight !== controller) return false
           piece.text = text
           current.error = null
         } catch (failure) {
-          if (current.upload === controller) current.error = failure
+          if (current.inflight === controller) current.error = failure
           return false
         } finally {
           window.clearTimeout(timer)
-          if (current.upload === controller) current.upload = null
+          if (current.inflight === controller) current.inflight = null
         }
         save(current, true)
       }
@@ -428,7 +438,7 @@ export function useChunkedDictation(
       current.failure = failed
       current.recording = null
       current.stopping = end(recording)
-      stopUpload(current)
+      stopInflight(current)
       releaseTake(current.profile, current.lock)
       current.lock = null
       setLevels(null)
@@ -605,13 +615,33 @@ export function useChunkedDictation(
     }, MAX_MS)
   }
 
-  /**
-   * Waits for every piece's text: the whole of it, or null with the recording kept for `retry`.
-   *
-   * `deadline` is when the caller stops waiting — a Send's short wait, a Stop's longer one. A wait
-   * that runs out abandons the take rather than holding the composer: the pieces whose text is in
-   * are the take, and the ones still with the host are let go (ADR 0016).
-   */
+  const tidy = useCallback(async (current: Session, text: string, budgetMs = TIDY_MS) => {
+    if (!text || budgetMs < MIN_TIDY_MS) return text
+    const controller = new AbortController()
+    current.inflight = controller
+    const asking = tidyDictation(
+      latest.current.config,
+      text,
+      latest.current.vocabulary,
+      controller.signal,
+    ).catch(() => null)
+    const tidied = await within(asking, budgetMs)
+    if (current.inflight !== controller) return text
+    current.inflight = null
+    controller.abort()
+    return tidied ?? text
+  }, [])
+
+  const land = useCallback(
+    (current: Session, text: string) => {
+      forget(current)
+      session.current = null
+      showIdle()
+      return text
+    },
+    [showIdle],
+  )
+
   const settle = useCallback(
     async (current: Session, deadline?: number) => {
       setStatus("transcribing")
@@ -625,20 +655,14 @@ export function useChunkedDictation(
           : await within(draining, Math.max(0, deadline - Date.now()))
       if (session.current !== current) return null
       if (done) {
-        forget(current)
-        session.current = null
-        showIdle()
-        return joinText(...current.pieces.map((piece) => piece.text ?? ""))
+        const budget = deadline === undefined ? TIDY_MS : deadline - Date.now()
+        const text = await tidy(current, takeText(current.pieces), budget)
+        if (session.current !== current) return null
+        return land(current, text)
       }
       if (done === undefined && deadline !== undefined) {
-        // The wait is up, not the host's answer: what has its text is the take, and a piece still
-        // being heard is let go rather than holding the field (ADR 0016).
-        stopUpload(current)
-        const text = joinText(...current.pieces.map((piece) => piece.text ?? ""))
-        forget(current)
-        session.current = null
-        showIdle()
-        return text
+        stopInflight(current)
+        return land(current, takeText(current.pieces))
       }
       const heard = current.pieces.filter((piece) => piece.text !== null)
       if (heard.length) {
@@ -647,12 +671,16 @@ export function useChunkedDictation(
         save(current, true)
         if (text) latest.current.onCommitted?.(text)
       }
-      showFailure(current.error !== null ? clipFailure(current.error) : (current.failure ?? clipFailure(undefined)))
+      showFailure(
+        current.error !== null
+          ? clipFailure(current.error)
+          : (current.failure ?? clipFailure(undefined)),
+      )
       // The host may have lost faster-whisper since; ask again so the mic hides if so.
       void readDictationInfo(latest.current.config, true)
       return null
     },
-    [drain, showFailure, showIdle],
+    [drain, land, showFailure, tidy],
   )
 
   const replay = useCallback(
@@ -661,27 +689,28 @@ export function useChunkedDictation(
       setLevels(null)
       setFailure(null)
       const controller = new AbortController()
-      current.upload = controller
+      current.inflight = controller
       try {
         const text = await keptText(
           latest.current.config,
           current.pieces,
           latest.current.hint,
+          latest.current.vocabulary,
           controller.signal,
         )
-        if (current.upload !== controller) return null
+        if (current.inflight !== controller) return null
         forget(current)
         session.current = null
         showIdle()
         return text
       } catch (failure) {
-        if (current.upload !== controller) return null
+        if (current.inflight !== controller) return null
         current.error = failure
         showFailure(clipFailure(failure))
         void readDictationInfo(latest.current.config, true)
         return null
       } finally {
-        if (current.upload === controller) current.upload = null
+        if (current.inflight === controller) current.inflight = null
       }
     },
     [showFailure, showIdle],
@@ -692,7 +721,7 @@ export function useChunkedDictation(
     session.current = null
     if (current) {
       forget(current)
-      stopUpload(current)
+      stopInflight(current)
       if (current.recording) void end(current.recording)
     }
     showIdle()
@@ -701,10 +730,6 @@ export function useChunkedDictation(
   /**
    * Ends the recording and returns its text: `""` for a recording too short to hold speech, null
    * when the host couldn't transcribe it (it's kept for `retry`).
-   *
-   * `waitMs` is how long it waits for the last phrase's text, as the stream take's own wait is: a
-   * Send waits short and a Stop longer (ADR 0016). A wait that runs out abandons the take — the
-   * pieces whose text is in are the text — so a slow host never holds the composer.
    */
   const finish = useCallback(
     (waitMs = STOP_WAIT_MS) => {
@@ -777,8 +802,8 @@ export function useChunkedDictation(
       const current = session.current
       session.current = null
       if (!current) return
-      current.upload?.abort()
-      current.upload = null
+      current.inflight?.abort()
+      current.inflight = null
       releaseTake(current.profile, current.lock)
       current.lock = null
       const recording = current.recording
@@ -797,7 +822,6 @@ export function useChunkedDictation(
     levels,
     startedAt,
     failure,
-    transcript: EMPTY_TRANSCRIPT,
     /** When the recorder started, for a hold that ends before the mic was granted. */
     recordingSince: () => session.current?.recording?.startedAt ?? null,
     anchor: () => session.current?.caret ?? null,

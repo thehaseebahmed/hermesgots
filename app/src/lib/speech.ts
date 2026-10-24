@@ -1,21 +1,9 @@
 /**
- * The host's speech model, and the model a finished phrase's cleanup runs on — the two settings the
- * Dictation tab writes that live on the bot's host rather than in the bot's own record.
- *
- * The speech model is Hermes's `stt.local.model`; the plugin lists the models a pick can be made
- * from with the size and speed it is weighed on, whether the host already has each one, and which
- * is in play. A pick that isn't on disk downloads inside the next take, which is why the next take
- * says "Preparing…" for it the way a cold start does. A pick the host can't load fails the take
- * with the host's own reason, so the failure line says what to try.
- *
- * The cleanup model is the bot's, read by the host at the start of every take, so it survives a
- * plugin restart. It only overrides the model of a model call, which the host has to allow
- * (`llm.model_override` and `llm.provider_override`); where it doesn't, the tab says so and the
- * host ignores the pick, tidying every phrase on the bot's own model.
- *
- * Both are one record on the host, so one read and one write carry them: `GET speech` and
- * `POST speech` with only the fields that moved. `host-speech.ts` makes those calls; this file is
- * the shape and the words a row is read with, so the unit tier can pin them without a host.
+ * A bot's two speech settings — the model its dictation is heard on, and the one a finished
+ * dictation's cleanup runs on — are one record on the host, so one read and one write carry both:
+ * `GET speech` and `POST speech` with only the fields that moved. `host-speech.ts` makes those
+ * calls; this file is the shape and the words a row is read with, so the unit tier can pin them
+ * without a host.
  */
 
 /** The feature a host advertises when it has the host speech settings at all. */
@@ -31,14 +19,14 @@ export interface SpeechModel {
   slowOnCpu: boolean
   /** Already on the host, so a take on it doesn't wait for a download. */
   downloaded: boolean
-  /** The model in play: what the next take is heard on. */
+  /** The model in play: what the next clip is heard on. */
   inUse: boolean
-  /** In play but not on disk: the next take downloads it before it hears anything. */
+  /** In play but not on disk: the next clip downloads it before it is heard. */
   downloading: boolean
 }
 
 export interface SpeechCleanup {
-  /** The model phrases are tidied on, or null for the bot's own. */
+  /** What a dictation's cleanup runs on, or null for the bot's own model. */
   model: SpeechPick | null
   /** Whether the host lets Gots pick the model of a model call at all. */
   allowed: boolean

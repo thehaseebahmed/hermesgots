@@ -454,8 +454,8 @@ export interface SavedDictation {
   pieces: DictationPiece[]
   at: number
   /**
-   * What made the take: `stream` for one heard while it was spoken, whose pieces are the slices of
-   * one recording. Absent for the pieces the chunked path cut at pauses.
+   * What made the take: `stream` is a value older builds wrote for a take heard while it was
+   * spoken, and this build no longer writes it.
    */
   kind?: "pieces" | "stream"
   /** Where the caret was when the take began, so a restored take lands where it was left. */

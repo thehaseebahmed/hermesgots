@@ -10,10 +10,9 @@ import { launch, settleNav } from "./e2e/lib.mjs"
 const app = process.env.APP_URL ?? "http://localhost:15173"
 const mock = process.env.MOCK_URL ?? "http://localhost:18642"
 const offMock = process.env.OFF_MOCK_URL
-const streamMock = process.env.STREAM_MOCK_URL
 const shots = process.env.SHOTS_DIR
 const SENTENCE = "Let's ship the dictation feature today."
-const TAKE = "Let us ship 25 things. and then two more items"
+const HEARD = `um ${SENTENCE}`
 // Long enough for the stop a dead recorder never sends (STOP_MS) plus the state to render.
 const FAILED_MS = 2500
 const fakeMic = ["--no-sandbox", "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"]
@@ -64,21 +63,9 @@ function speech() {
   return path
 }
 
-const clips = async () => (await (await fetch(`${mock}/__mock/dictation`)).json()).clips
-const streamClips = async () => (await (await fetch(`${streamMock}/__mock/dictation`)).json()).clips
-const takeState = async () => await (await fetch(`${streamMock}/__mock/dictation-take`)).json()
-async function takeHeld(what) {
-  for (let end = Date.now() + 10_000; !(await takeState()).takes.length;) {
-    assert.ok(Date.now() < end, what)
-    await new Promise((done) => setTimeout(done, 50))
-  }
-}
-
-async function noTakes(what) {
-  for (let end = Date.now() + 5000; (await takeState()).takes.length;) {
-    assert.ok(Date.now() < end, what)
-    await new Promise((done) => setTimeout(done, 50))
-  }
+async function mockDictation() {
+  const { clips, cleanups } = await (await fetch(`${mock}/__mock/dictation`)).json()
+  return { clips, cleanups }
 }
 
 const PHONE = { width: 390, height: 844 }
@@ -87,13 +74,14 @@ const PHONE = { width: 390, height: 844 }
 const botId = (page) =>
   page.evaluate(async () => (await (await import("/src/lib/db.ts")).db.profiles.toArray())[0].id)
 
-/** The mock host's phrase cleanup, failed or tidied: what a take opened from then on answers. */
-const cleanupFails = (fail) =>
-  fetch(`${streamMock}/__mock/dictation-cleanup`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fail }),
-  })
+async function addWord(page, word) {
+  await page.goto(`${app}/settings/bots/${await botId(page)}/dictation`)
+  const tab = page.locator("[data-bot-dictation]")
+  await tab.waitFor({ timeout: 15_000 })
+  await tab.locator("#vocabulary-word").fill(word)
+  await tab.getByRole("button", { name: "Add" }).click()
+  await tab.getByRole("button", { name: `Remove ${word}` }).waitFor({ timeout: 5000 })
+}
 
 /** Every recorder errors 1.2 s into its stretch, as an encoder that dies mid-take does. */
 const recorderErrors = () => {
@@ -116,11 +104,15 @@ const exposeMic = () => {
   }
 }
 
-/** Retries a kept recording and the host's sentence lands in the composer. */
-async function retried(page) {
+/**
+ * Retries a kept recording and its words land in the composer: a live take ends through the cleanup,
+ * while one restored from the device is asked for whole and lands as the host heard it (ADR 0038
+ * keeps the retry as it was).
+ */
+async function retried(page, words = SENTENCE) {
   await page.getByRole("button", { name: "Retry" }).click()
   await page.getByRole("button", { name: "Voice", exact: true }).waitFor()
-  assert.equal(await page.getByRole("textbox").last().inputValue(), SENTENCE)
+  assert.equal(await page.getByRole("textbox").last().inputValue(), words)
 }
 
 async function open(server, viewport, colorScheme = "light", on = browser, touch = false, init) {
@@ -208,7 +200,7 @@ try {
     await page.reload()
     await page.getByText("hasn't been transcribed yet").waitFor()
     await shot(page, "phone-light-6-kept")
-    await retried(page)
+    await retried(page, HEARD)
     await page.reload()
     await page.getByRole("button", { name: "Voice", exact: true }).waitFor()
     await page.close()
@@ -218,24 +210,24 @@ try {
   {
     const talker = await launch(chromium, true, [...fakeMic.slice(1), `--use-file-for-fake-audio-capture=${speech()}`])
     const page = await open(mock, PHONE, "light", talker)
-    const before = (await clips()).length
+    const before = (await mockDictation()).clips.length
     await page.getByRole("button", { name: "Voice", exact: true }).click()
     await page.getByRole("button", { name: "Stop" }).waitFor()
-    for (let end = Date.now() + 30_000; (await clips()).length - before < 2;) {
+    for (let end = Date.now() + 30_000; (await mockDictation()).clips.length - before < 2;) {
       assert.ok(Date.now() < end, "two pieces were cut at the pauses before Stop")
       await page.waitForTimeout(100)
     }
-    const sent = (await clips()).slice(before)
+    const sent = (await mockDictation()).clips.slice(before)
     assert.equal(sent.length, 2, "two pieces sent before Stop")
-    assert.equal(sent[1].context, SENTENCE, "the second piece carries on from the first")
+    assert.equal(sent[1].context, HEARD, "the second piece carries on from what the host heard")
     await page.waitForTimeout(1500)
     await page.getByRole("button", { name: "Stop" }).click()
     await page.getByRole("button", { name: "Voice", exact: true }).waitFor()
-    const all = (await clips()).slice(before)
+    const all = (await mockDictation()).clips.slice(before)
     assert.equal(all.length, 3)
     assert.equal(
       await page.getByRole("textbox").last().inputValue(),
-      Array(3).fill(SENTENCE).join(" "),
+      [SENTENCE, HEARD, HEARD].join(" "),
     )
     await talker.close()
   }
@@ -244,7 +236,7 @@ try {
   {
     const page = await open(mock, PHONE, "light", browser, false, recorderErrors)
     const mic = page.getByRole("button", { name: "Voice", exact: true })
-    const before = (await clips()).length
+    const before = (await mockDictation()).clips.length
     await mic.click()
     await page.getByRole("button", { name: "Stop" }).waitFor()
     await page.getByRole("button", { name: "Retry" }).waitFor({ timeout: FAILED_MS })
@@ -259,13 +251,13 @@ try {
     await shot(page, "phone-light-9-recorder-failed")
 
     await retried(page)
-    assert.equal((await clips()).length, before + 1, "one phrase reached the host")
+    assert.equal((await mockDictation()).clips.length, before + 1, "one phrase reached the host")
 
     await mic.click()
     await page.getByRole("button", { name: "Retry" }).waitFor({ timeout: FAILED_MS })
     await page.getByRole("button", { name: "Discard" }).click()
     await mic.waitFor()
-    assert.equal((await clips()).length, before + 1, "Discard sent nothing")
+    assert.equal((await mockDictation()).clips.length, before + 1, "Discard sent nothing")
     assert.equal(await page.getByRole("textbox").last().inputValue(), SENTENCE)
     assert.equal(
       await page.evaluate(async () => (await import("/src/lib/db.ts")).db.dictations.count()),
@@ -346,316 +338,72 @@ try {
     assert.equal(await page.getByRole("button", { name: "Voice", exact: true }).count(), 0)
     await page.close()
   }
-  if (streamMock) {
-    for (const [label, viewport, scheme] of [
-      ["phone-light", { width: 390, height: 844 }, "light"],
-      ["tablet-dark", { width: 820, height: 1180 }, "dark"],
-    ]) {
-      const page = await open(streamMock, viewport, scheme)
-      await page.waitForLoadState("networkidle").catch(() => {})
-      const composer = page.getByRole("textbox").last()
-      const mic = page.getByRole("button", { name: "Voice", exact: true })
-      const bar = page.getByRole("region", { name: "Dictation" })
 
-      await composer.fill("Note:")
-      await mic.click()
-      await bar.getByText("Preparing…").waitFor()
-      await shot(page, `${label}-9-preparing`)
-      await page.evaluate(() => {
-        window.__heard = []
-        window.__hearWatcher = window.setInterval(() => {
-          const region = document.querySelector('[role="region"][aria-label="Dictation"]')
-          const text = [...(region?.querySelectorAll("p") ?? [])]
-            .map((line) => line.textContent)
-            .filter((line) => line && line !== "Behind")
-            .join(" ")
-            .trim()
-          if (text && window.__heard.at(-1) !== text) window.__heard.push(text)
-        }, 40)
-      })
-      await bar.getByText("Let us ship 25 things.").waitFor({ timeout: 15_000 })
-      await bar.getByText("Behind").waitFor()
-      assert.equal(await bar.getAttribute("aria-live"), "off", "the transcript is read on request")
-      await shot(page, `${label}-10-hearing`)
+  {
+    const page = await open(mock, PHONE)
+    const tab = page.locator("[data-bot-dictation]")
+    await addWord(page, "Gots")
+    await shot(page, "phone-light-18-dictation-word")
 
-      await page.getByRole("button", { name: "Stop" }).click()
-      await mic.waitFor({ timeout: 15_000 })
-      assert.equal(
-        await composer.inputValue(),
-        "Note: Let us ship 25 things. and then two more items",
-      )
-      assert.equal(
-        await page.getByText("um Let us", { exact: false }).count(),
-        0,
-        "the filler the host heard is not what the user reads",
-      )
-      assert.equal(
-        await page.evaluate(async () => (await import("/src/lib/db.ts")).db.dictations.count()),
-        0,
-        "a take that ended keeps nothing on the device",
-      )
-      await shot(page, `${label}-11-heard`)
-      const moments = await page.evaluate(() => {
-        window.clearInterval(window.__hearWatcher)
-        return window.__heard
-      })
-      assert.ok(moments.length >= 2, `the bar was read at two moments (${JSON.stringify(moments)})`)
-      assert.ok(
-        moments.some((text) => text.includes("um Let us")),
-        `the words arrive as the host heard them (${JSON.stringify(moments)})`,
-      )
-      const tidied = moments.findIndex((text) => text.includes("Let us ship 25 things."))
-      assert.ok(tidied >= 0, `the phrase arrived tidied (${JSON.stringify(moments)})`)
-      for (const text of moments.slice(tidied))
-        assert.ok(
-          text.includes("Let us ship 25 things."),
-          `"${text}" keeps the phrase the host tidied`,
-        )
-      assert.ok(
-        moments.some((text) => text.split(" ").length > 1),
-        `the take's words arrived over more than one moment (${JSON.stringify(moments)})`,
-      )
-      const heard = await (await fetch(`${streamMock}/__mock/dictation-take`)).json()
-      assert.ok(heard.slices.length > 1, "the take was sent slice by slice")
-      assert.equal(heard.peak, 1, "one slice in flight at a time")
+    await page.reload()
+    await page.getByRole("button", { name: "Remove Gots" }).waitFor({ timeout: 15_000 })
+    assert.equal(
+      await page.getByRole("button", { name: "Remove Gots" }).count(),
+      1,
+      "the word added on the tab is still the bot's after a reload",
+    )
 
-      await composer.fill("")
-      await mic.click()
-      await page.getByRole("button", { name: "Stop" }).waitFor()
-      await takeHeld("the host has the take being cancelled")
-      await page.waitForTimeout(900)
-      await page.getByRole("button", { name: "Cancel" }).click()
-      await mic.waitFor()
-      assert.equal(await composer.inputValue(), "")
-      await noTakes("a cancelled take is dropped on the host")
-      assert.equal(
-        await page.evaluate(async () => (await import("/src/lib/db.ts")).db.dictations.count()),
-        0,
-        "a cancelled take keeps nothing on the device",
-      )
+    const models = tab.locator('[aria-label="Speech models"] button')
+    const row = (name) => models.filter({ hasText: new RegExp(`^${name}`) })
+    await models.first().waitFor({ timeout: 15_000 })
+    assert.match(await row("small").innerText(), /In use/, "the model in play says so")
+    assert.equal(await row("base").getAttribute("aria-pressed"), "false")
 
-      await mic.click()
-      await bar.getByText("Let us ship 25 things.").waitFor({ timeout: 15_000 })
-      await bar.getByText("and then two more items").waitFor({ timeout: 15_000 })
-      await shot(page, `${label}-13-sending`)
-      await page.getByRole("button", { name: "Send" }).click()
-      await page.getByText(TAKE).first().waitFor({ timeout: 15_000 })
-      await mic.waitFor({ timeout: 15_000 })
-      assert.equal(
-        await page.getByRole("textbox").last().inputValue(),
-        "",
-        "the take went out as the message, not into the field as well",
-      )
-      await noTakes("the send finished the take on the host")
-      await shot(page, `${label}-14-sent`)
-      await page.close()
+    await row("base").click()
+    for (let picked = false, end = Date.now() + 10_000; !picked; await page.waitForTimeout(100)) {
+      picked = (await row("base").getAttribute("aria-pressed")) === "true"
+      assert.ok(picked || Date.now() < end, "the model picked on the tab is the one in use")
     }
+    assert.match(await row("base").innerText(), /In use/)
+    assert.equal(await row("small").getAttribute("aria-pressed"), "false", "the old one steps down")
+    await shot(page, "phone-light-19-dictation-model")
 
-    {
-      const page = await open(streamMock, PHONE)
-      const composer = page.getByRole("textbox").last()
-      const mic = page.getByRole("button", { name: "Voice", exact: true })
-      const bar = page.getByRole("group", { name: "Dictation take" })
-      const refusal = "This Hermes can't decode audio while it is spoken."
-      let asked = 0
-      await page.route("**/api/plugins/memento/dictation/take", async (route) => {
-        asked += 1
-        if (asked > 1) return route.continue()
-        await route.fulfill({
-          status: 409,
-          contentType: "application/json",
-          body: JSON.stringify({ error: { message: refusal } }),
-        })
-      })
-      await composer.fill("Note:")
-      await mic.click()
-      await page.getByText(refusal).waitFor({ timeout: 15_000 })
-      await page.getByText("Check that this bot's host can dictate, then try again.").waitFor()
-      assert.equal(await page.getByText("Preparing…").count(), 0, "a refused take is not left preparing")
-      await shot(page, "phone-light-15-start-refused")
-
-      await bar.getByRole("button", { name: "Retry" }).click()
-      await bar.getByText("Preparing…").waitFor({ timeout: 15_000 })
-      assert.equal(asked, 2, "Retry asked the host again")
-      await takeHeld("the retried take open on the host")
-      await bar.getByRole("button", { name: "Cancel" }).click()
-      await mic.waitFor()
-      assert.equal(await composer.inputValue(), "Note:", "the composer is as it was")
-      assert.deepEqual((await takeState()).takes, [], "the cancelled take is dropped on the host")
-      await page.close()
-    }
-
-    {
-      const page = await open(streamMock, PHONE)
-      const composer = page.getByRole("textbox").last()
-      const mic = page.getByRole("button", { name: "Voice", exact: true })
-      const bar = page.getByRole("group", { name: "Dictation take" })
-      const broken = "Couldn't decode the recording: bad container"
-      let slices = 0
-      await page.route("**/api/plugins/memento/dictation/take/**/audio", async (route) => {
-        slices += 1
-        if (slices !== 6) return route.continue()
-        await route.fulfill({
-          status: 502,
-          contentType: "application/json",
-          body: JSON.stringify({ error: { message: broken } }),
-        })
-      })
-      await composer.fill("")
-      await mic.click()
-      await bar.getByText("Let us ship 25 things.").waitFor({ timeout: 15_000 })
-      await page.getByText(broken).waitFor({ timeout: 15_000 })
-      await page.getByText("Try again; the words it already heard are kept.").waitFor()
-      assert.equal(
-        await page.getByText("Transcribing…").count(),
-        0,
-        "no transcribing that never ends",
-      )
-      await shot(page, "phone-light-16-host-gone")
-      await bar.getByRole("button", { name: "Dismiss" }).click()
-      await mic.waitFor()
-      assert.equal(
-        await composer.inputValue(),
-        TAKE,
-        "the words the host had committed land where the take began",
-      )
-      await noTakes("the failed take is let go on the host")
-      assert.equal(
-        await page.evaluate(async () => (await import("/src/lib/db.ts")).db.dictations.count()),
-        0,
-        "a failed take keeps nothing on the device",
-      )
-      await mic.click()
-      await bar.getByText("Preparing…").waitFor({ timeout: 15_000 })
-      await page.waitForTimeout(1500)
-      await shot(page, "phone-light-17-after-failure-take")
-      await takeHeld("a take open after the failure")
-      await bar.getByRole("button", { name: "Cancel" }).click()
-      await mic.waitFor()
-      await page.close()
-    }
-
-    {
-      const page = await open(streamMock, PHONE)
-      await page.waitForLoadState("networkidle").catch(() => {})
-      const composer = page.getByRole("textbox").last()
-      const mic = page.getByRole("button", { name: "Voice", exact: true })
-      await composer.fill("Before after")
-      await composer.evaluate((field) => field.setSelectionRange(7, 7))
-      const before = (await streamClips()).length
-      await mic.click()
-      await page.getByRole("region", { name: "Dictation" }).waitFor()
-      for (let kept = false, end = Date.now() + 10_000; !kept; await page.waitForTimeout(100)) {
-        kept = await page.evaluate(async () => {
-          const { db } = await import("/src/lib/db.ts")
-          const rows = await db.dictations.toArray()
-          return rows.some(
-            (row) => row.kind === "stream" && row.pieces.some((piece) => piece.blob.size > 0),
-          )
-        })
-        assert.ok(kept || Date.now() < end, "the take is kept on the device")
-      }
-      await page.reload()
-      await page.getByText("hasn't been transcribed yet").waitFor()
-      await shot(page, "phone-light-12-kept-take")
-      await page.getByRole("button", { name: "Retry" }).click()
-      await page.getByRole("button", { name: "Voice", exact: true }).waitFor({ timeout: 15_000 })
-      assert.equal(
-        await page.getByRole("textbox").last().inputValue(),
-        `Before ${SENTENCE} after`,
-        "the take's words go where it began, with the draft around them",
-      )
-      const asked = (await streamClips()).slice(before)
-      assert.equal(asked.length, 1, "a restored take is asked for whole, not slice by slice")
-      assert.match(asked[0].type, /^audio\/webm/, "the slices went as the one recording they were")
-      assert.equal(asked[0].context ?? null, null, "nothing was heard before it")
-      assert.equal(
-        await page.evaluate(async () => (await import("/src/lib/db.ts")).db.dictations.count()),
-        0,
-        "its text is in, so it is not kept again",
-      )
-      await page.close()
-    }
-
-    // The bot's Dictation tab: a word added there is kept on the device across a reload, and the
-    // host's speech model picked there is the model in play after one (plugin/speech.py, #295).
-    {
-      const page = await open(streamMock, PHONE)
-      await page.goto(`${app}/settings/bots/${await botId(page)}/dictation`)
-      const tab = page.locator("[data-bot-dictation]")
-      const words = tab.getByRole("list", { name: "Words" })
-      await tab.waitFor({ timeout: 15_000 })
-      await tab.locator("#vocabulary-word").fill("Gots")
-      await tab.getByRole("button", { name: "Add" }).click()
-      await words.getByRole("button", { name: "Remove Gots" }).waitFor({ timeout: 5000 })
-      await shot(page, "phone-light-18-dictation-word")
-
-      await page.reload()
-      await page.getByRole("button", { name: "Remove Gots" }).waitFor({ timeout: 15_000 })
-      assert.equal(
-        await page.getByRole("button", { name: "Remove Gots" }).count(),
-        1,
-        "the word added on the tab is still the bot's after a reload",
-      )
-
-      const models = tab.locator('[aria-label="Speech models"] button')
-      const row = (name) => models.filter({ hasText: new RegExp(`^${name}`) })
-      await models.first().waitFor({ timeout: 15_000 })
-      assert.match(await row("small").innerText(), /In use/, "the model in play says so")
-      assert.equal(await row("base").getAttribute("aria-pressed"), "false")
-
-      await row("base").click()
-      for (let picked = false, end = Date.now() + 10_000; !picked; await page.waitForTimeout(100)) {
-        picked = (await row("base").getAttribute("aria-pressed")) === "true"
-        assert.ok(picked || Date.now() < end, "the model picked on the tab is the one in use")
-      }
-      assert.match(await row("base").innerText(), /In use/)
-      assert.equal(await row("small").getAttribute("aria-pressed"), "false", "the old one steps down")
-      await shot(page, "phone-light-19-dictation-model")
-
-      // The host answered the write, so a reload reads the pick back rather than the one before it.
-      await page.reload()
-      await models.first().waitFor({ timeout: 15_000 })
-      assert.equal(
-        await row("base").getAttribute("aria-pressed"),
-        "true",
-        "the pick written to the host is the one in play",
-      )
-      await page.close()
-    }
-
-    // A phrase whose cleanup fails is committed as the host heard it, filler and all, and the take
-    // carries on: a take is never failed by its own cleanup (#290, ADR 0017).
-    {
-      const page = await open(streamMock, PHONE)
-      await cleanupFails(true)
-      try {
-        const composer = page.getByRole("textbox").last()
-        const bar = page.getByRole("group", { name: "Dictation take" })
-        await composer.fill("")
-        await page.getByRole("button", { name: "Voice", exact: true }).click()
-        await bar.getByText("um Let us ship the dictation").waitFor({ timeout: 15_000 })
-        assert.equal(
-          await bar.getByText("Let us ship 25 things.").count(),
-          0,
-          "nothing tidied the phrase the cleanup failed on",
-        )
-        assert.equal(await bar.getByRole("alert").count(), 0, "the take carries on")
-        await shot(page, "phone-light-20-cleanup-failed")
-
-        await page.getByRole("button", { name: "Stop" }).click()
-        await page.getByRole("button", { name: "Voice", exact: true }).waitFor({ timeout: 15_000 })
-        assert.equal(
-          await composer.inputValue(),
-          "um Let us ship the dictation and then two more items",
-          "the words the host heard are what the take committed",
-        )
-      } finally {
-        await cleanupFails(false)
-        await page.close()
-      }
-    }
+    await page.reload()
+    await models.first().waitFor({ timeout: 15_000 })
+    assert.equal(
+      await row("base").getAttribute("aria-pressed"),
+      "true",
+      "the pick written to the host is the one in play",
+    )
+    await page.close()
   }
+
+  {
+    const page = await open(mock, PHONE)
+    await addWord(page, "Gots")
+
+    await page.goto(app)
+    const composer = page.getByRole("textbox").last()
+    const before = await mockDictation()
+    await page.getByRole("button", { name: "Voice", exact: true }).click()
+    await page.getByRole("button", { name: "Stop" }).waitFor()
+    await page.waitForTimeout(1200)
+    await page.getByRole("button", { name: "Stop" }).click()
+    await page.getByRole("button", { name: "Voice", exact: true }).waitFor({ timeout: 15_000 })
+    assert.equal(await composer.inputValue(), SENTENCE, "the cleanup's tidied text is what lands")
+    await shot(page, "phone-light-20-vocabulary")
+
+    const after = await mockDictation()
+    const sent = after.clips.slice(before.clips.length)
+    assert.equal(sent.length, 1)
+    assert.deepEqual(sent[0].vocabulary, ["Gots"], "the bot's word rode on the clip")
+    const tidied = after.cleanups.slice(before.cleanups.length)
+    assert.equal(tidied.length, 1, "one cleanup ended the dictation")
+    assert.equal(tidied[0].text, HEARD, "the cleanup was asked for the words as they were heard")
+    assert.deepEqual(tidied[0].vocabulary, ["Gots"], "…and carried the bot's word too")
+    await page.close()
+  }
+
   console.log("dictation: ok")
 } finally {
   await browser.close()

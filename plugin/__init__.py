@@ -36,7 +36,6 @@ from . import (
     delegation,
     dictation,
     dictation_cleanup,
-    dictation_stream,
     meetings,
     events,
     findings,
@@ -124,6 +123,14 @@ def _runs_by_job(job_id: str | None, per_job: int) -> Dict[str, List[Dict[str, A
 def _error(web: Any, message: str, status: int):
     # The API server's own error shape, so clients read every error the same way.
     return web.json_response({"error": {"message": message}}, status=status)
+
+
+def _cleanup_pick(path: Path) -> Optional[Dict[str, str]]:
+    try:
+        return speech.applied_cleanup(path, research.llm_gate())
+    except Exception:
+        logger.warning("memento: couldn't read the dictation cleanup model", exc_info=True)
+        return None
 
 
 def mirror_for_profiles(app: Any, web: Any) -> None:
@@ -329,7 +336,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "delegation_model",
                     "queue",
                     "dictation",
-                    "dictation_stream",
                     "speech_model",
                     "usage",
                     "research",
@@ -1610,10 +1616,16 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "The recording is too long.", 413)
         hint = dictation.clean_hint(request.query.get("hint"))
         context = dictation.clean_context(request.query.get("context"))
+        vocabulary = dictation.clean_vocabulary(request.query.getall("vocabulary", []))
         async with dictating:
             try:
                 result = await asyncio.to_thread(
-                    dictation.transcribe, data, request.headers.get("content-type"), hint, context
+                    dictation.transcribe,
+                    data,
+                    request.headers.get("content-type"),
+                    hint,
+                    context,
+                    vocabulary,
                 )
             except dictation.DictationError as error:
                 return _error(web, str(error), error.status)
@@ -1628,6 +1640,27 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return denied
         result = await asyncio.to_thread(dictation.warm)
         return web.json_response({"object": "memento.dictation_warm", **result})
+
+    async def clean_dictation(request: "web.Request") -> "web.Response":
+        """A finished dictation's whole text tidied, on the bot's cleanup model (ADR 0038)."""
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        vocabulary = dictation.clean_vocabulary(body.get("vocabulary"))
+        cleanup_model = await asyncio.to_thread(_cleanup_pick, store_path())
+        try:
+            result = await asyncio.to_thread(
+                dictation_cleanup.finish, body.get("text"), vocabulary, model=cleanup_model
+            )
+        except dictation.DictationError as error:
+            return _error(web, str(error), error.status)
+        except Exception:
+            logger.warning("memento: couldn't tidy a dictation", exc_info=True)
+            return _error(web, "Couldn't tidy the dictation.", 502)
+        return web.json_response({"object": "memento.dictation_cleanup", **result})
 
     async def served_file(request: "web.Request", resolve: Any, allowed: Any = None) -> "web.StreamResponse":
         """Serves the file a query's ``path`` names: ``resolve`` validates it, ``allowed`` may refuse
@@ -1656,6 +1689,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/library/file", serve_library_file)
     app.router.add_post(f"{PREFIX}/dictation", dictate)
     app.router.add_post(f"{PREFIX}/dictation/warm", warm_dictation)
+    app.router.add_post(f"{PREFIX}/dictation/cleanup", clean_dictation)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/attachments", upload_attachment)
     app.router.add_get(f"{PREFIX}/runs/live", live_runs)
     app.router.add_get(f"{PREFIX}/events", stream_events)
@@ -1673,119 +1707,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except Exception:
             return None
 
-    dictation_takes = dictation_stream.Takes(reap=True)
-
-    def dictation_profile() -> str:
-        """Which profile the take belongs to: one take at a time is one per profile."""
-        return str(request_profile() or "")
-
-    async def dictation_take_start(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        body = await json_body(request)
-        hint = dictation.clean_hint(body.get("hint") if body else None)
-        vocabulary = body.get("vocabulary") if body else None
-        path = store_path()
-        gate = await asyncio.to_thread(research.llm_gate)
-        cleanup_model = await asyncio.to_thread(speech.applied_cleanup, path, gate)
-        try:
-            started = await asyncio.to_thread(
-                dictation_stream.start,
-                dictation_takes,
-                dictation_profile(),
-                hint,
-                vocabulary,
-                cleanup_model,
-            )
-        except (dictation.DictationError, dictation_stream.TakeError) as error:
-            return _error(web, str(error), error.status)
-        except Exception:
-            logger.warning("memento: couldn't start a dictation take", exc_info=True)
-            return _error(web, "Couldn't start the dictation.", 502)
-        return web.json_response({"object": "memento.dictation_take", **started})
-
-    async def dictation_slice(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        profile = dictation_profile()
-        try:
-            take = await asyncio.to_thread(
-                dictation_takes.get, profile, request.match_info.get("take_id", "")
-            )
-        except dictation_stream.TakeError as error:
-            return _error(web, str(error), error.status)
-        try:
-            data = await request.read()
-        except web.HTTPRequestEntityTooLarge:
-            return _error(web, "The recording is too long.", 413)
-        if not data:
-            return _error(web, "The recording is empty.", 400)
-        if len(data) > dictation.MAX_BYTES:
-            return _error(web, "The recording is too long.", 413)
-        pause = request.query.get("pause") == "1"
-        try:
-            answer = await asyncio.to_thread(take.add, data, pause)
-        except (dictation.DictationError, dictation_stream.TakeError) as error:
-            await asyncio.to_thread(dictation_takes.release, profile, take)
-            return _error(web, str(error), error.status)
-        except Exception:
-            await asyncio.to_thread(dictation_takes.release, profile, take)
-            logger.warning("memento: dictation take failed", exc_info=True)
-            return _error(web, "Transcription failed.", 502)
-        if take.dropped:
-            await asyncio.to_thread(dictation_takes.release, profile, take)
-        return web.json_response({"object": "memento.dictation_audio", "take": take.id, **answer})
-
-    async def dictation_take_stop(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        profile = dictation_profile()
-        try:
-            take = await asyncio.to_thread(
-                dictation_takes.get, profile, request.match_info.get("take_id", "")
-            )
-        except dictation_stream.TakeError as error:
-            return _error(web, str(error), error.status)
-        try:
-            answer = await asyncio.to_thread(take.stop)
-        except (dictation.DictationError, dictation_stream.TakeError) as error:
-            return _error(web, str(error), error.status)
-        except Exception:
-            logger.warning("memento: a dictation take couldn't finish", exc_info=True)
-            return _error(web, "Transcription failed.", 502)
-        finally:
-            await asyncio.to_thread(dictation_takes.release, profile, take)
-        return web.json_response({"object": "memento.dictation_stop", "take": take.id, **answer})
-
-    async def dictation_take_cancel(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        profile = dictation_profile()
-        try:
-            take = await asyncio.to_thread(
-                dictation_takes.get, profile, request.match_info.get("take_id", "")
-            )
-        except dictation_stream.TakeError:
-            return web.json_response({"object": "memento.dictation_cancel", "cancelled": True})
-        try:
-            await asyncio.to_thread(take.cancel)
-        finally:
-            await asyncio.to_thread(dictation_takes.release, profile, take)
-        return web.json_response({"object": "memento.dictation_cancel", "cancelled": True})
-
-    app.router.add_post(f"{PREFIX}/dictation/take", dictation_take_start)
-    app.router.add_post(f"{PREFIX}/dictation/take/{{take_id}}/audio", dictation_slice)
-    app.router.add_post(f"{PREFIX}/dictation/take/{{take_id}}/stop", dictation_take_stop)
-    app.router.add_post(f"{PREFIX}/dictation/take/{{take_id}}/cancel", dictation_take_cancel)
-
-    # The host's speech model, and the model a finished phrase's cleanup runs on (speech.py). The
-    # model is Hermes's own `stt.local.model`, written through its round-trip YAML writer; the
-    # cleanup pick is the bot's, kept in the host's settings store and read at the start of each
-    # take, so it survives a plugin restart.
     async def get_speech(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:

@@ -1,10 +1,10 @@
-"""Tests for the host's speech model and the model a phrase's cleanup runs on (``plugin/speech.py``).
+"""Tests for the host's speech model and the model a dictation's cleanup runs on (``plugin/speech.py``).
 
 The host's config and the model load are scripted, so these assert the promises a pick rests on: the
 list says each model's size and speed, which the host already has and which is in play; a pick
 writes the one key and a refusal leaves the old model in place; a model that won't load falls back
 to the model that last did, with a warning, and never becomes the model in play itself; and the
-cleanup model is gated on the host's model-override permission, read with each take, and kept
+cleanup model is gated on the host's model-override permission, read per request, and kept
 across a restart. No faster-whisper, no network.
 """
 
@@ -177,52 +177,6 @@ class SetModelTest(TempStore):
             self.assertEqual(speech.set_model(self.config, "small"), "small")
         self.assertEqual(host.writes, [])
 
-
-class PlayTest(TempStore):
-
-    def warmer(self, loaded, fail=()):
-        calls = []
-
-        def warm(model):
-            calls.append(model)
-            if model in fail:
-                return {"warmed": False, "error": f"{model}: it could not be downloaded"}
-            loaded.append(model)
-            return {"warmed": True, "model": model}
-
-        return warm, calls
-
-    def test_a_model_that_loads_is_the_model_in_play(self) -> None:
-        loaded = []
-        warm, _ = self.warmer(loaded)
-        self.assertEqual(speech.play("small", warm), {"model": "small"})
-
-    def test_a_pick_that_will_not_load_fails_the_take_with_the_host_s_reason(self) -> None:
-        loaded = []
-        warm, calls = self.warmer(loaded, fail={"small"})
-        speech.play("base", warm)
-        with self.assertRaises(speech.SpeechError) as caught:
-            speech.play("small", warm)
-        self.assertEqual(caught.exception.status, 502)
-        self.assertIn("small", str(caught.exception))
-        self.assertEqual(calls, ["base", "small"], "no other model is tried behind the pick")
-
-    def test_a_failed_take_changes_nothing_the_settings_hold(self) -> None:
-        loaded = []
-        warm, _ = self.warmer(loaded, fail={"small"})
-        speech.play("base", warm)
-        before = speech.read(self.config, self.path, {})
-        with self.assertRaises(speech.SpeechError):
-            speech.play("small", warm)
-        self.assertEqual(speech.read(self.config, self.path, {}), before)
-
-    def test_a_model_the_host_never_loaded_fails_the_take(self) -> None:
-        loaded = []
-        warm, _ = self.warmer(loaded, fail={"small"})
-        with self.assertRaises(speech.SpeechError) as caught:
-            speech.play("small", warm)
-        self.assertEqual(caught.exception.status, 502)
-        self.assertIn("small", str(caught.exception))
 
 class CleanupTest(TempStore):
     allowed = {"model": True, "provider": True}
