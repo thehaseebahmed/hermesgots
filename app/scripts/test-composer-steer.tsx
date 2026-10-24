@@ -1,8 +1,7 @@
 /**
  * What the composer does with a message sent while a reply runs, by what it carries: one of files
- * goes to the reply as a steer, and one carrying a photo waits in the queue — which the composer
- * says, in the field's own voice and in one line under it. And how a steer of files reads back in
- * the thread it joined.
+ * goes to the reply as a steer, and one carrying a photo waits in the queue — which the field's own
+ * placeholder says. And how a steer of files reads back in the thread it joined.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -65,7 +64,6 @@ function composer({ canSteer = true, sent }: { canSteer?: boolean; sent: Sent })
 
 const field = () => find('textarea[aria-label="Message"]')
 const placeholder = () => field()?.getAttribute("placeholder")
-const hint = () => find("[data-queue-hint]")?.textContent ?? ""
 
 async function paste(name: string, type: string) {
   const file = new File(["hello"], name, { type, lastModified: 1_700_000_000_000 })
@@ -97,7 +95,6 @@ test("a message carrying a file steers the reply, and the field says so", async 
     await paste("notes.txt", "text/plain")
     assert.deepEqual(tiles(), ["Remove notes.txt"])
     assert.equal(placeholder(), "Steer the response…", "a file can ride in a steer")
-    assert.equal(hint(), "", "and nothing says otherwise, since it does steer")
     await type(field(), "read this")
     await enter()
     assert.equal(sent.queue.length, 0)
@@ -111,16 +108,14 @@ test("a message carrying a file steers the reply, and the field says so", async 
   })
 })
 
-test("a message carrying a photo waits in the queue, and the composer says so", async () => {
+test("a message carrying a photo waits in the queue, and the field says so", async () => {
   const sent: Sent = { steer: [], queue: [] }
   await mount(composer({ sent }), async () => {
     await paste("cat.png", "image/png")
     assert.deepEqual(tiles(), ["Remove cat.png"])
     assert.equal(placeholder(), "Queue a message…")
-    assert.match(hint(), /A steer is text alone/, "the composer says where this one goes")
-    assert.match(text(), /waits in the queue/)
     await type(field(), "look at this")
-    assert.match(hint(), /A steer is text alone/, "and still says it once there are words")
+    assert.equal(placeholder(), "Queue a message…", "and still says it once there are words")
     await enter()
     assert.deepEqual(sent.steer, [], "a steer can't carry a photo")
     assert.deepEqual(sent.queue, ["look at this"])

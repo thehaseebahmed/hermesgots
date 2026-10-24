@@ -209,7 +209,6 @@ export function Composer({
     (value.trim().length > 0 || attachments.length > 0) && !disabled && preparing.length === 0
   // What Enter does now, so the button says so.
   const steering = steersNow(value, attachments)
-  const waitsForPhoto = !steering && steersNow(value, [])
 
   // The menu follows the caret: a `/` that begins a word opens it, wherever in the message it is.
   const token = slashToken(value, caret)
@@ -584,11 +583,6 @@ export function Composer({
         onIndex={setViewing}
         onRemove={removeAttachment}
       />
-      {waitsForPhoto && (
-        <p data-queue-hint className="px-2 pb-1.5 text-xs text-muted-foreground">
-          A steer is text alone, so this message waits in the queue.
-        </p>
-      )}
       <InputGroup
         className={cn(
           "bg-background shadow-lg shadow-black/5 has-data-[align=block-end]:rounded-[1.75rem] has-[textarea]:rounded-[1.75rem] dark:bg-input/30",
