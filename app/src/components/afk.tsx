@@ -10,6 +10,12 @@
  * that is the host's record and not this screen's. With that library off, a plugin that advertises
  * `afk_prompt` draws the Prompt row instead: the project's words for how its work is carried out,
  * opened in its own sheet.
+ *
+ * Where the plugin advertises `afk_picks`, a project works several tasks at once: the Working block
+ * is one row per task it holds — its number, title and stage — over a count of the holds against the
+ * project's pick count, and a pick count of one to five sits under the switch, one write of its own.
+ * A host that advertises none of that keeps the sheet it had: one Working row, drawn from the task
+ * the read names.
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react"
@@ -17,6 +23,7 @@ import { toast } from "sonner"
 
 import { PromptEditor } from "@/components/afk-prompt"
 import { RowText } from "@/components/settings-chrome"
+import { Segmented } from "@/components/segmented"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { WorkflowEditor } from "@/components/workflow-editor"
 import { WorkflowSheet } from "@/components/workflow-sheet"
@@ -51,10 +58,12 @@ import {
   getProjectTasks,
   listWorkflows,
   setProjectAfk,
+  setProjectAfkPickCount,
   setProjectAfkPrompt,
   setProjectAfkSkills,
   setProjectAfkWorkflow,
   updateWorkflow,
+  type AfkHold,
   type HermesConfig,
   type ProjectAfk,
   type ProjectIssue,
@@ -83,11 +92,21 @@ export const AFK_WORKFLOWS_FEATURE = "afk_workflows"
 export const AFK_PROMPT_FEATURE = "afk_prompt"
 
 /**
+ * And the one it advertises when a project may hold several tasks at once: its pick count, and the
+ * list of what it holds. A plugin from before it holds one task and answers no count, so nothing of
+ * this is drawn there and the pop-up is the one it always was.
+ */
+export const AFK_PICKS_FEATURE = "afk_picks"
+
+/**
  * What a staged task's stage reads as in the Working row: the stage itself is the host's, and a
  * project with no critique skill has none to name. `done` has no word here — nothing is held by
  * then, so this row never says it.
  */
 const STAGE_LABELS: Record<AfkStage, string | null> = { ...STAGE_WORDS, done: null }
+
+/** How many tasks a project may hold at once, one to five: the host's own range for its pick count. */
+const PICK_COUNTS = [1, 2, 3, 4, 5] as const
 
 /** A Bot whose plugin answers without the route is left alone for a while, like every other read. */
 const unsupported = cooldown()
@@ -120,6 +139,10 @@ export function AfkPopup({
   const [afk, setAfk] = useState<ProjectAfk>()
   const [afkError, setAfkError] = useState<string>()
   const [saving, setSaving] = useState(false)
+  // The pick count the row shows while its write is on its way; nothing else while it is null, so a
+  // refused write falls back to the count the host last answered.
+  const [pickDraft, setPickDraft] = useState<number | null>(null)
+  const [savingPicks, setSavingPicks] = useState(false)
   // The workflow library, read when a sheet needs it: the picker and the editor share one list, so a
   // save in either shows at once.
   const [library, setLibrary] = useState<WorkflowEntry[]>()
@@ -133,6 +156,10 @@ export function AfkPopup({
   const withSkills = usePluginFeature(config, AFK_SKILLS_FEATURE)
   const libraryOffered = useLibraryOffered(config)
   const withPrompt = usePluginFeature(config, AFK_PROMPT_FEATURE)
+  const withPicks = usePluginFeature(config, AFK_PICKS_FEATURE)
+  // The count row, the stepper and the Working list are one answer: a host that advertises none of
+  // them holds the one task it always did, and the sheet stays the one it always was.
+  const picksDrawn = withPicks === "yes"
   // One row or the other: the library offered is a project running stages, and the Prompt is the
   // words a project running one run is told instead.
   const promptOffered = withPrompt === "yes" && !libraryOffered
@@ -239,16 +266,28 @@ export function AfkPopup({
   // and the task it claims, or why GitHub refused it, lands after the switch's own answer.
   usePoll(readAfk, afk?.on ? AFK_MS : false, [key, projectId], {
     active:
-      open && (switchable === "yes" || withSkills === "yes" || libraryOffered || promptOffered),
+      open &&
+      (switchable === "yes" ||
+        withSkills === "yes" ||
+        libraryOffered ||
+        promptOffered ||
+        picksDrawn),
     onShow: false,
   })
 
-  // Taking a task moves it out of the frontier, so the list is read again when AFK's answer names
-  // the one it holds — and when it lets one go, which puts it back. Not when the frontier already
-  // has it claimed: that read is the same list, only fresher.
-  const held = afk?.task ? `${afk.task.repo}#${afk.task.number}` : ""
+  // Taking a task moves it out of the frontier, so the list is read again when AFK's answer names a
+  // hold it didn't hold before — and when it lets one go, which puts it back. Every hold is compared,
+  // since a sweep can fill several places between two reads; not when the frontier already has them
+  // all claimed: that read is the same list, only fresher.
+  const holds = afk?.holds ?? (afk?.task ? [afk.task] : [])
+  const held = holds.map((one) => `${one.repo}#${one.number}`).join(",")
   const listed =
-    Boolean(held) && Boolean(tasks?.claimed.some((row) => `${row.repo}#${row.number}` === held))
+    holds.length > 0 &&
+    holds.every((one) =>
+      Boolean(
+        tasks?.claimed.some((row) => `${row.repo}#${row.number}` === `${one.repo}#${one.number}`),
+      ),
+    )
   const seen = useRef(held)
   useEffect(() => {
     if (seen.current === held) return
@@ -271,6 +310,22 @@ export function AfkPopup({
     }
   }
   const turn = (on: boolean) => save(() => setProjectAfk(config, projectId, on))
+  // The count the rows read: the one a write is carrying until its answer lands, then the host's
+  // own. A write that fails or is refused drops the draft, so the count it had is what stays.
+  const pickCount = pickDraft ?? afk?.pickCount ?? null
+  const choosePicks = async (count: number) => {
+    if (count === pickCount || savingPicks) return
+    setPickDraft(count)
+    setSavingPicks(true)
+    try {
+      setAfk(await setProjectAfkPickCount(config, projectId, count))
+    } catch (failure) {
+      toast.error(failure instanceof Error ? failure.message : "Couldn't save that pick count.")
+    } finally {
+      setPickDraft(null)
+      setSavingPicks(false)
+    }
+  }
   const choose = (buildSkill: string | null, critiqueSkills: string[]) =>
     save(() => setProjectAfkSkills(config, projectId, buildSkill, critiqueSkills))
   // A refusal is the host's, said here the way the other writes are, and answered to the editor so it
@@ -323,8 +378,8 @@ export function AfkPopup({
           <PopupTitle>Away From Keyboard</PopupTitle>
         </PopupHeader>
         <div className="flex flex-col gap-6 px-4 pb-4 sm:px-6">
-          {/* The switch and the Prompt it writes for are one list: the row sits under the switch with
-              nothing but its own item padding between them. */}
+          {/* The switch, the Prompt it writes for and the pick count are one list: each row sits
+              under the switch with nothing but its own item padding between them. */}
           <div className="flex flex-col">
             <AfkSwitch
               answer={switchable}
@@ -335,6 +390,15 @@ export function AfkPopup({
             />
             {promptOffered && afk && !afkError && (
               <PromptRow prompt={afk.prompt} onOpen={() => setPromptOpen(true)} />
+            )}
+            {/* Under the switch, and at the foot of its list where a Prompt row takes the place
+                right under it: how many tasks this project may hold at once. */}
+            {picksDrawn && afk && !afkError && pickCount !== null && (
+              <PickCountRow
+                count={pickCount}
+                saving={savingPicks}
+                onChange={(count) => void choosePicks(count)}
+              />
             )}
           </div>
           {libraryOffered && afk && !afkError && (
@@ -353,6 +417,8 @@ export function AfkPopup({
           {afk?.on && (
             <Working
               task={afk.task}
+              holds={picksDrawn ? afk.holds : null}
+              pickCount={picksDrawn ? pickCount : null}
               stage={afk.stage}
               stageName={afk.stageName}
               refusal={afk.refusal}
@@ -509,6 +575,36 @@ function WorkflowRow({ workflow, onOpen }: { workflow: WorkflowEntry | null; onO
           {workflowShape(workflow.stages)}
         </p>
       )}
+    </div>
+  )
+}
+
+/**
+ * How many tasks this project's switch may hold at once — its pick count, one to five — kept on the
+ * project's host. The pills are the app's control for a short choice, which is exactly a count of
+ * one to five; nothing is written for the count the row already holds, and the row keeps what it has
+ * until the host's answer lands, so a write the host refused leaves the count it had on screen.
+ */
+function PickCountRow({
+  count,
+  saving,
+  onChange,
+}: {
+  count: number
+  /** A write is on its way: the pills are out of reach until its answer lands. */
+  saving: boolean
+  onChange: (count: number) => void
+}) {
+  return (
+    <div className="flex flex-col gap-2 px-1 pt-2" data-afk-picks data-pick-count={count}>
+      <h3 className="pb-1 text-sm text-muted-foreground">Pick count</h3>
+      <Segmented
+        label="Pick count"
+        options={PICK_COUNTS.map((each) => ({ id: each, label: String(each) }))}
+        value={count}
+        onChange={onChange}
+        disabled={saving}
+      />
     </div>
   )
 }
@@ -698,27 +794,38 @@ function AfkSkills({
 }
 
 /**
- * What the sweep is doing: the task AFK holds, the stage it is in, and why GitHub last refused it.
- * None of them is the switch's own reason — a refusal leaves the switch on — so they read as the
- * sweep's answer rather than as the project's, and each simply disappears when there is nothing to
- * say. A project that isn't left to work says nothing: the task it holds is released with the claim
- * (#270), not here.
+ * What the sweep is doing: the tasks AFK holds, the stage each is in, how many of its places are
+ * taken, and why GitHub last refused it. None of them is the switch's own reason — a refusal leaves
+ * the switch on — so they read as the sweep's answer rather than as the project's, and each simply
+ * disappears when there is nothing to say. A project that isn't left to work says nothing: the tasks
+ * it holds are released with the claim (#270), not here.
+ *
+ * Where the host holds several tasks, its answer names them all and the block is a row each, oldest
+ * first, over the count of them against the project's pick count. A host that names none of that
+ * holds at most the one task, and keeps the single row the app has always drawn.
  */
 function Working({
   task,
+  holds,
+  pickCount,
   stage,
   stageName,
   refusal,
   manyRepos,
 }: {
   task: ProjectIssue | null | undefined
+  /** Every task it holds, oldest first; null where the host answers no list. */
+  holds: AfkHold[] | null | undefined
+  /** How many it may hold at once, drawn over the list; null where the host answers none. */
+  pickCount: number | null | undefined
   stage: AfkStage | null | undefined
   /** The stage's own name from the task's snapshot, so a workflow's words show rather than ours. */
   stageName: string | null | undefined
   refusal: string | null | undefined
   manyRepos: boolean
 }) {
-  if (!task && !refusal) return null
+  const held = holds && holds.length > 0 ? holds : null
+  if (!task && !refusal && !held) return null
   const label = stageName ?? (stage ? STAGE_LABELS[stage] : null)
   return (
     <div className="flex flex-col gap-3">
@@ -727,14 +834,49 @@ function Working({
           {refusal}
         </p>
       )}
-      {task && (
+      {held ? (
         <section aria-label="Working" data-working data-stage={stage ?? undefined}>
           <h3 className="px-1 pb-1 text-sm text-muted-foreground">Working</h3>
-          <TaskLink task={task} label={label} note={manyRepos ? task.repo : undefined} />
+          {pickCount !== null && (
+            <p
+              data-holds={held.length}
+              data-pick-count={pickCount}
+              className="px-1 pb-1 text-sm text-muted-foreground"
+            >
+              {`${held.length} of ${pickCount} held`}
+            </p>
+          )}
+          <ul>
+            {held.map((hold) => (
+              <li
+                key={`${hold.repo}#${hold.number}`}
+                data-hold={hold.number}
+                data-stage={hold.stage ?? undefined}
+              >
+                <TaskLink
+                  task={hold}
+                  label={holdRowLabel(hold)}
+                  note={manyRepos ? hold.repo : undefined}
+                />
+              </li>
+            ))}
+          </ul>
         </section>
+      ) : (
+        task && (
+          <section aria-label="Working" data-working data-stage={stage ?? undefined}>
+            <h3 className="px-1 pb-1 text-sm text-muted-foreground">Working</h3>
+            <TaskLink task={task} label={label} note={manyRepos ? task.repo : undefined} />
+          </section>
+        )
       )}
     </div>
   )
+}
+
+/** One hold's stage as its row prefixes the title: the workflow's own word first, then ours. */
+function holdRowLabel(hold: AfkHold) {
+  return hold.stageName ?? (hold.stage ? STAGE_LABELS[hold.stage] : null)
 }
 
 /** The groups that hold something, or the one line that says why none does. */

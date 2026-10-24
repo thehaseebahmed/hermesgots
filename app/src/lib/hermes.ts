@@ -2899,6 +2899,20 @@ export async function getProjectTasks(
 }
 
 /**
+ * A task AFK holds: the issue, the stage the session working it is in, and why nothing is working
+ * it. One session a hold, so a project up to its pick count holds several (ADR 0025). Needs plugin
+ * 0.80, which made the project's read answer a list.
+ */
+export interface AfkHold extends ProjectIssue {
+  /** The stage that hold's session is in; null for a task running one run, or past its last stage. */
+  stage: AfkStage | null
+  /** That stage's own name in the workflow's words; null once past the last one. */
+  stageName: string | null
+  /** Why nothing is working it, when something stopped; null while its session runs. */
+  stalled: string | null
+}
+
+/**
  * A project's AFK switch: whether it is left to work its own tasks, and why it can't be. The
  * setting is the host's, so it is the same on every device the project is opened from. Needs
  * plugin 0.50, 0.51 for the task it holds and the last refusal, 0.56 for the skills its work
@@ -2910,6 +2924,14 @@ export interface ProjectAfk {
   reason: string | null
   /** The task AFK has claimed and is working, while it holds one. */
   task: ProjectIssue | null
+  /**
+   * Every task the project's switch holds, oldest first — one session each, up to its pick count,
+   * with the stage that session is in. Null for a host from before picks, which holds at most the
+   * one `task` above; the sheet draws a single Working row from it then.
+   */
+  holds: AfkHold[] | null
+  /** How many tasks it may hold at once, 1–5; null where the host answers no pick count. */
+  pickCount: number | null
   /** Why GitHub last refused the sweep. The switch stays on, so this is not `reason`. */
   refusal: string | null
   /** The bot's skill the project picked to build by, when it picked one. */
@@ -2929,6 +2951,32 @@ export interface ProjectAfk {
   prompt: string
 }
 
+function parseHold(value: unknown): AfkHold | null {
+  const issue = parseIssue(value)
+  if (!issue) return null
+  const found = (value ?? {}) as Record<string, unknown>
+  return {
+    ...issue,
+    // A host answers each hold's stage the way it answers the one task's: null is one run.
+    stage: parseStage(found.stage),
+    stageName: str(found.stage_name) || null,
+    stalled: str(found.stalled) || null,
+  }
+}
+
+function parseHolds(value: unknown): AfkHold[] | null {
+  // A plugin from before the pick count answers none, and one that holds nothing answers an empty
+  // list: the first reads as the sheet it always drew, the second as nothing to draw.
+  if (!Array.isArray(value)) return null
+  return value.map(parseHold).filter((hold): hold is AfkHold => hold !== null)
+}
+
+function parsePickCount(value: unknown): number | null {
+  // Absent where the plugin predates it; a whole number 1–5 is the host's own rule, so a shape this
+  // app can't read is nothing chosen rather than a reason to fail the whole read.
+  return typeof value === "number" && Number.isInteger(value) ? value : null
+}
+
 function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
   // A read that answers without the setting isn't off: showing a switch that says so would be a
   // guess about a project nothing answered for.
@@ -2941,6 +2989,10 @@ function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
     on: body.on,
     reason: str(body.reason) || null,
     task: parseIssue(body.task),
+    // A plugin from before the pick count answers no list: the sheet draws the one Working row it
+    // always drew, from `task`.
+    holds: parseHolds(body.holds),
+    pickCount: parsePickCount(body.pick_count),
     refusal: str(body.refusal) || null,
     buildSkill: str(body.build_skill) || null,
     critiqueSkills: skillNames(body.critique_skills),
@@ -3034,6 +3086,19 @@ export function setProjectAfkPrompt(
   prompt: string,
 ): Promise<ProjectAfk> {
   return writeAfk(config, projectId, { prompt })
+}
+
+/**
+ * How many tasks a project's switch may hold at once, 1–5, on its host: one write of its own, since
+ * a count is a shape the host refuses beside another (afk.py's `write_from`). A count out of range is
+ * refused there and nothing is written, so the answer is the count the project still holds.
+ */
+export function setProjectAfkPickCount(
+  config: HermesConfig,
+  projectId: string,
+  pickCount: number,
+): Promise<ProjectAfk> {
+  return writeAfk(config, projectId, { pick_count: pickCount })
 }
 
 function workflowPath(config: HermesConfig, rest = ""): string {
