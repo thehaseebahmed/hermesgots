@@ -373,7 +373,7 @@ export function ChatPage({
     [messages],
   )
   const threadList = useThreads(
-    botThreads && conversation?.main ? conversation.profileId : undefined,
+    botThreads && conversation?.main ? conversation.profileId : gone ? profile?.id : undefined,
   )
   const cards = useMemo(
     () =>
@@ -988,9 +988,15 @@ export function ChatPage({
   // Nothing started has no title yet, and its bot is the big one in the middle. Main is the bot's
   // face, so its title is the bot's name rather than the `Main` its record is stored under: the
   // name Bot settings edits, so a rename shows here at once.
-  const goneTitle = mainOwner
-    ? (profile?.name ?? "")
-    : (threadList?.find((one) => one.chat.id === id)?.chat.title ?? "")
+  // A chat that answered gone keeps the title it is still known by: Main is its bot's name, and a
+  // thread is the one the list this device last read carries for it. Nothing once that list has
+  // nothing left — a gone chat is never drawn as a new one, and its header standing empty is the
+  // honest answer. The scan runs only on the branch that draws it.
+  const goneTitle = !gone
+    ? ""
+    : mainOwner
+      ? (profile?.name ?? "")
+      : (threadList?.find((one) => one.chat.id === id)?.chat.title ?? "")
   const headerTitle = gone
     ? goneTitle
     : unstarted

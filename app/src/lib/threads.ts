@@ -275,8 +275,12 @@ export interface BotPane {
   thread?: string
   /** The thread the third pane reopens while the address is Main: this bot's last one opened here. */
   last?: string
-  /** Whether the bot has a thread at all, since a bot with none gets the pane's empty state. */
-  threads: boolean
+  /**
+   * Whether the bot has a thread at all, since a bot with none gets the pane's empty state. Absent
+   * while its thread list has not answered for this bot: an unanswered list is never read as no
+   * threads, so the pane holds what it had until the answer lands.
+   */
+  threads?: boolean
 }
 
 /**
@@ -344,6 +348,7 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
 
   if (!large || !enabled || !profileId) return undefined
   if (thread) return { profileId, thread, threads: true }
-  // Nothing remembered yet reads as no thread to show, never as a bot without threads.
-  return { profileId, last: answer?.last, threads: answer?.threads !== 0 }
+  // Nothing remembered yet reads as no thread to show, never as a bot without threads; a list that
+  // has not answered is not a list of none.
+  return { profileId, last: answer?.last, threads: answer ? answer.threads > 0 : undefined }
 }

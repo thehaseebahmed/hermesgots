@@ -22,7 +22,7 @@ import { useCodePane, useMeetingsPane, useProjectsPane, useResearchPane } from "
 import { useSidebarCollapsed } from "@/lib/sidebar"
 import { useBotPane, useBotThreads } from "@/lib/threads"
 import { cn } from "@/lib/utils"
-import { onChatSwap, type HoldSlot } from "@/lib/chat-hold"
+import { onChatSwap, heldFrame, type HoldSlot } from "@/lib/chat-hold"
 import { ChatPage } from "@/routes/chat"
 
 /**
@@ -126,15 +126,32 @@ function usePageTransition(ref: RefObject<HTMLElement | null>, pane: ListPane | 
 
 /**
  * The third pane of a bot that has no thread to keep beside Main. It stands at the pane's own width
- * so the layout doesn't move when the bot's first thread opens, and says the one thing it knows.
+ * so the layout doesn't move when the bot's first thread opens, and says the one thing it knows —
+ * once the bot's thread list has answered. Until then it holds the frame the pane last drew, inert,
+ * so neither the lane's place nor what it says moves while the answer is on its way.
  */
-function BotPaneEmpty() {
+function ThreadLane({ threads }: { threads?: boolean }) {
+  if (threads === false)
+    return (
+      <div
+        data-slot="bot-pane-empty"
+        className="flex min-h-0 flex-1 items-center justify-center px-6 text-center"
+      >
+        <p className="text-sm text-muted-foreground">No threads yet</p>
+      </div>
+    )
+  const held = threads === undefined ? heldFrame("thread") : undefined
+  if (!held?.frame) return null
+  // The same box `ChatPage` draws a held pane in, so the frame is the pane it was, and inert, so
+  // nothing in a chat the pane has left can be tapped.
   return (
     <div
-      data-slot="bot-pane-empty"
-      className="flex min-h-0 flex-1 items-center justify-center px-6 text-center"
+      data-slot="chat-pane"
+      data-pane="thread"
+      className="relative flex min-h-0 flex-1 flex-col"
+      inert
     >
-      <p className="text-sm text-muted-foreground">No threads yet</p>
+      {held.frame}
     </div>
   )
 }
@@ -196,13 +213,15 @@ export function AppShell({ children }: { children?: ReactNode }) {
   const shown = bot && (bot.thread ?? bot.last)
   const botItem = shown ? (
     <ChatPage key={shown} chatId={shown} slot="thread" />
-  ) : bot && !bot.threads ? (
-    <BotPaneEmpty />
+  ) : bot ? (
+    <ThreadLane threads={bot.threads} />
   ) : undefined
   const pane: ListPane | undefined = bot
     ? {
         screen: `/c/${mainThreadId(bot.profileId)}`,
-        open: Boolean(bot.thread || bot.last || !bot.threads),
+        // Open while the bot has a thread to show, or while its thread list has yet to say it has
+        // none: a lane that closed and reopened would move Main twice for one switch.
+        open: Boolean(bot.thread || bot.last || bot.threads !== true),
         // Main is told what the third pane holds, so its own flow can mark that thread open.
         node: (
           <ChatPage
