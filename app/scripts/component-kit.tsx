@@ -186,6 +186,16 @@ export const workflowStage = (name: string, extra: Record<string, unknown> = {})
 export const DEFAULT_AFK_PROMPT =
   "# Work in checkpoints\n\nSmall slices of the issue, one at a time."
 
+/** One hold as a test gives it: number and title, and the stage its session is in. */
+export type HoldRow = {
+  number: number
+  repo?: string
+  title?: string
+  stage?: string | null
+  stage_name?: string | null
+  stalled?: string | null
+}
+
 export function afkHost({
   projectId = "project-1",
   features = ["afk", "afk_switch", "afk_workflows", "afk_pipeline", "afk_prompt"],
@@ -194,6 +204,9 @@ export function afkHost({
   stageName = "Build",
   prompt = DEFAULT_AFK_PROMPT,
   promptRefusal = null,
+  holds = null,
+  pickCount = null,
+  pickRefusal = null,
 }: {
   projectId?: string
   features?: string[]
@@ -202,6 +215,12 @@ export function afkHost({
   stageName?: string | null
   prompt?: string
   promptRefusal?: string | null
+  /** The holds the host answers, oldest first; null is a host from before the pick count. */
+  holds?: HoldRow[] | null
+  /** The project's pick count; null is a host that answers none. */
+  pickCount?: number | null
+  /** What a pick count write is refused with, where the host refuses one. */
+  pickRefusal?: string | null
 } = {}) {
   const library: Record<string, unknown>[] = [
     {
@@ -227,17 +246,38 @@ export function afkHost({
   const calls: Call[] = []
   let chosen: string | null = workflow
   let words = prompt
+  // The holds as the wire spells them: the oldest first, each with the stage its session is in.
+  const held =
+    holds === null
+      ? null
+      : holds.map((hold) => ({
+          repo: hold.repo ?? "owner/repo",
+          number: hold.number,
+          title: hold.title ?? `Task ${hold.number}`,
+          url: `https://x/${hold.number}`,
+          created_at: "2026-10-01T00:00:00Z",
+          stage: hold.stage ?? null,
+          stage_name: hold.stage_name ?? null,
+          stalled: hold.stalled ?? null,
+        }))
+  let count = pickCount
   const answer = () => ({
     object: "memento.afk",
     project_id: projectId,
     on: true,
     reason: null,
-    task: { repo: "owner/repo", number: 338, title: "Pick a workflow", url: "https://x/338" },
+    // The oldest hold is the task a host from before the pick count would name on its own.
+    task:
+      held === null
+        ? { repo: "owner/repo", number: 338, title: "Pick a workflow", url: "https://x/338" }
+        : (held[0] ?? null),
+    ...(held === null ? {} : { holds: held }),
+    ...(count === null ? {} : { pick_count: count }),
     refusal: null,
     build_skill: null,
     critique_skills: [],
-    stage,
-    stage_name: stageName,
+    stage: held === null ? stage : (held[0]?.stage ?? null),
+    stage_name: held === null ? stageName : (held[0]?.stage_name ?? null),
     workflow: library.find((entry) => entry.id === chosen),
     prompt: words,
   })
@@ -276,6 +316,11 @@ export function afkHost({
         // A Prompt and a pick are one choice between them, as the plugin writes them.
         words = body.prompt.trim() || DEFAULT_AFK_PROMPT
         chosen = null
+      }
+      // A pick count is a write of its own, and one the host refuses writes nothing.
+      if (typeof body?.pick_count === "number") {
+        if (pickRefusal) return json({ error: { message: pickRefusal } }, 400)
+        count = body.pick_count
       }
       return json(answer())
     }
