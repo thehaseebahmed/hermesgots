@@ -1,16 +1,13 @@
 import { MinusIcon, PlusIcon } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { PICK_BUDGET } from "@/lib/afk-picks"
 import type { Profile } from "@/lib/db"
-import { connectionKey } from "@/lib/connection"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
 import { getBotAfk, setBotAfkPickBudget } from "@/lib/hermes"
-
-/** The host's own range for a bot's pick budget, and the count it answers where it holds none. */
-const BUDGET = { least: 1, most: 10, unset: 5 } as const
 
 /**
  * The Coding tab: how a bot works when it is left alone, over every project it serves rather than
@@ -24,7 +21,12 @@ const BUDGET = { least: 1, most: 10, unset: 5 } as const
 export function CodingTab({ profile }: { profile: Profile }) {
   // The profile is the host these numbers live on, so its own connection says which host answered:
   // an edited address or key asks the host it now names rather than showing the last one's budget.
-  const host = connectionKey(profile)
+  // Held still on those two parts — a profiles write makes a new object for the same host on every
+  // keystroke, and this tab has one read to make, not one per write.
+  const config = useMemo(
+    () => ({ baseUrl: profile.baseUrl, apiKey: profile.apiKey }),
+    [profile.baseUrl, profile.apiKey],
+  )
   const [budget, setBudget] = useState<number | null>(null)
   const [failed, setFailed] = useState(false)
   // The count a write is carrying until its answer lands: a refused one drops it, so nothing on the
@@ -32,16 +34,15 @@ export function CodingTab({ profile }: { profile: Profile }) {
   const [draft, setDraft] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
 
-  // One read per host: an edited address or key asks the host it now names rather than showing the
-  // last one's budget. A host from before the route answers nothing, which is the reason the tab
-  // says it couldn't read it rather than drawing a number nobody wrote.
+  // A host from before the route answers nothing, which is the reason the tab says it couldn't read
+  // it rather than drawing a number nobody wrote.
   useEffect(() => {
     let cancelled = false
     setFailed(false)
-    void getBotAfk(profile, AbortSignal.timeout(READ_TIMEOUT_MS))
+    void getBotAfk(config, AbortSignal.timeout(READ_TIMEOUT_MS))
       .then((answer) => {
         if (cancelled) return
-        setBudget(answer.pickBudget ?? BUDGET.unset)
+        setBudget(answer.pickBudget ?? PICK_BUDGET.unset)
       })
       .catch(() => {
         if (!cancelled) setFailed(true)
@@ -49,18 +50,18 @@ export function CodingTab({ profile }: { profile: Profile }) {
     return () => {
       cancelled = true
     }
-  }, [host, profile])
+  }, [config])
 
-  const shown = draft ?? budget ?? BUDGET.unset
+  const shown = draft ?? budget ?? PICK_BUDGET.unset
 
   const choose = async (next: number) => {
     // The count the tab already holds is no write, and neither is one past the host's own range: the
     // stepper's buttons are out of reach there, so this is only the guard behind them.
-    if (saving || failed || next < BUDGET.least || next > BUDGET.most || next === shown) return
+    if (saving || failed || next < PICK_BUDGET.least || next > PICK_BUDGET.most || next === shown) return
     setDraft(next)
     setSaving(true)
     try {
-      const answer = await setBotAfkPickBudget(profile, next)
+      const answer = await setBotAfkPickBudget(config, next)
       setBudget(answer.pickBudget ?? next)
     } catch (failure) {
       toast.error(failure instanceof Error ? failure.message : "Couldn't save that pick budget.")
@@ -80,7 +81,7 @@ export function CodingTab({ profile }: { profile: Profile }) {
             variant="outline"
             className="size-11"
             aria-label="Decrease pick budget"
-            disabled={saving || failed || shown <= BUDGET.least}
+            disabled={saving || failed || shown <= PICK_BUDGET.least}
             onClick={() => void choose(shown - 1)}
           >
             <MinusIcon />
@@ -97,7 +98,7 @@ export function CodingTab({ profile }: { profile: Profile }) {
             variant="outline"
             className="size-11"
             aria-label="Increase pick budget"
-            disabled={saving || failed || shown >= BUDGET.most}
+            disabled={saving || failed || shown >= PICK_BUDGET.most}
             onClick={() => void choose(shown + 1)}
           >
             <PlusIcon />
