@@ -65,6 +65,8 @@ type RunPart = {
   /** This run's row streams open: it is the reply's newest run and the reply is still thinking. */
   thinking: boolean
   key: string
+  /** Every stretch the row holds — its own, and the ones it merged with when they touched. */
+  keys: string[]
 }
 
 /** A stretch of a reply: the text between breaks, and the calls started inside it. */
@@ -184,13 +186,20 @@ function mergeThinking(parts: Part[]): Part[] {
     let end = at
     while (end + 1 < parts.length && parts[end + 1].kind === "thinking") end++
     if (end === at) merged.push(part)
-    else
+    else {
+      // The row keeps the first stretch's key, so it survives the merge as the same tree node, and
+      // holds every stretch's key: the latch is asked of the row, whichever stretch streamed.
+      const keys = parts
+        .slice(at, end + 1)
+        .flatMap((one) => (one.kind === "thinking" ? one.keys : []))
       merged.push({
         kind: "thinking",
         key: part.key,
+        keys,
         thinking: row.thinking,
         run: row.spanMs === undefined ? { text: row.text } : { text: row.text, spanMs: row.spanMs },
       })
+    }
     at = end
   }
   return merged
@@ -466,17 +475,31 @@ export const MessageItem = memo(function MessageItem({
   // revealed, and none of that moves a run or opens one.
   const storedRuns = message.reasoningRuns
   const storedReasoning = message.reasoning
-  const thinkingOpen = message.status === "streaming" && !message.content
+  const working = message.status === "streaming" && !message.content
   const thinking: RunPart[] = useMemo(() => {
     const runs = runsOf({ reasoningRuns: storedRuns, reasoning: storedReasoning })
-    return runs.map((run, index) => ({
-      run,
-      key: `run-${index}`,
-      // A span is stamped exactly when its run ends, so a run carrying one is done and stays folded:
-      // re-opening it over the call it broke would throw away the number it measured.
-      thinking: index === runs.length - 1 && thinkingOpen && run.spanMs === undefined,
-    }))
-  }, [storedRuns, storedReasoning, thinkingOpen])
+    return runs.map((run, index) => {
+      const key = `run-${index}`
+      return {
+        run,
+        key,
+        keys: [key],
+        // A span is stamped exactly when its run ends, so a run carrying one has no words still
+        // arriving: the label reads what it measured, whatever the row's openness.
+        thinking: index === runs.length - 1 && working && run.spanMs === undefined,
+      }
+    })
+  }, [storedRuns, storedReasoning, working])
+  // The rows that have streamed open on this visit, by key — the latch that keeps a row open after
+  // its own stretch ends, until the answer begins or the turn ends. It lives here so it is dropped
+  // when the reply remounts, and it is never written down: a row drawn from storage starts closed.
+  const [watched, setWatched] = useState<ReadonlySet<string>>(() => new Set())
+  // A row joins the latch as it streams, adjusted in the render that finds it rather than in an
+  // effect: a reply redraws with every token, and a state written after each of those would cost a
+  // render apiece. Only a key the latch doesn't hold yet is added, so this settles in one pass.
+  const live = working ? thinking.filter((part) => part.thinking).map((part) => part.key) : []
+  const fresh = live.filter((key) => !watched.has(key))
+  if (fresh.length) setWatched(new Set([...watched, ...fresh]))
   // The turn failed: a user message whose send never got there, or a reply that errored instead of
   // answering. The one kept in the thread waits to be sent again; the other says so plainly.
   const failed = message.status === "error"
@@ -648,6 +671,8 @@ export const MessageItem = memo(function MessageItem({
                 busy={busy}
                 ended={!streaming}
                 parts={parts}
+                working={working}
+                watched={watched}
               >
                 {last && footer}
               </AssistantRow>
@@ -682,6 +707,8 @@ function AssistantRow({
   busy,
   ended,
   parts,
+  working,
+  watched,
   children,
 }: {
   conversationId: string
@@ -690,6 +717,10 @@ function AssistantRow({
   /** The reply has been written: the turn it belongs to has ended. */
   ended: boolean
   parts: Part[]
+  /** The reply is still thinking, so a row that streamed open stays open. */
+  working: boolean
+  /** The rows that have streamed open on this visit, by key. */
+  watched: ReadonlySet<string>
   children?: ReactNode
 }) {
   return (
@@ -717,6 +748,8 @@ function AssistantRow({
               reasoning={part.run.text}
               thinking={part.thinking}
               spanMs={part.run.spanMs}
+              autoOpen={working && part.keys.some((key) => watched.has(key))}
+              working={working}
               className={huggingTools(parts, index)}
             />
           ) : part.kind === "media" ? (
@@ -735,7 +768,10 @@ function AssistantRow({
               </Suspense>
             </div>
           ) : (
-            <Markdown key={part.at} className={cn(REPLY_INSET, "text-[15px] leading-relaxed", COLUMN)}>
+            <Markdown
+              key={part.at}
+              className={cn(REPLY_INSET, "text-[15px] leading-relaxed", COLUMN)}
+            >
               {part.text}
             </Markdown>
           ),

@@ -267,6 +267,120 @@ test("a tap opens the folded run, a second folds it, and a remount folds it agai
   })
 })
 
+test("a row that streamed live stays open after its own run ends, and the answer folds it", async () => {
+  host()
+  const id = "latch"
+  await screen(undefined, turn({ id, reasoningRuns: [run(REASONING)] }), async () => {
+    await stream(id)
+    assert.equal(expanded(onlyThinkingLine()), "true", "the run streams open as its words arrive")
+
+    // A call ends that run, measuring it, and a second stretch of thinking follows the call.
+    await db.messages.put({
+      ...(await db.messages.get(id))!,
+      tools: [call("call-1")],
+      reasoningRuns: [run(REASONING, { spanMs: 12_000 }), run(SECOND, { afterToolId: "call-1" })],
+    })
+    await settle()
+    const rows = thinkingLines()
+    assert.equal(rows.length, 2, "the call splits the thinking into two rows")
+    assert.equal(lineLabel(rows[0]), "Thought for 12s", "the run that ended reads the span it measured")
+    assert.equal(
+      expanded(rows[0]),
+      "true",
+      "and stays open: the turn still works, so the row that streamed keeps its place",
+    )
+    assert.equal(lineLabel(rows[1]), "Thinking…", "the run after the call is still thinking")
+    assert.equal(expanded(rows[1]), "true", "and open as its words arrive")
+
+    await db.messages.put({ ...(await db.messages.get(id))!, content: ANSWER })
+    await settle()
+    for (const line of thinkingLines())
+      assert.equal(expanded(line), "false", "the answer beginning folds every row of the turn")
+  })
+})
+
+test("a merged row that streamed stays open when its newest stretch ends", async () => {
+  host()
+  const id = "merged-latch"
+  await screen(
+    undefined,
+    turn({
+      id,
+      tools: [call("call-1"), call("call-2", "read_file", "parse.ts")],
+      reasoningRuns: [
+        run(REASONING),
+        run("What the first call printed.", { afterToolId: "call-1", spanMs: 3_000 }),
+        run(SECOND, { afterToolId: "call-2" }),
+      ],
+    }),
+    async () => {
+      await stream(id)
+      const rows = thinkingLines()
+      assert.equal(rows.length, 2, "the two stretches that touched are one row")
+      assert.equal(expanded(rows[1]), "true", "and it streams open as its newest stretch thinks")
+
+      // The newest stretch ends, measured, and the turn still works: a further call is running.
+      await db.messages.put({
+        ...(await db.messages.get(id))!,
+        tools: [call("call-1"), call("call-2", "read_file", "parse.ts"), { ...call("call-3"), status: "running" }],
+        reasoningRuns: [
+          run(REASONING),
+          run("What the first call printed.", { afterToolId: "call-1", spanMs: 3_000 }),
+          run(SECOND, { afterToolId: "call-2", spanMs: 9_000 }),
+        ],
+      })
+      await settle()
+      const row = thinkingLines()[1]
+      assert.equal(lineLabel(row), "Thought for 12s", "the row adds the spans both stretches measured")
+      assert.equal(expanded(row), "true", "and stays open, as the row that streamed on this visit")
+    },
+  )
+})
+
+test("a turn that ends with no answer folds its rows", async () => {
+  host()
+  const id = "stopped-early"
+  await screen(undefined, turn({ id, reasoningRuns: [run(REASONING)] }), async () => {
+    await stream(id)
+    assert.equal(expanded(onlyThinkingLine()), "true", "the run streams open")
+    await db.messages.put({ ...(await db.messages.get(id))!, status: "stopped" })
+    await settle()
+    const line = onlyThinkingLine()
+    assert.equal(expanded(line), "false", "the turn ending folds the row, though no answer came")
+    assert.equal(lineLabel(line), "Thought it through", "with nothing measured for it here")
+  })
+})
+
+test("the answer folds every row of the turn, even one the reader opened mid-turn", async () => {
+  host()
+  const id = "opened-mid-turn"
+  await screen(
+    undefined,
+    // The first run ended over a call before this visit, so its row arrives closed.
+    turn({
+      id,
+      tools: [call("call-1")],
+      reasoningRuns: [run(REASONING, { spanMs: 12_000 }), run(SECOND, { afterToolId: "call-1" })],
+    }),
+    async () => {
+      await stream(id)
+      assert.equal(expanded(thinkingLines()[0]), "false", "a row that never streamed starts closed")
+      await click(thinkingLines()[0])
+      assert.equal(expanded(thinkingLines()[0]), "true", "a tap opens it while the turn works")
+
+      await db.messages.put({ ...(await db.messages.get(id))!, content: ANSWER })
+      await settle()
+      const folded = thinkingLines()
+      for (const line of folded)
+        assert.equal(expanded(line), "false", "the answer folds the turn's rows together")
+      assert.equal(lineLabel(folded[0]), "Thought for 12s", "keeping the label its own stretch earned")
+
+      await click(thinkingLines()[0])
+      assert.equal(expanded(thinkingLines()[0]), "true", "a tap after the fold sticks for the visit")
+    },
+  )
+})
+
 test("a tap while the model is still thinking folds the run, and the answer leaves it folded", async () => {
   host()
   const id = "tap-while-thinking"

@@ -36,30 +36,49 @@ type Read = "whole" | "capped" | "revealed"
 
 /**
  * One run of a reply's thinking: a folded row that opens on a tap, reads its words as the reply's
- * own markdown while open, and lands the reader on its newest ones.
+ * own markdown while open, and lands the reader on its newest ones. A row opens when the reader
+ * watches its thinking stream and stays open until the turn stops working (`autoOpen`, latched by
+ * the thread); a tap overrides either way, until the fold moment drops it.
  */
 export const ThinkingLine = memo(function ThinkingLine({
   reasoning,
   thinking,
   spanMs,
+  autoOpen,
+  working,
   className,
 }: {
   reasoning: string
-  /** The model is still thinking, so the line streams open. */
+  /** The model is still thinking, so the line reads "Thinking…" even when it is folded. */
   thinking: boolean
   /** How long this device watched the turn think, when it watched it at all. */
   spanMs?: number
+  /** This row streamed open on this visit and the turn still works, so it stays open on its own. */
+  autoOpen: boolean
+  /** The reply is still thinking: its answer has not begun and the turn has not ended. */
+  working: boolean
   /** The margin that hugs the row it sits beside, when the thread's parts hand one over. */
   className?: string
 }) {
   const [override, setOverride] = useState<boolean | null>(null)
   const [read, setRead] = useState<Read>("whole")
+  const [wasWorking, setWasWorking] = useState(working)
   const id = useId()
   const root = useRef<HTMLDivElement | null>(null)
   const box = useRef<HTMLDivElement | null>(null)
   const body = useRef<HTMLDivElement | null>(null)
   const following = useRef(false)
-  const open = override ?? thinking
+
+  // The fold moment: the answer beginning or the turn ending folds every row of the turn together,
+  // including one the reader opened, so the tap state goes with it. It is adjusted here rather than
+  // in an effect, so the fold lands in the same commit as the answer. A row that mounts already
+  // folded has no tap to drop, and nothing fires again once the turn has stopped working, so a tap
+  // after that moment sticks for the visit.
+  if (wasWorking !== working) {
+    setWasWorking(working)
+    if (!working) setOverride(null)
+  }
+  const open = override ?? autoOpen
 
   // Opening reads from the newest words down: the row's end is put at the foot of the thread, and
   // kept there as the row grows — the fold's own transition and the run's arriving words both grow
