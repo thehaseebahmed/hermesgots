@@ -92,12 +92,12 @@ for (const [width, collapsed, panes] of CASES) {
       await page.goto(`${app}/code`)
       if (panes === 2) {
         await page.waitForURL("**/c/pane-*", { timeout: 15_000 })
-        await page.getByRole("region", { name: "Today" }).getByText("Add a timer").waitFor()
+        await page.getByRole("region", { name: "Idle" }).getByText("Add a timer").waitFor()
         await shot("code")
         assert.equal(await page.getByRole("button", { name: "Back to Code" }).count(), 0)
         const first = page.url()
         const other = first.endsWith("pane-gots") ? "Add a timer" : "Rotate the logs"
-        await page.getByRole("region", { name: "Today" }).getByText(other).click()
+        await page.getByRole("region", { name: "Idle" }).getByText(other).click()
         await page.waitForURL((url) => url.href !== first)
         const last = page.url()
         await page.waitForFunction(
@@ -108,7 +108,7 @@ for (const [width, collapsed, panes] of CASES) {
         await page.waitForURL(last, { timeout: 5_000 })
         pass(`${look}: code list beside the session, reopening the last one`)
       } else {
-        await page.getByRole("region", { name: "Today" }).getByText("Add a timer").waitFor()
+        await page.getByRole("region", { name: "Idle" }).getByText("Add a timer").waitFor()
         assert.equal(new URL(page.url()).pathname, "/code", "stays on the list")
         // A chip picks the project, and New session starts there.
         await page.getByRole("button", { name: "Maze", exact: true }).click()

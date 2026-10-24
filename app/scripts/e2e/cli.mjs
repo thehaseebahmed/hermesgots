@@ -55,7 +55,7 @@ const FLOWS = {
   approval: {
     script: "e2e/approval.mjs",
     about:
-      "A project session waits on an approval in the sidebar and in Code, then lands under Today",
+      "A project session waits on an approval in the sidebar and in Code, then lands under Idle",
     alsoPolling: true,
   },
   "approval-missed": {
@@ -199,7 +199,7 @@ const FLOWS = {
   "afk-stalled": {
     script: "e2e/afk-stalled.mjs",
     about:
-      "A stalled AFK session waits where the user finds it: the sidebar's Waiting for input and Code's Waiting on you, with the host's reason under it",
+      "A stalled AFK session waits where the user finds it: the sidebar's Waiting for input and Code's Waiting for You, with the host's reason under it",
   },
   "afk-stage": {
     script: "e2e/afk-stage.mjs",

@@ -26,7 +26,7 @@ import { createConversation, db, prIsLive, type Conversation, type Profile } fro
 import { useDraft } from "@/lib/drafts"
 import { formatRelative } from "@/lib/format"
 import type { HermesProject } from "@/lib/hermes"
-import { itemGroups } from "@/lib/item-groups"
+import { codeGroupOf, codeGroups } from "@/lib/item-groups"
 import { useAnyChange } from "@/lib/live"
 import { useNav } from "@/lib/nav"
 import { itemToOpen, useCodePane, type FeaturePane } from "@/lib/pane"
@@ -173,16 +173,12 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
     .filter(([key, { project }]) => !project.archived || rows.some((r) => r.key === key))
     .sort((a, b) => a[1].project.name.localeCompare(b[1].project.name))
   const shown = rows.filter((r) => (!chip || r.key === chip) && matches(r, query))
-  const grouped = itemGroups(
+  // What waits on the user first, then working, idle and closed — each group newest-created first,
+  // so the order is deterministic rather than a live timestamp chasing itself.
+  const grouped = codeGroups(
     shown,
-    (r) =>
-      r.state === "resolved" || r.state === "discarded"
-        ? "closed"
-        : r.state === "idle"
-          ? undefined
-          : r.state,
-    (r) => r.c.updatedAt,
-    listed?.now ?? 0,
+    (r) => codeGroupOf(r.state),
+    (a, b) => b.c.createdAt - a.c.createdAt,
   )
   const filtering = Boolean(query.trim() || chip)
 
@@ -285,7 +281,7 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
         )}
 
         {grouped.map((group) => (
-          <ItemGroup key={group.key} group={group}>
+          <ItemGroup key={group.key} group={group} sticky>
             {group.items.map((row) => (
               <li key={row.c.id}>
                 <SessionItem

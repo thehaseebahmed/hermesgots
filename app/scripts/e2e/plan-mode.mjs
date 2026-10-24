@@ -51,14 +51,14 @@ await flow(
     const group = (label) => page.getByRole("region", { name: label })
     const backToProject = () => page.getByRole("button", { name: "Back to Code" }).click()
     const openSession = async (id, title) => {
-      await group("Today").getByText(title).click()
+      await group("Idle").getByText(title).click()
       await page.waitForURL(`**/c/${id}`)
     }
 
     // Session A plans, as the mode menu sets it: the mode on the row here, on the plugin with the
     // first turn.
     await page.goto(project)
-    await group("Today").getByText(titleA).click()
+    await group("Idle").getByText(titleA).click()
     await page.waitForURL(`**/c/${a}`)
     await page.evaluate(async (id) => {
       const { setSessionMode } = await import("/src/lib/workspace.ts")
@@ -218,7 +218,7 @@ await flow(
     // The other order the report could have been: A's card already on screen, then back, then in.
     await backToProject()
     await page.waitForURL("**/code")
-    await group("Waiting on you").getByText(titleA).click()
+    await group("Waiting for You").getByText(titleA).click()
     await page.waitForURL(`**/c/${a}`)
     await page.getByRole("button", { name: "Keep planning" }).waitFor({ timeout: 20_000 })
     await shot("plan-ready")
@@ -241,7 +241,7 @@ await flow(
 
     // And A keeps its own.
     await backToProject()
-    await group("Waiting on you").getByText(titleA).click()
+    await group("Waiting for You").getByText(titleA).click()
     await page.getByRole("button", { name: "Keep planning" }).waitFor({ timeout: 20_000 })
     pass("session A's plan is still there")
 
@@ -250,7 +250,7 @@ await flow(
     // must not show in the new session's place — its plan card would approve the other plan.
     await page.setViewportSize({ width: 1280, height: 900 })
     await page.goto(project)
-    await group("Waiting on you").getByText(titleA).click()
+    await group("Waiting for You").getByText(titleA).click()
     await page.waitForURL(`**/c/${a}`)
     await page.getByRole("button", { name: "Keep planning" }).waitFor({ timeout: 20_000 })
     // Hold the swap open: the row takes this long to come back, as a slow device's would.
@@ -290,7 +290,7 @@ await flow(
       },
       [`/c/${b}`, titleB],
     )
-    await group("Today").getByText(titleB).click()
+    await group("Idle").getByText(titleB).click()
     await page.waitForURL(`**/c/${b}`)
     // The watcher counts only once the swap has committed — this session's own title in a header —
     // and the row read above holds the swap open by design. Wait for a watched window to accrue

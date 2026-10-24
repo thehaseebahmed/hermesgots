@@ -12,8 +12,12 @@
  * One facts object and one ladder: a thread's pill is this answer with no session of its own to be
  * resolved or discarded, so the two can't drift.
  *
- * Pure: no imports, no clock, so `scripts/test-session-work.mjs` runs it as a rule.
+ * Pure: no clock, and the one value it imports (`pull-state.ts`) is a rule's own — so
+ * `scripts/test-session-work.mjs` drives it as a rule.
  */
+
+import { prIsLive } from "./pull-state.ts"
+import type { Conversation } from "@/lib/db"
 
 export type SessionState = "working" | "waiting" | "idle" | "resolved" | "discarded"
 
@@ -68,6 +72,35 @@ export function sessionState(facts: SessionFacts): SessionState {
   if (facts.local?.streaming || facts.live === "running" || working(facts.subagents))
     return "working"
   return "idle"
+}
+
+/** The slice of a session `sessionGroup` reads: its closure and wait marks, and its pull requests. */
+type SessionPrs = Pick<Conversation, "resolvedAt" | "discardedAt" | "planPending" | "prs">
+
+/**
+ * Where a Code row's session stands, with its pull requests claimed in: the highest claim wins.
+ * Closed first, then anything waiting on the user — a question, an approval, a plan, a stall, or a
+ * live pull request's checks running or failed, which wait on the watcher rather than the agent
+ * (they used to read `working`; a turn running beside them loses to them). A live pull request with
+ * nothing wrong still waits for its review and merge, as it always has; `prTick` marks both pull
+ * request claims, which is what puts the arrow glyph on the row instead of the alert.
+ */
+export function sessionGroup(
+  conversation: SessionPrs,
+  live?: LiveTurn,
+  local?: LocalTurn,
+  subagents?: number,
+): { state: SessionState; prTick: boolean } {
+  const state = sessionState({ ...conversation, live, local, subagents })
+  if (state === "resolved" || state === "discarded") return { state, prTick: false }
+  // An answer to ask outranks every pull request: the alert glyph is the question, not the arrow.
+  if (state === "waiting") return { state, prTick: false }
+  const livePrs = (conversation.prs ?? []).filter(prIsLive)
+  if (livePrs.some((pr) => pr.checks === "pending" || pr.checks === "failure"))
+    return { state: "waiting", prTick: true }
+  if (state === "working") return { state: "working", prTick: false }
+  if (livePrs.length) return { state: "waiting", prTick: true }
+  return { state: "idle", prTick: false }
 }
 
 /**

@@ -1,3 +1,5 @@
+import type { SessionState } from "@/lib/session-work"
+
 /** What an item needs, which puts it ahead of the dated groups (or, closed, after them). */
 export type ItemNeed = "waiting" | "working" | "closed" | undefined
 
@@ -16,7 +18,7 @@ export type ItemGroupKey = keyof typeof LABELS
 const DAY_MS = 86_400_000
 
 /**
- * The groups every list (Code, Meetings, Research) shares: Waiting on you, Working, then the rest
+ * The groups the dated lists (Meetings, Research) share: Waiting on you, Working, then the rest
  * by Today, Yesterday, This week and Earlier, and Closed last. Empty groups are left out.
  */
 export function itemGroups<T>(
@@ -45,4 +47,46 @@ export function itemGroups<T>(
       items: placed.filter((p) => p.key === key).map((p) => p.item),
     }))
     .filter((group) => group.items.length)
+}
+
+/** The Code list's four groups, in the order they always run: what waits on the user first. */
+const CODE_LABELS = {
+  waiting: "Waiting for You",
+  working: "Working",
+  idle: "Idle",
+  closed: "Closed",
+} as const
+
+export type CodeGroupKey = keyof typeof CODE_LABELS
+
+/**
+ * Which of the four a session's state puts it in: Resolved and Discarded share Closed, told apart
+ * by their icon rather than by headings of their own. Waiting, Working and Idle pass through as
+ * they are — the claim that won is already in the state (`sessionGroup`).
+ */
+export function codeGroupOf(state: SessionState): CodeGroupKey {
+  return state === "resolved" || state === "discarded" ? "closed" : state
+}
+
+/**
+ * The Code list's groups: the four in their fixed order, empty ones left out, each run by `order`
+ * (created, newest first, unless the sort-by dropdown says otherwise). Each group is sorted on its
+ * own, so one group's sessions never reach into another's.
+ */
+export function codeGroups<T>(
+  items: T[],
+  group: (item: T) => CodeGroupKey,
+  order: (a: T, b: T) => number,
+) {
+  const placed = items.map((item) => ({ item, key: group(item) }))
+  return (Object.keys(CODE_LABELS) as CodeGroupKey[])
+    .map((key) => ({
+      key,
+      label: CODE_LABELS[key],
+      items: placed
+        .filter((p) => p.key === key)
+        .map((p) => p.item)
+        .sort(order),
+    }))
+    .filter((grouped) => grouped.items.length)
 }

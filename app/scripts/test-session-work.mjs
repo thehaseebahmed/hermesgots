@@ -7,13 +7,24 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { sessionState, threadState } from "../src/lib/session-work.ts"
+import { sessionGroup, sessionState, threadState } from "../src/lib/session-work.ts"
 
 const session = (facts = {}) => ({
   resolvedAt: undefined,
   discardedAt: undefined,
   planPending: false,
   ...facts,
+})
+
+/** A pull request of a session's, live or not, with the checks of its head commit. */
+const pr = (state = "open", checks = null) => ({
+  repo: "acme/gots",
+  number: 7,
+  title: "A change",
+  state,
+  checks,
+  url: "https://example.test/7",
+  at: 5,
 })
 
 test("a live subagent with no live turn reads working", () => {
@@ -55,4 +66,85 @@ test("a thread waiting on the user keeps waiting over its subagents", () => {
 test("a failed reply reads failed, unless something still works", () => {
   assert.equal(threadState({ failed: true }), "failed")
   assert.equal(threadState({ failed: true, subagents: 1 }), "working")
+})
+
+// The Code row's claim: which group the session lands in, told by `{ state, prTick }` —
+// state picks the group (`codeGroupOf`), prTick is the pull request's arrow.
+
+test("a pull request's checks running or failed wait on the watcher, not the agent", () => {
+  assert.deepEqual(sessionGroup(session({ prs: [pr("open", "pending")] })), {
+    state: "waiting",
+    prTick: true,
+  })
+  assert.deepEqual(sessionGroup(session({ prs: [pr("open", "failure")] })), {
+    state: "waiting",
+    prTick: true,
+  })
+  // They used to read `working`, and they lose to nothing short of closed: a turn runs beside them.
+  assert.deepEqual(sessionGroup(session({ prs: [pr("open", "pending")] }), "running"), {
+    state: "waiting",
+    prTick: true,
+  })
+  assert.deepEqual(sessionGroup(session({ prs: [pr("draft", "pending")] }), undefined, undefined, 2), {
+    state: "waiting",
+    prTick: true,
+  })
+})
+
+test("checks that have settled stop waiting — unless the pull request still does", () => {
+  assert.deepEqual(sessionGroup(session({ prs: [pr("open", "success")] })), {
+    state: "waiting",
+    prTick: true,
+  })
+  assert.deepEqual(sessionGroup(session({ prs: [pr("draft", "success")] })), {
+    state: "waiting",
+    prTick: true,
+  })
+  // Finished pull requests claim nothing, however their checks ended.
+  assert.deepEqual(sessionGroup(session({ prs: [pr("merged", "failure")] })), {
+    state: "idle",
+    prTick: false,
+  })
+})
+
+test("an open question outranks the pull request watching beside it", () => {
+  const question = session({ prs: [pr("open", "pending")] })
+  assert.deepEqual(sessionGroup(question, "running", { waiting: true }, 1), {
+    state: "waiting",
+    prTick: false,
+  })
+  assert.deepEqual(sessionGroup(question, undefined, { waiting: true }), {
+    state: "waiting",
+    prTick: false,
+  })
+})
+
+test("an agent running with no wait is working, whatever its pull requests finished", () => {
+  assert.deepEqual(sessionGroup(session({ prs: [pr("open", "success")] }), "running"), {
+    state: "working",
+    prTick: false,
+  })
+  assert.deepEqual(sessionGroup(session({ prs: [pr("merged", null)] }), undefined, undefined, 1), {
+    state: "working",
+    prTick: false,
+  })
+})
+
+test("a closed session stays closed, its pull requests claiming nothing", () => {
+  assert.deepEqual(sessionGroup(session({ resolvedAt: 5, prs: [pr("open", "pending")] })), {
+    state: "resolved",
+    prTick: false,
+  })
+  assert.deepEqual(sessionGroup(session({ discardedAt: 5, prs: [pr("open", "success")] })), {
+    state: "discarded",
+    prTick: false,
+  })
+})
+
+test("a session nothing runs and no pull request opens is idle", () => {
+  assert.deepEqual(sessionGroup(session()), { state: "idle", prTick: false })
+  assert.deepEqual(sessionGroup(session({ prs: [pr("merged", null)] })), {
+    state: "idle",
+    prTick: false,
+  })
 })

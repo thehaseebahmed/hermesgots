@@ -24,18 +24,18 @@ import {
   type HermesProject,
   type HermesProjectFolder,
   type KeptWorktree,
-  type LiveRunStatus,
   type SessionWorkspace,
 } from "@/lib/hermes"
 import { syncNow } from "@/lib/sync"
-import { sessionState, type SessionState } from "@/lib/session-work"
+import { sessionGroup, sessionState, type SessionState } from "@/lib/session-work"
 
 /**
- * Where a session stands, from the pure rule in `src/lib/session-work.ts` — a screen keeps reading it
+ * Where a session stands, from the pure rules in `src/lib/session-work.ts` — a screen keeps reading it
  * from here: `live` is what the plugin reports for the server, `local` what this device sees of its
  * own turn (exact here, invisible elsewhere), and `subagents` how many the host still runs for it.
+ * `sessionGroup` is the Code row's claim: the same ladder with the session's pull requests in it.
  */
-export { sessionState, type SessionState }
+export { sessionGroup, sessionState, type SessionState }
 
 /**
  * A project session's workspace: the worktrees the Gots plugin made for it on the Hermes host
@@ -306,28 +306,6 @@ export async function closeSessionWork(
       errors: [error instanceof Error ? error.message : "Couldn't reach the plugin."],
     }
   }
-}
-
-/** A pull request still open (a draft included) is a session waiting to be reviewed and merged. */
-export const hasOpenPr = (conversation: Pick<Conversation, "prs">) =>
-  (conversation.prs ?? []).some(prIsLive)
-
-/**
- * Where a session stands as the project screen groups it: an idle session left with an open pull
- * request waits to be reviewed and merged (`prTick`), unless its checks are still running, which is
- * work it has left to do. `subagents` is how many the host still runs for it (`useLiveSubagents`).
- */
-export function sessionGroup(
-  conversation: Pick<Conversation, "resolvedAt" | "discardedAt" | "planPending" | "prs">,
-  live?: LiveRunStatus,
-  local?: { streaming?: boolean; waiting?: boolean },
-  subagents?: number,
-): { state: SessionState; prTick: boolean } {
-  const state = sessionState({ ...conversation, live, local, subagents })
-  if (state !== "idle" || !hasOpenPr(conversation)) return { state, prTick: false }
-  return prChecksPending(conversation.prs)
-    ? { state: "working", prTick: false }
-    : { state: "waiting", prTick: true }
 }
 
 const PLAN_GO_AHEAD = "Go ahead with the plan"

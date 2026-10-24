@@ -10,15 +10,20 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import type { ItemGroupKey } from "@/lib/item-groups"
+import type { CodeGroupKey, ItemGroupKey } from "@/lib/item-groups"
 import { cn } from "@/lib/utils"
 
-/** A titled group of rows with its count; Closed starts folded. */
+/**
+ * A titled group of rows with its count; Closed starts folded. `sticky` pins the heading under the
+ * screen's own header while the group scrolls (Code's four).
+ */
 export function ItemGroup({
   group,
+  sticky,
   children,
 }: {
-  group: { key: ItemGroupKey; label: string; items: unknown[] }
+  group: { key: ItemGroupKey | CodeGroupKey; label: string; items: unknown[] }
+  sticky?: boolean
   children: ReactNode
 }) {
   const heading = (
@@ -34,11 +39,21 @@ export function ItemGroup({
       </span>
     </>
   )
+  // The screen header's own height (its row over its padding, over any safe-area top), so the
+  // heading stops beneath it rather than under it: the button only exists below md.
+  const at = sticky
+    ? "sticky z-[5] bg-background top-[calc(3.5rem_+_max(0.75rem,env(safe-area-inset-top)))] md:top-[calc(2.5rem_+_max(0.75rem,env(safe-area-inset-top)))]"
+    : ""
   const list = <ul className="flex flex-col">{children}</ul>
   if (group.key !== "closed")
     return (
       <section className="flex flex-col gap-1" aria-label={group.label}>
-        <h2 className="flex min-h-8 items-center gap-2 px-1 text-sm font-medium text-muted-foreground">
+        <h2
+          className={cn(
+            "flex min-h-8 items-center gap-2 px-1 text-sm font-medium text-muted-foreground",
+            at,
+          )}
+        >
           {heading}
         </h2>
         {list}
@@ -50,7 +65,12 @@ export function ItemGroup({
       render={<section className="flex flex-col gap-1" aria-label={group.label} />}
     >
       <h2>
-        <CollapsibleTrigger className="group -mx-1 flex min-h-11 items-center gap-2 rounded-xl px-2 text-sm font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+        <CollapsibleTrigger
+          className={cn(
+            "group -mx-1 flex min-h-11 items-center gap-2 rounded-xl px-2 text-sm font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+            at,
+          )}
+        >
           {heading}
           <ChevronUpIcon className="size-4 rotate-180 transition-transform group-data-panel-open:rotate-0 motion-reduce:transition-none" />
         </CollapsibleTrigger>

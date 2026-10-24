@@ -258,11 +258,9 @@ export interface PullRequestRef {
   at: number
 }
 
-/** The states a pull request is still live in: open, or a draft waiting for review. */
-export const LIVE_PR_STATES: PrState[] = ["open", "draft"]
-
-/** Whether a pull request is one of a session's live ones. */
-export const prIsLive = (pr: Pick<PullRequestRef, "state">) => LIVE_PR_STATES.includes(pr.state)
+// The live states and the test live apart from the schema, so the pure rules can ask them
+// (`pull-state.ts`); they are re-exported here, where the rest of the app finds them.
+export { LIVE_PR_STATES, prIsLive } from "@/lib/pull-state"
 
 /** A pull request's identity among a session's: what GitHub closes, and what a list keys it by. */
 export const prKey = (pr: Pick<PullRequestRef, "repo" | "number">) => `${pr.repo}#${pr.number}`

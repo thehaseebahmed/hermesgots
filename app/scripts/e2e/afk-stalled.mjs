@@ -1,5 +1,5 @@
 // An AFK session nothing is working any more — its run failed, or a restart adopted it — waits where
-// the user will find it: Code's Waiting on you, and from 1280px the sidebar's Waiting for input, each
+// the user will find it: Code's Waiting for You, and from 1280px the sidebar's Waiting for input, each
 // with the host's own reason under it, the way the plugin reports a stalled claim. The mock says a
 // project's claim stalled on request, so the whole thing is covered without GitHub.
 import { afkOn, app, assert, flow, makeProject, mock, pass, say } from "./lib.mjs"
@@ -31,7 +31,7 @@ const run = (wide) => async ({ page, profileId, shot, until }) => {
   await say({ project_id: projectId, reason: REASON })
 
   await page.goto(`${app}/code`)
-  const group = page.getByRole("region", { name: "Waiting on you" })
+  const group = page.getByRole("region", { name: "Waiting for You" })
   await group.getByText(TITLE).waitFor({ timeout: 20_000 })
   await group.getByText(REASON).waitFor({ timeout: 10_000 })
   assert.equal(
@@ -62,5 +62,5 @@ for (const width of [390, 1440]) {
   }
 }
 pass(
-  `A stalled AFK session (${REASON}) waits in Code's Waiting on you, and in the sidebar's Waiting for input from 1280px, titled after its task and still marked AFK, at 390 and 1440px, light and dark`,
+  `A stalled AFK session (${REASON}) waits in Code's Waiting for You, and in the sidebar's Waiting for input from 1280px, titled after its task and still marked AFK, at 390 and 1440px, light and dark`,
 )
