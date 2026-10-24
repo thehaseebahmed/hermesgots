@@ -4,8 +4,9 @@ Status: grilled 2026-10-24, every decision settled and recorded in ADR 0044 and 
 glossary's *Built-in skill*, *Hub skill*, *Your skill*, *Plugin skill*, *Project skill* and
 *Skill sheet* entries written alongside and *Health* extended to cover a skill's row. Published as
 #519 with tickets #520 to #525; the build order at the end is the tickets' shape when implementation
-starts. The spec carries `ready-for-agent` and the tickets stay bare, so the agent claims the spec
-and works the graph in order.
+starts. #519 is blocked by the gate issue (#527) that the docs PR carrying this file (#526) closes —
+work starts on that merge. The spec carries `ready-for-agent` and the tickets stay bare, so the
+agent claims the spec and works the graph in order.
 
 ## Goal
 
