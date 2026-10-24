@@ -38,6 +38,38 @@ export function MediaName({ name, size }: { name: string; size?: number }) {
 }
 
 /**
+ * A file that isn't a photo, as its row: what it's called, what it weighs, and a tap that saves it
+ * from the host. The thread draws a reply's files through this, where there is no attachment of the
+ * message's own to draw.
+ */
+export function FileRow({
+  name,
+  size,
+  onSave,
+  className,
+}: {
+  name: string
+  /** What the host said it weighs, where it said. */
+  size?: number
+  onSave?: () => void
+  className?: string
+}) {
+  return (
+    <div className={cn("relative shrink-0", className)}>
+      <button
+        type="button"
+        onClick={onSave}
+        aria-label={`Download ${name}`}
+        className="flex h-16 max-w-48 min-w-28 items-center gap-2 rounded-xl border bg-muted/50 px-3 text-left text-sm text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+      >
+        <DownloadIcon className="size-5 shrink-0 text-muted-foreground" />
+        <MediaName name={name} size={size} />
+      </button>
+    </div>
+  )
+}
+
+/**
  * A photo as a thumbnail, or a file as its name and size. With `onRemove`, a button takes it off the
  * message; with `onOpen`, a tap opens it, or saves it where `action` says a tap saves.
  */

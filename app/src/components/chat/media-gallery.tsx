@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { PlayIcon } from "lucide-react"
 
-import { AttachmentTile, MediaName } from "@/components/chat/attachments"
+import { FileRow, MediaName } from "@/components/chat/attachments"
 import { Skeleton } from "@/components/ui/skeleton"
 import { boundedStore } from "@/lib/bounded-cache"
 import type { MediaCell, MediaKind } from "@/lib/media-kind"
@@ -270,17 +270,11 @@ export function MediaItems({
           )}
         >
           {files.map((item) => (
-            <AttachmentTile
+            <FileRow
               key={item.key}
-              attachment={{
-                id: item.key,
-                name: item.name,
-                type: item.type,
-                size: item.size ?? 0,
-                image: false,
-              }}
-              action="download"
-              onOpen={() => onDownload(item)}
+              name={item.name}
+              size={item.size}
+              onSave={() => onDownload(item)}
             />
           ))}
         </div>
