@@ -1,16 +1,3 @@
-"""Tests for the profile-scoped skills read, switch and sheet (``plugin/skill_catalog.py``).
-
-Hermes's skills scan, its provenance reads, its disabled list, its config write scope, its caches and
-the manager's own skill lookup are stood in for through ``sys.modules`` (the ``test_dictation.py``
-pattern), so each test asserts only this module's own rules: the row shape the host's answer becomes,
-which rows are left out, that the scan runs inside the scope for the given profile, that the helper's
-name resolves under either spelling, that only a host with neither spelling raises ImportError, that
-the switch writes one name in the profile's global disabled list inside the host's own write scope —
-with the refusals and the cache clearing that go with it — and that one skill's sheet reads that
-skill's own file, for a switched-off skill too, with one of its files read only when it is asked for,
-and that a removal takes the operation its origin has (the Hub's uninstall, the manager's delete) or
-answers that origin's own refusal.
-"""
 
 from __future__ import annotations
 
@@ -27,25 +14,18 @@ from plugin import skill_catalog
 
 
 class Host:
-    """The stand-in host's modules, and what the read and the switch asked of them."""
 
     def __init__(self):
         self.modules = {}
         self.scopes = []
         self.platforms = []
         self.catalog_calls = {}
-        # The switch's own trail: the write scopes entered, the disabled lists saved (with the
-        # config each was saved in), and the caches cleared.
         self.write_scopes = []
         self.saves = []
         self.caches = []
-        # The removal's own: which helper was called, with what, and inside which scope.
         self.uninstalls = []
         self.deletes = []
-        # Which config read the listing's disabled-list look went through, in order.
         self.config_reads = []
-        # How many profile scopes are held right now, so a removal records whether the helper it
-        # called ran inside the one the request makes.
         self.inside = 0
 
 
@@ -71,19 +51,6 @@ def hermes(
     delete=None,
     readonly=False,
 ):
-    """Fake every host module the read, the switch and the sheet import lazily, for one test.
-
-    ``rows`` is the plain listing's answer; when it is left out it is built from ``catalog``, so a
-    catalog row marked ``hidden`` (one the real scan would drop from the listing) is the only thing
-    missing from it. ``omit`` names a module to leave unimportable, and ``cache_fails`` makes the
-    skills cache's clear raise, as a host whose cache moved out from under it would. ``skill_dirs``
-    maps a skill's name to its folder for the manager's own lookup, ``plugin_dirs`` does the same for
-    the registry's, ``linked`` is what the linked-file listing answers, and ``readiness`` is the
-    ``(fields, extras)`` pair the readiness read answers — left out, the host can't say either.
-    ``uninstall`` is what the Hub's own uninstall answers — its ``(ok, message)`` pair — and
-    ``delete`` what the manager's delete answers (its own dict, or None for a plain success).
-    ``readonly`` adds the host's copy-free config read, which a current Hermes has.
-    """
     host = Host()
     scopes, platforms, catalog_calls = host.scopes, host.platforms, host.catalog_calls
 
@@ -100,8 +67,6 @@ def hermes(
     profiles._profile_scope = _profile_scope
     host.modules["hermes_cli.web_server_profiles"] = profiles
 
-    # The config write scope, which is what the switch's write has to run inside: a save made while
-    # one is held is recorded as such, so a test can assert the ordering rather than infer it.
     held = []
 
     @contextlib.contextmanager
@@ -163,8 +128,6 @@ def hermes(
     reads = host.config_reads
 
     def load_config():
-        # A config read is a read of the profile's file: what a save wrote is what the next read
-        # sees, which is what makes a switch's answered row the state it landed in.
         reads.append("config")
         return copy.deepcopy(config_state)
 
@@ -173,8 +136,6 @@ def hermes(
     if readonly:
 
         def load_config_readonly():
-            # The host's own copy-free read: the config as the cache holds it, for a caller that
-            # only reads it.
             reads.append("readonly")
             return config_state
 
@@ -186,8 +147,6 @@ def hermes(
         return set(loaded["skills"]["disabled"]) - set(essential)
 
     def save_disabled_skills(loaded, disabled, platform=None):
-        # The host's own writer, in its own shape: essential names are subtracted, no platform means
-        # the global list, and a platform would write the slot ADR 0044 forbids Gots to write.
         written = set(disabled) - set(essential)
         loaded.setdefault("skills", {})
         if platform is None:
@@ -202,8 +161,6 @@ def hermes(
                 "in_scope": bool(held),
             }
         )
-        # Hermes's writer ends by saving the config it was handed, so that is what a later read of
-        # the profile's file now holds.
         config_state.clear()
         config_state.update(copy.deepcopy(loaded))
 
@@ -242,21 +199,12 @@ def hermes(
     plugins.get_plugin_manager = lambda: manager
     host.modules["hermes_cli.plugins"] = plugins
 
-    # The sheet's read of one skill: the manager's own lookup, which answers for a switched-off skill
-    # (the whole reason the sheet doesn't go through `skill_view`, which is here to fail loudly if
-    # anything ever reaches for it), and the host's own utf-8-sig read of a skill's text.
     folders = dict(skill_dirs or {})
     manager_tool = types.ModuleType("tools.skill_manager_tool")
     manager_tool._find_skill = lambda name: {"path": folders[name]} if name in folders else None
     host.modules["tools.skill_manager_tool"] = manager_tool
 
-    # The two removals, each the host's own answer: the Hub's tuple for a name its lock file knows,
-    # the manager's dict for a skill on the profile — a refusal included, which is the sentence the
-    # screen shows. A removal that lands takes the row out of the listing, so the read after it is
-    # the list the host would really answer.
     def forget(name):
-        # Both the plain listing and the scan's resolved rows, since which one the read uses is the
-        # host's own business: after a removal neither carries the skill any more.
         listed[:] = [row for row in listed if row.get("name") != name]
         if entries is not None:
             entries[:] = [
@@ -311,7 +259,6 @@ def hermes(
 
 
 def scanned(name, **patch):
-    """One row the host's scan would resolve: unique and loadable unless the test says otherwise."""
     return {
         "name": name,
         "description": f"{name} does things",
@@ -342,8 +289,6 @@ class SkillCatalogTests(unittest.TestCase):
                 }
             ],
         )
-        # Off skills and hidden ones are what the row's own fields are for, so the scan is asked for
-        # both rather than for the menu's own subset.
         self.assertEqual(host.catalog_calls, {"skip_disabled": True, "include_hidden": True})
 
     def test_each_origin_the_host_reports(self):
@@ -396,7 +341,6 @@ class SkillCatalogTests(unittest.TestCase):
         bare = hermes()
         for skills in (
             types.ModuleType("tools.skills_tool"),
-            # A module that has one of the two: half a listing is no listing at all.
             types.SimpleNamespace(find_all_skills=lambda: []),
         ):
             with mock.patch.dict(
@@ -427,7 +371,6 @@ class SkillCatalogTests(unittest.TestCase):
             [(row["name"], row["enabled"]) for row in got],
             [("log-triage", True), ("plan", False)],
         )
-        # The global list, which is the only one Gots writes: a platform would mean another answer.
         self.assertEqual(host.platforms, [None])
 
     def test_an_essential_skill_has_no_switch(self):
@@ -531,9 +474,6 @@ class SkillCatalogTests(unittest.TestCase):
                 host.modules["tools.skills_tool"]._skill_catalog = drifted
                 with mock.patch.dict(sys.modules, host.modules):
                     got = skill_catalog.read("bot-a")
-                # The host's private scan is the one read here with no sentence of its own, so a
-                # signature or a shape this host has moved leaves the plain listing standing in:
-                # every row loads, since only that scan could say otherwise, and the list is a list.
                 self.assertEqual([row["name"] for row in got], ["plan"])
                 self.assertIsNone(got[0]["loadError"])
 
@@ -541,7 +481,6 @@ class SkillCatalogTests(unittest.TestCase):
         host = hermes(catalog=[scanned("plan")], disabled=("plan",), readonly=True)
         with mock.patch.dict(sys.modules, host.modules):
             got = skill_catalog.read("bot-a")
-        # Nothing here writes the config, so the read that skips the defensive copy is the one taken.
         self.assertEqual(host.config_reads, ["readonly"])
         self.assertFalse(got[0]["enabled"])
 
@@ -597,7 +536,6 @@ class SkillCatalogTests(unittest.TestCase):
 
 
 class SkillSwitchTests(unittest.TestCase):
-    """The one write this module makes: one name in the profile's global disabled list."""
 
     def switched(self, host, name="plan", enabled=False, profile="bot-a"):
         with mock.patch.dict(sys.modules, host.modules):
@@ -607,7 +545,6 @@ class SkillSwitchTests(unittest.TestCase):
         host = hermes(catalog=[scanned("plan"), scanned("log-triage")], disabled=("log-triage",))
         row = self.switched(host, "plan", False)
         (save,) = host.saves
-        # The key written is the global disabled set, the rest of the list left as it was.
         self.assertEqual(save["disabled"], ["log-triage", "plan"])
         self.assertEqual(save["config"]["skills"]["disabled"], ["log-triage", "plan"])
         # And nothing else: the per-platform slot is never what a Gots switch writes (ADR 0044),
@@ -615,7 +552,6 @@ class SkillSwitchTests(unittest.TestCase):
         self.assertNotIn("platform_disabled", save["config"]["skills"])
         self.assertIsNone(save["platform"])
         self.assertEqual(set(host.platforms), {None})
-        # The write ran inside the host's own config write scope, for this bot.
         self.assertEqual(host.write_scopes, ["bot-a"])
         self.assertTrue(save["in_scope"])
         self.assertFalse(row["enabled"])
@@ -645,14 +581,11 @@ class SkillSwitchTests(unittest.TestCase):
     def test_a_switch_clears_both_of_hermes_caches(self):
         host = hermes(catalog=[scanned("plan")])
         self.switched(host)
-        # Hermes's scan, then its prompt snapshot: the second is what makes the change live for the
-        # next turn without a chat in flight losing the abilities it had.
         self.assertEqual(host.caches, ["skills", ("prompt", True)])
 
     def test_a_cache_that_cant_be_cleared_still_answers_the_switch(self):
         host = hermes(catalog=[scanned("plan")], cache_fails=True)
         row = self.switched(host)
-        # Both clears were attempted and neither failure was allowed to undo the write.
         self.assertEqual(host.caches, ["skills", ("prompt", True)])
         self.assertEqual(len(host.saves), 1)
         self.assertFalse(row["enabled"])
@@ -680,8 +613,6 @@ class SkillSwitchTests(unittest.TestCase):
     def test_a_switch_answers_the_row_it_found_without_reading_the_list_again(self):
         host = hermes(catalog=[scanned("plan"), scanned("log-triage")], disabled=("plan",))
         row = self.switched(host, "plan", True)
-        # One scan — the one that allowed the write — and the row is answered with the switch where
-        # the write just put it, rather than read back over the whole tree a second time.
         self.assertEqual(host.scopes, ["bot-a"])
         self.assertTrue(row["enabled"])
         self.assertEqual(set(row), {"name", "description", "category", "origin", "enabled",
@@ -697,7 +628,6 @@ class SkillSwitchTests(unittest.TestCase):
 
 
 class SkillSheetTests(unittest.TestCase):
-    """One skill read on its own: its sheet's payload, and one of its files at a time."""
 
     def setUp(self) -> None:
         self.tmp = TemporaryDirectory()
@@ -705,7 +635,6 @@ class SkillSheetTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
 
     def skill(self, name: str = "plan", body: str = "# Plan\n\nWrite it down.\n", **files: str) -> Path:
-        """One skill's folder on disk: its SKILL.md, and a file per ``files`` path."""
         folder = self.root / name
         folder.mkdir(parents=True, exist_ok=True)
         (folder / "SKILL.md").write_text(body, encoding="utf-8")
@@ -735,18 +664,14 @@ class SkillSheetTests(unittest.TestCase):
         self.assertTrue(got["enabled"])
         self.assertIsNone(got["loadError"])
         self.assertTrue(got["switchable"])
-        # The file as it is, with nothing preprocessed out of it.
         self.assertEqual(got["content"], "# Plan\n\nWrite it down.\n")
         self.assertEqual(got["linkedFiles"], {"references": ["references/api.md"]})
-        # The row is the list's own, read inside the profile's scope like every read here.
         self.assertEqual(host.scopes, ["bot-a"])
 
     def test_a_switched_off_skill_opens_like_any_other(self):
         folder = self.skill()
         host = hermes(catalog=[scanned("plan")], disabled=("plan",), skill_dirs={"plan": folder})
         got = self.viewed(host)
-        # The row still says Off — that is what the sheet is opened to look at — and the file is
-        # there: the read never goes near `skill_view`, which refuses exactly this skill.
         self.assertFalse(got["enabled"])
         self.assertEqual(got["content"], "# Plan\n\nWrite it down.\n")
 
@@ -811,8 +736,6 @@ class SkillSheetTests(unittest.TestCase):
         folder = self.skill()
         host = hermes(catalog=[scanned("plan")], skill_dirs={"plan": folder})
         got = self.viewed(host)
-        # Left out rather than filled in with something the host never said, and the linked-file
-        # listing with them: null is "this host can't list them".
         for field in ("readiness_status", "setup_needed", "setup_note", "setup_help"):
             self.assertNotIn(field, got)
         self.assertIsNone(got["linkedFiles"])
@@ -874,7 +797,6 @@ class SkillSheetTests(unittest.TestCase):
 
 
 class SkillRemoveTests(unittest.TestCase):
-    """Removal: one word, three host operations, and each origin's own path or refusal."""
 
     def removed(self, host, name="plan", profile="bot-a"):
         with mock.patch.dict(sys.modules, host.modules):
@@ -885,8 +807,6 @@ class SkillRemoveTests(unittest.TestCase):
         left = self.removed(host)
         self.assertEqual(host.uninstalls, [{"name": "plan", "in_scope": True}])
         self.assertEqual(host.deletes, [])
-        # The answer is the list read again, so the app's whole list is the host's own: the skill
-        # that went is gone from it and the one that stayed is still there, in the list's row shape.
         self.assertEqual([row["name"] for row in left], ["log"])
         self.assertEqual(set(left[0]), {"name", "description", "category", "origin", "enabled",
                                         "loadError", "switchable"})
@@ -899,7 +819,6 @@ class SkillRemoveTests(unittest.TestCase):
                 skill_catalog.remove("bot-a", "plan")
         self.assertEqual(caught.exception.status, 400)
         self.assertEqual(str(caught.exception), message)
-        # A refusal is no removal: the other helper was never reached, and no cache was cleared.
         self.assertEqual(host.deletes, [])
         self.assertEqual(host.caches, [])
 

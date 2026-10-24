@@ -136,6 +136,15 @@ def _error(web: Any, message: str, status: int):
     return web.json_response({"error": {"message": message}}, status=status)
 
 
+def request_profile():
+    try:
+        from gateway.platforms.api_server import _api_request_profile
+
+        return _api_request_profile.get()
+    except Exception:
+        return None
+
+
 def _skill_route(
     web: Any,
     call: Any,
@@ -151,14 +160,6 @@ def _skill_route(
 ) -> Any:
     """A route into ``skill_catalog.py``: the guard, this bot's profile, one call, one answer.
 
-    Every skills route has this shape — the signed-in check, the profile that makes the call land on
-    this bot and no other, the 400 a body reader raises, the 501 for a host whose Hermes has moved the
-    built-ins the call needs, and the answer as ``{"object": key, "data": answer}`` — so each
-    declares only its call, its key, what it needs from the request, and the sentence a host without
-    its machinery answers with. That sentence is the route's own: a host that can list a profile's
-    skills is one whose sheet can still be unreachable, and saying so in the listing's words would be
-    the wrong account of it (skill_catalog.py holds all four).
-
     ``web``, ``guard``, ``profile`` and ``read_body`` are the API server's own, injected because they
     are bound to the app this is registered on; the call itself runs on a worker thread, never the
     loop, since every one of them scans the skills tree or reads a file.
@@ -172,8 +173,6 @@ def _skill_route(
         if named:
             args.append(request.match_info["name"])
         if query is not None:
-            # Read from the query, not the path: a group's files sit below the skill, and a relative
-            # path with a slash in it is the thing being asked for.
             path = request.query.get(query) or ""
             if not path:
                 return _error(web, f"Missing {query}", 400)
@@ -350,9 +349,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             for name, gate in mcp.FEATURES
             if serves_mcps and await asyncio.to_thread(gate) is None
         ]
-        # The skills screen is advertised on the same terms: only where Hermes's own listing imports,
-        # under whichever name this host ships it, which is the gate the read's 501 answers from —
-        # a host that can't list skills has no slash menu and no tab. See skill_catalog.py.
         serves_skills = await asyncio.to_thread(skill_catalog.available) is None
         skills_features = [
             name
@@ -372,7 +368,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "todos",
                     "projects",
                     "projects_async",
-                    # Hermes's own skills listing, and the Skills screen with it; see skill_catalog.py.
                     *skills_features,
                     "project_repos",
                     "project_usage",
@@ -579,20 +574,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         body: Optional[Any] = None,
         query: Optional[str] = None,
     ) -> Any:
-        """A route into Hermes's own skills machinery: the guard, this bot's profile, one key.
-
-        The shape is ``_skill_route``'s, and what each route answers a host that hasn't got its
-        machinery with is its own — skill_catalog.py's four sentences, one per flow — so a host that
-        can list a profile's skills never answers a sheet's refusal in the listing's words.
-        """
-        # The profile is resolved per request: this file reads it further down, so the name only
-        # exists by the time a request is served.
         return _skill_route(
             web,
             call,
             key,
             guard=unauthorized,
-            profile=lambda: request_profile(),
+            profile=request_profile,
             read_body=json_body,
             named=named,
             unavailable=unavailable,
@@ -680,11 +667,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     read_mcp_tools = mcp_route(mcp.tools, "tools")
     probe_mcp_tools = mcp_route(mcp.probe_tools, "tools")
 
-    # The bot's skills, and the one skill a sheet reads: the listing and a removal answer the list
-    # (`{"object": "list", "data": …}`, the app's whole list either way), a switch and a sheet
-    # answer the one row (`"skill"`), and one of a skill's files answers itself (`"skill.file"`).
-    # Each carries the sentence a host that can't do that one answers with, since a host can list a
-    # profile's skills and still have no way into one of them.
     list_skills = skill_route(skill_catalog.read, "list", named=False)
     set_skill_enabled = skill_route(
         skill_catalog.set_enabled,
@@ -1900,16 +1882,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/push/remove", push_unsubscribe)
     app.router.add_post(f"{PREFIX}/push/mute", push_mute)
     app.router.add_post(f"{PREFIX}/runs/{{run_id}}/clarify", answer_clarify)
-    # The profile the request being served belongs to, read on the loop thread (None when this
-    # Hermes has no profile scope). One definition only: everything below resolves it by name.
-    def request_profile():
-        try:
-            from gateway.platforms.api_server import _api_request_profile
-
-            return _api_request_profile.get()
-        except Exception:
-            return None
-
     async def get_speech(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:

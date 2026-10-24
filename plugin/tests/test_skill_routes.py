@@ -1,13 +1,3 @@
-"""Tests for the skills routes' one shape (``plugin._skill_route``).
-
-The five skills routes are the same route: the guard, this bot's profile, one call on a worker
-thread, the module's own refusal mapped to its status, and a Host whose Hermes has moved the
-built-ins answering 501 — in that route's **own** sentence, since a host can list a profile's skills
-and still have no way into one of them. The shapes are driven here, with a fake request and a fake
-``web``, because the routes themselves are wired to an aiohttp app this repo's tests don't stand up:
-the factory is the level they are checked at, and the declarations that name each route's sentence
-are one line each in ``_wire_api_server``.
-"""
 
 from __future__ import annotations
 
@@ -18,7 +8,6 @@ from plugin import _skill_route, skill_catalog
 
 
 class Web:
-    """aiohttp's two answers, as the factory asks for them: a JSON body and an error's own shape."""
 
     @staticmethod
     def json_response(payload, status=200):
@@ -26,7 +15,6 @@ class Web:
 
 
 class Request:
-    """What a skills route reads of a request: the skill's name, its query, and its body."""
 
     def __init__(self, name="plan", query=None, body=None):
         self.match_info = {"name": name}
@@ -35,19 +23,16 @@ class Request:
 
 
 async def body_of(request):
-    """The API server's own body read, as the factory is handed it: nothing when it isn't JSON."""
     return request.body
 
 
 def enabled_body(body):
-    """The switch's body reader, as ``_wire_api_server`` declares it: the one field a switch says."""
     if body is None or not isinstance(body.get("enabled"), bool):
         raise ValueError('Body must be {"enabled": true} or {"enabled": false}')
     return (body["enabled"],)
 
 
 def routed(call, *, key="skill", named=True, unavailable=skill_catalog.UNAVAILABLE, **kwargs):
-    """One route of the factory's, with the API server's own guard, profile and body read stubbed."""
     return _skill_route(
         Web,
         call,
@@ -62,7 +47,6 @@ def routed(call, *, key="skill", named=True, unavailable=skill_catalog.UNAVAILAB
 
 
 def answer(handler, request=None):
-    """What one request to a route answers."""
     return asyncio.run(handler(request or Request()))
 
 
@@ -121,7 +105,6 @@ class SkillRouteTests(unittest.TestCase):
                     answer(routed(gone, unavailable=sentence))["payload"],
                     {"error": {"message": sentence}},
                 )
-        # Each flow has a sentence of its own: a sheet's refusal is never the listing's.
         self.assertEqual(
             len(
                 {

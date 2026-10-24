@@ -10,53 +10,23 @@ older underscore-prefixed pair — so the read resolves either, and only a host 
 ImportError the route answers with a 501.
 
 Everything else a row carries is best-effort, because a menu that fails outright is worse than one
-that knows less than it might:
-
-* The host's private ``_skill_catalog`` still carries the rows its own listing drops — a skill this
-  platform can't run, a name two copies share — which is what lets a row say why it doesn't load. A
-  host without it answers the plain listing, three-key rows and all.
-* ``tools.skill_usage`` says where a local skill came from (Hermes's own bundled/hub/external/agent
-  classification); ``hermes_cli.skills_config`` says whether it is switched off. A row leaves
-  ``enabled`` out where those can't be imported.
-* ``hermes_cli.plugins`` is a second source: the skills a plugin on the host provides, named
-  ``namespace:skill``, which the profile's own listing never carries. They are merged after the local
-  rows, so a local skill of the same name always wins.
-
-Two things are left out of the answer because they are not the bot's: a shadowed copy of a skill a
-better copy owns, and a project skill (a repository's own, which depends on where the host runs).
-
-The tab's switch is the one write here, and it is Hermes's own write: the profile's global disabled
-list, read and saved inside the host's config write scope, then both of Hermes's caches cleared so
-the change is live for the bot's next turn (ADR 0044). What the host would refuse — a name the bot
-hasn't got, an essential skill — is refused before anything is written, in the sentence the screen
-shows.
-
-One skill is also read on its own, for its sheet (ADR 0045): the row above, its SKILL.md as it is on
-disk, its linked files, and the host's readiness and setup answer. Not through Hermes's ``skill_view``,
-which refuses a switched-off skill — that is exactly the row whose sheet has to open — but the way the
-dashboard's own content route does it, from ``skill_manager_tool._find_skill`` and the file itself.
-
-And one skill can be taken away, wherever its origin has a removal behind it (ADR 0044): a Hub skill
-through the Hub's own uninstall, one written on the profile through Hermes's delete helper. A built-in
-and a plugin's skill have no removal at all, so they are refused rather than promised one.
+that knows less than it might: the host's private ``_skill_catalog`` still carries the rows its own
+listing drops — a skill this platform can't run, a name two copies share — which is what lets a row
+say why it doesn't load. A host without it answers the plain listing, three-key rows and all.
 """
 
 from __future__ import annotations
 
 import importlib
+import logging
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
-# What a host whose skills scan has moved answers with: the route's 501, and the feature gate's
-# reason.
+logger = logging.getLogger(__name__)
+
 UNAVAILABLE = "This Hermes version can't list skills from here."
-# And what a host without the switch's own machinery answers with, for the same two callers.
 UNAVAILABLE_WRITE = "This Hermes version can't switch skills from here."
-# And what a host that can't open one skill answers with: its own sentence, because a host can list a
-# profile's skills and still have no way in to one of them (the sheet's ``skills_view``).
 UNAVAILABLE_VIEW = "This Hermes version can't open a skill from here."
-# And what a host without either removal helper answers with, for the same two callers: a removal is
-# one word over three host operations, so a host missing one of the two is one with no removal at all.
 UNAVAILABLE_REMOVE = "This Hermes version can't remove skills from here."
 
 # The refusals a switch answers with, in the words the screen shows. Hermes has no sentence of its
@@ -77,16 +47,10 @@ ESSENTIAL = (
 NOT_SUPPORTED = "Skill '%s' is not supported on this platform or environment."
 AMBIGUOUS = "Ambiguous skill name '%s': another copy shares it."
 
-# What one skill's sheet refuses with: a file's path is only ever read from inside the skill it
-# belongs to, and a name the bot hasn't got is the same not-found sentence the switch uses, at 404.
 OUTSIDE = "'%s' is not a path inside the skill."
 NO_FILE = "Skill '%s' has no file '%s'."
 READ_FAILED = "Failed to read '%s': %s"
 
-# The two origins a removal is behind — a Hub install's uninstall, a profile skill's delete — and the
-# sentences the other two answer with. A built-in is Hermes's own and is never removed (ADR 0044); a
-# plugin's skill belongs to its package, its host's write helpers never walk that namespace, and the
-# switch is all it gets.
 REMOVABLE = ("hub", "yours")
 BUILTIN_REMOVAL = "Skill '%s' is built into Hermes, so it can't be removed."
 PLUGIN_REMOVAL = "Skill '%s' comes from a plugin, so it can't be removed; switch it off instead."
@@ -111,11 +75,6 @@ def _helper(module: str, *names: str) -> Optional[Any]:
 
 
 def _listing() -> Tuple[Callable[..., Any], Callable[..., Any]]:
-    """Hermes's own listing: the scan, and the order every listing path keeps.
-
-    This is the one thing the read cannot do without, so it is the whole of the 501: a host with
-    neither spelling of the scan or the sort is one whose skills can't be listed from here.
-    """
     find = _helper("tools.skills_tool", "find_all_skills", "_find_all_skills")
     sort = _helper("tools.skills_tool", "sort_skills", "_sort_skills")
     if find is None or sort is None:
@@ -124,7 +83,6 @@ def _listing() -> Tuple[Callable[..., Any], Callable[..., Any]]:
 
 
 def available() -> Optional[str]:
-    """Why this host's skills can't be listed from here, or None when they can."""
     try:
         _listing()
     except ImportError:
@@ -133,10 +91,6 @@ def available() -> Optional[str]:
 
 
 def _all(find: Callable[..., Any]) -> List[Dict[str, Any]]:
-    """Every row the listing has, switched-off ones included: the config UI's listing, not the menu's.
-
-    A switch is what the app puts on a row, so the read has to see an off skill to say it is off.
-    """
     try:
         return find(skip_disabled=True)
     except TypeError:  # a listing that took no keyword: this host's rows are what it has
@@ -157,25 +111,18 @@ def _disabled() -> Optional[Set[str]]:
         return None
     try:
         return set(read_disabled(load_config()))
-    except Exception:  # a config this host can't read is no reason to lose the whole list
+    except Exception:
         return None
 
 
 def _origins() -> Optional[Callable[[str], str]]:
-    """Where each local skill came from, from the host's own provenance reads, or None.
-
-    Hermes classifies a skill as hub, bundled, external or agent; the app's four origins fold that
-    to ``hub`` -> ``hub``, ``bundled`` -> ``builtin``, and both of the other two -> ``yours``, since
-    an external-dir mount and a hand-written skill are equally the user's and neither of them the
-    bot's own Hub download. That fold is why the host's external-dir walk isn't asked for.
-    """
     bundled = _helper("tools.skill_usage", "_read_bundled_names")
     hub = _helper("tools.skill_usage", "_read_hub_installed_names")
     if bundled is None or hub is None:
         return None
     try:
         bundled_names, hub_names = set(bundled()), set(hub())
-    except Exception:  # a skills tree this host can't walk is no reason to lose the whole list
+    except Exception:
         return None
 
     def origin(name: str) -> str:
@@ -222,15 +169,15 @@ def _row(
         "origin": origin(name) if origin is not None else "yours",
     }
     if disabled is not None:
-        # A disabled entry matches a skill's declared name or a same-tier copy's exact load path,
-        # exactly as the host's own reader does.
-        row["enabled"] = disabled.isdisjoint({str(n) for n in (scanned.get("name"), name) if n})
+        row["enabled"] = not _is_disabled(scanned, name, disabled)
     row["loadError"] = load_error
     if essential is not None:
-        # An essential skill is subtracted from every disabled list the host writes, so a switch on
-        # it would be a switch that can never do anything.
         row["switchable"] = name not in essential
     return row
+
+
+def _is_disabled(scanned: Dict[str, Any], name: str, disabled: Set[str]) -> bool:
+    return not disabled.isdisjoint({str(n) for n in (scanned.get("name"), name) if n})
 
 
 def _rows_from_catalog(
@@ -241,11 +188,8 @@ def _rows_from_catalog(
     essential: Optional[Any],
     project: Optional[Any],
 ) -> List[Dict[str, Any]]:
-    """The profile's own skills, health and all, from the scan's resolved rows."""
     rows = []
     for entry in scanned:
-        # A shadowed copy is one a better copy owns, and a project skill belongs to the repository
-        # the host happens to run in, not to this bot.
         if entry.get("status") == "shadowed":
             continue
         if project is not None and entry.get("tier") == project:
@@ -263,7 +207,6 @@ def _rows_from_listing(
     disabled: Optional[Set[str]],
     essential: Optional[Any],
 ) -> List[Dict[str, Any]]:
-    """The profile's own skills from a host whose scan is the plain listing: every row loads."""
     rows = []
     for entry in listed:
         name = str(entry.get("name") or "")
@@ -284,7 +227,7 @@ def _plugin_rows(seen: Set[str], disabled: Optional[Set[str]]) -> List[Dict[str,
         from hermes_cli.plugins import get_plugin_manager
 
         found = get_plugin_manager().list_plugin_skill_metadata()
-    except Exception:  # a host whose plugin registry moved: the local rows stand on their own
+    except Exception:
         return []
     rows = []
     for entry in found:
@@ -306,37 +249,39 @@ def _plugin_rows(seen: Set[str], disabled: Optional[Set[str]]) -> List[Dict[str,
     return rows
 
 
+def _catalog_rows(
+    catalog: Optional[Callable[..., Any]],
+    listed: List[Dict[str, Any]],
+    origin: Optional[Callable[[str], str]],
+    disabled: Optional[Set[str]],
+    essential: Optional[Any],
+    project: Optional[Any],
+) -> Optional[List[Dict[str, Any]]]:
+    if catalog is None:
+        return None
+    try:
+        return _rows_from_catalog(
+            catalog(skip_disabled=True, include_hidden=True),
+            {str(entry.get("name") or "") for entry in listed},
+            origin,
+            disabled,
+            essential,
+            project,
+        )
+    except Exception:
+        return None
+
+
 def _scan(
     find: Callable[..., Any], sort: Callable[..., Any], *, single: bool = False
 ) -> List[Dict[str, Any]]:
-    """Every row the profile holds, read inside the caller's profile scope.
-
-    ``single`` is a caller that wants one row out of the answer (``row_of``): the order of a list
-    read for one name is nobody's, so it comes back unsorted rather than paying for the sort.
-    """
     essential = _helper("agent.skill_utils", "ESSENTIAL_SKILLS")
     project = _helper("agent.skill_utils", "TIER_PROJECT")
     catalog = _helper("tools.skills_tool", "_skill_catalog")
     disabled = _disabled()
     origin = _origins()
     listed = _all(find)
-    rows: Optional[List[Dict[str, Any]]] = None
-    if catalog is not None:
-        try:
-            # What the plain listing still carries is what loads; the catalog's hidden rows are the
-            # ones whose row says it doesn't. A private scan whose signature or shape this host has
-            # moved is the one call here with no such sentence of its own, so it answers nothing and
-            # the plain listing stands in: a menu that knows less beats a list that can't be drawn.
-            rows = _rows_from_catalog(
-                catalog(skip_disabled=True, include_hidden=True),
-                {str(entry.get("name") or "") for entry in listed},
-                origin,
-                disabled,
-                essential,
-                project,
-            )
-        except Exception:
-            rows = None
+    rows = _catalog_rows(catalog, listed, origin, disabled, essential, project)
     if rows is None:
         rows = _rows_from_listing(listed, origin, disabled, essential)
     rows.extend(_plugin_rows({row["name"] for row in rows}, disabled))
@@ -357,7 +302,6 @@ def read(profile: Optional[str]) -> List[Dict[str, Any]]:
 
 
 class SkillError(Exception):
-    """A refusal the route answers with ``status`` (501 when this host can't do it at all)."""
 
     def __init__(self, message: str, status: int = 400):
         super().__init__(message)
@@ -382,7 +326,6 @@ def _load(
 
 
 def _gate(needs: Tuple[Tuple[str, str], ...], message: str) -> Optional[str]:
-    """Why a host can't offer a flow, or None when it can: whether its built-ins are all there."""
     try:
         _load(needs, message)
     except SkillError as error:
@@ -404,50 +347,29 @@ _WRITE: Tuple[Tuple[str, str], ...] = (
 
 
 def writable() -> Optional[str]:
-    """Why this host's skills can't be switched from here, or None when they can.
-
-    A set of its own, apart from the read's: a host can list a profile's skills without the config
-    write scope and the disabled list's writer a switch is made of. ``info`` advertises this as its
-    own feature, so that host's tab carries a list and no switch, rather than a switch whose every
-    tap could only fail.
-    """
     return _gate(_WRITE, UNAVAILABLE_WRITE)
 
 
 def _clear_caches() -> None:
-    """Clear Hermes's two caches of the skills list, so a change is live for the bot's next turn.
-
-    Best-effort, as Hermes's own dashboard does it after a write: a cache that can't be cleared
-    either expires on its own or is gone with the next process, and neither is a reason to tell a
-    user that a write which landed didn't. The prompt cache is cleared with its snapshot, so a
-    chat already built keeps the abilities it had (ADR 0044).
-    """
     clear = _helper("tools.skills_tool", "clear_skills_cache")
     if clear is not None:
         try:
             clear()
         except Exception:
-            pass
+            logger.debug("memento: couldn't clear the skills cache", exc_info=True)
     prompt = _helper("agent.prompt_builder", "clear_skills_system_prompt_cache")
     if prompt is not None:
         try:
             prompt(clear_snapshot=True)
         except Exception:
-            pass
+            logger.debug("memento: couldn't clear the skills prompt cache", exc_info=True)
 
 
 def row_of(rows: List[Dict[str, Any]], name: str) -> Optional[Dict[str, Any]]:
-    """One skill's row out of any of this module's listings, or None when the bot hasn't got it."""
     return next((row for row in rows if row.get("name") == name), None)
 
 
 def _one(profile: Optional[str], name: str) -> Optional[Dict[str, Any]]:
-    """One skill's row out of the same scan the list answers, or None when the bot hasn't got it.
-
-    The listing's order is nobody's when one row is all that is wanted, so the scan is asked for the
-    rows and no sort. A sheet picks its row out of the scan it holds open itself rather than calling
-    this: that scan is already inside the profile's scope, and this one would open another.
-    """
     from hermes_cli.web_server_profiles import _profile_scope
 
     find, sort = _listing()
@@ -456,19 +378,12 @@ def _one(profile: Optional[str], name: str) -> Optional[Dict[str, Any]]:
 
 
 def set_enabled(profile: Optional[str], name: str, enabled: bool) -> Dict[str, Any]:
-    """Switch one of ``profile``'s skills on or off, and answer its row once the write has landed.
-
-    ADR 0044: the write is the profile's **global** disabled list and nothing else. Never
+    """ADR 0044: the write is the profile's **global** disabled list and nothing else. Never
     ``skills.platform_disabled`` — a bot's host is one machine, and a per-platform slot would mean
     two answers to "is it on" — so the list is read with no platform, the one name added or
     discarded, and the list saved back, all inside Hermes's own config write scope. The name written
     is the one the row carries, which for a plugin skill is its qualified ``namespace:skill``: that
     is the name Hermes honours, and a switch is all a plugin skill gets.
-
-    Two things are refused before anything is written: a name the bot hasn't got, since a disabled
-    entry for a skill that isn't there would read as a switch that did nothing, and a row whose host
-    says it can't be switched (an essential skill, which every list Hermes saves subtracts again),
-    each in the sentence the screen shows.
 
     ``profile`` is a profile name, or None for the process's own. Blocking — a skills scan and
     config I/O — so call it from a worker thread, never the event loop. Answers the skill's row as
@@ -505,12 +420,6 @@ _VIEW: Tuple[Tuple[str, str], ...] = (
 
 
 def viewable() -> Optional[str]:
-    """Why this host's one skill can't be opened from here, or None when it can.
-
-    Apart from the listing's gate and the switch's: a host can list a profile's skills and still have
-    no lookup that answers for a disabled one. `info` advertises this as `skills_view`, so such a
-    host's tab is a list of rows that open nothing rather than rows that could only fail.
-    """
     return _gate(_VIEW, UNAVAILABLE_VIEW)
 
 
@@ -529,7 +438,7 @@ def _skill_md(name: str, find: Callable[..., Any]) -> Optional[Path]:
         if manager is not None:
             try:
                 root = manager().find_plugin_skill(name)
-            except Exception:  # a registry that can't answer is no path either
+            except Exception:
                 root = None
     if root is None:
         return None
@@ -548,7 +457,7 @@ def _linked(skill_dir: Path) -> Optional[Dict[str, List[str]]]:
         return None
     try:
         return dict(linked(skill_dir))
-    except Exception:  # a directory this host can't walk says nothing rather than failing the sheet
+    except Exception:
         return None
 
 
@@ -567,7 +476,7 @@ def _readiness(name: str, content: str) -> Dict[str, Any]:
     try:
         frontmatter = parse(content=content)
         fields, extras = readiness(frontmatter, str(frontmatter.get("name") or name))
-    except Exception:  # a host that moved either half says nothing rather than failing the sheet
+    except Exception:
         return {}
     return {**fields, **extras}
 
@@ -585,7 +494,7 @@ def _inside(skill_dir: Path, path: str) -> Path:
     target = skill_dir / path
     try:
         inside = target.resolve().is_relative_to(skill_dir.resolve())
-    except (OSError, ValueError) as error:  # a path the filesystem can't resolve is not one to read
+    except (OSError, ValueError) as error:
         raise SkillError(OUTSIDE % path, 400) from error
     if not inside:
         raise SkillError(OUTSIDE % path, 400)
@@ -593,17 +502,8 @@ def _inside(skill_dir: Path, path: str) -> Path:
 
 
 def view(profile: Optional[str], name: str) -> Dict[str, Any]:
-    """One skill's own sheet: its row, its SKILL.md, its linked files, and how ready it is.
-
-    The row is the one the list answered, so the sheet and the row it was opened from can't disagree
-    about a skill's origin or its switch. The content is the file as it is on disk — no
-    preprocessing, which is the host's rendering for a model's eyes rather than the text its owner
-    would edit — and the linked files are the host's own listing of them, never a walk of the whole
-    directory (ADR 0045). Readiness and setup come from the host's own answer on the frontmatter,
-    and are left out where it can't give one.
-
-    Works for a switched-off skill, which is the point: ``skill_view`` refuses those. Blocking — a
-    skills scan, then a file read — so call it from a worker thread, never the event loop.
+    """Works for a switched-off skill: ``skill_view`` refuses those. Blocking — a skills scan, then
+    a file read — so call it from a worker thread, never the event loop.
     """
     hermes = _load(_VIEW, UNAVAILABLE_VIEW)
     from hermes_cli.web_server_profiles import _profile_scope
@@ -615,8 +515,6 @@ def view(profile: Optional[str], name: str) -> Dict[str, Any]:
             raise SkillError(NOT_FOUND % name, 404)
         skill_md = _skill_md(name, hermes["_find_skill"])
         if skill_md is None:
-            # A row the tab lists but the host's lookup won't resolve — a name two copies share, say.
-            # The row's own sentence says why, and it is the one the tab already shows.
             raise SkillError(row.get("loadError") or NOT_FOUND % name, 404)
         try:
             content = hermes["_read_skill_text"](skill_md)
@@ -630,11 +528,9 @@ def view(profile: Optional[str], name: str) -> Dict[str, Any]:
 
 
 def file(profile: Optional[str], name: str, path: str) -> Dict[str, Any]:
-    """One file inside one skill's folder, read on its own when the sheet asks for it.
+    """One file inside one skill's folder, read when its sheet asks for it.
 
-    Only the file named: the sheet lists what the host says a skill holds and reads the one thing
-    tapped, so opening a file is never a read of the directory around it. A path that would leave
-    the skill is refused in its own sentence rather than answered with the not-found one, since the
+    Only the file named: a path that would leave the skill is refused in its own sentence, since the
     two are different things to tell a caller. Blocking — a lookup, then a file read — so call it
     from a worker thread.
     """
@@ -655,10 +551,6 @@ def file(profile: Optional[str], name: str, path: str) -> Dict[str, Any]:
     return {"name": name, "path": path, "content": content}
 
 
-# What a removal needs of the host, by the name this module asks for it: the Hub's own uninstall, whose
-# lock file knows what a Hub install is, and the manager's delete, whose guards know what a pinned or
-# essential skill is. Both are asked for because the two origins are two operations and this module
-# never picks one without the whole machinery being there to pick from.
 _REMOVE: Tuple[Tuple[str, str], ...] = (
     ("tools.skills_hub_install", "uninstall_skill"),
     ("tools.skill_manager_tool", "_delete_skill"),
@@ -666,44 +558,20 @@ _REMOVE: Tuple[Tuple[str, str], ...] = (
 
 
 def removable() -> Optional[str]:
-    """Why this host's skills can't be removed from here, or None when they can.
-
-    A gate of its own, apart from the switch's and the sheet's: a host can list, switch and open a
-    profile's skills and predate one of the two removals a row's origin decides between. `info`
-    advertises this as `skills_remove`, so such a host's sheet offers no Remove at all rather than a
-    button whose every tap could only fail.
-    """
     return _gate(_REMOVE, UNAVAILABLE_REMOVE)
 
 
 def _removal_refusal(name: str, origin: Any) -> str:
-    """The sentence an origin with no removal behind it answers with.
-
-    The read folds every row to one of four origins, so two of them get here; the third sentence is
-    for a row this host couldn't classify, which is not a row to promise a removal for.
-    """
     if origin == "plugin":
         return PLUGIN_REMOVAL % name
     return BUILTIN_REMOVAL % name if origin == "builtin" else NO_REMOVAL % name
 
 
 def remove(profile: Optional[str], name: str) -> List[Dict[str, Any]]:
-    """Take one of ``profile``'s skills away, and answer the skills it has left.
-
-    ADR 0044: removal is one word over Hermes's own operations, and the origin the list read decides
-    which one — a Hub skill goes through the Hub's own uninstall, so its lock file, its audit log and
-    its usage record move with it, and one written on the profile goes through the manager's delete,
-    which is the same hard delete a user-driven screen wants. Each helper's own refusal is raised in
-    its own words — the Hub's "not a hub-installed skill (may be a builtin)", the delete guards'
-    pinned and essential sentences — because those are the sentences the screen shows.
-
-    A built-in and a plugin's skill are refused before either helper is called: a built-in is never
-    removed, and a plugin's skill belongs to its package and gets the switch and nothing else.
+    """Takes one of ``profile``'s skills away and answers the skills it has left.
 
     ``profile`` is a profile name, or None for the process's own. Blocking — a skills scan, then a
-    delete and another scan — so call it from a worker thread, never the event loop. Answers the
-    profile's remaining skills as ``read`` shapes them, so the app's whole list is the Host's own
-    answer rather than the list it held with one row crossed out.
+    delete and another scan — so call it from a worker thread, never the event loop.
     """
     hermes = _load(_REMOVE, UNAVAILABLE_REMOVE)
     row = _one(profile, name)
@@ -726,8 +594,6 @@ def remove(profile: Optional[str], name: str) -> List[Dict[str, Any]]:
         else:
             result = hermes["_delete_skill"](name)
             if not isinstance(result, dict) or not result.get("success"):
-                # The manager's own refusal, shaped ``{"success": False, "error": <sentence>}``: its
-                # pinned and essential guards' words, which are the ones the screen shows.
                 raise SkillError(
                     (result.get("error") if isinstance(result, dict) else None)
                     or "The host couldn't remove '%s'." % name,
@@ -737,10 +603,6 @@ def remove(profile: Optional[str], name: str) -> List[Dict[str, Any]]:
     return read(profile)
 
 
-# What the Skills screen needs of this module, and what `info` advertises: Hermes's own listing,
-# under whichever name this host ships it, the switch, which needs a different set of Hermes
-# built-ins and so is advertised apart from the listing, the sheet's read, apart from both, and the
-# removal, which is the two helpers a row's origin decides between.
 FEATURES: Tuple[Tuple[str, Callable[[], Optional[str]]], ...] = (
     ("skills", available),
     ("skills_write", writable),
