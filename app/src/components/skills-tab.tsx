@@ -1,13 +1,24 @@
 import { SparklesIcon } from "lucide-react"
+import { useState } from "react"
+import { toast } from "sonner"
 
 import { Group, rowClass, RowText } from "@/components/settings-chrome"
 import { Badge } from "@/components/ui/badge"
+import { Switch } from "@/components/ui/switch"
 import type { Profile } from "@/lib/db"
-import { usePluginFeature } from "@/lib/features"
 import type { Skill } from "@/lib/hermes"
-import { useSkills } from "@/lib/skills"
+import { useSkillFeatureAnswers, useSkills } from "@/lib/skills"
 import { skillHealth, skillSections, type SkillSection } from "@/lib/skills-tab"
 import { cn } from "@/lib/utils"
+
+/**
+ * What a row needs to carry its switch: the write to make, and which row's write is in flight.
+ * Absent where the Host advertises no switch, so a read-only tab is a tab with no controls.
+ */
+type RowControls = {
+  onToggle: (name: string, enabled: boolean) => void
+  saving: string | null
+}
 
 /**
  * A bot's skills, as a tab of its Settings: everything the profile holds — the skills seeded with
@@ -21,23 +32,42 @@ import { cn } from "@/lib/utils"
  * under it is dropped, so a bot with no plugin skills shows the one section.
  *
  * The list is the composer's `/` menu's list, unfiltered — that menu keeps what the bot can run,
- * and this screen is the one that has to show what it can't. Nothing here changes a skill yet: the
- * switch and the skill sheet are their own later work, so a row is its name, its category, its
- * description and its health, and nothing to press.
+ * and this screen is the one that has to show what it can't. A row's switch is the one thing to
+ * press here: one switch means the bot as a whole (the profile's global disabled list, ADR 0044),
+ * and the Host's row replaces the one every consumer reads, so a skill switched off leaves the
+ * menu and the pickers at once.
  */
 export function SkillsTab({ profile }: { profile: Profile }) {
-  // The tab is drawn only where the Host advertises listing skills, so a Host without it is never
-  // asked for a list it can't give.
-  const answer = usePluginFeature(profile, "skills")
+  // The tab is drawn only where the Host advertises listing skills, and its switches only where it
+  // advertises writing one: a Host that can read a profile's skills without being able to write one
+  // offers a list and no controls, rather than a control that could only come back refused.
+  const answers = useSkillFeatureAnswers(profile)
+  const answer = answers.list
   const state = useSkills(profile, answer === "yes")
+  // The row whose write is in flight, by name: only that switch waits, and the rest stay pressable.
+  const [saving, setSaving] = useState<string | null>(null)
   if (answer !== "yes") return null
   // The tab arriving, rather than a bot without skills: a first-ever open waits for the read
   // instead of drawing an empty frame the list then fills.
   if (state.status === "loading") return null
+
+  const toggle = async (name: string, enabled: boolean) => {
+    setSaving(name)
+    try {
+      await state.setEnabled(name, enabled)
+    } catch (error) {
+      // The Host's own sentence, with the row unchanged: a refusal leaves nothing half-changed.
+      toast.error(error instanceof Error ? error.message : "Couldn't save that.")
+    } finally {
+      setSaving(null)
+    }
+  }
+
+  const controls = answers.write === "yes" ? { onToggle: toggle, saving } : undefined
   return (
     <div className="flex flex-col gap-4" data-skills-tab>
       {skillSections(state.skills).map((section) => (
-        <Section key={section.id} section={section} />
+        <Section key={section.id} section={section} controls={controls} />
       ))}
     </div>
   )
@@ -48,7 +78,7 @@ export function SkillsTab({ profile }: { profile: Profile }) {
  * rows at all is left out — a heading over nothing says there are none — and so is a category the
  * rule handed over empty.
  */
-function Section({ section }: { section: SkillSection }) {
+function Section({ section, controls }: { section: SkillSection; controls?: RowControls }) {
   const groups = section.groups.filter((group) => group.skills.length > 0)
   if (groups.length === 0) return null
   return (
@@ -66,7 +96,7 @@ function Section({ section }: { section: SkillSection }) {
             </h3>
             <Group>
               {group.skills.map((skill) => (
-                <SkillItem key={skill.name} skill={skill} />
+                <SkillItem key={skill.name} skill={skill} controls={controls} />
               ))}
             </Group>
           </div>
@@ -77,13 +107,17 @@ function Section({ section }: { section: SkillSection }) {
 }
 
 /**
- * One skill: its name, the category it sits in, what it is for, and how it is doing underneath —
- * the same name, badge and description a skill wears in the composer's menu, with the health line
- * an MCP server's row has. The line is the Host's own text where it failed, so it reads as the
- * failure it is.
+ * One skill: its name, the category it sits in, what it is for, how it is doing underneath, and the
+ * switch its Host advertises — the same name, badge and description a skill wears in the composer's
+ * menu, with the health line an MCP server's row has. The line is the Host's own text where it
+ * failed, so it reads as the failure it is.
  */
-function SkillItem({ skill }: { skill: Skill }) {
+function SkillItem({ skill, controls }: { skill: Skill; controls?: RowControls }) {
   const health = skillHealth(skill)
+  // A row the Host says it will refuse to switch carries none — an essential skill's switch could
+  // only come back refused. A row that doesn't say is offered one: a Host that can't answer that is
+  // a Host that doesn't advertise `skills_write` either, so a switch here still means something.
+  const offers = controls !== undefined && skill.switchable !== false
   const title = (
     <span className="flex min-w-0 items-center gap-2">
       <span className="truncate">{skill.name}</span>
@@ -105,6 +139,14 @@ function SkillItem({ skill }: { skill: Skill }) {
           {health.text}
         </span>
       </div>
+      {offers && (
+        <Switch
+          aria-label={`${skill.name} on`}
+          checked={skill.enabled !== false}
+          disabled={controls.saving === skill.name}
+          onCheckedChange={(checked) => controls.onToggle(skill.name, checked)}
+        />
+      )}
     </div>
   )
 }

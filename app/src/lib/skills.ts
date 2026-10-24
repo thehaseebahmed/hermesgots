@@ -3,12 +3,41 @@ import { useEffect, useState } from "react"
 import { connectionKey } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { db } from "@/lib/db"
-import { READ_TIMEOUT_MS } from "@/lib/freshness"
-import { listSkills, type HermesConfig, type Skill } from "@/lib/hermes"
+import {
+  usePluginFeatureAnswers,
+  type PluginFeatureAnswer,
+  type PluginServer,
+} from "@/lib/features"
+import { READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
+import {
+  listSkills,
+  setSkillEnabled as writeSkillEnabled,
+  type HermesConfig,
+  type Skill,
+} from "@/lib/hermes"
 import { noteFailure } from "@/lib/report"
 import { skillsState, type SkillsState } from "@/lib/skills-cache"
 
 export type { SkillsState } from "@/lib/skills-cache"
+
+/**
+ * Every skills feature the tab asks its Bot's Host about, by the key it answers under: `list` gates
+ * the tab itself, and `write` gates each row's switch, because a Host can list a profile's skills
+ * without the config write a switch is made of, and such a Host offers no switch rather than one
+ * whose every tap could only fail (ADR 0044).
+ */
+export const SKILL_FEATURES = {
+  list: "skills",
+  write: "skills_write",
+} as const
+
+/** What each of those features this Bot's Host answered (see `PluginFeatureAnswer`). */
+export type SkillFeatureAnswers = Record<keyof typeof SKILL_FEATURES, PluginFeatureAnswer>
+
+/** What this Bot's plugin answered about its skills: `list` for the tab, `write` for a switch. */
+export function useSkillFeatureAnswers(server: PluginServer): SkillFeatureAnswers {
+  return usePluginFeatureAnswers(server, SKILL_FEATURES)
+}
 
 // This page's answer, so a second open in the same page needs no read; the device keeps the row.
 const memory = new Map<string, Skill[]>()
@@ -62,12 +91,48 @@ function readSkills(config: HermesConfig, key: string): Promise<Skill[]> {
 }
 
 /**
+ * Switches one skill on the Host, and takes the row the Host answers into the one list every
+ * consumer reads — this page's `memory` and the device's row both — so the composer's `/` menu and
+ * the skill pickers drop a skill switched off without waiting for a read (ADR 0044: one list
+ * serves them all).
+ *
+ * A write the Host refuses is thrown, with the list as it was, so the screen shows the Host's own
+ * sentence and the row it refused stays the row it was.
+ */
+async function switchSkill(config: HermesConfig, key: string, name: string, enabled: boolean) {
+  const row = await writeSkillEnabled(config, name, enabled, AbortSignal.timeout(WRITE_TIMEOUT_MS))
+  // The list this page holds, or the device's where the page hasn't read one yet: a list nobody has
+  // read is no list to patch, and the next read fills it in from the Host.
+  const held = memory.get(key) ?? (await readStored(key))
+  if (!held) return row
+  const skills = held.map((skill) => (skill.name === name ? { ...skill, ...row } : skill))
+  memory.set(key, skills)
+  try {
+    // Keeping the row is a favour to the next page load, as a read's is: a Dexie failure must not
+    // throw away an answer the Host just gave.
+    await db.skills.put({ id: key, skills })
+  } catch (error) {
+    noteFailure("Saving the bot's skills", error)
+  }
+  return row
+}
+
+/** The bot's skills as this page knows them, and the one write the tab makes over them. */
+export type Skills = SkillsState & {
+  /** Switches one skill on its Host; a refusal is thrown, leaving the list as it was. */
+  setEnabled: (name: string, enabled: boolean) => Promise<void>
+}
+
+/**
  * The bot's skills as this page last knew them, read again in the background while `open`: what the
  * page holds answers at once and a read that lands replaces it, so a skill installed a moment ago
  * shows without a reload, and a read that fails leaves it standing, so the menu never opens empty on
  * a bot whose host is away. A bot whose plugin has no skills route has none to show.
+ *
+ * `setEnabled` is the Skills tab's switch: the Host's row replaces that one row in the list every
+ * consumer reads, so a skill switched off leaves the `/` menu and the pickers at once.
  */
-export function useSkills(config: HermesConfig | null, open: boolean): SkillsState {
+export function useSkills(config: HermesConfig | null, open: boolean): Skills {
   // A bot the app reads plugin routes for at all: with no key, no route is read, as everywhere else.
   const key = config?.baseUrl.trim() && config.apiKey ? connectionKey(config) : ""
   // The read that has finished for this bot, as a fresh object each time: a read that lands must
@@ -114,5 +179,14 @@ export function useSkills(config: HermesConfig | null, open: boolean): SkillsSta
     }
   }, [open, key, baseUrl, apiKey])
 
-  return state
+  // Not memoized: it is handed to a row that is drawn from this render anyway, and the list it
+  // writes is `memory`'s rather than a state of its own.
+  const setEnabled = async (name: string, enabled: boolean) => {
+    if (!baseUrl || !apiKey) return
+    await switchSkill({ baseUrl, apiKey }, key, name, enabled)
+    // A fresh object, so the row the write replaced is drawn even when it is the shape it had.
+    setSettled({ key })
+  }
+
+  return { ...state, setEnabled }
 }

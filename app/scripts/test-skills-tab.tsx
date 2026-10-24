@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { useLiveQuery } from "dexie-react-hooks"
 import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-router"
+import { toast } from "sonner"
 
 import { BotEditor } from "@/components/bot-settings"
 import { botTabOf } from "@/lib/bot-tabs"
@@ -14,12 +15,24 @@ import {
   json,
   mount,
   seedSettings,
+  settle,
   text,
   until,
 } from "./component-kit.tsx"
 
+/** A row as the plugin answers it: the three keys, then whatever this host can say about it. */
+type Row = {
+  name: string
+  description: string
+  category?: string | null
+  origin?: string
+  enabled?: boolean
+  switchable?: boolean
+  loadError?: string
+}
+
 /** The rows one host answers with: every shape a row can have, and enough to prove the order. */
-const ROWS = [
+const ROWS: Row[] = [
   { name: "pr-review", description: "Review a change.", category: "review", origin: "yours" },
   { name: "pr-land", description: "Land a pull request.", category: "review", origin: "hub" },
   { name: "lint", description: "Run the linters.", category: "quality", origin: "builtin" },
@@ -38,16 +51,32 @@ const ROWS = [
   { name: "stray", description: "Came from nowhere.", category: null },
 ]
 
-type Row = (typeof ROWS)[number]
-
-function host(features: string[], rows: Row[] = ROWS) {
-  const calls: { path: string; method: string }[] = []
+/**
+ * A host with the plugin's two skills answers: what it advertises, the list it holds, and — where
+ * it advertises `skills_write` — the one row a switch replaces. `refuse` is the sentence a write
+ * comes back with, as a Host that will not switch that skill answers.
+ */
+function host(features: string[], rows: Row[] = ROWS, refuse?: string) {
+  const calls: { path: string; method: string; body: Record<string, unknown> | null }[] = []
+  const held = rows.map((row) => ({ ...row }))
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    const path = new URL(String(input)).pathname
-    calls.push({ path, method: init?.method ?? "GET" })
-    if (path.endsWith("/api/plugins/memento/info")) return json({ name: "memento", features })
-    if (path.endsWith("/api/plugins/memento/skills"))
-      return json({ object: "list", data: rows.map((row) => ({ ...row })) })
+    const url = new URL(String(input))
+    const method = (init?.method ?? "GET").toUpperCase()
+    const body = init?.body ? JSON.parse(String(init.body)) : null
+    calls.push({ path: url.pathname, method, body })
+    if (url.pathname.endsWith("/api/plugins/memento/info"))
+      return json({ name: "memento", features })
+    const write = /\/api\/plugins\/memento\/skills\/([^/]+)\/enabled$/.exec(url.pathname)
+    if (write && method === "POST") {
+      if (refuse) return json({ error: { message: refuse } }, 400)
+      const name = decodeURIComponent(write[1])
+      const found = held.find((one) => one.name === name)
+      if (!found) return json({ error: { message: `Skill '${name}' isn't on this bot.` } }, 400)
+      found.enabled = body?.enabled === true
+      return json({ object: "skill", data: { ...found } })
+    }
+    if (url.pathname.endsWith("/api/plugins/memento/skills"))
+      return json({ object: "list", data: held.map((row) => ({ ...row })) })
     return json({}, 404)
   }
   return { fetch: fetch as unknown as typeof globalThis.fetch, calls }
@@ -90,12 +119,12 @@ const rowNames = (section: string) =>
   )
 const row = (name: string) => find(`[data-skill="${name}"]`)
 
-async function seed(name: string, features: string[], rows: Row[] = ROWS) {
+async function seed(name: string, features: string[], rows: Row[] = ROWS, refuse?: string) {
   await seedSettings()
   await db.profiles.clear()
   await db.skills.clear()
   await db.profiles.put(botProfile(name))
-  const server = host(features, rows)
+  const server = host(features, rows, refuse)
   globalThis.fetch = server.fetch
   return server.calls
 }
@@ -179,7 +208,7 @@ test("a row that is off or doesn't load is still listed, with its description", 
     assert.deepEqual(
       findAll('[data-skill="deploy"] [role="switch"]').map((one) => one),
       [],
-      "nothing to press yet",
+      "a Host that advertises no write offers nothing to press",
     )
   })
 })
@@ -202,4 +231,86 @@ test("a host that can't list skills has no Skills tab, and its address lands on 
     assert.equal(here(), "/settings/bots/bot-1", "the address is the bot's own")
     assert.match(text(), /Test connection/, "General is what is drawn")
   })
+})
+
+/** The rows the switch's tests read: one on, one off, one no Host will switch, a plugin's skill. */
+const SWITCHABLE: Row[] = [
+  { name: "pr-review", description: "Review a change.", category: "review", origin: "yours" },
+  { name: "deploy", description: "Ship it.", category: "ops", origin: "yours", enabled: false },
+  {
+    name: "hermes-agent",
+    description: "The agent's own operating manual.",
+    category: "ops",
+    origin: "builtin",
+    switchable: false,
+  },
+  { name: "gots:notes", description: "Note a session.", category: "plugin", origin: "plugin" },
+]
+
+/** The host's sentence for an essential skill, which is what a refusal comes back with. */
+const ESSENTIAL =
+  "Skill 'pr-review' is essential to Hermes (the agent's own operating manual referenced by the " +
+  "system prompt), so it can't be switched off."
+
+const switchIn = (name: string) => find(`[data-skill="${name}"] [role="switch"]`)
+const on = (element: Element | null) => element?.getAttribute("aria-checked") === "true"
+
+test("a Host that advertises the write puts a switch on every row it can switch", async () => {
+  await seed("skills-switchable", ["skills", "skills_write"], SWITCHABLE)
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    assert.ok(switchIn("pr-review"), "a writable row has a switch")
+    assert.equal(on(switchIn("pr-review")), true, "checked means on")
+    assert.equal(on(switchIn("deploy")), false, "a skill switched off wears its switch off")
+    assert.equal(switchIn("hermes-agent"), null, "an essential skill has no switch")
+    assert.ok(switchIn("gots:notes"), "a plugin's skill is switched like any other")
+  })
+})
+
+test("a Host that advertises no write puts no switch on any row", async () => {
+  await seed("skills-readonly", ["skills"], SWITCHABLE)
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    assert.deepEqual(findAll("[role='switch']"), [], "a read-only tab has no controls")
+  })
+})
+
+test("flipping a switch writes it to the Host, and the row shows what it answered", async () => {
+  const calls = await seed("skills-switch-off", ["skills", "skills_write"], SWITCHABLE)
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    await click(switchIn("pr-review"))
+    await until(async () => calls.some((call) => call.method === "POST"), "the write")
+    assert.deepEqual(
+      calls.filter((call) => call.method === "POST").map((call) => [call.path, call.body]),
+      [["/api/plugins/memento/skills/pr-review/enabled", { enabled: false }]],
+      "one write, of the one field the route takes",
+    )
+    await until(async () => /Off/.test(row("pr-review")?.textContent ?? ""), "the row to say Off")
+    assert.equal(on(switchIn("pr-review")), false, "the switch shows what the Host now holds")
+    // The one list every consumer reads took the same row, so the `/` menu and the pickers drop a
+    // skill switched off without waiting for a read (ADR 0044).
+    const stored = (await db.skills.toArray()).flatMap((cached) => cached.skills)
+    assert.equal(stored.find((skill) => skill.name === "pr-review")?.enabled, false)
+  })
+})
+
+test("a write the Host refuses is its own sentence, with the row as it was", async () => {
+  await seed("skills-refused", ["skills", "skills_write"], SWITCHABLE, ESSENTIAL)
+  const errors: string[] = []
+  const original = toast.error
+  toast.error = ((message: string) => errors.push(String(message))) as typeof toast.error
+  try {
+    await mount(editor("/settings/bots/bot-1/skills"), async () => {
+      await drawn()
+      await click(switchIn("pr-review"))
+      await until(async () => errors.length === 1, "the toast")
+      assert.deepEqual(errors, [ESSENTIAL], "the Host's own words, nothing added")
+      await settle()
+      assert.equal(on(switchIn("pr-review")), true, "and the switch keeps the Host's truth")
+      assert.match(row("pr-review")?.textContent ?? "", /Ready/, "the row is as it was")
+    })
+  } finally {
+    toast.error = original
+  }
 })

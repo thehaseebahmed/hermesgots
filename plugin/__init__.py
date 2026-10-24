@@ -483,6 +483,28 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "This Hermes version can't list skills from here.", 501)
         return web.json_response({"object": "list", "data": skills})
 
+    async def set_skill_enabled(request: "web.Request") -> "web.Response":
+        """One skill's switch, answered with its row as the list read shapes it.
+
+        The rules are skill_catalog.py's: this only guards, takes the one field the body says, and
+        maps the module's own refusal to its status — the same shape every MCP write has. Its body
+        reader is ``enabled_body``, below, because a switch's body is a switch's body.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            (enabled,) = enabled_body(await json_body(request))
+        except ValueError as error:
+            return _error(web, str(error), 400)
+        try:
+            row = await asyncio.to_thread(
+                skill_catalog.set_enabled, request_profile(), request.match_info["name"], enabled
+            )
+        except skill_catalog.SkillError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "skill", "data": row})
+
     def mcp_route(
         call: Any,
         key: Optional[str],
@@ -1613,6 +1635,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/triage-model", get_triage_model)
     app.router.add_get(f"{PREFIX}/openui", get_openui)
     app.router.add_get(f"{PREFIX}/skills", list_skills)
+    # The list's write, one skill's switch; no static sibling shares the `skills/{name}` space yet,
+    # so it is registered beside the list it answers for.
+    app.router.add_post(f"{PREFIX}/skills/{{name}}/enabled", set_skill_enabled)
     app.router.add_get(f"{PREFIX}/mcp", list_mcp_servers)
     app.router.add_get(f"{PREFIX}/mcp/catalogue", list_mcp_catalogue)
     app.router.add_get(f"{PREFIX}/mcp/catalogue/{{name}}", get_mcp_catalogue_entry)

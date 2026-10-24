@@ -392,6 +392,36 @@ export async function listSkills(config: HermesConfig, signal?: AbortSignal): Pr
     : []
 }
 
+/**
+ * Switches one of the bot's skills on or off on its Host (the Gots plugin's
+ * `POST /skills/<name>/enabled`), answering the row as the change lands. The Host writes the
+ * profile's **global** disabled list — one switch means the whole bot, never one platform — clears
+ * Hermes's own caches so the change is live for the next turn, and leaves a chat already built with
+ * the abilities it had. A skill the profile doesn't have, or one Hermes will not switch, is refused
+ * there in the Host's own words.
+ */
+export async function setSkillEnabled(
+  config: HermesConfig,
+  name: string,
+  enabled: boolean,
+  signal?: AbortSignal,
+): Promise<Skill> {
+  const response = await request(
+    `${pluginRoot(config.baseUrl)}/skills/${encodeURIComponent(name)}/enabled`,
+    {
+      method: "POST",
+      headers: headers(config),
+      body: JSON.stringify({ enabled }),
+      signal,
+    },
+  )
+  const data = (await response.json())?.data as Skill | undefined
+  if (!data || typeof data.name !== "string" || !data.name) {
+    throw new HermesError("The host answered without the skill.")
+  }
+  return data
+}
+
 /** A bot's MCP server, as the Gots plugin's read reports it: its state in Gots' own words. */
 export type McpState = "on" | "off" | "connecting" | "failed" | "needs_access" | "plugin"
 

@@ -24,6 +24,12 @@ that knows less than it might:
 
 Two things are left out of the answer because they are not the bot's: a shadowed copy of a skill a
 better copy owns, and a project skill (a repository's own, which depends on where the host runs).
+
+The tab's switch is the one write here, and it is Hermes's own write: the profile's global disabled
+list, read and saved inside the host's config write scope, then both of Hermes's caches cleared so
+the change is live for the bot's next turn (ADR 0044). What the host would refuse — a name the bot
+hasn't got, an essential skill — is refused before anything is written, in the sentence the screen
+shows.
 """
 
 from __future__ import annotations
@@ -34,6 +40,19 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 # What a host whose skills scan has moved answers with: the route's 501, and the feature gate's
 # reason.
 UNAVAILABLE = "This Hermes version can't list skills from here."
+# And what a host without the switch's own machinery answers with, for the same two callers.
+UNAVAILABLE_WRITE = "This Hermes version can't switch skills from here."
+
+# The refusals a switch answers with, in the words the screen shows. Hermes has no sentence of its
+# own for an essential skill: its own toggle simply drops the name from the list it saves, so a
+# switch on one would come back done and change nothing. The words it does have are its delete
+# guard's ("cannot be deleted"), which is the wrong thing to say about a switch, so this says the
+# same fact in the same shape.
+NOT_FOUND = "Skill '%s' isn't on this bot."
+ESSENTIAL = (
+    "Skill '%s' is essential to Hermes (the agent's own operating manual referenced by the system "
+    "prompt), so it can't be switched off."
+)
 
 # The two ways a skill the profile holds can still not run, in the words the host's own refusals use
 # (``skill_view`` answers the first for a platform mismatch, ``locate_skill`` prefixes the second).
@@ -288,7 +307,125 @@ def read(profile: Optional[str]) -> List[Dict[str, Any]]:
     return sort(rows)
 
 
+class SkillError(Exception):
+    """A refusal the route answers with ``status`` (501 when this host can't do it at all)."""
+
+    def __init__(self, message: str, status: int = 400):
+        super().__init__(message)
+        self.status = status
+
+
+# What a switch needs of the host, by the name this module asks for it: the write scope Hermes's own
+# dashboard toggles under (which nests the profile scope the read uses, so the config read inside it
+# sees that profile's home), the config read, and the reader and writer of the global disabled list.
+# The two caches a write clears are deliberately not here: they are cleared best-effort, so a host
+# that moved one still has a switch.
+_WRITE: Tuple[Tuple[str, str], ...] = (
+    ("hermes_cli.web_routers._common", "config_write_scope"),
+    ("hermes_cli.config", "load_config"),
+    ("hermes_cli.skills_config", "get_disabled_skills"),
+    ("hermes_cli.skills_config", "save_disabled_skills"),
+)
+
+
+def _writable() -> Dict[str, Callable[..., Any]]:
+    """Hermes's own machinery for a switch, imported at call time: a plugin loads before the CLI."""
+    found: Dict[str, Callable[..., Any]] = {}
+    for module, attribute in _WRITE:
+        try:
+            found[attribute] = getattr(importlib.import_module(module), attribute)
+        except (ImportError, AttributeError) as error:
+            raise SkillError(UNAVAILABLE_WRITE, 501) from error
+    return found
+
+
+def writable() -> Optional[str]:
+    """Why this host's skills can't be switched from here, or None when they can.
+
+    A set of its own, apart from the read's: a host can list a profile's skills without the config
+    write scope and the disabled list's writer a switch is made of. ``info`` advertises this as its
+    own feature, so that host's tab carries a list and no switch, rather than a switch whose every
+    tap could only fail.
+    """
+    try:
+        _writable()
+    except SkillError as error:
+        return str(error)
+    return None
+
+
+def _clear_caches() -> None:
+    """Clear Hermes's two caches of the skills list, so a change is live for the bot's next turn.
+
+    Best-effort, as Hermes's own dashboard does it after a write: a cache that can't be cleared
+    either expires on its own or is gone with the next process, and neither is a reason to tell a
+    user that a write which landed didn't. The prompt cache is cleared with its snapshot, so a
+    chat already built keeps the abilities it had (ADR 0044).
+    """
+    clear = _helper("tools.skills_tool", "clear_skills_cache")
+    if clear is not None:
+        try:
+            clear()
+        except Exception:
+            pass
+    prompt = _helper("agent.prompt_builder", "clear_skills_system_prompt_cache")
+    if prompt is not None:
+        try:
+            prompt(clear_snapshot=True)
+        except Exception:
+            pass
+
+
+def _one(profile: Optional[str], name: str) -> Optional[Dict[str, Any]]:
+    """One skill's row out of the same read the list answers, or None when the bot hasn't got it."""
+    return next((row for row in read(profile) if row.get("name") == name), None)
+
+
+def set_enabled(profile: Optional[str], name: str, enabled: bool) -> Dict[str, Any]:
+    """Switch one of ``profile``'s skills on or off, and answer its row once the write has landed.
+
+    ADR 0044: the write is the profile's **global** disabled list and nothing else. Never
+    ``skills.platform_disabled`` — a bot's host is one machine, and a per-platform slot would mean
+    two answers to "is it on" — so the list is read with no platform, the one name added or
+    discarded, and the list saved back, all inside Hermes's own config write scope. The name written
+    is the one the row carries, which for a plugin skill is its qualified ``namespace:skill``: that
+    is the name Hermes honours, and a switch is all a plugin skill gets.
+
+    Two things are refused before anything is written: a name the bot hasn't got, since a disabled
+    entry for a skill that isn't there would read as a switch that did nothing, and a row whose host
+    says it can't be switched (an essential skill, which every list Hermes saves subtracts again),
+    each in the sentence the screen shows.
+
+    ``profile`` is a profile name, or None for the process's own. Blocking — a skills scan at each
+    end and config I/O — so call it from a worker thread, never the event loop. Answers the skill's
+    row as the list read shapes it, so the app replaces one row from the host's own answer.
+    """
+    hermes = _writable()
+    row = _one(profile, name)
+    if row is None:
+        raise SkillError(NOT_FOUND % name, 400)
+    if row.get("switchable") is False:
+        raise SkillError(ESSENTIAL % name, 400)
+    with hermes["config_write_scope"](profile):
+        config = hermes["load_config"]()
+        disabled = set(hermes["get_disabled_skills"](config))
+        if enabled:
+            disabled.discard(name)
+        else:
+            disabled.add(name)
+        hermes["save_disabled_skills"](config, disabled)
+    _clear_caches()
+    # The same read again, so the row the app is handed is the one the tab's next read would draw;
+    # a host that can't answer it a second time is still answered from the read that refused or
+    # allowed the write, with the position it landed in.
+    return _one(profile, name) or {**row, "enabled": enabled}
+
+
 # What the Skills screen needs of this module, and what `info` advertises: Hermes's own listing,
-# under whichever name this host ships it. The switch, the sheet and the removal join it as they
+# under whichever name this host ships it, and the switch, which needs a different set of Hermes
+# built-ins and so is advertised apart from the listing. The sheet and the removal join them as they
 # land.
-FEATURES: Tuple[Tuple[str, Callable[[], Optional[str]]], ...] = (("skills", available),)
+FEATURES: Tuple[Tuple[str, Callable[[], Optional[str]]], ...] = (
+    ("skills", available),
+    ("skills_write", writable),
+)
