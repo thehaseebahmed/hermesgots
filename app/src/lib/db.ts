@@ -21,6 +21,11 @@ export interface Settings {
   breakReminders?: boolean
   /** Alt+1 to Alt+9 start a new chat with the bot added in that place. Off by default. */
   navShortcuts?: boolean
+  /**
+   * A reply's thinking stays folded until a tap opens it — nothing opens on its own, not even a row
+   * whose stretch still streams. Off by default, so a live turn shows its working out as it happens.
+   */
+  foldThinkingByDefault?: boolean
   /** The clock on this device's copy of the appearance record: a change made here, or one pulled. */
   appearanceAt?: number
   /** Shows the Developer section in Settings (tapping the version five times). */
@@ -59,7 +64,12 @@ export interface Settings {
  * since next-themes keeps it on the device. Sync carries them as the `settings` document's one
  * record and the fingerprint watches them, so this list is the one place that says what syncs.
  */
-export const APPEARANCE_FIELDS = ["steerByDefault", "breakReminders", "navShortcuts"] as const
+export const APPEARANCE_FIELDS = [
+  "steerByDefault",
+  "breakReminders",
+  "navShortcuts",
+  "foldThinkingByDefault",
+] as const
 
 /** Those switches as sync reads them, present rather than optional, so a read needs no fallback. */
 export type Appearance = Required<Pick<Settings, (typeof APPEARANCE_FIELDS)[number]>>
@@ -546,6 +556,7 @@ export const DEFAULT_SETTINGS: Settings & Appearance = {
   steerByDefault: false,
   breakReminders: true,
   navShortcuts: false,
+  foldThinkingByDefault: false,
 }
 
 export const DEFAULT_PROFILE = {

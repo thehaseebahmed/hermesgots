@@ -451,6 +451,8 @@ interface MessageItemProps {
   blocks?: ThreadBlock[]
   /** Whether a reply is streaming in this chat, so queued messages know they'll go on their own. */
   busy?: boolean
+  /** Appearance's Fold thinking by default: no row opens on its own, and the working line speaks. */
+  foldThinking?: boolean
 }
 
 /**
@@ -463,6 +465,7 @@ export const MessageItem = memo(function MessageItem({
   showStats,
   blocks,
   busy,
+  foldThinking,
 }: MessageItemProps) {
   // Replies type out a word at a time, however Hermes delivers them.
   const content = useReveal(message.role === "assistant" ? message.content : "")
@@ -497,7 +500,13 @@ export const MessageItem = memo(function MessageItem({
   // A row joins the latch as it streams, adjusted in the render that finds it rather than in an
   // effect: a reply redraws with every token, and a state written after each of those would cost a
   // render apiece. Only a key the latch doesn't hold yet is added, so this settles in one pass.
-  const live = working ? thinking.filter((part) => part.thinking).map((part) => part.key) : []
+  //
+  // With Fold thinking by default on, nothing latches: the gate sits here rather than on `autoOpen`
+  // because the switch governs what opens on its own, not what a reader opened — a row already
+  // latched (or opened by a tap) stays open for the visit, the next streaming row never joins, and
+  // the rows latch again from the moment the switch goes back off.
+  const live =
+    working && !foldThinking ? thinking.filter((part) => part.thinking).map((part) => part.key) : []
   const fresh = live.filter((key) => !watched.has(key))
   if (fresh.length) setWatched(new Set([...watched, ...fresh]))
   // The turn failed: a user message whose send never got there, or a reply that errored instead of
@@ -617,9 +626,13 @@ export const MessageItem = memo(function MessageItem({
     if (batch) batch.push(part)
     else thinkingBySegment.set(at, [part])
   }
-  // With a row open, the working line would say what the row already says.
+  // The working line would say what an open row already says, so it stands down only while a row
+  // really lies open on its own — keyed on the latch, not on a stretch merely thinking, since with
+  // Fold thinking by default on nothing is open and the turn must still say what it is doing.
   const thinkingProgress =
-    thinking.some((part) => part.thinking) && !awaitingApproval && !awaitingClarify
+    thinking.some((part) => part.thinking && part.keys.some((key) => watched.has(key))) &&
+    !awaitingApproval &&
+    !awaitingClarify
 
   // A reply's stats come only once it is done and fully revealed, so they never count up.
   const statsShown = showStats && !streaming && !revealing && Boolean(message.stats)

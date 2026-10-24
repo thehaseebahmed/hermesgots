@@ -5,6 +5,7 @@
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   CheckIcon,
+  ChevronsDownUpIcon,
   CornerDownRightIcon,
   KeyboardIcon,
   LayoutGridIcon,
@@ -116,6 +117,14 @@ export function AppearanceSettings() {
           subtitle="Alt+1 to Alt+9 start a new chat with that bot"
           checked={chatSettings?.navShortcuts ?? DEFAULT_SETTINGS.navShortcuts}
           onCheckedChange={(checked) => saveAppearance({ navShortcuts: checked })}
+        />
+        <SwitchRow
+          id="fold-thinking"
+          icon={ChevronsDownUpIcon}
+          title="Fold thinking by default"
+          subtitle="Thinking stays folded until you tap it open"
+          checked={chatSettings?.foldThinkingByDefault ?? DEFAULT_SETTINGS.foldThinkingByDefault}
+          onCheckedChange={(checked) => saveAppearance({ foldThinkingByDefault: checked })}
         />
         <InterfaceSwitch server={profile} />
       </Group>
