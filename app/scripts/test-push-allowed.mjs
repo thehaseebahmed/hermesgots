@@ -2,14 +2,15 @@
  * What the registry is told this phone still allows. Android owns each type's switch, so the app
  * reads a channel's live importance instead of asking: none means the user switched it off, an id
  * the phone doesn't list has never been made and counts as allowed, and the phone's notifications
- * off altogether is an empty list. A unit test because the rule is pure (`allowedCategories`);
- * listing the phone's channels needs Capacitor.
+ * off altogether is an empty list — and whether a list is news at all, so only a change is sent
+ * again. A unit test because the rules are pure (`allowedCategories`, `categoriesChanged`); listing
+ * the phone's channels needs Capacitor.
  */
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 
-import { PUSH_CATEGORIES, allowedCategories } from "../src/lib/push-kinds.ts"
+import { PUSH_CATEGORIES, allowedCategories, categoriesChanged } from "../src/lib/push-kinds.ts"
 
 /** The rule answers with ids, so the expected lists are the ids in the order the list keeps. */
 const all = PUSH_CATEGORIES.map((category) => category.id)
@@ -84,6 +85,65 @@ test("an importance the phone doesn't report is a channel the user left alone", 
 const push = readFileSync(new URL("../src/lib/push.ts", import.meta.url), "utf8")
 const body = (name) =>
   push.match(new RegExp(`(?:async )?function ${name}\\([^)]*\\)[\\s\\S]*?\\n\\}`))?.[0] ?? ""
+
+/**
+ * Only a change is sent again: the registry filters by the list a device last sent, so a list that
+ * reads the same must cost no call, while a device carrying an older one is told the live one on
+ * its first resume.
+ */
+test("a list never sent is sent, and a list already told is not", () => {
+  assert.equal(categoriesChanged(undefined, all), true, "nothing sent yet, so the live list goes")
+  assert.equal(
+    categoriesChanged(all.join(), all),
+    false,
+    "a resume that changed nothing costs no call",
+  )
+  assert.equal(
+    categoriesChanged(all.slice(0, 5).join(), all),
+    true,
+    "a device carrying an older subset is told the live one",
+  )
+})
+
+test("a phone that lost a channel is told, and the list it now has is what is kept", () => {
+  const after = all.filter((id) => id !== "code_run_done")
+  assert.equal(categoriesChanged(all.join(), after), true, "one channel switched off is a change")
+  assert.equal(categoriesChanged(after.join(), after), false, "and telling it once is enough")
+})
+
+test("with notifications off the empty list is still a change, told once", () => {
+  assert.equal(categoriesChanged(undefined, []), true, "an empty list is news, not silence")
+  assert.equal(categoriesChanged(all.join(), []), true, "the phone switched everything off")
+  assert.equal(categoriesChanged([].join(), []), false, "and repeating it says nothing new")
+  assert.equal(categoriesChanged([].join(), all), true, "turning them back on is a change again")
+})
+
+test("syncCategories sends only a changed list, before it patches, and records what it sent", () => {
+  const sync = body("syncCategories")
+  assert.ok(sync, "syncCategories is in push.ts")
+  const checked = sync.indexOf("categoriesChanged(sentCategories, categories)")
+  const patched = sync.indexOf('"PATCH"')
+  const recorded = sync.lastIndexOf("sentCategories = categories.join()")
+  assert.ok(checked >= 0, "it asks the rule whether this list is news")
+  assert.ok(patched >= 0, "and patches the device when it is")
+  assert.ok(recorded >= 0, "then records the list the registry now has")
+  assert.ok(checked < patched, "the check comes first, so the same list never patches twice")
+  assert.ok(patched < recorded, "and the record is of the list that got through")
+  assert.doesNotMatch(
+    sync,
+    /"POST"/,
+    "a PATCH needs only the device id: with notifications off no token arrives",
+  )
+})
+
+test("sendToken records the list a registered token carried", () => {
+  const send = body("sendToken")
+  assert.ok(send, "sendToken is in push.ts")
+  const posted = send.indexOf('"POST"')
+  const recorded = send.indexOf("sentCategories = categories.join()")
+  assert.ok(posted >= 0, "registering a token posts the device")
+  assert.ok(recorded > posted, "and leaves behind the list it sent, so a resume doesn't repeat it")
+})
 
 test("the registration carries the phone's list, not the app's stored preferences", () => {
   for (const name of ["sendToken", "syncCategories"]) {

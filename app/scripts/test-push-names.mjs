@@ -40,6 +40,10 @@ test("every type reads as the event it reports", () => {
   for (const [id, title] of NAMED) assert.equal(byId(id).title, title, id)
 })
 
+test("every type is created on the phone at the importance its row names", () => {
+  for (const [id, , importance] of NAMED) assert.equal(byId(id).importance, importance, id)
+})
+
 test("a title is the event, not a sentence about it", () => {
   for (const category of PUSH_CATEGORIES) {
     assert.doesNotMatch(
