@@ -14,9 +14,14 @@ export interface CheatsheetGroup {
  * Every key a hardware keyboard answers in Gots, by hand beside the handlers that take them
  * (ADR 0042). Keys are spelled as the handlers read them, so no Cmd branch is drawn: the stop
  * rejects the meta key and the bot switcher reads Alt alone.
+ *
+ * `navShortcuts` is the synced Appearance switch, off by default. While it is off the Alt+1…9
+ * binding answers nothing, so its group is absent rather than advertising a dead key — no heading
+ * with no rows under it. The sheet reads the flag once when it opens, so a flipped switch shows on
+ * the next opening.
  */
-export function cheatsheetGroups(): CheatsheetGroup[] {
-  return [
+export function cheatsheetGroups(navShortcuts: boolean): CheatsheetGroup[] {
+  const groups: CheatsheetGroup[] = [
     {
       name: "Composer",
       rows: [
@@ -38,4 +43,18 @@ export function cheatsheetGroups(): CheatsheetGroup[] {
       rows: [{ keys: ["Ctrl+C"], description: "Stop a running reply" }],
     },
   ]
+  if (navShortcuts) {
+    groups.push({
+      name: "Navigation",
+      rows: [{ keys: ["Alt+1…9"], description: "Switch to another bot" }],
+    })
+  }
+  groups.push({
+    name: "While something's open",
+    rows: [
+      { keys: ["ArrowLeft", "ArrowRight"], description: "Step through the attachments" },
+      { keys: ["Escape"], description: "Cancel the recording" },
+    ],
+  })
+  return groups
 }
