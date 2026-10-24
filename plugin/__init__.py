@@ -19,7 +19,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import (
     afk,
@@ -145,24 +145,29 @@ def request_profile():
         return None
 
 
-def _skill_route(
+def _plugin_route(
     web: Any,
     call: Any,
-    key: str,
     *,
     guard: Any,
     profile: Any,
     read_body: Any,
+    error: Any,
+    answer: Callable[[Any], Dict[str, Any]],
+    unavailable: str,
     named: bool = True,
-    unavailable: str = skill_catalog.UNAVAILABLE,
     body: Optional[Any] = None,
     query: Optional[str] = None,
 ) -> Any:
-    """A route into ``skill_catalog.py``: the guard, this bot's profile, one call, one answer.
+    """A route into one of the plugin's own callers: the guard, this bot's profile, one answer.
 
     ``web``, ``guard``, ``profile`` and ``read_body`` are the API server's own, injected because they
-    are bound to the app this is registered on; the call itself runs on a worker thread, never the
-    loop, since every one of them scans the skills tree or reads a file.
+    are bound to the app this is registered on. The call itself runs on a worker thread, never the
+    loop: every caller here either scans the skills tree or reaches Hermes's own machinery. A caller
+    refuses with its own error class — ``error``, carrying the status to answer — and a host that has
+    moved the built-in the call needs is the 501 ``unavailable`` names. ``answer`` is each family's
+    own envelope: MCP and the skills catalog never answered one wire shape, so this core is the
+    plumbing they share rather than a shape either of them had to change.
     """
 
     async def handler(request: "web.Request") -> "web.Response":
@@ -180,17 +185,27 @@ def _skill_route(
         if body is not None:
             try:
                 args.extend(body(await read_body(request)))
-            except ValueError as error:
-                return _error(web, str(error), 400)
+            except ValueError as invalid:
+                return _error(web, str(invalid), 400)
         try:
-            answer = await asyncio.to_thread(call, *args)
-        except skill_catalog.SkillError as error:
-            return _error(web, str(error), error.status)
+            found = await asyncio.to_thread(call, *args)
+        except error as refused:
+            return _error(web, str(refused), refused.status)
         except ImportError:
             return _error(web, unavailable, 501)
-        return web.json_response({"object": key, "data": answer})
+        return web.json_response(answer(found))
 
     return handler
+
+
+def _keyed(key: Optional[str]) -> Callable[[Any], Dict[str, Any]]:
+    """Hermes's own MCP answer: under its key, or spread for a write that answers more than one."""
+    return lambda found: {"object": found if key is None else {key: found}}
+
+
+def _named(key: str) -> Callable[[Any], Dict[str, Any]]:
+    """The skills catalog's: the kind of thing in ``object``, the thing itself in ``data``."""
+    return lambda found: {"object": key, "data": found}
 
 
 def _cleanup_pick(path: Path) -> Optional[Dict[str, str]]:
@@ -539,31 +554,20 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         on this bot and no other, the 400 a body reader raises, the 501 for a host whose Hermes has
         moved the built-in the call needs, and the answer wrapped under one key (or spread, for a
         write that answers more than one thing) — so each declares only its call, its key and what
-        it needs from the request. The call runs on the loop
-        thread inside ``profile``'s scope, where the worker re-enters it; see mcp.py.
+        it needs from the request. The core it shares with the skills routes is ``_plugin_route``.
         """
-
-        async def handler(request: "web.Request") -> "web.Response":
-            denied = unauthorized(request)
-            if denied is not None:
-                return denied
-            args: List[Any] = [request_profile()]
-            if named:
-                args.append(request.match_info["name"])
-            if body is not None:
-                try:
-                    args.extend(body(await json_body(request)))
-                except ValueError as error:
-                    return _error(web, str(error), 400)
-            try:
-                answer = await asyncio.to_thread(call, *args)
-            except mcp.McpError as error:
-                return _error(web, str(error), error.status)
-            except ImportError:
-                return _error(web, unavailable, 501)
-            return web.json_response({"object": answer if key is None else {key: answer}})
-
-        return handler
+        return _plugin_route(
+            web,
+            call,
+            guard=unauthorized,
+            profile=request_profile,
+            read_body=json_body,
+            error=mcp.McpError,
+            answer=_keyed(key),
+            named=named,
+            unavailable=unavailable,
+            body=body,
+        )
 
     def skill_route(
         call: Any,
@@ -574,13 +578,15 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         body: Optional[Any] = None,
         query: Optional[str] = None,
     ) -> Any:
-        return _skill_route(
+        """A route into ``skill_catalog.py``, answered as that catalog answers — see ``_named``."""
+        return _plugin_route(
             web,
             call,
-            key,
             guard=unauthorized,
             profile=request_profile,
             read_body=json_body,
+            error=skill_catalog.SkillError,
+            answer=_named(key),
             named=named,
             unavailable=unavailable,
             body=body,

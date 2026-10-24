@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import unittest
 
-from plugin import _skill_route, skill_catalog
+from plugin import _named, _plugin_route, skill_catalog
 
 
 class Web:
@@ -33,13 +33,14 @@ def enabled_body(body):
 
 
 def routed(call, *, key="skill", named=True, unavailable=skill_catalog.UNAVAILABLE, **kwargs):
-    return _skill_route(
+    return _plugin_route(
         Web,
         call,
-        key,
         guard=kwargs.pop("guard", lambda request: None),
         profile=kwargs.pop("profile", lambda: "bot-a"),
         read_body=kwargs.pop("read_body", body_of),
+        error=skill_catalog.SkillError,
+        answer=_named(key),
         named=named,
         unavailable=unavailable,
         **kwargs,
