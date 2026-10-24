@@ -512,8 +512,7 @@ async function syncPrompts(key: CryptoKey) {
  * defaults `DEFAULT_SETTINGS` holds are what a device that never touched them pushes.
  */
 async function localAppearance(): Promise<Doc<Appearance>> {
-  const { appearanceAt, steerByDefault, breakReminders, navShortcuts, foldThinkingByDefault } =
-    await getSettings()
+  const { appearanceAt, steerByDefault, breakReminders, navShortcuts } = await getSettings()
   return {
     appearance: {
       at: appearanceAt ?? 0,
@@ -521,7 +520,6 @@ async function localAppearance(): Promise<Doc<Appearance>> {
         steerByDefault: steerByDefault ?? DEFAULT_SETTINGS.steerByDefault,
         breakReminders: breakReminders ?? DEFAULT_SETTINGS.breakReminders,
         navShortcuts: navShortcuts ?? DEFAULT_SETTINGS.navShortcuts,
-        foldThinkingByDefault: foldThinkingByDefault ?? DEFAULT_SETTINGS.foldThinkingByDefault,
       },
     },
   }

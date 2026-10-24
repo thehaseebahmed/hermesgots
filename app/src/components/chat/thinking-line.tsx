@@ -1,22 +1,22 @@
-import { memo, useEffect, useId, useRef } from "react"
+import { memo, useCallback, useEffect, useRef, useState } from "react"
 import { ChevronRightIcon } from "lucide-react"
 
 import { Markdown } from "@/components/chat/markdown"
+import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { Spinner } from "@/components/ui/spinner"
 import { COLUMN } from "@/lib/layout"
 import { thinkingLabel } from "@/lib/thinking"
 import { cn } from "@/lib/utils"
 
-/** How close to the thread's end a reader counts as reading it, so a row that opens on its own follows. */
-const NEAR_END = 40
-
-/** How close to the thread's end still counts as its end, for words that landed in view already. */
+/** How close to the sheet's bottom still counts as its end, for words that landed in view already. */
 const AT_END = 4
 
 const reducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
 
 function scroller(node: HTMLElement | null): HTMLElement | null {
-  const thread = node?.closest<HTMLElement>("[data-slot=message-scroller-viewport]")
-  if (thread) return thread
+  // The words live in a pop-up, so its own scroll box is where the reader reads them.
+  const sheet = node?.closest<HTMLElement>("[data-slot=popup-scroll]")
+  if (sheet) return sheet
   for (let parent = node?.parentElement ?? null; parent; parent = parent.parentElement) {
     const { overflowY } = getComputedStyle(parent)
     if (overflowY === "auto" || overflowY === "scroll") return parent
@@ -81,69 +81,67 @@ function watchAway(view: HTMLElement, away: () => void) {
 }
 
 /**
- * One stretch of a reply's thinking: a folded row that reads its words as the reply's own markdown
- * while open, however long they run, and lands the reader on its newest ones. The row keeps no state
- * of its own — the thread says whether it lies open and whether the reader asked for it, so one place
- * can answer whether any row of the turn is open, which the footer's working line has to know — and a
- * tap only asks the thread to open or fold it.
+ * One stretch of a reply's thinking — or the stretch still to come, while the reply works and its
+ * model has said nothing yet. The row says what the turn is doing: its spinner while the thinking
+ * still arrives, its label once this device has measured how long the run took. It opens the
+ * working-out in the same sheet the tool row opens, so the thread's two accounts of the work read
+ * and open the same way, and the fold the row used to draw in the thread is gone with it. A live
+ * run opened in the sheet lands on its newest words and keeps them in view while they arrive,
+ * until the reader scrolls away inside the sheet; the sheet never closes itself — when the thinking
+ * ends the label beside it just reads the span. See ADR 0050.
  */
 export const ThinkingLine = memo(function ThinkingLine({
   reasoning,
   thinking,
   spanMs,
-  open,
-  asked,
-  onToggle,
   className,
 }: {
   reasoning: string
-  /** The model is still thinking, so the line reads "Thinking…" even when it is folded. */
+  /** The model is still thinking, so the row spins and reads "Thinking…" wherever it is drawn. */
   thinking: boolean
   /** How long this device watched the turn think, when it watched it at all. */
   spanMs?: number
-  /** The row lies open, as the thread answers it from its latch and the reader's taps. */
-  open: boolean
-  /** The reader asked for this row, so wherever they were, its end is what they came for. */
-  asked: boolean
-  /** Opens or folds the row for the visit; the thread keeps what it decided. */
-  onToggle: () => void
   /** The margin that hugs the row it sits beside, when the thread's parts hand one over. */
   className?: string
 }) {
-  const id = useId()
-  const root = useRef<HTMLDivElement | null>(null)
+  const [open, setOpen] = useState(false)
+  // The sheet's body lands in the tree when the pop-up mounts it, which can be a commit after the
+  // tap: the follow waits for the body to really be there rather than for the tap alone.
+  const [drawn, setDrawn] = useState(false)
   const body = useRef<HTMLDivElement | null>(null)
+  // Stable, so the pop-up attaching the body detaches it only when it really goes.
+  const bodyRef = useCallback((node: HTMLDivElement | null) => {
+    body.current = node
+    setDrawn(Boolean(node))
+  }, [])
   const following = useRef(false)
+  const label = thinkingLabel({ thinking, spanMs })
 
-  // Opening reads from the newest words down: the row's end is put at the foot of the thread, and
-  // kept there as the row grows — the fold's own transition and the run's arriving words both grow
-  // it — until the reader scrolls away, which stops the follow until the row is opened again. The
-  // row itself is what is measured: a folded row's body keeps its own height while the row around it
-  // opens, so watching the body alone would miss the moment the words come into view.
+  // The sheet opened over a run still thinking lands on its newest words and keeps them in view as
+  // they arrive — the follow the open row used to do in the thread, now bounded by the sheet's own
+  // body rather than the thread's end. A run already written opens at the top, where its
+  // working-out starts. The body is what is measured: its words are what is growing.
   useEffect(() => {
-    if (!open) return
+    if (!open || !thinking || !drawn) return
     const node = body.current
-    const row = root.current
-    if (!node || !row) return
+    if (!node) return
     const view = scroller(node)
-    // A tap is the reader asking for this run, so its end comes into view; a row that opens on its
-    // own follows only for a reader already at the thread's end, and never pulls someone who has
-    // scrolled up back down to a run they did not ask for.
-    following.current =
-      asked || !view || view.scrollTop + view.clientHeight >= view.scrollHeight - NEAR_END
+    // The tap is the reader asking for this run, so its end comes into view; a box with no room
+    // to scroll has nothing to follow either way.
+    following.current = Boolean(view)
     if (!following.current) return
     const end = (behavior: ScrollBehavior) => node.scrollIntoView({ block: "end", behavior })
     end(reducedMotion() ? "auto" : "smooth")
     if (typeof ResizeObserver === "undefined") return
     // A browser reports once as soon as an observer is registered, and that report lands while the
-    // smooth arrival is still moving the thread: it would cancel it. The run's growth is waited for.
+    // smooth arrival is still moving the sheet: it would cancel it. The run's growth is waited for.
     let fresh = true
     let queued = 0
     const keep = () => {
       queued = 0
       if (!following.current) return
-      // The row's end is in view already, so there is nothing to write — and a write would cancel a
-      // scroll the thread is making for its own reasons.
+      // The end is in view already, so there is nothing to write — and a write would cancel a
+      // scroll the sheet is making for its own reasons.
       if (view && Math.abs(view.scrollTop + view.clientHeight - view.scrollHeight) <= AT_END) return
       end("auto")
     }
@@ -153,67 +151,54 @@ export const ThinkingLine = memo(function ThinkingLine({
         return
       }
       // One write per frame: the words arrive in many small steps, and a scroll per step would
-      // fight the smooth arrival that is still moving the thread.
+      // fight the smooth arrival that is still moving the sheet.
       if (following.current && !queued) queued = requestAnimationFrame(keep)
     })
-    observer.observe(row)
+    observer.observe(node)
     return () => {
       observer.disconnect()
       cancelAnimationFrame(queued)
     }
-  }, [open, asked])
+  }, [open, thinking, drawn])
 
-  // Scrolling the thread up takes the reader somewhere else, so the follow stops for this row and
-  // stays off however much more its run has to say. Only the reader's own scrolling counts: the
-  // thread moves itself as rows grow, and one of its own moves is not the reader leaving.
+  // Scrolling the sheet up takes the reader somewhere else, so the follow stops and stays off
+  // however much more the run has to say. Only the reader's own scrolling counts: the sheet moves
+  // itself as words arrive, and one of its own moves is not the reader leaving.
   useEffect(() => {
-    if (!open) return
+    if (!open || !drawn) return
     const view = scroller(body.current)
     if (!view) return
     return watchAway(view, () => {
       following.current = false
     })
-  }, [open])
+  }, [open, drawn])
 
   return (
-    <div ref={root} className={cn("flex flex-col", className, COLUMN)} data-slot="thinking-line">
+    <div className={cn("flex flex-col", className, COLUMN)} data-slot="thinking-line">
       <button
         type="button"
-        className="flex min-h-11 w-full items-center gap-2 text-left text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         aria-expanded={open}
-        aria-controls={id}
-        onClick={onToggle}
+        className="flex min-h-11 w-full items-center gap-2 text-left text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        onClick={() => setOpen(true)}
       >
-        {thinkingLabel({ thinking, spanMs })}
-        <ChevronRightIcon
-          className={cn(
-            "size-4 shrink-0 transition-transform motion-reduce:transition-none",
-            open && "rotate-90",
-          )}
-          aria-hidden
-        />
+        {thinking && <Spinner className="size-4 shrink-0" />}
+        {label}
+        <ChevronRightIcon className="size-4 shrink-0" aria-hidden />
       </button>
-      <div
-        id={id}
-        // Folded text would still be read out, and its links would still take a tab, so the line
-        // leaves the tree and the tab order until it opens.
-        aria-hidden={!open}
-        inert={!open}
-        className={cn(
-          "grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none",
-          open ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
-        )}
-      >
-        <div className="overflow-hidden">
-          {/* `scroll-mb-16` keeps the row's end clear of the thread's own floating scroll control
-              when landing on it: the newest words are what the reader came for. */}
-          <div ref={body} data-slot="thinking-body" className="flex min-w-0 scroll-mb-16 flex-col">
-            <Markdown className="px-1 pt-1 text-sm leading-relaxed text-muted-foreground">
-              {reasoning}
-            </Markdown>
+      <Popup open={open} onOpenChange={setOpen}>
+        <PopupContent>
+          <PopupHeader className="pb-3">
+            <PopupTitle>{label}</PopupTitle>
+          </PopupHeader>
+          <div className="flex flex-col px-6 pb-6">
+            <div ref={bodyRef} data-slot="thinking-body" className="flex min-w-0 flex-col">
+              <Markdown className="text-sm leading-relaxed text-muted-foreground">
+                {reasoning}
+              </Markdown>
+            </div>
           </div>
-        </div>
-      </div>
+        </PopupContent>
+      </Popup>
     </div>
   )
 })

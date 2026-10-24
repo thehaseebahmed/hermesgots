@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { db, saveAppearance, type Message, type Settings, type ToolEvent } from "@/lib/db"
+import { act } from "react"
+import { db, type Message, type Settings, type ToolEvent } from "@/lib/db"
 import type { ReasoningRun } from "@/lib/thinking"
 import {
   absent,
@@ -18,6 +19,7 @@ import {
   settle,
   spyScrollIntoView,
   thinkingLines,
+  until,
   withReducedMotion,
 } from "./component-kit.tsx"
 
@@ -43,8 +45,8 @@ const MARKDOWN = [
 const run = (text: string, extra: Partial<ReasoningRun> = {}): ReasoningRun => ({ text, ...extra })
 
 /**
- * A working-out no screen holds: the fixture repeated, with a last line of its own to look for. An
- * open row draws all of it, down to that line.
+ * A working-out no screen holds: the fixture repeated, with a last line of its own to look for. A
+ * sheet draws all of it, down to that line.
  */
 const LONG = [...Array.from({ length: 6 }, () => MARKDOWN), "The scan is cheap in the end."].join(
   "\n\n",
@@ -101,16 +103,33 @@ async function screen(
   await mount(chatScreen(id), body)
 }
 
-/** The footer's working line: what the turn is doing, said under the reply. */
+/** The footer's working line: what the turn is doing, said under the reply. It never thinks. */
 const workingLine = () => find('[aria-live="polite"]')
 
-const reasoned = (line: Element) => {
-  const id = line.getAttribute("aria-controls")
-  assert.ok(id, "the control names the text it folds")
-  const body = document.getElementById(id)
-  assert.ok(body, "and that text is on the page")
-  return body
+/** The open sheet's body: a row's words are on the page only while its sheet is open. */
+const sheet = () => find("[data-slot=thinking-body]")
+
+const sheetText = () => sheet()?.textContent ?? ""
+
+/** The sheet's own scroll box, where a live run's newest words land. */
+const sheetScroll = () => {
+  const found = find("[data-slot=popup-scroll]")
+  assert.ok(found, "the sheet has a scroll box")
+  return found
 }
+
+/** Escape, the way the pop-up closes. */
+async function shutSheet() {
+  await act(async () => {
+    sheet()?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+    )
+  })
+  await until(async () => !sheet(), "the sheet shut")
+}
+
+/** Whether the row carries the spinner that says the turn is thinking right now. */
+const spins = (line: Element) => Boolean(line.querySelector("[data-slot=spinner]"))
 
 const screenText = () => document.body.textContent ?? ""
 
@@ -146,302 +165,213 @@ function sized(element: Element, size: { client: number; scroll: number }) {
   Object.defineProperty(element, "scrollHeight", { value: size.scroll, configurable: true })
 }
 
-const viewport = () => {
-  const found = find("[data-slot=message-scroller-viewport]")
-  assert.ok(found, "the thread has a scroll box")
-  return found
-}
-
-test("a streaming reply's run streams open and the working line stands down", async () => {
+test("a row spins for the turn's thinking, and the footer never says it too", async () => {
   host()
   const id = "streaming"
   await screen(undefined, turn({ id, reasoningRuns: [run(REASONING)] }), async () => {
     await stream(id)
     const line = onlyThinkingLine()
     assert.equal(lineLabel(line), "Thinking…", "still thinking, so no duration yet")
-    assert.equal(expanded(line), "true", "and open, as the thinking arrives")
-    assert.match(
-      reasoned(line).textContent ?? "",
-      /then its blocks/,
-      "its thinking readable",
-    )
+    assert.ok(spins(line), "and it carries the spinner, as the tool row does while it runs")
+    assert.equal(expanded(line), "false", "its sheet starts shut")
+    assert.equal(sheet(), null, "with nothing of the run on the page until it is asked for")
     assert.equal(
-      document.querySelector('[aria-live="polite"]'),
+      workingLine(),
       null,
-      "with the row open, the working line is gone rather than saying Thinking… again",
+      "the footer says nothing: the row is the one place the turn's thinking is named",
     )
   })
 })
 
-test("a run that streams with no reasoning of its own keeps the working line", async () => {
+test("a reply that never thinks wears the row while it works, and loses it at the answer", async () => {
   host()
   const id = "no-reasoning"
   await screen(undefined, turn({ id }), async () => {
     await stream(id)
-    assert.equal(thinkingLines().length, 0, "there is nothing to fold")
-    assert.match(screenText(), /Writing…/, "so the working line still says it is writing")
-  })
-})
-
-test("while the turn waits on the user, the working line says so even with a run open", async () => {
-  host()
-  const id = "waiting"
-  const messages = turn({
-    id,
-    reasoningRuns: [run(REASONING)],
-    approval: {
-      runId: "run-1",
-      description: "Read parse.ts",
-      choices: ["once", "deny"],
-      requestedAt: 1_500,
-    },
-  })
-  await screen(undefined, messages, async () => {
-    await stream(id)
-    assert.equal(expanded(onlyThinkingLine()), "true", "the thinking is still arriving")
-    assert.match(screenText(), /Waiting for your approval…/, "but waiting on the user is named")
-  })
-})
-
-test("the first answer token folds the run and brings the working line back", async () => {
-  host()
-  const id = "first-token"
-  await screen(undefined, turn({ id, reasoningRuns: [run(REASONING)] }), async () => {
-    await stream(id)
-    assert.equal(lineLabel(onlyThinkingLine()), "Thinking…", "the row streams open while it thinks")
-    await db.messages.put({ ...(await db.messages.get(id))!, content: ANSWER })
-    await settle()
     const line = onlyThinkingLine()
-    assert.equal(expanded(line), "false", "the answer starting folds it")
-    assert.equal(lineLabel(line), "Thought it through", "and nothing measured it here")
+    assert.equal(lineLabel(line), "Thinking…", "the row is on screen from the first working moment")
+    assert.ok(spins(line), "with its spinner, before a word of thinking arrives")
     assert.equal(
-      reasoned(line).getAttribute("aria-hidden"),
-      "true",
-      "folded text leaves the tree rather than being read out",
+      workingLine(),
+      null,
+      "and the footer leaves the saying to it",
     )
-    assert.match(screenText(), /Writing…/, "the working line says what the reply is doing again")
-  })
-})
-
-test("only the reply's newest run streams open, and the answer folds them all", async () => {
-  host()
-  const id = "two-runs"
-  const messages = turn({
-    id,
-    tools: [call("call-1"), call("call-2", "read_file", "parse.ts")],
-    reasoningRuns: [run(REASONING), run(SECOND, { afterToolId: "call-2" })],
-  })
-  await screen(undefined, messages, async () => {
-    await stream(id)
-    const open = thinkingLines()
-    assert.equal(open.length, 2, "one row per run")
-    assert.equal(lineLabel(open[0]), "Thought it through", "the run before the calls is done")
-    assert.equal(expanded(open[0]), "false", "so it is folded")
-    assert.equal(lineLabel(open[1]), "Thinking…", "the run after them is still going")
-    assert.equal(expanded(open[1]), "true", "so it is open")
 
     await db.messages.put({ ...(await db.messages.get(id))!, content: ANSWER })
     await settle()
-    const folded = thinkingLines()
-    assert.equal(folded.length, 2, "still one row per run")
-    for (const line of folded) {
-      assert.equal(lineLabel(line), "Thought it through", "both ended with no span measured")
-      assert.equal(expanded(line), "false", "and both folded at the answer")
-    }
+    assert.equal(thinkingLines().length, 0, "the model never thought, so the row goes with that")
+    assert.match(screenText(), /Writing…/, "and the footer says what the reply is doing instead")
   })
 })
 
-test("a tap opens the folded run, a second folds it, and a remount folds it again", async () => {
+test("behind a finished call, the model's quiet draws a row after it until words land", async () => {
   host()
-  const messages = turn({ id: "tap-fold", reasoningRuns: [run(REASONING)], content: ANSWER })
-  await screen(undefined, messages, async () => {
-    assert.equal(expanded(onlyThinkingLine()), "false", "an answered reply starts folded")
-    await click(onlyThinkingLine())
-    assert.equal(expanded(onlyThinkingLine()), "true", "a tap opens it")
-    assert.match(
-      reasoned(onlyThinkingLine()).textContent ?? "",
-      /parse\.ts/,
-      "and its thinking is readable",
-    )
-    await click(onlyThinkingLine())
-    assert.equal(expanded(onlyThinkingLine()), "false", "a second tap folds it")
-  })
-  await screen(undefined, messages, async () => {
-    assert.equal(
-      expanded(onlyThinkingLine()),
-      "false",
-      "being open is not kept, so a remount folds it",
-    )
-  })
-})
-
-test("a row that streamed live stays open after its own run ends, and the answer folds it", async () => {
-  host()
-  const id = "latch"
-  await screen(undefined, turn({ id, reasoningRuns: [run(REASONING)] }), async () => {
-    await stream(id)
-    assert.equal(expanded(onlyThinkingLine()), "true", "the run streams open as its words arrive")
-
-    // A call ends that run, measuring it, and a second stretch of thinking follows the call.
-    await db.messages.put({
-      ...(await db.messages.get(id))!,
-      tools: [call("call-1")],
-      reasoningRuns: [run(REASONING, { spanMs: 12_000 }), run(SECOND, { afterToolId: "call-1" })],
-    })
-    await settle()
-    const rows = thinkingLines()
-    assert.equal(rows.length, 2, "the call splits the thinking into two rows")
-    assert.equal(lineLabel(rows[0]), "Thought for 12s", "the run that ended reads the span it measured")
-    assert.equal(
-      expanded(rows[0]),
-      "true",
-      "and stays open: the turn still works, so the row that streamed keeps its place",
-    )
-    assert.equal(lineLabel(rows[1]), "Thinking…", "the run after the call is still thinking")
-    assert.equal(expanded(rows[1]), "true", "and open as its words arrive")
-
-    await db.messages.put({ ...(await db.messages.get(id))!, content: ANSWER })
-    await settle()
-    for (const line of thinkingLines())
-      assert.equal(expanded(line), "false", "the answer beginning folds every row of the turn")
-  })
-})
-
-test("a merged row that streamed stays open when its newest stretch ends", async () => {
-  host()
-  const id = "merged-latch"
+  const id = "quiet-after-call"
+  const TEXT = "I read the parser first."
   await screen(
     undefined,
     turn({
       id,
-      tools: [call("call-1"), call("call-2", "read_file", "parse.ts")],
-      reasoningRuns: [
-        run(REASONING),
-        run("What the first call printed.", { afterToolId: "call-1", spanMs: 3_000 }),
-        run(SECOND, { afterToolId: "call-2" }),
-      ],
+      content: TEXT,
+      tools: [{ ...call("call-1"), contentOffset: TEXT.length }],
     }),
     async () => {
       await stream(id)
-      const rows = thinkingLines()
-      assert.equal(rows.length, 2, "the two stretches that touched are one row")
-      assert.equal(expanded(rows[1]), "true", "and it streams open as its newest stretch thinks")
+      const line = onlyThinkingLine()
+      assert.equal(lineLabel(line), "Thinking…", "the model is quiet behind its last call")
+      assert.ok(spins(line), "so the row spins where the footer's line used to be")
+      const box = item(line)
+      assert.ok(follows(toolRow(box), line), "drawn after the call the quiet follows")
 
-      // The newest stretch ends, measured, and the turn still works: a further call is running.
       await db.messages.put({
         ...(await db.messages.get(id))!,
-        tools: [call("call-1"), call("call-2", "read_file", "parse.ts"), { ...call("call-3"), status: "running" }],
-        reasoningRuns: [
-          run(REASONING),
-          run("What the first call printed.", { afterToolId: "call-1", spanMs: 3_000 }),
-          run(SECOND, { afterToolId: "call-2", spanMs: 9_000 }),
-        ],
+        content: `${TEXT} Then its blocks.`,
       })
       await settle()
-      const row = thinkingLines()[1]
-      assert.equal(lineLabel(row), "Thought for 12s", "the row adds the spans both stretches measured")
-      assert.equal(expanded(row), "true", "and stays open, as the row that streamed on this visit")
+      assert.equal(thinkingLines().length, 0, "the answer moving again takes the row with it")
     },
   )
 })
 
-test("a turn that ends with no answer folds its rows", async () => {
+test("a tap opens the whole working-out in a sheet, which never closes itself", async () => {
   host()
-  const id = "stopped-early"
+  const id = "sheet"
   await screen(undefined, turn({ id, reasoningRuns: [run(REASONING)] }), async () => {
     await stream(id)
-    assert.equal(expanded(onlyThinkingLine()), "true", "the run streams open")
-    await db.messages.put({ ...(await db.messages.get(id))!, status: "stopped" })
-    await settle()
-    const line = onlyThinkingLine()
-    assert.equal(expanded(line), "false", "the turn ending folds the row, though no answer came")
-    assert.equal(lineLabel(line), "Thought it through", "with nothing measured for it here")
-  })
-})
-
-test("the answer folds every row of the turn, even one the reader opened mid-turn", async () => {
-  host()
-  const id = "opened-mid-turn"
-  await screen(
-    undefined,
-    // The first run ended over a call before this visit, so its row arrives closed.
-    turn({
-      id,
-      tools: [call("call-1")],
-      reasoningRuns: [run(REASONING, { spanMs: 12_000 }), run(SECOND, { afterToolId: "call-1" })],
-    }),
-    async () => {
-      await stream(id)
-      assert.equal(expanded(thinkingLines()[0]), "false", "a row that never streamed starts closed")
-      await click(thinkingLines()[0])
-      assert.equal(expanded(thinkingLines()[0]), "true", "a tap opens it while the turn works")
-
-      await db.messages.put({ ...(await db.messages.get(id))!, content: ANSWER })
-      await settle()
-      const folded = thinkingLines()
-      for (const line of folded)
-        assert.equal(expanded(line), "false", "the answer folds the turn's rows together")
-      assert.equal(lineLabel(folded[0]), "Thought for 12s", "keeping the label its own stretch earned")
-
-      await click(thinkingLines()[0])
-      assert.equal(expanded(thinkingLines()[0]), "true", "a tap after the fold sticks for the visit")
-    },
-  )
-})
-
-test("a tap while the model is still thinking folds the run, and the answer leaves it folded", async () => {
-  host()
-  const id = "tap-while-thinking"
-  await screen(undefined, turn({ id, reasoningRuns: [run(REASONING)] }), async () => {
-    await stream(id)
-    assert.equal(lineLabel(onlyThinkingLine()), "Thinking…", "the row streams open")
-    assert.equal(expanded(onlyThinkingLine()), "true", "and open")
     await click(onlyThinkingLine())
-    const folded = onlyThinkingLine()
-    assert.equal(expanded(folded), "false", "a tap folds it, even mid-stream")
-    assert.equal(lineLabel(folded), "Thinking…", "the model is still thinking, so the label holds")
-    assert.equal(
-      reasoned(folded).getAttribute("aria-hidden"),
-      "true",
-      "and the folded text leaves the tree",
+    assert.equal(expanded(onlyThinkingLine()), "true", "a tap opens the row's sheet")
+    assert.match(sheetText(), /then its blocks/, "the run's words read in it")
+    assert.ok(
+      !item(onlyThinkingLine()).contains(sheet()),
+      "the words open in the sheet, not in the thread under the row",
     )
+
+    // The answer begins: the label under the sheet is what changes, and the sheet stays put.
     await db.messages.put({ ...(await db.messages.get(id))!, content: ANSWER })
     await settle()
-    const answered = onlyThinkingLine()
-    assert.equal(lineLabel(answered), "Thought it through", "the first answer token ends the thinking")
-    assert.equal(expanded(answered), "false", "and leaves the row as the user folded it")
-    await click(onlyThinkingLine())
-    assert.equal(expanded(onlyThinkingLine()), "true", "a second tap opens it again")
-    assert.match(
-      reasoned(onlyThinkingLine()).textContent ?? "",
-      /parse\.ts/,
-      "with its thinking readable",
-    )
+    assert.equal(lineLabel(onlyThinkingLine()), "Thought it through", "the thinking has ended")
+    assert.equal(expanded(onlyThinkingLine()), "true", "and the sheet the reader opened stays open")
+    assert.match(sheetText(), /then its blocks/, "still holding the run's words")
+
+    await db.messages.put({ ...(await db.messages.get(id))!, status: "stopped" })
+    await settle()
+    assert.equal(expanded(onlyThinkingLine()), "true", "the turn ending closes nothing either")
+
+    await shutSheet()
+    assert.equal(expanded(onlyThinkingLine()), "false", "the reader closes it, their own way")
+    assert.equal(sheet(), null, "and the words leave the page with it")
   })
 })
 
-test("a run the user opens on an answered reply stays open while its text grows", async () => {
+test("an answered row's sheet opens at the top, a live one lands on its newest words", async () => {
   host()
-  const id = "opened-answered"
-  await screen(undefined, turn({ id, reasoningRuns: [run(REASONING)], content: ANSWER }), async () => {
-    assert.equal(expanded(onlyThinkingLine()), "false", "an answered reply starts folded")
-    await click(onlyThinkingLine())
-    assert.equal(expanded(onlyThinkingLine()), "true", "a tap opens it")
-    await db.messages.put({
-      ...(await db.messages.get(id))!,
-      reasoningRuns: [run(`${REASONING} Then its blocks.`)],
-    })
-    await settle()
-    const stillOpen = onlyThinkingLine()
-    assert.match(
-      reasoned(stillOpen).textContent ?? "",
-      /Then its blocks\./,
-      "the redraw brought the newer thinking",
+  const spy = spyScrollIntoView()
+  try {
+    // A run already written reads from the start: opening lands nothing anywhere.
+    await screen(
+      undefined,
+      turn({ id: "quiet-open", reasoningRuns: [run(REASONING)], content: ANSWER }),
+      async () => {
+        await click(onlyThinkingLine())
+        assert.match(sheetText(), /then its blocks/, "the words are all there")
+        assert.equal(spy.into.length, 0, "a finished run's sheet opens at its top")
+        await shutSheet()
+      },
     )
-    assert.equal(expanded(stillOpen), "true", "and the row stays open, as the user left it")
-    await click(onlyThinkingLine())
-    assert.equal(expanded(onlyThinkingLine()), "false", "until a tap folds it")
-  })
+
+    // A run still thinking lands on its newest words, and follows them until the reader scrolls up.
+    const id = "following"
+    await screen(undefined, turn({ id, reasoningRuns: [run(REASONING)] }), async () => {
+      await stream(id)
+      spy.into.length = 0
+      await click(onlyThinkingLine())
+      assert.equal(spy.into.at(-1)?.block, "end", "opening puts the run's end in view")
+      assert.equal(spy.into.at(-1)?.behavior, "smooth", "gliding there, as a sheet's own moves do")
+
+      // The sheet has less room than its words need, so the growth has somewhere to go.
+      sized(sheetScroll(), { client: 400, scroll: 1_200 })
+      spy.into.length = 0
+      await db.messages.put({
+        ...(await db.messages.get(id))!,
+        reasoningRuns: [run(`${REASONING} Then the blocks.`)],
+      })
+      await settle()
+      await resized("[data-slot=thinking-body]")
+      assert.equal(spy.into.length, 0, "the report an observer gets at once is not growth")
+      await resized("[data-slot=thinking-body]")
+      assert.ok(spy.into.length > 0, "growth keeps the end of the sheet in view")
+
+      sheetScroll().dispatchEvent(new window.WheelEvent("wheel", { deltaY: -120, bubbles: true }))
+      spy.into.length = 0
+      await db.messages.put({
+        ...(await db.messages.get(id))!,
+        reasoningRuns: [run(`${REASONING} Then the blocks. Its scan is cheap.`)],
+      })
+      await settle()
+      await resized("[data-slot=thinking-body]")
+      await resized("[data-slot=thinking-body]")
+      assert.equal(spy.into.length, 0, "a scroll up inside the sheet stops the follow, for good")
+    })
+
+    await withReducedMotion(async () => {
+      await screen(
+        undefined,
+        turn({ id: "no-motion", reasoningRuns: [run(REASONING)] }),
+        async () => {
+          await stream("no-motion")
+          spy.into.length = 0
+          await click(onlyThinkingLine())
+          assert.equal(spy.into.at(-1)?.block, "end", "still the run's end")
+          assert.equal(spy.into.at(-1)?.behavior, "auto", "placed with no motion at all")
+        },
+      )
+    })
+  } finally {
+    spy.restore()
+  }
+})
+
+test("the sheet reads the run as the reply's own markdown, whole and uncapped", async () => {
+  host()
+  await screen(
+    undefined,
+    turn({ id: "markdown", reasoningRuns: [run(LONG)], content: ANSWER }),
+    async () => {
+      await click(onlyThinkingLine())
+      // The renderer is the app's own, loaded off the startup path; ask for it as a reply does.
+      await import("@/components/chat/markdown-renderer")
+      await settle()
+
+      const body = sheet()
+      assert.ok(body, "the sheet is open")
+      assert.equal(
+        body.querySelector("strong")?.textContent,
+        "Read the parser first",
+        "**bold** draws as a <strong>, not as its markers",
+      )
+      const items = [...body.querySelectorAll("li")].map((one) => one.textContent?.trim())
+      assert.deepEqual(
+        items.slice(0, 2),
+        ["parse.ts keeps the scan", "its blocks are what matter"],
+        "a list draws as list items",
+      )
+      assert.match(
+        body.querySelector("pre code")?.textContent ?? "",
+        /markdownBlocks\(text\)/,
+        "a fence draws as code, as it does in the reply",
+      )
+      assert.match(
+        sheetText(),
+        /The scan is cheap in the end/,
+        "the whole run reads, down to its last words, with no cap and no Show more",
+      )
+      absent("[data-slot=thinking-fade]")
+      absent("[data-slot=thinking-cap]")
+      absent("button", "Show more")
+      assert.doesNotMatch(screenText(), /Show more/, "nowhere on the screen")
+      assert.match(screenText(), new RegExp(ANSWER), "the answer is still drawn under it")
+    },
+  )
 })
 
 test("a run this device measured reads in whole seconds, not the stats line's figure", async () => {
@@ -455,33 +385,10 @@ test("a run this device measured reads in whole seconds, not the stats line's fi
   }
   await screen(undefined, turn(reply), async () => {
     assert.equal(lineLabel(onlyThinkingLine()), "Thought for 12s", "the span this device measured")
-    assert.equal(expanded(onlyThinkingLine()), "false", "still folded over an answer")
+    assert.equal(expanded(onlyThinkingLine()), "false", "its sheet starts shut over an answer")
+    assert.ok(!spins(onlyThinkingLine()), "and nothing spins for a run that ended")
     assert.match(screenText(), /12\.0s/, "and the turn's own duration stays in the stats line")
   })
-})
-
-test("a run that already ended stays folded while the call it broke runs", async () => {
-  host()
-  const id = "ended-run"
-  await screen(
-    undefined,
-    turn({
-      id,
-      // The call that ended the run is still going: its own row says what it is doing.
-      tools: [{ ...call("call-1"), status: "running" }],
-      reasoningRuns: [run(REASONING, { spanMs: 12_000 })],
-    }),
-    async () => {
-      await stream(id)
-      const line = onlyThinkingLine()
-      assert.equal(lineLabel(line), "Thought for 12s", "the number it measured is what it reads")
-      assert.equal(
-        expanded(line),
-        "false",
-        "an ended run does not re-open as Thinking… while the call it broke runs",
-      )
-    },
-  )
 })
 
 test("a restored reply reads Thought it through and keeps its duration in the stats", async () => {
@@ -496,12 +403,12 @@ test("a restored reply reads Thought it through and keeps its duration in the st
     const line = onlyThinkingLine()
     assert.equal(lineLabel(line), "Thought it through", "nothing here measured it, so no number")
     assert.doesNotMatch(lineLabel(line), /\d/, "no figure at all")
-    assert.equal(expanded(line), "false", "and folded")
+    assert.equal(expanded(line), "false", "and its sheet shut")
     assert.match(screenText(), /12\.0s/, "while the reply's stats still show its own duration")
   })
 })
 
-test("a stopped or failed reply keeps its run, folded", async () => {
+test("a stopped or failed reply keeps its run, its words behind the row's sheet", async () => {
   host()
   const messages: Message[] = [
     ...turn({ id: "stopped", reasoningRuns: [run(REASONING)], status: "stopped" }),
@@ -521,11 +428,15 @@ test("a stopped or failed reply keeps its run, folded", async () => {
     assert.equal(found.length, 2, "each reply keeps what arrived")
     for (const line of found) {
       assert.equal(lineLabel(line), "Thought it through", "with no span measured")
-      assert.equal(expanded(line), "false", "and folded")
-      assert.match(reasoned(line).textContent ?? "", /parse\.ts/, "its thinking still there")
+      assert.equal(expanded(line), "false", "and its sheet shut")
     }
     assert.match(screenText(), /Stopped/, "the stopped reply says so")
     assert.match(screenText(), /The host dropped the run\./, "and the failed one says why")
+    await click(found[0])
+    assert.match(sheetText(), /parse\.ts/, "its thinking still there, in the sheet")
+    await shutSheet()
+    await click(thinkingLines()[1])
+    assert.match(sheetText(), /parse\.ts/, "and the other reply's too")
   })
 })
 
@@ -548,6 +459,29 @@ test("a reply with no thinking of its own draws no row", async () => {
   })
 })
 
+test("a run that already ended keeps its label while the call it broke runs", async () => {
+  host()
+  const id = "ended-run"
+  await screen(
+    undefined,
+    turn({
+      id,
+      // The call that ended the run is still going: its own row says what it is doing.
+      tools: [{ ...call("call-1"), status: "running" }],
+      reasoningRuns: [run(REASONING, { spanMs: 12_000 })],
+    }),
+    async () => {
+      await stream(id)
+      const line = onlyThinkingLine()
+      assert.equal(lineLabel(line), "Thought for 12s", "the number it measured is what it reads")
+      assert.ok(
+        !spins(line),
+        "an ended run does not spin as Thinking… while the call it broke runs",
+      )
+    },
+  )
+})
+
 test("a reply whose thinking is broken by tool calls draws a row above them and one below", async () => {
   host()
   const messages = turn({
@@ -560,8 +494,7 @@ test("a reply whose thinking is broken by tool calls draws a row above them and 
     const [before, after] = thinkingLines()
     assert.ok(before && after, "one row per stretch of thinking")
     assert.equal(lineLabel(before), "Thought it through", "the first run says it thought it through")
-    assert.match(reasoned(before).textContent ?? "", /parse\.ts/, "and holds the first stretch")
-    assert.match(reasoned(after).textContent ?? "", /blocks are what matter/, "the second its own")
+    assert.equal(lineLabel(after), "Thought it through", "and the second, its own way")
 
     const box = item(before)
     const calls = toolRow(box)
@@ -570,6 +503,13 @@ test("a reply whose thinking is broken by tool calls draws a row above them and 
     assert.ok(follows(before, calls), "the thinking before the call is drawn above it")
     assert.ok(follows(calls, after), "and the thinking after it below, once the calls are one row")
     assert.ok(follows(after, text), "where it happened, before the text that followed")
+
+    await click(before)
+    assert.match(sheetText(), /parse\.ts/, "the first stretch reads in its own sheet")
+    assert.doesNotMatch(sheetText(), /blocks are what matter/, "and only its own")
+    await shutSheet()
+    await click(after)
+    assert.match(sheetText(), /blocks are what matter/, "the second stretch in its own sheet")
   })
 })
 
@@ -594,14 +534,16 @@ test("two calls back to back draw one row below them, holding both stretches", a
     const calls = toolRow(box)
     assert.ok(follows(rows[0], calls), "the run before any call is drawn above the group")
     assert.ok(follows(calls, rows[1]), "and the stretches that touched are drawn below it, as one row")
-    const body = reasoned(rows[1]).textContent ?? ""
+    assert.equal(lineLabel(rows[1]), "Thought it through", "one label for the two of them")
+
+    await click(rows[1])
+    const body = sheetText()
     const first = body.indexOf("first call printed")
     const second = body.indexOf("blocks are what matter")
-    assert.ok(first >= 0, "the row holds the stretch the first call broke")
+    assert.ok(first >= 0, "the sheet holds the stretch the first call broke")
     assert.ok(second >= 0, "and the one the second call broke")
     assert.ok(first < second, "in the order they arrived")
     assert.equal(body.match(/first call printed/g)?.length, 1, "each stretch once, not once a row")
-    assert.equal(lineLabel(rows[1]), "Thought it through", "and one label for the two of them")
   })
 })
 
@@ -633,7 +575,7 @@ test("a merged row adds up the spans it holds, and claims none where a stretch w
   })
 })
 
-test("a merged row whose last stretch still streams reads Thinking…", async () => {
+test("a merged row whose last stretch still streams reads Thinking… and spins", async () => {
   host()
   const id = "merged-streaming"
   const messages = turn({
@@ -650,9 +592,11 @@ test("a merged row whose last stretch still streams reads Thinking…", async ()
     const rows = thinkingLines()
     assert.equal(rows.length, 2, "one row for the stretches that touched")
     assert.equal(lineLabel(rows[1]), "Thinking…", "a stretch still thinking holds the whole row there")
-    assert.equal(expanded(rows[1]), "true", "and the row stands open over both of them")
-    assert.match(reasoned(rows[1]).textContent ?? "", /first call printed/, "holding the one that ended")
-    assert.match(reasoned(rows[1]).textContent ?? "", /blocks are what matter/, "and the one still going")
+    assert.ok(spins(rows[1]), "and the spinner says the turn is at it now")
+    assert.equal(expanded(rows[1]), "false", "with its sheet shut until a tap")
+    await click(rows[1])
+    assert.match(sheetText(), /first call printed/, "holding the one that ended")
+    assert.match(sheetText(), /blocks are what matter/, "and the one still going")
   })
 })
 
@@ -678,7 +622,6 @@ test("a steer and an answered approval leave one row per run, never a row apiece
   await screen(undefined, messages, async () => {
     const found = thinkingLines()
     assert.equal(found.length, 2, "two stretches of thinking, two rows — the breaks add none")
-    for (const line of found) assert.equal(expanded(line), "false", "each folded over the answer")
 
     const box = item(found[0])
     const boxed = item(found[1])
@@ -706,7 +649,28 @@ test("a reply stored before runs draws its thinking as one row at the top", asyn
     assert.equal(lineLabel(line), "Thought it through", "the fold keeps it as one run")
     const box = item(line)
     assert.ok(follows(line, toolRow(box)), "drawn at the top of the reply, above what it ran")
-    assert.match(reasoned(line).textContent ?? "", /blocks are what matter/, "holding all of it")
+    await click(line)
+    assert.match(sheetText(), /blocks are what matter/, "holding all of it")
+  })
+})
+
+test("while the turn waits on the user, the working line says so beside the spinning row", async () => {
+  host()
+  const id = "waiting"
+  const messages = turn({
+    id,
+    reasoningRuns: [run(REASONING)],
+    approval: {
+      runId: "run-1",
+      description: "Read parse.ts",
+      choices: ["once", "deny"],
+      requestedAt: 1_500,
+    },
+  })
+  await screen(undefined, messages, async () => {
+    await stream(id)
+    assert.ok(spins(onlyThinkingLine()), "the thinking is still arriving")
+    assert.match(screenText(), /Waiting for your approval…/, "waiting on the user is named")
   })
 })
 
@@ -726,7 +690,6 @@ test("a coding session's thread draws the same rows, in place, as the same reply
       ["Thought it through", "Thought for 12s"],
       "each run reads its own label",
     )
-    for (const line of chat) assert.equal(expanded(line), "false", "and both fold over the answer")
   })
   await screen("project-1", turn(reply), async () => {
     assert.match(screenText(), /The parser reads it/, "the session draws the reply")
@@ -737,7 +700,6 @@ test("a coding session's thread draws the same rows, in place, as the same reply
       ["Thought it through", "Thought for 12s"],
       "with the same words",
     )
-    for (const line of session) assert.equal(expanded(line), "false", "folded over the answer")
     const box = item(session[0])
     assert.equal(item(session[1]), box, "both rows belong to the one reply")
     assert.ok(follows(session[0], toolRow(box)), "the run before the calls is drawn above them")
@@ -747,15 +709,24 @@ test("a coding session's thread draws the same rows, in place, as the same reply
       ...(await db.messages.get("session-reply"))!,
       content: "",
       status: "streaming",
-      // A live turn's newest run hasn't ended, so it carries no span to re-open against.
+      // A live turn's newest run hasn't ended, so it carries no span to read a number from.
       reasoningRuns: [run(REASONING), run(SECOND, { afterToolId: "call-2" })],
     })
     await settle()
     const streaming = thinkingLines()
     assert.equal(streaming.length, 2, "a streaming session keeps one row per run")
     assert.equal(lineLabel(streaming[0]), "Thought it through", "the run before the calls is done")
-    assert.equal(lineLabel(streaming[1]), "Thinking…", "its newest run streams open, as a chat's does")
-    assert.equal(expanded(streaming[1]), "true", "and is open")
+    assert.equal(lineLabel(streaming[1]), "Thinking…", "its newest run spins, as a chat's does")
+    assert.ok(spins(streaming[1]), "with the spinner the row wears everywhere")
+    assert.equal(
+      workingLine(),
+      null,
+      "and the session's footer leaves the saying to the row too",
+    )
+
+    await click(streaming[1])
+    assert.match(sheetText(), /blocks are what matter/, "a tap opens the sheet here as well")
+    await shutSheet()
 
     await db.messages.put({
       ...(await db.messages.get("session-reply"))!,
@@ -763,414 +734,8 @@ test("a coding session's thread draws the same rows, in place, as the same reply
       status: "done",
     })
     await settle()
-    for (const line of thinkingLines())
-      assert.equal(expanded(line), "false", "the answer folds it, as a chat's folds")
-
-    await click(thinkingLines()[1])
-    assert.equal(expanded(thinkingLines()[1]), "true", "a tap opens it")
-    assert.match(
-      reasoned(thinkingLines()[1]).textContent ?? "",
-      /blocks are what matter/,
-      "with its thinking readable",
-    )
-    await click(thinkingLines()[1])
-    assert.equal(expanded(thinkingLines()[1]), "false", "and a second tap folds it")
-  })
-})
-
-test("an opened run reads as markdown, the way the reply's own answer does", async () => {
-  host()
-  await screen(
-    undefined,
-    turn({ id: "markdown", reasoningRuns: [run(MARKDOWN)], content: ANSWER }),
-    async () => {
-      assert.equal(expanded(onlyThinkingLine()), "false", "an answered reply starts folded")
-      await click(onlyThinkingLine())
-      // The renderer is the app's own, loaded off the startup path; ask for it as a reply does.
-      await import("@/components/chat/markdown-renderer")
-      await settle()
-
-      const body = reasoned(onlyThinkingLine())
-      assert.equal(
-        body.querySelector("strong")?.textContent,
-        "Read the parser first",
-        "**bold** draws as a <strong>, not as its markers",
-      )
-      const items = [...body.querySelectorAll("li")].map((one) => one.textContent?.trim())
-      assert.deepEqual(
-        items,
-        ["parse.ts keeps the scan", "its blocks are what matter"],
-        "a list draws as list items",
-      )
-      assert.match(
-        body.querySelector("pre code")?.textContent ?? "",
-        /markdownBlocks\(text\)/,
-        "a fence draws as code, as it does in the reply",
-      )
-      assert.doesNotMatch(
-        body.textContent ?? "",
-        /\*\*|```|- `parse/,
-        "with no markdown left reading as text",
-      )
-      assert.match(screenText(), new RegExp(ANSWER), "the answer is still drawn under it")
-    },
-  )
-})
-
-test("a folded run's links wait for the open, as its words do", async () => {
-  host()
-  const messages = turn({
-    id: "inert",
-    reasoningRuns: [run("The scan is in [parse.ts](./parse.ts).")],
-    content: ANSWER,
-  })
-  await screen(undefined, messages, async () => {
-    const folded = reasoned(onlyThinkingLine())
-    assert.equal(folded.hasAttribute("inert"), true, "a folded body is out of the tab order")
-    assert.equal(folded.getAttribute("aria-hidden"), "true", "and out of the tree")
-    await click(onlyThinkingLine())
-    const shown = reasoned(onlyThinkingLine())
-    assert.equal(shown.hasAttribute("inert"), false, "an opened one can be reached again")
-    assert.equal(shown.getAttribute("aria-hidden"), "false")
-  })
-})
-
-test("an open row longer than a screen shows its last words, with no cap and no Show more", async () => {
-  host()
-  await screen(
-    undefined,
-    turn({ id: "uncapped", reasoningRuns: [run(LONG)], content: ANSWER }),
-    async () => {
-      const folded = onlyThinkingLine()
-      assert.equal(expanded(folded), "false", "an answered reply starts folded")
-      assert.equal(lineLabel(folded), "Thought it through", "under the label its run earned")
-      assert.ok(folded.querySelector("svg"), "with its chevron to turn")
-      const hidden = reasoned(folded)
-      assert.equal(hidden.getAttribute("aria-hidden"), "true", "a folded row hides its words")
-      assert.equal(hidden.hasAttribute("inert"), true, "and keeps them out of reach")
-
-      await click(onlyThinkingLine())
-      const line = onlyThinkingLine()
-      assert.equal(expanded(line), "true", "a tap opens it")
-      assert.match(
-        reasoned(line).textContent ?? "",
-        /The scan is cheap in the end/,
-        "the whole run reads, down to its last words",
-      )
-      absent("[data-slot=thinking-fade]")
-      absent("[data-slot=thinking-cap]")
-      absent("button", "Show more")
-      assert.doesNotMatch(screenText(), /Show more/, "nowhere on the screen")
-    },
-  )
-})
-
-test("opening a run lands on its newest words, and the tail follows until a scroll up", async () => {
-  host()
-  const id = "following"
-  const spy = spyScrollIntoView()
-  try {
-    await screen(undefined, turn({ id, reasoningRuns: [run(REASONING)] }), async () => {
-      await stream(id)
-      // The thread has less room than its words need, so the row's end is not in view already.
-      sized(viewport(), { client: 400, scroll: 1_200 })
-      // Fold it and open it again, the way a reader opens a row: opening is what lands on the end.
-      await click(onlyThinkingLine())
-      spy.into.length = 0
-      await click(onlyThinkingLine())
-      assert.equal(spy.into.at(-1)?.block, "end", "opening puts the run's end in view")
-      assert.equal(
-        spy.into.at(-1)?.behavior,
-        "smooth",
-        "gliding there, as the thread's own moves do",
-      )
-
-      spy.into.length = 0
-      await db.messages.put({
-        ...(await db.messages.get(id))!,
-        reasoningRuns: [run(`${REASONING} Then the blocks.`)],
-      })
-      await settle()
-      await resized("[data-slot=thinking-body]")
-      assert.equal(spy.into.length, 0, "the report an observer gets at once is not growth")
-      await resized("[data-slot=thinking-body]")
-      assert.ok(spy.into.length > 0, "growth keeps the end of the row in view")
-
-      viewport().dispatchEvent(new window.WheelEvent("wheel", { deltaY: -120, bubbles: true }))
-      spy.into.length = 0
-      await db.messages.put({
-        ...(await db.messages.get(id))!,
-        reasoningRuns: [run(`${REASONING} Then the blocks. Its scan is cheap.`)],
-      })
-      await settle()
-      await resized("[data-slot=thinking-body]")
-      await resized("[data-slot=thinking-body]")
-      assert.equal(spy.into.length, 0, "a scroll up stops the follow, for good")
-
-      await click(onlyThinkingLine())
-      spy.into.length = 0
-      await click(onlyThinkingLine())
-      assert.ok(spy.into.length > 0, "and opening the row again follows it once more")
-    })
-
-    await withReducedMotion(async () => {
-      const quiet = (id: string) =>
-        screen(undefined, turn({ id, reasoningRuns: [run(REASONING)], content: ANSWER }), async () => {
-          spy.into.length = 0
-          await click(onlyThinkingLine())
-          assert.equal(spy.into.at(-1)?.block, "end", "still the run's end")
-          assert.equal(spy.into.at(-1)?.behavior, "auto", "placed with no motion at all")
-        })
-      await quiet("no-motion")
-    })
-  } finally {
-    spy.restore()
-  }
-})
-
-test("a run that opens on its own leaves a reader who has scrolled away where they were", async () => {
-  host()
-  const id = "auto-open"
-  const spy = spyScrollIntoView()
-  try {
-    await screen(
-      undefined,
-      // The call its second run follows is drawn between the two stretches, so they are two rows:
-      // one above the group, one below it.
-      turn({ id, tools: [call("call-1")], reasoningRuns: [run(REASONING)], content: ANSWER }),
-      async () => {
-        // The reader is reading higher up the thread when the turn's next run starts.
-        const view = viewport()
-        sized(view, { client: 400, scroll: 1_600 })
-        view.scrollTop = 0
-        spy.into.length = 0
-        await db.messages.put({
-          ...(await db.messages.get(id))!,
-          status: "streaming",
-          content: "",
-          reasoningRuns: [run(REASONING), run(SECOND, { afterToolId: "call-1" })],
-        })
-        await settle()
-        const rows = thinkingLines()
-        assert.equal(rows.length, 2, "the turn's two runs, one row each")
-        assert.equal(expanded(rows[1]), "true", "the new run opens as it streams")
-        assert.equal(spy.into.length, 0, "and the reader is not pulled down to it")
-      },
-    )
-  } finally {
-    spy.restore()
-  }
-})
-
-test("with reduced motion asked for, a tap still opens the row and a second folds it", async () => {
-  host()
-  const messages = turn({ id: "reduced", reasoningRuns: [run(REASONING)], content: ANSWER })
-  await withReducedMotion(() =>
-    screen(undefined, messages, async () => {
-      assert.equal(expanded(onlyThinkingLine()), "false", "folded to start")
-      await click(onlyThinkingLine())
-      assert.equal(expanded(onlyThinkingLine()), "true", "a tap opens it, with no motion needed")
-      await click(onlyThinkingLine())
-      assert.equal(expanded(onlyThinkingLine()), "false", "and a second folds it")
-    }),
-  )
-})
-
-test("with the switch on, a streaming run stays folded and the working line says what it does", async () => {
-  host()
-  const id = "folded-stream"
-  const settings = { foldThinkingByDefault: true }
-  await screen(
-    undefined,
-    turn({ id, reasoningRuns: [run(REASONING)] }),
-    async () => {
-      await stream(id)
-      const line = onlyThinkingLine()
-      assert.equal(
-        lineLabel(line),
-        "Thinking…",
-        "a folded row keeps its own label while its stretch streams",
-      )
-      assert.equal(expanded(line), "false", "and it never opens on its own")
-      assert.equal(
-        reasoned(line).getAttribute("aria-hidden"),
-        "true",
-        "so its words are out of the tree until it is asked for",
-      )
-      assert.match(
-        workingLine()?.textContent ?? "",
-        /Thinking…/,
-        "the footer says what the turn is doing, where an open row used to",
-      )
-
-      await click(onlyThinkingLine())
-      assert.equal(expanded(onlyThinkingLine()), "true", "a tap opens the row for the visit")
-      assert.match(reasoned(onlyThinkingLine()).textContent ?? "", /then its blocks/, "readable")
-      await click(onlyThinkingLine())
-      assert.equal(expanded(onlyThinkingLine()), "false", "and a second tap folds it again")
-    },
-    settings,
-  )
-})
-
-test("with the switch on, no row of the turn opens at any point, and the answer moves nothing", async () => {
-  host()
-  const id = "folded-turn"
-  const settings = { foldThinkingByDefault: true }
-  await screen(
-    undefined,
-    turn({ id, reasoningRuns: [run(REASONING)] }),
-    async () => {
-      await stream(id)
-      assert.equal(expanded(onlyThinkingLine()), "false", "the streaming row is folded")
-
-      // The first stretch ends over a call and a second one thinks: it never joins either.
-      await db.messages.put({
-        ...(await db.messages.get(id))!,
-        tools: [call("call-1")],
-        reasoningRuns: [run(REASONING, { spanMs: 12_000 }), run(SECOND, { afterToolId: "call-1" })],
-      })
-      await settle()
-      const rows = thinkingLines()
-      assert.equal(rows.length, 2, "the call splits the thinking into two rows")
-      for (const row of rows) assert.equal(expanded(row), "false", "neither opened on its own")
-
-      // The turn keeps working, its newest stretch measured, and a call running.
-      await db.messages.put({
-        ...(await db.messages.get(id))!,
-        tools: [call("call-1"), { ...call("call-2"), status: "running" }],
-        reasoningRuns: [
-          run(REASONING, { spanMs: 12_000 }),
-          run(SECOND, { afterToolId: "call-1", spanMs: 4_000 }),
-        ],
-      })
-      await settle()
-      for (const row of thinkingLines())
-        assert.equal(expanded(row), "false", "a turn still working leaves every row folded")
-
-      await db.messages.put({ ...(await db.messages.get(id))!, content: ANSWER })
-      await settle()
-      const answered = thinkingLines()
-      assert.equal(answered.length, 2, "the answer draws no row of its own")
-      for (const row of answered)
-        assert.equal(expanded(row), "false", "and the answer moving in changes nothing")
-    },
-    settings,
-  )
-})
-
-test("the switch turned on mid-turn leaves the open row open and the next one never opens", async () => {
-  host()
-  const id = "switch-mid-turn"
-  await screen(undefined, turn({ id, reasoningRuns: [run(REASONING)] }), async () => {
-    await stream(id)
-    assert.equal(expanded(onlyThinkingLine()), "true", "with the switch off the run streams open")
-
-    await saveAppearance({ foldThinkingByDefault: true })
-    await settle()
-    assert.equal(
-      expanded(onlyThinkingLine()),
-      "true",
-      "a row already open stays open for the visit: the switch governs what opens on its own",
-    )
-
-    await db.messages.put({
-      ...(await db.messages.get(id))!,
-      tools: [call("call-1")],
-      reasoningRuns: [run(REASONING, { spanMs: 12_000 }), run(SECOND, { afterToolId: "call-1" })],
-    })
-    await settle()
-    const rows = thinkingLines()
-    assert.equal(expanded(rows[0]), "true", "the row that streamed before the switch stays open")
-    assert.equal(lineLabel(rows[1]), "Thinking…", "the next stretch is still thinking")
-    assert.equal(expanded(rows[1]), "false", "and it never opens, as the switch now asks")
-  })
-})
-
-test("with the switch on, a reader who opens the streaming row takes the working line's place", async () => {
-  host()
-  const id = "opened-under-switch"
-  await screen(
-    undefined,
-    turn({ id, reasoningRuns: [run(REASONING)] }),
-    async () => {
-      await stream(id)
-      assert.equal(expanded(onlyThinkingLine()), "false", "the switch keeps the streaming row folded")
-      assert.match(
-        workingLine()?.textContent ?? "",
-        /Thinking…/,
-        "so the footer is what says the turn is thinking",
-      )
-
-      await click(onlyThinkingLine())
-      assert.equal(expanded(onlyThinkingLine()), "true", "a tap opens the row for the visit")
-      assert.equal(lineLabel(onlyThinkingLine()), "Thinking…", "and the row says it for itself")
-      assert.equal(workingLine(), null, "so the footer stands down rather than saying it twice")
-
-      await click(onlyThinkingLine())
-      assert.equal(expanded(onlyThinkingLine()), "false", "a second tap folds it again")
-      assert.match(workingLine()?.textContent ?? "", /Thinking…/, "and the footer speaks again")
-    },
-    { foldThinkingByDefault: true },
-  )
-})
-
-test("with the switch off, a reader who folds the streaming row keeps the turn from going silent", async () => {
-  host()
-  const id = "folded-by-reader"
-  await screen(undefined, turn({ id, reasoningRuns: [run(REASONING)] }), async () => {
-    await stream(id)
-    assert.equal(expanded(onlyThinkingLine()), "true", "the row streams open as its words arrive")
-    assert.equal(workingLine(), null, "so the footer stands down while it lies open")
-
-    await click(onlyThinkingLine())
-    const folded = onlyThinkingLine()
-    assert.equal(expanded(folded), "false", "a tap folds it mid-stream")
-    assert.equal(lineLabel(folded), "Thinking…", "the row keeps its label through the fold")
-    assert.match(
-      workingLine()?.textContent ?? "",
-      /Thinking…/,
-      "and the footer says the turn is thinking, so no row open leaves the turn silent",
-    )
-  })
-})
-
-test("with the switch on, a coding session's streaming row stays folded too", async () => {
-  host()
-  const id = "session-1"
-  await screen(
-    "project-1",
-    turn({ id, reasoningRuns: [run(REASONING)] }),
-    async () => {
-      await stream(id)
-      const line = onlyThinkingLine()
-      assert.equal(lineLabel(line), "Thinking…", "the session's row says what its stretch is doing")
-      assert.equal(expanded(line), "false", "and the switch keeps it folded here, as in a chat")
-      assert.match(workingLine()?.textContent ?? "", /Thinking…/, "with the footer speaking instead")
-    },
-    { foldThinkingByDefault: true },
-  )
-})
-
-test("a reply resumed after the stream dropped latches open again, and folds at the answer", async () => {
-  host()
-  const id = "resumed"
-  await screen(undefined, turn({ id, reasoningRuns: [run(REASONING)] }), async () => {
-    await stream(id)
-    assert.equal(expanded(onlyThinkingLine()), "true", "the row streams open as its words arrive")
-
-    await db.messages.put({ ...(await db.messages.get(id))!, status: "stopped" })
-    await settle()
-    assert.equal(expanded(onlyThinkingLine()), "false", "the turn ending with no answer folds it")
-
-    // The stream comes back: the same stretch of thinking is being watched again on this visit.
-    await stream(id)
-    const again = onlyThinkingLine()
-    assert.equal(lineLabel(again), "Thinking…", "the resumed stretch is still thinking")
-    assert.equal(expanded(again), "true", "and drawn open again, as a row being watched")
-
-    await db.messages.put({ ...(await db.messages.get(id))!, content: ANSWER })
-    await settle()
-    assert.equal(expanded(onlyThinkingLine()), "false", "and the answer folds it, as it folds any row")
+    const done = thinkingLines()
+    assert.equal(done.length, 2, "the answer draws no row of its own")
+    for (const line of done) assert.equal(expanded(line), "false", "with every sheet shut")
   })
 })

@@ -1,4 +1,4 @@
-import { Fragment, Suspense, lazy, memo, useMemo, useState, type ReactNode } from "react"
+import { Fragment, Suspense, lazy, memo, useMemo, type ReactNode } from "react"
 import {
   AlertCircleIcon,
   ClockIcon,
@@ -81,9 +81,6 @@ type Segment = { start: number; end: number; tools: ToolEvent[] }
 
 /** A segment with no run of its own, so a reply that never thought allocates nothing. */
 const NO_RUNS: RunPart[] = []
-
-/** No row tapped either way: the state a reply starts in, and the one the fold moment returns to. */
-const NO_TAPS: ReadonlyMap<string, boolean> = new Map()
 
 function rowBlocks(content: string, blocks: ThreadBlock[] | undefined, streaming: boolean) {
   const parts = openuiParts(content)
@@ -443,8 +440,6 @@ interface MessageItemProps {
   blocks?: ThreadBlock[]
   /** Whether a reply is streaming in this chat, so queued messages know they'll go on their own. */
   busy?: boolean
-  /** Appearance's Fold thinking by default: no row opens on its own, and the working line speaks. */
-  foldThinking: boolean
 }
 
 /**
@@ -457,7 +452,6 @@ export const MessageItem = memo(function MessageItem({
   showStats,
   blocks,
   busy,
-  foldThinking,
 }: MessageItemProps) {
   // Replies type out a word at a time, however Hermes delivers them.
   const content = useReveal(message.role === "assistant" ? message.content : "")
@@ -471,35 +465,44 @@ export const MessageItem = memo(function MessageItem({
   const storedRuns = message.reasoningRuns
   const storedReasoning = message.reasoning
   const working = message.status === "streaming" && !message.content
+  const storedTools = message.tools
+  const storedContent = message.content
   const thinking: RunPart[] = useMemo(() => {
     const runs = runsOf({ reasoningRuns: storedRuns, reasoning: storedReasoning })
-    return runs.map((run, index) => ({
+    const parts: RunPart[] = runs.map((run, index) => ({
       ...run,
       key: `run-${index}`,
       // A span is stamped exactly when its run ends, so a run carrying one has no words still
-      // arriving: the label reads what it measured, whatever the row's openness.
+      // arriving: the label reads what it measured, wherever the row is drawn.
       thinking: index === runs.length - 1 && working && run.spanMs === undefined,
     }))
-  }, [storedRuns, storedReasoning, working])
-  // Every row's openness is answered here and nowhere else: one place knows whether any row of the
-  // turn lies open, which is what the working line has to ask.
-  //
-  // The latch: the rows that have streamed open on this visit, by key, so a row stays open after its
-  // own stretch ends until the answer begins or the turn ends. It lives with the reply, so it is
-  // dropped on remount, and it is never written down — a row drawn from storage starts closed.
-  const [latched, setLatched] = useState<ReadonlySet<string>>(() => new Set())
-  // The reader's own taps for this visit, by key: an event, so an ordinary write. A tap lasts the
-  // visit and is what a reload forgets.
-  const [tapped, setTapped] = useState<ReadonlyMap<string, boolean>>(NO_TAPS)
-  // The fold moment: the answer beginning or the turn ending folds every row of the turn together,
-  // including one the reader opened, so the taps go with it. Adjusted in the render that sees the
-  // change rather than in an effect, so the fold lands in the same commit as the answer; a reply that
-  // mounts already folded has no tap to drop.
-  const [wasWorking, setWasWorking] = useState(working)
-  if (wasWorking !== working) {
-    setWasWorking(working)
-    if (!working) setTapped(NO_TAPS)
-  }
+    // The footer's working line used to say "Thinking…" in two places, and the row says both now,
+    // drawn with its spinner where that line was: while the reply is silent with nothing of its own
+    // yet, a stretch at the top; behind the model's last call, a stretch after it — so the row is on
+    // screen from the first moment the turn works, before a word of thinking arrives. Neither
+    // stretch outlives its reason to be: a run of the model's own thinking after the call is that
+    // run's row, and the first one goes the moment the answer's first word lands, leaving a reply
+    // that never thought with no row at all. A call still running is its own row's to say, and both
+    // are drawn only while the reply streams.
+    const last = storedTools?.at(-1)
+    const running = storedTools?.some((tool) => tool.status === "running")
+    const silent =
+      working || (last !== undefined && (last.contentOffset ?? 0) >= storedContent.length)
+    if (message.status !== "streaming" || running || !silent) return parts
+    const live = parts.at(-1)
+    // A run of the model's own thinking after that call is the row that says it; the quiet stretch
+    // is drawn otherwise — at the top while the reply is empty, after the call when it is not.
+    if (last && live?.afterToolId === last.toolCallId && live.spanMs === undefined)
+      live.thinking = true
+    else if (last || !live)
+      parts.push({
+        key: `run-${parts.length}`,
+        text: "",
+        afterToolId: last?.toolCallId,
+        thinking: true,
+      })
+    return parts
+  }, [storedRuns, storedReasoning, storedTools, storedContent, working, message.status])
   // The turn failed: a user message whose send never got there, or a reply that errored instead of
   // answering. The one kept in the thread waits to be sent again; the other says so plainly.
   const failed = message.status === "error"
@@ -628,51 +631,22 @@ export const MessageItem = memo(function MessageItem({
       thinkingBySegment.get(i) ?? NO_RUNS,
     ),
   )
-  // A row joins the latch as it streams, adjusted in the render that finds it rather than in an
-  // effect: a reply redraws with every token, and a state written after each of those would cost a
-  // render apiece — this settles in one pass, whatever the token rate.
-  //
-  // Fold thinking by default gates the latch here, not the row's openness: the switch governs what
-  // opens on its own, so a row already open stays open for the visit, the next streaming row never
-  // joins, and rows latch again from the moment the switch goes back off.
-  let fresh: (Part & { kind: "thinking" }) | undefined
-  if (working && !foldThinking)
-    for (const parts of drawn) {
-      fresh = parts.find(
-        (part): part is Part & { kind: "thinking" } =>
-          part.kind === "thinking" && part.thinking && !latched.has(part.key),
-      )
-      if (fresh) break
-    }
-  if (fresh) setLatched(new Set(latched).add(fresh.key))
-  // The reader's tap where there is one, the latch while the turn works, else folded — exactly the
-  // reach the row used to work out for itself, answered once here.
-  const openOf = (part: RunPart) => tapped.get(part.key) ?? (working && latched.has(part.key))
-  // A tap is the reader asking this row open or shut for the visit, recorded against what the row
-  // shows now, so a row the latch holds open folds on one tap rather than two.
-  const toggle = (part: RunPart) => setTapped(new Map(tapped).set(part.key, !openOf(part)))
-  // The working line would say what a row already says, so it stands down only while a row really
-  // lies open reading "Thinking…" — not on a stretch merely thinking (with Fold thinking by default
-  // on nothing is open, so the turn must still say what it is doing), and not on an open row that
-  // reads a span, which says nothing about what the turn is doing now.
-  const thinkingProgress =
-    drawn.some((parts) =>
-      parts.some((part) => part.kind === "thinking" && part.thinking && openOf(part)),
-    ) &&
-    !awaitingApproval &&
-    !awaitingClarify
-
   // A reply's stats come only once it is done and fully revealed, so they never count up.
   const statsShown = showStats && !streaming && !revealing && Boolean(message.stats)
+  // The footer's line says what the turn is doing — waiting on the reader, running a call, writing
+  // — but never while a row says the turn is thinking: the row says that, with its spinner, from
+  // the first moment the turn works, so two places never say it at once or both fall silent.
+  const activity = describeActivity(message)
+  const thinkingProgress =
+    !awaitingApproval &&
+    !awaitingClarify &&
+    drawn.some((parts) => parts.some((part) => part.kind === "thinking" && part.thinking))
   const statusLine = streaming && !runningTool && !thinkingProgress
   // Empty, the row would still add two of the message's gaps around itself, so it is drawn only
   // once a line shows.
   const footerLines = [
     statusLine && (
-      <StatusLine
-        key="status"
-        text={awaitingApproval ? "Waiting for your approval…" : describeActivity(message)}
-      />
+      <StatusLine key="status" text={awaitingApproval ? "Waiting for your approval…" : activity} />
     ),
     // An error on a reply that streamed says so plainly: it isn't the bot's answer.
     failed && (
@@ -705,9 +679,6 @@ export const MessageItem = memo(function MessageItem({
                 busy={busy}
                 ended={!streaming}
                 parts={parts}
-                openOf={openOf}
-                tapped={tapped}
-                onToggle={toggle}
               >
                 {last && footer}
               </AssistantRow>
@@ -742,9 +713,6 @@ function AssistantRow({
   busy,
   ended,
   parts,
-  openOf,
-  tapped,
-  onToggle,
   children,
 }: {
   conversationId: string
@@ -753,12 +721,6 @@ function AssistantRow({
   /** The reply has been written: the turn it belongs to has ended. */
   ended: boolean
   parts: Part[]
-  /** Whether a row of this reply lies open, as the thread answers it. */
-  openOf: (part: RunPart) => boolean
-  /** The rows the reader tapped on this visit, by key. */
-  tapped: ReadonlyMap<string, boolean>
-  /** Opens or folds a row for the visit. */
-  onToggle: (part: RunPart) => void
   children?: ReactNode
 }) {
   return (
@@ -786,9 +748,6 @@ function AssistantRow({
               reasoning={part.text}
               thinking={part.thinking}
               spanMs={part.spanMs}
-              open={openOf(part)}
-              asked={tapped.has(part.key)}
-              onToggle={() => onToggle(part)}
               className={huggingTools(parts, index)}
             />
           ) : part.kind === "media" ? (

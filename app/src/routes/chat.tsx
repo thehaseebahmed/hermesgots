@@ -1116,7 +1116,6 @@ export function ChatPage({
                           showStats
                           busy={busy}
                           blocks={draws.get(message.id)}
-                          foldThinking={resolved.foldThinkingByDefault ?? false}
                         />
                       </MessageScrollerItem>
                     )

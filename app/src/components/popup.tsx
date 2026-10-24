@@ -132,7 +132,10 @@ export function PopupHeader({ className, children, ...props }: ComponentProps<ty
 /** The scrolling part, so the header above stays pinned. */
 function Scroll({ children }: { children: ReactNode }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
+    <div
+      data-slot="popup-scroll"
+      className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain"
+    >
       {children}
     </div>
   )

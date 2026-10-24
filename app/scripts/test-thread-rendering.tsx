@@ -375,7 +375,7 @@ test("with the switch on, a sub-thread folds its thinking as a chat's reply does
     startedAt: 1_000,
     endedAt: 2_000,
   }
-  // The chat surface beside it: a reply still thinking, which the switch folds rather than opening.
+  // The chat surface beside it: a reply still thinking, its row shut until a tap asks for it.
   const streaming: Message[] = [
     { id: "ask", conversationId: "", role: "user", content: ASK, status: "done", createdAt: 1 },
     {
@@ -402,9 +402,8 @@ test("with the switch on, a sub-thread folds its thinking as a chat's reply does
       const [line] = thinkingLines()
       assert.ok(line, "the chat's reply draws its thinking")
       assert.equal(lineLabel(line), "Thinking…", "still thinking, so the label says so")
-      assert.equal(expanded(line), "false", "and the switch holds it folded rather than opening it")
+      assert.equal(expanded(line), "false", "and its sheet stays shut rather than opening itself")
     },
-    { foldThinkingByDefault: true },
   )
   await mount(
     <AgentsContext.Provider
@@ -437,13 +436,9 @@ test("with the switch on, a sub-thread folds its thinking as a chat's reply does
         "Thought it through",
         "read back from a finished transcript, so nothing was measured here",
       )
-      // A transcript's reply arrives written, so it never streams: the switch reaches this row
-      // through the same setting as a chat's, and the row it draws is folded either way.
-      assert.equal(
-        expanded(lines[0]),
-        "false",
-        "and folded, under the switch the chat beside it read",
-      )
+      // A transcript's reply arrives written, so it never streams: the row it draws is shut until a
+      // tap asks for it, as a chat's own row is.
+      assert.equal(expanded(lines[0]), "false", "and shut, as the chat's beside it")
     },
   )
 })
