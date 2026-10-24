@@ -1,98 +1,63 @@
-import { app, assert, flow, mock, pass } from "./lib.mjs"
+// Remove's geometry: the confirmation a removal asks first with, drawn over the skill's own sheet at a
+// phone's and a tablet's width, light and dark — a centred dialog on screen at both, the sheet under it
+// still in place. Which origins offer Remove, what a cancel sends, what a confirmed removal leaves and
+// what the host's refusal says are `test-skills-tab.tsx`'s; this is the box the question is drawn in.
+import { app, assert, flow, mock, pass, settled } from "./lib.mjs"
 
-const REFUSAL =
-  "Skill 'pinned-notes' is pinned and cannot be deleted by skill_manage. Ask the user to run " +
-  "`hermes curator unpin pinned-notes` if they want to delete it."
+/** The confirmation's own ceiling (`AlertDialogContent`'s `max-w-xs`), which no width may pass. */
+const DIALOG_MAX = 320
 
-const run = async ({ page, profileId, shot, until }) => {
+const run = async ({ page, profileId, shot }) => {
   const screen = `/settings/bots/${profileId}/skills`
-  const removals = []
   const errors = []
   page.on("pageerror", (error) => errors.push(error.message))
   page.on("console", (message) => {
     if (message.type() === "error") errors.push(message.text())
   })
-  page.on("request", (request) => {
-    const path = new URL(request.url()).pathname
-    if (request.method() === "DELETE" && path.includes("/plugins/memento/skills/"))
-      removals.push(decodeURIComponent(path.split("/").pop()))
-  })
   const row = (name) => page.locator(`[data-skill="${name}"]`)
   const sheet = () => page.locator("[data-skill-sheet]")
-  const open = async (name) => {
-    await row(name).locator("button").first().click()
-    await page.locator(`[data-skill-sheet="${name}"]`).waitFor({ timeout: 15_000 })
-  }
-  const close = async () => {
-    await page.keyboard.press("Escape")
-    await sheet().waitFor({ state: "hidden", timeout: 15_000 })
-  }
-  const remove = () => page.getByRole("button", { name: "Remove", exact: true })
+  const dialog = () => page.getByRole("alertdialog")
 
   try {
+    // The interactions the box needs: the tab, the skill's own sheet, and the question on it.
     await page.goto(`${app}${screen}`)
     await row("hub-audit").waitFor({ timeout: 15_000 })
-    const listed = await page.locator("[data-skills-tab] [data-skill]").count()
+    await settled(page)
+    await row("hub-audit").locator("button").first().click()
+    await page.locator('[data-skill-sheet="hub-audit"]').waitFor({ timeout: 15_000 })
+    await settled(page)
+    await page.getByRole("button", { name: "Remove", exact: true }).click()
+    await dialog().waitFor({ timeout: 15_000 })
+    await settled(page)
 
-    for (const name of ["identity", "gots:ship"]) {
-      await open(name)
-      assert.equal(await remove().count(), 0, `${name} offers no removal`)
-      await close()
-    }
-
-    await open("hub-audit")
-    assert.equal(await remove().count(), 1, "a Hub skill's sheet offers a removal")
-    await shot("offered")
-    await remove().click()
-    const dialog = page.getByRole("alertdialog")
-    await dialog.getByText("Remove hub-audit?", { exact: true }).waitFor({ timeout: 15_000 })
+    const viewport = page.viewportSize()
+    assert.ok(viewport, "the page has a viewport")
+    const box = await dialog().boundingBox()
+    assert.ok(box, "the confirmation has a box")
+    const width = Math.round(box.width)
+    const height = Math.round(box.height)
+    assert.ok(width > 0 && height > 0, `the confirmation is drawn (${width}×${height})`)
+    assert.ok(width <= DIALOG_MAX, `a dialog's width, not the screen's (${width}px)`)
+    assert.ok(
+      box.x >= -1 && box.x + box.width <= viewport.width + 1,
+      `the confirmation is on screen at ${viewport.width}px (${Math.round(box.x)}…${Math.round(box.x + box.width)})`,
+    )
+    assert.ok(
+      Math.abs(box.x + box.width / 2 - viewport.width / 2) <= 1,
+      "centred across the screen, as every confirmation is",
+    )
+    assert.ok(
+      Math.abs(box.y + box.height / 2 - viewport.height / 2) <= 1,
+      "and centred down it",
+    )
     await shot("confirm")
-    await dialog.getByRole("button", { name: "Cancel" }).click()
-    await dialog.waitFor({ state: "hidden", timeout: 15_000 })
-    assert.deepEqual(removals, [], "a cancelled removal sends nothing to the bot")
-    assert.ok(await sheet().isVisible(), "the skill's sheet comes back")
-    assert.ok(await row("hub-audit").isVisible(), "the skill a cancel was asked about is still there")
 
-    await remove().click()
-    await dialog.getByText("Remove hub-audit?", { exact: true }).waitFor({ timeout: 15_000 })
-    await dialog.getByRole("button", { name: "Remove", exact: true }).click()
-    await until(() => row("hub-audit").count().then((count) => count === 0), 15_000, "the row to go")
-    assert.deepEqual(removals, ["hub-audit"], "the removal named the skill on the plugin's route")
-    assert.equal(
-      await page.locator("[data-skills-tab] [data-skill]").count(),
-      listed - 1,
-      "the tab shows what is left",
-    )
-    assert.equal(await sheet().count(), 0, "the sheet went with the skill")
-    await shot("removed")
+    // The sheet the question was asked over is still there, in its own box at this width.
+    const sheetBox = await sheet().boundingBox()
+    assert.ok(sheetBox && sheetBox.width > 0, "the skill's sheet is under the question")
+    await shot("dialog-over-sheet")
 
-    await open("pinned-notes")
-    assert.equal(await remove().count(), 1, "a skill written on the profile offers a removal")
-    await remove().click()
-    await dialog.getByText("Remove pinned-notes?", { exact: true }).waitFor({ timeout: 15_000 })
-    await dialog.getByRole("button", { name: "Remove", exact: true }).click()
-    const toast = page.locator("[data-sonner-toast]").getByText(REFUSAL, { exact: true })
-    await toast.waitFor({ timeout: 15_000 })
-    await dialog.waitFor({ state: "hidden", timeout: 15_000 })
-    await shot("refused")
-    assert.ok(await sheet().isVisible(), "the skill's sheet is back under the refusal")
-    assert.ok(await row("pinned-notes").isVisible(), "the refused skill is still listed")
-    assert.equal(
-      await page.locator("[data-skills-tab] [data-skill]").count(),
-      listed - 1,
-      "and nothing else left with it",
-    )
-    assert.equal(
-      await row("pinned-notes").getByText("Ready", { exact: true }).count(),
-      1,
-      "its row is as it was",
-    )
-
-    assert.deepEqual(
-      errors.filter((text) => !/Failed to load resource|CORS policy/.test(text)),
-      [],
-      `no error in the console (${errors.join("; ")})`,
-    )
+    assert.deepEqual(errors, [], `no error in the console (${errors.join("; ")})`)
   } finally {
     await fetch(`${mock}/__mock/skills`, { method: "POST" })
   }
@@ -108,5 +73,5 @@ for (const width of [390, 1024]) {
   }
 }
 pass(
-  "a removal lives on the sheet of a Hub skill and of one written on the profile, and on neither a built-in's nor a plugin's, asks first with a cancel sending nothing, and takes the row away with the tab showing what is left — while a removal the Host refuses is its own sentence with the row still there — at 390 and 1024px, light and dark",
+  "a removal asks first in a confirmation centred over the skill's own sheet, drawn in a box of its own no wider than a dialog and on screen at both widths, with the sheet still under it — at 390 and 1024px, light and dark",
 )
