@@ -23,6 +23,12 @@ export interface Settings {
   navShortcuts?: boolean
   /** The clock on this device's copy of the appearance record: a change made here, or one pulled. */
   appearanceAt?: number
+  /**
+   * The clock on this device's own edits to the account's prompt library — a save, a rename or a
+   * delete. Sync's fingerprint reads this instead of the entries, so an edit asks for a pass without
+   * every body being read and cloned on each one.
+   */
+  promptsAt?: number
   /** Shows the Developer section in Settings (tapping the version five times). */
   developer?: boolean
   /** The bot-first layout: bots in the sidebar, each chat a thread in its bot. Developer, local. */

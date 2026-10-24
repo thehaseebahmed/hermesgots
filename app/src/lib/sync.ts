@@ -626,23 +626,20 @@ async function mergePluginChats(profile: Profile) {
 }
 
 async function fingerprint() {
-  const [profiles, count, newest, tombstones, settings, prompts] = await Promise.all([
+  const [profiles, count, newest, tombstones, settings] = await Promise.all([
     db.profiles.toArray(),
     db.conversations.count(),
     db.conversations.orderBy("changedAt").last(),
     db.tombstones.count(),
     getSettings(),
-    db.prompts.toArray(),
   ])
   const bots = profiles.map((p) => `${p.id}@${p.updatedAt}`).join(",")
   const appearance = APPEARANCE_FIELDS.map((field) => `${settings[field] ? 1 : 0}`).join("")
-  // The library is a document of its own: an edit here moves this key, which is what asks for a
-  // sync, the same way a bot's rename does.
-  const library = prompts
-    .map((entry) => `${entry.id}@${entry.updatedAt}`)
-    .sort()
-    .join(",")
-  return `${bots}|${count}@${newest?.changedAt ?? 0}|${tombstones}|${settings.onboarded}|${appearance}@${settings.appearanceAt ?? 0}|${library}`
+  // The library is a document of its own, and its own clock says when it moved: an entry saved,
+  // renamed or deleted here bumps `promptsAt`, which is what asks for a sync. Reading the entries —
+  // every body, on every pass this key re-runs for any other device's write — was the cost of
+  // knowing that, and `syncPrompts` reads them anyway when a pass runs.
+  return `${bots}|${count}@${newest?.changedAt ?? 0}|${tombstones}|${settings.onboarded}|${appearance}@${settings.appearanceAt ?? 0}|prompts@${settings.promptsAt ?? 0}`
 }
 
 let running: Promise<void> | undefined
