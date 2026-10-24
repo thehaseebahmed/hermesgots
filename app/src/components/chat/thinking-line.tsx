@@ -1,4 +1,4 @@
-import { memo, useEffect, useId, useRef, useState } from "react"
+import { memo, useEffect, useId, useRef } from "react"
 import { ChevronRightIcon } from "lucide-react"
 
 import { Markdown } from "@/components/chat/markdown"
@@ -25,17 +25,75 @@ function scroller(node: HTMLElement | null): HTMLElement | null {
 }
 
 /**
- * One run of a reply's thinking: a folded row that opens on a tap, reads its words as the reply's
- * own markdown while open, however long they run, and lands the reader on its newest ones. A row
- * opens when the reader watches its thinking stream and stays open until the turn stops working
- * (`autoOpen`, latched by the thread); a tap overrides either way, until the fold moment drops it.
+ * The listeners that stop a row following when the reader scrolls away, kept once per thread scroller
+ * rather than once per open row: a live turn holds every row of its thinking open, so four listeners
+ * per row would be four per stretch of the turn. The wheel, the keys and the touch are the reader's
+ * own moves, so one set stops every row of the thread that is following.
+ */
+const watchers = new WeakMap<HTMLElement, { rows: Set<() => void>; stop: () => void }>()
+
+/** Registers a row's "the reader left" callback against its scroller; answers the way to drop it. */
+function watchAway(view: HTMLElement, away: () => void) {
+  let watcher = watchers.get(view)
+  if (!watcher) {
+    const rows = new Set<() => void>()
+    const allAway = () => {
+      for (const row of rows) row()
+    }
+    const onWheel = (event: WheelEvent) => {
+      if (event.deltaY < 0) allAway()
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "ArrowUp" || event.key === "PageUp" || event.key === "Home") allAway()
+    }
+    let touched: number | undefined
+    const onTouchStart = (event: TouchEvent) => {
+      touched = event.touches[0]?.clientY
+    }
+    const onTouchMove = (event: TouchEvent) => {
+      const y = event.touches[0]?.clientY
+      if (y !== undefined && touched !== undefined && y > touched + 4) allAway()
+      touched = y
+    }
+    view.addEventListener("wheel", onWheel, { passive: true })
+    view.addEventListener("keydown", onKey)
+    view.addEventListener("touchstart", onTouchStart, { passive: true })
+    view.addEventListener("touchmove", onTouchMove, { passive: true })
+    const stop = () => {
+      view.removeEventListener("wheel", onWheel)
+      view.removeEventListener("keydown", onKey)
+      view.removeEventListener("touchstart", onTouchStart)
+      view.removeEventListener("touchmove", onTouchMove)
+    }
+    watcher = { rows, stop }
+    watchers.set(view, watcher)
+  }
+  const held = watcher
+  held.rows.add(away)
+  return () => {
+    held.rows.delete(away)
+    // The last row of the thread that was following has closed: nothing follows now, so the thread
+    // is listened to for nothing until a row opens again.
+    if (held.rows.size) return
+    held.stop()
+    watchers.delete(view)
+  }
+}
+
+/**
+ * One stretch of a reply's thinking: a folded row that reads its words as the reply's own markdown
+ * while open, however long they run, and lands the reader on its newest ones. The row keeps no state
+ * of its own — the thread says whether it lies open and whether the reader asked for it, so one place
+ * can answer whether any row of the turn is open, which the footer's working line has to know — and a
+ * tap only asks the thread to open or fold it.
  */
 export const ThinkingLine = memo(function ThinkingLine({
   reasoning,
   thinking,
   spanMs,
-  autoOpen,
-  working,
+  open,
+  asked,
+  onToggle,
   className,
 }: {
   reasoning: string
@@ -43,30 +101,19 @@ export const ThinkingLine = memo(function ThinkingLine({
   thinking: boolean
   /** How long this device watched the turn think, when it watched it at all. */
   spanMs?: number
-  /** This row streamed open on this visit and the turn still works, so it stays open on its own. */
-  autoOpen: boolean
-  /** The reply is still thinking: its answer has not begun and the turn has not ended. */
-  working: boolean
+  /** The row lies open, as the thread answers it from its latch and the reader's taps. */
+  open: boolean
+  /** The reader asked for this row, so wherever they were, its end is what they came for. */
+  asked: boolean
+  /** Opens or folds the row for the visit; the thread keeps what it decided. */
+  onToggle: () => void
   /** The margin that hugs the row it sits beside, when the thread's parts hand one over. */
   className?: string
 }) {
-  const [override, setOverride] = useState<boolean | null>(null)
-  const [wasWorking, setWasWorking] = useState(working)
   const id = useId()
   const root = useRef<HTMLDivElement | null>(null)
   const body = useRef<HTMLDivElement | null>(null)
   const following = useRef(false)
-
-  // The fold moment: the answer beginning or the turn ending folds every row of the turn together,
-  // including one the reader opened, so the tap state goes with it. It is adjusted here rather than
-  // in an effect, so the fold lands in the same commit as the answer. A row that mounts already
-  // folded has no tap to drop, and nothing fires again once the turn has stopped working, so a tap
-  // after that moment sticks for the visit.
-  if (wasWorking !== working) {
-    setWasWorking(working)
-    if (!working) setOverride(null)
-  }
-  const open = override ?? autoOpen
 
   // Opening reads from the newest words down: the row's end is put at the foot of the thread, and
   // kept there as the row grows — the fold's own transition and the run's arriving words both grow
@@ -83,9 +130,7 @@ export const ThinkingLine = memo(function ThinkingLine({
     // own follows only for a reader already at the thread's end, and never pulls someone who has
     // scrolled up back down to a run they did not ask for.
     following.current =
-      override !== null ||
-      !view ||
-      view.scrollTop + view.clientHeight >= view.scrollHeight - NEAR_END
+      asked || !view || view.scrollTop + view.clientHeight >= view.scrollHeight - NEAR_END
     if (!following.current) return
     const end = (behavior: ScrollBehavior) => node.scrollIntoView({ block: "end", behavior })
     end(reducedMotion() ? "auto" : "smooth")
@@ -116,7 +161,7 @@ export const ThinkingLine = memo(function ThinkingLine({
       observer.disconnect()
       cancelAnimationFrame(queued)
     }
-  }, [open, override])
+  }, [open, asked])
 
   // Scrolling the thread up takes the reader somewhere else, so the follow stops for this row and
   // stays off however much more its run has to say. Only the reader's own scrolling counts: the
@@ -125,34 +170,9 @@ export const ThinkingLine = memo(function ThinkingLine({
     if (!open) return
     const view = scroller(body.current)
     if (!view) return
-    const away = () => {
+    return watchAway(view, () => {
       following.current = false
-    }
-    const onWheel = (event: WheelEvent) => {
-      if (event.deltaY < 0) away()
-    }
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "ArrowUp" || event.key === "PageUp" || event.key === "Home") away()
-    }
-    let touched: number | undefined
-    const onTouchStart = (event: TouchEvent) => {
-      touched = event.touches[0]?.clientY
-    }
-    const onTouchMove = (event: TouchEvent) => {
-      const y = event.touches[0]?.clientY
-      if (y !== undefined && touched !== undefined && y > touched + 4) away()
-      touched = y
-    }
-    view.addEventListener("wheel", onWheel, { passive: true })
-    view.addEventListener("keydown", onKey)
-    view.addEventListener("touchstart", onTouchStart, { passive: true })
-    view.addEventListener("touchmove", onTouchMove, { passive: true })
-    return () => {
-      view.removeEventListener("wheel", onWheel)
-      view.removeEventListener("keydown", onKey)
-      view.removeEventListener("touchstart", onTouchStart)
-      view.removeEventListener("touchmove", onTouchMove)
-    }
+    })
   }, [open])
 
   return (
@@ -162,7 +182,7 @@ export const ThinkingLine = memo(function ThinkingLine({
         className="flex min-h-11 w-full items-center gap-2 text-left text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         aria-expanded={open}
         aria-controls={id}
-        onClick={() => setOverride(!open)}
+        onClick={onToggle}
       >
         {thinkingLabel({ thinking, spanMs })}
         <ChevronRightIcon

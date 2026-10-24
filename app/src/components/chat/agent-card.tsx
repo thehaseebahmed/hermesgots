@@ -18,7 +18,7 @@ import {
   useAgentsSource,
   type AgentsSource,
 } from "@/lib/agents"
-import { DEFAULT_SETTINGS, db, type Message, type SubagentRef, type ToolEvent } from "@/lib/db"
+import { getSettings, type Message, type SubagentRef, type ToolEvent } from "@/lib/db"
 import { usePluginFeatureOn } from "@/lib/features"
 import { stopAgent, type AgentStop, type DelegatedAgent, type HermesConfig } from "@/lib/hermes"
 import { toMessages } from "@/lib/history"
@@ -325,11 +325,8 @@ function AgentView({ agent, server }: { agent: DelegatedAgent; server: HermesCon
   const { messages, failed } = useTranscript(server, agent, 500)
   const draws = useDraws(messages ?? NO_ROWS, server)
   // A sub-thread draws through the same rows as a chat's, so it folds thinking the same way.
-  const settings = useLiveQuery(
-    async () => ({ ...DEFAULT_SETTINGS, ...(await db.settings.get("settings")) }),
-    [],
-  )
-  const foldThinking = settings?.foldThinkingByDefault ?? DEFAULT_SETTINGS.foldThinkingByDefault
+  const settings = useLiveQuery(getSettings, [])
+  const foldThinking = settings?.foldThinkingByDefault ?? false
   const end = useRef<HTMLDivElement>(null)
   const loaded = messages !== undefined
   useEffect(() => {

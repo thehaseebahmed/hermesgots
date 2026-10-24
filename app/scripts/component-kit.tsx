@@ -214,6 +214,16 @@ export const findAll = (selector: string) => [...document.querySelectorAll(selec
 export const findText = (selector: string, label: string) =>
   findAll(selector).find((one) => one.textContent?.includes(label)) ?? null
 
+/**
+ * Asserts nothing on the screen matches a selector, or a control reading `label`. The failure names
+ * what should have been absent, rather than printing the element that was found.
+ */
+export function absent(selector: string, label?: string) {
+  const found = label === undefined ? find(selector) : findText(selector, label)
+  const what = label === undefined ? selector : `${selector} reading "${label}"`
+  assert.ok(!found, `nothing on the screen matches ${what}`)
+}
+
 export const composerField = () =>
   find('textarea[aria-label="Message"]') as HTMLTextAreaElement | null
 export const slashOptions = () => findAll('[role="option"]').map((row) => row.textContent ?? "")

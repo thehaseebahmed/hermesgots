@@ -3,12 +3,12 @@ import test from "node:test"
 import { db, saveAppearance, type Message, type Settings, type ToolEvent } from "@/lib/db"
 import type { ReasoningRun } from "@/lib/thinking"
 import {
+  absent,
   botProfile,
   chatScreen,
   click,
   expanded,
   find,
-  findText,
   json,
   lineLabel,
   mount,
@@ -44,7 +44,7 @@ const run = (text: string, extra: Partial<ReasoningRun> = {}): ReasoningRun => (
 
 /**
  * A working-out no screen holds: the fixture repeated, with a last line of its own to look for. An
- * open row draws all of it, so the words at the end are the ones a cap would have hidden.
+ * open row draws all of it, down to that line.
  */
 const LONG = [...Array.from({ length: 6 }, () => MARKDOWN), "The scan is cheap in the end."].join(
   "\n\n",
@@ -857,11 +857,9 @@ test("an open row longer than a screen shows its last words, with no cap and no 
         /The scan is cheap in the end/,
         "the whole run reads, down to its last words",
       )
-      // Asked as flags: an element handed to `assert.equal` is inspected whole when it fails, and a
-      // diff of a run this long is more than the reporter can hold.
-      assert.equal(Boolean(find("[data-slot=thinking-fade]")), false, "no fade over the rest")
-      assert.equal(Boolean(find("[data-slot=thinking-cap]")), false, "no box measuring a cap")
-      assert.equal(Boolean(findText("button", "Show more")), false, "and no Show more to reveal it")
+      absent("[data-slot=thinking-fade]")
+      absent("[data-slot=thinking-cap]")
+      absent("button", "Show more")
       assert.doesNotMatch(screenText(), /Show more/, "nowhere on the screen")
     },
   )
@@ -1086,5 +1084,93 @@ test("the switch turned on mid-turn leaves the open row open and the next one ne
     assert.equal(expanded(rows[0]), "true", "the row that streamed before the switch stays open")
     assert.equal(lineLabel(rows[1]), "Thinking…", "the next stretch is still thinking")
     assert.equal(expanded(rows[1]), "false", "and it never opens, as the switch now asks")
+  })
+})
+
+test("with the switch on, a reader who opens the streaming row takes the working line's place", async () => {
+  host()
+  const id = "opened-under-switch"
+  await screen(
+    undefined,
+    turn({ id, reasoningRuns: [run(REASONING)] }),
+    async () => {
+      await stream(id)
+      assert.equal(expanded(onlyThinkingLine()), "false", "the switch keeps the streaming row folded")
+      assert.match(
+        workingLine()?.textContent ?? "",
+        /Thinking…/,
+        "so the footer is what says the turn is thinking",
+      )
+
+      await click(onlyThinkingLine())
+      assert.equal(expanded(onlyThinkingLine()), "true", "a tap opens the row for the visit")
+      assert.equal(lineLabel(onlyThinkingLine()), "Thinking…", "and the row says it for itself")
+      assert.equal(workingLine(), null, "so the footer stands down rather than saying it twice")
+
+      await click(onlyThinkingLine())
+      assert.equal(expanded(onlyThinkingLine()), "false", "a second tap folds it again")
+      assert.match(workingLine()?.textContent ?? "", /Thinking…/, "and the footer speaks again")
+    },
+    { foldThinkingByDefault: true },
+  )
+})
+
+test("with the switch off, a reader who folds the streaming row keeps the turn from going silent", async () => {
+  host()
+  const id = "folded-by-reader"
+  await screen(undefined, turn({ id, reasoningRuns: [run(REASONING)] }), async () => {
+    await stream(id)
+    assert.equal(expanded(onlyThinkingLine()), "true", "the row streams open as its words arrive")
+    assert.equal(workingLine(), null, "so the footer stands down while it lies open")
+
+    await click(onlyThinkingLine())
+    const folded = onlyThinkingLine()
+    assert.equal(expanded(folded), "false", "a tap folds it mid-stream")
+    assert.equal(lineLabel(folded), "Thinking…", "the row keeps its label through the fold")
+    assert.match(
+      workingLine()?.textContent ?? "",
+      /Thinking…/,
+      "and the footer says the turn is thinking, so no row open leaves the turn silent",
+    )
+  })
+})
+
+test("with the switch on, a coding session's streaming row stays folded too", async () => {
+  host()
+  const id = "session-1"
+  await screen(
+    "project-1",
+    turn({ id, reasoningRuns: [run(REASONING)] }),
+    async () => {
+      await stream(id)
+      const line = onlyThinkingLine()
+      assert.equal(lineLabel(line), "Thinking…", "the session's row says what its stretch is doing")
+      assert.equal(expanded(line), "false", "and the switch keeps it folded here, as in a chat")
+      assert.match(workingLine()?.textContent ?? "", /Thinking…/, "with the footer speaking instead")
+    },
+    { foldThinkingByDefault: true },
+  )
+})
+
+test("a reply resumed after the stream dropped latches open again, and folds at the answer", async () => {
+  host()
+  const id = "resumed"
+  await screen(undefined, turn({ id, reasoningRuns: [run(REASONING)] }), async () => {
+    await stream(id)
+    assert.equal(expanded(onlyThinkingLine()), "true", "the row streams open as its words arrive")
+
+    await db.messages.put({ ...(await db.messages.get(id))!, status: "stopped" })
+    await settle()
+    assert.equal(expanded(onlyThinkingLine()), "false", "the turn ending with no answer folds it")
+
+    // The stream comes back: the same stretch of thinking is being watched again on this visit.
+    await stream(id)
+    const again = onlyThinkingLine()
+    assert.equal(lineLabel(again), "Thinking…", "the resumed stretch is still thinking")
+    assert.equal(expanded(again), "true", "and drawn open again, as a row being watched")
+
+    await db.messages.put({ ...(await db.messages.get(id))!, content: ANSWER })
+    await settle()
+    assert.equal(expanded(onlyThinkingLine()), "false", "and the answer folds it, as it folds any row")
   })
 })
