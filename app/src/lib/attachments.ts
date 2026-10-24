@@ -3,27 +3,28 @@ import { useSyncExternalStore } from "react"
 import {
   attachmentParts,
   attachmentsText,
-  formatBytes,
   splitAttachments,
 } from "@/lib/attachment-text"
+import {
+  formatBytes,
+  isPhoto,
+  MAX_FILE_BYTES,
+  MAX_ATTACHMENTS,
+  MAX_INLINE_BYTES,
+} from "@/lib/attachment-caps"
 import { db, type Attachment } from "@/lib/db"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
 import { getPluginMedia, type ContentPart } from "@/lib/hermes"
 import { createSignal } from "@/lib/store"
 import { randomId } from "@/lib/utils"
 
-export { attachmentsText, formatBytes, splitAttachments }
+export { attachmentsText, splitAttachments }
 
-/** Under the API server's 10 MB request cap, which the plugin's upload shares. */
-export const MAX_FILE_BYTES = 9 * 1024 * 1024
-export const MAX_ATTACHMENTS = 10
-/** Photos go inline as base64 (a third bigger), so together they must leave the request room. */
-export const MAX_INLINE_BYTES = 6.5 * 1024 * 1024
+// The caps every intake surface is held to are one rule; these are the ones a message is sent under.
+export { formatBytes, MAX_ATTACHMENTS, MAX_FILE_BYTES, MAX_INLINE_BYTES }
 /** Long edge models are given; bigger images are scaled down before they go, to keep the body small. */
 const MAX_EDGE = 1600
 const KEEP_AS_IS_BYTES = 1024 * 1024
-// SVG isn't something providers take as an image, so it goes as a file.
-const IMAGE_TYPES = /^image\/(jpeg|png|webp|gif|heic|heif|avif|bmp)$/
 
 /** A photo on its way to storage: the file to keep, and its own size. */
 type Photo = { blob: Blob; width: number; height: number }
@@ -66,7 +67,7 @@ function jpegName(name: string) {
  */
 export async function prepareAttachment(file: File, inline = true): Promise<Attachment> {
   const name = file.name || "file"
-  if (inline && IMAGE_TYPES.test(file.type)) {
+  if (inline && isPhoto(file.type)) {
     const photo = await scaled(file)
     if (photo) {
       const { blob, width, height } = photo

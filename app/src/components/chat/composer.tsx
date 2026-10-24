@@ -3,6 +3,8 @@ import {
   useId,
   useRef,
   useState,
+  type ClipboardEvent,
+  type DragEvent,
   type FormEvent,
   type KeyboardEvent,
   type PointerEvent,
@@ -23,13 +25,8 @@ import {
   InputGroupTextarea,
 } from "@/components/ui/input-group"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import {
-  formatBytes,
-  inlineBytes,
-  MAX_ATTACHMENTS,
-  MAX_INLINE_BYTES,
-  prepareAttachment,
-} from "@/lib/attachments"
+import { fitsInline, fresh, inlineRefusal, intake, MAX_ATTACHMENTS } from "@/lib/attachment-caps"
+import { inlineBytes, prepareAttachment } from "@/lib/attachments"
 import type { Attachment } from "@/lib/db"
 import type { PluginFeatureAnswer } from "@/lib/features"
 
@@ -62,7 +59,7 @@ import {
 } from "@/lib/slash"
 import { isDoubleEscape, isInterrupt } from "@/lib/keys"
 import { useSkills } from "@/lib/skills"
-import { randomId } from "@/lib/utils"
+import { cn, randomId } from "@/lib/utils"
 
 const HOLD_MS = 400
 const SLIDE_CANCEL_PX = 80
@@ -130,6 +127,10 @@ export function Composer({
   const [attachments, setAttachments] = useState<Attachment[]>([])
   // Picked files still being read, shown as placeholders where they'll land.
   const [preparing, setPreparing] = useState<{ id: string; name: string; image: boolean }[]>([])
+  // Files taken moments ago, so a paste and the drop it can also fire add one copy.
+  const recent = useRef(new Map<string, number>())
+  // A file dragged over the composer, held until it is dropped or leaves.
+  const [over, setOver] = useState(false)
   const [viewing, setViewing] = useState<number | null>(null)
   // The key whose draft the text is; until it has loaded nothing is saved over it.
   const [loaded, setLoaded] = useState<string>()
@@ -281,29 +282,26 @@ export function Composer({
   }
 
   const addFiles = async (files: File[]) => {
-    const room = MAX_ATTACHMENTS - attachments.length - preparing.length
-    const taken = files.slice(0, Math.max(room, 0))
-    if (files.length > taken.length) {
-      const left = files.length - taken.length
-      toast.error(
-        `A message can carry ${MAX_ATTACHMENTS} attachments, so ${left === 1 ? "1 was" : `${left} were`} left out.`,
-      )
-    }
-    const placeholders = taken.map((file) => ({
+    // A paste and the drop the browser can also fire carry the same file, which lands once.
+    const added = fresh(files, recent.current, Date.now())
+    if (!added.length) return
+    const { take, refusals } = intake(added, attachments.length + preparing.length, {
+      inline: imagesAvailable,
+    })
+    for (const refusal of refusals) toast.error(refusal.message)
+    const placeholders = take.map((file) => ({
       id: randomId(),
       name: file.name,
       image: file.type.startsWith("image/"),
     }))
     setPreparing((current) => [...current, ...placeholders])
     let inline = inlineBytes(attachments)
-    for (const [index, file] of taken.entries()) {
+    for (const [index, file] of take.entries()) {
       try {
         const attachment = await prepareAttachment(file, imagesAvailable)
         const size = attachment.image ? attachment.blob!.size : 0
-        if (inline + size > MAX_INLINE_BYTES) {
-          toast.error(
-            `${attachment.name} doesn't fit: a message's photos can add up to ${formatBytes(MAX_INLINE_BYTES)}. Send it in the next one.`,
-          )
+        if (!fitsInline(size, inline)) {
+          toast.error(inlineRefusal(attachment.name).message)
         } else {
           inline += size
           setAttachments((current) => [...current, attachment].slice(0, MAX_ATTACHMENTS))
@@ -316,6 +314,36 @@ export function Composer({
       }
     }
     textarea.current?.focus()
+  }
+
+  // A pasted photo or file is the same intake as a picked one, and never a send.
+  const pasted = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const data = event.clipboardData
+    // `files` and `items` can each carry a file, and the same one twice; `fresh` takes it once.
+    const files = [...(data?.files ?? [])]
+    for (const item of data?.items ?? [])
+      if (item.kind === "file") {
+        const file = item.getAsFile()
+        if (file) files.push(file)
+      }
+    if (!files.length) return
+    event.preventDefault()
+    void addFiles(files)
+  }
+
+  const dragging = (event: DragEvent<HTMLFormElement>) => {
+    if (!Array.from(event.dataTransfer?.types ?? []).includes("Files")) return
+    event.preventDefault()
+    setOver(true)
+  }
+
+  const dropped = (event: DragEvent<HTMLFormElement>) => {
+    const files = [...(event.dataTransfer?.files ?? [])]
+    // Text dragged into the field is the field's own drop; only files are taken here.
+    if (!files.length) return
+    event.preventDefault()
+    setOver(false)
+    void addFiles(files)
   }
 
   const removeAttachment = (attachment: Attachment) =>
@@ -521,7 +549,13 @@ export function Composer({
   )
 
   return (
-    <form onSubmit={submit} className={`${COLUMN_BOX} relative`}>
+    <form
+      onSubmit={submit}
+      onDragOver={dragging}
+      onDragLeave={() => setOver(false)}
+      onDrop={dropped}
+      className={`${COLUMN_BOX} relative`}
+    >
       {menuOpen && (
         <SlashMenu
           id={listId}
@@ -554,7 +588,12 @@ export function Composer({
         onIndex={setViewing}
         onRemove={removeAttachment}
       />
-      <InputGroup className="bg-background shadow-lg shadow-black/5 has-data-[align=block-end]:rounded-[1.75rem] has-[textarea]:rounded-[1.75rem] dark:bg-input/30">
+      <InputGroup
+        className={cn(
+          "bg-background shadow-lg shadow-black/5 has-data-[align=block-end]:rounded-[1.75rem] has-[textarea]:rounded-[1.75rem] dark:bg-input/30",
+          over && "ring-2 ring-ring/40",
+        )}
+      >
         <InputGroupTextarea
           ref={textarea}
           value={value}
@@ -569,6 +608,7 @@ export function Composer({
           }}
           // A caret moved without a keystroke — a click, an arrow key — moves the menu with it.
           onSelect={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}
+          onPaste={pasted}
           onKeyDown={onKeyDown}
           enterKeyHint="send"
           role={menuOpen ? "combobox" : undefined}
