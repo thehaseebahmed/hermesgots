@@ -504,7 +504,7 @@ function MeetingRow({
   return (
     <ItemRow
       icon={<AudioLinesIcon aria-hidden />}
-      waiting={failed}
+      tone={failed ? "warning" : "success"}
       botId={meeting.bot.botId}
       title={meeting.title}
       when={formatRelative(meeting.createdAt, now)}

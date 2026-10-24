@@ -1,9 +1,10 @@
 /**
  * A Code row drawn over the device's own database: which colour its round icon wears, which glyph
- * says why, and the unread dot this device's read marks decide — the components' own answers, with
- * the session's claim computed from faked host facts the way CodeList computes it. Geometry (where
- * the dot sits) is the browser flow's (`e2e/code-list.mjs`), since a DOM without layout has no
- * boxes; the pure rules behind all of this are unit tests (`test-session-work.mjs`).
+ * says why, and the unread dot, as the mark CodeList threads from this device's read marks decides
+ * — the components' own answers, with the session's claim computed from faked host facts the way
+ * CodeList computes it. Geometry (where the dot sits) is the browser flow's (`e2e/code-list.mjs`),
+ * since a DOM without layout has no boxes; the pure rules behind all of this are unit tests
+ * (`test-session-work.mjs`).
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -15,17 +16,7 @@ import { db } from "@/lib/db"
 import { SessionItem } from "@/routes/code"
 import { sessionGroup, type LiveTurn, type LocalTurn } from "@/lib/session-work"
 import { mount, seedSettings } from "./component-kit.tsx"
-
-/** A pull request of a session's, the way the plugin reports it. */
-const pr = (state: "open" | "draft" | "merged" | "closed", checks: "pending" | "failure" | "success" | null) => ({
-  repo: "acme/gots",
-  number: 7,
-  title: "A change",
-  state,
-  checks,
-  url: "https://example.test/7",
-  at: 150,
-})
+import { pr } from "./fixtures/pr.ts"
 
 const conversation = (id: string, patch: Partial<Conversation> = {}): Conversation => ({
   id,
@@ -45,11 +36,13 @@ async function drawRow(
     live,
     local,
     subagents,
+    mark,
     body,
   }: {
     live?: LiveTurn
     local?: LocalTurn
     subagents?: number
+    mark?: number
     body: () => Promise<void>
   },
 ) {
@@ -63,6 +56,7 @@ async function drawRow(
         row={{ c, state: claim.state, prTick: claim.prTick, key: c.id }}
         showProject={false}
         now={1_000}
+        mark={mark}
       />
     </MemoryRouter>,
     body,
@@ -93,6 +87,7 @@ test("the round icon is yellow for a wait, green for done or healthy, grey at re
     patch?: Partial<Conversation>
     live?: LiveTurn
     local?: LocalTurn
+    subagents?: number
     tone: string
   }[] = [
     { id: "human", local: { waiting: true }, tone: "bg-warning/15" },
@@ -104,12 +99,14 @@ test("the round icon is yellow for a wait, green for done or healthy, grey at re
     { id: "discarded", patch: { discardedAt: 300, prs: [pr("open", "success")] }, tone: "bg-muted" },
     { id: "draft-rest", patch: { prs: [pr("draft", "success")] }, tone: "bg-muted" },
     { id: "working", local: { streaming: true }, tone: "bg-muted" },
+    { id: "subagents", subagents: 1, tone: "bg-muted" },
     { id: "idle", tone: "bg-muted" },
   ]
   for (const one of cases) {
     await drawRow(conversation(one.id, one.patch), {
       live: one.live,
       local: one.local,
+      subagents: one.subagents,
       body: async () => {
         toneHas(icon().tone, one.tone)
       },
@@ -122,6 +119,7 @@ test("the glyph says why: alert, pull request arrow, spinner, code, check, archi
     id: string
     patch?: Partial<Conversation>
     local?: LocalTurn
+    subagents?: number
     glyph: string
     loading?: boolean
   }[] = [
@@ -130,6 +128,7 @@ test("the glyph says why: alert, pull request arrow, spinner, code, check, archi
     { id: "g-merge", patch: { prs: [pr("open", "success")] }, glyph: "lucide-git-pull-request-arrow" },
     { id: "g-draft", patch: { prs: [pr("draft", "success")] }, glyph: "lucide-git-pull-request-arrow" },
     { id: "g-working", local: { streaming: true }, glyph: "lucide", loading: true },
+    { id: "g-subagents", subagents: 1, glyph: "lucide", loading: true },
     { id: "g-idle", glyph: "lucide-code-xml" },
     { id: "g-resolved", patch: { resolvedAt: 300 }, glyph: "lucide-check" },
     { id: "g-discarded", patch: { discardedAt: 300 }, glyph: "lucide-archive-x" },
@@ -137,6 +136,7 @@ test("the glyph says why: alert, pull request arrow, spinner, code, check, archi
   for (const one of cases) {
     await drawRow(conversation(one.id, one.patch), {
       local: one.local,
+      subagents: one.subagents,
       body: async () => {
         const drawn = icon()
         if (one.loading) assert.ok(drawn.loading, `${one.id}: the spinner keeps its status`)
@@ -147,27 +147,27 @@ test("the glyph says why: alert, pull request arrow, spinner, code, check, archi
 })
 
 test("a session this device hasn't read wears the dot, and a read mark clears it", async () => {
+  // No mark: never opened on this device. The dot is the blue one, and said in words too.
   await drawRow(conversation("unread"), {
     body: async () => {
       const dot = document.querySelector("[data-unread]")
       assert.ok(dot, "never opened here, so unread")
       const circle = icon().circle
       assert.equal(dot.parentElement, circle.parentElement, "the dot sits on the icon's own wrapper")
-      const tone = [...(dot as HTMLElement).classList]
-      assert.ok(tone.includes("bg-info"), "the dot is the blue one")
+      assert.ok([...(dot as HTMLElement).classList].includes("bg-info"), "the dot is the blue one")
       assert.match(document.body.textContent ?? "", /New activity/, "the dot is said in words too")
     },
   })
-  // Reading writes the mark; the row drawn after it has nothing to say.
-  markRead("read", Date.now())
+  // A mark as new as the thread's activity: read, so nothing to say.
   await drawRow(conversation("read"), {
+    mark: Date.now(),
     body: async () => {
       assert.equal(document.querySelector("[data-unread]"), null, "read: the dot is gone")
     },
   })
-  // A mark older than the activity brings the dot back.
-  markRead("older", Date.now() - 60_000)
+  // A mark older than the thread's activity: the dot comes back.
   await drawRow(conversation("older", { updatedAt: Date.now() }), {
+    mark: Date.now() - 60_000,
     body: async () => {
       assert.ok(document.querySelector("[data-unread]"), "activity landed since the mark")
     },
@@ -180,4 +180,16 @@ test("a closed session with new activity is dotted too", async () => {
       assert.ok(document.querySelector("[data-unread]"), "Resolved still tells this device it is new")
     },
   })
+})
+
+test("a mark never moves back, and the oldest drop once the store is full", () => {
+  const store = () =>
+    JSON.parse(localStorage.getItem("memento:read-marks") ?? "{}") as Record<string, number>
+  markRead("mono", 100)
+  markRead("mono", 50)
+  assert.equal(store()["mono"], 100, "an older moment never moves a mark back")
+  for (let i = 0; i < 500; i++) markRead(`bulk-${i}`, 1_000 + i)
+  assert.equal(Object.keys(store()).length, 500, "the store holds only its cap")
+  assert.equal(store()["mono"], undefined, "the oldest mark drops once it is full")
+  assert.ok(store()["bulk-499"], "the newest survive")
 })

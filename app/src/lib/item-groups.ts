@@ -1,5 +1,6 @@
 import type { SessionState } from "@/lib/session-work"
 import type { CodeSort } from "@/lib/db"
+import { byName } from "./compare.ts"
 
 /** What an item needs, which puts it ahead of the dated groups (or, closed, after them). */
 export type ItemNeed = "waiting" | "working" | "closed" | undefined
@@ -17,6 +18,24 @@ const LABELS = {
 export type ItemGroupKey = keyof typeof LABELS
 
 const DAY_MS = 86_400_000
+
+/**
+ * The groups in `labels`' order with the empty ones dropped; each group's members in `order`'s
+ * sequence when a list brings one. The dated lists and Code's four are this fold over their own
+ * vocabulary, so the anatomy (fixed order, empties gone) lives once.
+ */
+function groupsOf<T, K extends string>(
+  items: T[],
+  labels: Record<K, string>,
+  keyOf: (item: T) => K,
+  order?: (a: T, b: T) => number,
+) {
+  const placed = items.map((item) => ({ item, key: keyOf(item) }))
+  return (Object.keys(labels) as K[]).map((key) => {
+    const members = placed.filter((p) => p.key === key).map((p) => p.item)
+    return { key, label: labels[key], items: order ? members.sort(order) : members }
+  }).filter((group) => group.items.length)
+}
 
 /**
  * The groups the dated lists (Meetings, Research) share: Waiting on you, Working, then the rest
@@ -40,14 +59,7 @@ export function itemGroups<T>(
     if (when >= today - 6 * DAY_MS) return "week"
     return "earlier"
   }
-  const placed = items.map((item) => ({ item, key: of(item) }))
-  return (Object.keys(LABELS) as ItemGroupKey[])
-    .map((key) => ({
-      key,
-      label: LABELS[key],
-      items: placed.filter((p) => p.key === key).map((p) => p.item),
-    }))
-    .filter((group) => group.items.length)
+  return groupsOf(items, LABELS, of)
 }
 
 /** The Code list's four groups, in the order they always run: what waits on the user first. */
@@ -79,17 +91,7 @@ export function codeGroups<T>(
   group: (item: T) => CodeGroupKey,
   order: (a: T, b: T) => number,
 ) {
-  const placed = items.map((item) => ({ item, key: group(item) }))
-  return (Object.keys(CODE_LABELS) as CodeGroupKey[])
-    .map((key) => ({
-      key,
-      label: CODE_LABELS[key],
-      items: placed
-        .filter((p) => p.key === key)
-        .map((p) => p.item)
-        .sort(order),
-    }))
-    .filter((grouped) => grouped.items.length)
+  return groupsOf(items, CODE_LABELS, group, order)
 }
 
 /**
@@ -105,7 +107,10 @@ export function codeOrder<T>(
     title: (item: T) => string
   },
 ): (a: T, b: T) => number {
-  if (sort === "title") return (a, b) => fields.title(a).localeCompare(fields.title(b))
-  const newest = sort === "activity" ? fields.activity : fields.created
-  return (a, b) => newest(b) - newest(a)
+  if (sort === "title") return (a, b) => byName(fields.title(a), fields.title(b))
+  const newest: Record<Exclude<CodeSort, "title">, (item: T) => number> = {
+    created: fields.created,
+    activity: fields.activity,
+  }
+  return (a, b) => newest[sort](b) - newest[sort](a)
 }

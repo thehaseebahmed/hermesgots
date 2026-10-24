@@ -10,3 +10,7 @@ export const LIVE_PR_STATES: PrState[] = ["open", "draft"]
 
 /** Whether a pull request is one of a session's live ones. */
 export const prIsLive = (pr: Pick<PullRequestRef, "state">) => LIVE_PR_STATES.includes(pr.state)
+
+/** Whether a pull request's checks are still running or have failed: what waits on the watcher. */
+export const prChecksWait = (pr: Pick<PullRequestRef, "checks">) =>
+  pr.checks === "pending" || pr.checks === "failure"

@@ -395,7 +395,7 @@ function MissionRow({
   return (
     <ItemRow
       icon={isWorking(mission) ? <Spinner /> : <Icon />}
-      waiting={needsYou(mission)}
+      tone={needsYou(mission) ? "warning" : "success"}
       botId={botId}
       title={mission.title}
       when={formatRelative(mission.createdAt, now)}

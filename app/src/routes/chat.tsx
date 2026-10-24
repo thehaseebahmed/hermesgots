@@ -161,9 +161,9 @@ import {
   refreshWorkspace,
   closeSessionWork,
   setSessionMode,
-  lastActivityAt,
   type RepoRef,
 } from "@/lib/workspace"
+import { lastActivityAt } from "@/lib/session-work"
 import { useReadyLine } from "@/lib/greeting"
 import { SUGGESTIONS } from "@/lib/suggestions"
 import { DEFAULT_BOT_ID } from "@/components/bots"
@@ -737,8 +737,10 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
   // the row's unread dot (never synced: a mark is about where the reader was sitting).
   const threadId = session?.id
   const sessionActivity = session ? lastActivityAt(session) : 0
+  // The mark rides the activity it has seen, not the wall clock: a re-render with nothing new
+  // writes nothing, and the list's dot still clears.
   useEffect(() => {
-    if (threadId) markRead(threadId)
+    if (threadId) markRead(threadId, sessionActivity)
   }, [threadId, sessionActivity])
   // A thread beside Main says how many replies it has under its title.
   const replyCount = messages?.filter((m) => m.role === "assistant").length ?? 0

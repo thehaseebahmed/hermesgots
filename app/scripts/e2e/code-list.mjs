@@ -3,7 +3,8 @@
 // and Discarded told apart by their icons, the sort menu choosing Title A–Z and remembering it over a
 // reload, and a search dropping the headers for one flat list in that same order. Then the unread
 // dot — the geometry no DOM without layout can prove: its corner on the round icon, cleared by the
-// thread rendering when the row is opened, and back when activity lands while the list sits open.
+// thread rendering when the row is opened, and back when activity lands while the list sits open —
+// and the sticky heading's tuck under the header, the same geometry's other half.
 import { app, assert, flow, pass } from "./lib.mjs"
 
 const PROJECT = "p_1a2b3c4d"
@@ -159,4 +160,43 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   assert.ok(reloaded[0]?.includes("Another idle"), "and the rows still run by it")
   assert.equal(await closed.getByText("Finished work").isVisible(), false, "Closed is folded again")
   pass("the sort choice is kept on this device and the groups come back folded after a reload")
+
+  // The sticky headings' geometry, which no DOM without layout can prove: with enough rows to
+  // scroll, the list is scrolled and a heading stops beneath the header's own box — the offset
+  // the scroll container publishes as `--list-header-h`.
+  await page.evaluate(async (projectId) => {
+    const { db } = await import("/src/lib/db.ts")
+    const profile = await db.profiles.toCollection().first()
+    const at = Date.now()
+    for (let i = 0; i < 12; i++) {
+      await db.conversations.put({
+        id: `cl-overflow-${i}`,
+        profileId: profile.id,
+        projectId,
+        title: `Overflow ${i}`,
+        hermesSessionId: `cl-overflow-${i}-hermes`,
+        createdAt: at - 60_000 + i,
+        updatedAt: at - 60_000 + i,
+        changedAt: at,
+        draftAt: at,
+      })
+    }
+  }, PROJECT)
+  await page.reload()
+  await until(async () => (await page.getByText("Overflow 0").isVisible()), 20_000, "the taller list")
+  const scroller = page
+    .locator("div.overflow-y-auto")
+    .filter({ has: page.getByRole("heading", { name: "Code", exact: true }) })
+  assert.equal(await scroller.count(), 1, "the list's own scroll container")
+  assert.ok(await scroller.evaluate((el) => el.scrollHeight > el.clientHeight + 50),
+    "the seeded rows make the list taller than its pane")
+  await scroller.evaluate((el) => { el.scrollTop = 400 })
+  const headerBox = await scroller.locator("header").first().boundingBox()
+  const headingBox = await group(page, "Idle").locator("h2").boundingBox()
+  assert.ok(headerBox && headingBox, "the header and a heading measured")
+  assert.ok(headingBox.y >= headerBox.y + headerBox.height - 2,
+    `a scrolled heading (${Math.round(headingBox.y)}px) stops beneath the header (${Math.round(headerBox.y + headerBox.height)}px)`)
+  assert.ok(headingBox.y < headerBox.y + headerBox.height + 60, "and tucks right under it")
+  await shot("sticky")
+  pass("a group heading sticks beneath the list's header once the list scrolls")
 })

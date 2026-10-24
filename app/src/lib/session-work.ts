@@ -16,7 +16,7 @@
  * `scripts/test-session-work.mjs` drives it as a rule.
  */
 
-import { prIsLive } from "./pull-state.ts"
+import { prChecksWait, prIsLive } from "./pull-state.ts"
 import type { Conversation } from "@/lib/db"
 
 export type SessionState = "working" | "waiting" | "idle" | "resolved" | "discarded"
@@ -102,8 +102,7 @@ export function sessionGroup(
   // An answer to ask outranks every pull request: the alert glyph is the question, not the arrow.
   if (state === "waiting") return { state, prTick: false }
   const livePrs = (conversation.prs ?? []).filter(prIsLive)
-  if (livePrs.some((pr) => pr.checks === "pending" || pr.checks === "failure"))
-    return { state: "waiting", prTick: true }
+  if (livePrs.some(prChecksWait)) return { state: "waiting", prTick: true }
   if (state === "working") return { state: "working", prTick: false }
   if (livePrs.length) return { state: "waiting", prTick: true }
   return { state: "idle", prTick: false }
@@ -120,12 +119,12 @@ export type RowTone = "warning" | "success" | "muted"
  * grey. Finished pull requests are in none of it: green names an open pull request literally, and a
  * merged one's checks wait on nothing.
  */
-export function rowTone(conversation: SessionPrs, claim: SessionClaim): RowTone {
+export function rowTone(conversation: Pick<Conversation, "prs">, claim: SessionClaim): RowTone {
   if (claim.state === "discarded") return "muted"
   if (claim.state === "resolved") return "success"
   if (claim.state === "waiting" && !claim.prTick) return "warning"
   const live = (conversation.prs ?? []).filter(prIsLive)
-  if (live.some((pr) => pr.checks === "pending" || pr.checks === "failure")) return "warning"
+  if (live.some(prChecksWait)) return "warning"
   if (live.some((pr) => pr.state === "draft")) return "muted"
   if (live.some((pr) => pr.state === "open")) return "success"
   return "muted"

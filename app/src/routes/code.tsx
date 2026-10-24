@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   ArchiveXIcon,
-  ArrowDownUpIcon,
   CheckIcon,
   CircleAlertIcon,
   CodeXmlIcon,
@@ -18,17 +17,9 @@ import { prLabel, prLook } from "@/components/chat/pr-look"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { ItemGroup, ItemRow, ItemSearch } from "@/components/item-list"
 import { NewSessionPopup, type SessionTarget } from "@/components/new-session"
+import { SortMenu } from "@/components/sort-menu"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { Spinner } from "@/components/ui/spinner"
 import { projectKey, startBlocked, useProjectSessions, useSessionFollowUps } from "@/lib/code"
 import { connectionKey } from "@/lib/connection"
@@ -60,8 +51,15 @@ import {
   useWaiting,
   type WaitingReason,
 } from "@/lib/waiting"
-import { isUnread, lastActivityAt, rowTone, sessionGroup, type SessionState } from "@/lib/workspace"
-import { readMark, useReadMarks } from "@/lib/read-marks"
+import {
+  isUnread,
+  lastActivityAt,
+  rowTone,
+  sessionGroup,
+  type SessionClaim,
+  type SessionState,
+} from "@/lib/session-work"
+import { useReadMarks } from "@/lib/read-marks"
 
 const DAY_MS = 86_400_000
 const LAST_PROJECT = "memento:last-session-project"
@@ -113,10 +111,8 @@ export function CodePane({ pane }: { pane: FeaturePane }) {
   return <CodeList pane={pane} />
 }
 
-interface Row {
+interface Row extends SessionClaim {
   c: Conversation
-  state: SessionState
-  prTick?: boolean
   project?: HermesProject
   key: string
 }
@@ -130,7 +126,7 @@ const CODE_SORTS: Record<CodeSort, string> = {
 /** The Code list's order over each group, kept on this device (unset: created). */
 function useCodeSort(): [CodeSort, (sort: CodeSort) => void] {
   const sort = useLiveQuery(async () => (await getSettings()).codeSort, []) ?? "created"
-  return [sort, (codeSort) => void saveSettings({ codeSort })]
+  return [sort, (codeSort) => void saveSettings({ codeSort }).catch(quietly("Saving the sort order"))]
 }
 
 function CodeList({ pane }: { pane?: FeaturePane }) {
@@ -143,8 +139,9 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
   const waits = useWaiting()
   const lists = useAllProjects()
   const changes = useAnyChange("projects")
-  // Re-draws the rows' unread dots when a mark moves (the thread rendered in the pane beside).
-  useReadMarks()
+  // This device's read marks: the rows' dots redraw the moment one moves (the thread rendered
+  // in the pane beside).
+  const marks = useReadMarks()
   const [query, setQuery] = useState("")
   const [chip, setChip] = useState<string>()
   const [starting, setStarting] = useState(false)
@@ -209,16 +206,16 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
     .sort((a, b) => a[1].project.name.localeCompare(b[1].project.name))
   const shown = rows.filter((r) => (!chip || r.key === chip) && matches(r, query))
   const filtering = Boolean(query.trim() || chip)
-  // The chosen order runs over every group, and flat across all rows while a search or chip
-  // filters: filtering is the list with its headers removed, never a second ordering rule.
+  // The chosen order runs inside every group, and over all rows flat while a search or chip
+  // filters — filtering is this list with its headers removed, one order either way.
   const order = codeOrder<Row>(sort, {
     created: (row) => row.c.createdAt,
     activity: (row) => lastActivityAt(row.c),
     title: (row) => row.c.title,
   })
   // What waits on the user first, then working, idle and closed — deterministic, not a live
-  // timestamp chasing itself.
-  const grouped = codeGroups(shown, (r) => codeGroupOf(r.state), order)
+  // timestamp chasing itself. Only the grouped view needs it: a filtered list is flat.
+  const grouped = filtering ? undefined : codeGroups(shown, (r) => codeGroupOf(r.state), order)
   const flat = filtering ? [...shown].sort(order) : undefined
 
   const targets: SessionTarget[] = [...projects.entries()]
@@ -263,12 +260,21 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
         pane={pane}
         now={listed?.now ?? 0}
         waiting={waits[row.c.hermesSessionId]}
+        mark={marks[row.c.id]}
       />
     </li>
   )
 
+  // The scroll container carries the header's height for the group headings to tuck under (its
+  // row over its padding over any safe-area top — the header spells the same `max(0.75rem, …)`
+  // for its own padding below): one value, read by `ItemGroup`'s sticky headings.
+  const headerHeight =
+    "calc(max(0.75rem, env(safe-area-inset-top)) + 3.5rem)"
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+    <div
+      className="flex min-h-0 flex-1 flex-col overflow-y-auto"
+      style={{ "--list-header-h": headerHeight } as CSSProperties}
+    >
       <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
         <div className="mx-auto flex max-w-2xl items-center gap-3">
           <Button
@@ -281,40 +287,7 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
             <MenuIcon />
           </Button>
           <h1 className="flex-1 text-xl font-semibold tracking-tight">Code</h1>
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  className="h-11 shrink-0 gap-1.5 rounded-full px-3 text-xs text-muted-foreground"
-                  aria-label={`Sort sessions by ${CODE_SORTS[sort]}`}
-                />
-              }
-            >
-              <ArrowDownUpIcon />
-              {CODE_SORTS[sort]}
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-44">
-              <DropdownMenuGroup>
-                <DropdownMenuLabel>Sort by</DropdownMenuLabel>
-                <DropdownMenuRadioGroup
-                  value={sort}
-                  onValueChange={(value) => setSort(value as CodeSort)}
-                >
-                  {(Object.keys(CODE_SORTS) as CodeSort[]).map((option) => (
-                    <DropdownMenuRadioItem
-                      key={option}
-                      value={option}
-                      className="min-h-11"
-                      closeOnClick
-                    >
-                      {CODE_SORTS[option]}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <SortMenu by="sessions" options={CODE_SORTS} value={sort} onSort={setSort} />
         </div>
       </header>
 
@@ -371,7 +344,7 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
           // Filtering drops the headers: one flat list, the chosen order over everything shown.
           <ul className="flex flex-col">{flat.map(draw)}</ul>
         ) : (
-          grouped.map((group) => (
+          grouped?.map((group) => (
             <ItemGroup key={group.key} group={group} sticky>
               {group.items.map(draw)}
             </ItemGroup>
@@ -500,6 +473,7 @@ export function SessionItem({
   pane,
   now,
   waiting,
+  mark,
 }: {
   row: Row
   botId?: string
@@ -509,6 +483,8 @@ export function SessionItem({
   now: number
   /** Why the server says the session waits on the user, if it does. */
   waiting?: WaitingReason
+  /** This device's read mark for the session, if it has one; newer activity dots the row. */
+  mark?: number
 }) {
   const removed = removedRepos(session, project)
   const draft = useDraft(session.id)
@@ -528,8 +504,8 @@ export function SessionItem({
           <StateIcon state={state} />
         )
       }
-      tone={rowTone(session, { state, prTick: prTick ?? false })}
-      unread={isUnread(session, readMark(session.id))}
+      tone={rowTone(session, { state, prTick })}
+      unread={isUnread(session, mark)}
       botId={botId}
       title={session.title}
       badge={

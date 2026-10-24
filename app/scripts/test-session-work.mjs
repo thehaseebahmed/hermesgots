@@ -15,23 +15,13 @@ import {
   sessionState,
   threadState,
 } from "../src/lib/session-work.ts"
+import { pr } from "./fixtures/pr.ts"
 
 const session = (facts = {}) => ({
   resolvedAt: undefined,
   discardedAt: undefined,
   planPending: false,
   ...facts,
-})
-
-/** A pull request of a session's, live or not, with the checks of its head commit. */
-const pr = (state = "open", checks = null, at = 5) => ({
-  repo: "acme/gots",
-  number: 7,
-  title: "A change",
-  state,
-  checks,
-  url: "https://example.test/7",
-  at,
 })
 
 test("a live subagent with no live turn reads working", () => {

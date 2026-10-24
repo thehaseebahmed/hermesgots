@@ -6,45 +6,50 @@
  * it back. One subscribe-able snapshot, so a list holding rows re-draws the moment a mark moves.
  */
 
-import { useSyncExternalStore } from "react"
+import { createStore } from "@/lib/store"
 
 const KEY = "memento:read-marks"
+/** The store only ever grows: the oldest marks drop past this many. */
+const KEEP = 500
 
 const load = (): Record<string, number> => {
   try {
     const stored: unknown = JSON.parse(localStorage.getItem(KEY) ?? "{}")
-    return stored && typeof stored === "object" ? (stored as Record<string, number>) : {}
+    if (!stored || typeof stored !== "object" || Array.isArray(stored)) return {}
+    const marks: Record<string, number> = {}
+    for (const [id, at] of Object.entries(stored)) {
+      if (typeof at === "number") marks[id] = at
+    }
+    return marks
   } catch {
     // Storage blocked (private mode): the marks still work for this session's life.
     return {}
   }
 }
 
-let marks = load()
-let snapshot = marks
-const listeners = new Set<() => void>()
+const marks = createStore<Record<string, number>>(load())
 
-/** The moment this device last rendered the session's thread, if it ever has. */
-export const readMark = (sessionId: string): number | undefined => marks[sessionId]
-
-/** The thread has rendered on this device as of `at`: what clears its row's dot. Monotonic. */
+/**
+ * The thread has rendered on this device as of `at`: what clears its row's dot. Monotonic — a
+ * mark never moves back — and the oldest marks drop once the store is full, so a device that
+ * reads everything cannot grow it without bound.
+ */
 export function markRead(sessionId: string, at = Date.now()) {
-  if ((marks[sessionId] ?? 0) >= at) return
-  marks = { ...marks, [sessionId]: at }
-  snapshot = marks
+  const current = marks.get()
+  if ((current[sessionId] ?? 0) >= at) return
+  let next = { ...current, [sessionId]: at }
+  const entries = Object.entries(next)
+  if (entries.length > KEEP) {
+    entries.sort((a, b) => b[1] - a[1])
+    next = Object.fromEntries(entries.slice(0, KEEP))
+  }
+  marks.set(next)
   try {
-    localStorage.setItem(KEY, JSON.stringify(marks))
+    localStorage.setItem(KEY, JSON.stringify(next))
   } catch {
     // Persisting failed; the in-memory marks still clear this session's dots.
   }
-  for (const listen of listeners) listen()
-}
-
-const subscribe = (listen: () => void) => {
-  listeners.add(listen)
-  return () => listeners.delete(listen)
 }
 
 /** Re-renders whatever draws the dots when a mark moves. */
-export const useReadMarks = (): Record<string, number> =>
-  useSyncExternalStore(subscribe, () => snapshot)
+export const useReadMarks = marks.use

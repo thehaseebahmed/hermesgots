@@ -11,11 +11,13 @@ import {
 } from "@/components/ui/input-group"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import type { CodeGroupKey, ItemGroupKey } from "@/lib/item-groups"
+import type { RowTone } from "@/lib/session-work"
 import { cn } from "@/lib/utils"
 
 /**
  * A titled group of rows with its count; Closed starts folded. `sticky` pins the heading under the
- * screen's own header while the group scrolls (Code's four).
+ * screen's own header while the group scrolls (Code's four): the header publishes its height as
+ * `--list-header-h` on the list's scroll container, and the heading stops beneath it.
  */
 export function ItemGroup({
   group,
@@ -32,18 +34,14 @@ export function ItemGroup({
       <span
         className={cn(
           "rounded-full px-1.5 text-xs leading-5 font-semibold tabular-nums",
-          group.key === "waiting" ? "bg-warning/15 text-warning" : "bg-muted",
+          group.key === "waiting" ? TONES.warning : TONES.muted,
         )}
       >
         {group.items.length}
       </span>
     </>
   )
-  // The screen header's own height (its row over its padding, over any safe-area top), so the
-  // heading stops beneath it rather than under it: the button only exists below md.
-  const at = sticky
-    ? "sticky z-[5] bg-background top-[calc(3.5rem_+_max(0.75rem,env(safe-area-inset-top)))] md:top-[calc(2.5rem_+_max(0.75rem,env(safe-area-inset-top)))]"
-    : ""
+  const at = sticky ? "sticky z-[5] bg-background top-[var(--list-header-h)]" : ""
   const list = <ul className="flex flex-col">{children}</ul>
   if (group.key !== "closed")
     return (
@@ -80,12 +78,12 @@ export function ItemGroup({
   )
 }
 
-/** The icon's three colours, whichever list picks them. */
-const TONES = {
+/** The icon's three tones, whichever list picks them. */
+const TONES: Record<RowTone, string> = {
   warning: "bg-warning/15 text-warning",
   success: "bg-primary/10 text-primary",
   muted: "bg-muted text-muted-foreground",
-} as const
+}
 
 /**
  * One row of a list: the feature's icon with the bot in its corner, the title and time, one status
@@ -95,7 +93,6 @@ export function ItemRow({
   icon,
   tone,
   unread,
-  waiting,
   botId,
   title,
   badge,
@@ -112,11 +109,9 @@ export function ItemRow({
    * The icon's colour, when the list picks it per row (Code: warning for what waits, success for
    * done or healthy, muted for at rest).
    */
-  tone?: "warning" | "success" | "muted"
+  tone?: RowTone
   /** New activity since this device last rendered the thread: the blue dot on the icon's corner. */
   unread?: boolean
-  /** Waits on the user: the icon takes the warning tone. Ignored where `tone` is given. */
-  waiting?: boolean
   botId?: string
   title: string
   /** A mark beside the title, for what the row is rather than what it's doing. */
@@ -140,7 +135,7 @@ export function ItemRow({
         <span
           className={cn(
             "flex size-10 items-center justify-center rounded-full [&_svg]:size-5",
-            tone ? TONES[tone] : waiting ? TONES.warning : TONES.success,
+            tone ? TONES[tone] : TONES.success,
           )}
         >
           {icon}
