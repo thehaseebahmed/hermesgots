@@ -3,23 +3,36 @@
  * pop-up, so a drawer from a laptop's width — with the words in a field deep enough to read them in.
  * Done writes it and closes on the host's answer; the sheet's own way out leaves the words unwritten,
  * and a refused write is said by the caller, which is why the draft stays as typed.
+ *
+ * Where the account's library is offered — signed in, with the vault unlocked — two doors stand under
+ * the field: Choose from library, which copies an entry's words in and writes them the way Done does
+ * (a pick is a copy, so the host clears a picked workflow as it does for any Prompt), and Save to
+ * library, which keeps the words on screen under a name and tags. Without the library this is the
+ * editor it always was.
  */
 import { useState } from "react"
+import { toast } from "sonner"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { PromptEntrySheet, PromptLibrarySheet } from "@/components/prompt-library-sheet"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import type { PromptDraft, PromptEntry } from "@/lib/prompt-library"
+import { addPrompt, removePrompt, savePrompt, usePromptEntries } from "@/lib/prompt-library-store"
 
 export function PromptEditor({
   open,
   onOpenChange,
   prompt,
   onSave,
+  library = false,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   prompt: string
   onSave: (prompt: string) => Promise<"saved" | "refused">
+  /** The account's library is drawn here: signed in, with the vault open on this device. */
+  library?: boolean
 }) {
   const [text, setText] = useState(prompt)
   const [saving, setSaving] = useState(false)
@@ -30,6 +43,12 @@ export function PromptEditor({
     setWasOpen(open)
     if (open) setText(prompt)
   }
+
+  const entries = usePromptEntries(library)
+  const [choosing, setChoosing] = useState(false)
+  // One entry sheet for both doors: a new entry saving the words on screen, or an entry being
+  // renamed, rewritten or deleted.
+  const [writing, setWriting] = useState<PromptEntry | "new" | null>(null)
 
   const submit = async () => {
     // Done on the words the row already holds is not a write: it would turn the host's default into
@@ -43,6 +62,43 @@ export function PromptEditor({
       if ((await onSave(text)) === "saved") onOpenChange(false)
     } finally {
       setSaving(false)
+    }
+  }
+
+  /**
+   * A pick is one write of the entry's own words, through the route Done writes: the host answers
+   * with what it holds now — a Prompt, so no workflow — and the sheet stays open on the copy, which
+   * Done then closes without a second write. The entry's id rides along from a later ticket; here the
+   * pick needs nothing the host doesn't already serve.
+   */
+  const pick = async (entry: PromptEntry) => {
+    setChoosing(false)
+    setText(entry.body)
+    setSaving(true)
+    try {
+      await onSave(entry.body)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const write = async (draft: PromptDraft) => {
+    const editing = writing === "new" ? null : writing
+    try {
+      if (editing) await savePrompt(editing.id, draft)
+      else await addPrompt(draft)
+      setWriting(null)
+    } catch (failure) {
+      toast.error(failure instanceof Error ? failure.message : "Couldn't save that Prompt.")
+    }
+  }
+
+  const remove = async (entry: PromptEntry) => {
+    try {
+      await removePrompt(entry.id)
+      setWriting(null)
+    } catch (failure) {
+      toast.error(failure instanceof Error ? failure.message : "Couldn't delete that Prompt.")
     }
   }
 
@@ -60,6 +116,28 @@ export function PromptEditor({
             value={text}
             onChange={(event) => setText(event.target.value)}
           />
+          {library && (
+            <div className="flex flex-wrap gap-2" data-prompt-library-actions>
+              <Button
+                type="button"
+                variant="secondary"
+                className="h-10 rounded-full px-4"
+                disabled={saving}
+                onClick={() => setChoosing(true)}
+              >
+                Choose from library
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                className="h-10 rounded-full px-4"
+                disabled={saving}
+                onClick={() => setWriting("new")}
+              >
+                Save to library
+              </Button>
+            </div>
+          )}
           <Button
             className="h-11 shrink-0 self-end rounded-full px-5"
             disabled={saving}
@@ -69,6 +147,31 @@ export function PromptEditor({
           </Button>
         </div>
       </PopupContent>
+      {library && (
+        <>
+          <PromptLibrarySheet
+            open={choosing}
+            onOpenChange={setChoosing}
+            entries={entries}
+            onPick={(entry) => void pick(entry)}
+            onEdit={(entry) => {
+              setChoosing(false)
+              setWriting(entry)
+            }}
+          />
+          <PromptEntrySheet
+            // Keyed by what it writes: a new open starts from the row it names rather than from the
+            // last thing typed into it.
+            key={writing === null ? "closed" : writing === "new" ? "new" : writing.id}
+            open={writing !== null}
+            onOpenChange={(next) => !next && setWriting(null)}
+            entry={writing === "new" ? null : writing}
+            prompt={text}
+            onSave={write}
+            onDelete={remove}
+          />
+        </>
+      )}
     </Popup>
   )
 }

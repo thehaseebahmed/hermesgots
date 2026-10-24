@@ -73,6 +73,7 @@ import {
 } from "@/lib/hermes"
 import { STAGE_WORDS, type AfkStage } from "@/lib/pipeline"
 import { usePoll } from "@/lib/poll"
+import { usePromptLibraryReady } from "@/lib/prompt-library-store"
 import { noteFailure } from "@/lib/report"
 import { useSkills } from "@/lib/skills"
 import { workflowShape, type Workflow, type WorkflowEntry } from "@/lib/workflow"
@@ -92,9 +93,10 @@ export const AFK_WORKFLOWS_FEATURE = "afk_workflows"
 export const AFK_PROMPT_FEATURE = "afk_prompt"
 
 /**
- * And the one it advertises when a project may hold several tasks at once: its pick count, and the
- * list of what it holds. A plugin from before it holds one task and answers no count, so nothing of
- * this is drawn there and the pop-up is the one it always was.
+ * And the one it advertises when a project may hold several tasks at once and a project's Prompt can
+ * draw on the account's library of them: its pick count, the list of what it holds, and the library
+ * behind the Prompt row. A plugin from before it holds one task, answers no count and has no
+ * library, so nothing of this is drawn there and the pop-up is the one it always was.
  */
 export const AFK_PICKS_FEATURE = "afk_picks"
 
@@ -163,6 +165,10 @@ export function AfkPopup({
   // One row or the other: the library offered is a project running stages, and the Prompt is the
   // words a project running one run is told instead.
   const promptOffered = withPrompt === "yes" && !libraryOffered
+  // The account's own prompt library: the host has to advertise the change, and the account has to
+  // be signed in with its vault open here — the library lives in that store, not on a host.
+  const picks = usePluginFeatureOn(config, AFK_PICKS_FEATURE)
+  const promptLibrary = usePromptLibraryReady()
   // A Prompt names its own skills in its words, so the build and critique pickers are not drawn beside
   // it and their list is not read: it is the workflow's own choice.
   const skillsDrawn = withSkills === "yes" && !promptOffered
@@ -473,6 +479,7 @@ export function AfkPopup({
             onOpenChange={setPromptOpen}
             prompt={afk?.prompt ?? ""}
             onSave={writePrompt}
+            library={promptOffered && picks && promptLibrary}
           />
         )}
       </PopupContent>
