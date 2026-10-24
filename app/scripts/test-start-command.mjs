@@ -35,8 +35,11 @@ test("only /thread carries the message it opens a thread with", () => {
 test("/cheatsheet opens the sheet, and takes no text with it", () => {
   assert.deepEqual(localCommand("/cheatsheet"), { command: "cheatsheet", text: "" })
   assert.deepEqual(localCommand("/cheatsheet", true), { command: "cheatsheet", text: "" })
-  // Not a carrying command, so text behind it is a message for the host, as /settings' is.
-  assert.equal(localCommand("/cheatsheet anything"), null)
+  assert.equal(
+    localCommand("/cheatsheet anything"),
+    null,
+    "text behind it is a message for the host, as /settings' is",
+  )
 })
 
 test("the menu offers /cheatsheet as a command, and only while it is the whole message", () => {

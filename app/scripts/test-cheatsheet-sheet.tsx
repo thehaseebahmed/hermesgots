@@ -1,15 +1,11 @@
-/**
- * The Cheatsheet's way in: `/cheatsheet` in the composer's slash menu, picked the way a keyboard
- * picks it, over a seeded device database and the real chat route. The branch it drives is the one
- * whose fall-through opens Settings, so a missed branch fails here rather than in a demo.
- */
+/** The Cheatsheet's way in: `/cheatsheet` picked by a keyboard, over the real chat route. */
 import assert from "node:assert/strict"
 import test from "node:test"
 import { act } from "react"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { ChatPage } from "@/routes/chat"
-import { db, saveAppearance, type Settings } from "@/lib/db"
+import { db, getSettings, saveAppearance, type Settings } from "@/lib/db"
 import {
   botProfile,
   find,
@@ -84,7 +80,6 @@ async function enter() {
 const sheet = () => findAll('[role="dialog"]').at(-1) ?? null
 const groups = () => findAll("[data-group]").map((one) => one.getAttribute("data-group"))
 
-/** The sheet as the slash menu opens it: the command typed, then Enter. */
 async function openSheet() {
   await type(field(), "/cheatsheet")
   await until(async () => offered("/cheatsheet"), "the command in the menu")
@@ -92,7 +87,7 @@ async function openSheet() {
   await until(async () => Boolean(sheet()), "the sheet")
 }
 
-/** The sheet's own way out — an Escape the pop-up takes — so a reopening starts from shut. */
+/** Escape, the way the pop-up closes. */
 async function shutSheet() {
   await act(async () => {
     sheet()?.dispatchEvent(
@@ -102,10 +97,8 @@ async function shutSheet() {
   await until(async () => !sheet(), "the sheet shut")
 }
 
-/** The switch as the device holds it, which an opening must leave alone. */
-const storedSwitch = async () => (await db.settings.get("settings"))?.navShortcuts
+const storedSwitch = async () => (await getSettings()).navShortcuts
 
-/** What this page kept in localStorage, key by key, to compare before and after. */
 const stored = () =>
   Object.fromEntries(Object.keys(localStorage).map((key) => [key, localStorage.getItem(key)]))
 

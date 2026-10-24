@@ -12,13 +12,9 @@ export interface CheatsheetGroup {
 
 /**
  * Every key a hardware keyboard answers in Gots, by hand beside the handlers that take them
- * (ADR 0042). Keys are spelled as the handlers read them, so no Cmd branch is drawn: the stop
- * rejects the meta key and the bot switcher reads Alt alone.
- *
- * `navShortcuts` is the synced Appearance switch, off by default. While it is off the Alt+1…9
- * binding answers nothing, so its group is absent rather than advertising a dead key — no heading
- * with no rows under it. The sheet reads the flag once when it opens, so a flipped switch shows on
- * the next opening.
+ * (ADR 0042). Keys are spelled as the handlers read them — the stop rejects the meta key and the
+ * bot switcher reads Alt alone — so no Cmd branch is drawn, and the Alt+1…9 group is absent while
+ * its switch is off rather than advertising a dead key.
  */
 export function cheatsheetGroups(navShortcuts: boolean): CheatsheetGroup[] {
   const composer: CheatsheetGroup = {

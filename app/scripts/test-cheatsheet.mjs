@@ -36,19 +36,17 @@ test("the Chat group spells the stop as its handler takes it", () => {
   assert.deepEqual(group("Chat", false).rows, [
     { keys: ["Ctrl+C"], description: "Stop a running reply" },
   ])
-  // The handler rejects the meta key and the bot switcher reads Alt alone, so the sheet says Ctrl.
   for (const navShortcuts of [false, true])
-    assert.ok(!JSON.stringify(cheatsheetGroups(navShortcuts)).includes("Cmd"))
+    assert.ok(
+      !JSON.stringify(cheatsheetGroups(navShortcuts)).includes("Cmd"),
+      "the sheet says Ctrl, as the handler takes it",
+    )
 })
 
 test("Navigation is absent while the switch is off, which is the default", () => {
   assert.equal(group("Navigation", false), undefined)
   assert.ok(!names(cheatsheetGroups(false)).includes("Navigation"))
-  // No empty heading either: the gated group is not drawn at all.
-  assert.ok(
-    !JSON.stringify(cheatsheetGroups(false)).includes("Navigation"),
-    "nothing of the group is left behind",
-  )
+  assert.ok(!JSON.stringify(cheatsheetGroups(false)).includes("Navigation"))
 })
 
 test("Navigation appears with the switch on, naming Alt+1…9 beside what it does", () => {
@@ -98,7 +96,6 @@ test("every row is one or more key chips beside a description", () => {
 
 test("the list is the same each time it is asked, and holds nothing of a caller", () => {
   assert.deepEqual(cheatsheetGroups(false), cheatsheetGroups(false))
-  // A caller that edits what it was given doesn't edit the list.
   cheatsheetGroups(false)[0].rows.pop()
   assert.equal(cheatsheetGroups(false)[0].rows.length, 3)
 })
