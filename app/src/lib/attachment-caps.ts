@@ -38,6 +38,18 @@ export interface Intake<T extends CappedFile = CappedFile> {
 /** Whether a photo is read and scaled, rather than sent as the file it is. */
 export const isPhoto = (type: string) => PHOTO_TYPES.test(type)
 
+/**
+ * Why Files isn't offered on a host that answered `answer` about the plugin's file route, or null
+ * where it is. Every surface that takes a file says it in these words — the menu, and a paste or a
+ * drop that arrives while the menu's Files is off.
+ */
+export function filesReason(answer: "unknown" | "yes" | "no"): string | null {
+  if (answer === "yes") return null
+  return answer === "no"
+    ? "File uploads need a newer Gots plugin."
+    : "File uploads need the Gots plugin."
+}
+
 export function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`

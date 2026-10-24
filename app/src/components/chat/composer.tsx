@@ -25,7 +25,7 @@ import {
   InputGroupTextarea,
 } from "@/components/ui/input-group"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { fresh, MAX_ATTACHMENTS } from "@/lib/attachment-caps"
+import { filesReason, fresh, isPhoto, MAX_ATTACHMENTS } from "@/lib/attachment-caps"
 import { prepareIntake } from "@/lib/attachments"
 import type { Attachment } from "@/lib/db"
 import type { PluginFeatureAnswer } from "@/lib/features"
@@ -285,8 +285,13 @@ export function Composer({
     // A paste and the drop the browser can also fire carry the same file, which lands once.
     const added = fresh(files, recent.current, Date.now())
     if (!added.length) return
+    // Files need the plugin's upload route; a photo the model reads inline doesn't, and still lands.
+    const because = filesReason(filesFeature)
+    const taken = because ? added.filter((file) => imagesAvailable && isPhoto(file.type)) : added
+    if (taken.length < added.length && because) toast.error(because)
+    if (!taken.length) return
     let placeholders: { id: string; name: string; image: boolean }[] = []
-    const { attachments: prepared, refusals } = await prepareIntake(added, {
+    const { attachments: prepared, refusals } = await prepareIntake(taken, {
       held: attachments,
       reserved: preparing.length,
       inline: imagesAvailable,

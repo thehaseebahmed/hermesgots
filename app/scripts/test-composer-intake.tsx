@@ -16,7 +16,10 @@ import { connection, findAll, mount, settle } from "./component-kit.tsx"
 
 const bot = connection("composer-intake")
 
-function composer(sent: { text: string; attachments: Attachment[] }[]) {
+function composer(
+  sent: { text: string; attachments: Attachment[] }[],
+  filesFeature: "unknown" | "yes" | "no" = "yes",
+) {
   return (
     <Composer
       busy={false}
@@ -27,7 +30,7 @@ function composer(sent: { text: string; attachments: Attachment[] }[]) {
       onStop={() => {}}
       onCommand={() => {}}
       connection={bot}
-      filesFeature="yes"
+      filesFeature={filesFeature}
       imagesAvailable
     />
   )
@@ -111,6 +114,46 @@ test("the same file pasted and then dropped lands once", async () => {
     await drop([file])
     assert.deepEqual(tileNames(), ["once.txt"], "one file, one attachment")
   })
+})
+
+test("a pasted file is refused where the menu's Files is off, in the menu's own words", async () => {
+  const said: string[] = []
+  const original = toast.error
+  const sent: { text: string; attachments: Attachment[] }[] = []
+  toast.error = ((message: unknown) => {
+    said.push(String(message))
+  }) as typeof toast.error
+  try {
+    await mount(composer(sent, "no"), async () => {
+      await paste([note("notes.txt")])
+      assert.deepEqual(said, ["File uploads need a newer Gots plugin."], "the menu's own reason")
+      assert.deepEqual(tileNames(), [], "the file never lands")
+      // A photo the model reads inline needs no upload route, so Photos stays allowed.
+      await paste([new File(["png"], "cat.png", { type: "image/png", lastModified: 3 })])
+      assert.deepEqual(tileNames(), ["cat.png"], "a photo still lands")
+    })
+  } finally {
+    toast.error = original
+  }
+})
+
+test("a file dropped where no plugin answered is refused the same way", async () => {
+  const said: string[] = []
+  const original = toast.error
+  const sent: { text: string; attachments: Attachment[] }[] = []
+  toast.error = ((message: unknown) => {
+    said.push(String(message))
+  }) as typeof toast.error
+  try {
+    await mount(composer(sent, "unknown"), async () => {
+      await drop([note("clip.txt")])
+      assert.deepEqual(said, ["File uploads need the Gots plugin."])
+      assert.deepEqual(tileNames(), [], "a drop is held to the pick's rule")
+      assert.deepEqual(sent, [])
+    })
+  } finally {
+    toast.error = original
+  }
 })
 
 test("a file over nine megabytes is refused by name instead of landing", async () => {

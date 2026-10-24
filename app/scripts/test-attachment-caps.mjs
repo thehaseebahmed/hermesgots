@@ -3,6 +3,7 @@ import test from "node:test"
 
 import {
   countRefusal,
+  filesReason,
   fitsInline,
   fresh,
   inlineRefusal,
@@ -100,6 +101,12 @@ test("a share's refusals name the limits in the same words", () => {
     unreadableRefusal("clip.mp4").message,
     "Gots couldn't read clip.mp4 from that share.",
   )
+})
+
+test("Files is refused in one sentence wherever a file can arrive", () => {
+  assert.equal(filesReason("yes"), null, "a host that has the route explains nothing")
+  assert.equal(filesReason("no"), "File uploads need a newer Gots plugin.")
+  assert.equal(filesReason("unknown"), "File uploads need the Gots plugin.")
 })
 
 test("the host keeps the file the user chose, with the scaled copy as the model's part", () => {

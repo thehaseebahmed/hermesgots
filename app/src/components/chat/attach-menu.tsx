@@ -5,6 +5,7 @@ import { Banner } from "@/components/banner"
 import { ModeIcon, ModeOptions, type ModeSettings } from "@/components/chat/mode-menu"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
+import { filesReason } from "@/lib/attachment-caps"
 import type { SessionMode } from "@/lib/db"
 import type { PluginFeatureAnswer } from "@/lib/features"
 import { cn } from "@/lib/utils"
@@ -63,6 +64,7 @@ export function AttachMenu({
   // The mode isn't on screen any more, so one that changes what the agent may do marks the button.
   const flagged = session && session.mode !== "accept_edits"
   const filesAvailable = filesFeature === "yes"
+  const because = filesReason(filesFeature)
 
   return (
     <>
@@ -115,13 +117,9 @@ export function AttachMenu({
           <PopupHeader className="pb-2">
             <PopupTitle>Add context</PopupTitle>
           </PopupHeader>
-          {!filesAvailable && (
+          {because && (
             <div className="px-4 pb-4 sm:px-6">
-              <Banner>
-                {filesFeature === "no"
-                  ? "File uploads need a newer Gots plugin."
-                  : "File uploads need the Gots plugin."}
-              </Banner>
+              <Banner>{because}</Banner>
             </div>
           )}
           <div
