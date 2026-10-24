@@ -163,22 +163,22 @@ export const ThinkingLine = memo(function ThinkingLine({
   }, [open])
 
   return (
-    <div ref={root} className="-my-2 flex flex-col" data-slot="thinking-line">
+    <div ref={root} className="flex flex-col" data-slot="thinking-line">
       <button
         type="button"
-        className="flex min-h-11 items-center gap-1 self-start rounded-lg px-1 text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        className="flex min-h-11 w-full items-center gap-2 text-left text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         aria-expanded={open}
         aria-controls={id}
         onClick={() => setOverride(!open)}
       >
+        {thinkingLabel({ thinking, spanMs })}
         <ChevronRightIcon
           className={cn(
-            "size-3.5 shrink-0 transition-transform motion-reduce:transition-none",
+            "size-4 shrink-0 transition-transform motion-reduce:transition-none",
             open && "rotate-90",
           )}
           aria-hidden
         />
-        {thinkingLabel({ thinking, spanMs })}
       </button>
       <div
         id={id}
