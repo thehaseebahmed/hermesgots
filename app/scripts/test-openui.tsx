@@ -794,7 +794,7 @@ test("a map draws its labelled points, its summary the text alternative", async 
           /OpenStreetMap/,
           "the basemap's attribution is in its chrome",
         )
-        assert.match(attribution ?? "", /CARTO/, "naming the tiles' provider")
+        assert.match(attribution ?? "", /Esri/, "naming the tiles' provider")
         assert.match(reply.textContent ?? "", /The walk:/, "the text before the block draws")
         assert.doesNotMatch(reply.textContent ?? "", /openui-lang/, "the fence draws nothing")
       },

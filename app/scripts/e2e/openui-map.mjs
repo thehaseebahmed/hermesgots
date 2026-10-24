@@ -67,9 +67,9 @@ const facts = (page, place = false) =>
         summary: frame.getAttribute("aria-label"),
         labels,
         tiles: tiles.length,
-        basemap: tiles.some((src) => src.includes("dark_all"))
+        basemap: tiles.some((src) => src.includes("World_Dark_Gray_Base"))
           ? "dark"
-          : tiles.some((src) => src.includes("light_all"))
+          : tiles.some((src) => src.includes("World_Street_Map"))
             ? "light"
             : "none",
         attribution: attribution?.textContent ?? "",
@@ -196,7 +196,7 @@ await flow(
         `the view is fitted: "${label.text}" lies wholly inside the map (${label.left},${label.top} ${label.width}×${label.height} in ${fitted.box.width}×${fitted.box.height})`,
       )
     assert.ok(
-      fitted.attribution.includes("OpenStreetMap") && fitted.attribution.includes("CARTO"),
+      fitted.attribution.includes("OpenStreetMap") && fitted.attribution.includes("Esri"),
       `the tiles' attribution is in the map's chrome ("${fitted.attribution.trim()}")`,
     )
     assert.ok(fitted.credited?.inside, "and sits inside the map's own box")

@@ -10,16 +10,32 @@ import "./map-surface.css"
 
 import type { MapPoint, MapProps } from "./map.tsx"
 
-/** CARTO's free raster basemaps: a light one and a dark one, no key, no session. */
+/**
+ * Esri's raster basemaps, served without a key: a street map in light, a dark canvas in dark.
+ * CARTO's equally keyless pair was the first choice and is off the table — its raster endpoints
+ * answer an unkeyed request with an "API key required" watermark tile (a key now needs an emailed
+ * sign-in), so the map draws where it can actually draw.
+ */
 const TILES = {
-  light: "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
-  dark: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+  light: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+  dark: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
 }
 
-/** The tiles' terms: legal text, in the map's own chrome, never explanatory copy. */
-const ATTRIBUTION =
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors ' +
-  '&copy; <a href="https://carto.com/attributions">CARTO</a>'
+/**
+ * Each service's own copyrightText, in the map's chrome: legal text, never explanatory copy, and
+ * the credit follows the basemap when the theme flips it.
+ */
+const CREDIT = {
+  light:
+    'Sources: Esri, HERE, Garmin, USGS, Intermap, INCREMENT P, NRCan, Esri Japan, METI, ' +
+    'Esri China (Hong Kong), Esri Korea, Esri (Thailand), NGCC, &copy; ' +
+    '<a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, ' +
+    "and the GIS User Community",
+  dark:
+    'Esri, HERE, Garmin, &copy; ' +
+    '<a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, ' +
+    "and the GIS user community",
+}
 
 /** A single point has no bounds to fit, so it takes a street-level view of its own. */
 const ONE_POINT_ZOOM = 13
@@ -98,9 +114,8 @@ export default function MapSurface({ props }: { props: MapProps }) {
     if (!made) return
     layer.current?.remove()
     layer.current = L.tileLayer(TILES[dark ? "dark" : "light"], {
-      attribution: ATTRIBUTION,
+      attribution: CREDIT[dark ? "dark" : "light"],
       maxZoom: 19,
-      detectRetina: true,
     }).addTo(made)
   }, [dark])
 
