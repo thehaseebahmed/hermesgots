@@ -12,7 +12,7 @@ reason the change can fail — from ADR
 what the tiers are along with `AGENTS.md`'s Testing paragraph. This page records only which one
 each flow lands in: **stay** (end-to-end), **component**, **plugin** (the plugin's own Python
 suite), or **delete** (a duplicate another flow already asserts). The end-to-end skill points here
-once it is rewritten for the ten (#317). The counts describe the registry at this commit; the
+once it is rewritten for the stays (#317). The counts describe the registry at this commit; the
 ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
@@ -45,24 +45,23 @@ Two things in that arithmetic did not hold, and both are checkable:
   before the plan), carries 61 keys. Both went with goal mode (#296), so that omission costs
   nothing today.
 
-Nine keys have arrived since: five are components by the same rule — `delegation-model` (#318),
-`afk-skills` (#327), `afk-stage` (#328), `pipeline-pill` (#330) and `afk-prompt` (#359) — and three
+Eleven keys have arrived since: five are components by the same rule — `delegation-model` (#318),
+`afk-skills` (#327), `afk-stage` (#328), `pipeline-pill` (#330) and `afk-prompt` (#359) — and five
 are stays, for what no lower tier can watch: `thinking-line` (#368), the app's line following a
-host's own reasoning as it arrives, `openui` (#389), an interface's geometry at two widths and a
-scroll offset a patch must not move, and `question-during-delegation` (#471), the question card
-taking the composer's place while a subagent still runs, with its result and its wake turn landing
-after it.
-The ninth, `bot-threads` (#422), is a component by the same rule as the five: every rule it walks —
-a card's place in Main, `/thread` with text, the marker a moved message keeps — is a component
-test's, and what the browser adds is that they compose. So the registry holds 59 + 9 = **68** keys,
-the component verdicts are the plan's 48 less the key it counted twice, plus those six: **53**, and
-the stays are the plan's 7 plus those three: **10**.
+host's own reasoning as it arrives; `openui` (#389), an interface's geometry at two widths and a
+scroll offset a patch must not move; `openui-map` (#490), a map's fitted geometry and the gesture
+contract deciding whether one finger scrolls the thread or pans the map, both things a DOM without
+layout has not got; `question-during-delegation` (#471), the question card taking the composer's
+place while a subagent still runs, with its result and its wake turn landing after it; and
+`card-widths` (#497), because a card's width and the offset of the column beside it are geometry,
+which no DOM without a layout engine has. The eleventh, `bot-threads` (#422), is a component by the
+same rule as the five: every rule it walks — a card's place in Main, `/thread` with text, the
+marker a moved message keeps — is a component test's, and what the browser adds is that they
+compose. So the registry holds 59 + 11 = **70** keys, the component verdicts are the plan's 48 less
+the key it counted twice, plus those six: **53**, and the stays are the plan's 7 plus those five:
+**12**.
 #299's own criterion still says 48; the 53 above
 supersedes it for the reason just given, and nothing else in the ticket's split moves.
-A ninth key has arrived since, with #490: `openui-map`, a stay, because a map's fitted geometry and
-the gesture contract deciding whether one finger scrolls the thread or pans the map are both things a
-DOM without layout has not got. So the registry today holds 59 + 9 = **68** keys and the stays are
-the plan's 7 plus three: **10**.
 
 `app/scripts/test-e2e-registry.mjs`, a unit test, holds the registry and this page to each other:
 a key with no row here, a row with no key, a verdict outside the four, a count in the table above
@@ -257,6 +256,7 @@ replaced by itself. They are what the end-to-end registry holds once the other 5
 | `openui` | stay | A reply carrying an `openui-lang` block draws its interface from Gots's own components at 390px and at 768px, in light and dark — a card, a table, a callout and two bar charts, the interface taking the thread's own column, its box's left and right edges on the reply text's own (the glyphs measured by a `Range`, ±1px) with the block's undrawn code form in the same place, the gap above and below it the thread's paragraph gap (12px either side, measured box to box against two paragraphs of that text), no chart's five-digit Y tick label outside the chart's own box, and no sideways scroll of the page or the table inside it — and the patched card is what draws at both widths; a block naming a component the library doesn't have draws as the code the model sent, under the `openui-lang` label, with the reply still reaching its last sentence; and a patch that lands while the thread is scrolled up leaves `[data-slot=message-scroller-viewport]`'s scrollTop exactly where it was, and the interface at the same offset of the screen, while the thread grows under the reader. | Geometry and a scroll offset: a DOM without layout has no sizes and no scrollTop, so a component test can assert the card's text but not its box, nor where a reader's viewport sits when a patch re-renders the interface they are reading. The patch also has to arrive on a real stream inside the one reply — a second user message jumps the thread to the end (`FollowOnSend`) — which is a host's own wiring, not a faked boundary's. |
 | `openui-map` | stay | A reply's block is a `Map` of four labelled places. It draws a map at 390px and at 768px, in light and dark, fitted to its own points — every label's box wholly inside the map's box at both widths — its required summary the accessible name, each point's detail on its marker; the basemap follows the theme (tiles asked for from `World_Street_Map` in light and `World_Dark_Gray_Base` in dark) with `Esri` and `OpenStreetMap` attributed in the chrome, inside the map's box, and the map takes the thread's own column with no sideways scroll. Then the gesture contract: over an untouched map a wheel and a real one-finger swipe both change the thread's scrollTop while the map's view holds to the pixel and `data-active` stays false; a tap makes it active and shows a 44px button; a wheel zooms and a drag pans the active map while the thread's scrollTop holds; the button hands the gestures back, the thread scrolling over the map again at the view the pan left. | Geometry and a gesture contract. A DOM without layout has no sizes, so a component test can prove the labels, the summary and the required props (`test-openui.tsx`) but not that the view is fitted, that a label lands inside the frame, or that the tiles asked for are the theme's. And which element takes one finger — the thread scrolling or the map panning — is decided by `touch-action` and Leaflet's handlers inside the browser's own input pipeline; nothing below a browser has a touchscreen, a scroll offset to move or a frame to pan within. |
 | `question-during-delegation` | stay | A bot delegates and asks in the same turn: the subagent's card reads its child still running; the question card takes the composer's place while the agents route still reports that child running; the answer brings the turn's reply, and then the subagent's result lands as the bot's own message at the thread's end, named above the result it carries, with no bubble and never as the user's; the wake prompt the plugin posts for it draws no message at all, no header, no footer and no user row; and the wake turn that answers it acts on the result and draws as a message of its own, below the delivery, arriving while its run is still going, a piece at a time; and the words the reply said before the question are drawn once, live and again after a reload, never once for each half of the turn. | Composer-replacement timing across a live stream. The question card has to take the composer's place at the instant the host raises it while a child is still working, and the result and the wake turn have to land in the thread as the host writes them, in wall-clock order, under the fold that draws a wake prompt as nothing. A component test over a faked host answers every shape in one step: it asserts the card, the delivery and the wake answer, but not that the card replaced the composer while `runs/live` and the agents route both still said the child was running, nor that the result and the wake turn landed after the reply that answered the question rather than inside it. |
+| `card-widths` | stay | A chat's subagent card and its waiting Question each fill the pane they are given, with the gutter each container supplies: the card the thread's 16px inside the pane's content box and the Question the composer slot's own 16px at 1024px and at 1440px (12px at 390px, its `sm:px-4`), with message text filling the pane too where the pane is narrower than the column, as it is on a phone and behind a docked sidebar. At 1440px, where the pane clears the column, that text keeps its 736px column centred in the pane, the card beside it is wider than the text, and the Question's own cap shows for what it was. | Geometry, and nothing else: a card's width and its left edge's offset are layout, so no DOM without a layout engine has them, and a class assertion cannot tell a card that fills the pane from the same card capped at 448px or 768px — which is the whole of ADR 0041. The tablet's width is the case review loses most easily, since the text beside the card does not move at all; the laptop's is where the column and both caps are told apart. |
 
 ## The coverage a demotion leaves with no home
 

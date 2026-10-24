@@ -62,7 +62,9 @@ elsewhere, set `PLAYWRIGHT_MODULE` to its `index.mjs`. The CommonJS `index.js` l
 |---|---|
 | `chat-message` | A new chat sends its message, gets the whole reply, and shows in Recents |
 | `bot-threads` | A bot opens its Main, its threads are cards where they began, `/thread` with text opens a thread with that message, back returns to its card, and triage's two answers read as a card with Undo or a Moved marker with its link |
+| `card-widths` | A chat's subagent card and its waiting Question fill the pane with each container's own gutter at 1024 and 390px, and again at 1440px where a wide pane shows the caps; message text keeps its 736px reading column at 1440px and fills the pane where that is narrower |
 | `thinking-line` | A turn told to think out loud and stall shows its working line before any thinking, with no row yet; the mock's pieces stream either side of a tool call, so the thinking before it is one row folded over the span it measured while the thinking after it opens a second row below the call, both folded at the first answer token, and a reload draws the same two rows in the same places still reading the numbers they measured. A second turn thinks at length in one run: opening it lands the thread on its newest words and keeps them there as the pieces arrive, a wheel up stops that follow, the run past its cap draws the cap with a fade and a Show more at the foot, Show more reveals the rest inline, and the cap holds at 390px and 834px in both themes |
+
 | `approval` | A project session waiting on an approval shows in the sidebar's Waiting for input and its project's Waiting on you. Both move it to Idle once it's allowed |
 | `reattach` | A reply still streaming when the page reloads picks its run up again and finishes |
 | `history-pages` | A session opened mid-turn from another device loads the running turn whole, pages back a turn longer than a page twice, and keeps one reply per turn, at the end; a chat an older version split is mended by Load earlier. Main showed the running turn twice |
@@ -168,7 +170,7 @@ Projects, attach it to your reply, or describe what it shows. Never commit scree
    port table above.
    Give it a row in `docs/e2e-flow-audit.md` too, with its verdict and why no lower tier reaches
    it: `app/scripts/test-e2e-registry.mjs` fails the app's gates on a key with no row, and on a
-   stay beyond the nine (ADR 0019).
+   stay beyond the ten (ADR 0019).
 3. Drive the mock with words in a message: `clean up` asks for an approval, `long` streams slowly,
    `ask` asks a question, `plan` writes a plan. The header of `app/scripts/mock-hermes.mjs` lists
    its words and env vars, and `.agents/skills/mock-server-scenarios.md` has recipes. Seeded
@@ -211,6 +213,11 @@ Projects, attach it to your reply, or describe what it shows. Never commit scree
   parent wears, so probe the element that carries the property.
 - When a selector stops matching, check whether the app renamed it before you blame your change.
   The sidebar's chat list went from "Conversations" to "Recents".
+- A chat's pane is not the window's width: at a 1024px viewport the docked sidebar takes 303px, so
+  the thread is 704px wide — narrower than the 768px reading column — and its text and its cards
+  take the same width there. A flow that asserts the column needs a laptop width (1440px), and one
+  that measures a card against the pane must subtract the scrollbar the thread reserves
+  (`offsetWidth - clientWidth`, 10px with `scrollbar-thin`) before comparing.
 - Don't `pkill -f` with a pattern from your own command line, because it kills your shell. Use
   `pnpm e2e down`, or a bracketed pattern that can't match itself (`pkill -f 'mock-herme[s]'`).
   `fuser` isn't installed everywhere, so `fuser -k <port>/tcp` can no-op silently: an old server

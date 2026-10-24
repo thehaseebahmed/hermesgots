@@ -364,6 +364,11 @@ const FLOWS = {
     about:
       "A bot opens Main, its threads are cards where they began, /thread with text opens a thread, and triage's answers read as a card with Undo or a Moved marker",
   },
+  "card-widths": {
+    script: "e2e/card-widths.mjs",
+    about:
+      "A chat's subagent card and waiting Question span the pane with its gutter at 390 and 1024px, and both at 1440px too, while message text keeps the 768px reading column there",
+  },
   submission: {
     script: "regression-submission.mjs",
     about: "Concurrent sends start one run and get one reply",

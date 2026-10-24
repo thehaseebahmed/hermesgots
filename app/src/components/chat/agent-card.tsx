@@ -214,6 +214,7 @@ function AgentCard({
   return (
     <>
       <CardShell
+        slot="agent-card"
         onClick={() => setOpen(true)}
         action={
           canStop || note ? (
