@@ -23,7 +23,7 @@ Table(columns: string[], rows: (string | number)[][], caption?: string) — Plai
 List(items: {label: string, detail?: string}[], ordered?: boolean)
 Callout(tone: "info" | "warn" | "good", text: string)
 Chart(kind: "bar" | "line" | "area" | "pie", series: {name: string, points: {x: string, y: number}[]}[], xLabel?: string, yLabel?: string, summary: string) — A bar, line, area or pie chart; summary in words.
-Map(points: {lat: number, lng: number, label: string, detail?: string}[], summary: string) — Labeled places on a map; summary in words.
+Map(points: {lat: number, lng: number, label: string, detail?: string}[], summary: string) — Labeled places on a map at coordinates you supply, never looked up; summary in words.
 
 ## Hoisting & Streaming (CRITICAL)
 
@@ -59,7 +59,7 @@ content = SomeContent("Hello world")
 - The agent's own question for the user goes through the clarify tool where the host offers one — the thread draws it as a question card — else text; a question is never drawn as an interface.
 - The parser extracts code from fences automatically. Text outside fences is shown as chat.
 ## Important Rules
-- Pick the component that fits: Table for comparison, Chart for trend.
+- Pick the component that fits: Table for comparison, Chart for trend, Map for places.
 
 ## Final Verification
 Before finishing, verify:

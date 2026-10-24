@@ -1365,21 +1365,21 @@ const OPENUI_FALLBACK = [
   "```",
 ].join("\n")
 
-// What a turn asked to draw a map says: four places on one walk, each labelled, with the summary a
-// reader hears in place of the picture.
 const MAP_SUMMARY = "Four stops on the north waterfront walk."
+
+const MAP_POINTS = [
+  '{ lat: 37.7955, lng: -122.3937, label: "Ferry Building", detail: "Market Street at the Embarcadero" }',
+  '{ lat: 37.8024, lng: -122.4058, label: "Coit Tower", detail: "Telegraph Hill, up the steps" }',
+  '{ lat: 37.8107, lng: -122.4103, label: "Pier 39", detail: "The Embarcadero at Beach Street" }',
+  '{ lat: 37.8058, lng: -122.4229, label: "Ghirardelli Square", detail: "Larkin and Beach" }',
+]
 
 const OPENUI_MAP_INTRO = "Here's the walk as a map, with the receipt under it.\n\n"
 const OPENUI_MAP = [
   "```openui-lang",
   "# id: walk",
   "root = Stack([m])",
-  `m = Map([${[
-    '{ lat: 37.7955, lng: -122.3937, label: "Ferry Building", detail: "Market Street at the Embarcadero" }',
-    '{ lat: 37.8024, lng: -122.4058, label: "Coit Tower", detail: "Telegraph Hill, up the steps" }',
-    '{ lat: 37.8107, lng: -122.4103, label: "Pier 39", detail: "The Embarcadero at Beach Street" }',
-    '{ lat: 37.8058, lng: -122.4229, label: "Ghirardelli Square", detail: "Larkin and Beach" }',
-  ].join(", ")}], "${MAP_SUMMARY}")`,
+  `m = Map([${MAP_POINTS.join(", ")}], "${MAP_SUMMARY}")`,
   "```",
 ].join("\n")
 

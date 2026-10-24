@@ -356,23 +356,41 @@ const SUMMARY = "Sales rose from 10 in Q1 to 25 in Q2."
 const surfaceOf = (row: Element | undefined) => row?.querySelector("[role=img]")
 
 /**
- * jsdom has no layout, so Recharts measures a box of nothing and draws nothing. The elements
- * `mine` picks report the width the screen under test gives them; every other element keeps
- * jsdom's empty rect.
+ * jsdom has no layout, so every box is a nothing: Recharts measures a box of nothing and draws
+ * nothing, and Leaflet fits no view in a container of no size. The elements `mine` picks report
+ * `width` × `height` — as the rect they are measured by, and as the client size they are laid out
+ * from — while every other element keeps jsdom's empty box.
  */
-const insideChart = (element: Element) => Boolean(element.closest("[data-slot=chart]"))
-
-function chartBox(width: number, mine = insideChart) {
+function fakeBox(width: number, height: number, mine: (element: Element) => boolean) {
   const original = Element.prototype.getBoundingClientRect
+  const own = (name: "clientWidth" | "clientHeight") =>
+    Object.getOwnPropertyDescriptor(HTMLElement.prototype, name)
+  const saved = { clientWidth: own("clientWidth"), clientHeight: own("clientHeight") }
   Element.prototype.getBoundingClientRect = function (this: Element) {
     const box = original.call(this)
     if (!mine(this)) return box
-    return { ...box, width, height: 224, right: width, bottom: 224, x: 0, y: 0 } as DOMRect
+    return { ...box, width, height, right: width, bottom: height, x: 0, y: 0 } as DOMRect
   }
+  const client = { clientWidth: width, clientHeight: height }
+  for (const name of ["clientWidth", "clientHeight"] as const)
+    Object.defineProperty(HTMLElement.prototype, name, {
+      configurable: true,
+      get(this: HTMLElement) {
+        return mine(this) ? client[name] : 0
+      },
+    })
   return () => {
     Element.prototype.getBoundingClientRect = original
+    for (const [name, descriptor] of Object.entries(saved))
+      if (descriptor)
+        Object.defineProperty(HTMLElement.prototype, name, descriptor as PropertyDescriptor)
+      else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name]
   }
 }
+
+const insideChart = (element: Element) => Boolean(element.closest("[data-slot=chart]"))
+
+const chartBox = (width: number, mine = insideChart) => fakeBox(width, 224, mine)
 
 /**
  * A box for the two elements that size the chart and for nothing else: were the legend's height
@@ -381,6 +399,9 @@ function chartBox(width: number, mine = insideChart) {
  */
 const measuredChart = (width: number) =>
   chartBox(width, (element) => element.matches("[data-slot=chart], .recharts-responsive-container"))
+
+const mapBox = (width: number, height = 224) =>
+  fakeBox(width, height, (element) => Boolean(element.closest("[data-slot=map]")))
 
 const SCROLLER = /overflow-(x-|y-)?(auto|scroll)/
 
@@ -733,35 +754,6 @@ const STOPS = [
   stop("Pier 39", 37.8107, -122.4103, "The Embarcadero"),
 ]
 
-/**
- * jsdom has no layout, so Leaflet measures a container of nothing and fits no view. The elements
- * inside the map report the box the screen under test gives them; everything else keeps jsdom's.
- */
-function mapBox(width: number, height = 224) {
-  const inMap = (element: Element) => Boolean(element.closest("[data-slot=map]"))
-  const own = (name: "clientWidth" | "clientHeight") =>
-    Object.getOwnPropertyDescriptor(HTMLElement.prototype, name)
-  const saved = { clientWidth: own("clientWidth"), clientHeight: own("clientHeight") }
-  Object.defineProperty(HTMLElement.prototype, "clientWidth", {
-    configurable: true,
-    get(this: HTMLElement) {
-      return inMap(this) ? width : 0
-    },
-  })
-  Object.defineProperty(HTMLElement.prototype, "clientHeight", {
-    configurable: true,
-    get(this: HTMLElement) {
-      return inMap(this) ? height : 0
-    },
-  })
-  return () => {
-    for (const [name, descriptor] of Object.entries(saved))
-      if (descriptor)
-        Object.defineProperty(HTMLElement.prototype, name, descriptor as PropertyDescriptor)
-      else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name]
-  }
-}
-
 test("a map draws its labelled points, its summary the text alternative", async () => {
   const restore = mapBox(390)
   try {
@@ -855,11 +847,8 @@ test("a map with no summary draws as the fenced source, never as a map", async (
 
 test("a map missing its points, or a point its numbers, draws as the fenced source", async () => {
   const broken = [
-    // The points themselves are required, like every signature's own arguments.
-    mapSource([]).replace("m = Map([])", 'm = Map("Ferry Building")'),
-    // A point with no longitude is not a place.
+    ["# id: walk", "root = Stack([m])", 'm = Map("Ferry Building")'].join("\n"),
     mapSource([`{ lat: 37.7955, label: "Ferry Building" }`], WALK),
-    // And a latitude the parser hands over as text is not a number either.
     mapSource([`{ lat: "37.7955", lng: -122.3937, label: "Ferry Building" }`], WALK),
   ]
   for (const [index, source] of broken.entries()) {

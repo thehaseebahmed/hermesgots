@@ -27,7 +27,7 @@ import { removeQueued, sendQueued } from "@/lib/chat"
 import type { Attachment, Message, ToolEvent } from "@/lib/db"
 import { describeActivity, formatDuration } from "@/lib/format"
 import { mediaImages } from "@/lib/media-tags"
-import { openuiParts } from "@/lib/openui-block.ts"
+import { openuiParts, REPLY_INSET } from "@/lib/openui-block.ts"
 import type { InterfaceDraw, ThreadBlock } from "@/lib/openui-thread.ts"
 import { thoughtSpan } from "@/lib/thinking"
 import { cn } from "@/lib/utils"
@@ -532,7 +532,7 @@ function AssistantRow({
               />
             </Suspense>
           ) : (
-            <Markdown key={part.at} className="px-1 text-[15px] leading-relaxed">
+            <Markdown key={part.at} className={cn(REPLY_INSET, "text-[15px] leading-relaxed")}>
               {part.text}
             </Markdown>
           ),

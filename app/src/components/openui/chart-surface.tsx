@@ -1,3 +1,4 @@
+import { useMemo } from "react"
 import {
   Area,
   AreaChart,
@@ -20,9 +21,10 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart"
-import { estimateWidth, yAxisOf, yAxisWidth } from "@/lib/openui-chart"
+import { TICK_MARGIN, TICK_STUB, yAxisOf, yAxisWidth } from "@/lib/openui-chart"
 
 import type { ChartProps, ChartSeries } from "./chart.tsx"
+import { SURFACE_FRAME } from "./surface.tsx"
 
 const PALETTE = ["--chart-1", "--chart-2", "--chart-3", "--chart-4", "--chart-5"].map(
   (token) => `var(${token})`,
@@ -79,78 +81,66 @@ const slicesOf = (series: ChartSeries[]) =>
 const AXIS = {
   tickLine: false,
   axisLine: false,
-  tickMargin: 4,
-  tickSize: 6,
+  tickMargin: TICK_MARGIN,
+  tickSize: TICK_STUB,
   fontSize: 11,
 } as const
 
 const MARGIN = { top: 4, right: 8, bottom: 16, left: 0 } as const
 
-/** The stub and margin a tick label keeps from the plot, and a pixel of slack for a loading font. */
-const LABEL_ROOM = AXIS.tickSize + AXIS.tickMargin + 2
-
-/** The narrowest axis drawn: one- and two-digit labels need no less, or the y label crowds them. */
-const LEAST_AXIS = 32
-
-/** The column a rotated y label takes inside the axis, beside the ticks it names. */
-const LABEL_BAND = 12
-
-let painter: CanvasRenderingContext2D | null | undefined
+let painter: CanvasRenderingContext2D | null = null
 let family: string | undefined
-
-/** The canvas a label is measured on, or null where the DOM has no 2D one — a test's, by default. */
-function painterOf() {
-  if (painter === undefined)
-    painter =
-      typeof CanvasRenderingContext2D === "undefined"
-        ? null
-        : document.createElement("canvas").getContext("2d")
-  return painter
-}
 
 /**
  * How wide a tick label draws. The axis has no font of its own — it inherits the thread's — so the
- * canvas takes the page's, and a page that can't measure gets an estimate that errs wide.
+ * canvas takes the page's.
  */
 function measure(label: string) {
-  const context = painterOf()
-  if (!context) return estimateWidth(label, AXIS.fontSize)
+  painter ??= document.createElement("canvas").getContext("2d")
+  if (!painter) return 0
   family ??= getComputedStyle(document.body).fontFamily || "sans-serif"
-  context.font = `${AXIS.fontSize}px ${family}`
-  return context.measureText(label).width
+  painter.font = `${AXIS.fontSize}px ${family}`
+  return painter.measureText(label).width
 }
 
 function ChartSurface({ props }: { props: ChartProps }) {
   const columns = columnsOf(props)
   const config = configOf(props.kind, columns)
   const { xLabel, yLabel } = props
-  const axis = yAxisOf(props.series.flatMap((series) => series.points.map((point) => point.y)))
-  const labels = axis.ticks.map((tick) => String(tick))
-  const axisWidth = yAxisWidth(labels, measure, LABEL_ROOM, LEAST_AXIS) + (yLabel ? LABEL_BAND : 0)
-  const frame = (
-    <>
-      <CartesianGrid vertical={false} />
-      <XAxis
-        dataKey="x"
-        name={xLabel}
-        label={xLabel ? { value: xLabel, position: "insideBottom", offset: -6 } : undefined}
-        {...AXIS}
-      />
-      <YAxis
-        name={yLabel}
-        width={axisWidth}
-        domain={axis.domain}
-        ticks={axis.ticks}
-        label={yLabel ? { value: yLabel, angle: -90, position: "insideLeft" } : undefined}
-        {...AXIS}
-      />
-      <ChartTooltip cursor={false} content={<ChartTooltipContent />} />
-      <ChartLegend content={<ChartLegendContent />} />
-    </>
-  )
+
+  const frame = useMemo(() => {
+    if (props.kind === "pie") return null
+    const axis = yAxisOf(props.series.flatMap((series) => series.points.map((point) => point.y)))
+    const axisWidth = yAxisWidth(
+      axis.ticks.map((tick) => String(tick)),
+      measure,
+      { yLabel: Boolean(yLabel) },
+    )
+    return (
+      <>
+        <CartesianGrid vertical={false} />
+        <XAxis
+          dataKey="x"
+          name={xLabel}
+          label={xLabel ? { value: xLabel, position: "insideBottom", offset: -6 } : undefined}
+          {...AXIS}
+        />
+        <YAxis
+          name={yLabel}
+          width={axisWidth}
+          domain={axis.domain}
+          ticks={axis.ticks}
+          label={yLabel ? { value: yLabel, angle: -90, position: "insideLeft" } : undefined}
+          {...AXIS}
+        />
+        <ChartTooltip cursor={false} content={<ChartTooltipContent />} />
+        <ChartLegend content={<ChartLegendContent />} />
+      </>
+    )
+  }, [props.kind, props.series, xLabel, yLabel])
 
   return (
-    <div role="img" aria-label={props.summary} className="h-56 w-full min-w-0">
+    <div role="img" aria-label={props.summary} className={SURFACE_FRAME}>
       <ChartContainer config={config} className="aspect-auto h-full w-full">
         {props.kind === "pie" ? (
           <PieChart>

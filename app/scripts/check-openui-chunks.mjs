@@ -9,14 +9,19 @@ import assert from "node:assert/strict"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
 
-/**
- * Each library, named by a string only its own code emits and by the chunk its lazy import is named
- * for. Recharts draws an `<svg class="recharts-surface">`; Leaflet classes its container
- * `leaflet-container`, which nothing else in the app writes.
- */
 const LIBRARIES = [
-  { name: "Recharts", marker: "recharts-surface", chunk: /^chart-surface-/ },
-  { name: "Leaflet", marker: "leaflet-container", chunk: /^map-surface-/ },
+  {
+    name: "Recharts",
+    marker: "recharts-surface",
+    chunk: /^chart-surface-/,
+    entryPattern: /recharts/i,
+  },
+  {
+    name: "Leaflet",
+    marker: "leaflet-container",
+    chunk: /^map-surface-/,
+    entryPattern: /leaflet/i,
+  },
 ]
 
 const assets = "dist/assets"
@@ -26,8 +31,7 @@ const chunk = readdirSync(assets).filter((file) => file.endsWith(".js"))
 const entry = readFileSync("dist/index.html", "utf8").match(/src="\/assets\/([^"]+\.js)"/)?.[1]
 assert.ok(entry, "dist/index.html names the chunk the chat route loads")
 
-/** One library: its one carrier chunk, an entry free of it, and the library as its one importer. */
-function carried({ name, marker, chunk: named }) {
+function carried({ name, marker, chunk: named, entryPattern }) {
   const carriers = chunk.filter((file) => read(file).includes(marker))
   assert.equal(
     carriers.length,
@@ -36,7 +40,13 @@ function carried({ name, marker, chunk: named }) {
   )
   const [lazy] = carriers
   assert.match(lazy, named, `and that chunk is ${name}'s own`)
-  assert.ok(!read(entry).includes(marker), `the entry chunk carries none of ${name}`)
+  const loaded = read(entry)
+  assert.ok(!loaded.includes(marker), `the entry chunk carries none of ${name}`)
+  assert.doesNotMatch(
+    loaded,
+    entryPattern,
+    `and nothing of ${name}'s module reaches the entry: its code stays in ${lazy}`,
+  )
 
   const importers = chunk.filter((file) => file !== lazy && read(file).includes(lazy))
   assert.equal(importers.length, 1, `one chunk names ${name}'s: ${importers.join(", ")}`)

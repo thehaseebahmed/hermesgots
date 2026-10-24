@@ -16,8 +16,11 @@ import { Chart } from "./chart.tsx"
 import { Map } from "./map.tsx"
 import { OPENUI_ROOT } from "./root.ts"
 
+/** The leaves a parent may nest, in the order the library registers them. */
+const leaves = () => [Card, Table, List, Callout, Chart, Map]
+
 const child: z.ZodType<SubComponentOf<unknown>> = z.lazy(() =>
-  z.union([Card.ref, Table.ref, List.ref, Callout.ref, Chart.ref, Map.ref]),
+  z.union(leaves().map((leaf) => leaf.ref)),
 )
 
 const stackProps = z.object({ children: z.array(child) })
@@ -149,7 +152,7 @@ const Callout = defineComponent({
 })
 
 export const library = createLibrary({
-  components: [Stack, Card, Table, List, Callout, Chart, Map],
+  components: [Stack, ...leaves()],
   root: OPENUI_ROOT,
 })
 export const parser = createParser(library.toJSONSchema(), OPENUI_ROOT)

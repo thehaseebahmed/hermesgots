@@ -146,8 +146,8 @@ The block is a lazy import, memoised on its resolved source.
 ## Component library v1
 
 Root `Stack`. Read-only, theme tokens only, no hard-coded colour, legible at 390px before it is pretty
-at 768px. Seven components, which still fits the host's 4,000-character section: the artifact measures
-3,789 characters with the map's signature in it, 211 characters of room left.
+at 768px. Seven components, which still fits the host's 4,000-character section — the artifact's
+measured length and headroom are reported by every regeneration, and the gates fail at the ceiling.
 
 | Component | Props | Drawn with |
 | --- | --- | --- |

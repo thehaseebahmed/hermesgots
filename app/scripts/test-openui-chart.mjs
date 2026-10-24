@@ -1,13 +1,7 @@
-/**
- * The chart's axis rule, on its own: which values a y axis carries for a set of points, and how wide
- * the axis has to be for the labels it draws. A chart draws these numbers as its ticks, so the width
- * comes from the labels rather than a constant — a five-digit value at a phone's width has to stay
- * whole.
- */
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { estimateWidth, yAxisOf, yAxisWidth } from "../src/lib/openui-chart.ts"
+import { LABEL_BAND, LABEL_ROOM, LEAST_AXIS, yAxisOf, yAxisWidth } from "../src/lib/openui-chart.ts"
 
 const width = (label) => label.length * 10
 
@@ -43,28 +37,28 @@ test("every series the chart plots shares the one axis", () => {
 
 test("the axis is as wide as its widest label plus the room it keeps", () => {
   assert.equal(
-    yAxisWidth(["0", "20000", "500"], width, 12, 32),
-    62,
-    "5 digits of 10px each, 12 of room",
+    yAxisWidth(["0", "20000", "500"], width),
+    Math.max(LEAST_AXIS, 50 + LABEL_ROOM),
+    "5 digits of 10px each, plus the room a label keeps from the plot",
   )
-  assert.equal(yAxisWidth(["0", "5"], width, 12, 32), 32, "a thin axis keeps its floor")
+  assert.equal(yAxisWidth(["0", "5"], width), LEAST_AXIS, "a thin axis keeps its floor")
+})
+
+test("a rotated y label takes its own column beside the ticks", () => {
+  assert.equal(
+    yAxisWidth(["0", "20000"], width, { yLabel: true }),
+    Math.max(LEAST_AXIS, 50 + LABEL_ROOM) + LABEL_BAND,
+    "the ticks' width plus the band the y label names them in",
+  )
+  assert.equal(
+    yAxisWidth(["0", "5"], width, { yLabel: false }),
+    yAxisWidth(["0", "5"], width),
+    "and no band where there is no y label to draw",
+  )
 })
 
 test("a five-digit label widens the axis where a two-digit one doesn't", () => {
-  const small = yAxisWidth(["0", "5", "10"], width, 12, 32)
-  const large = yAxisWidth(["0", "5000", "20000"], width, 12, 32)
+  const small = yAxisWidth(["0", "5", "10"], width)
+  const large = yAxisWidth(["0", "5000", "20000"], width)
   assert.ok(large > small, `the axis grows for the label it carries (${small}px to ${large}px)`)
-})
-
-test("the estimate for a label with no canvas errs wide, never narrow", () => {
-  // Five digits at an 11px font measure a shade over 30px in the browser; the estimate a test's DOM
-  // needs must not come in under that, or a chart would give a label too little room.
-  assert.ok(
-    estimateWidth("20000", 11) >= 31,
-    `a five-digit estimate clears what the font draws (${estimateWidth("20000", 11)}px)`,
-  )
-  assert.ok(
-    estimateWidth("20000", 11) > estimateWidth("20", 11),
-    "and a longer label still estimates wider",
-  )
 })

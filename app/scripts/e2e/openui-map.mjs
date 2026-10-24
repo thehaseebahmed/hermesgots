@@ -1,7 +1,3 @@
-// A reply's places, drawn: a real map fitted to its own points at a phone's width and a tablet's, in
-// both themes, its basemap following the theme and the provider's attribution in its chrome — and
-// the gesture contract no DOM without layout can hold: one finger scrolls the thread over an
-// untouched map, a tap takes pan and zoom, and the map's own button hands the gestures back.
 import { app, assert, flow, pass, settled } from "./lib.mjs"
 
 const REPLY = "[data-slot=message][data-align=start]"
@@ -10,17 +6,12 @@ const SUMMARY = "Four stops on the north waterfront walk."
 const LABELS = ["Ferry Building", "Coit Tower", "Pier 39", "Ghirardelli Square"]
 const HAND_BACK = "Let the thread scroll again"
 
-/**
- * One walk of the page for every fact this flow reads: the thread's scroll, the map's box, where each
- * label sits inside it, the tiles it asked for and the chrome's attribution. `place` first puts the
- * reader with the map below the top of the screen, so a scroll gesture has room either way.
- */
 const facts = (page, place = false) =>
   page.evaluate(
     ({ place, selector }) => {
       const viewport = document.querySelector("[data-slot=message-scroller-viewport]")
       const wrapper = document.querySelector(selector)
-      const frame = wrapper?.querySelector("[role=img]")
+      const frame = wrapper?.querySelector("[role=img], [role=region]")
       const round = (value) => Math.round(value * 10) / 10
       if (place && wrapper) {
         const top =
@@ -30,6 +21,11 @@ const facts = (page, place = false) =>
         viewport.scrollTop = Math.max(0, Math.round(top) - 200)
       }
       const box = frame.getBoundingClientRect()
+      const inside = (rect) =>
+        rect.left >= box.left - 0.5 &&
+        rect.right <= box.right + 0.5 &&
+        rect.top >= box.top - 0.5 &&
+        rect.bottom <= box.bottom + 0.5
       const labels = [...frame.querySelectorAll(".openui-map-label")].map((label) => {
         const at = label.getBoundingClientRect()
         return {
@@ -39,11 +35,7 @@ const facts = (page, place = false) =>
           top: round(at.top - box.top),
           width: round(at.width),
           height: round(at.height),
-          inside:
-            at.left >= box.left - 0.5 &&
-            at.right <= box.right + 0.5 &&
-            at.top >= box.top - 0.5 &&
-            at.bottom <= box.bottom + 0.5,
+          inside: inside(at),
         }
       })
       const tiles = [...frame.querySelectorAll("img.leaflet-tile")].map(
@@ -53,7 +45,6 @@ const facts = (page, place = false) =>
       const credited = attribution?.getBoundingClientRect()
       return {
         scrollTop: Math.round(viewport.scrollTop),
-        end: Math.round(viewport.scrollHeight - viewport.clientHeight),
         column: viewport.clientWidth,
         screen: window.innerWidth,
         page: document.documentElement.scrollWidth,
@@ -73,16 +64,8 @@ const facts = (page, place = false) =>
             ? "light"
             : "none",
         attribution: attribution?.textContent ?? "",
-        credited:
-          credited && credited.width > 0 && credited.height > 0
-            ? {
-                inside:
-                  credited.left >= box.left - 0.5 &&
-                  credited.right <= box.right + 0.5 &&
-                  credited.top >= box.top - 0.5 &&
-                  credited.bottom <= box.bottom + 0.5,
-              }
-            : null,
+        creditedInside:
+          credited && credited.width > 0 && credited.height > 0 ? inside(credited) : null,
         affordance: Boolean(wrapper.querySelector("button")),
         dark: document.documentElement.classList.contains("dark"),
       }
@@ -90,14 +73,17 @@ const facts = (page, place = false) =>
     { place, selector: MAP },
   )
 
-/** The middle of the map, where a finger goes. */
+async function place(page) {
+  await facts(page, true)
+  await settled(page)
+}
+
 const middle = (page) =>
   page.evaluate((selector) => {
     const box = document.querySelector(selector).getBoundingClientRect()
     return { x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2) }
   }, MAP)
 
-/** A wheel over the map, down the page for a positive `dy`. */
 async function wheel(page, dy) {
   const at = await middle(page)
   await page.mouse.move(at.x, at.y)
@@ -129,7 +115,6 @@ async function swipe(page, dy) {
   await settled(page)
 }
 
-/** A mouse drag across the map, for the pan an active map takes. */
 async function drag(page, dx, dy) {
   const at = await middle(page)
   await page.mouse.move(at.x, at.y)
@@ -139,7 +124,6 @@ async function drag(page, dx, dy) {
   await settled(page)
 }
 
-/** Where the labels sat, as one string, so a gesture's effect on the view reads in one comparison. */
 const view = (seen) => seen.labels.map((label) => `${label.left},${label.top}`).join(" ")
 
 await flow(
@@ -199,14 +183,13 @@ await flow(
       fitted.attribution.includes("OpenStreetMap") && fitted.attribution.includes("Esri"),
       `the tiles' attribution is in the map's chrome ("${fitted.attribution.trim()}")`,
     )
-    assert.ok(fitted.credited?.inside, "and sits inside the map's own box")
+    assert.ok(fitted.creditedInside, "and sits inside the map's own box")
     assert.equal(fitted.active, "false", "an untouched map is not taking gestures")
     assert.equal(fitted.affordance, false, "and offers nothing to hand back yet")
     pass(
       `the map drew fitted to its four points (${fitted.box.width}×${fitted.box.height}px), their labels all inside it, its summary the accessible name, the attribution in its chrome`,
     )
 
-    // The basemap follows the theme and the map stays fitted at a phone's width and a tablet's.
     const seen = new Map()
     for (const width of [390, 768]) {
       await page.setViewportSize({ width, height: width < 768 ? 844 : 768 })
@@ -253,10 +236,8 @@ await flow(
       10_000,
       "the light basemap again",
     )
-    await facts(page, true)
-    await settled(page)
+    await place(page)
 
-    // Untouched: the thread keeps its scroll, and the map keeps its view.
     let before = await facts(page)
     const reached = before.scrollTop
     await wheel(page, 320)
@@ -268,9 +249,7 @@ await flow(
     assert.equal(after.active, "false", "and the map never became active")
     assert.equal(view(after), view(before), "the map's view held: its labels didn't move")
 
-    // The wheel carried the map up the screen, so it is placed again under the finger.
-    await facts(page, true)
-    await settled(page)
+    await place(page)
     before = await facts(page)
     await swipe(page, -260)
     after = await facts(page)
@@ -284,10 +263,7 @@ await flow(
       `one finger and a wheel both scroll the thread over an untouched map (${reached}px → ${after.scrollTop}px), the map's own view unmoved`,
     )
 
-    // A tap takes the gestures: the map pans and zooms, the thread holds still, and a button hands
-    // them back.
-    await facts(page, true)
-    await settled(page)
+    await place(page)
     const at = await middle(page)
     await page.touchscreen.tap(at.x, at.y)
     await until(
@@ -296,8 +272,7 @@ await flow(
       "the tap to take the map's gestures",
     )
     await settled(page)
-    await facts(page, true)
-    await settled(page)
+    await place(page)
     const taken = await facts(page)
     assert.ok(
       taken.box.top > 0 && taken.box.top + taken.box.height < 844,
@@ -308,24 +283,35 @@ await flow(
     const target = await handBack.boundingBox()
     assert.ok(target && target.width >= 44 && target.height >= 44, "and the button is 44px or more")
 
+    const moved = async (before, what) => {
+      await until(async () => view(await facts(page)) !== view(before), 3_000, what)
+      return facts(page)
+    }
+    // A touch drag keeps drifting for a beat after the finger lifts (Leaflet's inertia), and a
+    // zoom eases in; a view read mid-flight is a view read that moves again on its own, so each
+    // gesture waits for two reads to agree before its result is pinned.
+    const settleView = async () => {
+      let seen = view(await facts(page))
+      for (let i = 0; i < 30; i += 1) {
+        await page.waitForTimeout(100)
+        const next = view(await facts(page))
+        if (next === seen) return
+        seen = next
+      }
+    }
+
     before = taken
     await wheel(page, -240)
-    await until(
-      async () => view(await facts(page)) !== view(before),
-      3_000,
-      "the wheel to zoom the active map",
-    )
+    after = await moved(before, "the wheel to zoom the active map")
+    await settleView()
     after = await facts(page)
     assert.notEqual(view(after), view(before), "a wheel zooms the active map")
     assert.equal(after.scrollTop, before.scrollTop, "and the thread's scroll held while it zoomed")
 
     before = after
     await drag(page, 70, 50)
-    await until(
-      async () => view(await facts(page)) !== view(before),
-      3_000,
-      "the drag to pan the active map",
-    )
+    after = await moved(before, "the drag to pan the active map")
+    await settleView()
     after = await facts(page)
     assert.notEqual(view(after), view(before), "a drag pans the active map")
     assert.equal(after.scrollTop, before.scrollTop, "and the thread's scroll held while it panned")
@@ -340,8 +326,7 @@ await flow(
       "the button to hand the gestures back",
     )
     assert.equal((await facts(page)).affordance, false, "the button goes with the gestures")
-    await facts(page, true)
-    await settled(page)
+    await place(page)
     before = await facts(page)
     await wheel(page, 260)
     after = await facts(page)

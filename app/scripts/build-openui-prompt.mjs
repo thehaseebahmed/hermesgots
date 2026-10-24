@@ -1,11 +1,6 @@
 /**
  * Writes `plugin/openui/prompt.txt`: the component library as the words a model is told.
  * Run it with `pnpm build:openui-prompt`; a test fails the gates on drift or an oversize section.
- *
- * Per ADR 0040 this script owns the artifact end to end: the library still writes the body, and the
- * rewrite table below takes over the parts of it that stopped being true and compresses the prose
- * around the schema. Every pair asserts its needle occurs exactly once, so a `@openuidev/lang-core`
- * bump that rewords the generator fails the build instead of shipping stale words.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname } from "node:path"
@@ -37,15 +32,10 @@ const DRAWS_DATA =
   "- An answer shaped like data — numbers, a series, a comparison, locations, structured facts — " +
   "draws an interface; conversation, opinions and one-liners stay text."
 
-/** Hermes serves clarify where it has it and the thread draws its card; no host, plain text. */
 const ASKS_THROUGH_CLARIFY =
   "- The agent's own question for the user goes through the clarify tool where the host offers one " +
   "— the thread draws it as a question card — else text; a question is never drawn as an interface."
 
-/**
- * Stale words out, the product's words and compressed prose in. `find` is matched byte for byte
- * against the library's own body, so a miss names exactly which passage moved.
- */
 const REWRITES = [
   {
     what: "the text-only answer section",
@@ -117,7 +107,7 @@ Example:`,
     find:
       "- Choose components that best represent the content (tables for comparisons, charts for " +
       "trends, forms for input, etc.)",
-    replace: "- Pick the component that fits: Table for comparison, Chart for trend.",
+    replace: "- Pick the component that fits: Table for comparison, Chart for trend, Map for places.",
   },
   {
     what: "the final-verification lead-in",
@@ -126,7 +116,8 @@ Example:`,
   },
 ]
 
-function version() {
+/** The pinned `@openuidev/react-lang` version, as the artifact's header and its test name it. */
+export function version() {
   const pinned = JSON.parse(readFileSync(PACKAGE, "utf8")).dependencies?.[LIBRARY]
   if (typeof pinned !== "string" || !pinned) throw new Error(`package.json pins no ${LIBRARY}`)
   return pinned.replace(/^[\^~]/, "")
@@ -178,10 +169,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     )
     process.exit(1)
   }
-  // Headroom alone hides a change that grew the artifact, so every run reports all three numbers.
   const previous = existsSync(ARTIFACT) ? readFileSync(ARTIFACT, "utf8").length : null
-  const grown = `${text.length - (previous ?? 0) >= 0 ? "+" : ""}${text.length - (previous ?? 0)}`
-  const delta = previous === null ? "first write" : `${grown} characters`
+  const grown = previous === null ? null : text.length - previous
+  const delta = grown === null ? "first write" : `${grown >= 0 ? "+" : ""}${grown} characters`
   mkdirSync(dirname(ARTIFACT), { recursive: true })
   writeFileSync(ARTIFACT, text, "utf8")
   console.log(

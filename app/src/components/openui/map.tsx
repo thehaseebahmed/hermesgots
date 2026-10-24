@@ -1,6 +1,7 @@
-import { Suspense, lazy } from "react"
 import { defineComponent, type ComponentRenderProps } from "@openuidev/react-lang"
 import { z } from "zod/v4"
+
+import { lazySurface, SURFACE_FRAME } from "./surface.tsx"
 
 const pointSchema = z.object({
   lat: z.number(),
@@ -18,17 +19,14 @@ const mapProps = z.object({
 
 export type MapProps = z.infer<typeof mapProps>
 
-// Leaflet and its tiles are the heaviest code the library can reach and most replies draw no map,
-// so it arrives only when one does. This module stays light: the import below is its whole claim.
-const MapSurface = lazy(() => import("./map-surface.tsx"))
+const MapSurface = lazySurface(
+  () => import("./map-surface.tsx"),
+  <div className={SURFACE_FRAME} aria-hidden />,
+)
 
 export const Map = defineComponent({
   name: "Map",
   props: mapProps,
-  description: "Labeled places on a map; summary in words.",
-  component: ({ props }: ComponentRenderProps<MapProps>) => (
-    <Suspense fallback={<div className="h-56 w-full min-w-0" aria-hidden />}>
-      <MapSurface props={props} />
-    </Suspense>
-  ),
+  description: "Labeled places on a map at coordinates you supply, never looked up; summary in words.",
+  component: ({ props }: ComponentRenderProps<MapProps>) => <MapSurface props={props} />,
 })

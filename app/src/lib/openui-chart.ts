@@ -8,7 +8,6 @@
 /** The ticks a y axis carries, counting the bottom one. Recharts' own default. */
 const TICK_COUNT = 5
 
-/** The steps a rounded axis may take: two of these, or five, per power of ten. */
 const NICE = [1, 2, 5, 10]
 
 export type Axis = {
@@ -18,8 +17,18 @@ export type Axis = {
   ticks: number[]
 }
 
-/** How wide a label draws, in pixels. A browser measures the text; a DOM without a canvas estimates. */
+/** How wide a label draws, in pixels. The surface measures the text on a canvas. */
 export type Measure = (label: string) => number
+
+export const TICK_STUB = 6
+export const TICK_MARGIN = 4
+
+/** The room a label keeps from the plot: stub, margin, and two pixels for a late-loading font. */
+export const LABEL_ROOM = TICK_STUB + TICK_MARGIN + 2
+
+export const LEAST_AXIS = 32
+
+export const LABEL_BAND = 12
 
 function stepFor(span: number, count: number) {
   const raw = span / (count - 1)
@@ -34,8 +43,12 @@ function stepFor(span: number, count: number) {
  */
 export function yAxisOf(values: number[]): Axis {
   if (!values.length) return { domain: [0, 1], ticks: [0, 1] }
-  const min = Math.min(0, ...values)
-  const max = Math.max(0, ...values)
+  let min = 0
+  let max = 0
+  for (const value of values) {
+    if (value < min) min = value
+    if (value > max) max = value
+  }
   if (min === max) return { domain: [0, 1], ticks: [0, 1] }
 
   const step = stepFor(max - min, TICK_COUNT)
@@ -49,21 +62,12 @@ export function yAxisOf(values: number[]): Axis {
   return { domain: [low, high], ticks }
 }
 
-/**
- * The width a y axis needs: its widest label, the room between a label and the plot, and a pixel of
- * slack for a font measured before it loaded. `least` keeps an axis of one-digit labels from
- * collapsing into its own ticks.
- */
-export function yAxisWidth(labels: string[], measure: Measure, room: number, least: number) {
+/** The width a y axis needs: its widest label and the room between it and the plot. */
+export function yAxisWidth(
+  labels: string[],
+  measure: Measure,
+  opts?: { yLabel?: boolean },
+): number {
   const widest = labels.reduce((width, label) => Math.max(width, measure(label)), 0)
-  return Math.max(least, Math.ceil(widest + room))
-}
-
-/**
- * A label's width where nothing can measure it — a test's DOM has no 2D canvas. It errs wide: a
- * label given a few pixels more than it needs costs plot area, and one given less hangs out of the
- * chart.
- */
-export function estimateWidth(label: string, fontSize: number) {
-  return label.length * fontSize * 0.62
+  return Math.max(LEAST_AXIS, Math.ceil(widest + LABEL_ROOM)) + (opts?.yLabel ? LABEL_BAND : 0)
 }

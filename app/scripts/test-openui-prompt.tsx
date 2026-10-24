@@ -1,24 +1,19 @@
 /**
  * The prompt artifact against the library it is generated from: the words a model is told and the
  * components the app can draw are one fact, and ADR 0032 makes a build catch the day they disagree
- * rather than a user reading it as "the model got it wrong". ADR 0040 puts the build script between
- * the library's words and the artifact, so half these gates hold the rewrite to the outcomes the
- * product needs and the other half hold it to the schema it may never touch.
+ * rather than a user reading it as "the model got it wrong".
  */
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 
-import { ARTIFACT, MAX_CHARS, generated, render, rewrite } from "./build-openui-prompt.mjs"
+import { ARTIFACT, MAX_CHARS, generated, render, rewrite, version } from "./build-openui-prompt.mjs"
 
 const checkedIn = readFileSync(ARTIFACT, "utf8")
 const generatedText = generated()
 const rewritten = render()
 
 const HEADER = /^# (@openuidev\/react-lang) (\S+)$/
-
-const pinned = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"))
-  .dependencies["@openuidev/react-lang"]
 
 /** What the model is told stays text, and what it draws, as the product settled it (spec #487). */
 const DRAWS_DATA =
@@ -37,7 +32,6 @@ function fences(text: string) {
     .filter((info) => info !== "")
 }
 
-/** One `##` section of the artifact, heading to the next one, as the bytes the model is told. */
 function section(text: string, heading: string): string {
   const start = text.indexOf(heading)
   assert.ok(start >= 0, `the artifact says no ${heading}`)
@@ -45,7 +39,7 @@ function section(text: string, heading: string): string {
   return text.slice(start, next === -1 ? undefined : next + 1)
 }
 
-test("the checked-in artifact is the library's own words", () => {
+test("the script owns the checked-in artifact: it is its own render, byte for byte", () => {
   assert.equal(
     checkedIn,
     rewritten,
@@ -69,9 +63,6 @@ test("it fits the host's section limit instead of being dropped whole", () => {
     checkedIn.length <= MAX_CHARS,
     `${checkedIn.length} characters, over the host's ${MAX_CHARS}`,
   )
-  // The library's own words may sit over the ceiling — since ADR 0040 the rewrite owns the artifact
-  // and the compression is what buys the room, so the map's signature put them at 4,114 — but the
-  // rewrite has to be the shrink that fits it, and a body it can no longer fit fails here.
   assert.ok(
     rewritten.length < generatedText.length,
     `the rewrite shrinks the library's ${generatedText.length} characters, not grows them`,
@@ -82,11 +73,7 @@ test("the header names the pinned renderer the words were generated for", () => 
   const [first] = checkedIn.split("\n")
   const named = HEADER.exec(first ?? "")
   assert.ok(named, `the first line names no @openuidev/react-lang version: ${String(first)}`)
-  assert.equal(
-    named[2],
-    pinned.replace(/^[\^~]/, ""),
-    `${String(pinned)} is pinned in package.json`,
-  )
+  assert.equal(named[2], version(), "the pinned @openuidev/react-lang in package.json")
 })
 
 test("the rules this app adds are in it", () => {
@@ -99,8 +86,6 @@ test("the rules this app adds are in it", () => {
 })
 
 test("a data answer draws and a question asks through clarify", () => {
-  // The library still says a question gets text only and that it has forms; both fought the
-  // product, so the rewrite owns them and these two rules stand where the old one did.
   assert.ok(checkedIn.includes(DRAWS_DATA), `the artifact never says: ${DRAWS_DATA}`)
   assert.ok(
     checkedIn.includes(ASKS_THROUGH_CLARIFY),
@@ -124,8 +109,6 @@ test("nothing the library said about questions or forms survives", () => {
 })
 
 test("the compression never touches the schema the model codes against", () => {
-  // Signatures, enum values and the syntax rules are what the parser accepts: prose may shrink,
-  // those bytes may not, so they are held to the library's own unrewritten words.
   for (const heading of ["## Syntax Rules", "## Component Signatures"]) {
     assert.equal(
       section(checkedIn, heading),
@@ -140,8 +123,6 @@ test("the compression never touches the schema the model codes against", () => {
 })
 
 test("a body the library moved fails the build instead of shipping stale words", () => {
-  // A @openuidev/lang-core bump that rewords a needle has to be loud: the rewrite names what moved
-  // upstream rather than write an artifact it did not fully recognise.
   assert.throws(() => rewrite("## Inline Mode\n\nnothing the table knows\n"), /moved it upstream/)
   assert.throws(
     () => rewrite(`${generatedText}${generatedText}`),

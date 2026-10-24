@@ -48,7 +48,7 @@ for.
   the system prompt mid-conversation, which is the one thing Hermes's caching forbids.
 - **The artifact is capped at 4,000 characters.** Hermes bounds a section there, so the library has to
   stay small enough to describe inside it, and a test fails when the generated text outgrows the cap.
-  That bound is a feature: six components that fit are better than twenty that don't.
+  That bound is a feature: seven components that fit are better than twenty that don't.
 - **A drift test is the guard, not a convention.** It regenerates the artifact from the library and
   compares, including the fence name the prompt tells the model to write. A prompt that names a
   different fence than the extractor reads is the one failure the fallback cannot hide.

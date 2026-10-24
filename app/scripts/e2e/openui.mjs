@@ -1,8 +1,3 @@
-// An interface in a real thread: the reply's block draws from the library at a phone's width and a
-// tablet's, in both themes, lined up with the text around it — its box on the text's own edges, the
-// gap around it the thread's paragraph gap, a chart's five-digit tick labels whole inside it; the
-// block no component answers for draws as the code the model sent; and a patch that lands while the
-// reader is scrolled up leaves their place where it was.
 import { app, assert, flow, pass, settled } from "./lib.mjs"
 
 const VIEWPORT = "[data-slot=message-scroller-viewport]"
@@ -44,11 +39,6 @@ const facts = (page, place = false) =>
     }
   }, place)
 
-/**
- * The box geometry this flow can only read from a browser: where the reply's text sits against the
- * interface's box, how much room the gaps around the block keep, and whether a chart's tick labels
- * stay inside the chart. A component test has no layout to measure (ADR 0019).
- */
 const geometry = (page) =>
   page.evaluate(() => {
     const reply = document.querySelector("[data-slot=card]").closest("[data-slot=message]")

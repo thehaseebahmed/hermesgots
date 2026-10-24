@@ -2,7 +2,7 @@ import { memo, useEffect, useRef } from "react"
 import { Renderer } from "@openuidev/react-lang"
 
 import { Markdown } from "@/components/chat/markdown"
-import { INFO } from "@/lib/openui-block.ts"
+import { INFO, REPLY_INSET } from "@/lib/openui-block.ts"
 import type { InterfaceDraw } from "@/lib/openui-thread.ts"
 import { noteFailure } from "@/lib/report"
 
@@ -64,12 +64,14 @@ function OpenUIBlock(props: Props) {
   }, [props.streaming, answer, failure])
   if (answer === "nothing") return null
   if (answer === "code")
-    return <Markdown className="px-1 text-[15px] leading-relaxed">{fenced(props.source)}</Markdown>
+    return (
+      <Markdown className={`${REPLY_INSET} text-[15px] leading-relaxed`}>
+        {fenced(props.source)}
+      </Markdown>
+    )
   return (
     <Renderer.Root response={props.source} library={library} isStreaming={props.streaming}>
-      {/* The text beside a block carries `px-1` (message-item's Markdown); the drawn box carries the
-          same inset, so a block starting to draw moves nothing, and its edges land on the text's. */}
-      <Renderer.Content className="w-full min-w-0 space-y-3 px-1" />
+      <Renderer.Content className={`w-full min-w-0 space-y-3 ${REPLY_INSET}`} />
     </Renderer.Root>
   )
 }
