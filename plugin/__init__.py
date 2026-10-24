@@ -292,6 +292,15 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             for name, gate in mcp.FEATURES
             if serves_mcps and await asyncio.to_thread(gate) is None
         ]
+        # The skills screen is advertised on the same terms: only where Hermes's own listing imports,
+        # under whichever name this host ships it, which is the gate the read's 501 answers from —
+        # a host that can't list skills has no slash menu and no tab. See skill_catalog.py.
+        serves_skills = await asyncio.to_thread(skill_catalog.available) is None
+        skills_features = [
+            name
+            for name, gate in skill_catalog.FEATURES
+            if serves_skills and await asyncio.to_thread(gate) is None
+        ]
         return web.json_response(
             {
                 "name": "memento",
@@ -305,7 +314,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "todos",
                     "projects",
                     "projects_async",
-                    "skills",
+                    # Hermes's own skills listing, and the Skills screen with it; see skill_catalog.py.
+                    *skills_features,
                     "project_repos",
                     "project_usage",
                     "github",
