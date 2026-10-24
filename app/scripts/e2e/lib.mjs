@@ -506,6 +506,24 @@ export const say = (body) =>
     body: JSON.stringify(body),
   })
 
+/** AFK's answer for a project, read straight from the mock rather than through the app's own sheet. */
+export const afkRead = async (projectId) =>
+  (await fetch(`${mock}/api/plugins/memento/projects/${projectId}/afk`)).json()
+
+/**
+ * Seeds this device's vault the way a returning device's is: a data key minted here, and its locked
+ * copy in the device's own database — the state an account's device is in with the vault unlocked.
+ * The account's sealed documents are sealed with that key, so whatever a flow answers them with
+ * opens on this page. `userId` is the account the page is signed in as.
+ */
+export async function seedVault(page, userId = accountUser.id) {
+  await page.evaluate(async (id) => {
+    const vault = await import("/src/lib/vault.ts")
+    const { db } = await import("/src/lib/db.ts")
+    await db.vault.put({ id: "key", userId: id, key: await vault.lockDown(await vault.generateDataKey()) })
+  }, userId)
+}
+
 /** Leaves a project to work on its own: the AFK pop-up opened, the switch turned on and read back. */
 export async function afkOn(page, screen, until) {
   await openAfk(page, screen)
