@@ -9,8 +9,21 @@ import { app, assert, flow, makeProject, mock, openAfk, pass } from "./lib.mjs"
 
 const BUILD = "plan"
 const CRITIQUE = ["github-pr-workflow", "log-triage"]
-// The mock's profile holds these three, so a picker listing anything else is not the bot's own list.
-const OFFERED = ["github-pr-workflow", "log-triage", "plan"]
+// The mock's profile holds these, and the pickers offer the ones its host can run now: a row
+// switched off (`weekly-digest`) or one that doesn't load (`legacy-importer`) is not among them
+// (ADR 0044), while a plugin's skill and an essential one are.
+const OFFERED = [
+  "code-review",
+  "code-review-deep",
+  "github-pr-workflow",
+  "gots:ship",
+  "hub-audit",
+  "identity",
+  "log-triage",
+  "log-rotation",
+  "pinned-notes",
+  "plan",
+]
 
 /** The host's `info` answered without these features: a plugin from before they were added. */
 async function withoutFeatures(page, ...missing) {
