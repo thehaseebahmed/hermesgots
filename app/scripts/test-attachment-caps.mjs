@@ -92,6 +92,16 @@ test("a paste and the drop it also fires add one copy, and a later pick adds ano
     "the same files arriving again moments later",
   )
   assert.deepEqual(fresh([photo], seen, 5000), [photo], "the user picking one again on purpose")
+  assert.deepEqual(
+    fresh([photo], seen, 5100, { repeat: false }),
+    [photo],
+    "an explicit pick lands however recently the same file was taken",
+  )
+  assert.deepEqual(
+    fresh([photo], seen, 5200),
+    [],
+    "and is recorded, so a paste that follows it is still one copy",
+  )
 })
 
 test("a share's refusals name the limits in the same words", () => {

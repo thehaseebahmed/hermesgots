@@ -281,9 +281,10 @@ export function Composer({
     })
   }
 
-  const addFiles = async (files: File[]) => {
+  // `picked` is a file chosen on purpose, which lands however recently it was taken.
+  const addFiles = async (files: File[], picked = false) => {
     // A paste and the drop the browser can also fire carry the same file, which lands once.
-    const added = fresh(files, recent.current, Date.now())
+    const added = fresh(files, recent.current, Date.now(), { repeat: !picked })
     if (!added.length) return
     // Files need the plugin's upload route; a photo the model reads inline doesn't, and still lands.
     const because = filesReason(filesFeature)
@@ -349,7 +350,7 @@ export function Composer({
       disabled={disabled}
       filesFeature={filesFeature}
       imagesAvailable={imagesAvailable}
-      onAdd={(files) => void addFiles(files)}
+      onAdd={(files) => void addFiles(files, true)}
       session={session}
     />
   )

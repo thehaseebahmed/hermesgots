@@ -79,6 +79,28 @@ async function pick(source: "camera" | "photos" | "files", files: File[]) {
 const note = (name: string, body = "hello") =>
   new File([body], name, { type: "text/plain", lastModified: 1_700_000_000_000 })
 
+async function removeAttachment(name: string) {
+  const button = findAll("button").find((one) => one.getAttribute("aria-label") === `Remove ${name}`)
+  assert.ok(button, `the ${name} tile's remove button`)
+  await act(async () => {
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))
+  })
+  await settle()
+}
+
+test("a file picked again after its tile is removed lands a second time", async () => {
+  const sent: { text: string; attachments: Attachment[] }[] = []
+  await mount(composer(sent), async () => {
+    const file = note("again.txt")
+    await pick("files", [file])
+    assert.deepEqual(tileNames(), ["again.txt"], "the pick lands")
+    await removeAttachment("again.txt")
+    assert.deepEqual(tileNames(), [], "the user took it off")
+    await pick("files", [file])
+    assert.deepEqual(tileNames(), ["again.txt"], "picking the very same file lands again")
+  })
+})
+
 test("a pasted file lands on the message and sends nothing", async () => {
   const sent: { text: string; attachments: Attachment[] }[] = []
   await mount(composer(sent), async () => {

@@ -117,19 +117,22 @@ export function keptImage<B extends { size: number }>(file: B, scaled: B | null)
 
 /**
  * The files `seen` hasn't taken moments ago, recorded as they are taken. A surface that hears both
- * a paste and the drop of the same file adds it once, and one picked again later still lands.
+ * a paste and the drop of the same file adds it once; `repeat: false` is an explicit pick, which
+ * lands however recently the same file was taken, and is recorded all the same so a paste that
+ * follows it is still one copy.
  */
 export function fresh<T extends CappedFile>(
   files: T[],
   seen: Map<string, number>,
   now: number,
+  { repeat = true }: { repeat?: boolean } = {},
 ): T[] {
   const took: T[] = []
   for (const file of files) {
     const key = `${file.name}:${file.size}:${file.lastModified ?? 0}`
     const at = seen.get(key)
-    if (at !== undefined && now - at < REPEAT_MS) continue
     seen.set(key, now)
+    if (repeat && at !== undefined && now - at < REPEAT_MS) continue
     took.push(file)
   }
   return took
