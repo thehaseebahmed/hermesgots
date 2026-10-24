@@ -113,7 +113,7 @@ test("the host keeps the file the user chose, with the scaled copy as the model'
 test("an original too big to keep is what the scaled copy stands in for", () => {
   const huge = { size: MAX_FILE_BYTES + 1, type: "image/heic" }
   const smaller = { size: 2 * 1024 * 1024, type: "image/jpeg" }
-  assert.deepEqual(keptImage(huge, smaller), { kept: smaller, inline: null })
+  assert.deepEqual(keptImage(huge, smaller), { kept: smaller })
   assert.equal(
     keptImage({ size: MAX_FILE_BYTES }, smaller).kept.size,
     MAX_FILE_BYTES,
@@ -123,6 +123,6 @@ test("an original too big to keep is what the scaled copy stands in for", () => 
 
 test("a photo that needed no scaling is one copy, not two", () => {
   const photo = { size: 400 * 1024, type: "image/png" }
-  assert.deepEqual(keptImage(photo, photo), { kept: photo, inline: null })
-  assert.deepEqual(keptImage(photo, null), { kept: photo, inline: null })
+  assert.deepEqual(keptImage(photo, photo), { kept: photo })
+  assert.deepEqual(keptImage(photo, null), { kept: photo })
 })
