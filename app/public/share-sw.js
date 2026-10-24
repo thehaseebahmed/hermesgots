@@ -3,6 +3,8 @@
 // screen to read, which a redirect then opens.
 
 const SHARE_CACHE = "memento-share"
+// What one message carries, so a share of more is said out loud by the share screen.
+const MAX_FILES = 10
 
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url)
@@ -23,9 +25,11 @@ async function receive(request) {
       title: String(form.get("title") || ""),
       text: String(form.get("text") || ""),
       url: String(form.get("url") || ""),
+      // What arrived but is beyond what one message carries, so the screen can say so.
+      leftOut: Math.max(0, files.length - MAX_FILES),
       files: [],
     }
-    for (const [index, file] of files.slice(0, 10).entries()) {
+    for (const [index, file] of files.slice(0, MAX_FILES).entries()) {
       const key = `/__share/${id}/${index}`
       await cache.put(key, new Response(file, { headers: { "content-type": file.type } }))
       meta.files.push({ key, name: file.name, type: file.type })
