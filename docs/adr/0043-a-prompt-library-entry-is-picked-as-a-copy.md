@@ -10,7 +10,7 @@ The host can never read that document: sync is sealed with the account's data ke
 not have, and the sweep runs with the app closed. So a pick is a **copy**: the app writes the entry's
 text into the project's prompt over the route the plugin already serves, and the project also records
 which entry it took. The prompt row then tells copy from original — an entry whose current text no
-longer matches the copy shows an **Update** badge in front of the row's title, and tapping it asks in
+longer matches the copy shows an **Update** badge right after the row's title, and tapping it asks in
 a dialog before pulling the new text in; hand-editing the prompt clears the recorded source, so the
 badge cannot lie about the user's own words; an entry deleted from the library leaves the copy
 standing unbadged. A pick keeps the standing rule that a project's prompt and its workflow are
