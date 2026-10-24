@@ -4,6 +4,7 @@ import { BellOffIcon, MenuIcon } from "lucide-react"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { Bot } from "@/components/bot"
 import { Button } from "@/components/ui/button"
+import { COLUMN_BOX } from "@/lib/layout"
 import { cn } from "@/lib/utils"
 
 /**
@@ -56,7 +57,7 @@ export function ChatHeader({
       <div
         data-slot="header-row"
         className={cn(
-          "mx-auto max-w-3xl",
+          COLUMN_BOX,
           centered
             ? "grid grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(0,1fr)] items-center gap-3"
             : "flex items-center gap-3",

@@ -522,27 +522,32 @@ export const MessageItem = memo(function MessageItem({
   // A reply's stats come only once it is done and fully revealed, so they never count up.
   const statsShown = showStats && !streaming && !revealing && Boolean(message.stats)
   const statusLine = streaming && !runningTool && !thinkingProgress
-  const footerShown =
-    statusLine || failed || (message.status === "stopped" && !message.content) || statsShown
   // The footer's lines are one part of the reply, so they carry the column together and keep the
   // gap they had as direct children of the row. A footer with no lines would be a gap of its own,
   // so there is no row at all until one shows.
+  const footerLines = [
+    statusLine && (
+      <StatusLine
+        key="status"
+        text={awaitingApproval ? "Waiting for your approval…" : describeActivity(message)}
+      />
+    ),
+    // An error on a reply that streamed says so plainly: it isn't the bot's answer.
+    failed && (
+      <div key="failed" className="flex items-start gap-2 px-1 text-[15px] text-destructive">
+        {error}
+      </div>
+    ),
+    message.status === "stopped" && !message.content && (
+      <div key="stopped" className="px-1 text-xs text-muted-foreground">
+        Stopped
+      </div>
+    ),
+    statsShown && <Stats key="stats" message={message} />,
+  ].filter(Boolean)
+  const footerShown = footerLines.length > 0
   const footer = footerShown && (
-    <div className={cn(COLUMN, "flex flex-col gap-3")}>
-      {statusLine && (
-        <StatusLine
-          text={awaitingApproval ? "Waiting for your approval…" : describeActivity(message)}
-        />
-      )}
-      {/* An error on a reply that streamed says so plainly: it isn't the bot's answer. */}
-      {failed && (
-        <div className="flex items-start gap-2 px-1 text-[15px] text-destructive">{error}</div>
-      )}
-      {message.status === "stopped" && !message.content && (
-        <div className="px-1 text-xs text-muted-foreground">Stopped</div>
-      )}
-      {statsShown && <Stats message={message} />}
-    </div>
+    <div className={cn(COLUMN, "flex flex-col gap-3")}>{footerLines}</div>
   )
   return (
     <div className="flex flex-col gap-3">

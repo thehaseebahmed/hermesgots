@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { CheckIcon, MessageCircleQuestionIcon } from "lucide-react"
 import { toast } from "sonner"
 
+import { CARD } from "@/components/chat/session-cards"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
@@ -237,10 +238,7 @@ export function QuestionCard({ message }: { message: Message }) {
   const onChange = (id: string) => (next: Picked) => setPicked((all) => ({ ...all, [id]: next }))
 
   return (
-    <Card
-      size="sm"
-      className="w-full rounded-3xl border shadow-xl ring-0 shadow-black/10 dark:shadow-black/40"
-    >
+    <Card size="sm" className={CARD}>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base text-primary">
           <MessageCircleQuestionIcon className="size-5" />

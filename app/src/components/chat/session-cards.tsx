@@ -17,7 +17,14 @@ import { Spinner } from "@/components/ui/spinner"
 import { sendMessage } from "@/lib/chat"
 import type { ToolEvent } from "@/lib/db"
 
-const CARD = "w-full rounded-3xl border shadow-xl ring-0 shadow-black/10 dark:shadow-black/40"
+/** The width rule every card the app draws inside a chat shares: its container's own, with no cap (ADR 0041). */
+export const CARD_BASE = "w-full rounded-3xl border"
+
+/** A card floating in the composer slot, shadowed over the thread behind it. */
+export const CARD = `${CARD_BASE} shadow-xl ring-0 shadow-black/10 dark:shadow-black/40`
+
+/** A card drawn flat in a thread, against the pane rather than over it. */
+export const THREAD_CARD = `${CARD_BASE} bg-muted/40`
 
 /**
  * In place of the composer once a plan-mode turn has finished: the plan waits for the user, who
@@ -155,7 +162,7 @@ function ExchangeCard({
   children?: ReactNode
 }) {
   return (
-    <Card size="sm" className="w-full rounded-3xl border bg-muted/40 ring-0">
+    <Card size="sm" className={`${THREAD_CARD} ring-0`}>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
           {icon}

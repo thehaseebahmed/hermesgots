@@ -2,6 +2,7 @@ import { useState } from "react"
 import { ShieldAlertIcon } from "lucide-react"
 import { toast } from "sonner"
 
+import { CARD_BASE } from "@/components/chat/session-cards"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { answerApproval } from "@/lib/chat"
@@ -46,7 +47,7 @@ export function ApprovalCard({ message }: { message: Message }) {
     <Card
       size="sm"
       className={cn(
-        "w-full rounded-3xl border ring-0",
+        CARD_BASE,
         !resolved && "shadow-xl shadow-black/10 dark:shadow-black/40",
         resolved && "opacity-70",
       )}

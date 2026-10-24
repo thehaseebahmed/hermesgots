@@ -34,6 +34,7 @@ import type { Attachment } from "@/lib/db"
 
 import { flushDrafts, loadDraft, saveDraft, useDraftText } from "@/lib/drafts"
 import type { HermesConfig } from "@/lib/hermes"
+import { COLUMN_BOX } from "@/lib/layout"
 import {
   SEND_WAIT_MS,
   STOP_WAIT_MS,
@@ -408,7 +409,7 @@ export function Composer({
 
   if (dictation.status !== "idle") {
     return (
-      <div className="mx-auto w-full max-w-3xl">
+      <div className={COLUMN_BOX}>
         <VoiceBar
           status={dictation.status}
           levels={dictation.levels}
@@ -519,7 +520,7 @@ export function Composer({
   )
 
   return (
-    <form onSubmit={submit} className="relative mx-auto w-full max-w-3xl">
+    <form onSubmit={submit} className={`${COLUMN_BOX} relative`}>
       {menuOpen && (
         <SlashMenu
           id={listId}
