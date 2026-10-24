@@ -1,3 +1,4 @@
+import { boundedStore } from "@/lib/bounded-cache"
 import { connectionKey } from "@/lib/connection"
 import { cooldown } from "@/lib/cooldown"
 import { db } from "@/lib/db"
@@ -20,24 +21,45 @@ export interface MediaFile {
   blob: Blob
 }
 
-/** One shared fetch per file: a chat re-renders constantly while a reply streams in. */
-const files = new Map<string, Promise<MediaFile | null>>()
+/** How many files a page keeps: a chat read through for a while would otherwise pin every one. */
+const MEDIA_LIMIT = 128
+/** The files read already, so a redraw of a tag costs nothing. */
+const files = boundedStore<MediaFile>({
+  limit: MEDIA_LIMIT,
+  // Letting go of a file's URL lets go of the bytes pinned behind it; a cell that comes back for
+  // the file reads it again.
+  dispose: (file) => URL.revokeObjectURL(file.url),
+})
+/** Reads under way, so a group of tags asks the route once each; each leaves on its own settle. */
+const reading = new Map<string, Promise<MediaFile | null>>()
 
 /** The file a `MEDIA:<path>` tag names, or null when the host can't serve it. */
 export function getMediaFile(config: HermesConfig, path: string): Promise<MediaFile | null> {
   const key = `${config.baseUrl}\n${path}`
-  let pending = files.get(key)
+  const known = files.get(key)
+  if (known) return Promise.resolve(known)
+  let pending = reading.get(key)
   if (!pending) {
     // A host that goes quiet must not leave a cell pulsing: the read is bounded.
     pending = getPluginMedia(config, path, AbortSignal.timeout(READ_TIMEOUT_MS))
-      .then((blob) => ({
-        url: URL.createObjectURL(blob),
-        type: blob.type,
-        size: blob.size,
-        blob,
-      }))
+      .then((blob) => {
+        const file = {
+          url: URL.createObjectURL(blob),
+          type: blob.type,
+          size: blob.size,
+          blob,
+        }
+        // The store's copy is the page's, so a file kept nowhere else still has its URL let go.
+        if (!files.has(key)) files.set(key, file)
+        else URL.revokeObjectURL(file.url)
+        return file
+      })
       .catch(() => null)
-    files.set(key, pending)
+      // Shared only while the read is: after it, the store or a fresh read answers.
+      .finally(() => {
+        reading.delete(key)
+      })
+    reading.set(key, pending)
   }
   return pending
 }

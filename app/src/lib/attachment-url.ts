@@ -1,9 +1,14 @@
 import type { Attachment } from "@/lib/db"
+import { boundedStore } from "@/lib/bounded-cache"
 import { renderableImage } from "@/lib/media-kind"
 
-// One URL per attachment for the page's life: a live query hands back a fresh Blob on every
-// change, and a new URL each time would make every image on screen flash.
-const urls = new Map<string, string>()
+// One URL per attachment, so a live query handing back a fresh Blob on every change doesn't make
+// every image on screen flash. Bounded, because each URL holds its whole file open: a thread read
+// through for a while would otherwise keep every one of them.
+const urls = boundedStore<string>({
+  limit: 128,
+  dispose: (url) => URL.revokeObjectURL(url),
+})
 
 /**
  * What this device draws for an attachment: the file the user chose — a clip, an animation, a

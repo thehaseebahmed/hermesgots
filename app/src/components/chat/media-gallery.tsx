@@ -3,6 +3,7 @@ import { PlayIcon } from "lucide-react"
 
 import { AttachmentTile, MediaName } from "@/components/chat/attachments"
 import { Skeleton } from "@/components/ui/skeleton"
+import { boundedStore } from "@/lib/bounded-cache"
 import type { MediaCell, MediaKind } from "@/lib/media-kind"
 import { useImageReady } from "@/lib/image"
 import { openMediaViewer } from "@/lib/native"
@@ -35,12 +36,22 @@ export interface MediaItem {
 /** How long the browser gets to give up a clip's first frame before its cell settles for less. */
 const FRAME_TIMEOUT_MS = 4000
 
+/** How many frames a page keeps: a few kilobytes each, and a clip's cell scrolls past and back. */
+const FRAME_LIMIT = 64
+
+/**
+ * A clip's first frame once it has been read, keyed by the clip: a frame is a data URL, so nothing
+ * has to be let go of, and scrolling a clip's cell away and back doesn't decode the whole clip to
+ * draw the same frame again.
+ */
+const frames = boundedStore<string | null>({ limit: FRAME_LIMIT, dispose: () => {} })
+
 /**
  * A clip's first frame, from the browser's own metadata load: an element that is never put on the
  * page seeks a moment in and paints that frame to a canvas. A clip is never played in the thread,
  * so this is the one look at it there is; a browser that can't decode it answers nothing.
  */
-async function firstFrame(src: string, type: string): Promise<string | null> {
+async function readFrame(src: string, type: string): Promise<string | null> {
   const video = document.createElement("video")
   // A type this browser can't play has no first frame to give, and asking would only wait.
   if (!video.canPlayType(type)) return null
@@ -89,8 +100,8 @@ async function firstFrame(src: string, type: string): Promise<string | null> {
 }
 
 /**
- * The cell's frame and whether the attempt is over: a clip the browser cannot read settles with no
- * frame rather than pulsing a skeleton forever.
+ * A clip's cell: the frame, and whether the attempt is over. A clip the browser cannot read settles
+ * with no frame rather than pulsing a skeleton forever.
  */
 function useFirstFrame(src: string | undefined, type: string) {
   const [frame, setFrame] = useState<string | null>(null)
@@ -108,6 +119,15 @@ function useFirstFrame(src: string | undefined, type: string) {
     }
   }, [src, type])
   return { frame, settled }
+}
+
+/** A clip's first frame, from the page's frames where it has been read already. */
+async function firstFrame(src: string, type: string): Promise<string | null> {
+  const known = frames.get(src)
+  if (known !== undefined) return known
+  const taken = await readFrame(src, type)
+  frames.set(src, taken)
+  return taken
 }
 
 function open(item: MediaItem) {
