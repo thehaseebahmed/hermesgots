@@ -72,12 +72,16 @@ and the time at the end of the row is that thread's last activity rather than it
 
 | Path | What it is |
 | --- | --- |
-| `app/src/lib/item-groups.ts` | The four groups, their labels, membership and order |
-| `app/src/lib/workspace.ts` | The state each session resolves to, including checks running as waiting |
+| `app/src/lib/session-work.ts` | Where a session stands — its state, the group claim with a pull request's checks running or failed waiting, the last-activity derivation and the unread predicate |
+| `app/src/lib/pull-state.ts` | A pull request's live states and its checks waiting, apart from the schema |
+| `app/src/lib/item-groups.ts` | The four groups' labels and order, which group a state lands in, the fold both list vocabularies group by, and each group's orders |
 | `app/src/routes/code.tsx` | The list, its headers, the trailing time, the dot, the sort-by dropdown |
 | `app/src/components/item-list.tsx` | The row's icon colour, glyph and the dot's corner |
-| `app/src/lib/code.ts` | The list's sessions and their base ordering |
-| `app/src/lib/` (new read-mark module) | Per-client session to last-rendered moments, and the unread predicate |
+| `app/src/components/sort-menu.tsx` | The one sort control, which the sidebar's bots and the Library tree draw too |
+| `app/src/lib/compare.ts` | How every list orders names |
+| `app/src/lib/code.ts` | The list's sessions, read per project from the host |
+| `app/src/lib/read-marks.ts` | Per-client session to last-rendered moments, dropped with the session |
+| `app/src/lib/workspace.ts` | Reading a session's worktree and pull requests; `sessionState` re-exported for its callers |
 | `app/scripts/test-*.mjs` | Unit rules: membership and order, colour precedence, last activity, unread |
 | `app/scripts/e2e/`, `app/scripts/e2e/cli.mjs` | The flow that proves grouping, colour and the dot |
 | `docs/e2e-flow-audit.md` | Its row and verdict |
