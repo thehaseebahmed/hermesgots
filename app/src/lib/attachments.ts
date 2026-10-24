@@ -1,9 +1,18 @@
 import { useSyncExternalStore } from "react"
 
+import {
+  attachmentParts,
+  attachmentsText,
+  formatBytes,
+  splitAttachments,
+} from "@/lib/attachment-text"
+import { db, type Attachment } from "@/lib/db"
+import { READ_TIMEOUT_MS } from "@/lib/freshness"
+import { getPluginMedia, type ContentPart } from "@/lib/hermes"
 import { createSignal } from "@/lib/store"
-import type { Attachment } from "@/lib/db"
-import type { ContentPart } from "@/lib/hermes"
 import { randomId } from "@/lib/utils"
+
+export { attachmentsText, formatBytes, splitAttachments }
 
 /** Under the API server's 10 MB request cap, which the plugin's upload shares. */
 export const MAX_FILE_BYTES = 9 * 1024 * 1024
@@ -86,18 +95,33 @@ export async function prepareAttachment(file: File, inline = true): Promise<Atta
   }
 }
 
-export function formatBytes(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
-  return `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`
-}
-
 /** Whether there's anything on this device to show for it. */
 export const openable = (attachment: Attachment) => Boolean(attachment.blob)
 
 /** The bytes a message's photos add to its request. */
 export const inlineBytes = (attachments: Attachment[]) =>
   attachments.reduce((sum, a) => sum + (a.image && a.blob ? a.blob.size : 0), 0)
+
+/**
+ * Saves a file this device doesn't hold — one another device sent, or one a restored message names
+ * — under the file's own name. The bytes come from the bot's plugin media route, which a plain link
+ * can't call without the key, so they are fetched and handed to the browser as a download.
+ */
+export async function downloadAttachment(conversationId: string, attachment: Attachment) {
+  const conversation = await db.conversations.get(conversationId)
+  const profile = conversation && (await db.profiles.get(conversation.profileId))
+  if (!profile || !attachment.path) throw new Error(`There is no copy of ${attachment.name}.`)
+  const blob = await getPluginMedia(profile, attachment.path, AbortSignal.timeout(READ_TIMEOUT_MS))
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = attachment.name
+  document.body.append(link)
+  link.click()
+  link.remove()
+  // The browser reads the bytes after the click returns, so the URL outlives it.
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+}
 
 // Attachments being saved on the Hermes host right now, so their tiles can say so.
 const uploading = new Set<string>()
@@ -123,95 +147,15 @@ function blobToDataUrl(blob: Blob) {
   })
 }
 
-const escapeAttr = (value: string) =>
-  value
-    .replace(/\s+/g, " ")
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-
-const unescapeAttr = (value: string) =>
-  value
-    .replace(/&quot;/g, '"')
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&amp;/g, "&")
-
-/** The line that tells the model about an attachment, and where the plugin saved it. */
-function marker(attachment: Attachment) {
-  const attrs: [string, string][] = [
-    ["name", attachment.name],
-    ["type", attachment.type],
-    ...(attachment.path ? ([["path", attachment.path]] as [string, string][]) : []),
-  ]
-  return `<attachment ${attrs.map(([key, value]) => `${key}="${escapeAttr(value)}"`).join(" ")} />`
-}
-
-const MARKER = /^<attachment((?:\s+[a-z]+="[^"]*")*)\s*\/>$/
-// What Hermes keeps of an inline image in its transcript.
-const IMAGE_PLACEHOLDER = "[screenshot]"
-
-/** The message as Hermes's transcript keeps it: the text, then a line per attachment. */
-export function attachmentsText(text: string, attachments: Attachment[] = []) {
-  return [
-    text,
-    ...attachments.map((a) => (a.image ? `${marker(a)}\n${IMAGE_PLACEHOLDER}` : marker(a))),
-  ]
-    .filter(Boolean)
-    .join("\n")
-}
-
-/** The message's content for Hermes: parts with each image inline when it has attachments. */
+/** The message's content for Hermes: the text with a marker per attachment, and each photo inline. */
 export async function wireContent(
   text: string,
   attachments: Attachment[] = [],
 ): Promise<string | ContentPart[]> {
   if (!attachments.length) return text
-  const parts: ContentPart[] = text ? [{ type: "text", text }] : []
-  for (const attachment of attachments) {
-    parts.push({ type: "text", text: marker(attachment) })
+  const parts = attachmentParts(text, attachments)
+  for (const attachment of attachments)
     if (attachment.image && attachment.blob)
       parts.push({ type: "image_url", image_url: { url: await blobToDataUrl(attachment.blob) } })
-  }
   return parts
-}
-
-/** Splits a transcript row's text back into what the user typed and what they attached. */
-export function splitAttachments(content: string): { text: string; attachments: Attachment[] } {
-  const lines = content.split("\n")
-  const attachments: Attachment[] = []
-  let end = lines.length
-  let image = false
-  while (end > 0) {
-    const line = lines[end - 1].trim()
-    if (line === IMAGE_PLACEHOLDER && !image) {
-      image = true
-      end--
-      continue
-    }
-    const match = MARKER.exec(line)
-    if (!match) break
-    const attrs = Object.fromEntries(
-      [...match[1].matchAll(/([a-z]+)="([^"]*)"/g)].map(([, key, value]) => [
-        key,
-        unescapeAttr(value),
-      ]),
-    )
-    attachments.unshift({
-      id: `${end}`,
-      name: attrs.name || "file",
-      type: attrs.type || "application/octet-stream",
-      size: 0,
-      image,
-      path: attrs.path || undefined,
-    })
-    image = false
-    end--
-  }
-  // A placeholder with no attachment line before it is the user's own text.
-  if (image) end++
-  return attachments.length
-    ? { text: lines.slice(0, end).join("\n"), attachments }
-    : { text: content, attachments }
 }
