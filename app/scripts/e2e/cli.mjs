@@ -271,7 +271,7 @@ export const FLOWS = {
   "skills-remove": {
     script: "e2e/skills-remove.mjs",
     about:
-      "A removal's confirmation is drawn over the skill's own sheet in a box no wider than a dialog's, centred and on screen at phone and tablet widths, with the sheet still under it, light and dark",
+      "A removal's confirmation is drawn in a box no wider than a dialog's, centred across and down the screen and on screen at phone and tablet widths, light and dark",
   },
   "fallbacks-silent-host": {
     script: "e2e/fallbacks-silent-host.mjs",

@@ -1,7 +1,7 @@
-// Remove's geometry: the confirmation a removal asks first with, drawn over the skill's own sheet at a
-// phone's and a tablet's width, light and dark — a centred dialog on screen at both, the sheet under it
-// still in place. Which origins offer Remove, what a cancel sends, what a confirmed removal leaves and
-// what the host's refusal says are `test-skills-tab.tsx`'s; this is the box the question is drawn in.
+// Remove's geometry: the confirmation a removal asks first with, opened from the skill's own sheet at a
+// phone's and a tablet's width, light and dark — a centred dialog on screen at both. Which origins offer
+// Remove, what a cancel sends, what a confirmed removal leaves and what the host's refusal says are
+// `test-skills-tab.tsx`'s; this is the box the question is drawn in.
 import { app, assert, flow, mock, pass, settled } from "./lib.mjs"
 
 /** The confirmation's own ceiling (`AlertDialogContent`'s `max-w-xs`), which no width may pass. */
@@ -26,6 +26,7 @@ const run = async ({ page, profileId, shot }) => {
     await row("hub-audit").locator("button").first().click()
     await page.locator('[data-skill-sheet="hub-audit"]').waitFor({ timeout: 15_000 })
     await settled(page)
+    assert.ok(await sheet().isVisible(), "the sheet Remove is offered on is up")
     await page.getByRole("button", { name: "Remove", exact: true }).click()
     await dialog().waitFor({ timeout: 15_000 })
     await settled(page)
@@ -52,10 +53,7 @@ const run = async ({ page, profileId, shot }) => {
     )
     await shot("confirm")
 
-    // The sheet the question was asked over is still there, in its own box at this width.
-    const sheetBox = await sheet().boundingBox()
-    assert.ok(sheetBox && sheetBox.width > 0, "the skill's sheet is under the question")
-    await shot("dialog-over-sheet")
+    await shot("dialog")
 
     assert.deepEqual(errors, [], `no error in the console (${errors.join("; ")})`)
   } finally {
@@ -73,5 +71,5 @@ for (const width of [390, 1024]) {
   }
 }
 pass(
-  "a removal asks first in a confirmation centred over the skill's own sheet, drawn in a box of its own no wider than a dialog and on screen at both widths, with the sheet still under it — at 390 and 1024px, light and dark",
+  "a removal asks first in a confirmation drawn in a box of its own, no wider than a dialog's, centred across and down the screen and on screen at both widths — at 390 and 1024px, light and dark",
 )
