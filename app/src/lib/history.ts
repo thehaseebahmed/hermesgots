@@ -267,11 +267,12 @@ export function toMessages(
     const id = `h-${sessionId}-${row.id}`
     if (isSteer(row)) {
       reply ??= newReply(id, createdAt)
+      // A steer carrying files reached the model as their markers; the thread shows the words.
       reply.steers = [
         ...(reply.steers ?? []),
         {
           id,
-          text: steerText(row.content ?? ""),
+          text: splitAttachments(steerText(row.content ?? "")).text,
           contentOffset: reply.content.length,
           at: createdAt,
         },

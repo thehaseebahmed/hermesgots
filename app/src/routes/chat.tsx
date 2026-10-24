@@ -1175,21 +1175,19 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
             draftKey={draftKey(id)}
             onDraft={onDraft}
             onSend={send}
-            onQueue={(text, attachments) =>
-              id
-                ? conversation?.main
-                  ? sendMidReply(id, false, text, attachments)
-                  : queueMessage(id, text, attachments)
-                : send(text, attachments)
-            }
+            onQueue={(text, attachments) => {
+              if (!id) return send(text, attachments)
+              if (conversation?.main) return sendMidReply(id, false, text, attachments)
+              void queueMessage(id, text, attachments)
+            }}
             steerByDefault={resolved.steerByDefault}
             canSteer={steerable}
-            onSteer={(text) =>
+            onSteer={(text, attachments) =>
               id
                 ? conversation?.main
-                  ? sendMidReply(id, true, text)
-                  : steerText(id, text)
-                : send(text)
+                  ? sendMidReply(id, true, text, attachments)
+                  : steerText(id, text, attachments)
+                : send(text, attachments)
             }
             files={files}
             imagesAvailable={profile?.imageInput !== false}

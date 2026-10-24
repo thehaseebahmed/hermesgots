@@ -24,7 +24,7 @@ import { Message as MessageRow, MessageContent } from "@/components/ui/message"
 import { Spinner } from "@/components/ui/spinner"
 import { DELEGATE_TOOL } from "@/lib/agents"
 import { attachmentUrl } from "@/lib/attachment-url"
-import { downloadAttachment, openable } from "@/lib/attachments"
+import { downloadAttachment, openable, splitAttachments } from "@/lib/attachments"
 import { removeQueued, sendQueued } from "@/lib/chat"
 import type { Attachment, Message, ToolEvent } from "@/lib/db"
 import { describeActivity, formatDuration } from "@/lib/format"
@@ -304,12 +304,14 @@ function SentAttachments({
 
 /** Something the user steered the reply with, where it reached the agent. */
 function SteerBubble({ text }: { text: string }) {
+  // A steer carrying files reached the model as their markers: the bubble shows the words.
+  const said = splitAttachments(text).text
   return (
     <MessageRow align="end" className={COLUMN}>
       <MessageContent className="items-end gap-1">
         <Bubble variant="default" align="end">
           <BubbleContent className="px-4 py-2.5 text-[15px] whitespace-pre-wrap">
-            {text}
+            {said}
           </BubbleContent>
         </Bubble>
         <div className="flex items-center gap-1 px-1 text-xs text-muted-foreground">

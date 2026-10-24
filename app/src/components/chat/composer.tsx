@@ -59,6 +59,7 @@ import {
 } from "@/lib/slash"
 import { isDoubleEscape, isInterrupt } from "@/lib/keys"
 import { useSkills } from "@/lib/skills"
+import { canSteer as canSteerWith, midReply } from "@/lib/steer"
 import { cn, randomId } from "@/lib/utils"
 
 const HOLD_MS = 400
@@ -91,8 +92,8 @@ export function Composer({
   steerByDefault?: boolean
   /** Whether the running reply can be steered. */
   canSteer?: boolean
-  /** Sends text to the running reply now (`/steer`). */
-  onSteer?: (text: string) => Promise<void> | void
+  /** Sends text to the running reply now (`/steer`), with what it carries. */
+  onSteer?: (text: string, attachments: Attachment[]) => Promise<void> | void
   /** Where the unsent text is kept (`draftKey` in `lib/drafts.ts`), so it's there on return. */
   draftKey?: string
   /** Called with the text as it changes. */
@@ -197,19 +198,26 @@ export function Composer({
   const dictationSends = useRef(false)
   // A press held past HOLD_MS is push-to-talk: letting go finishes, sliding away cancels.
   const press = useRef<{ x: number; y: number } | null>(null)
-  // `/steer` or `/queue` picks how a message sent mid-reply goes; the setting is the default. Only
-  // text can steer, so a message with files waits in the queue. An explicit `/steer` asks the
-  // host even when the reply looks unsteerable, and falls back to the queue with a toast.
-  const steersNow = (text: string, files: number) => {
+  // `/steer` or `/queue` picks how a message sent mid-reply goes; the setting is the default. A
+  // steer is text, so a message carrying files can be one — their markers are text — and one
+  // carrying a photo can't. An explicit `/steer` asks the host even when the reply looks
+  // unsteerable, and falls back to the queue with a toast.
+  const steerWanted = (text: string) => {
     const chosen = sendMode(text)
     const mode = chosen?.mode ?? (steerByDefault ? "steer" : "queue")
-    return busy && Boolean(onSteer) && !files && mode === "steer" && (Boolean(chosen) || canSteer)
+    return mode === "steer" && (Boolean(chosen) || canSteer)
   }
+  const steersNow = (text: string, carrying: Attachment[]) =>
+    Boolean(onSteer) &&
+    midReply(carrying, { steer: steerWanted(text), hostTakesIt: busy }) === "steer"
 
   const canSend =
     (value.trim().length > 0 || attachments.length > 0) && !disabled && preparing.length === 0
   // What Enter does now, so the button says so.
-  const steering = steersNow(value, attachments.length)
+  const steering = steersNow(value, attachments)
+  // A message that would steer but for a photo says where it goes instead, since the field's
+  // placeholder is gone once it has words in it.
+  const waitsForPhoto = Boolean(onSteer) && busy && steerWanted(value) && !canSteerWith(attachments)
 
   // The menu follows the caret: a `/` that begins a word opens it, wherever in the message it is.
   const token = slashToken(value, caret)
@@ -270,10 +278,10 @@ export function Composer({
     const text = sendMode(raw)?.text ?? raw
     if (!text.trim() && !attachments.length) return
     const sent = attachments
-    const steer = steersNow(raw, sent.length)
+    const steer = steersNow(raw, sent)
     setValue("")
     setAttachments([])
-    const go = () => (steer ? onSteer!(text) : (busy ? onQueue : onSend)(text, sent))
+    const go = () => (steer ? onSteer!(text, sent) : (busy ? onQueue : onSend)(text, sent))
     // Hand the message back if it never made it into the chat, unless something new was added.
     void Promise.resolve(go()).catch(() => {
       setValue((current) => current || raw)
@@ -588,6 +596,11 @@ export function Composer({
         onIndex={setViewing}
         onRemove={removeAttachment}
       />
+      {waitsForPhoto && (
+        <p data-queue-hint className="px-2 pb-1.5 text-xs text-muted-foreground">
+          A steer is text alone, so this message waits in the queue.
+        </p>
+      )}
       <InputGroup
         className={cn(
           "bg-background shadow-lg shadow-black/5 has-data-[align=block-end]:rounded-[1.75rem] has-[textarea]:rounded-[1.75rem] dark:bg-input/30",
