@@ -13,12 +13,10 @@ import { cn } from "@/lib/utils"
  * right.
  * `centered` gives the arrangement of a place rather than a conversation with a bot — a coding
  * session, or a bot's thread open beside its Main: the same leading control, then the title centred
- * over its subtitle. The row is three tracks with both flanks the same share, so the block sits on
- * the row's exact centre however wide the actions are and however little leads it — a session's back
- * control, or nothing at all beside an open thread. The muted mark moves into the actions, so it
- * cannot pull the title off centre. A session is a place in a project and a thread open beside Main
- * is already somewhere, so both pass `showBot={false}`: the picture stays a caller's decision, and
- * the arrangement doesn't second-guess it.
+ * over its subtitle. The muted mark moves into the actions, so it cannot pull the title off centre.
+ * A session is a place in a project and a thread open beside Main is already somewhere, so both pass
+ * `showBot={false}`: the picture stays a caller's decision, and the arrangement doesn't second-guess
+ * it.
  * `className` can pin it in the page's flow instead.
  */
 export function ChatHeader({
@@ -59,7 +57,7 @@ export function ChatHeader({
         className={cn(
           COLUMN_BOX,
           centered
-            ? "grid grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(0,1fr)] items-center gap-3"
+            ? "grid grid-cols-[1fr_minmax(0,2fr)_1fr] items-center gap-3"
             : "flex items-center gap-3",
         )}
       >
@@ -113,7 +111,13 @@ export function ChatHeader({
           </div>
           {!centered && mark}
         </div>
-        <div className="pointer-events-auto flex shrink-0 items-center gap-2">
+        <div
+          data-slot="header-actions"
+          className={cn(
+            "pointer-events-auto flex shrink-0 items-center gap-2",
+            centered && "justify-self-end",
+          )}
+        >
           {centered && mark}
           {actions}
         </div>

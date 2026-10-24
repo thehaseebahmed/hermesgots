@@ -1942,3 +1942,95 @@ stores the send as the wire request and the attachments as metadata, not the com
   plugin and vice versa, so the new field has to fall back to the body re-parse for as long as old
   items can exist.
 
+---
+
+# Deferred fixes from the review passes on the centred header's edge
+
+A cleanup review of `fix(chat): hold a centred header's actions on the row's right edge` (four
+parallel reviewers: reuse, quality, efficiency, altitude; then a comment pass and a two-axis code
+review) turned up two changes too wide for this branch. Everything else is applied on this branch:
+the last-button measurement both flows carried inline — already drifted between them, a `<= 2`
+two-sided tolerance in one and a `< 4` one-sided `+1` in the other — is one `readHeader` in
+`lib.mjs`, a locator's own row read in a single measure so every box and scroll width sits on one
+frame, asserted so a header without a title or an action fails by name instead of as a null; the
+actions div joined the row's `data-slot` contract instead of being walked as `lastElementChild`;
+the thread flow's gate matches the session's; the `screens` row in `docs/e2e-flow-audit.md` now
+carries what the strengthened legs assert; and the `/no-comments` pass then cut the component's
+comment back to its prop contract — its old "exactly 768px" case was wrong (full-pane 768 leaves
+each flank 178px), and the geometry that prose described is carried by the flows' assertions now,
+not by sentences nothing checked.
+
+## Risky, pre-existing
+
+### 1. A drawer's heading centres inside the room its close button keeps
+
+`popup.tsx`'s `PopupHeader` reserves `pr-14` for the drawer's close button and `PopupTitle` centres
+in every form, so a drawer-form heading sits ~28px left of the popup's own centre at every width —
+the same drift class this branch fixed in `ChatHeader`, reached by asymmetric padding rather than an
+`auto` track. Overflow is already handled (`max-w-full truncate`), so only the drift half applies.
+
+- Cost: every drawer form's heading is visibly off-centre beside its close button, and the component's
+  own docstring claims the heading is "centred in every form".
+- Suggested fix: reserve both sides (`pl-14` alongside `pr-14`) so the centring is real, or
+  start-align drawer headings, which is what Material side sheets — cited in that docstring — do.
+- Why it is not applied here: `popup.tsx` is untouched by this branch and the two fixes disagree
+  about what a drawer heading should do, so the choice belongs with whoever owns the popup's design.
+- Why it is risky: `PopupHeader` renders above every sheet, drawer and menu in the app; a padding
+  change moves every pop-up's heading at once and no flow measures a drawer heading's centre today.
+
+### 2. The audit calls `bot-threads` a component while the flow measures layout
+
+`docs/e2e-flow-audit.md`'s `bot-threads` row (ticket #415) is verdict `component` and argues "none
+of them needs a browser's layout" — but the flow's laptop leg measures its thread header's geometry
+(the title on its pane's centre, the actions ending on the row's right edge), legs this branch
+tightened to `<= 2`. ADR 0019 sends geometry to the sweep, and the row's own *What replaces it* cell
+already says the flow stays, so verdict and prose disagree with the row itself.
+
+- Cost: the page's contract is every row carrying "what the flow asserts today", and this one omits
+  the only legs no component tier reaches; the arithmetic section repeats the claim ("The eleventh,
+  `bot-threads` … is a component by the same rule as the five"), the count table reads component 53
+  / stay 14, and `scripts/test-e2e-registry.mjs` pins `STAYS = 14`.
+- Suggested fix: flip the row's verdict to `stay`, reword *Why it moves* as layout a DOM without
+  layout cannot measure, recount (stay 15, component 52 — table and prose both), and raise `STAYS`
+  to 15; the checker test arbitrates every number.
+- Why it is not applied here: the mis-verdict predates this branch — the geometry legs came with
+  #422 — and the flip reclassifies what ticket #415 will do, a plan decision for whoever owns the
+  audit; the blast radius is prose arithmetic, a pinned test constant and a ticket's scope, none of
+  which this diff touches.
+- Why it is risky: the counts are gate-checked, so a partial recount fails the suite, and a row
+  half-corrected leaves the page arguing with itself about a ticket's scope.
+
+## Not entries
+
+Declined with the evidence, each for what it is:
+
+- **Hoisting the actions div's `className` into module constants** — the efficiency reviewer's own
+  figure was one memoised `twMerge` over three short strings per header render, sub-microsecond, and
+  the row above already calls `cn()` the same way; two constants would trade that for indirection.
+- **Measuring the actions div by its new `header-actions` slot instead of its last button** — the
+  div hugged its content after `justify-self-end`, but a div's right edge is trivially the row's when
+  it stretches, which is the exact false green this branch removed; the last button inside the slot
+  is the invariant, so the helper measures that.
+- **A named constant for the `2fr` middle track** — the string has one consumer; the flows now
+  assert what its split does (the title ellipsizing in its room, the flanks still holding the
+  actions), and its rationale rides with the commit that chose it rather than as prose about widths,
+  which is the class of claim that rotted. `COLUMN_BOX` lives in `layout.ts` because two files read
+  it.
+- **Exporting `centre` for two call sites** (speculative-generality read) — strictness is what it
+  buys: each flow's own copy read `?? 0` for a missing box, so a header with neither title nor row
+  compared `0` against `0` and passed. One strict line is the false green's fix, and the shared
+  `centred` set became its only consumer, so it needs no export at all.
+- **Swapping the flanks' `1fr` for `minmax(0,1fr)`** (the code review's latent-defect read) — `1fr`
+  carries an auto floor, so a flank never shrinks below its controls: when a flank's share stops
+  covering the actions the title drifts by the few pixels this PR already documents as its limit,
+  while `minmax(0,1fr)` would pin the title exactly and spill the controls toward it instead. It
+  cannot fire today either way: the floors total 186px (44px back + 118px actions + 24px gaps)
+  against the narrowest real row of about 356px, and the tightest room the flows now measure — the
+  session beside Code's list at 1280px — leaves each flank about 139px, clear of the 96–118px
+  cluster. The spec conditions exact centring on a flank's share covering its controls, which `1fr`
+  honours exactly; the swap trades the documented drift for an unfired failure mode of its own.
+- **Moving the `2fr` rationale from the commit body into a comment** — the code review's own note is
+  that the file is under-, not over-commented; the comment that stays explains the empty `md`+
+  spacer box, which reads as a mystery div without it, while a width claim in prose is what needed
+  correcting twice already.
+

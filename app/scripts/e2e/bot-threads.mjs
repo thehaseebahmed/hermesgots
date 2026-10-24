@@ -1,4 +1,4 @@
-import { app, assert, flow, mockAuth, pass } from "./lib.mjs"
+import { app, assert, centred, flow, mockAuth, pass, readHeader } from "./lib.mjs"
 
 const NEW_MOCK = process.env.TRIAGE_NEW_MOCK_URL
 const THREAD_MOCK = process.env.TRIAGE_THREAD_MOCK_URL
@@ -413,8 +413,8 @@ await flow(
     const heads = await page.evaluate(() =>
       [...document.querySelectorAll('[data-slot="header-row"]')].map((row) => ({
         title: row.querySelector('[data-slot="header-title"]')?.textContent ?? "",
-        controls: [...row.querySelectorAll("button")].map((button) =>
-          button.getAttribute("aria-label") ?? "",
+        controls: [...row.querySelectorAll("button")].map(
+          (button) => button.getAttribute("aria-label") ?? "",
         ),
         pictures: row.querySelectorAll('[role="img"]').length,
       })),
@@ -433,28 +433,8 @@ await flow(
       [1, 0],
       "Main keeps the bot's picture, and the thread beside it carries none",
     )
-    const boxes = await page.evaluate(() => {
-      const row = document.querySelectorAll('[data-slot="header-row"]')[1]
-      const box = (element) => {
-        if (!element) return null
-        const { x, width } = element.getBoundingClientRect()
-        return { x, width }
-      }
-      return {
-        row: box(row),
-        title: box(row?.querySelector('[data-slot="header-title"]')),
-        actions: box(row?.lastElementChild),
-      }
-    })
-    const centre = (rect) => (rect ? rect.x + rect.width / 2 : 0)
-    assert.ok(
-      Math.abs(centre(boxes.title) - centre(boxes.row)) < 4,
-      `the thread's title sits on its pane's centre (title at ${Math.round(centre(boxes.title))}, row at ${Math.round(centre(boxes.row))})`,
-    )
-    assert.ok(
-      boxes.actions.x + boxes.actions.width <= boxes.row.x + boxes.row.width + 1,
-      "the thread's actions end at the row's own edge",
-    )
+    const boxes = await readHeader(page.locator('[data-slot="header-row"]').nth(1))
+    centred(boxes, "the thread beside Main")
     await shot("laptop")
     pass(
       "on a laptop the thread beside Main carries no control of its own, and naming it changes nothing",

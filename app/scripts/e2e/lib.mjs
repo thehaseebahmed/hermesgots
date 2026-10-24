@@ -541,6 +541,87 @@ export async function afkOn(page, screen, until) {
 }
 
 /**
+ * One header row's geometry, read in one measure: `row`, `title`, `line` and `middle` boxes, the
+ * `actions` box of the last control they carry, the scroll widths the title and line cut at, and
+ * the margins the header's own padding keeps between its shell and the row. The control is the last
+ * button inside the actions slot, not the slot itself — the slot stretched to its whole track even
+ * when the buttons inside sat at that track's left edge, which is how a row once drew its controls
+ * anywhere but the corner and still measured as ending on the row's edge. Boxes are asserted, so a
+ * header that draws no title or no action fails by name rather than as a null. The row is the
+ * caller's own locator: scoped to the header it came for, so a second header on the screen cannot
+ * be measured by mistake, and one `evaluate` wide, so no two boxes can be read a reflow apart.
+ */
+export async function readHeader(row) {
+  assert.equal(await row.count(), 1, `${row} is drawn once`)
+  const boxes = await row.evaluate((element) => {
+    const box = (node) => {
+      if (!node) return null
+      const { x, width } = node.getBoundingClientRect()
+      return { x, width, right: x + width }
+    }
+    const title = element.querySelector('[data-slot="header-title"]')
+    const line = element.querySelector('[data-slot="header-line"]')
+    const buttons =
+      element.querySelector('[data-slot="header-actions"]')?.querySelectorAll("button") ?? []
+    const rowBox = box(element)
+    const shell = element.closest("header")?.getBoundingClientRect()
+    return {
+      row: rowBox,
+      title: box(title),
+      line: box(line),
+      middle: box(element.querySelector('[data-slot="header-middle"]')),
+      actions: box(buttons[buttons.length - 1]),
+      scroll: title?.scrollWidth ?? 0,
+      client: title?.clientWidth ?? 0,
+      lineScroll: line?.scrollWidth ?? 0,
+      lineClient: line?.clientWidth ?? 0,
+      marginLeft: shell ? rowBox.x - shell.x : 0,
+      marginRight: shell ? shell.right - rowBox.right : 0,
+    }
+  })
+  assert.ok(boxes.title, "the header carries a title")
+  assert.ok(boxes.actions, "the header carries an action to hold its corner")
+  return boxes
+}
+
+/** A box's horizontal centre — strict, so a missing box fails rather than comparing zero. */
+const centre = (box) => box.x + box.width / 2
+
+/**
+ * The set every room of a centred header gets, under `look`: its line drawn, the header's margins
+ * kept on both sides, the title inside the room the controls leave and on that room's and the
+ * row's centres, the line on the title's, and the actions ending on the row's right edge. One set
+ * for both flows and every width they measure, so the gates cannot drift apart between them.
+ */
+export const centred = (boxes, look) => {
+  assert.ok(boxes.line, `the header draws its line (${look})`)
+  assert.ok(
+    boxes.marginLeft >= 8 && boxes.marginRight >= 8,
+    `the header keeps its margins on both sides at ${look} (${Math.round(boxes.marginLeft)}px left, ${Math.round(boxes.marginRight)}px right)`,
+  )
+  assert.ok(
+    boxes.title.x >= boxes.middle.x - 2 && boxes.title.right <= boxes.middle.right + 2,
+    `the title stays in the room the controls leave at ${look}`,
+  )
+  assert.ok(
+    Math.abs(centre(boxes.title) - centre(boxes.middle)) <= 2,
+    `the title is centred in that room at ${look}`,
+  )
+  assert.ok(
+    Math.abs(centre(boxes.line) - centre(boxes.title)) <= 2,
+    `the line is centred under the title at ${look}`,
+  )
+  assert.ok(
+    Math.abs(centre(boxes.title) - centre(boxes.row)) <= 2,
+    `the title is centred on the row at ${look} (${Math.round(centre(boxes.title))} against ${Math.round(centre(boxes.row))})`,
+  )
+  assert.ok(
+    Math.abs(boxes.actions.right - boxes.row.right) <= 2,
+    `the actions end on the row's right edge at ${look} (${Math.round(boxes.actions.right)} against ${Math.round(boxes.row.right)})`,
+  )
+}
+
+/**
  * Fails unless the element's text fits on one line. Its height is compared with a line, since a block
  * reports a single client rect whether it wraps or not.
  */
