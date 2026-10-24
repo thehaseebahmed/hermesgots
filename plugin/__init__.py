@@ -136,6 +136,64 @@ def _error(web: Any, message: str, status: int):
     return web.json_response({"error": {"message": message}}, status=status)
 
 
+def _skill_route(
+    web: Any,
+    call: Any,
+    key: str,
+    *,
+    guard: Any,
+    profile: Any,
+    read_body: Any,
+    named: bool = True,
+    unavailable: str = skill_catalog.UNAVAILABLE,
+    body: Optional[Any] = None,
+    query: Optional[str] = None,
+) -> Any:
+    """A route into ``skill_catalog.py``: the guard, this bot's profile, one call, one answer.
+
+    Every skills route has this shape — the signed-in check, the profile that makes the call land on
+    this bot and no other, the 400 a body reader raises, the 501 for a host whose Hermes has moved the
+    built-ins the call needs, and the answer as ``{"object": key, "data": answer}`` — so each
+    declares only its call, its key, what it needs from the request, and the sentence a host without
+    its machinery answers with. That sentence is the route's own: a host that can list a profile's
+    skills is one whose sheet can still be unreachable, and saying so in the listing's words would be
+    the wrong account of it (skill_catalog.py holds all four).
+
+    ``web``, ``guard``, ``profile`` and ``read_body`` are the API server's own, injected because they
+    are bound to the app this is registered on; the call itself runs on a worker thread, never the
+    loop, since every one of them scans the skills tree or reads a file.
+    """
+
+    async def handler(request: "web.Request") -> "web.Response":
+        denied = guard(request)
+        if denied is not None:
+            return denied
+        args: List[Any] = [profile()]
+        if named:
+            args.append(request.match_info["name"])
+        if query is not None:
+            # Read from the query, not the path: a group's files sit below the skill, and a relative
+            # path with a slash in it is the thing being asked for.
+            path = request.query.get(query) or ""
+            if not path:
+                return _error(web, f"Missing {query}", 400)
+            args.append(path)
+        if body is not None:
+            try:
+                args.extend(body(await read_body(request)))
+            except ValueError as error:
+                return _error(web, str(error), 400)
+        try:
+            answer = await asyncio.to_thread(call, *args)
+        except skill_catalog.SkillError as error:
+            return _error(web, str(error), error.status)
+        except ImportError:
+            return _error(web, unavailable, 501)
+        return web.json_response({"object": key, "data": answer})
+
+    return handler
+
+
 def _cleanup_pick(path: Path) -> Optional[Dict[str, str]]:
     try:
         return speech.applied_cleanup(path, research.llm_gate())
@@ -472,107 +530,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "This Hermes version can't read models from here.", 501)
         return web.json_response({"object": "memento.fallbacks", "fallbacks": fallbacks})
 
-    async def list_skills(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        profile = request_profile()
-        try:
-            skills = await asyncio.to_thread(skill_catalog.read, profile)
-        except ImportError:
-            return _error(web, "This Hermes version can't list skills from here.", 501)
-        return web.json_response({"object": "list", "data": skills})
-
-    async def set_skill_enabled(request: "web.Request") -> "web.Response":
-        """One skill's switch, answered with its row as the list read shapes it.
-
-        The rules are skill_catalog.py's: this only guards, takes the one field the body says, and
-        maps the module's own refusal to its status — the same shape every MCP write has. Its body
-        reader is ``enabled_body``, below, because a switch's body is a switch's body.
-        """
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        try:
-            (enabled,) = enabled_body(await json_body(request))
-        except ValueError as error:
-            return _error(web, str(error), 400)
-        try:
-            row = await asyncio.to_thread(
-                skill_catalog.set_enabled, request_profile(), request.match_info["name"], enabled
-            )
-        except skill_catalog.SkillError as error:
-            return _error(web, str(error), error.status)
-        return web.json_response({"object": "skill", "data": row})
-
-    async def view_skill(request: "web.Request") -> "web.Response":
-        """One skill's own sheet: the row, its SKILL.md, its linked files and its readiness.
-
-        A switched-off skill's sheet opens like any other's, which is why this reads the manager's
-        lookup rather than Hermes's ``skill_view`` — the module's own rules, this only guards and
-        maps the refusal. The skill's row keys come first, so the answer is the row it opened from
-        with the skill itself under it.
-        """
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        try:
-            found = await asyncio.to_thread(
-                skill_catalog.view, request_profile(), request.match_info["name"]
-            )
-        except ImportError:
-            return _error(web, skill_catalog.UNAVAILABLE, 501)
-        except skill_catalog.SkillError as error:
-            return _error(web, str(error), error.status)
-        return web.json_response({"object": "skill", "data": found})
-
-    async def read_skill_file(request: "web.Request") -> "web.Response":
-        """One linked file of one skill, named by the request's ``path``, and nothing around it.
-
-        The sheet lists what the host says a skill holds and reads the one file a tap names, so this
-        never walks a directory. A path outside the skill is refused by the module with its own
-        sentence and status, as a name the bot hasn't got is.
-        """
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        # Read from the query rather than the path: a group's files sit below the skill, and a
-        # relative path with a slash in it is the thing being asked for.
-        path = request.query.get("path") or ""
-        if not path:
-            return _error(web, "Missing path", 400)
-        try:
-            found = await asyncio.to_thread(
-                skill_catalog.file, request_profile(), request.match_info["name"], path
-            )
-        except ImportError:
-            return _error(web, skill_catalog.UNAVAILABLE, 501)
-        except skill_catalog.SkillError as error:
-            return _error(web, str(error), error.status)
-        return web.json_response({"object": "skill.file", "data": found})
-
-    async def remove_skill(request: "web.Request") -> "web.Response":
-        """One skill taken away, answered with the list the Host has left.
-
-        Which Host operation the removal is — a Hub uninstall, a profile skill's delete — is
-        skill_catalog.py's: the origin the list read decides it, and so are the refusals (a built-in,
-        a plugin's skill, a pinned one, a name this bot hasn't got). This only guards, maps the
-        refusal, and answers the refreshed list, so the app replaces its whole list with what the
-        Host says is left rather than the list it held with one row crossed out.
-        """
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        try:
-            left = await asyncio.to_thread(
-                skill_catalog.remove, request_profile(), request.match_info["name"]
-            )
-        except ImportError:
-            return _error(web, skill_catalog.UNAVAILABLE, 501)
-        except skill_catalog.SkillError as error:
-            return _error(web, str(error), error.status)
-        return web.json_response({"object": "list", "data": left})
-
     def mcp_route(
         call: Any,
         key: Optional[str],
@@ -612,6 +569,36 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return web.json_response({"object": answer if key is None else {key: answer}})
 
         return handler
+
+    def skill_route(
+        call: Any,
+        key: str,
+        *,
+        named: bool = True,
+        unavailable: str = skill_catalog.UNAVAILABLE,
+        body: Optional[Any] = None,
+        query: Optional[str] = None,
+    ) -> Any:
+        """A route into Hermes's own skills machinery: the guard, this bot's profile, one key.
+
+        The shape is ``_skill_route``'s, and what each route answers a host that hasn't got its
+        machinery with is its own — skill_catalog.py's four sentences, one per flow — so a host that
+        can list a profile's skills never answers a sheet's refusal in the listing's words.
+        """
+        # The profile is resolved per request: this file reads it further down, so the name only
+        # exists by the time a request is served.
+        return _skill_route(
+            web,
+            call,
+            key,
+            guard=unauthorized,
+            profile=lambda: request_profile(),
+            read_body=json_body,
+            named=named,
+            unavailable=unavailable,
+            body=body,
+            query=query,
+        )
 
     def install_body(body: Any) -> Any:
         """The entry's name and the values it declares, as the form that adds it sends them."""
@@ -692,6 +679,31 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     get_mcp_server = mcp_route(mcp.detail, "server")
     read_mcp_tools = mcp_route(mcp.tools, "tools")
     probe_mcp_tools = mcp_route(mcp.probe_tools, "tools")
+
+    # The bot's skills, and the one skill a sheet reads: the listing and a removal answer the list
+    # (`{"object": "list", "data": …}`, the app's whole list either way), a switch and a sheet
+    # answer the one row (`"skill"`), and one of a skill's files answers itself (`"skill.file"`).
+    # Each carries the sentence a host that can't do that one answers with, since a host can list a
+    # profile's skills and still have no way into one of them.
+    list_skills = skill_route(skill_catalog.read, "list", named=False)
+    set_skill_enabled = skill_route(
+        skill_catalog.set_enabled,
+        "skill",
+        body=enabled_body,
+        unavailable=skill_catalog.UNAVAILABLE_WRITE,
+    )
+    view_skill = skill_route(
+        skill_catalog.view, "skill", unavailable=skill_catalog.UNAVAILABLE_VIEW
+    )
+    read_skill_file = skill_route(
+        skill_catalog.file,
+        "skill.file",
+        query="path",
+        unavailable=skill_catalog.UNAVAILABLE_VIEW,
+    )
+    remove_skill = skill_route(
+        skill_catalog.remove, "list", unavailable=skill_catalog.UNAVAILABLE_REMOVE
+    )
 
     async def set_fallbacks(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
