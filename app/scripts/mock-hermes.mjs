@@ -1439,56 +1439,65 @@ function pageRows(rows, params) {
 
 // What a turn asked to think out loud says, one piece per reasoning event — a whole paragraph each,
 // since a run's reasoning reaches the app a block at a time and its blocks are joined as paragraphs.
-// One stretch per run: each pair of them has a call between, and the two calls run back to back with
-// no reply text between them, so the two stretches after the calls are drawn as one row under one
-// tool group. A stretch of two or three pieces spans long enough that the row it lands in measures a
-// second or more, and the merged row's sum of two of them is a figure neither stretch measured.
+// One stretch per run, with the call that breaks it carried on the stretch itself, so how many calls
+// a turn makes can never drift from how many stretches it breaks: each of the first two is followed
+// by a call of its own, and the two run back to back with no reply text between them, so the thinking
+// before them is drawn above one tool group and the two stretches after them land beside one another
+// under it as one row. A stretch of two or three pieces spans long enough that the row it lands in
+// measures a second or more, and the merged row's sum of two of them is a figure neither measured.
 const REASONING = [
-  [
-    "They want the working-out, not just the answer.",
-    "I'm weighing what's under /var/log and what is safe to drop.",
-  ],
-  [
-    "The first look says five gigabytes, and the journal is most of that.",
-    "The old gzipped rotations are the bulk of it, and nothing will read them again.",
-    "So the rotations go first, and the journal only if that isn't enough.",
-  ],
-  [
-    "The journal's own accounting agrees with the first look.",
-    "Nothing has the journal capped yet, which is why it grew.",
-    "So the answer names the folders and what can go, and leaves the delete to them.",
-  ],
+  {
+    pieces: [
+      "They want the working-out, not just the answer.",
+      "I'm weighing what's under /var/log and what is safe to drop.",
+    ],
+    // A look at the disk: the first of the two calls, recorded with its result so a catch-up after
+    // a reload reads the same turn the stream built.
+    call: { tool: "terminal", emoji: "🖥️", label: "du -sh /var/log", result: "5.1G\t/var/log" },
+  },
+  {
+    pieces: [
+      "The first look says five gigabytes, and the journal is most of that.",
+      "The old gzipped rotations are the bulk of it, and nothing will read them again.",
+      "So the rotations go first, and the journal only if that isn't enough.",
+    ],
+    // The second call, straight after the first with nothing said between them.
+    call: {
+      tool: "terminal",
+      emoji: "🖥️",
+      label: "journalctl --disk-usage",
+      result: "Archived and active journals take up 2.0G",
+    },
+  },
+  {
+    pieces: [
+      "The journal's own accounting agrees with the first look.",
+      "Nothing has the journal capped yet, which is why it grew.",
+      "So the answer names the folders and what can go, and leaves the delete to them.",
+    ],
+  },
 ]
 // What a turn asked to think at length says: one long working-out in markdown, paragraph after
-// paragraph, far taller than the height an opened row is drawn to.
-const REASONING_AT_LENGTH = [
-  "They asked for the reasoning itself, so here is the whole of it, in order.",
-  "**What is on the disk:** five gigabytes under /var/log, and almost all of it in two places.",
-  "- `/var/log/journal` holds three of the five gigabytes.\n- The old gzipped rotations hold another one.\n- Everything else, all the small files together, is under a hundred megabytes.",
-  "The journal is the only one still being written to. A rotation is read once, when something has already gone wrong, and then never again — which makes it the cheap thing to lose.",
-  "```sh\ndu -sh /var/log/journal /var/log/*.gz\n```",
-  "If every rotation went, the machine would keep running and the next incident would be harder to read. If the journal went the same is true, but the loss is larger: that is the one with yesterday in it.",
-  "So the order to look at them in is the rotations first, and the journal only if that isn't enough. The rest of it, the small files, isn't worth a command of its own.",
-  "None of this is mine to decide alone, so the answer names the folders and says what each one costs to lose. The deleting is theirs.",
-]
+// paragraph, far taller than the height an opened row is drawn to. One stretch with no call on it, so
+// it lands as a single run that nothing breaks.
+const REASONING_AT_LENGTH = {
+  pieces: [
+    "They asked for the reasoning itself, so here is the whole of it, in order.",
+    "**What is on the disk:** five gigabytes under /var/log, and almost all of it in two places.",
+    "- `/var/log/journal` holds three of the five gigabytes.\n- The old gzipped rotations hold another one.\n- Everything else, all the small files together, is under a hundred megabytes.",
+    "The journal is the only one still being written to. A rotation is read once, when something has already gone wrong, and then never again — which makes it the cheap thing to lose.",
+    "```sh\ndu -sh /var/log/journal /var/log/*.gz\n```",
+    "If every rotation went, the machine would keep running and the next incident would be harder to read. If the journal went the same is true, but the loss is larger: that is the one with yesterday in it.",
+    "So the order to look at them in is the rotations first, and the journal only if that isn't enough. The rest of it, the small files, isn't worth a command of its own.",
+    "None of this is mine to decide alone, so the answer names the folders and says what each one costs to lose. The deleting is theirs.",
+  ],
+}
 // On top of the turn's own pause, so a client's working line is up before any reasoning lands.
 const REASONING_LEAD_MS = 2500
 // Between pieces, slow enough that each is seen to arrive as an event of its own, and long enough
 // that the span a stretch measures on the device watching it is over a second.
 const REASONING_PACE_MS = 900
 const REASONING_STALL_MS = 2500
-// The calls the thinking is broken by, and what each reads back: a look at the disk after the first
-// stretch, and a second look after the second — the two run back to back, with no reply text between
-// them, so the reply draws half the working-out above one tool group and the rest below it.
-const REASONING_CALLS = [
-  { tool: "terminal", emoji: "🖥️", label: "du -sh /var/log", result: "5.1G\t/var/log" },
-  {
-    tool: "terminal",
-    emoji: "🖥️",
-    label: "journalctl --disk-usage",
-    result: "Archived and active journals take up 2.0G",
-  },
-]
 const REASONING_CALL_MS = 600
 
 // What a turn asked to draw an interface says.
@@ -1675,23 +1684,17 @@ async function playTurn(req, body, last, out) {
   if (atLength || /\bthink out loud\b/i.test(last)) {
     // After the turn's own pause, so the client's working line is up before any reasoning lands.
     await sleep(REASONING_LEAD_MS)
+    // One loop for both scenarios: they differ in what the stretches hold, not in how they go out.
+    // The index runs across every piece of the turn, so the pace holds between them and a stretch's
+    // own call fires the moment its last piece has landed.
     let index = 0
-    if (atLength) {
-      for (const piece of REASONING_AT_LENGTH) {
+    for (const stretch of atLength ? [REASONING_AT_LENGTH] : REASONING) {
+      for (const piece of stretch.pieces) {
         if (out.closed()) break
         if (index) await sleep(REASONING_PACE_MS)
         out.reason?.(piece, index++)
       }
-    } else {
-      for (const [at, stretch] of REASONING.entries()) {
-        for (const piece of stretch) {
-          if (out.closed()) break
-          if (index) await sleep(REASONING_PACE_MS)
-          out.reason?.(piece, index++)
-        }
-        if (at < REASONING.length - 1 && !out.closed())
-          await lookAtTheDisk(req, out, REASONING_CALLS[at])
-      }
+      if (stretch.call && !out.closed()) await lookAtTheDisk(req, out, stretch.call)
     }
     // A turn told to stall holds here, thinking and doing nothing else: what the app's thinking line
     // has to stand up to. A run stopped meanwhile isn't held, so Stop lands as on any other turn.

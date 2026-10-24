@@ -4,6 +4,9 @@
 // under it — the merge, the open latch, the fold and the uncapped body are all layout, which no lower
 // tier reaches.
 import { assert, app, flow, pass, settled } from "./lib.mjs"
+// What a row reads is the app's own rule, imported rather than restated: a second copy of the label
+// format here could drift from the one the thread draws and still pass.
+import { thinkingLabel } from "../../src/lib/thinking.ts"
 
 /** One reply's own row in the thread: the header and the toaster say plenty this flow must not read. */
 const ITEM = "[data-slot=message-scroller-item]"
@@ -11,8 +14,8 @@ const WORKING = '[aria-live="polite"]'
 const THINKING = /^(Thinking…|Thought it through|Thought for \d+[sm])/
 const LINE = THINKING
 const SPAN = /^Thought for \d+s$/
-/** The share of the screen the old cap held: an uncapped row has to be taller than it. */
-const CAP_SHARE = 0.3
+/** The share of the viewport height the deleted `max-h-[30dvh]` cap held: an open body outgrows it. */
+const FORMER_CAP_SHARE = 0.3
 const FIRST = "working-out, not just the answer"
 const MEASURED = "The first look says five gigabytes"
 const ROTATIONS = "gzipped rotations are the bulk of it"
@@ -21,12 +24,6 @@ const LAST = "leaves the delete to them"
 const LONG_FIRST = "the reasoning itself, so here is the whole of it"
 const LONG_LAST = "The deleting is theirs"
 
-/** A span as a row reads it — `thinkingLabel`'s own format, from `app/src/lib/thinking.ts`. */
-const thoughts = (ms) => {
-  const seconds = Math.max(1, Math.round(ms / 1000))
-  return `Thought for ${seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`}`
-}
-
 await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   await page.goto(app)
   await send("think out loud, then stall: where did the space under /var/log go?")
@@ -34,16 +31,6 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   const chatId = new URL(page.url()).pathname.split("/").at(-1)
   const item = page.locator(ITEM).last()
   const line = item.getByRole("button", { name: LINE })
-  // The text a row folds is named by aria-controls, whose id is React's and so not a selector.
-  const body = (controls) =>
-    page.evaluate((id) => {
-      const found = document.getElementById(id)
-      return {
-        text: found?.textContent ?? "",
-        hidden: found?.getAttribute("aria-hidden") ?? null,
-        inert: found?.hasAttribute("inert") ?? false,
-      }
-    }, controls)
 
   // Everything the reply draws that only the browser has: each row's label and the words it holds,
   // whether that body is in the tree and the tab order, the box it takes, where the reply's tool
@@ -110,6 +97,32 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
       `${where} offers no Show more control anywhere on the page`,
     )
     return state
+  }
+
+  // An open body has to be the whole of its markdown wherever it is drawn: taller than the share of
+  // the viewport the deleted cap cut it to, nothing clipped out of it, its last words in the tree and
+  // its end inside the thread's view. The same four at every width and theme, so they live in one
+  // place and every plate runs all of them.
+  const wholeBody = async (state, where) => {
+    const row = state.rows[0]
+    const bound = Math.ceil(state.screen.height * FORMER_CAP_SHARE)
+    assert.ok(
+      row.box.height > bound,
+      `${where}, an open row draws its whole body, past the ${bound}px the old cap held it to (${row.box.height}px)`,
+    )
+    assert.ok(
+      row.drawn.height <= row.drawn.client + 1,
+      `${where}, with nothing clipped out of it (${row.drawn.height}px of ${row.drawn.client}px)`,
+    )
+    assert.ok(
+      (await page.getByText(LONG_LAST).count()) > 0,
+      `${where}, its last words are drawn, the run's final paragraph in full`,
+    )
+    assert.ok(
+      row.box.bottom <= state.frame.bottom + 2 && row.box.bottom > state.frame.top,
+      `${where}, its end sits in the thread's view (${row.box.bottom}px in ${state.frame.top}-${state.frame.bottom}px)`,
+    )
+    return { row, bound }
   }
 
   // A smooth scroll into place is not an animation `settled` waits for, so a reading taken straight
@@ -332,7 +345,10 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     spans.every((one) => typeof one === "number"),
     "every one of them measured on this device, watching it arrive",
   )
-  const labels = [thoughts(spans[0]), thoughts(spans[1] + spans[2])]
+  const labels = [
+    thinkingLabel({ thinking: false, spanMs: spans[0] }),
+    thinkingLabel({ thinking: false, spanMs: spans[1] + spans[2] }),
+  ]
   assert.deepEqual(
     folded.rows.map((one) => one.label),
     labels,
@@ -341,14 +357,22 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   assert.match(folded.rows[1].label ?? "", SPAN, "the merged row reads a span, not a plain phrase")
   assert.notEqual(
     folded.rows[1].label,
-    thoughts(spans[1]),
+    thinkingLabel({ thinking: false, spanMs: spans[1] }),
     "and reads the two spans added, not the first of them",
   )
-  assert.notEqual(folded.rows[1].label, thoughts(spans[2]), "nor the second alone")
+  assert.notEqual(
+    folded.rows[1].label,
+    thinkingLabel({ thinking: false, spanMs: spans[2] }),
+    "nor the second alone",
+  )
+  // The fold itself, read off the same walk the rows were: what a closed row's body leaves out.
   for (const index of [0, 1]) {
-    const closed = await body(await line.nth(index).getAttribute("aria-controls"))
-    assert.equal(closed.hidden, "true", `row ${index + 1}'s thinking leaves the tree`)
-    assert.equal(closed.inert, true, `row ${index + 1}'s thinking leaves the tab order too`)
+    assert.equal(folded.rows[index].hidden, "true", `row ${index + 1}'s thinking leaves the tree`)
+    assert.equal(
+      folded.rows[index].inert,
+      true,
+      `row ${index + 1}'s thinking leaves the tab order too`,
+    )
   }
 
   await until(
@@ -389,9 +413,8 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   )
   for (const index of [0, 1]) {
     assert.equal(restored.rows[index].expanded, "false", "folded")
-    const closed = await body(await line.nth(index).getAttribute("aria-controls"))
-    assert.equal(closed.hidden, "true", "its body folded away")
-    assert.equal(closed.inert, true, "and kept out of the tab order")
+    assert.equal(restored.rows[index].hidden, "true", "its body folded away")
+    assert.equal(restored.rows[index].inert, true, "and kept out of the tab order")
   }
   assert.ok(restored.rows[1].text.includes(ROTATIONS), "with the first stretch still in the row")
   assert.ok(restored.rows[1].text.includes(ACCOUNTING), "and the second one beside it")
@@ -528,24 +551,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   )
   await rested()
   const opened = await uncapped("with the finished run open")
-  const whole = opened.rows[0]
-  const share = Math.ceil(opened.screen.height * CAP_SHARE)
-  assert.ok(
-    whole.box.height > share,
-    `an open row draws its whole body, past the ${share}px a screen's 30% holds it to (${whole.box.height}px)`,
-  )
-  assert.ok(
-    whole.drawn.height <= whole.drawn.client + 1,
-    `with nothing clipped out of it (${whole.drawn.height}px of ${whole.drawn.client}px)`,
-  )
-  assert.ok(
-    (await page.getByText(LONG_LAST).count()) > 0,
-    "its last words on the page, the run's final paragraph drawn in full",
-  )
-  assert.ok(
-    whole.box.bottom <= opened.frame.bottom + 2,
-    `the run's whole end is in view (${whole.box.bottom}px of ${opened.frame.bottom}px)`,
-  )
+  const { row: whole, bound } = await wholeBody(opened, "with the finished run open")
   assert.ok(
     whole.box.bottom > opened.frame.top + (opened.frame.bottom - opened.frame.top) / 2,
     "in the lower half of the thread, the tap landing on the row's end",
@@ -553,36 +559,48 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   assert.ok(opened.scroll.top > 0, `the thread moved down to it (${opened.scroll.top}px)`)
   await shot("opened")
   pass(
-    `opening the finished run landed the thread on its end (scrollTop ${opened.scroll.top}px), its whole ${whole.box.height}px body drawn with no cap, fade or Show more`,
+    `opening the finished run landed the thread on its end (scrollTop ${opened.scroll.top}px), its whole ${whole.box.height}px body drawn with no cap, fade or Show more, past the ${bound}px the old cap held it to`,
   )
 
   // An uncapped body is a height against a real viewport, so it is proved at a phone's width and a
-  // tablet's, in both themes — the four plates the change is reviewed on.
+  // tablet's, in both themes — the four plates the change is reviewed on. Geometry doesn't depend on
+  // the theme, so each width loads once: the row is opened and measured in light, then the theme is
+  // flipped under it and the same reading taken again.
   const plates = []
   for (const [width, height] of [
     [390, 844],
     [1024, 1112],
   ]) {
-    for (const dark of [false, true]) {
-      const theme = dark ? "dark" : "light"
+    await page.setViewportSize({ width, height })
+    await page.emulateMedia({ colorScheme: "light" })
+    await page.reload()
+    // The bound is a share of the viewport, so the viewport the rows are measured in has to be the
+    // one asked for.
+    assert.deepEqual(
+      await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })),
+      { width, height },
+      `the page is drawn at ${width}×${height}`,
+    )
+    await until(
+      async () => ((await thread()).rows.length === 1 ? true : null),
+      20_000,
+      `the long row at ${width}×${height}`,
+    )
+    for (const theme of ["light", "dark"]) {
       const where = `at ${width}px in the ${theme}`
-      await page.setViewportSize({ width, height })
       await page.emulateMedia({ colorScheme: theme })
-      await page.reload()
-      await until(
-        async () => ((await thread()).rows.length === 1 ? true : null),
-        20_000,
-        `the long row ${where}`,
-      )
       await until(
         async () =>
-          (await page.evaluate(() => document.documentElement.classList.contains("dark"))) === dark
+          (await page.evaluate(() => document.documentElement.classList.contains("dark"))) ===
+          (theme === "dark")
             ? true
             : null,
         10_000,
         `the app to draw its ${theme} theme ${where}`,
       )
-      await line.click()
+      // The load draws the row closed and a theme flip doesn't fold it, so this only taps when the
+      // row isn't already standing open.
+      if ((await thread()).rows[0]?.expanded !== "true") await line.click()
       await until(
         async () => ((await thread()).rows[0]?.expanded === "true" ? true : null),
         10_000,
@@ -590,27 +608,13 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
       )
       await rested()
       const at = await uncapped(`the open row ${where}`)
-      const row = at.rows[0]
-      const cap = Math.ceil(height * CAP_SHARE)
-      assert.ok(
-        row.box.height > cap,
-        `${where} the open row's body is taller than the ${cap}px the old cap held (${row.box.height}px)`,
-      )
-      assert.ok(
-        row.drawn.height <= row.drawn.client + 1,
-        `${where} nothing of it is clipped (${row.drawn.height}px of ${row.drawn.client}px)`,
-      )
-      assert.ok((await page.getByText(LONG_LAST).count()) > 0, `${where} its last words are drawn`)
-      assert.ok(
-        row.box.bottom <= at.frame.bottom + 2 && row.box.bottom > at.frame.top,
-        `${where} and its end sits in the thread's view (${row.box.bottom}px in ${at.frame.top}-${at.frame.bottom}px)`,
-      )
+      const { row, bound } = await wholeBody(at, where)
       const path = await shot(`uncapped-${width}-${theme}`)
-      plates.push({ width, theme, height: row.box.height, cap, path })
+      plates.push({ width, theme, bound, height: row.box.height, path })
     }
   }
   await page.emulateMedia({ colorScheme: "light" })
   pass(
-    `the open row is uncapped at 390px (${plates[0].height}px past the old ${plates[0].cap}px cap) and 1024px (${plates[2].height}px past ${plates[2].cap}px), in light and in dark`,
+    `the open row is uncapped at 390px (${plates[0].height}px past the old ${plates[0].bound}px cap) and 1024px (${plates[2].height}px past ${plates[2].bound}px), in light and in dark`,
   )
 })
