@@ -881,6 +881,10 @@ const MODES = ["accept_edits", "auto", "plan"]
 // each a transcript of its own at GET /api/sessions/{id}/messages.
 const delegations = new Map()
 
+// The delegated agents a card has stopped (#470): core ends a child at its next iteration boundary,
+// so its remaining steps stop landing and its row settles interrupted.
+const stoppedDelegations = new Set()
+
 /** A delegated agent at work: its transcript grows a step every 1.2s, then it reports back. */
 async function runDelegation(parent, goal, out) {
   const id = `${parent}-agent-${(delegations.get(parent)?.length ?? 0) + 1}`
@@ -924,7 +928,7 @@ async function runDelegation(parent, goal, out) {
     ],
   ]
   for (const [i, [tool, args, result]] of steps.entries()) {
-    if (out.closed()) break
+    if (out.closed() || stoppedDelegations.has(id)) break
     const call = `${id}-call-${i}`
     add({
       role: "assistant",
@@ -937,11 +941,12 @@ async function runDelegation(parent, goal, out) {
   }
   const report =
     "The journal takes 2.0G of the 2.5G: journald has no SystemMaxUse cap. nginx is next with 410M."
-  if (!out.closed()) add({ role: "assistant", content: report })
+  const stopped = out.closed() || stoppedDelegations.has(id)
+  if (!stopped) add({ role: "assistant", content: report })
   Object.assign(agent, {
     ended_at: Date.now() / 1000,
-    end_reason: out.closed() ? "interrupted" : "agent_close",
-    status: out.closed() ? "stopped" : "done",
+    end_reason: stopped ? "interrupted" : "agent_close",
+    status: stopped ? "stopped" : "done",
   })
   noteEvent("runs")
   return report
@@ -1012,6 +1017,7 @@ function startDelegation(parent, goal) {
   const done = (async () => {
     for (const [i, [tool, args, result]] of steps.entries()) {
       await sleep(i === 0 ? 400 : 900)
+      if (stoppedDelegations.has(id)) break
       const call = `${id}-call-${i}`
       add({
         role: "assistant",
@@ -1024,11 +1030,13 @@ function startDelegation(parent, goal) {
       add({ role: "tool", tool_call_id: call, tool_name: tool, content: result })
       agent.tool_calls += 1
     }
-    add({ role: "assistant", content: report })
+    // A child a card stopped ends at its next boundary, as core's own interrupt makes it.
+    const stopped = stoppedDelegations.has(id)
+    if (!stopped) add({ role: "assistant", content: report })
     Object.assign(agent, {
       ended_at: Date.now() / 1000,
-      end_reason: "agent_close",
-      status: "done",
+      end_reason: stopped ? "interrupted" : "agent_close",
+      status: stopped ? "stopped" : "done",
     })
     noteEvent("runs")
     return report
@@ -4250,6 +4258,38 @@ http
         object: "memento.agents",
         session_id: id,
         agents: delegations.get(id) ?? [],
+      })
+    }
+    // #470's card stops one child, by the child's own session id (`delegation.stop`'s route). Never
+    // a 404 for an unknown agent or session: the app reads a 404 as a host without the route.
+    const sessionAgentStop =
+      /^\/api\/plugins\/memento\/sessions\/([^/]+)\/agents\/([^/]+)\/stop$/.exec(url.pathname)
+    if (PLUGIN && !profile && req.method === "POST" && sessionAgentStop) {
+      const session = decodeURIComponent(sessionAgentStop[1])
+      const agentId = decodeURIComponent(sessionAgentStop[2])
+      const agent = (delegations.get(session) ?? []).find((one) => one.id === agentId)
+      if (!agent || agent.status !== "running")
+        return json(res, 200, {
+          object: "memento.agent_stop",
+          session_id: session,
+          agent_id: agentId,
+          stopped: false,
+          reason: "That subagent isn't running any more.",
+        })
+      stoppedDelegations.add(agentId)
+      // Its row reads stopped from here: the steps it had left never land, and its card draws the
+      // host's own end rather than the one the tap remembers.
+      Object.assign(agent, {
+        ended_at: Date.now() / 1000,
+        end_reason: "interrupted",
+        status: "stopped",
+      })
+      noteEvent("runs")
+      return json(res, 200, {
+        object: "memento.agent_stop",
+        session_id: session,
+        agent_id: agentId,
+        stopped: true,
       })
     }
     const clarifyRoute = /^\/api\/plugins\/memento\/runs\/([^/]+)\/clarify$/.exec(url.pathname)
