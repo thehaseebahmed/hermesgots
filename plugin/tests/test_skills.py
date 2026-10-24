@@ -42,6 +42,8 @@ class Host:
         # The removal's own: which helper was called, with what, and inside which scope.
         self.uninstalls = []
         self.deletes = []
+        # Which config read the listing's disabled-list look went through, in order.
+        self.config_reads = []
         # How many profile scopes are held right now, so a removal records whether the helper it
         # called ran inside the one the request makes.
         self.inside = 0
@@ -67,6 +69,7 @@ def hermes(
     readiness=None,
     uninstall=(True, "Uninstalled"),
     delete=None,
+    readonly=False,
 ):
     """Fake every host module the read, the switch and the sheet import lazily, for one test.
 
@@ -79,6 +82,7 @@ def hermes(
     ``(fields, extras)`` pair the readiness read answers — left out, the host can't say either.
     ``uninstall`` is what the Hub's own uninstall answers — its ``(ok, message)`` pair — and
     ``delete`` what the manager's delete answers (its own dict, or None for a plain success).
+    ``readonly`` adds the host's copy-free config read, which a current Hermes has.
     """
     host = Host()
     scopes, platforms, catalog_calls = host.scopes, host.platforms, host.catalog_calls
@@ -156,14 +160,25 @@ def hermes(
     host.modules["agent.skill_utils"] = utils
 
     config_state = {"skills": {"disabled": sorted(disabled)}}
+    reads = host.config_reads
 
     def load_config():
         # A config read is a read of the profile's file: what a save wrote is what the next read
         # sees, which is what makes a switch's answered row the state it landed in.
+        reads.append("config")
         return copy.deepcopy(config_state)
 
     config = types.ModuleType("hermes_cli.config")
     config.load_config = load_config
+    if readonly:
+
+        def load_config_readonly():
+            # The host's own copy-free read: the config as the cache holds it, for a caller that
+            # only reads it.
+            reads.append("readonly")
+            return config_state
+
+        config.load_config_readonly = load_config_readonly
     host.modules["hermes_cli.config"] = config
 
     def get_disabled_skills(loaded, platform=None):
@@ -506,6 +521,37 @@ class SkillCatalogTests(unittest.TestCase):
             got = skill_catalog.read("bot-a")
         self.assertEqual([(row["name"], row["origin"]) for row in got], [("plan", "yours")])
 
+    def test_a_private_scan_this_host_has_moved_leaves_the_plain_listing(self):
+        def raises(**_kwargs):
+            raise TypeError("_skill_catalog() got an unexpected keyword argument")
+
+        for drifted in (raises, lambda **_kwargs: {"plan": "a row of no shape"}):
+            with self.subTest(drifted=drifted):
+                host = hermes(catalog=[scanned("plan", description="Make a plan")])
+                host.modules["tools.skills_tool"]._skill_catalog = drifted
+                with mock.patch.dict(sys.modules, host.modules):
+                    got = skill_catalog.read("bot-a")
+                # The host's private scan is the one read here with no sentence of its own, so a
+                # signature or a shape this host has moved leaves the plain listing standing in:
+                # every row loads, since only that scan could say otherwise, and the list is a list.
+                self.assertEqual([row["name"] for row in got], ["plan"])
+                self.assertIsNone(got[0]["loadError"])
+
+    def test_the_disabled_list_is_read_through_the_hosts_copy_free_read(self):
+        host = hermes(catalog=[scanned("plan")], disabled=("plan",), readonly=True)
+        with mock.patch.dict(sys.modules, host.modules):
+            got = skill_catalog.read("bot-a")
+        # Nothing here writes the config, so the read that skips the defensive copy is the one taken.
+        self.assertEqual(host.config_reads, ["readonly"])
+        self.assertFalse(got[0]["enabled"])
+
+    def test_a_host_without_that_read_still_lists(self):
+        host = hermes(catalog=[scanned("plan")], disabled=("plan",))
+        with mock.patch.dict(sys.modules, host.modules):
+            got = skill_catalog.read("bot-a")
+        self.assertEqual(host.config_reads, ["config"])
+        self.assertFalse(got[0]["enabled"])
+
     def test_the_scan_runs_inside_the_given_profile_scope(self):
         host = hermes(catalog=[scanned("plan")])
         with mock.patch.dict(sys.modules, host.modules):
@@ -630,6 +676,16 @@ class SkillSwitchTests(unittest.TestCase):
         self.assertEqual(str(caught.exception), skill_catalog.NOT_FOUND % "ghost")
         self.assertEqual(host.saves, [])
         self.assertEqual(host.write_scopes, [])
+
+    def test_a_switch_answers_the_row_it_found_without_reading_the_list_again(self):
+        host = hermes(catalog=[scanned("plan"), scanned("log-triage")], disabled=("plan",))
+        row = self.switched(host, "plan", True)
+        # One scan — the one that allowed the write — and the row is answered with the switch where
+        # the write just put it, rather than read back over the whole tree a second time.
+        self.assertEqual(host.scopes, ["bot-a"])
+        self.assertTrue(row["enabled"])
+        self.assertEqual(set(row), {"name", "description", "category", "origin", "enabled",
+                                    "loadError", "switchable"})
 
     def test_a_host_without_the_write_machinery_refuses_with_its_own_reason(self):
         host = hermes(catalog=[scanned("plan")], omit=("hermes_cli.skills_config",))
