@@ -40,6 +40,7 @@ from plugin.afk import (
     read,
     release,
     set_on,
+    set_pick_budget,
     set_pick_count,
     set_prompt,
     set_workflow,
@@ -47,7 +48,7 @@ from plugin.afk import (
     sweep_all,
     write_from,
 )
-from plugin.store import connect, db_path
+from plugin.store import connect, db_path, get_setting, put_setting
 from plugin.tasks import CLAIM_LABEL, READY_LABEL
 from plugin.tests._helpers import issue_row, placed, preset, staged as staged_record, stub_projects_db
 
@@ -358,6 +359,8 @@ def afk_row(
     holds: Any = None,
     pick_count: int = 1,
     prompt_id: Optional[str] = None,
+    pick_budget: int = 5,
+    holds_held: int = 0,
 ) -> Dict[str, Any]:
     """The answer `read` gives for a project holding nothing and having picked nothing.
 
@@ -373,6 +376,8 @@ def afk_row(
         "refusal": refusal,
         "workflow": default_workflow() if workflow is None else workflow,
         "prompt": prompt_builder.DEFAULT_PROMPT if prompt is None else prompt,
+        "pick_budget": pick_budget,
+        "holds_held": holds_held,
         "stage": stage,
         "stage_name": stage_name,
     }
@@ -1126,6 +1131,349 @@ class PickCountTests(ClaimStubTests):
         )
 
 
+class PickBudgetSettingTests(unittest.TestCase):
+    """The bot's pick budget itself: what an unset one reads as, what a write takes, and the answer
+    the bot-level route refuses.
+
+    One number on the bot's own store, so most of this needs no project and no GitHub at all — the
+    budget is read and written the way the Coding tab's stepper does, and the project's read only
+    carries it along.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = Path(self.tmp.name)
+
+    def test_a_bot_that_names_no_budget_works_five(self) -> None:
+        self.assertEqual(afk.pick_budget(self.home), 5, "five is every bot's budget until it says")
+        self.assertEqual(afk.bot_read(self.home), {"pick_budget": 5, "holds_held": 0})
+
+    def test_the_budget_is_read_back_from_the_hosts_own_store(self) -> None:
+        set_pick_budget(self.home, 3)
+        self.assertEqual(afk.pick_budget(self.home), 3)
+        self.assertEqual(
+            get_setting(db_path(self.home), "afk_pick_budget"),
+            3,
+            "the number is the bot's own settings row, not a column and not memory",
+        )
+        self.assertEqual(afk.bot_read(self.home)["pick_budget"], 3)
+
+    def test_a_stored_budget_outside_one_to_ten_reads_as_the_nearest_it_can_be(self) -> None:
+        for stored, answered in ((0, 1), (-4, 1), (11, 10), (99, 10)):
+            with self.subTest(stored=stored):
+                put_setting(db_path(self.home), "afk_pick_budget", stored)
+                self.assertEqual(afk.pick_budget(self.home), answered)
+
+    def test_a_stored_budget_that_is_no_number_reads_as_five(self) -> None:
+        # A row somebody wrote by hand, or one an older build wrote another way: the default is the
+        # answer rather than a sheet with no budget on it.
+        for stored in ("3", 2.5, True, None, [5], {"pick_budget": 5}):
+            with self.subTest(stored=stored):
+                put_setting(db_path(self.home), "afk_pick_budget", stored)
+                self.assertEqual(afk.pick_budget(self.home), 5)
+
+    def test_every_whole_number_from_one_to_ten_is_a_budget(self) -> None:
+        for value in range(1, 11):
+            with self.subTest(pick_budget=value):
+                self.assertEqual(afk.budget_from({"pick_budget": value}), value)
+                set_pick_budget(self.home, value)
+                self.assertEqual(afk.pick_budget(self.home), value)
+
+    def test_a_budget_outside_one_to_ten_is_refused(self) -> None:
+        for body in (0, 11, -1, "3", 2.5, True, None):
+            with self.subTest(pick_budget=body):
+                with self.assertRaises(ValueError) as raised:
+                    afk.budget_from({"pick_budget": body})
+                self.assertEqual(
+                    str(raised.exception), "pick_budget must be a whole number from 1 to 10."
+                )
+
+    def test_a_write_that_names_no_budget_is_refused_the_same_way(self) -> None:
+        for body in ({}, {"on": True}, {"pick_count": 2}):
+            with self.subTest(body=body):
+                with self.assertRaises(ValueError) as raised:
+                    afk.budget_from(body)
+                self.assertEqual(
+                    str(raised.exception), "pick_budget must be a whole number from 1 to 10."
+                )
+
+    def test_a_field_beside_the_budget_is_not_a_refusal(self) -> None:
+        # ADR 0026's usage threshold lands on this same route later: a body carrying it must not
+        # stop the budget being written.
+        self.assertEqual(afk.budget_from({"pick_budget": 4, "threshold": 90}), 4)
+
+    def test_every_projects_read_answers_the_budget_and_the_holds_against_it(self) -> None:
+        held = {
+            "repo": "mock-user/memento",
+            "number": 265,
+            "title": "Task 265",
+            "url": "https://github.com/mock-user/memento/issues/265",
+            "created_at": "2026-10-01T00:00:00Z",
+        }
+        afk._hold(self.home, "p1", held)
+        afk._hold(self.home, "p2", held)
+        set_pick_budget(self.home, 3)
+        for project_id in ("p1", "p2"):
+            with self.subTest(project=project_id):
+                found = read(self.home, project_id, [])
+                self.assertEqual(
+                    (found["pick_budget"], found["holds_held"]),
+                    (3, 2),
+                    "one read draws the bot's numbers, whatever project the sheet was opened on",
+                )
+
+    def test_a_project_with_no_row_answers_the_bot_s_numbers_too(self) -> None:
+        found = read(self.home, "p9", [])
+        self.assertFalse(found["on"])
+        self.assertEqual((found["pick_budget"], found["holds_held"]), (5, 0))
+
+
+class PickBudgetTests(unittest.TestCase):
+    """The bot's pick budget over its projects: what a pass may claim, in which order, and what it
+    says on a project it held back (ADR 0042).
+
+    Two projects with a repository each: the budget is only ever about what several projects claim
+    together, which one checkout can't show. GitHub is the plugin's own stub, answering each
+    repository's issues and recording every read and write.
+    """
+
+    REPOS = {"p1": "mock-user/one", "p2": "mock-user/two"}
+
+    def setUp(self) -> None:
+        self.tmp = TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = Path(self.tmp.name)
+        self.home.joinpath("projects.db").write_text("")
+        self.checkouts: Dict[str, Path] = {}
+        for project_id in self.REPOS:
+            checkout = self.home / project_id
+            (checkout / ".git").mkdir(parents=True)
+            self.checkouts[project_id] = checkout
+        self.issues: Dict[str, List[dict]] = {repo: [] for repo in self.REPOS.values()}
+        self.reads: List[str] = []
+        self.writes: List[tuple] = []
+        self.write_error: Optional[Exception] = None
+        self.write_error_on: Optional[str] = None
+        for one in (
+            patch.object(github, "token", return_value=("token", "env")),
+            patch.object(github, "origin_repo", self.repo_of),
+            patch.object(github, "_get", self.answer_get),
+            patch.object(github, "_page", self.answer_page),
+            patch.object(github, "_request", self.answer_request),
+            patch.object(afk, "wake"),
+        ):
+            one.start()
+            self.addCleanup(one.stop)
+
+    def repo_of(self, path: Any) -> Optional[str]:
+        for project_id, checkout in self.checkouts.items():
+            if str(path) == str(checkout):
+                return self.REPOS[project_id]
+        return None
+
+    def answer_get(self, path: str, auth: Any) -> Any:
+        if path == "/user":
+            return {"login": "mock-user"}
+        if "/labels/" in path:
+            return {"name": CLAIM_LABEL}
+        for repo, issues in self.issues.items():
+            if path.startswith(f"/repos/{repo}/issues?"):
+                self.reads.append(repo)
+                return issues
+        raise AssertionError(f"unexpected read: {path}")
+
+    def answer_page(self, path: str, auth: Any) -> Any:
+        return self.answer_get(path, auth), ""
+
+    def answer_request(self, path: str, auth: Any, method: str = "GET", data: Any = None) -> Any:
+        self.writes.append((method, path, data))
+        refused = self.write_error is not None and (
+            self.write_error_on is None or self.write_error_on in path
+        )
+        if refused:
+            raise self.write_error
+        return {}
+
+    def project(self, project_id: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            id=project_id, folders=[folder(str(self.checkouts[project_id]))], archived=False
+        )
+
+    def folders(self, project_id: str) -> List[Any]:
+        return [folder(str(self.checkouts[project_id]))]
+
+    def turn_on(self, project_id: str, count: int = 1) -> None:
+        set_pick_count(self.home, project_id, count)
+        set_on(self.home, project_id, self.folders(project_id), True)
+
+    def pass_(self) -> List[tuple]:
+        """One sweep of the whole bot, over both projects as a host lists them."""
+        with stub_projects_db(projects=[self.project("p1"), self.project("p2")]):
+            return sweep_all(self.home)
+
+    def holds(self, project_id: str) -> List[int]:
+        return [hold.task["number"] for hold in afk._holds(self.home, project_id)]
+
+    def shown(self, project_id: str) -> dict:
+        return read(self.home, project_id, self.folders(project_id))
+
+    def test_the_budget_caps_what_the_bots_projects_claim_together(self) -> None:
+        set_pick_budget(self.home, 2)
+        self.turn_on("p1", 2)
+        self.turn_on("p2", 2)
+        self.issues["mock-user/one"] = [
+            issue_row(265),
+            issue_row(267, created="2026-10-03T00:00:00Z"),
+        ]
+        self.issues["mock-user/two"] = [
+            issue_row(266, created="2026-10-02T00:00:00Z"),
+            issue_row(268, created="2026-10-04T00:00:00Z"),
+        ]
+        claimed = self.pass_()
+        self.assertEqual(
+            [(project_id, task["number"]) for project_id, task in claimed],
+            [("p1", 265), ("p2", 266)],
+            "two places over four free ones, and the two oldest ready tasks take them",
+        )
+        self.assertEqual(self.holds("p1"), [265])
+        self.assertEqual(self.holds("p2"), [266])
+        self.assertEqual(self.shown("p1")["holds_held"], 2, "the count is every project's holds")
+        self.assertEqual(self.shown("p2")["pick_budget"], 2)
+
+    def test_a_freed_place_goes_to_the_oldest_task_across_the_bot(self) -> None:
+        """The frontier's oldest-first rule, read over the bot rather than over one project."""
+        set_pick_budget(self.home, 1)
+        self.turn_on("p1", 1)
+        self.turn_on("p2", 1)
+        # p1 is swept first — it is the first project the pass reads — and its task is the newer.
+        self.issues["mock-user/one"] = [issue_row(300, created="2026-10-09T00:00:00Z")]
+        self.issues["mock-user/two"] = [issue_row(301, created="2026-10-01T00:00:00Z")]
+        claimed = self.pass_()
+        self.assertEqual(
+            [(project_id, task["number"]) for project_id, task in claimed],
+            [("p2", 301)],
+            "the bot's oldest ready task, not the first project in iteration order",
+        )
+        self.assertEqual(self.holds("p1"), [], "the newer task waits for the next free place")
+        self.assertEqual(self.holds("p2"), [301])
+        self.assertEqual(
+            self.shown("p1")["refusal"],
+            afk.PICK_BUDGET_FULL.format(held=1, budget=1),
+            "the project the budget skipped is the one that says so",
+        )
+        self.assertIsNone(self.shown("p2")["refusal"], "the project that claimed says nothing")
+
+    def test_the_budget_is_counted_once_a_pass_before_any_github_read(self) -> None:
+        """A sweep the budget holds back asks GitHub nothing at all, not even what is ready."""
+        set_pick_budget(self.home, 1)
+        self.turn_on("p1", 1)
+        self.issues["mock-user/one"] = [issue_row(265)]
+        self.pass_()
+        self.assertEqual(self.holds("p1"), [265], "the one place the budget allows is taken")
+        self.turn_on("p2", 1)
+        self.issues["mock-user/two"] = [issue_row(266)]
+        self.reads.clear()
+        self.writes.clear()
+        with patch.object(afk.tasks, "frontier", wraps=afk.tasks.frontier) as frontier:
+            self.pass_()
+        frontier.assert_not_called()
+        self.assertEqual(self.reads, [], "a project the budget skipped costs no read of GitHub")
+        self.assertEqual(self.writes, [])
+        self.assertEqual(
+            self.shown("p2")["refusal"], afk.PICK_BUDGET_FULL.format(held=1, budget=1)
+        )
+
+    def test_a_stalled_hold_counts_against_the_budget(self) -> None:
+        """A hold is the bot's claimed work whether or not something is running it."""
+        set_pick_budget(self.home, 1)
+        self.turn_on("p1", 1)
+        self.issues["mock-user/one"] = [issue_row(265)]
+        self.pass_()
+        stalled = afk._holds(self.home, "p1")[0].task
+        afk._stall(self.home, "p1", stalled, afk.FAILED_RUN)
+        self.turn_on("p2", 1)
+        self.issues["mock-user/two"] = [issue_row(266)]
+        self.pass_()
+        self.assertEqual(self.holds("p2"), [], "five stalled holds would stop a bot at five")
+        self.assertEqual(
+            self.shown("p2")["refusal"], afk.PICK_BUDGET_FULL.format(held=1, budget=1)
+        )
+        self.assertEqual(self.shown("p1")["holds"][0]["stalled"], afk.FAILED_RUN)
+
+    def test_lowering_the_budget_abandons_nothing(self) -> None:
+        set_pick_budget(self.home, 2)
+        self.turn_on("p1", 2)
+        self.issues["mock-user/one"] = [
+            issue_row(265),
+            issue_row(266, created="2026-10-02T00:00:00Z"),
+        ]
+        self.pass_()
+        self.assertEqual(self.holds("p1"), [265, 266])
+        self.writes.clear()
+        set_pick_budget(self.home, 1)
+        self.assertEqual(
+            self.holds("p1"),
+            [265, 266],
+            "the surplus is left to finish: giving it back would hand back work under way",
+        )
+        self.assertEqual(self.writes, [], "and nothing is taken off GitHub")
+        self.pass_()
+        self.assertEqual(self.holds("p1"), [265, 266], "the bot claims nothing until it is under it")
+        self.assertEqual(self.writes, [])
+
+    def test_the_refusal_lands_only_on_the_projects_the_budget_skipped(self) -> None:
+        set_pick_budget(self.home, 1)
+        self.turn_on("p1", 1)
+        self.issues["mock-user/one"] = [issue_row(265)]
+        self.pass_()
+        self.turn_on("p2", 1)
+        self.issues["mock-user/two"] = [issue_row(266)]
+        self.pass_()
+        self.assertEqual(
+            self.shown("p2")["refusal"], afk.PICK_BUDGET_FULL.format(held=1, budget=1)
+        )
+        self.assertIsNone(
+            self.shown("p1")["refusal"],
+            "a project at its own count was not skipped by the budget, and says nothing of it",
+        )
+
+    def test_the_budget_answers_each_projects_read_after_a_pass(self) -> None:
+        set_pick_budget(self.home, 3)
+        self.turn_on("p1", 2)
+        self.issues["mock-user/one"] = [
+            issue_row(265),
+            issue_row(266, created="2026-10-02T00:00:00Z"),
+        ]
+        self.pass_()
+        for project_id in ("p1", "p2"):
+            with self.subTest(project=project_id):
+                found = self.shown(project_id)
+                self.assertEqual(
+                    (found["pick_budget"], found["holds_held"]),
+                    (3, 2),
+                    "\"Pick budget 2 of 3\", drawn from whichever project's read the sheet has",
+                )
+
+    def test_a_refusal_on_one_project_leaves_anothers_claim_standing(self) -> None:
+        """GitHub refusing one project's claim is that project's trouble, not the bot's."""
+        set_pick_budget(self.home, 2)
+        self.turn_on("p1", 1)
+        self.turn_on("p2", 1)
+        self.issues["mock-user/one"] = [issue_row(265)]
+        self.issues["mock-user/two"] = [issue_row(266, created="2026-10-02T00:00:00Z")]
+        self.write_error = github.GitHubError("GitHub answered 403.", 403)
+        self.write_error_on = "mock-user/one"
+        claimed = self.pass_()
+        self.assertEqual(
+            [(project_id, task["number"]) for project_id, task in claimed],
+            [("p2", 266)],
+            "the other project's task is still claimed",
+        )
+        self.assertEqual(self.shown("p1")["refusal"], "GitHub answered 403.")
+        self.assertEqual(self.shown("p1")["holds_held"], 1)
+
+
 class AfkSessionTests(ClaimStubTests):
     """AFK holding a claimed task in a published session, and giving that claim back.
 
@@ -1758,7 +2106,7 @@ class StagedStartTests(SessionTests):
 
 
 class SweepAllTests(unittest.TestCase):
-    """Which projects the background sweep looks at."""
+    """Which projects the background sweep looks at, and what it answers the loop with."""
 
     def setUp(self) -> None:
         self.tmp = TemporaryDirectory()
@@ -1777,34 +2125,49 @@ class SweepAllTests(unittest.TestCase):
     def project(self, project_id: str, archived: bool = False) -> SimpleNamespace:
         return SimpleNamespace(id=project_id, folders=[folder(str(self.checkout))], archived=archived)
 
+    def read_nothing(self, home: Path, project_id: str, *args: Any, **kwargs: Any) -> afk.Plan:
+        """A project read into a plan that claims nothing: what the pass's own reading answers."""
+        return afk.Plan(project_id, [])
+
     def test_a_project_left_on_is_swept_and_one_that_is_off_is_not(self) -> None:
         set_on(self.home, "p1", [folder(str(self.checkout))], True)
         with stub_projects_db(projects=[self.project("p1"), self.project("p2")]):
-            with patch.object(afk, "sweep") as sweep:
+            with patch.object(afk, "_plan", side_effect=self.read_nothing) as plan:
                 sweep_all(self.home)
-        self.assertEqual([call.args[1] for call in sweep.call_args_list], ["p1"])
+        self.assertEqual([call.args[1] for call in plan.call_args_list], ["p1"])
 
     def test_a_project_whose_record_is_gone_is_left_alone(self) -> None:
         set_on(self.home, "p1", [folder(str(self.checkout))], True)
         with stub_projects_db(projects=[]):
-            with patch.object(afk, "sweep") as sweep:
+            with patch.object(afk, "_plan", side_effect=self.read_nothing) as plan:
                 sweep_all(self.home)
-        sweep.assert_not_called()
+        plan.assert_not_called()
 
     def test_a_failing_project_does_not_stop_the_next_one(self) -> None:
         set_on(self.home, "p1", [folder(str(self.checkout))], True)
         set_on(self.home, "p2", [folder(str(self.checkout))], True)
+
+        def read(home: Path, project_id: str, *args: Any, **kwargs: Any) -> afk.Plan:
+            if project_id == "p1":
+                raise RuntimeError("database is locked")
+            return afk.Plan(project_id, [])
+
         with stub_projects_db(projects=[self.project("p1"), self.project("p2")]):
-            with patch.object(afk, "sweep", side_effect=[RuntimeError("database is locked"), []]) as call:
+            with patch.object(afk, "_plan", side_effect=read) as call:
                 sweep_all(self.home)
         self.assertEqual([one.args[1] for one in call.call_args_list], ["p1", "p2"])
 
     def test_a_sweep_answers_the_tasks_it_just_claimed(self) -> None:
+        """The pass's answer is what the loop starts sessions for, in the order it took them."""
         set_on(self.home, "p1", [folder(str(self.checkout))], True)
         task = {"repo": "mock-user/memento", "number": 265, "title": "Task 265"}
         second = {"repo": "mock-user/memento", "number": 266, "title": "Task 266"}
         with stub_projects_db(projects=[self.project("p1"), self.project("p2")]):
-            with patch.object(afk, "sweep", side_effect=[[task, second], []]):
+            with (
+                patch.object(afk, "_plan", return_value=afk.Plan("p1", [task, second])),
+                patch.object(github, "login", return_value="mock-user"),
+                patch.object(github, "claim_issue"),
+            ):
                 claimed = sweep_all(self.home)
         self.assertEqual(
             claimed,
@@ -2569,6 +2932,34 @@ class FeatureTests(unittest.TestCase):
         name has to be in the features array a real host answers."""
         source = (Path(afk.__file__).parent / "__init__.py").read_text()
         self.assertRegex(source, r'\n\s+"afk_picks",\n')
+
+
+class BotRouteTests(unittest.TestCase):
+    """The bot-level AFK route: what it is registered as, and what it answers from.
+
+    The handlers live inside the plugin's registration function, which needs a whole Hermes host, so
+    what a test can hold them to is the source itself — the two verbs, the object the app reads, and
+    the three plugin calls they answer with. What those calls do is `PickBudgetSettingTests`.
+    """
+
+    def setUp(self) -> None:
+        self.source = (Path(afk.__file__).parent / "__init__.py").read_text()
+
+    def test_both_of_the_bots_afk_verbs_are_registered_beside_the_projects(self) -> None:
+        self.assertRegex(
+            self.source, r'app\.router\.add_get\(f"\{PREFIX\}/afk", bot_afk\)'
+        )
+        self.assertRegex(
+            self.source, r'app\.router\.add_post\(f"\{PREFIX\}/afk", post_bot_afk\)'
+        )
+
+    def test_its_answer_is_a_bots_own_object(self) -> None:
+        self.assertIn('"object": "memento.afk.bot"', self.source)
+
+    def test_it_reads_and_writes_the_bots_own_store(self) -> None:
+        for call in ("afk.bot_read", "afk.budget_from", "afk.set_pick_budget"):
+            with self.subTest(call=call):
+                self.assertIn(call, self.source)
 
 
 if __name__ == "__main__":
