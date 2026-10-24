@@ -8,9 +8,9 @@
  * took the words keeps them.
  */
 import { useState } from "react"
-import { PencilIcon } from "lucide-react"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { SheetPickerList, SheetPickerRow } from "@/components/sheet-picker"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -60,50 +60,37 @@ export function PromptLibrarySheet({
           <PopupTitle>Choose a Prompt</PopupTitle>
         </PopupHeader>
         <div className="flex min-h-0 flex-col gap-3 px-4 pb-4 sm:px-6" data-prompt-library>
-          {!entries ? (
-            <p className="px-1 py-2 text-sm text-muted-foreground">Reading prompts…</p>
-          ) : entries.length === 0 ? (
-            <p className="px-1 py-2 text-sm text-muted-foreground">
-              No prompts yet. Save this project's words to the library to start it.
-            </p>
-          ) : (
-            <ul aria-label="Prompts">
-              {entries.map((entry) => (
-                <li key={entry.id} className="flex items-center gap-1" data-prompt={entry.id}>
-                  <button
-                    type="button"
-                    aria-label={`Use ${entry.name}`}
-                    onClick={() => onPick(entry)}
-                    className="flex min-h-11 min-w-0 flex-1 flex-col justify-center gap-0.5 rounded-2xl px-3 py-2 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <span className="min-w-0 truncate text-base">{entry.name}</span>
-                    {entry.tags.length > 0 && (
-                      <span className="flex min-w-0 flex-wrap items-center gap-1">
-                        {entry.tags.map((tag) => (
-                          <Badge key={tag} variant="secondary">
-                            {tag}
-                          </Badge>
-                        ))}
-                      </span>
-                    )}
-                    <span className="min-w-0 truncate text-sm text-muted-foreground">
-                      {bodyPreview(entry.body)}
-                    </span>
-                  </button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`Edit ${entry.name}`}
-                    className="size-11 shrink-0"
-                    onClick={() => onEdit(entry)}
-                  >
-                    <PencilIcon />
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          )}
+          <SheetPickerList
+            entries={entries}
+            label="Prompts"
+            reading="Reading prompts…"
+            empty="No prompts yet. Save this project's words to the library to start it."
+            row={(entry) => (
+              <SheetPickerRow
+                key={entry.id}
+                attribute="data-prompt"
+                id={entry.id}
+                name={entry.name}
+                pickLabel={`Use ${entry.name}`}
+                onPick={() => onPick(entry)}
+                onEdit={() => onEdit(entry)}
+              >
+                <span className="min-w-0 truncate text-base">{entry.name}</span>
+                {entry.tags.length > 0 && (
+                  <span className="flex min-w-0 flex-wrap items-center gap-1">
+                    {entry.tags.map((tag) => (
+                      <Badge key={tag} variant="secondary">
+                        {tag}
+                      </Badge>
+                    ))}
+                  </span>
+                )}
+                <span className="min-w-0 truncate text-sm text-muted-foreground">
+                  {bodyPreview(entry.body)}
+                </span>
+              </SheetPickerRow>
+            )}
+          />
         </div>
       </PopupContent>
     </Popup>

@@ -17,6 +17,7 @@ import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup
 import { PromptEntrySheet, PromptLibrarySheet } from "@/components/prompt-library-sheet"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import type { PromptWrite } from "@/lib/hermes"
 import type { PromptDraft, PromptEntry } from "@/lib/prompt-library"
 import { addPrompt, removePrompt, savePrompt, usePromptEntries } from "@/lib/prompt-library-store"
 
@@ -35,7 +36,7 @@ export function PromptEditor({
    * from beside them. Done hands over the words alone, which detaches the copy on the host; a pick
    * hands over both, so the row can tell a copy whose entry moves on from an original.
    */
-  onSave: (prompt: string, promptId?: string | null) => Promise<"saved" | "refused">
+  onSave: (draft: PromptWrite) => Promise<"saved" | "refused">
   /** The account's library is drawn here: signed in, with the vault open on this device. */
   library?: boolean
 }) {
@@ -55,6 +56,23 @@ export function PromptEditor({
   // renamed, rewritten or deleted.
   const [writing, setWriting] = useState<PromptEntry | "new" | null>(null)
 
+  /**
+   * One write at a time, said the same way wherever it's made: the sheet's own controls are out of
+   * reach while it runs, and a failure is a toast with the sheet left exactly as it was — open, and
+   * holding what the user typed. `fallback` is what a failure that isn't the host's own words reads
+   * as.
+   */
+  const attempt = async (work: () => Promise<void>, fallback: string) => {
+    setSaving(true)
+    try {
+      await work()
+    } catch (failure) {
+      toast.error(failure instanceof Error ? failure.message : fallback)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const submit = async () => {
     // Done on the words the row already holds is not a write: it would turn the host's default into
     // this project's own words, which nothing then reads as the default again.
@@ -62,12 +80,9 @@ export function PromptEditor({
       onOpenChange(false)
       return
     }
-    setSaving(true)
-    try {
-      if ((await onSave(text)) === "saved") onOpenChange(false)
-    } finally {
-      setSaving(false)
-    }
+    await attempt(async () => {
+      if ((await onSave({ text })) === "saved") onOpenChange(false)
+    }, "Couldn't save that Prompt.")
   }
 
   /**
@@ -80,32 +95,31 @@ export function PromptEditor({
   const pick = async (entry: PromptEntry) => {
     setChoosing(false)
     setText(entry.body)
-    setSaving(true)
-    try {
-      await onSave(entry.body, entry.id)
-    } finally {
-      setSaving(false)
-    }
+    await attempt(async () => {
+      await onSave({ text: entry.body, source: entry.id })
+    }, "Couldn't save that Prompt.")
   }
 
   const write = async (draft: PromptDraft) => {
     const editing = writing === "new" ? null : writing
-    try {
-      if (editing) await savePrompt(editing.id, draft)
-      else await addPrompt(draft)
+    await attempt(async () => {
+      if (!editing) {
+        await addPrompt(draft)
+      } else if (!(await savePrompt(editing.id, draft))) {
+        // The entry was deleted on another device: nothing was written, so the sheet keeps the typed
+        // draft and says the entry is gone rather than closing as if it had saved.
+        toast.error("That Prompt is gone from the library.")
+        return
+      }
       setWriting(null)
-    } catch (failure) {
-      toast.error(failure instanceof Error ? failure.message : "Couldn't save that Prompt.")
-    }
+    }, "Couldn't save that Prompt.")
   }
 
   const remove = async (entry: PromptEntry) => {
-    try {
+    await attempt(async () => {
       await removePrompt(entry.id)
       setWriting(null)
-    } catch (failure) {
-      toast.error(failure instanceof Error ? failure.message : "Couldn't delete that Prompt.")
-    }
+    }, "Couldn't delete that Prompt.")
   }
 
   return (

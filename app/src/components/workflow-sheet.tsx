@@ -1,9 +1,9 @@
-import { CheckIcon, PencilIcon } from "lucide-react"
+import { CheckIcon } from "lucide-react"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { SheetPickerList, SheetPickerRow } from "@/components/sheet-picker"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Spinner } from "@/components/ui/spinner"
 import { workflowShape, type WorkflowEntry } from "@/lib/workflow"
 
 /**
@@ -45,55 +45,41 @@ export function WorkflowSheet({
           <PopupTitle>Workflow</PopupTitle>
         </PopupHeader>
         <div className="flex min-h-0 flex-col gap-3 px-4 pb-4 sm:px-6">
-          {error ? (
-            <p className="px-1 text-sm text-destructive">{error}</p>
-          ) : !ordered ? (
-            <p className="flex items-center gap-2 px-1 py-2 text-sm text-muted-foreground">
-              <Spinner className="size-4" /> Reading workflows…
-            </p>
-          ) : ordered.length === 0 ? (
-            <p className="px-1 py-2 text-sm text-muted-foreground">No workflows yet.</p>
-          ) : (
-            <ul aria-label="Workflows">
-              {ordered.map((entry) => {
-                const chosen = entry.id === chosenId
-                return (
-                  <li key={entry.id} className="flex items-center gap-1" data-workflow={entry.id}>
-                    <button
-                      type="button"
-                      aria-current={chosen}
-                      disabled={saving}
-                      onClick={() => onPick(entry)}
-                      className="flex min-h-11 min-w-0 flex-1 flex-col justify-center gap-0.5 rounded-2xl px-3 py-2 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      <span className="flex min-w-0 items-center gap-2">
-                        {chosen && <CheckIcon aria-hidden className="size-4 shrink-0" />}
-                        <span className="min-w-0 truncate text-base">{entry.name}</span>
-                        {entry.preset && (
-                          <Badge variant="secondary" className="shrink-0">
-                            Preset
-                          </Badge>
-                        )}
-                      </span>
-                      <span className="min-w-0 truncate pl-6 text-sm text-muted-foreground">
-                        {workflowShape(entry.stages)}
-                      </span>
-                    </button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      aria-label={`Edit ${entry.name}`}
-                      className="size-11 shrink-0"
-                      onClick={() => onEdit(entry)}
-                    >
-                      <PencilIcon />
-                    </Button>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
+          <SheetPickerList
+            entries={ordered}
+            error={error}
+            label="Workflows"
+            reading="Reading workflows…"
+            empty="No workflows yet."
+            row={(entry) => {
+              const chosen = entry.id === chosenId
+              return (
+                <SheetPickerRow
+                  key={entry.id}
+                  attribute="data-workflow"
+                  id={entry.id}
+                  name={entry.name}
+                  chosen={chosen}
+                  saving={saving}
+                  onPick={() => onPick(entry)}
+                  onEdit={() => onEdit(entry)}
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    {chosen && <CheckIcon aria-hidden className="size-4 shrink-0" />}
+                    <span className="min-w-0 truncate text-base">{entry.name}</span>
+                    {entry.preset && (
+                      <Badge variant="secondary" className="shrink-0">
+                        Preset
+                      </Badge>
+                    )}
+                  </span>
+                  <span className="min-w-0 truncate pl-6 text-sm text-muted-foreground">
+                    {workflowShape(entry.stages)}
+                  </span>
+                </SheetPickerRow>
+              )
+            }}
+          />
           <Button type="button" variant="secondary" className="h-11" onClick={onNew}>
             New workflow
           </Button>
