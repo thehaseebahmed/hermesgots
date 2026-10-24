@@ -72,24 +72,34 @@ export const useIncomingShare = current.use
 
 const SHARE_CACHE = "memento-share"
 
-/** Reads a share the service worker took (`public/share-sw.js`), then forgets it. */
+/**
+ * Reads a share the service worker took (`public/share-sw.js`), then forgets it. False only where
+ * there was never a share to read here; a share that arrived and couldn't be read back still opens,
+ * carrying the refusal, so nothing a user shared disappears without a word.
+ */
 export async function readWebShare(id: string) {
   if (!("caches" in window)) return false
+  const refused: Refusal[] = []
   try {
     const cache = await caches.open(SHARE_CACHE)
     const meta = await cache.match(`/__share/${id}`)
     if (!meta) return false
-    const { title, text, url, files, leftOut } = (await meta.json()) as {
+    const { title, text, url, files = [], leftOut } = (await meta.json()) as {
       title?: string
       text?: string
       url?: string
-      files: { key: string; name: string; type: string }[]
+      files?: { key: string; name: string; type: string }[]
       leftOut?: number
     }
     const shared: File[] = []
     for (const file of files) {
       const response = await cache.match(file.key)
-      if (response) shared.push(new File([await response.blob()], file.name, { type: file.type }))
+      // A file the cache no longer holds is said out loud, so a share loses nothing quietly.
+      if (!response) {
+        refused.push(unreadableRefusal(file.name))
+        continue
+      }
+      shared.push(new File([await response.blob()], file.name, { type: file.type }))
     }
     setShare(
       toShare({
@@ -97,12 +107,14 @@ export async function readWebShare(id: string) {
         text,
         url,
         files: shared,
-        refused: leftOut ? [countRefusal(leftOut)] : [],
+        refused: [...(leftOut ? [countRefusal(leftOut)] : []), ...refused],
       }),
     )
     return true
   } catch {
-    return false
+    // What was shared is still the user's share: the screen opens on the reason it can't be read.
+    setShare(toShare({ refused: [unreadableRefusal("what was shared")] }))
+    return true
   } finally {
     void caches.delete(SHARE_CACHE).catch(() => {})
   }

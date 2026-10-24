@@ -11,7 +11,7 @@ import { toast } from "sonner"
 
 import { MAX_ATTACHMENTS, MAX_FILE_BYTES } from "@/lib/attachment-caps"
 import { db } from "@/lib/db"
-import { clearShare, receiveShare, toShare } from "@/lib/share"
+import { clearShare, readWebShare, receiveShare, toShare } from "@/lib/share"
 import { SharePage } from "@/routes/share"
 
 import { botProfile, mount, seedSettings, text, until } from "./component-kit.tsx"
@@ -45,6 +45,40 @@ const tiles = () =>
     button.getAttribute("aria-label")!.replace("Remove ", ""),
   )
 
+/**
+ * The PWA share cache, as much of it as the share screen reads back: the meta the service worker
+ * wrote under `/__share/s1`, and whichever of its files are still there.
+ */
+function stubCaches(written: { meta?: unknown; files?: Record<string, string> }) {
+  const entries = new Map<string, Response>()
+  if (written.meta !== undefined)
+    entries.set(
+      "/__share/s1",
+      typeof written.meta === "string"
+        ? new Response(written.meta)
+        : Response.json(written.meta),
+    )
+  for (const [key, body] of Object.entries(written.files ?? {}))
+    entries.set(key, new Response(body))
+  const cache = { match: async (key: string) => entries.get(key) }
+  const storage = {
+    open: async () => cache,
+    delete: async () => true,
+  } as unknown as CacheStorage
+  // In a page these are one object; in this process the global and the DOM's window are not.
+  const holder = window as unknown as { caches?: CacheStorage }
+  const saved = holder.caches
+  const savedGlobal = (globalThis as { caches?: CacheStorage }).caches
+  holder.caches = storage
+  ;(globalThis as { caches?: CacheStorage }).caches = storage
+  return {
+    restore: () => {
+      holder.caches = saved
+      ;(globalThis as { caches?: CacheStorage }).caches = savedGlobal
+    },
+  }
+}
+
 /** The share screen's refusals, collected from the toasts it shows. */
 async function withToasts(body: (said: string[]) => Promise<void>) {
   const said: string[] = []
@@ -59,6 +93,53 @@ async function withToasts(body: (said: string[]) => Promise<void>) {
     clearShare()
   }
 }
+
+test("a file the share cache lost is said out loud instead of dropped", async () => {
+  // The service worker takes up to ten files, so the eleventh is already named; a file whose bytes
+  // went missing between the two has to be named too, or a share quietly loses it.
+  await seedBot()
+  const browser = stubCaches({
+    meta: {
+      title: "",
+      text: "two files",
+      url: "",
+      files: [
+        { key: "/__share/s1/chart.png", name: "chart.png", type: "image/png" },
+        { key: "/__share/s1/clip.mp4", name: "clip.mp4", type: "video/mp4" },
+      ],
+    },
+    files: { "/__share/s1/chart.png": "png" },
+  })
+  try {
+    await withToasts(async (said) => {
+      assert.equal(await readWebShare("s1"), true, "the share still opens")
+      await mount(screen(), async () => {
+        await until(async () => said.length > 0, "the refusal")
+        assert.deepEqual(said, ["Gots couldn't read clip.mp4 from that share."])
+        await until(async () => tiles().length === 1, "the file it still had")
+        assert.deepEqual(tiles(), ["chart.png"])
+      })
+    })
+  } finally {
+    browser.restore()
+  }
+})
+
+test("a share that can't be read back opens saying why, rather than closing", async () => {
+  await seedBot()
+  const browser = stubCaches({ meta: "not the share's meta" })
+  try {
+    await withToasts(async (said) => {
+      assert.equal(await readWebShare("s1"), true, "the screen opens on the refusal")
+      await mount(screen(), async () => {
+        await until(async () => said.length > 0, "the refusal")
+        assert.deepEqual(said, ["Gots couldn't read what was shared from that share."])
+      })
+    })
+  } finally {
+    browser.restore()
+  }
+})
 
 test("a shared file over nine megabytes is refused, naming the limit", async () => {
   await seedBot()
