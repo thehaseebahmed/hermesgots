@@ -37,7 +37,7 @@ The rules that follow:
 
 ## Consequences
 
-- Schema v39 in one bump: the holds table and `pick_count` ADR 0025 specifies, a settings row for the
+- Schema v40 in one bump: the holds table and `pick_count` ADR 0025 specifies, a settings row for the
   bot's pick budget, and `prompt_id` on `project_afk` for ADR 0043. ADR 0025 is amended where its
   schema line had gone stale.
 - A bot-level `GET`/`POST /afk` beside the project's own routes — the route ADR 0026 already named —
