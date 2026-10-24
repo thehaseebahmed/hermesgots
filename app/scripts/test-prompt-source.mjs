@@ -40,9 +40,22 @@ test("a copy whose entry now reads otherwise has changed in the library", () => 
     "an emptied Prompt is not the entry's copy either",
   )
   assert.equal(
-    promptSourceState("e-one", "# Review\n\nRead the diff first.", entry("# Review\n\nRead the diff first. ")),
+    promptSourceState("e-one", "# Review\n\nRead the diff first.", entry("# Review\n\nRead the dif first.")),
     "changed",
-    "the comparison is the text itself: a space is a difference",
+    "a difference inside the words is a difference",
+  )
+})
+
+test("the ends a write trims are not a change", () => {
+  assert.equal(
+    promptSourceState("e-one", "# Review\n\nRead the diff first.", entry("# Review\n\nRead the diff first.\n")),
+    "original",
+    "the host trims a Prompt when it stores one, so a fresh pick of an entry with a trailing newline is still its copy",
+  )
+  assert.equal(
+    promptSourceState("e-one", "# Review", entry("\n  # Review  \n\n")),
+    "original",
+    "the same holds for whitespace at either end",
   )
 })
 

@@ -16,6 +16,11 @@ export type PromptSourceState = "none" | "original" | "changed"
  * What a Prompt's row should say about its source: `"changed"` where the entry with that id now
  * holds other words (the row offers the pull), `"original"` where the copy still matches it, and
  * `"none"` where there is nothing to compare — no source recorded, or no entry here to compare with.
+ *
+ * The ends are not part of the comparison. The host trims a Prompt when it stores one
+ * (`afk.prompt_text`), so a pick of an entry whose body starts or ends with whitespace lands here
+ * without it, and a copy that is still the entry's words would otherwise read as changed the moment
+ * it was picked. What differs inside the words is still a difference.
  */
 export function promptSourceState(
   promptId: string | null,
@@ -24,5 +29,5 @@ export function promptSourceState(
 ): PromptSourceState {
   if (!promptId) return "none"
   if (!entry) return "none"
-  return entry.body === prompt ? "original" : "changed"
+  return entry.body.trim() === prompt.trim() ? "original" : "changed"
 }
