@@ -7,14 +7,15 @@ import {
   PlusIcon,
   SettingsIcon,
   SparklesIcon,
+  type LucideIcon,
 } from "lucide-react"
 
 import { SkillRow } from "@/components/skill-row"
 import { Spinner } from "@/components/ui/spinner"
-import { optionId, type SlashItem } from "@/lib/slash"
+import { optionId, type LocalCommand, type SendMode, type SlashItem } from "@/lib/slash"
 import type { SkillsState } from "@/lib/skills"
 
-const COMMAND_ICONS = {
+const COMMAND_ICONS: Record<LocalCommand | SendMode, LucideIcon> = {
   new: PlusIcon,
   thread: MessageSquarePlusIcon,
   settings: SettingsIcon,

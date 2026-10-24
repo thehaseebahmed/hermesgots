@@ -1180,12 +1180,19 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
             onStop={() => id && stopMessage(id)}
             main={Boolean(botThreads && isMain)}
             onCommand={(command, message) => {
-              if (command === "thread") {
-                startThread(message?.text ?? "", message?.attachments ?? [])
-              } else if (command === "cheatsheet") {
-                setCheatsheetOpen(true)
-              } else {
-                root(command === "new" ? (mainPath ?? "/") : "/settings")
+              switch (command) {
+                case "thread":
+                  return startThread(message?.text ?? "", message?.attachments ?? [])
+                case "new":
+                  return root(mainPath ?? "/")
+                case "settings":
+                  return root("/settings")
+                case "cheatsheet":
+                  return setCheatsheetOpen(true)
+                default: {
+                  const unhandled: never = command
+                  return unhandled
+                }
               }
             }}
             connection={serverConfig(profile)}
