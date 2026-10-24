@@ -80,7 +80,6 @@ test("the order is whatever the caller passes — the dropdown's other choices r
   )
 })
 
-// The sort-by dropdown's own three orders.
 
 const pick = { created: (r) => r.at, activity: (r) => r.act, title: (r) => r.title }
 const mixed = [

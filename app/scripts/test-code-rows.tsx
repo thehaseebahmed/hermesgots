@@ -147,7 +147,6 @@ test("the glyph says why: alert, pull request arrow, spinner, code, check, archi
 })
 
 test("a session this device hasn't read wears the dot, and a read mark clears it", async () => {
-  // No mark: never opened on this device. The dot is the blue one, and said in words too.
   await drawRow(conversation("unread"), {
     body: async () => {
       const dot = document.querySelector("[data-unread]")
@@ -158,14 +157,12 @@ test("a session this device hasn't read wears the dot, and a read mark clears it
       assert.match(document.body.textContent ?? "", /New activity/, "the dot is said in words too")
     },
   })
-  // A mark as new as the thread's activity: read, so nothing to say.
   await drawRow(conversation("read"), {
     mark: Date.now(),
     body: async () => {
       assert.equal(document.querySelector("[data-unread]"), null, "read: the dot is gone")
     },
   })
-  // A mark older than the thread's activity: the dot comes back.
   await drawRow(conversation("older", { updatedAt: Date.now() }), {
     mark: Date.now() - 60_000,
     body: async () => {

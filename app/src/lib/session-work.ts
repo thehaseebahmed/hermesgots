@@ -86,10 +86,8 @@ export interface SessionClaim {
 /**
  * Where a Code row's session stands, with its pull requests claimed in: the highest claim wins.
  * Closed first, then anything waiting on the user — a question, an approval, a plan, a stall, or a
- * live pull request's checks running or failed, which wait on the watcher rather than the agent
- * (they used to read `working`; a turn running beside them loses to them). A live pull request with
- * nothing wrong still waits for its review and merge, as it always has; `prTick` marks both pull
- * request claims, which is what puts the arrow glyph on the row instead of the alert.
+ * live pull request's checks running or failed, which wait on the watcher rather than the agent.
+ * A live pull request with nothing wrong still waits for its review and merge, as it always has.
  */
 export function sessionGroup(
   conversation: SessionPrs,

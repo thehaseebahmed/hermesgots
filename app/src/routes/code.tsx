@@ -139,8 +139,6 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
   const waits = useWaiting()
   const lists = useAllProjects()
   const changes = useAnyChange("projects")
-  // This device's read marks: the rows' dots redraw the moment one moves (the thread rendered
-  // in the pane beside).
   const marks = useReadMarks()
   const [query, setQuery] = useState("")
   const [chip, setChip] = useState<string>()
@@ -206,15 +204,13 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
     .sort((a, b) => a[1].project.name.localeCompare(b[1].project.name))
   const shown = rows.filter((r) => (!chip || r.key === chip) && matches(r, query))
   const filtering = Boolean(query.trim() || chip)
-  // The chosen order runs inside every group, and over all rows flat while a search or chip
-  // filters — filtering is this list with its headers removed, one order either way.
   const order = codeOrder<Row>(sort, {
     created: (row) => row.c.createdAt,
     activity: (row) => lastActivityAt(row.c),
     title: (row) => row.c.title,
   })
   // What waits on the user first, then working, idle and closed — deterministic, not a live
-  // timestamp chasing itself. Only the grouped view needs it: a filtered list is flat.
+  // timestamp chasing itself.
   const grouped = filtering ? undefined : codeGroups(shown, (r) => codeGroupOf(r.state), order)
   const flat = filtering ? [...shown].sort(order) : undefined
 
@@ -250,7 +246,6 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
     })
   }
 
-  // One row, drawn in its group or in the flat filtered list.
   const draw = (row: Row) => (
     <li key={row.c.id}>
       <SessionItem
@@ -341,7 +336,6 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
         )}
 
         {flat ? (
-          // Filtering drops the headers: one flat list, the chosen order over everything shown.
           <ul className="flex flex-col">{flat.map(draw)}</ul>
         ) : (
           grouped?.map((group) => (

@@ -39,8 +39,6 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
       discardedAt: now },
   ])
 
-  // The list opens with one session beside it (the untouched auto-open rule), which reads that
-  // session here and so clears its dot; every other row stays as this device last left it.
   await page.goto(`${app}/code`)
   await until(async () => (await group(page, "Waiting for You").count()) > 0, 20_000, "the waiting group")
 
@@ -51,8 +49,6 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   assert.equal(await countIn(page, "Closed"), "2", "the closed count")
   pass("groups run Waiting for You, Idle, Closed with their counts, and the empty one stays hidden")
 
-  // A turn starting elsewhere gives Working its session: it moves out of Idle and into the
-  // heading between the others.
   await page.evaluate(async () => {
     const { db } = await import("/src/lib/db.ts")
     await db.messages.put({
@@ -70,8 +66,6 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   assert.equal(await countIn(page, "Idle"), "2", "the idle count, one session the fewer")
   pass("a running session sits in Working, whatever the clock says, and the empty heading appears")
 
-  // Closed starts collapsed: its two sessions are out of sight until the heading is tapped, and
-  // inside they sit side by side, the check and the archive saying which is which.
   const closed = group(page, "Closed")
   assert.equal(await closed.getByText("Finished work").isVisible(), false, "Closed starts collapsed")
   await closed.locator("h2 button").click()
@@ -87,7 +81,6 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   await shot("closed")
   pass("Closed collapses by default and holds Resolved and Discarded under their own icons, dotted")
 
-  // The sort menu: Title A–Z turns the idle group over, and the choice survives a reload.
   await page.getByRole("button", { name: /^Sort sessions by/ }).click()
   await page.getByText("Sort by").waitFor()
   await page.getByRole("menuitemradio", { name: "Title A–Z" }).click()
@@ -100,7 +93,6 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   await shot("sorted")
   pass("the sort menu orders each group by title and says which order it chose")
 
-  // Filtering: the headers drop away and one flat list runs in the chosen order.
   const search = page.getByLabel("Search sessions")
   await search.fill("work")
   await until(async () => (await group(page, "Idle").count()) === 0, 5_000, "the headers to drop")
@@ -115,7 +107,6 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   await until(async () => (await group(page, "Idle").count()) > 0, 5_000, "the headers back")
   pass("a search drops the group headers for one flat list in the same order")
 
-  // The unread dot's corner: on the icon's top-right, which a DOM without layout cannot place.
   // It rides an idle session that never changes state and never opens before its turn.
   const idleRows = group(page, "Idle")
   const target = idleRows.locator("li").filter({ hasText: "Another idle" })
@@ -132,9 +123,6 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   assert.ok(dotBox.y >= iconBox.y - 6, "and its top edge")
   await shot("dot")
 
-  // Opening the thread reads it: the mark is written where the thread rendered and the row, drawn
-  // beside it, has nothing left to say. Then, with another session open, activity landing on the
-  // one left behind dots it again without a reload.
   await target.locator("a").first().click()
   await page.waitForURL("**/c/cl-idle2", { timeout: 10_000 })
   await until(async () => (await dot.count()) === 0, 5_000,
@@ -149,9 +137,8 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
     "the dot to come back when activity lands")
   pass("the dot sits at the icon's corner, clears when the thread is read and returns with new activity")
 
-  // The choice survives this device's own reload: the groups come back under their headings,
-  // Closed folded again, and the rows still in title order. (The seeded streaming message does
-  // not outlive the reload — the app reconciles it against the host — so it runs last.)
+  // The seeded streaming message does not outlive the reload — the app reconciles it against
+  // the host — so this leg runs last.
   await page.reload()
   await until(async () => (await group(page, "Idle").count()) > 0, 20_000, "the list after a reload")
   assert.match(await page.getByRole("button", { name: /^Sort sessions by/ }).getAttribute("aria-label") ?? "",
@@ -161,9 +148,6 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   assert.equal(await closed.getByText("Finished work").isVisible(), false, "Closed is folded again")
   pass("the sort choice is kept on this device and the groups come back folded after a reload")
 
-  // The sticky headings' geometry, which no DOM without layout can prove: with enough rows to
-  // scroll, the list is scrolled and a heading stops beneath the header's own box — the offset
-  // the scroll container publishes as `--list-header-h`.
   await page.evaluate(async (projectId) => {
     const { db } = await import("/src/lib/db.ts")
     const profile = await db.profiles.toCollection().first()
