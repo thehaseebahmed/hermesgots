@@ -14,6 +14,27 @@ export async function minimizeAndroidApp() {
   await App.minimizeApp()
 }
 
+interface NotificationSettingsPlugin {
+  open(): Promise<void>
+}
+
+const NotificationSettings = registerPlugin<NotificationSettingsPlugin>("NotificationSettings")
+
+/**
+ * Opens the phone's own notification settings for this app: the master switch, then every channel
+ * with its own on/off, sound and peek setting. Those are the switches Android keeps and the app can
+ * only read back, so this is where a phone changes them. A browser has no such screen and an APK
+ * that predates the plugin has no bridge: both do nothing.
+ */
+export async function openNotificationSettings() {
+  if (!isNative) return
+  try {
+    await NotificationSettings.open()
+  } catch {
+    // An older APK's plugin isn't there to open it.
+  }
+}
+
 interface OpenImagePlugin {
   open(options: { dataBase64: string; name: string; type?: string }): Promise<void>
 }

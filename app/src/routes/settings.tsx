@@ -83,7 +83,7 @@ import {
 import { formatRelative } from "@/lib/format"
 import { useLiveStatus, type LiveStatus } from "@/lib/live"
 import { useLarge } from "@/lib/media"
-import { isNative, setBackGuard } from "@/lib/native"
+import { isNative, openNotificationSettings, setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import {
   disablePush,
@@ -103,11 +103,15 @@ import { useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { APP_VERSION, pluginOutdated } from "@/lib/version"
 
+/** What both the notification row and the screen it opens are called: one name, two places. */
+export const NOTIFICATION_SETTINGS = "Notification settings"
+
+/** The sections of the menu, by the URL segment that opens each, with the title its screen carries. */
 const SECTIONS: Record<string, { title: string; render: () => ReactNode }> = {
   account: { title: "Account", render: () => <AccountSettings /> },
   appearance: { title: "Appearance", render: () => <AppearanceSettings /> },
   community: { title: "Community", render: () => <CommunitySettings /> },
-  notifications: { title: "Notification types", render: () => <NotificationTypes /> },
+  notifications: { title: NOTIFICATION_SETTINGS, render: () => <NotificationTypes /> },
   data: { title: "Local data", render: () => <DataSettings /> },
   developer: { title: "Developer", render: () => <DeveloperSettings /> },
 }
@@ -269,7 +273,7 @@ function MenuScreen({
       <Group>
         <Row to="appearance" icon={PaletteIcon} title="Appearance" subtitle={themeLabel(theme)} />
         <NotificationsRow />
-        <NotificationTypesRow />
+        <NotificationSettingsRow />
       </Group>
       <Group>
         <CommunityRow />
@@ -378,10 +382,33 @@ function CommunityRow() {
   return <Row to="community" icon={TrophyIcon} title="Community" />
 }
 
-function NotificationTypesRow() {
+/**
+ * The row that hands its platform the notification switches, named for what it opens. A phone has
+ * channels, which only Android's own screen switches, so there it opens that screen and shows even
+ * while notifications are off — that is where they are turned back on. The web has no channels, so
+ * there it opens the app's own list, and hides while notifications are off.
+ */
+export function NotificationSettingsRow() {
+  if (!pushAvailable()) return null
+  return isNative ? <SystemNotificationSettingsRow /> : <NotificationListRow />
+}
+
+/** Android: the phone's screen for this app, which the app can read but not draw. */
+function SystemNotificationSettingsRow() {
+  return (
+    <button type="button" onClick={() => void openNotificationSettings()} className={linkRowClass}>
+      <SlidersHorizontalIcon className="size-5 shrink-0 text-muted-foreground" />
+      <RowText title={NOTIFICATION_SETTINGS} />
+      <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
+    </button>
+  )
+}
+
+/** The web: the app's list of types, the only switch a browser has. */
+function NotificationListRow() {
   const { on } = usePush()
-  if (!pushAvailable() || !on) return null
-  return <Row to="notifications" icon={SlidersHorizontalIcon} title="Notification types" />
+  if (!on) return null
+  return <Row to="notifications" icon={SlidersHorizontalIcon} title={NOTIFICATION_SETTINGS} />
 }
 
 const CATEGORY_ICONS: Record<PushCategory, LucideIcon> = {
