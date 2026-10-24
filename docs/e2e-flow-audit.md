@@ -17,20 +17,20 @@ ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
 
-The registry in `app/scripts/e2e/cli.mjs` holds **68 keys**, and every one of them has a row
-below. `pnpm e2e list` prints the same 68 keys, and the rows here are grouped by the ticket that
+The registry in `app/scripts/e2e/cli.mjs` holds **70 keys**, and every one of them has a row
+below. `pnpm e2e list` prints the same 70 keys, and the rows here are grouped by the ticket that
 takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
 | --- | --- |
-| stay | 11 |
+| stay | 12 |
 | component | 53 |
 | plugin | 2 |
 | delete | 3 |
-| **total** | **69** |
+| **total** | **70** |
 
-Of those 69, 63 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
-reuses `todos.mjs`, so 62 distinct files there) and 6 point at the older
+Of those 70, 64 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
+reuses `todos.mjs`, so 63 distinct files there) and 6 point at the older
 `app/scripts/regression-*.mjs`.
 
 #297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**.
@@ -39,7 +39,7 @@ Two things in that arithmetic did not hold, and both are checkable:
 - Its clauses name **59** keys — 53 pointing at `app/scripts/e2e/` and 6 at the older
   `regression-*.mjs` — and its sixtieth is `todos-legacy` counted a second time, as "one registry
   key reusing another's script" rather than as the 53rd of the first group, which it already is.
-  Today's 62 keys under `app/scripts/e2e/`, less the nine that arrived since, are those 53.
+  Today's 63 keys under `app/scripts/e2e/`, less the ten that arrived since, are those 53.
 - It left out goal mode's two keys, `goal-wizard` and `goal-pill`, which the registry still held
   when the plan was written: the commit before they left, `8a4e842^` (#282's `1b98896`, merged
   before the plan), carries 61 keys. Both went with goal mode (#296), so that omission costs
@@ -71,12 +71,12 @@ an argument this page has to carry, never a default (ADR 0019).
 Check any of it in one line:
 
 ```bash
-grep -c '^| `' docs/e2e-flow-audit.md                           # 68 rows, one per registry key
-grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 10
+grep -c '^| `' docs/e2e-flow-audit.md                           # 70 rows, one per registry key
+grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 12
 grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 53
 grep -c '^| `[a-z0-9-]*` | delete |' docs/e2e-flow-audit.md    # 3
 grep -c '^| `[a-z0-9-]*` | plugin |' docs/e2e-flow-audit.md    # 2
-cd app && pnpm -s e2e list | wc -l                             # 68 keys in the registry
+cd app && pnpm -s e2e list | wc -l                             # 70 keys in the registry
 git show 8a4e842^:app/scripts/e2e/cli.mjs |
   sed -n '/^const FLOWS = {/,/^}$/p' | grep -c '^  [a-z"-]*: {'  # 61, before goal mode left
 ```
