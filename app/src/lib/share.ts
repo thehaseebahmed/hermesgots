@@ -84,12 +84,18 @@ export async function readWebShare(id: string) {
     const cache = await caches.open(SHARE_CACHE)
     const meta = await cache.match(`/__share/${id}`)
     if (!meta) return false
-    const { title, text, url, files = [], leftOut } = (await meta.json()) as {
+    const { title, text, url, files = [], leftOut, failed } = (await meta.json()) as {
       title?: string
       text?: string
       url?: string
       files?: { key: string; name: string; type: string }[]
       leftOut?: number
+      /** The service worker couldn't take it: the note it left instead of a share. */
+      failed?: boolean
+    }
+    if (failed) {
+      setShare(toShare({ refused: [unreadableRefusal("what was shared")] }))
+      return true
     }
     const shared: File[] = []
     for (const file of files) {

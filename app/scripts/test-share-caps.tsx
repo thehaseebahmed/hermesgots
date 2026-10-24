@@ -125,6 +125,22 @@ test("a file the share cache lost is said out loud instead of dropped", async ()
   }
 })
 
+test("a share the service worker couldn't take opens on its refusal", async () => {
+  await seedBot()
+  const browser = stubCaches({ meta: { files: [], failed: true } })
+  try {
+    await withToasts(async (said) => {
+      assert.equal(await readWebShare("s1"), true, "the screen opens on the refusal")
+      await mount(screen(), async () => {
+        await until(async () => said.length > 0, "the refusal")
+        assert.deepEqual(said, ["Gots couldn't read what was shared from that share."])
+      })
+    })
+  } finally {
+    browser.restore()
+  }
+})
+
 test("a share that can't be read back opens saying why, rather than closing", async () => {
   await seedBot()
   const browser = stubCaches({ meta: "not the share's meta" })

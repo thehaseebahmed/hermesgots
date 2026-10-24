@@ -36,7 +36,14 @@ async function receive(request) {
     }
     await cache.put(`/__share/${id}`, Response.json(meta))
   } catch {
-    // The share screen says there was nothing to share.
+    // A share that couldn't be taken is still the user's: leave the note the screen reads, so it
+    // says why instead of closing as if nothing had been shared.
+    try {
+      const cache = await caches.open(SHARE_CACHE)
+      await cache.put(`/__share/${id}`, Response.json({ files: [], failed: true }))
+    } catch {
+      // Nothing can be kept at all; the screen still opens on what the id answered.
+    }
   }
   return Response.redirect(`/share?id=${id}`, 303)
 }
