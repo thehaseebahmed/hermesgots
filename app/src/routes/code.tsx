@@ -461,7 +461,7 @@ function removedRepos(c: Conversation, project: HermesProject | undefined) {
 
 /** One Code row's body, exported so a component test can draw it over a seeded device. */
 export function SessionItem({
-  row: { c: session, state, prTick, project },
+  row,
   botId,
   showProject,
   pane,
@@ -480,6 +480,7 @@ export function SessionItem({
   /** This device's read mark for the session, if it has one; newer activity dots the row. */
   mark?: number
 }) {
+  const { c: session, state, prTick, project } = row
   const removed = removedRepos(session, project)
   const draft = useDraft(session.id)
   const wait = waiting ? reasonText(waiting) : undefined
@@ -498,7 +499,7 @@ export function SessionItem({
           <StateIcon state={state} />
         )
       }
-      tone={rowTone(session, { state, prTick })}
+      tone={rowTone(session, row)}
       unread={isUnread(session, mark)}
       botId={botId}
       title={session.title}

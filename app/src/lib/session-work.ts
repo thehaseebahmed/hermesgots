@@ -77,6 +77,9 @@ export function sessionState(facts: SessionFacts): SessionState {
 /** The slice of a session `sessionGroup` reads: its closure and wait marks, and its pull requests. */
 type SessionPrs = Pick<Conversation, "resolvedAt" | "discardedAt" | "planPending" | "prs">
 
+/** A session's own moments and its pull requests: what last activity and the unread dot read. */
+export type SessionActivity = Pick<Conversation, "updatedAt" | "resolvedAt" | "discardedAt" | "prs">
+
 /** Where a Code row's session stands: the group's state, and whether a pull request's arrow claims it. */
 export interface SessionClaim {
   state: SessionState
@@ -134,9 +137,7 @@ export function rowTone(conversation: Pick<Conversation, "prs">, claim: SessionC
  * field joins sync to carry it. The Code row's trailing time is this, and the unread dot measures
  * against it.
  */
-export function lastActivityAt(
-  session: Pick<Conversation, "updatedAt" | "resolvedAt" | "discardedAt" | "prs">,
-): number {
+export function lastActivityAt(session: SessionActivity): number {
   const settled = Math.max(session.updatedAt, session.resolvedAt ?? 0, session.discardedAt ?? 0)
   return (session.prs ?? []).reduce((newest, pr) => Math.max(newest, pr.at), settled)
 }
@@ -145,10 +146,7 @@ export function lastActivityAt(
  * Whether the Code row shows its unread dot: the session's last activity is newer than this
  * device's read mark — and a session this device has never opened has no mark, so it is unread.
  */
-export function isUnread(
-  session: Pick<Conversation, "updatedAt" | "resolvedAt" | "discardedAt" | "prs">,
-  mark: number | undefined,
-): boolean {
+export function isUnread(session: SessionActivity, mark: number | undefined): boolean {
   return lastActivityAt(session) > (mark ?? 0)
 }
 

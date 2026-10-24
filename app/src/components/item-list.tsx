@@ -41,7 +41,7 @@ export function ItemGroup({
       </span>
     </>
   )
-  const at = sticky ? "sticky z-[5] bg-background top-[var(--list-header-h)]" : ""
+  const stickyClass = sticky ? "sticky z-[5] bg-background top-[var(--list-header-h)]" : ""
   const list = <ul className="flex flex-col">{children}</ul>
   if (group.key !== "closed")
     return (
@@ -49,7 +49,7 @@ export function ItemGroup({
         <h2
           className={cn(
             "flex min-h-8 items-center gap-2 px-1 text-sm font-medium text-muted-foreground",
-            at,
+            stickyClass,
           )}
         >
           {heading}
@@ -66,7 +66,7 @@ export function ItemGroup({
         <CollapsibleTrigger
           className={cn(
             "group -mx-1 flex min-h-11 items-center gap-2 rounded-xl px-2 text-sm font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
-            at,
+            stickyClass,
           )}
         >
           {heading}
