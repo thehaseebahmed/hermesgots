@@ -2913,12 +2913,31 @@ export interface AfkHold extends ProjectIssue {
 }
 
 /**
+ * A bot's own AFK numbers — the ones that span its projects rather than sitting on one of them
+ * (ADR 0042). Both are read tolerantly: a host from before the route answers none, which is nothing
+ * known rather than a failure to read. The bot-level route answers these two alone, and a project's
+ * own read answers them too, so one read draws the whole AFK sheet — `ProjectAfk` is these two plus
+ * everything that belongs to a project.
+ */
+export interface BotAfk {
+  /** How many tasks it may hold across its projects, 1–10; null where the host answers none. */
+  pickBudget: number | null
+  /**
+   * How many tasks it holds right now, every project's holds including the stalled ones; null where
+   * the host answers no count. The AFK sheet draws it against `pickBudget` — the usage those numbers
+   * are about. The bot editor's Coding tab sets the budget and draws the budget alone: what a bot
+   * holds is about the runs in flight, not the number being chosen there.
+   */
+  holdsHeld: number | null
+}
+
+/**
  * A project's AFK switch: whether it is left to work its own tasks, and why it can't be. The
  * setting is the host's, so it is the same on every device the project is opened from. Needs
  * plugin 0.50, 0.51 for the task it holds and the last refusal, 0.56 for the skills its work
  * follows, 0.58 for the stage a staged task is in and 0.60 for the Prompt its runs are told.
  */
-export interface ProjectAfk {
+export interface ProjectAfk extends BotAfk {
   on: boolean
   /** What stops the project being left to work, when something does; null when it can be. */
   reason: string | null
@@ -2932,16 +2951,6 @@ export interface ProjectAfk {
   holds: AfkHold[] | null
   /** How many tasks it may hold at once, 1–5; null where the host answers no pick count. */
   pickCount: number | null
-  /**
-   * How many tasks the bot may hold across all of its projects at once, 1–10 — the pick budget it
-   * was given in the bot editor's Coding tab (ADR 0042). Null where the host answers none.
-   */
-  pickBudget: number | null
-  /**
-   * How many tasks that bot holds right now, every project's holds including the stalled ones; the
-   * usage the sheet reads against `pickBudget`. Null where the host answers no count.
-   */
-  holdsHeld: number | null
   /** Why GitHub last refused the sweep. The switch stays on, so this is not `reason`. */
   refusal: string | null
   /** The bot's skill the project picked to build by, when it picked one. */
@@ -3010,10 +3019,9 @@ function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
     // always drew, from `task`.
     holds: parseHolds(body.holds),
     pickCount: parseWhole(body.pick_count),
-    // And the bot's own numbers: answered on the project's read so one read draws the sheet, and
-    // absent from a host that predates the budget.
-    pickBudget: parseWhole(body.pick_budget),
-    holdsHeld: parseWhole(body.holds_held),
+    // And the bot's own numbers, which a project's read answers so one read draws the sheet: the same
+    // two fields the bot-level route carries, parsed once (`parseBotAfk`).
+    ...parseBotAfk(body),
     refusal: str(body.refusal) || null,
     buildSkill: str(body.build_skill) || null,
     critiqueSkills: skillNames(body.critique_skills),
@@ -3145,23 +3153,14 @@ export function setProjectAfkPickCount(
   return writeAfk(config, projectId, { pick_count: pickCount })
 }
 
-/**
- * A bot's own AFK numbers — the ones that span its projects rather than sitting on one of them. Its
- * pick budget is how many tasks it may hold across all of them at once (ADR 0042). Both are read
- * tolerantly: a host from before the route answers none, which is nothing known rather than a
- * failure to read.
- */
-export interface BotAfk {
-  /** How many tasks it may hold across its projects, 1–10; null where the host answers none. */
-  pickBudget: number | null
-  /** How many it holds now, stalled holds included; null where the host answers no count. */
-  holdsHeld: number | null
-}
-
 function botAfkPath(config: HermesConfig) {
   return `${pluginRoot(config.baseUrl)}/afk`
 }
 
+/**
+ * `BotAfk`'s two numbers, off whichever read carried them: the bot-level route answers these alone,
+ * and a project's read answers them beside its own fields, so both reads parse them here.
+ */
 function parseBotAfk(body: Record<string, unknown> | null): BotAfk {
   return {
     pickBudget: parseWhole(body?.pick_budget),
