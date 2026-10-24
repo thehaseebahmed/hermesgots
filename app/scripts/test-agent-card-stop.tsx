@@ -3,6 +3,11 @@
  * that subagent on the host, and the card then reads what the host answered — stopped, or why it
  * wasn't. A host that doesn't advertise `subagent_stop` shows no Stop at all, and a turn still
  * running leaves stopping to the composer.
+ *
+ * The turn's own state is what says whether it has ended, not the `delegate_task` call's: a
+ * background delegation's handle lands mid-turn, so the call reads `completed` while the reply is
+ * still streaming. Both cases are mounted that way here, so the gate can't quietly fall back to the
+ * call's status.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -64,11 +69,11 @@ const card = (
   delegated: ReturnType<typeof agent>,
   call: ToolEvent,
   body: () => Promise<void>,
-  target: HermesConfig = server,
+  { live = false, target = server }: { live?: boolean; target?: HermesConfig } = {},
 ) =>
   mount(
     <AgentsContext.Provider value={{ agents: [delegated], server: target, sessionId: SESSION }}>
-      <AgentCards tool={call} />
+      <AgentCards tool={call} live={live} />
     </AgentsContext.Provider>,
     body,
   )
@@ -101,9 +106,15 @@ test("a stop the host declines says why", async () => {
 
 test("a turn still running leaves stopping to the composer", async () => {
   host()
-  await card(agent("running"), tool("running"), async () => {
-    assert.equal(stopButton(), undefined, "no Stop while the turn that started it runs")
-  })
+  // The handle has landed, so the call reads `completed` and only the turn is still going.
+  await card(
+    agent("running"),
+    tool("completed"),
+    async () => {
+      assert.equal(stopButton(), undefined, "no Stop while the turn that started it runs")
+    },
+    { live: true },
+  )
 })
 
 test("a finished subagent offers no Stop", async () => {
@@ -122,6 +133,6 @@ test("a host without the stop route shows no Stop", async () => {
       assert.equal(stopButton(), undefined)
       assert.equal(stops(calls).length, 0)
     },
-    legacyHost,
+    { target: legacyHost },
   )
 })

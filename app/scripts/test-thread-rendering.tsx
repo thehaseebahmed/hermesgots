@@ -274,7 +274,7 @@ test("a delegated agent's sub-thread draws the same thread", async () => {
         server,
       }}
     >
-      <AgentCards tool={tool} />
+      <AgentCards tool={tool} live={false} />
     </AgentsContext.Provider>,
     async () => {
       const card = document.querySelector("button")

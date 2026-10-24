@@ -464,7 +464,12 @@ export const MessageItem = memo(function MessageItem({
           <Fragment key={breaks[i - 1]?.key ?? "start"}>
             {i > 0 && breaks[i - 1].node}
             {(parts.length > 0 || (last && footerShown)) && (
-              <AssistantRow conversationId={message.conversationId} busy={busy} parts={parts}>
+              <AssistantRow
+                conversationId={message.conversationId}
+                busy={busy}
+                streaming={streaming}
+                parts={parts}
+              >
                 {last && footer}
               </AssistantRow>
             )}
@@ -496,12 +501,15 @@ function sameMessage(a: MessageItemProps, b: MessageItemProps) {
 function AssistantRow({
   conversationId,
   busy,
+  streaming,
   parts,
   children,
 }: {
   conversationId: string
   /** A reply is streaming in this chat, so a card that sends (a missed question) waits. */
   busy?: boolean
+  /** This reply is still being written: the turn it belongs to has not ended. */
+  streaming: boolean
   parts: Part[]
   children?: ReactNode
 }) {
@@ -517,7 +525,7 @@ function AssistantRow({
               busy={busy}
             />
           ) : part.kind === "agent" ? (
-            <AgentCards key={part.tool.toolCallId} tool={part.tool} />
+            <AgentCards key={part.tool.toolCallId} tool={part.tool} live={streaming} />
           ) : part.kind === "tools" ? (
             <div key={part.tools[0].toolCallId} className="w-full max-w-xl">
               <ToolGroup tools={part.tools} />
