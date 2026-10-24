@@ -28,7 +28,7 @@ import time
 from contextlib import closing
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, NamedTuple, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, NamedTuple, Optional, Set, Tuple
 
 from . import approvals, events, push
 from .store import connect
@@ -197,6 +197,27 @@ def pipeline_of(path: Path, session_id: str) -> Any:
     finally:
         conn.close()
     return _json(row[0], None) if row else None
+
+
+def pipelines_of(path: Path, session_ids: Iterable[str]) -> Dict[str, Any]:
+    """Every named session's pipeline column in one read, for a sheet asking about all its holds.
+
+    The same column `pipeline_of` answers for one session, over one connection rather than one per
+    hold: a project may hold several tasks, and its pop-up is polled every few seconds.
+    """
+    wanted = list(dict.fromkeys(one for one in session_ids if one))
+    if not wanted or not path.exists():
+        return {}
+    conn = connect(path)
+    try:
+        marks = ", ".join("?" for _ in wanted)
+        rows = conn.execute(
+            f"SELECT session_id, pipeline FROM project_sessions WHERE session_id IN ({marks})",
+            wanted,
+        ).fetchall()
+    finally:
+        conn.close()
+    return {str(row[0]): _json(row[1], None) for row in rows}
 
 
 def _set_json(path: Path, session_id: str, column: str, value: Any) -> None:
