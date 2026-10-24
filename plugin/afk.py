@@ -49,7 +49,18 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Tuple
 
-from . import chats, delegation, github, pipeline, prompt_builder, sessions, ship, tasks, workflows
+from . import (
+    chats,
+    delegation,
+    events,
+    github,
+    pipeline,
+    prompt_builder,
+    sessions,
+    ship,
+    tasks,
+    workflows,
+)
 from .store import connect, db_path
 
 logger = logging.getLogger(__name__)
@@ -715,22 +726,8 @@ async def _post(adapter: Any, hermes_home: Path, body: Dict[str, Any]) -> Dict[s
         link.profile_name(hermes_home),
         "/v1/runs",
         body,
-        authorization=_authorization(hermes_home),
+        authorization=link.authorization(hermes_home),
     )
-
-
-def _authorization(hermes_home: Path) -> Optional[str]:
-    """The key this home's runs are posted with, or None to let ``outbox`` resolve its own.
-
-    Read from the home's own ``.env``, the same read ``link.record`` publishes a bot's key from,
-    rather than through Hermes's credential helper: AFK runs from the gateway's loop, where no
-    request's profile scope is set, so the helper would answer the launch profile's key for every
-    home a multiplexed process serves.
-    """
-    from . import link
-
-    key = link.env_value(hermes_home, "API_SERVER_KEY")
-    return f"Bearer {key}" if key else None
 
 
 def enabled_projects(hermes_home: Path) -> List[str]:
@@ -844,13 +841,7 @@ async def run(adapter: Any) -> None:
 
 def wake() -> None:
     """Asks the sweep to look now — a project was turned on, or a session finished — from any thread."""
-    loop, event = _loop, _event
-    if loop is None or event is None:
-        return
-    try:
-        loop.call_soon_threadsafe(event.set)
-    except RuntimeError:
-        pass
+    events.poke(_loop, _event)
 
 
 def after_run(

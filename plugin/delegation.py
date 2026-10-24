@@ -33,6 +33,7 @@ import json
 import logging
 import sqlite3
 import time
+from contextlib import closing
 from pathlib import Path
 from typing import Any, Collection, Dict, Iterable, List, Optional
 
@@ -77,6 +78,8 @@ ERROR_FINISHES = frozenset({"error", "agent_error", "content_filter"})
 
 _event: Optional[asyncio.Event] = None
 _loop: Optional[asyncio.AbstractEventLoop] = None
+# Each store's wake watermark, once read: it is stamped once and never moves (``watch_since``).
+_watch_marks: Dict[Path, int] = {}
 # A stopped run's stop, handed to its subagents: core sets the run `stopping` as it interrupts it,
 # then whichever terminal status its unwind reaches. The watch reads those every second.
 STOPPED_STATES = ("stopping", "cancelled", "interrupted")
@@ -262,8 +265,8 @@ def live_sessions(hermes_home: Path) -> Dict[str, int]:
     return found
 
 
-def pending(hermes_home: Path) -> List[Dict[str, Any]]:
-    """The delegations that have ended, the newest end first, so the watcher can wake their bots.
+def pending(hermes_home: Path, since: int) -> List[Dict[str, Any]]:
+    """The delegations that ended at or after ``since`` (epoch ms), the newest end first.
 
     Read-only, like every other look this module takes at ``state.db``. A child is named by its own
     row — the id the app's card holds — and a row is a delegation only when its ``model_config``
@@ -271,16 +274,16 @@ def pending(hermes_home: Path) -> List[Dict[str, Any]]:
     ``children`` reads (a compression continuation copies the marker down, so it names a parent it
     is not delegated from and is left out: ``_tip`` follows it from the child's own row instead).
 
-    A bounded window of the most recently ended children: the mark filters the settled ones out, so
-    what is left is the handful that still need a wake — including one whose post failed, which is
-    among the newest ends until it succeeds.
+    The watermark is asked of the query, not of the answer: a home's ``state.db`` keeps every
+    subagent it ever ran, so a bounded window of the newest ends can fill with settled ones and
+    leave the child that actually needs a wake unseen. What it reads is then what still needs one —
+    including a child whose post failed, which stays among them until it succeeds.
     """
-    state = hermes_home / "state.db"
-    if not state.exists():
+    conn = sessions._open_state(hermes_home)
+    if conn is None:
         return []
     try:
-        with sqlite3.connect(f"{state.as_uri()}?mode=ro", uri=True, timeout=2) as conn:
-            conn.row_factory = sqlite3.Row
+        with closing(conn):
             rows = conn.execute(
                 f"""SELECT s.id, s.model, s.model_config, s.parent_session_id, s.started_at,
                         s.ended_at, s.end_reason, s.tool_call_count, s.api_call_count,
@@ -288,9 +291,11 @@ def pending(hermes_home: Path) -> List[Dict[str, Any]]:
                          ORDER BY m.id LIMIT 1) AS goal
                     FROM sessions s
                     WHERE s.parent_session_id IS NOT NULL AND s.ended_at IS NOT NULL
+                      AND s.ended_at * 1000 >= ?
                       AND s.model_config LIKE '%"_delegate_from"%'
                       AND EXISTS (SELECT 1 FROM sessions p WHERE p.id = s.parent_session_id)
-                    ORDER BY s.ended_at DESC LIMIT {WAKE_LIMIT}"""
+                    ORDER BY s.ended_at DESC LIMIT {WAKE_LIMIT}""",
+                (since,),
             ).fetchall()
     except sqlite3.Error:
         logger.debug("memento: couldn't read the delegations of %s", hermes_home, exc_info=True)
@@ -329,7 +334,7 @@ async def sweep(adapter: Any, home: Path) -> int:
     since = await asyncio.to_thread(watch_since, path)
     rows = [
         row
-        for row in await asyncio.to_thread(pending, home)
+        for row in await asyncio.to_thread(pending, home, since)
         if (row["ended_at"] or 0) * 1000 >= since
     ]
     if not rows:
@@ -375,7 +380,7 @@ async def wake_one(adapter: Any, home: Path, child: Dict[str, Any]) -> bool:
             link.profile_name(home),
             "/v1/runs",
             body,
-            authorization=_authorization(home),
+            authorization=link.authorization(home),
             idempotency_key=f"wake_{child['id']}",
         )
     except outbox.StartError as error:
@@ -402,13 +407,19 @@ def watch_since(path: Path) -> int:
     the user read weeks ago. So only a child that ends after the watcher began is woken — and the
     stamp is written once, which is why a restart keeps it: a child that ended while the plugin was
     down is still woken. Nothing is dropped for downtime, only for predating the feature.
+
+    Held in memory once read, since the stamp never moves: a sweep runs every few seconds and has no
+    reason to open the store for a value it already has.
     """
+    known = _watch_marks.get(path)
+    if known:
+        return known
     since = get_setting(path, WAKE_SINCE_KEY)
-    if isinstance(since, int) and since > 0:
-        return since
-    now = int(time.time() * 1000)
-    put_setting(path, WAKE_SINCE_KEY, now)
-    return now
+    if not (isinstance(since, int) and since > 0):
+        since = int(time.time() * 1000)
+        put_setting(path, WAKE_SINCE_KEY, since)
+    _watch_marks[path] = since
+    return since
 
 
 async def _deferred(adapter: Any, home: Path, root: str) -> Optional[str]:
@@ -422,11 +433,19 @@ async def _deferred(adapter: Any, home: Path, root: str) -> Optional[str]:
     the next look sees it, which is why there is no timer here.
     """
     path = db_path(home)
+    # The cheap checks first, since a child usually ends while its parent's turn still runs: the
+    # conversation's own run statuses live in the API server's memory, while ``waiting`` reads
+    # ``memento.db`` and is only asked when nothing of the conversation is even running.
+    ids = await outbox.session_ids(adapter, root)
+    runs = [run for run in outbox.session_runs(adapter, ids) if run.get("status") in outbox.ACTIVE]
+    if any(run.get("status") != "waiting_for_approval" for run in runs):
+        return "the conversation's turn is still running"
     waiting = await asyncio.to_thread(sessions.waiting, adapter, path, home)
     if root in waiting:
         return f"the conversation is waiting on its user ({waiting[root].get('kind')})"
-    ids = await outbox.session_ids(adapter, root)
-    if any(run.get("status") in outbox.ACTIVE for run in outbox.session_runs(adapter, ids)):
+    # A run that waits on the user is active either way; ``waiting`` names it when it can, and the
+    # status itself is the answer when it can't (a request the read doesn't reach).
+    if runs:
         return "the conversation's turn is still running"
     return None
 
@@ -454,10 +473,11 @@ def _ending(hermes_home: Path, child: Dict[str, Any]) -> Optional[Dict[str, Any]
     A child that compressed ended on its continuation, which is where its last words are too, so both
     are read off the tip ``_tip`` resolves — the same walk ``children`` uses.
     """
-    state = hermes_home / "state.db"
+    conn = sessions._open_state(hermes_home)
+    if conn is None:
+        return None
     try:
-        with sqlite3.connect(f"{state.as_uri()}?mode=ro", uri=True, timeout=2) as conn:
-            conn.row_factory = sqlite3.Row
+        with closing(conn):
             tip = _tip(
                 conn,
                 {
@@ -575,18 +595,6 @@ def _age(seconds: float) -> str:
     return f"{int(round(seconds / 3600))}h"
 
 
-def _authorization(hermes_home: Path) -> Optional[str]:
-    """The key this home's runs are posted with, or None to let ``outbox`` resolve its own.
-
-    Read from the home's own ``.env``, the read AFK posts its stage runs with
-    (``afk._authorization``), rather than through Hermes's credential helper: a wake runs from the
-    gateway's loop, where no request's profile scope is set, so the helper would answer the launch
-    profile's key for every home a multiplexed process serves.
-    """
-    key = link.env_value(hermes_home, "API_SERVER_KEY")
-    return f"Bearer {key}" if key else None
-
-
 async def run(adapter: Any) -> None:
     """Wakes a finished subagent's bot, on every home this process serves, while Hermes runs.
 
@@ -612,13 +620,7 @@ async def run(adapter: Any) -> None:
 
 def wake() -> None:
     """Has the watcher look again now; safe from any thread (Hermes's hooks run in others)."""
-    loop, event = _loop, _event
-    if loop is None or event is None:
-        return
-    try:
-        loop.call_soon_threadsafe(event.set)
-    except RuntimeError:
-        pass
+    events.poke(_loop, _event)
 
 
 def started(

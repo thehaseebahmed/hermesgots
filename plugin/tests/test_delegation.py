@@ -25,54 +25,10 @@ from unittest import mock
 
 import plugin
 from plugin import approvals, meetings, research, sessions
+from plugin.tests._helpers import App, Context, FakeWeb, Router
 
 HANDLE = {"handle": "subagent-1"}
 HELD_BY_THE_TURN = {"result": "the child's own answer"}
-
-
-class FakeWeb:
-    """The little of ``aiohttp.web`` the plugin's wiring touches, answering what it was given."""
-
-    class Response:
-        pass
-
-    class StreamResponse:
-        pass
-
-    class Request:
-        pass
-
-    @staticmethod
-    def json_response(payload: Any, status: int = 200) -> Dict[str, Any]:
-        return {"status": status, "payload": payload}
-
-
-class Router:
-    def __init__(self) -> None:
-        self.added: List[tuple] = []
-
-    def add_get(self, path: str, handler: Any) -> None:
-        self.added.append(("GET", path, handler))
-
-    def add_post(self, path: str, handler: Any) -> None:
-        self.added.append(("POST", path, handler))
-
-    def add_delete(self, path: str, handler: Any) -> None:
-        self.added.append(("DELETE", path, handler))
-
-    def add_route(self, method: str, path: str, handler: Any) -> None:
-        self.added.append((method, path, handler))
-
-    def routes(self) -> List[Any]:
-        return []
-
-
-class App:
-    """The API server's app, as far as the plugin's wiring reaches into it."""
-
-    def __init__(self) -> None:
-        self.router = Router()
-        self.cleanup_ctx: List[Any] = []
 
 
 class Agent:
@@ -99,28 +55,6 @@ class Adapter:
 
     def _create_agent(self, *args: Any, **kwargs: Any) -> Agent:
         return Agent(self._delegate)
-
-
-class Context:
-    """What Hermes hands ``register``, recording what the plugin wired."""
-
-    def __init__(self) -> None:
-        self.platforms: Dict[str, Any] = {}
-
-    def register_hook(self, name: str, callback: Any) -> None:
-        pass
-
-    def register_tool(self, **kwargs: Any) -> None:
-        pass
-
-    def register_cli_command(self, **kwargs: Any) -> None:
-        pass
-
-    def register_skill(self, *args: Any, **kwargs: Any) -> None:
-        pass
-
-    def register_platform_handler(self, name: str, handler: Any) -> None:
-        self.platforms[name] = handler
 
 
 class DelegationTest(unittest.TestCase):
