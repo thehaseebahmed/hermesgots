@@ -3,8 +3,9 @@
 // A project that may hold several tasks holds one per place: raising its pick count fills them, the
 // Working block names every task it holds over a count of them against the pick count, and a reload
 // reads every count back. A GitHub refusal leaves the switch on and shows its
-// reason in the same pop-up. The read is the plugin's own route, so the whole thing is covered
-// against the mock. Phone, tablet and laptop, light and dark, with no console error.
+// reason in the same pop-up. The bot's pick budget is written on the wire and drawn by its own
+// Coding tab, which this flow reads back. The read is the plugin's own route, so the whole thing is
+// covered against the mock. Phone, tablet and laptop, light and dark, with no console error.
 import { afkOn, afkRead, app, assert, flow, makeProject, mock, openAfk, pass, say } from "./lib.mjs"
 
 const HELD = 265
@@ -47,6 +48,18 @@ const run = async ({ page, profileId, shot, until }) => {
   assert.equal(smaller.pick_budget, 4, "the bot's budget is the number it was written")
   assert.equal((await botAfk()).pick_budget, 4, "and the next read answers it")
   await writeBudget(BUDGET)
+
+  // The tab the budget belongs to: the bot's own Coding tab draws the same number the wire
+  // answers, so the screen and the route can't drift apart.
+  await page.goto(`${app}/settings/bots/${profileId}/coding`)
+  const budget = page.locator("[data-pick-budget]")
+  await budget.waitFor({ timeout: 15_000 })
+  assert.equal(
+    await budget.getAttribute("data-pick-budget"),
+    String(BUDGET),
+    "the Coding tab reads the bot's budget back",
+  )
+  await shot("coding-tab")
 
   const projectId = await makeProject(until, "AFK claim")
   const screen = `${app}/projects/${profileId}/${projectId}`

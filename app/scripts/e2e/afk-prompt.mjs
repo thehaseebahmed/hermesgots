@@ -7,8 +7,8 @@
 // The account's prompt library is here too, because it needs a signed-in account with its vault
 // open on the device and a browser that can hold one: the words are saved to the library by name,
 // picked in ANOTHER project as a copy that remembers the entry it came from, and — once the entry is
-// rewritten on the library's side — the row wears an `Update` badge whose dialog asks before it
-// pulls the new words in, which is a pick again.
+// rewritten on the library's side — the row wears an `Update available` label, and the editor
+// offers the entry's newer words behind a line of its own, whose Done writes them with their entry.
 import {
   accountUser,
   afkRead,
@@ -264,8 +264,8 @@ const run = async ({ page, profileId, shot, until }) => {
   await marker.waitFor({ timeout: 15_000 })
   assert.equal(
     (await marker.innerText()).trim(),
-    "Update",
-    "the badge right after the title offers the entry's words",
+    "Update available",
+    "the label right after the title names the entry that has moved on",
   )
   assert.match(
     await page.locator("[data-afk-prompt]").innerText(),
@@ -274,38 +274,56 @@ const run = async ({ page, profileId, shot, until }) => {
   )
   await shot("changed")
 
-  // The badge asks first, and confirming pulls the entry's new words in — writing them and their
-  // source together: the badge goes with them, and the host holds the library's words.
-  await marker.click()
-  const asking = page.getByRole("alertdialog")
-  await asking.waitFor({ timeout: 15_000 })
-  await asking.getByText("Update this Prompt?", { exact: true }).waitFor({ timeout: 15_000 })
-  await shot("update-dialog")
+  // The label is not a control: the row's tap still opens the editor, where the entry's newer
+  // words wait behind their own line. Filling writes nothing — Done writes the words with their
+  // entry, and the label goes with them.
+  await page.locator('button[aria-label="Prompt"]').click()
+  await field.waitFor({ timeout: 15_000 })
+  const update = page.locator("[data-prompt-update]")
+  await update.waitFor({ timeout: 15_000 })
+  assert.match(
+    await update.innerText(),
+    /The library's entry has newer words/,
+    "the editor offering the entry's newer words",
+  )
+  await shot("update-line")
+  await update.getByRole("button", { name: "Update" }).click()
+  assert.equal(
+    await field.inputValue(),
+    EDITED,
+    "the offer fills the writing surface with the entry's current words",
+  )
+  await update.waitFor({ state: "detached", timeout: 15_000 })
   const before = await afkRead(elsewhereId)
-  assert.notEqual(before.prompt, EDITED, "asking alone writes nothing")
-  await asking.getByRole("button", { name: "Update" }).click()
+  assert.notEqual(before.prompt, EDITED, "filling alone writes nothing")
+  await page.getByRole("button", { name: "Done" }).click()
+  await field.waitFor({ state: "detached", timeout: 15_000 })
   await until(
     async () => (await afkRead(elsewhereId)).prompt === EDITED,
     15_000,
-    "the pull to land",
+    "the update to land",
   )
   await marker.waitFor({ state: "detached", timeout: 15_000 })
-  const pulled = await afkRead(elsewhereId)
-  assert.equal(pulled.prompt_id, picked.prompt_id, "the pulled words keep the entry they came from")
+  const updated = await afkRead(elsewhereId)
+  assert.equal(
+    updated.prompt_id,
+    picked.prompt_id,
+    "the updated words keep the entry they came from",
+  )
   await until(
     async () =>
       (await page.locator("[data-afk-prompt]").innerText()).includes("as the library has it now"),
     15_000,
-    "the row to read what was pulled in",
+    "the row to read what was updated",
   )
   assert.equal(
     await page.locator("[data-afk-prompt-changed]").count(),
     0,
-    "and the marker to be gone",
+    "and the label to be gone",
   )
-  await shot("pulled")
+  await shot("updated")
 
-  // What a reload reads is the host's answer: the pulled words, still marked as the entry's copy.
+  // What a reload reads is the host's answer: the updated words, still marked as the entry's copy.
   await openPrompt(elsewhere)
   assert.match(
     await page.locator("[data-afk-prompt]").innerText(),
@@ -315,7 +333,7 @@ const run = async ({ page, profileId, shot, until }) => {
   assert.equal(
     await page.locator("[data-afk-prompt-changed]").count(),
     0,
-    "and a copy that matches its entry is still unmarked",
+    "and a copy that matches its entry is still unlabelled",
   )
 
   assert.deepEqual(errors, [], `no console error (${errors.join("; ")})`)
@@ -332,5 +350,5 @@ for (const width of [390, 768, LAPTOP]) {
   }
 }
 pass(
-  "a project's pop-up draws the Prompt its runs are told — the host's default included, with none of the workflow's skill pickers — and opens one writing surface for it in a bottom sheet, the side drawer from a laptop's width, Done writing it back; the account's library saves those words by name, picks them into another project as a copy, and a rewritten entry shows an `Update` badge whose dialog asks, then pulls the new words in: at 390, 768 and 1024px, light and dark",
+  "a project's pop-up draws the Prompt its runs are told — the host's default included, with none of the workflow's skill pickers — and opens one writing surface for it in a bottom sheet, the side drawer from a laptop's width, Done writing it back; the account's library saves those words by name, picks them into another project as a copy, and a rewritten entry labels the copy `Update available` while the editor offers the entry's newer words, whose Done writes them with their entry: at 390, 768 and 1024px, light and dark",
 )

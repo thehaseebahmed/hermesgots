@@ -19,7 +19,8 @@ ten, default five) shared across its projects, so the lower of the two numbers i
 works and a freed place goes to the oldest ready task across the whole bot. The account gets a
 **prompt library** — one per signed-in account, synced and encrypted with the bots — managed inside
 the project's prompt editor, whose picks are copies carried to the host with their source recorded,
-so a prompt row can show an Update badge that asks, then pulls the new text in.
+so a prompt row can show an Update available label, and the editor can offer the entry's newer
+words for Done to write.
 
 ## What this is not
 
@@ -31,7 +32,7 @@ so a prompt row can show an Update badge that asks, then pulls the new text in.
 - **Not presets.** The library starts empty; the host's default prompt stays the host's default
   rather than an entry that drifts with plugin versions.
 - **Not automatic propagation.** Editing an entry does not push into projects that picked it; the
-  prompt row offers the pull where the change is visible.
+  prompt row labels the copy, and the editor offers the newer words to write.
 - **Not a pointer the host resolves.** The host cannot decrypt the account's library, so it never
   reads it — the app carries the text across at pick time.
 - **Not a shared or public library, and not variables.** One account's entries, plain text, no
