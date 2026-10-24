@@ -1900,3 +1900,45 @@ and an immediate re-run passed 8/8.
 
 Found by the review passes on this branch (simplify, no-comments, code-review). All that the branch
 introduced is fixed on the branch; the pull request does not wait on the entry.
+
+# Deferred fixes from the reviews on every kind of file in a message
+
+Three reviews of `feat(chat): every kind of file in a message` — `/simplify-code`'s four passes, the
+comment pass, and `/code-review`'s two axes (the repo's standards, the ticket with its parent spec) —
+between them found one design cleanup too wide for the branch's own pass, filed below. Everything
+else is applied on this branch: one intake for a pick, a paste, a drop and a share; one download
+path; one read and one draw path for a thread's media; the caps, the steer split, the
+plugin-advertised availability, the widened route and the grammar's drift guard; and the
+`MIN_PLUGIN_VERSION` bump to 0.80.0, the plugin version whose route first served any file a message
+carries.
+
+Declined rather than filed, with their reasons: a shared cross-artifact types table
+(`plugin/media.py` as the truth, `media-parts.ts`, `media-kind.ts`, `mock-hermes.mjs` as mirrors) —
+`scripts/test-media-types.mjs` parses the plugin's own map and fails the gates on drift, so the copies
+cannot silently disagree, and one JSON shipped in three runtimes is a bigger change than the drift it
+prevents; the bounded object-URL caches ship without profiled numbers because they bound memory
+lifetime rather than speed, and `stream-writes` and `idle-requests` guard the budgets they touch;
+deleting the `image-viewer` flow was correct rather than scope creep, since it tested the in-thread
+lightbox this feature replaced with the platform's own viewer.
+
+## Risky
+
+### 1. A queued steer's marker text is re-parsed out of the queue item's own request body
+
+`plugin/outbox.py`'s `steer_text` recovers the `<attachment>` marker lines a queued steer will carry
+by re-reading the request body the app composed (`_item` → `_files` → `_body_text`), because the item
+stores the send as the wire request and the attachments as metadata, not the composed text itself.
+
+- Cost: the app's wording and the plugin's recovery of it are coupled through the request body's
+  shape, so changing the marker sentence in `attachment-text.ts` moves a test in `plugin/tests` that
+  reads it back through JSON, and a reader of `outbox.py` cannot see where the text came from.
+- Suggested fix: let the queue item carry the composed steer text directly — a field beside
+  `attachments` — so `steer_text` reads what the app wrote and `_body_text` loses its re-parse.
+- Why it is not applied here: the pairing is load-bearing today (Hermes hands an unread steer back
+  as the text the model read, and `requeueSteer` recovers the attachments from it), so the field is a
+  contract change across the app, the plugin and the stored shape of every queued item — a
+  workflow-feature task, not a cleanup this branch's review pass could verify alone.
+- Why it is risky: an item queued by an older app must keep steering correctly against a newer
+  plugin and vice versa, so the new field has to fall back to the body re-parse for as long as old
+  items can exist.
+
