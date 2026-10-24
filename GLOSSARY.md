@@ -91,6 +91,31 @@ _Avoid_: autocomplete, command palette, picker
 **Cheatsheet**:
 The sheet `/cheatsheet` opens from the composer: the keys a hardware keyboard can send in Gots and what each does, by group — and only the shortcuts whose switch is on.
 _Avoid_: hotkey list, keyboard help, command palette, cheat sheet
+
+**Built-in skill**:
+A skill that ships with Hermes and was seeded into the bot's profile. It can be switched off; it is never removed.
+_Avoid_: bundled skill, core skill, essential skill
+
+**Hub skill**:
+A skill installed from a skills hub. Removed through the hub's own uninstall.
+_Avoid_: downloaded skill, store skill, registry skill
+
+**Your skill**:
+A skill written on the bot's own profile, by you or by the bot, rather than one that arrived built in, from the Hub or from a plugin.
+_Avoid_: custom skill, own skill, local skill, user managed skill
+
+**Plugin skill**:
+A skill a Hermes plugin on the host provides. Gots can switch it off and change nothing else about it.
+_Avoid_: plugin-provided skill, provided skill, managed skill
+
+**Project skill**:
+A skill a repository carries in its own skills folder. It belongs to the project, not the bot, so the Skills tab leaves it out.
+_Avoid_: repo skill, repository skill
+
+**Skill sheet**:
+One skill's own panel, opened by its row: its SKILL.md, its linked files, and where it came from, with the host's Readiness and Setup where it has them. No URL of its own — it is about one skill, not a place.
+_Avoid_: skill page, skill detail screen, editor
+
 **Usage window**:
 One thing a provider account can run out of, as that provider measures it: a period, which resets, or a balance, which doesn't.
 _Avoid_: quota, plan limit, usage bar
@@ -148,7 +173,7 @@ An MCP server added by typing its address or its command, rather than picked fro
 _Avoid_: manual server, raw server, own MCP
 
 **Health**:
-How an MCP server is doing, as its row says it in a line: healthy with a tool count where the host knows one, or why it isn't working. A server that is switched off says `Off` there, because that is how it is doing; the switch itself is the separate control beside it. Where the host can start Server access for what it says, the line is the tap that starts it.
+How an MCP server or a skill is doing, as its row says it in a line. A server is healthy with a tool count where the host knows one, or says why it isn't working; a skill says `Ready`, `Off`, or `Doesn't load` with the host's reason. A thing that is switched off says `Off` there, because that is how it is doing; the switch itself is the separate control beside it. Where the host can start Server access for what a server's line says, the line is the tap that starts it.
 _Avoid_: status, state, badge, indicator
 
 **Server sheet**:
