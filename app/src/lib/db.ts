@@ -4,6 +4,7 @@ import { BOTS, LEGACY_BOT_IDS } from "@/components/bots"
 import { connectionKey } from "@/lib/connection"
 import type { Compaction, ModelChange, Move, ProviderUsage, Skill } from "@/lib/hermes"
 import type { SessionPipeline } from "@/lib/pipeline"
+import type { PromptEntry } from "@/lib/prompt-library"
 import type { ReasoningRun } from "@/lib/thinking"
 import { randomId } from "@/lib/utils"
 
@@ -456,11 +457,15 @@ export interface Message {
   queuePaused?: boolean
 }
 
-/** A local deletion sync hasn't pushed yet: `bot:<profileId>` or `chat:<conversationId>`. */
+/**
+ * A local deletion sync hasn't pushed yet: `bot:<profileId>`, `chat:<conversationId>` or
+ * `prompt:<entryId>`. A prompt entry is the account's rather than a bot's, so only the last kind
+ * carries no `profileId`.
+ */
 export interface Tombstone {
   id: string
   deletedAt: number
-  profileId: string
+  profileId?: string
 }
 
 /**
@@ -579,6 +584,7 @@ export const db = new Dexie("memento") as Dexie & {
   dictations: EntityTable<SavedDictation, "id">
   skills: EntityTable<CachedSkills, "id">
   meetingRecordings: EntityTable<SavedMeetingRecording, "id">
+  prompts: EntityTable<PromptEntry, "id">
 }
 
 db.version(1).stores({
@@ -798,6 +804,9 @@ db.version(21).upgrade((tx) =>
       message.reasoningRuns = [{ text: message.reasoning as string }]
     }),
 )
+
+// v22: the account's prompts, kept where the bots are and synced as a document of their own.
+db.version(22).stores({ prompts: "id" })
 
 db.on("populate", (tx) => seedProfile(tx))
 

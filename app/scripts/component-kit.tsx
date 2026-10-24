@@ -367,6 +367,27 @@ export type HoldRow = {
   stalled?: string | null
 }
 
+/**
+ * The account's prompt library as this device holds it, cleared and then seeded: entries go in with
+ * their own clock, and no `prompt:` tombstone from an earlier test is left behind to fight them.
+ */
+export async function seedPrompts(
+  entries: { id?: string; name: string; tags?: string[]; body: string; updatedAt?: number }[],
+) {
+  await db.prompts.clear()
+  const tombstones = await db.tombstones.where("id").startsWith("prompt:").toArray()
+  await db.tombstones.bulkDelete(tombstones.map((one) => one.id))
+  await db.prompts.bulkPut(
+    entries.map((entry, index) => ({
+      id: entry.id ?? `e-${index + 1}`,
+      name: entry.name,
+      tags: entry.tags ?? [],
+      body: entry.body,
+      updatedAt: entry.updatedAt ?? index + 1,
+    })),
+  )
+}
+
 export function afkHost({
   projectId = "project-1",
   features = ["afk", "afk_switch", "afk_workflows", "afk_pipeline", "afk_prompt"],
@@ -499,5 +520,7 @@ export function afkHost({
       return json({ repos: [], ready: [], claimed: [], blocked: [] })
     return json({ error: { message: `No route for ${method} ${url.pathname}` } }, 404)
   }
-  return { calls, fetch, library }
+  /** What the host holds now: the workflow a Prompt's write cleared, and the words it answered. */
+  const state = () => ({ chosen, words })
+  return { calls, fetch, library, state }
 }
