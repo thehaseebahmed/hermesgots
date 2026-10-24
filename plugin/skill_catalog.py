@@ -51,6 +51,7 @@ AMBIGUOUS = "Ambiguous skill name '%s': another copy shares it."
 OUTSIDE = "'%s' is not a path inside the skill."
 NO_FILE = "Skill '%s' has no file '%s'."
 READ_FAILED = "Failed to read '%s': %s"
+TOO_LARGE = "File '%s' is too large to open here."
 
 REMOVABLE = ("hub", "yours")
 BUILTIN_REMOVAL = "Skill '%s' is built into Hermes, so it can't be removed."
@@ -113,6 +114,7 @@ def _disabled() -> Optional[Set[str]]:
     try:
         return set(read_disabled(load_config()))
     except Exception:
+        logger.debug("memento: couldn't read this profile's disabled skills", exc_info=True)
         return None
 
 
@@ -124,6 +126,7 @@ def _origins() -> Optional[Callable[[str], str]]:
     try:
         bundled_names, hub_names = set(bundled()), set(hub())
     except Exception:
+        logger.debug("memento: couldn't read skill origins", exc_info=True)
         return None
 
     def origin(name: str) -> str:
@@ -237,6 +240,7 @@ def _plugin_rows(seen: Set[str], disabled: Optional[Set[str]]) -> List[Dict[str,
 
         found = get_plugin_manager().list_plugin_skill_metadata()
     except Exception:
+        logger.debug("memento: couldn't list the host's plugin skills", exc_info=True)
         return []
     rows = []
     for entry in found:
@@ -274,12 +278,15 @@ def _catalog_rows(
             project,
         )
     except Exception:
+        logger.debug("memento: couldn't read the host's skill catalog", exc_info=True)
         return None
 
 
-def _scan(
-    find: Callable[..., Any], sort: Callable[..., Any], *, single: bool = False
-) -> List[Dict[str, Any]]:
+def _scan(find: Callable[..., Any]) -> List[Dict[str, Any]]:
+    """The profile's skill rows, in no order: a listing is the one place that sorts them.
+
+    Blocking — a skills tree walk under the profile's scope — so call it from a worker thread.
+    """
     catalog = _helper("tools.skills_tool", "_skill_catalog")
     scan = Scan(
         origin=_origins(),
@@ -292,20 +299,26 @@ def _scan(
     if rows is None:
         rows = _rows_from_listing(listed, scan)
     rows.extend(_plugin_rows({row["name"] for row in rows}, scan.disabled))
-    return rows if single else sort(rows)
+    return rows
+
+
+def _scope(profile: Optional[str]):
+    """The profile's skills scope — the one read that retargets the skills module's globals
+    (SKILLS_DIR, HERMES_HOME) under a lock, which decides whose skills are listed: the dashboard's
+    scope, not the plugin's own. Entering it takes that lock, so every caller is already on a
+    worker thread.
+    """
+    from hermes_cli.web_server_profiles import _profile_scope
+
+    return _profile_scope(profile)
 
 
 def read(profile: Optional[str]) -> List[Dict[str, Any]]:
     # Blocking: the scan reads the skills tree and the scope swaps module globals under a lock.
     # Call from a worker thread (asyncio.to_thread), never the event loop.
-    #
-    # The dashboard's scope, not the plugin's own: only this one retargets the skills module's
-    # globals (SKILLS_DIR, HERMES_HOME) under a lock, which is what decides whose skills are listed.
-    from hermes_cli.web_server_profiles import _profile_scope
-
     find, sort = _listing()
-    with _profile_scope(profile):
-        return _scan(find, sort)
+    with _scope(profile):
+        return sort(_scan(find))
 
 
 class SkillError(Exception):
@@ -378,11 +391,9 @@ def row_of(rows: List[Dict[str, Any]], name: str) -> Optional[Dict[str, Any]]:
 
 def row_for(profile: Optional[str], name: str) -> Optional[Dict[str, Any]]:
     """One skill's row as ``profile``'s own scan shapes it, or None when it hasn't got that skill."""
-    from hermes_cli.web_server_profiles import _profile_scope
-
-    find, sort = _listing()
-    with _profile_scope(profile):
-        return row_of(_scan(find, sort, single=True), name)
+    find, _ = _listing()
+    with _scope(profile):
+        return row_of(_scan(find), name)
 
 
 def set_enabled(profile: Optional[str], name: str, enabled: bool) -> Dict[str, Any]:
@@ -447,6 +458,7 @@ def _skill_md(name: str, find: Callable[..., Any]) -> Optional[Path]:
             try:
                 root = manager().find_plugin_skill(name)
             except Exception:
+                logger.debug("memento: couldn't find that plugin skill", exc_info=True)
                 root = None
     if root is None:
         return None
@@ -466,6 +478,7 @@ def _linked(skill_dir: Path) -> Optional[Dict[str, List[str]]]:
     try:
         return dict(linked(skill_dir))
     except Exception:
+        logger.debug("memento: couldn't list a skill's linked files", exc_info=True)
         return None
 
 
@@ -485,6 +498,7 @@ def _readiness(name: str, content: str) -> Dict[str, Any]:
         frontmatter = parse(content=content)
         fields, extras = readiness(frontmatter, str(frontmatter.get("name") or name))
     except Exception:
+        logger.debug("memento: couldn't read a skill's readiness", exc_info=True)
         return {}
     return {**fields, **extras}
 
@@ -514,11 +528,9 @@ def view(profile: Optional[str], name: str) -> Dict[str, Any]:
     a file read — so call it from a worker thread, never the event loop.
     """
     hermes = _load(_VIEW, UNAVAILABLE_VIEW)
-    from hermes_cli.web_server_profiles import _profile_scope
-
-    find, sort = _listing()
-    with _profile_scope(profile):
-        row = row_of(_scan(find, sort, single=True), name)
+    find, _ = _listing()
+    with _scope(profile):
+        row = row_of(_scan(find), name)
         if row is None:
             raise SkillError(NOT_FOUND % name, 404)
         skill_md = _skill_md(name, hermes["_find_skill"])
@@ -535,6 +547,20 @@ def view(profile: Optional[str], name: str) -> Dict[str, Any]:
     return sheet
 
 
+# A linked file is text; one over this bound is refused rather than read whole into a JSON response
+# (the media, attachments and library routes all bound what they serve — this is the same rule).
+MAX_BYTES = 1_000_000
+
+
+def _refuse_if_too_large(target: Path, path: str) -> None:
+    try:
+        too_large = target.stat().st_size > MAX_BYTES
+    except OSError:
+        return  # the read below answers a real failure in its own sentence
+    if too_large:
+        raise SkillError(TOO_LARGE % path, 413)
+
+
 def file(profile: Optional[str], name: str, path: str) -> Dict[str, Any]:
     """One file inside one skill's folder, read when its sheet asks for it.
 
@@ -543,17 +569,16 @@ def file(profile: Optional[str], name: str, path: str) -> Dict[str, Any]:
     from a worker thread.
     """
     hermes = _load(_VIEW, UNAVAILABLE_VIEW)
-    from hermes_cli.web_server_profiles import _profile_scope
-
-    with _profile_scope(profile):
+    with _scope(profile):
         skill_md = _skill_md(name, hermes["_find_skill"])
         if skill_md is None:
             raise SkillError(NOT_FOUND % name, 404)
         target = _inside(skill_md.parent, path)
-        if not target.is_file():
-            raise SkillError(NO_FILE % (name, path), 404)
+        _refuse_if_too_large(target, path)
         try:
             content = hermes["_read_skill_text"](target)
+        except (FileNotFoundError, IsADirectoryError) as error:
+            raise SkillError(NO_FILE % (name, path), 404) from error
         except OSError as error:
             raise SkillError(READ_FAILED % (path, error), 500) from error
     return {"name": name, "path": path, "content": content}
@@ -569,10 +594,11 @@ def removable() -> Optional[str]:
     return _gate(_REMOVE, UNAVAILABLE_REMOVE)
 
 
+_REFUSAL: Dict[Any, str] = {"plugin": PLUGIN_REMOVAL, "builtin": BUILTIN_REMOVAL}
+
+
 def _removal_refusal(name: str, origin: Any) -> str:
-    if origin == "plugin":
-        return PLUGIN_REMOVAL % name
-    return BUILTIN_REMOVAL % name if origin == "builtin" else NO_REMOVAL % name
+    return (_REFUSAL.get(origin) or NO_REMOVAL) % name
 
 
 def remove(profile: Optional[str], name: str) -> List[Dict[str, Any]]:
@@ -592,9 +618,7 @@ def remove(profile: Optional[str], name: str) -> List[Dict[str, Any]]:
     # writes the skills tree, and both helpers find it through the profile — the manager through the
     # SKILLS_DIR globals this scope retargets, the Hub through a resolver that reads the profile's
     # home at call time — which is the one scope that covers the two of them.
-    from hermes_cli.web_server_profiles import _profile_scope
-
-    with _profile_scope(profile):
+    with _scope(profile):
         if origin == "hub":
             ok, message = hermes["uninstall_skill"](name)
             if not ok:

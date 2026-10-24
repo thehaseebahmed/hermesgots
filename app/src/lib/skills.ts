@@ -174,17 +174,18 @@ export function useSkills(config: HermesConfig | null, open: boolean): Skills {
     }
   }, [open, key, baseUrl, apiKey])
 
-  const setEnabled = async (name: string, enabled: boolean) => {
+  // One write's shape: a bot with nothing to write to answers nothing, and a write that lands
+  // re-reads the list so the row the host answered is the row the tab draws.
+  const write = async (run: (config: HermesConfig) => Promise<void>) => {
     if (!baseUrl || !apiKey) return
-    await switchSkill({ baseUrl, apiKey }, key, name, enabled)
+    await run({ baseUrl, apiKey })
     setSettled({ key })
   }
 
-  const remove = async (name: string) => {
-    if (!baseUrl || !apiKey) return
-    await removeFromBot({ baseUrl, apiKey }, key, name)
-    setSettled({ key })
-  }
+  const setEnabled = (name: string, enabled: boolean) =>
+    write((config) => switchSkill(config, key, name, enabled))
+
+  const remove = (name: string) => write((config) => removeFromBot(config, key, name))
 
   return { ...state, setEnabled, remove }
 }

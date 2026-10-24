@@ -21,9 +21,9 @@ import type { Skill } from "@/lib/hermes"
 import { useSkillFeatureAnswers, useSkills } from "@/lib/skills"
 import {
   canRemove,
-  offersSwitch,
   skillHealth,
   skillSections,
+  switchableControls,
   type RowControls,
   type SkillSection,
 } from "@/lib/skills-tab"
@@ -90,35 +90,34 @@ export function SkillsTab({ profile }: { profile: Profile }) {
           }
         />
       )}
-      <AlertDialog
-        open={removing !== null}
-        onOpenChange={(next) => {
-          if (next || pending) return
-          setSheet(removing === null ? null : { kind: "skill", name: removing })
-        }}
-      >
-        <AlertDialogContent size="sm">
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {removing === null ? "Remove this skill?" : `Remove ${removing}?`}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              The bot stops having it, and its files go with it. A Hub skill is uninstalled, and one
-              written on the profile is deleted.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              disabled={pending}
-              onClick={() => removing !== null && void confirmRemove(removing)}
-            >
-              Remove
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {removing !== null && (
+        <AlertDialog
+          open
+          onOpenChange={(next) => {
+            if (!next && !pending) setSheet({ kind: "skill", name: removing })
+          }}
+        >
+          <AlertDialogContent size="sm">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Remove {removing}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                The bot stops having it, and its files go with it. A Hub skill is uninstalled, and
+                one written on the profile is deleted.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                variant="destructive"
+                disabled={pending}
+                onClick={() => void confirmRemove(removing)}
+              >
+                Remove
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
     </div>
   )
 }
@@ -182,7 +181,7 @@ function SkillItem({
   onOpen?: (name: string) => void
 }) {
   const health = skillHealth(skill)
-  const switchControls = offersSwitch(controls, skill) ? controls : undefined
+  const switchControls = switchableControls(controls, skill)
   return (
     <div className={rowClass} data-skill={skill.name}>
       <div className="flex min-w-0 flex-1 flex-col">

@@ -381,8 +381,12 @@ function skillsIn(body: unknown): Skill[] {
     : []
 }
 
-/** The skills the bot's profile can run, for the composer's `/` menu. Hermes's own `/v1/skills`
- * is unscoped and fails on current Hermes, so the plugin lists them under the profile instead. */
+/**
+ * Every skill the bot's profile holds — the ones it can run and the ones switched off or that no
+ * longer load, each carrying `enabled`/`loadError` so a caller filters to what it needs — for the
+ * composer's `/` menu and the Skills tab. Hermes's own `/v1/skills` is unscoped and fails on current
+ * Hermes, so the plugin lists them under the profile instead.
+ */
 export async function listSkills(config: HermesConfig, signal?: AbortSignal): Promise<Skill[]> {
   const response = await request(`${pluginRoot(config.baseUrl)}/skills`, {
     headers: headers(config),
@@ -460,9 +464,14 @@ function readLinkedFiles(value: unknown): Record<string, string[]> | null {
   return groups
 }
 
-function skillPath(config: HermesConfig, ...segments: string[]): string {
+/** One path on the bot's plugin under `root`, every segment escaped. */
+function pluginPath(config: HermesConfig, root: string, ...segments: string[]): string {
   const rest = segments.map((segment) => `/${encodeURIComponent(segment)}`).join("")
-  return `${pluginRoot(config.baseUrl)}/skills${rest}`
+  return `${pluginRoot(config.baseUrl)}/${root}${rest}`
+}
+
+function skillPath(config: HermesConfig, ...segments: string[]): string {
+  return pluginPath(config, "skills", ...segments)
 }
 
 export async function getSkillView(
@@ -541,8 +550,7 @@ function namedRows<T extends { name: string }>(
 
 /** One path on the bot's plugin under `/mcp`, every segment escaped (`/mcp/<name>/tools`). */
 function mcpPath(config: HermesConfig, ...segments: string[]): string {
-  const rest = segments.map((segment) => `/${encodeURIComponent(segment)}`).join("")
-  return `${pluginRoot(config.baseUrl)}/mcp${rest}`
+  return pluginPath(config, "mcp", ...segments)
 }
 
 const MCP_STATES = new Set<string>(["on", "off", "connecting", "failed", "needs_access", "plugin"])

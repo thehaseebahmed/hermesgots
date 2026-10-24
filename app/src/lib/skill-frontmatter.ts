@@ -91,13 +91,9 @@ function propertyRows(lines: string[]): SkillProperty[] {
       const value = scalar(pair[2])
       const folded = BLOCK.test(value)
       const node: Node = { key, scalar: folded ? "" : value, children: [], items: [] }
-      // A key written twice would draw two rows under one key; the first wins, which is the
-      // order the note reads in. The later key's own subtree sinks into a node nothing renders.
-      const first = indent > 0 || !roots.some((root) => root.key === key)
-      if (indent === 0) {
-        node.key = first ? key : ""
-        if (first) roots.push(node)
-      }
+      // A key written twice draws one row: the first wins, which is the order the note reads in.
+      // The repeat stays attached so its own subtree goes with it, out of `roots`.
+      if (indent === 0 && !roots.some((root) => root.key === key)) roots.push(node)
       attach(node, indent)
       if (folded) block = { node, style: value.startsWith("|") ? "literal" : "folded" }
       continue
@@ -107,7 +103,7 @@ function propertyRows(lines: string[]): SkillProperty[] {
     if (pending) pending.scalar = pending.scalar ? `${pending.scalar} ${trimmed}` : trimmed
   }
 
-  return roots.map((root) => ({ key: root.key, value: flatten(root) })).filter((row) => row.key)
+  return roots.map((root) => ({ key: root.key, value: flatten(root) }))
 }
 
 function flatten(node: Node): string {

@@ -208,6 +208,23 @@ def _named(key: str) -> Callable[[Any], Dict[str, Any]]:
     return lambda found: {"object": key, "data": found}
 
 
+def enabled_body(body: Any) -> Any:
+    """The switch's new position, which is all a toggle says."""
+    if body is None or not isinstance(body.get("enabled"), bool):
+        raise ValueError('Body must be {"enabled": true} or {"enabled": false}')
+    return (body["enabled"],)
+
+
+def _advertised(features: Tuple[Tuple[str, Callable[[], Optional[str]]], ...]) -> List[str]:
+    """The feature names one family offers, every gate answered in a single worker thread.
+
+    The first entry is the family's own availability, so a host that can't serve it at all gets none
+    of its finer features however those answer — the row is absent rather than a control that errors.
+    """
+    works = [gate() is None for _, gate in features]
+    return [name for (name, _), ok in zip(features, works) if ok] if works[0] else []
+
+
 def _cleanup_pick(path: Path) -> Optional[Dict[str, str]]:
     try:
         return speech.applied_cleanup(path, research.llm_gate())
@@ -358,18 +375,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         # and one may have a Catalogue it can only read — and must not offer a control that can't
         # work. Which built-ins each needs is mcp.py's table.
         # Off the loop: the checks import them.
-        serves_mcps = await asyncio.to_thread(mcp.available) is None
-        mcp_features = [
-            name
-            for name, gate in mcp.FEATURES
-            if serves_mcps and await asyncio.to_thread(gate) is None
-        ]
-        serves_skills = await asyncio.to_thread(skill_catalog.available) is None
-        skills_features = [
-            name
-            for name, gate in skill_catalog.FEATURES
-            if serves_skills and await asyncio.to_thread(gate) is None
-        ]
+        mcp_features = await asyncio.to_thread(_advertised, mcp.FEATURES)
+        skills_features = await asyncio.to_thread(_advertised, skill_catalog.FEATURES)
         return web.json_response(
             {
                 "name": "memento",
@@ -632,12 +639,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 'Body must describe the server\'s configuration: {"transport": ...}'
             )
         return (body,)
-
-    def enabled_body(body: Any) -> Any:
-        """The switch's new position, which is all a toggle says."""
-        if body is None or not isinstance(body.get("enabled"), bool):
-            raise ValueError('Body must be {"enabled": true} or {"enabled": false}')
-        return (body["enabled"],)
 
     def access_body(body: Any) -> Any:
         """The address the browser ended on, pasted back from the phone that followed the flow."""

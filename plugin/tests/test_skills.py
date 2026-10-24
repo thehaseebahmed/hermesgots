@@ -548,8 +548,7 @@ class SkillSwitchTests(unittest.TestCase):
         (save,) = host.saves
         self.assertEqual(save["disabled"], ["log-triage", "plan"])
         self.assertEqual(save["config"]["skills"]["disabled"], ["log-triage", "plan"])
-        # And nothing else: the per-platform slot is never what a Gots switch writes (ADR 0044),
-        # which is the one assertion this feature's risk turns on.
+        # And nothing else: the per-platform slot is never what a Gots switch writes (ADR 0044).
         self.assertNotIn("platform_disabled", save["config"]["skills"])
         self.assertIsNone(save["platform"])
         self.assertEqual(set(host.platforms), {None})

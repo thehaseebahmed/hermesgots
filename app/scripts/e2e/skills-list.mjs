@@ -31,7 +31,6 @@ const run = async ({ page, profileId, shot }) => {
   }
 
   try {
-    // The editor's own screen first: the tab that opens the panel, at this width.
     await page.goto(`${app}${editor}`)
     const tab = page.getByRole("tab", { name: "Skills", exact: true })
     await tab.waitFor({ timeout: 15_000 })
@@ -47,7 +46,6 @@ const run = async ({ page, profileId, shot }) => {
     await settled(page)
     assert.equal(await panel().count(), 1, "the tab is what the address opened")
 
-    // Each section's heading, in the order the sections sit, each with a box of its own.
     const headings = []
     for (const [id, title] of SECTIONS) {
       const heading = panel()
@@ -62,7 +60,6 @@ const run = async ({ page, profileId, shot }) => {
     assert.ok(headings[0].y < headings[1].y, "Your skills sits above From plugins")
     await shot("headings")
 
-    // Every category title has a box of its own, in the order its group sits.
     const titles = panel().locator("[data-skill-group] > h3")
     const count = await titles.count()
     assert.ok(count > 0, "the categories title their groups")
@@ -74,7 +71,6 @@ const run = async ({ page, profileId, shot }) => {
       onScreen(box, viewport, `category title ${i + 1}`)
     }
 
-    // A row per skill, each with its name drawn inside the row's own box.
     for (const name of ROWS) {
       const row = page.locator(`[data-skill="${name}"]`)
       await row.scrollIntoViewIfNeeded()

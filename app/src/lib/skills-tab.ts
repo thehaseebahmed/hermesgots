@@ -5,6 +5,7 @@
  * without a browser (as `mcp-server.ts` is for the MCP rows).
  */
 import type { Skill, SkillView } from "@/lib/hermes"
+import { byName } from "./compare.ts"
 import { loadFailure } from "./skills-cache.ts"
 
 export interface SkillHealth {
@@ -17,8 +18,15 @@ export interface RowControls {
   saving: string | null
 }
 
-export function offersSwitch(controls: RowControls | undefined, skill: Skill): boolean {
-  return controls !== undefined && skill.switchable !== false
+/**
+ * The controls a skill's switch draws, or undefined where it has none: a list with nothing to
+ * write to offers no switch, and neither does a skill the host says it can't switch.
+ */
+export function switchableControls(
+  controls: RowControls | undefined,
+  skill: Skill,
+): RowControls | undefined {
+  return skill.switchable === false ? undefined : controls
 }
 
 export function skillHealth(skill: Skill): SkillHealth {
@@ -63,16 +71,12 @@ function groupsOf(skills: Skill[]): SkillGroup[] {
   return [...held]
     .sort(([left], [right]) => {
       if (left === null) return 1
-      return right === null ? -1 : collated(left, right)
+      return right === null ? -1 : byName(left, right)
     })
     .map(([category, rows]) => ({
       category,
-      skills: rows.sort((left, right) => collated(left.name, right.name)),
+      skills: rows.sort((left, right) => byName(left.name, right.name)),
     }))
-}
-
-export function collated(left: string, right: string): number {
-  return left.localeCompare(right, "en", { sensitivity: "base" })
 }
 
 export function skillSections(skills: Skill[]): SkillSection[] {
@@ -92,32 +96,35 @@ export function skillSections(skills: Skill[]): SkillSection[] {
 }
 
 /**
+ * What an origin means where both facets of it are read: the sheet's one word for where a skill came
+ * from, and whether a skill of that origin can be removed. A row that names no origin (an older
+ * plugin) reads as no word and not removable, so the sheet leaves the line out rather than guessing.
+ */
+const ORIGINS: Record<string, { label: string; removable: boolean }> = {
+  builtin: { label: "Built in", removable: false },
+  hub: { label: "Installed from the Hub", removable: true },
+  yours: { label: "Yours", removable: true },
+  plugin: { label: "From a plugin", removable: false },
+}
+
+/** The origin's two facets, or undefined where the row names no origin the table knows. */
+function originFacts(skill: Skill) {
+  return skill.origin ? ORIGINS[skill.origin] : undefined
+}
+
+/**
  * Where a skill came from, in the sheet's one line, or null where the row doesn't say (ADR 0045).
- *
- * An older plugin answers no `origin` at all. The tab's sections have to file such a row somewhere,
- * and they file it as the profile's own; a line saying where a skill came from is worth nothing if it
- * is a guess, so the sheet leaves it out rather than repeating that default.
  */
 export function skillOrigin(skill: Skill): string | null {
-  switch (skill.origin) {
-    case "builtin":
-      return "Built in"
-    case "hub":
-      return "Installed from the Hub"
-    case "yours":
-      return "Yours"
-    case "plugin":
-      return "From a plugin"
-    default:
-      return null
-  }
+  return originFacts(skill)?.label ?? null
 }
 
 export function canRemove(skill: Skill): boolean {
-  return skill.origin === "hub" || skill.origin === "yours"
+  return originFacts(skill)?.removable ?? false
 }
 
 export interface SkillSetupLine {
+  key: "readiness" | "setup"
   label: "Readiness" | "Setup"
   text: string
 }
@@ -130,9 +137,9 @@ export interface SkillSetupLine {
 export function skillSetup(view: SkillView): SkillSetupLine[] {
   const lines: SkillSetupLine[] = []
   const status = view.readiness_status?.trim()
-  if (status) lines.push({ label: "Readiness", text: status })
+  if (status) lines.push({ key: "readiness", label: "Readiness", text: status })
   const setup =
     view.setup_note?.trim() || view.setup_help?.trim() || view.gateway_setup_hint?.trim()
-  if (setup) lines.push({ label: "Setup", text: setup })
+  if (setup) lines.push({ key: "setup", label: "Setup", text: setup })
   return lines
 }

@@ -129,21 +129,21 @@ test("a skill's origin leads the sheet's properties block, and nothing where the
 test("the Host's readiness and its setup sentence are both drawn, readiness first", () => {
   const note = "Setup needed before using this skill: missing env $PLAN_TOKEN."
   assert.deepEqual(skillSetup({ ...skill(), readiness_status: "setup_needed", setup_note: note }), [
-    { label: "Readiness", text: "setup_needed" },
-    { label: "Setup", text: note },
+    { key: "readiness", label: "Readiness", text: "setup_needed" },
+    { key: "setup", label: "Setup", text: note },
   ])
   assert.deepEqual(
     skillSetup({ ...skill(), readiness_status: "setup_needed", setup_help: "Add it to .env." }),
     [
-      { label: "Readiness", text: "setup_needed" },
-      { label: "Setup", text: "Add it to .env." },
+      { key: "readiness", label: "Readiness", text: "setup_needed" },
+      { key: "setup", label: "Setup", text: "Add it to .env." },
     ],
   )
   assert.deepEqual(skillSetup({ ...skill(), gateway_setup_hint: "Load it in the CLI." }), [
-    { label: "Setup", text: "Load it in the CLI." },
+    { key: "setup", label: "Setup", text: "Load it in the CLI." },
   ])
   assert.deepEqual(skillSetup({ ...skill(), readiness_status: "available" }), [
-    { label: "Readiness", text: "available" },
+    { key: "readiness", label: "Readiness", text: "available" },
   ])
   assert.deepEqual(skillSetup(skill()), [], "a host that says neither draws nothing")
   assert.deepEqual(
@@ -160,12 +160,4 @@ test("only the two origins with a removal behind them can be removed", () => {
   assert.equal(canRemove(skill({ origin: "plugin" })), false, "a plugin's skill is switch-only")
   assert.equal(canRemove(skill()), false)
   assert.equal(canRemove(skill({ origin: null })), false)
-})
-
-test("a Host with no sentence to give says its status word, and one that says nothing says nothing", () => {
-  assert.deepEqual(skillSetup({ ...skill(), readiness_status: "available" }), [
-    { label: "Readiness", text: "available" },
-  ])
-  assert.deepEqual(skillSetup({ ...skill() }), [])
-  assert.deepEqual(skillSetup({ ...skill(), readiness_status: "  ", setup_note: "" }), [])
 })

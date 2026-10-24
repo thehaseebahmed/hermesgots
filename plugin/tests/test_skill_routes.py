@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import unittest
 
-from plugin import _named, _plugin_route, skill_catalog
+from plugin import _named, _plugin_route, enabled_body, skill_catalog
 
 
 class Web:
@@ -24,12 +24,6 @@ class Request:
 
 async def body_of(request):
     return request.body
-
-
-def enabled_body(body):
-    if body is None or not isinstance(body.get("enabled"), bool):
-        raise ValueError('Body must be {"enabled": true} or {"enabled": false}')
-    return (body["enabled"],)
 
 
 def routed(call, *, key="skill", named=True, unavailable=skill_catalog.UNAVAILABLE, **kwargs):

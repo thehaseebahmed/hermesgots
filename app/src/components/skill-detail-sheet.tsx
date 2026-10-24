@@ -39,44 +39,42 @@ export function SkillDetailSheet({
   const { baseUrl, apiKey } = config
   const [reading, setReading] = useState<Reading>({ status: "reading" })
   const [file, setFile] = useState<OpenFile | null>(null)
-  const opened = useRef(0)
-  useEffect(
-    () => () => {
-      opened.current += 1
-    },
-    [],
-  )
+  const fileRead = useRef<AbortController | null>(null)
 
   useEffect(() => {
-    let live = true
-    getSkillView({ baseUrl, apiKey }, name).then(
+    const controller = new AbortController()
+    getSkillView({ baseUrl, apiKey }, name, controller.signal).then(
       (view) => {
-        if (live) setReading({ status: "ok", view })
+        if (!controller.signal.aborted) setReading({ status: "ok", view })
       },
       (error: unknown) => {
-        if (!live) return
+        if (controller.signal.aborted) return
         toast.error(error instanceof Error ? error.message : "Couldn't open that skill.")
         onClose()
       },
     )
-    return () => {
-      live = false
-    }
+    return () => controller.abort()
   }, [baseUrl, apiKey, name, onClose])
 
+  // A file still being read when the sheet closes stops on the host too.
+  useEffect(() => () => fileRead.current?.abort(), [])
+
   const back = () => {
-    opened.current += 1
+    fileRead.current?.abort()
+    fileRead.current = null
     setFile(null)
   }
 
   const openFile = async (path: string) => {
-    const request = (opened.current += 1)
+    fileRead.current?.abort()
+    const controller = new AbortController()
+    fileRead.current = controller
     setFile({ status: "reading", path })
     try {
-      const read = await getSkillFile({ baseUrl, apiKey }, name, path)
-      if (request === opened.current) setFile({ status: "ok", file: read })
+      const read = await getSkillFile({ baseUrl, apiKey }, name, path, controller.signal)
+      if (!controller.signal.aborted) setFile({ status: "ok", file: read })
     } catch (error) {
-      if (request !== opened.current) return
+      if (controller.signal.aborted) return
       setFile(null)
       toast.error(error instanceof Error ? error.message : "Couldn't read that file.")
     }
@@ -137,7 +135,7 @@ function SkillBody({
     ...setup.map((line) => ({
       key: line.label,
       value: line.text,
-      setup: line.label.toLowerCase(),
+      setup: line.key,
     })),
     ...note.rows,
   ]

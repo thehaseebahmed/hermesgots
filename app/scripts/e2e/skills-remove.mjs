@@ -19,7 +19,6 @@ const run = async ({ page, profileId, shot }) => {
   const dialog = () => page.getByRole("alertdialog")
 
   try {
-    // The interactions the box needs: the tab, the skill's own sheet, and the question on it.
     await page.goto(`${app}${screen}`)
     await row("hub-audit").waitFor({ timeout: 15_000 })
     await settled(page)
@@ -52,8 +51,6 @@ const run = async ({ page, profileId, shot }) => {
       "and centred down it",
     )
     await shot("confirm")
-
-    await shot("dialog")
 
     assert.deepEqual(errors, [], `no error in the console (${errors.join("; ")})`)
   } finally {
