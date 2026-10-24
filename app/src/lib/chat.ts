@@ -810,10 +810,14 @@ function finalTextStart(draft: Draft) {
  * stream never shows): what streamed holds every attempt, the output only the answer.
  */
 function settleFinalText(draft: Draft, output: string) {
-  const streamed = draft.content.slice(finalTextStart(draft))
+  const start = finalTextStart(draft)
+  const streamed = draft.content.slice(start)
   if (!streamed.trim() || streamed.trim() === output.trim()) return
-  const next =
-    draft.content.slice(0, finalTextStart(draft)) + /^\s*/.exec(streamed)![0] + output.trim()
+  // The answer is sometimes the whole turn's text, the words streamed before that call included (a
+  // reply a question interrupted, a continuation Hermes joins whole): the reply already reads them,
+  // and splicing the answer after its own lead-in draws that lead-in a second time.
+  if (draft.content.trim() === output.trim()) return
+  const next = draft.content.slice(0, start) + /^\s*/.exec(streamed)![0] + output.trim()
   anchorOffsets(draft, next)
   draft.content = next
 }
