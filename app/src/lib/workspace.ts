@@ -28,6 +28,14 @@ import {
   type SessionWorkspace,
 } from "@/lib/hermes"
 import { syncNow } from "@/lib/sync"
+import { sessionState, type SessionState } from "@/lib/session-work"
+
+/**
+ * Where a session stands, from the pure rule in `src/lib/session-work.ts` — a screen keeps reading it
+ * from here: `live` is what the plugin reports for the server, `local` what this device sees of its
+ * own turn (exact here, invisible elsewhere), and `subagents` how many the host still runs for it.
+ */
+export { sessionState, type SessionState }
 
 /**
  * A project session's workspace: the worktrees the Gots plugin made for it on the Hermes host
@@ -47,8 +55,6 @@ const libraryRead = new Map<string, number>()
 /** Whether any of a session's live pull requests still has checks running. */
 export const prChecksPending = (prs: PullRequestRef[] | undefined) =>
   (prs ?? []).some((pr) => prIsLive(pr) && pr.checks === "pending")
-
-export type SessionState = "working" | "waiting" | "idle" | "resolved" | "discarded"
 
 export const MODE_LABELS: Record<SessionMode, string> = {
   accept_edits: "Accept edits",
@@ -302,23 +308,6 @@ export async function closeSessionWork(
   }
 }
 
-/**
- * Where a session stands: `live` is what the plugin reports for the server, and `local` what this
- * device sees of its own turn, which is exact here and invisible elsewhere.
- */
-export function sessionState(
-  conversation: Pick<Conversation, "resolvedAt" | "discardedAt" | "planPending">,
-  live?: LiveRunStatus,
-  local?: { streaming?: boolean; waiting?: boolean },
-): SessionState {
-  if (conversation.discardedAt) return "discarded"
-  if (conversation.resolvedAt) return "resolved"
-  if (local?.waiting || live === "waiting_for_approval" || conversation.planPending)
-    return "waiting"
-  if (local?.streaming || live === "running") return "working"
-  return "idle"
-}
-
 /** A pull request still open (a draft included) is a session waiting to be reviewed and merged. */
 export const hasOpenPr = (conversation: Pick<Conversation, "prs">) =>
   (conversation.prs ?? []).some(prIsLive)
@@ -326,14 +315,15 @@ export const hasOpenPr = (conversation: Pick<Conversation, "prs">) =>
 /**
  * Where a session stands as the project screen groups it: an idle session left with an open pull
  * request waits to be reviewed and merged (`prTick`), unless its checks are still running, which is
- * work it has left to do.
+ * work it has left to do. `subagents` is how many the host still runs for it (`useLiveSubagents`).
  */
 export function sessionGroup(
   conversation: Pick<Conversation, "resolvedAt" | "discardedAt" | "planPending" | "prs">,
   live?: LiveRunStatus,
   local?: { streaming?: boolean; waiting?: boolean },
+  subagents?: number,
 ): { state: SessionState; prTick: boolean } {
-  const state = sessionState(conversation, live, local)
+  const state = sessionState({ ...conversation, live, local, subagents })
   if (state !== "idle" || !hasOpenPr(conversation)) return { state, prTick: false }
   return prChecksPending(conversation.prs)
     ? { state: "working", prTick: false }

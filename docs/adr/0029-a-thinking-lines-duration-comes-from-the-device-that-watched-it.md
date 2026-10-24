@@ -1,3 +1,7 @@
+---
+status: superseded by ADR-0038
+---
+
 # A thinking line's duration is shown only where the device watched it think
 
 A reply now carries the model's thinking above it: a line that reads "Thought for 12s", streams open

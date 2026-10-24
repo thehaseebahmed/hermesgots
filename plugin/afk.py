@@ -28,7 +28,10 @@ runs.
 
 A project that named no workflow works its task in one run: nothing is snapshotted, so the session
 records no pipeline and its run is the task's whole work. One that named a workflow runs its stages
-instead, under the snapshot of it written as the task starts (`_snapshot`, ADR 0027).
+instead, under the snapshot of it written as the task starts (`_snapshot`, ADR 0027). A stage's run
+can leave subagents still writing the worktree its gate reads, so a stage moves on only once its run
+has ended and every subagent that run started has ended too — the gate's end is held from the store's
+own reading and looked at again while it waits (`_held_for_subagents`, `settle_held`, ADR 0038).
 
 A project that can't be left to work says why instead of offering a switch: it has no GitHub
 repository to read tasks from, the host has no GitHub account to read or claim one with, or the
@@ -49,7 +52,18 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple
 
-from . import chats, github, pipeline, prompt_builder, sessions, ship, tasks, workflows
+from . import (
+    chats,
+    delegation,
+    events,
+    github,
+    pipeline,
+    prompt_builder,
+    sessions,
+    ship,
+    tasks,
+    workflows,
+)
 from .store import connect, db_path, get_setting, put_setting
 
 logger = logging.getLogger(__name__)
@@ -100,9 +114,23 @@ STALL_SECONDS = 300
 DEFAULT_STALL = "AFK stopped before the task was finished."
 FAILED_RUN = "The run failed."
 INTERRUPTED_RUN = "The run was interrupted."
+# How long the sweep waits while a stage is held for the subagents its run started. The hold is
+# settled from the plugin's own store, not GitHub, so it is looked at on a shorter clock than a
+# sweep: a gate must move on as soon as the tree it reads has stopped being written.
+HOLD_SECONDS = 5.0
+
+
+class StageHold(NamedTuple):
+    """A stage whose run ended while the subagents it started still work: its home, and its outcome."""
+
+    home: Path
+    outcome: sessions.Outcome
+
 
 _loop: Optional[asyncio.AbstractEventLoop] = None
 _event: Optional["asyncio.Event"] = None
+# In memory, like ``_loop``: a restart leaves the task where the stall clock finds it.
+_held: Dict[str, StageHold] = {}
 
 
 class Refused(Exception):
@@ -635,6 +663,30 @@ def holding_project(hermes_home: Path, session_id: str) -> Optional[str]:
     return hold.project_id if hold is not None else None
 
 
+def staged_session(hermes_home: Path, session_id: str) -> bool:
+    """Whether this session is working a stage of a task's workflow, so nothing may wake it.
+
+    A stage keeps its one run: the stage it moves to is posted on the same session by the gate that
+    judged the run before it, so a turn posted by a subagent's completion would be a second run on
+    that session, racing the work it is meant to be reading (#469). AFK's own reading is what says
+    so — the session's record, found the way a hook finds it (a compressed session walks up to the
+    one that has the record), carrying a workflow snapshot (`pipeline.read`, the same read
+    ``after_run`` decides a stage by). A task with no workflow snapshots none and is an ordinary
+    conversation here.
+
+    A store this can't read answers True: a wake is a turn nobody asked for.
+    """
+    path = db_path(hermes_home)
+    if not session_id or not path.exists():
+        return False
+    try:
+        record = sessions.record_for(path, hermes_home, session_id)
+    except (sqlite3.Error, OSError):
+        logger.warning("memento: couldn't read %s's workflow", session_id, exc_info=True)
+        return True
+    return pipeline.read((record or {}).get("pipeline")) is not None
+
+
 def stalled(
     hermes_home: Path, live: Optional[Dict[str, str]] = None
 ) -> Dict[str, Dict[str, Any]]:
@@ -643,14 +695,18 @@ def stalled(
     A hold whose session has no run in flight is one the user has to look at: its run failed, or the
     host restarted while it worked and the session was adopted rather than restarted or doubled.
     Either way it is where waiting sessions appear, naming the project like the rest, and never
-    beside a live run — a run in flight is what working it looks like. Each hold is judged on its
-    own clock, so the one claimed a moment ago isn't reported because the one beside it is old.
+    beside a live run — a run in flight is what working it looks like — nor while a stage waits for
+    the subagents its run started, since those are working it and the stage's own gate moves on
+    without the user (``_held_for_subagents``). Each hold is judged on its own clock, so the one
+    claimed a moment ago isn't reported because the one beside it is old.
     """
     found: Dict[str, Dict[str, Any]] = {}
     now = time.time()
     waiting: List[Hold] = []
     for hold in _holds(hermes_home):
         if not hold.session_id or (live and hold.session_id in live):
+            continue
+        if hold.session_id in _held:
             continue
         if (
             not hold.stalled
@@ -1093,22 +1149,8 @@ async def _post(adapter: Any, hermes_home: Path, body: Dict[str, Any]) -> Dict[s
         link.profile_name(hermes_home),
         "/v1/runs",
         body,
-        authorization=_authorization(hermes_home),
+        authorization=link.authorization(hermes_home),
     )
-
-
-def _authorization(hermes_home: Path) -> Optional[str]:
-    """The key this home's runs are posted with, or None to let ``outbox`` resolve its own.
-
-    Read from the home's own ``.env``, the same read ``link.record`` publishes a bot's key from,
-    rather than through Hermes's credential helper: AFK runs from the gateway's loop, where no
-    request's profile scope is set, so the helper would answer the launch profile's key for every
-    home a multiplexed process serves.
-    """
-    from . import link
-
-    key = link.env_value(hermes_home, "API_SERVER_KEY")
-    return f"Bearer {key}" if key else None
 
 
 def enabled_projects(hermes_home: Path) -> List[str]:
@@ -1209,14 +1251,23 @@ async def run(adapter: Any) -> None:
     global _loop, _event
     _loop = asyncio.get_running_loop()
     _event = asyncio.Event()
+    swept = 0.0
 
     while True:
+        now = time.monotonic()
+        if _held:
+            try:
+                await settle_held(adapter)
+            except Exception:
+                logger.warning("memento: AFK couldn't settle a held stage", exc_info=True)
+        if not _held or now - swept >= SWEEP_SECONDS:
+            swept = now
+            try:
+                await sweep_homes(adapter)
+            except Exception:
+                logger.warning("memento: AFK's sweep failed", exc_info=True)
         try:
-            await sweep_homes(adapter)
-        except Exception:
-            logger.warning("memento: AFK's sweep failed", exc_info=True)
-        try:
-            await asyncio.wait_for(_event.wait(), SWEEP_SECONDS)
+            await asyncio.wait_for(_event.wait(), HOLD_SECONDS if _held else SWEEP_SECONDS)
         except asyncio.TimeoutError:
             pass
         _event.clear()
@@ -1224,13 +1275,7 @@ async def run(adapter: Any) -> None:
 
 def wake() -> None:
     """Asks the sweep to look now — a project was turned on, or a session finished — from any thread."""
-    loop, event = _loop, _event
-    if loop is None or event is None:
-        return
-    try:
-        loop.call_soon_threadsafe(event.set)
-    except RuntimeError:
-        pass
+    events.poke(_loop, _event)
 
 
 def after_run(
@@ -1294,7 +1339,12 @@ def _stage_end(
     stage whose gate already passed: a gate that failed stalls the task in the stage it stopped in,
     and nothing about the tree can change that. The stage is written before anything is started, so
     a run that can't be posted leaves a record that says where the task stands.
+
+    A run is only half of what a stage waits for: one that dispatched a subagent leaves it writing
+    the tree the gate reads, so the end is held until every one of them has ended too (#469).
     """
+    if _held_for_subagents(hermes_home, record, stopped):
+        return
     worktree: Iterable[Dict[str, Any]] = ()
     in_gate = stopped.finished and pipeline.measured(staged)
     if in_gate and pipeline.gate_verdict(staged) is None:
@@ -1328,6 +1378,77 @@ def _stage_end(
     # The record as the task stands now, not as the run that ended left it: the next brief reads the
     # stage off it, and handing it the stage behind would brief the run for work already done.
     _start_stage(hermes_home, {**record, "pipeline": moved})
+
+
+def _held_for_subagents(
+    hermes_home: Path, record: Dict[str, Any], stopped: sessions.Outcome
+) -> bool:
+    """Whether the stage's run left subagents at work, holding its gate until they end.
+
+    A subagent counts as at work while the session that dispatched it has a run in flight — the rule
+    ``delegation.children`` reads every card by — so a row a host left open with no run behind it
+    (the host died with the child) reads stopped, and stopped is ended: it can't hold a stage for
+    ever. What the hold keeps is the session, its home and how its run ended, because that run is
+    what is over: the look that finds the last subagent ended (``settle_held``) takes the stage on
+    with the outcome its own run had, rather than with a later reading of it.
+    """
+    session_id = str(record.get("session_id") or "")
+    if not session_id:
+        return False
+    try:
+        live = sessions.live_runs(getattr(sessions, "adapter", None), None, hermes_home)[0]
+        working = any(
+            child["status"] == "running"
+            for child in delegation.children(hermes_home, session_id, set(live))
+        )
+    except Exception:
+        logger.debug("memento: couldn't read %s's subagents", session_id, exc_info=True)
+        return False
+    if not working:
+        _held.pop(session_id, None)
+        return False
+    _held[session_id] = StageHold(home=Path(hermes_home), outcome=stopped)
+    return True
+
+
+async def settle_held(adapter: Any) -> List[str]:
+    """Moves on every held stage whose subagents have all ended, on each home this process serves.
+
+    A stage's run ends before the subagents it started do, so its gate is settled here instead of by
+    a hook: from the store's own reading, on the loop's short clock while a hold is pending
+    (``HOLD_SECONDS``) — never at a sweep's pace, because a sweep reads GitHub. Answers the sessions
+    it moved on.
+    """
+    from . import link
+
+    moved: List[str] = []
+    for home in link.served_homes(adapter):
+        try:
+            moved += await asyncio.to_thread(_settle_home, home)
+        except Exception:
+            logger.warning("memento: AFK couldn't settle a held stage at %s", home, exc_info=True)
+    return moved
+
+
+def _settle_home(hermes_home: Path) -> List[str]:
+    """Looks again at each stage this home holds for its subagents; names the ones that moved on."""
+    moved: List[str] = []
+    path = db_path(hermes_home)
+    for session_id in list(_held):
+        held = _held[session_id]
+        if Path(held.home) != Path(hermes_home):
+            continue
+        record = sessions.record_for(path, hermes_home, session_id)
+        project_id = holding_project(hermes_home, session_id)
+        staged = pipeline.read((record or {}).get("pipeline"))
+        if not record or project_id is None or staged is None:
+            # The task moved on, or its session is gone: nothing is waiting on this stage.
+            _held.pop(session_id, None)
+            continue
+        _stage_end(hermes_home, path, project_id, record, staged, held.outcome)
+        if session_id not in _held:
+            moved.append(session_id)
+    return moved
 
 
 def _start_stage(hermes_home: Path, record: Dict[str, Any]) -> None:

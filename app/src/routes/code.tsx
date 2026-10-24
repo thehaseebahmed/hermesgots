@@ -34,7 +34,13 @@ import { readProjects, useAllProjects } from "@/lib/projects"
 import { quietly } from "@/lib/report"
 import { createSignal } from "@/lib/store"
 import { cn } from "@/lib/utils"
-import { reasonText, useAllLiveRuns, useWaiting, type WaitingReason } from "@/lib/waiting"
+import {
+  reasonText,
+  useAllLiveRuns,
+  useLiveSubagents,
+  useWaiting,
+  type WaitingReason,
+} from "@/lib/waiting"
 import { sessionGroup, type SessionState } from "@/lib/workspace"
 
 const DAY_MS = 86_400_000
@@ -101,6 +107,7 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
   const { root } = useNav()
   const listed = useProjectSessions()
   const live = useAllLiveRuns()
+  const subagents = useLiveSubagents()
   const waits = useWaiting()
   const lists = useAllProjects()
   const changes = useAnyChange("projects")
@@ -148,10 +155,15 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
         c,
         key,
         project: projects.get(key)?.project,
-        ...sessionGroup(c, live[c.hermesSessionId], {
-          ...listed?.local[c.id],
-          waiting: listed?.local[c.id]?.waiting || serverWaits(c),
-        }),
+        ...sessionGroup(
+          c,
+          live[c.hermesSessionId],
+          {
+            ...listed?.local[c.id],
+            waiting: listed?.local[c.id]?.waiting || serverWaits(c),
+          },
+          subagents[c.hermesSessionId],
+        ),
       },
     ]
   })

@@ -346,10 +346,6 @@ function helpers(page) {
       await composer.fill(text)
       await composer.press("Enter")
     },
-    /**
-     * The chat's newest message when it's a reply: what the app has written for it so far, and how
-     * long its text is.
-     */
     lastReply(chatId) {
       return page.evaluate(async (id) => {
         const { db } = await import("/src/lib/db.ts")
@@ -362,6 +358,12 @@ function helpers(page) {
               length: last.content.length,
               content: last.content,
               reasoning: last.reasoning ?? "",
+              // A reply's thinking in runs, each with the span this device measured for it.
+              runs: (last.reasoningRuns ?? []).map((run) => ({
+                text: run.text,
+                afterToolId: run.afterToolId ?? null,
+                spanMs: run.spanMs ?? null,
+              })),
               tools: last.tools?.length ?? 0,
             }
           : null

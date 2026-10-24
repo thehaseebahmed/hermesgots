@@ -138,7 +138,7 @@ plugin/tests -t .`).
 
 ## Risks
 
-- **The hold migration** is where an existing host breaks: a project row written before v39 must
+- **The hold migration** is where an existing host breaks: a project row written before v40 must
   become exactly one hold, or a working claim is lost or doubled — pinned by a test that migrates a
   populated row.
 - **The sweep ordering across projects** is new: the pass now sorts the whole bot's ready tasks, so

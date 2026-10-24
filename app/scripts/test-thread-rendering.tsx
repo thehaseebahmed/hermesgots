@@ -13,7 +13,18 @@ import { AgentsContext, DELEGATE_TOOL } from "@/lib/agents"
 import { db, type Message, type Profile } from "@/lib/db"
 import type { HermesConfig } from "@/lib/hermes"
 import { ChatPage } from "@/routes/chat"
-import { click, connection, findAll, json, mount, seedSettings, settle } from "./component-kit.tsx"
+import {
+  click,
+  connection,
+  expanded,
+  findAll,
+  json,
+  lineLabel,
+  mount,
+  seedSettings,
+  settle,
+  thinkingLines,
+} from "./component-kit.tsx"
 
 const server: HermesConfig = connection("thread")
 
@@ -274,7 +285,7 @@ test("a delegated agent's sub-thread draws the same thread", async () => {
         server,
       }}
     >
-      <AgentCards tool={tool} />
+      <AgentCards tool={tool} ended />
     </AgentsContext.Provider>,
     async () => {
       const card = document.querySelector("button")
@@ -284,6 +295,58 @@ test("a delegated agent's sub-thread draws the same thread", async () => {
       const sub = drawn()
       assert.equal(sub.length, 2, "the agent's own turns, read from its transcript")
       assert.deepEqual(sub, chat, "drawn exactly as the chat draws them")
+    },
+  )
+})
+
+test("a delegated agent's sub-thread draws its reply's thinking", async () => {
+  const goal = "Review the parser for the reader"
+  const thinking = "Read the scan before its blocks."
+  host([
+    { id: 1, role: "user", content: ASK, timestamp: 1 },
+    { id: 2, role: "assistant", content: REPLY, reasoning: thinking, timestamp: 2 },
+  ])
+  const tool = {
+    toolCallId: "call-1",
+    tool: DELEGATE_TOOL,
+    label: goal,
+    status: "completed" as const,
+    startedAt: 1_000,
+    endedAt: 2_000,
+  }
+  await mount(
+    <AgentsContext.Provider
+      value={{
+        agents: [
+          {
+            // Its own agent, so this read is not the finished transcript an earlier test kept.
+            id: "agent-think",
+            goal,
+            model: "test/model",
+            startedAt: 1,
+            endedAt: 2,
+            toolCalls: 1,
+            status: "done",
+          },
+        ],
+        server,
+      }}
+    >
+      <AgentCards tool={tool} />
+    </AgentsContext.Provider>,
+    async () => {
+      const card = document.querySelector("button")
+      assert.ok(card, "the delegation is a card in the thread")
+      await click(card)
+      await rendered()
+      const lines = thinkingLines()
+      assert.equal(lines.length, 1, "the agent's own reply keeps its thinking as a row")
+      assert.equal(
+        lineLabel(lines[0]),
+        "Thought it through",
+        "read back from the transcript, so no number was measured here",
+      )
+      assert.equal(expanded(lines[0]), "false", "and folded over its answer, as a chat's row is")
     },
   )
 })

@@ -1770,3 +1770,133 @@ including one that names no skill (#336 asks for exactly that), and the guard's 
 brief follows from ADR 0020 making the brief the stage's behaviour contract rather than a place for
 AFK's invariant.
 
+---
+
+# Deferred fixes from the review passes on a reply's thinking in runs
+
+`feat(chat): draw thinking in a coding session's thread` (#477, on the branch that carries #474's runs)
+went through a four-agent `/simplify-code`, a comment pass and a two-axis `/code-review`. Everything
+but this entry is applied on the branch: the order two runs land in after back-to-back calls, the open
+gate over a run whose span says it ended, the watcher's shape and lifetime, a folded row's tab order,
+the follow's arming and its writes, and each test's tier (ADR 0019).
+
+## Risky
+
+### 1. The thinking row follows its own end with a scroll engine of its own
+
+`thinking-line.tsx` scrolls the thread itself while a run is open: it lands the row's end on open
+(`scrollIntoView`, smooth unless motion is asked against), arms a `ResizeObserver` on the row, and
+takes a wheel, key or touch move up as the reader leaving — then keeps writing `scrollIntoView` as the
+run's words arrive. `MessageScrollerProvider` (`message-scroller.tsx`) runs its own `autoScroll` over
+the same box, from measured anchoring, with its own notion of whether the reader is at the end.
+
+- Cost: two writers on one scroll box, each reasoning about the same state without seeing the other.
+  The row's engine only hears the reader through input events, so a scrollbar drag, a momentum stop
+  after a fling, or a keyboard scroll on another element leaves the follow armed and fighting the
+  provider's anchoring; and every new way the thread moves itself is another thing the two can
+  disagree about.
+- Suggested fix: give the provider the one answer to "is the reader at the end" and have the row ask
+  it — the follow becomes "keep this row's end in view while the provider says the reader is at the
+  end, and the row's own `aria-expanded` says it is open" — with the agent pop-up's transcript wired
+  through the same scroller primitive so a sub-thread's rows behave as a chat's do.
+- Why it is risky: it is a rewrite of the thread's scroll ownership. The blast radius is outside this
+  diff — `message-scroller.tsx`, `popup.tsx` (`PopupContent` wraps its children in a plain
+  `overflow-y-auto` `Scroll` box) and `agent-card.tsx`'s `AgentView` — and a wrong answer there moves
+  every thread in the app, not one row's follow.
+- Why it is not applied here: the row-scoped follow is the shape #476 specifies, and the flow proves
+  it end to end (the tail stays in view while the run streams; a wheel up stops it; a tap re-arms it).
+  Detecting the reader's own scrolling from `scrollTop` was tried and measured against the provider's
+  own anchor scrolls, which move the box without the reader touching it: it fired on them and stopped
+  the follow the moment the thread anchored itself. The input listeners are what survived that test.
+
+The safe half of the same finding is filed rather than applied: `scroller()` walks ancestors asking
+`getComputedStyle` for an `overflow-y` that scrolls, which is a layout read per ancestor per open. A
+shared attribute — the thread already has `data-slot=message-scroller-viewport`, and a pop-up's
+scrolling box is `Scroll` in `popup.tsx` — would let it match attributes only. It is not applied here
+because the pop-up's box is shared UI's, so marking it is a change to every pop-up in the app for one
+row's sake, and nothing in this diff can prove the agent sub-thread's follow still lands without a
+browser.
+
+---
+
+Found by the `/simplify-code` and `/code-review` passes on this branch. Both flagged the second scroll
+writer; the simplify pass found the attribute walk as a cheaper subject for it.
+
+---
+
+# Deferred fixes from the review passes on cards filling the chat's pane
+
+Three passes ran over this branch — the four parallel simplify reviewers, Comment Sicko over the
+diff, and the two-axis `code-review` (standards and spec). Everything they found that the branch
+introduced is applied on it: the 768px box shared as `COLUMN_BOX` beside the column it holds,
+`CARD_BASE` behind every card's surface (the approval's ring included), the footer's lines as the
+list that decides whether the footer is drawn, the slot's dead wrappers gone and the slot named for
+the slot, the flow's three widths in one walk — 1440px now asserting the card stops dead at the
+768px cap the reading column's box carries (ADR 0047) — the comment cuts, the e2e skill's pane
+arithmetic corrected against what the flow
+measures, the `FLAT_CARD` rename the `ThreadCard` collision needed, `layout.ts`'s row in AGENTS.md's
+map, and the ADR, spec and audit worded to what was built. The entry below is what remains; the
+rejections follow it.
+
+## Risky
+
+### 1. The registry test reads the CLI's source as text
+
+`app/scripts/test-e2e-registry.mjs` finds the flow table with `cli.indexOf("const FLOWS = {")`,
+slices to the next closing brace and matches keys out of that slice — the registry is parsed out of
+source because importing `e2e/cli.mjs` would run it: the CLI reads `process.argv` at module scope
+and tears its servers down in a top-level `finally`.
+
+- Cost: renaming the table, its braces or its indentation empties the registry, and the failure
+  reads as an audit mismatch rather than a rename; every new check against the table re-implements
+  the same slice, and the apology for doing so lives in a comment rather than a type.
+- Suggested fix: move `FLOWS` into an importable module the CLI and the test both read, with the
+  CLI's argv handling and its teardown behind an entry point.
+- Why it is not applied here: the parsing predates this branch — #497 changed only the `STAYS`
+  constant beside it — and the extraction rewrites the sweep's entry point, which is e2e
+  infrastructure rather than this ticket's layout.
+
+## Not entries
+
+Declined with the evidence, each for what it is:
+
+- **`STAYS = 10` and the test title's "the ten"** — a pinned policy, not a restatement: the audit's
+  own counts are already checked against its rows, so this constant is the second key to the same
+  lock, and deriving it from the audit would assert nothing.
+- **The footer's gate** (`footerLines`, the filter, the wrapper) — an empty row would still add two
+  of the message's `gap-3`s around itself; the gate is that constraint, stated in the one line
+  beside it. The suggested alternative needs `StatusLine` and `Stats` to grow a `className` prop for
+  no pixel change.
+- **`[data-slot="composer-slot"] [data-slot="card"]` measures whatever card is in the slot** — the
+  slot's ternary renders one card at a time, and the flow waits on the waiting Question's own button
+  before it measures, so any other card fails that wait first.
+- **The flow pins 16, 736, 768 and the slot's gutters as literals** — a test that read them from
+  the source would follow a regression instead of failing on it.
+- **`cn` and template literals side by side** — `chat.tsx` and `composer.tsx` never import `cn`;
+  each file matches its own style.
+- **`ExchangeCard`** — the name predates this branch; the diff changed its class only.
+- **The Question's interior stretch** — `Card` lays its children out in flex and grid, which stretch
+  across whatever width the card has; the cap changed the width alone, and the spec's revision note
+  scopes the flow to card-against-box and text-against-column.
+
+## Risky, pre-existing
+
+### 2. The openui flow asserts a streamed title without waiting for the stream
+
+`app/scripts/e2e/openui.mjs` (a stay, #389) waits for the interface card to appear and then asserts
+the title's exact text, but the mock streams the title word by word, so the assert can read a
+prefix of it — this branch saw one red run where `Quarterly` was read against `Quarterly sales`,
+and an immediate re-run passed 8/8.
+
+- Cost: a false red on a healthy branch; someone reruns or, worse, investigates a layout regression
+  that is not there.
+- Suggested fix: wait for the full title string the same way the flow already waits for the card
+  (an `until` on the exact text), so the assert reads what the stream settled on.
+- Why it is not applied here: the race is in #389's own wait contract, not in anything this branch
+  wrote; rewriting a stay's waits belongs with the flow's owner, and this branch only observed the
+  flake once while re-taking shots.
+
+---
+
+Found by the review passes on this branch (simplify, no-comments, code-review). All that the branch
+introduced is fixed on the branch; the pull request does not wait on the entry.

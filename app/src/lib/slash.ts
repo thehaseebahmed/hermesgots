@@ -1,4 +1,4 @@
-export type LocalCommand = "new" | "thread" | "settings"
+export type LocalCommand = "new" | "thread" | "settings" | "cheatsheet"
 /** The command that starts a chat on purpose: `/thread` where threads are a thing, `/new` where not. */
 export type StartCommand = Extract<LocalCommand, "new" | "thread">
 /** Commands that carry the message after them, while a reply runs. */
@@ -24,6 +24,7 @@ export function localCommands(threads: boolean): SlashItem[] {
       description: threads ? "Start a thread" : "Start a new chat",
     },
     { kind: "command", name: "settings", description: "Open settings" },
+    { kind: "command", name: "cheatsheet", description: "See the keyboard shortcuts" },
   ]
 }
 

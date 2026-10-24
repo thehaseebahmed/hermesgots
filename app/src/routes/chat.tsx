@@ -23,6 +23,7 @@ import {
   SAFETY_MS,
   SEND_CAUGHT_UP_MS,
 } from "@/lib/freshness"
+import { COLUMN_BOX } from "@/lib/layout"
 import { quietly } from "@/lib/report"
 import { threadCount, threadsLine } from "@/lib/bot-chrome"
 import { repoCap, sessionSubtitle } from "@/lib/repo-line"
@@ -37,6 +38,7 @@ import { DayHeading } from "@/components/chat/day-heading"
 import { MovedMarker } from "@/components/chat/moved-marker"
 import { ThreadCard } from "@/components/chat/thread-card"
 import { prLabel } from "@/components/chat/pr-look"
+import { Cheatsheet } from "@/components/chat/cheatsheet"
 import { PipelinePill, PipelineSheet } from "@/components/chat/pipeline"
 import { PrPill } from "@/components/chat/pr-pill"
 import { LibraryPill } from "@/components/chat/library-pill"
@@ -110,6 +112,7 @@ import {
   ensureMainThread,
   getActiveProfile,
   getMessages,
+  getSettings,
   mainThreadId,
   mainThreadProfile,
   setActiveProfile,
@@ -316,6 +319,10 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
   // A new chat's pick, held until its first message makes the chat; it follows the chosen bot.
   const [pendingModel, setPendingModel] = useState<{ profileId?: string; choice?: ModelChoice }>()
   const [todosOpen, setTodosOpen] = useState(false)
+  const [cheatsheetOpen, setCheatsheetOpen] = useState(false)
+  const [cheatsheetNavShortcuts, setCheatsheetNavShortcuts] = useState(
+    DEFAULT_SETTINGS.navShortcuts,
+  )
   const [pipelineOpen, setPipelineOpen] = useState(false)
   const [outputsOpen, setOutputsOpen] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
@@ -572,8 +579,11 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
     Boolean(delegations?.some((t) => t.status === "running")),
   )
   const agentsSource = useMemo(
-    () => (agents && baseUrl && apiKey ? { agents, server: { baseUrl, apiKey } } : null),
-    [agents, baseUrl, apiKey],
+    () =>
+      agents && baseUrl && apiKey
+        ? { agents, server: { baseUrl, apiKey }, sessionId: conversation?.hermesSessionId }
+        : null,
+    [agents, baseUrl, apiKey, conversation?.hermesSessionId],
   )
   // Only persistent /v1/runs work survives losing the app's connection; legacy streams do not.
   useBreakReminderEligibility(
@@ -591,7 +601,11 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
   const streamOpen = useLive(profile)
   useEffect(() => (id ? watchChat(id) : undefined), [id])
   // The host's shared answer says at once when a run started elsewhere, which the timer would find
-  // only at its next round.
+  // only at its next round. Run-scoped on purpose: `reattachRun` only ever picks up a run of this
+  // session (`adoptRun` bails on `knownLiveRun`), so a chat whose turn has ended and whose subagents
+  // still work has nothing here to reattach — its work reads `working` from the state rule
+  // (`session-work.ts`), its results and wake turn land through the catch-up below, and the composer
+  // stays the user's.
   const hostRuns = useSessionRunning(
     tracked && baseUrl && apiKey ? { baseUrl, apiKey } : undefined,
     conversation?.hermesSessionId,
@@ -810,6 +824,14 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
     }
   }
 
+  const openCheatsheet = async () => {
+    const navShortcuts = await getSettings()
+      .then((settings) => settings.navShortcuts)
+      .catch(quietly("Reading the cheatsheet's navigation switch"))
+    setCheatsheetNavShortcuts(navShortcuts ?? DEFAULT_SETTINGS.navShortcuts)
+    setCheatsheetOpen(true)
+  }
+
   const mainChrome = Boolean(botThreads && isMain && profile)
   const actions = conversation && (
     <div className="flex items-center gap-2">
@@ -986,7 +1008,7 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
         <MessageScrollerProvider autoScroll defaultScrollPosition="end">
           <MessageScroller className="flex-1">
             <MessageScrollerViewport aria-label="Messages">
-              <MessageScrollerContent className="mx-auto w-full max-w-3xl gap-6 px-4 pt-32 pb-6">
+              <MessageScrollerContent className="w-full gap-6 px-4 pt-32 pb-6">
                 {conversation?.olderThan && (
                   <Button
                     variant="outline"
@@ -1037,7 +1059,6 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
                           message={message}
                           showStats
                           busy={busy}
-                          showThinking={!session}
                           blocks={draws.get(message.id)}
                         />
                       </MessageScrollerItem>
@@ -1068,7 +1089,11 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
         />
       )}
 
-      <div data-toast-above className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
+      <div
+        data-slot="composer-slot"
+        data-toast-above
+        className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4"
+      >
         {(stagedPipeline || todos.length > 0 || prs.length > 0 || outputs > 0) && (
           // One line, centred; wider than the screen it scrolls, from the first pill.
           <div className="-mx-3 flex [scrollbar-width:none] overflow-x-auto px-3 pb-2 sm:-mx-4 sm:px-4 [&::-webkit-scrollbar]:hidden">
@@ -1097,12 +1122,12 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
           </div>
         )}
         {!id && profile && !botThreads && (
-          <div className="mx-auto flex w-full max-w-3xl pb-2">
+          <div className={`${COLUMN_BOX} flex pb-2`}>
             <BotPicker profile={profile} />
           </div>
         )}
         {notice && provider && !noticeDismissed && (
-          <div className="mx-auto w-full max-w-3xl pb-2" data-toast-above>
+          <div className={`${COLUMN_BOX} pb-2`} data-toast-above>
             <LimitBanner
               notice={notice}
               onDismiss={() =>
@@ -1116,39 +1141,27 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
           </div>
         )}
         {session?.discardedAt ? (
-          <div className="mx-auto w-full max-w-3xl">
-            <DiscardedCard />
-          </div>
+          <DiscardedCard />
         ) : session?.resolvedAt ? (
-          <div className="mx-auto w-full max-w-3xl">
-            <ResolvedCard
-              onReopen={() => updateConversation(session.id, { resolvedAt: undefined })}
-            />
-          </div>
+          <ResolvedCard
+            onReopen={() => updateConversation(session.id, { resolvedAt: undefined })}
+          />
         ) : awaitingApproval ? (
-          <div className="mx-auto w-full max-w-3xl">
-            <ApprovalCard message={awaitingApproval} />
-          </div>
+          <ApprovalCard message={awaitingApproval} />
         ) : awaitingClarify ? (
-          <div className="mx-auto w-full max-w-3xl">
-            <QuestionCard key={awaitingClarify.clarify!.clarifyId} message={awaitingClarify} />
-          </div>
+          <QuestionCard key={awaitingClarify.clarify!.clarifyId} message={awaitingClarify} />
         ) : session?.blocked && !busy ? (
-          <div className="mx-auto w-full max-w-3xl">
-            <BlockedCard reason={session.blocked} />
-          </div>
+          <BlockedCard reason={session.blocked} />
         ) : session?.planPending && session.mode === "plan" && !busy ? (
-          <div className="mx-auto w-full max-w-3xl">
-            <PlanReadyCard
-              autoAvailable={tracked}
-              model={modelPill({ display: "block" })}
-              onApprove={async (mode) => {
-                await setSessionMode(session.id, mode)
-                await send(planApprovalMessage(session.planFile))
-              }}
-              onKeepPlanning={() => setSessionMode(session.id, "plan")}
-            />
-          </div>
+          <PlanReadyCard
+            autoAvailable={tracked}
+            model={modelPill({ display: "block" })}
+            onApprove={async (mode) => {
+              await setSessionMode(session.id, mode)
+              await send(planApprovalMessage(session.planFile))
+            }}
+            onKeepPlanning={() => setSessionMode(session.id, "plan")}
+          />
         ) : (
           <Composer
             // Sessions are swapped in place beside Code's list; each keeps its own text.
@@ -1178,11 +1191,22 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
             imagesAvailable={profile?.imageInput !== false}
             onStop={() => id && stopMessage(id)}
             main={Boolean(botThreads && isMain)}
-            onCommand={(command, message) =>
-              command === "thread"
-                ? startThread(message?.text ?? "", message?.attachments ?? [])
-                : root(command === "new" ? (mainPath ?? "/") : "/settings")
-            }
+            onCommand={(command, message) => {
+              switch (command) {
+                case "thread":
+                  return startThread(message?.text ?? "", message?.attachments ?? [])
+                case "new":
+                  return root(mainPath ?? "/")
+                case "settings":
+                  return root("/settings")
+                case "cheatsheet":
+                  return openCheatsheet()
+                default: {
+                  const unhandled: never = command
+                  return unhandled
+                }
+              }
+            }}
             connection={serverConfig(profile)}
             botName={profile?.name}
             dictationWords={profile?.vocabulary}
@@ -1234,6 +1258,11 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
         items={todos}
         progress={todoProgress}
         live={busy}
+      />
+      <Cheatsheet
+        open={cheatsheetOpen}
+        onOpenChange={setCheatsheetOpen}
+        navShortcuts={cheatsheetNavShortcuts}
       />
       {session && (
         <OutputsDrawer

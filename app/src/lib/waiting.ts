@@ -43,6 +43,8 @@ type Server = { baseUrl: string; apiKey: string }
 let answers = new Map<string, LiveRuns>()
 let found: Found = {}
 let running: Record<string, LiveRunStatus> = {}
+// The subagents each session still runs, merged across every bot's server like `running`.
+let subagents: Record<string, number> = {}
 let servers: Server[] = []
 const listeners = new Set<() => void>()
 let timer: number | undefined
@@ -55,6 +57,7 @@ function notify() {
     ...servers.map((server) => answers.get(connectionKey(server))?.waiting ?? {}),
   )
   running = Object.assign({}, ...[...answers.values()].map((answer) => answer.sessions))
+  subagents = Object.assign({}, ...[...answers.values()].map((answer) => answer.subagents))
   listeners.forEach((listener) => listener())
 }
 
@@ -151,6 +154,16 @@ export function useLiveRuns(profile: Server | undefined) {
 export function useAllLiveRuns() {
   useWaiting()
   return useSyncExternalStore(subscribe, () => running)
+}
+
+/**
+ * How many subagents each session still runs, by Hermes session id, from the same shared poll: a
+ * session whose turn has ended reads as working while one of them is, on every screen that draws a
+ * state. Needs a plugin that reports them; one that doesn't leaves every session as it was.
+ */
+export function useLiveSubagents(): Record<string, number> {
+  useWaiting()
+  return useSyncExternalStore(subscribe, () => subagents)
 }
 
 /** A session's run in flight on its server, from the shared poll's last answer. */

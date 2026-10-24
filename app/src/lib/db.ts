@@ -5,6 +5,7 @@ import { connectionKey } from "@/lib/connection"
 import type { Compaction, ModelChange, Move, ProviderUsage, Skill } from "@/lib/hermes"
 import type { SessionPipeline } from "@/lib/pipeline"
 import type { PromptEntry } from "@/lib/prompt-library"
+import type { ReasoningRun } from "@/lib/thinking"
 import { randomId } from "@/lib/utils"
 
 export type ThemePreference = "system" | "light" | "dark"
@@ -381,18 +382,47 @@ export interface Steer {
 /** `queued` is a user message waiting for the current reply to finish. */
 export type MessageStatus = "triaging" | "queued" | "streaming" | "done" | "error" | "stopped"
 
+/** The subagent a result the thread draws stands for: how its message finds its sub-thread. */
+export interface SubagentRef {
+  /** The delegation Hermes dispatched it under, off the notification's own header. */
+  delegationId?: string
+  /**
+   * Core's own ids for the subagents that finished (`sa-<task>-<hex>`), where the transcript names
+   * them. They never equal a plugin agent's `id` — that is the child's *session* id — so they are
+   * carried as what the call said, never matched on: the goal below is the join.
+   */
+  ids: string[]
+  /** The goals they were given: how the chat's agent list matches a result to its card. */
+  goals: string[]
+}
+
 export interface Message {
   id: string
   conversationId: string
   role: "user" | "assistant"
   content: string
   attachments?: Attachment[]
+  /**
+   * The pre-runs shape of a reply's thinking: one string for the whole turn. Nothing writes it any
+   * more — `chat.ts` and `history.ts` fill `reasoningRuns`, and a row that still carries this one is
+   * folded into a single run at the top when it is read (`runsOf` in `thinking.ts`).
+   */
   reasoning?: string
+  /**
+   * A reply's thinking, in runs: one per contiguous stretch between tool calls, anchored to the call
+   * that broke it. Each run keeps the span this device watched it think, on this device only.
+   */
+  reasoningRuns?: ReasoningRun[]
   tools?: ToolEvent[]
   approval?: ApprovalRequest
   clarify?: ClarifyRequest
   /** A reply's steers, in order. */
   steers?: Steer[]
+  /**
+   * Set on a message a subagent's finished work drew into the thread, never on a reply: it draws as
+   * the bot's own message, and this is the subagent whose sub-thread a tap on it opens.
+   */
+  subagent?: SubagentRef
   status: MessageStatus
   /** Latest `hermes.status` text while streaming, or the error text. */
   statusText?: string
@@ -792,8 +822,24 @@ db.version(20).upgrade((tx) =>
     .modify({ main: true }),
 )
 
-// v21: the account's prompts, kept where the bots are and synced as a document of their own.
-db.version(21).stores({ prompts: "id" })
+// v21: a reply's thinking is kept in runs, one per stretch between tool calls, so the thread can
+// draw each where it happened. A row from before runs kept it in one string: it is folded into a
+// single run at the top, and the old key stays beside it — the read fold is what makes the shape
+// change, this pass only spares a device the work for rows it already has.
+db.version(21).upgrade((tx) =>
+  tx
+    .table("messages")
+    .filter(
+      (message: Record<string, unknown>) =>
+        typeof message.reasoning === "string" && !message.reasoningRuns,
+    )
+    .modify((message: Record<string, unknown>) => {
+      message.reasoningRuns = [{ text: message.reasoning as string }]
+    }),
+)
+
+// v22: the account's prompts, kept where the bots are and synced as a document of their own.
+db.version(22).stores({ prompts: "id" })
 
 db.on("populate", (tx) => seedProfile(tx))
 

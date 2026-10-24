@@ -36,7 +36,7 @@ const FLOWS = {
   "thinking-line": {
     script: "e2e/thinking-line.mjs",
     about:
-      "A turn watched thinking: the working line before any reasoning, the line open and the working line gone as it streams, folded at the first answer token, and a reload reading Thought",
+      "A turn whose thinking a tool call breaks: the working line first, then one open row per run either side of the call, both folded at the answer over the span each run measured, and a reload reading the same rows in the same places; then a long run that lands on its newest words, follows them until the reader's wheel stops it, and draws its cap with a fade and a Show more at two widths",
   },
   "slash-skills": {
     script: "e2e/slash-skills.mjs",
@@ -154,6 +154,11 @@ const FLOWS = {
     script: "e2e/delegation-model.mjs",
     about:
       "A bot's subagent model is recorded as its host's delegation model, cleared back to the bot's own",
+  },
+  "question-during-delegation": {
+    script: "e2e/question-during-delegation.mjs",
+    about:
+      "A question replaces the composer while the subagent a turn dispatched still runs, then the result lands as the bot's message and the wake turn streams",
   },
   mcps: {
     script: "e2e/mcps.mjs",
@@ -358,6 +363,11 @@ const FLOWS = {
     extra: { TRIAGE_NEW_MOCK_URL: "triage-new", TRIAGE_THREAD_MOCK_URL: "triage-thread" },
     about:
       "A bot opens Main, its threads are cards where they began, /thread with text opens a thread, and triage's answers read as a card with Undo or a Moved marker",
+  },
+  "card-widths": {
+    script: "e2e/card-widths.mjs",
+    about:
+      "A chat's subagent card and waiting Question fill their pane with its gutter at 390 and 1024px and stop dead at the reading column's 768px box when the pane is wider, centred inside it, while message text keeps the 736px column the card then frames",
   },
   submission: {
     script: "regression-submission.mjs",

@@ -12,25 +12,25 @@ reason the change can fail — from ADR
 what the tiers are along with `AGENTS.md`'s Testing paragraph. This page records only which one
 each flow lands in: **stay** (end-to-end), **component**, **plugin** (the plugin's own Python
 suite), or **delete** (a duplicate another flow already asserts). The end-to-end skill points here
-once it is rewritten for the ten (#317). The counts describe the registry at this commit; the
+once it is rewritten for the stays (#317). The counts describe the registry at this commit; the
 ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
 
-The registry in `app/scripts/e2e/cli.mjs` holds **68 keys**, and every one of them has a row
-below. `pnpm e2e list` prints the same 68 keys, and the rows here are grouped by the ticket that
+The registry in `app/scripts/e2e/cli.mjs` holds **70 keys**, and every one of them has a row
+below. `pnpm e2e list` prints the same 70 keys, and the rows here are grouped by the ticket that
 takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
 | --- | --- |
-| stay | 10 |
+| stay | 12 |
 | component | 53 |
 | plugin | 2 |
 | delete | 3 |
-| **total** | **68** |
+| **total** | **70** |
 
-Of those 68, 62 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
-reuses `todos.mjs`, so 61 distinct files there) and 6 point at the older
+Of those 70, 64 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
+reuses `todos.mjs`, so 63 distinct files there) and 6 point at the older
 `app/scripts/regression-*.mjs`.
 
 #297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**.
@@ -39,42 +39,44 @@ Two things in that arithmetic did not hold, and both are checkable:
 - Its clauses name **59** keys — 53 pointing at `app/scripts/e2e/` and 6 at the older
   `regression-*.mjs` — and its sixtieth is `todos-legacy` counted a second time, as "one registry
   key reusing another's script" rather than as the 53rd of the first group, which it already is.
-  Today's 61 keys under `app/scripts/e2e/`, less the eight that arrived since, are those 53.
+  Today's 63 keys under `app/scripts/e2e/`, less the ten that arrived since, are those 53.
 - It left out goal mode's two keys, `goal-wizard` and `goal-pill`, which the registry still held
   when the plan was written: the commit before they left, `8a4e842^` (#282's `1b98896`, merged
   before the plan), carries 61 keys. Both went with goal mode (#296), so that omission costs
   nothing today.
 
-Eight keys have arrived since: five are components by the same rule — `delegation-model` (#318),
-`afk-skills` (#327), `afk-stage` (#328), `pipeline-pill` (#330) and `afk-prompt` (#359) — and two
+Eleven keys have arrived since: five are components by the same rule — `delegation-model` (#318),
+`afk-skills` (#327), `afk-stage` (#328), `pipeline-pill` (#330) and `afk-prompt` (#359) — and five
 are stays, for what no lower tier can watch: `thinking-line` (#368), the app's line following a
-host's own reasoning as it arrives, and `openui` (#389), an interface's geometry at two widths and
-a scroll offset a patch must not move. The eighth, `bot-threads` (#422), is a component by the same
-rule as the five: every rule it walks — a card's place in Main, `/thread` with text, the marker a
-moved message keeps — is a component test's, and what the browser adds is that they compose. So the
-registry holds 59 + 8 = **67** keys, the component verdicts are the plan's 48 less the key it
-counted twice, plus those six: **53**, and the stays are the plan's 7 plus those two: **9**.
+host's own reasoning as it arrives; `openui` (#389), an interface's geometry at two widths and a
+scroll offset a patch must not move; `openui-map` (#490), a map's fitted geometry and the gesture
+contract deciding whether one finger scrolls the thread or pans the map, both things a DOM without
+layout has not got; `question-during-delegation` (#471), the question card taking the composer's
+place while a subagent still runs, with its result and its wake turn landing after it; and
+`card-widths` (#497), because a card's width and the offset of the column beside it are geometry,
+which no DOM without a layout engine has. The eleventh, `bot-threads` (#422), is a component by the
+same rule as the five: every rule it walks — a card's place in Main, `/thread` with text, the
+marker a moved message keeps — is a component test's, and what the browser adds is that they
+compose. So the registry holds 59 + 11 = **70** keys, the component verdicts are the plan's 48 less
+the key it counted twice, plus those six: **53**, and the stays are the plan's 7 plus those five:
+**12**.
 #299's own criterion still says 48; the 53 above
 supersedes it for the reason just given, and nothing else in the ticket's split moves.
-A ninth key has arrived since, with #490: `openui-map`, a stay, because a map's fitted geometry and
-the gesture contract deciding whether one finger scrolls the thread or pans the map are both things a
-DOM without layout has not got. So the registry today holds 59 + 9 = **68** keys and the stays are
-the plan's 7 plus three: **10**.
 
 `app/scripts/test-e2e-registry.mjs`, a unit test, holds the registry and this page to each other:
 a key with no row here, a row with no key, a verdict outside the four, a count in the table above
-that its rows don't add up to, or a stay beyond the ten fails the app's gates. A new flow is then
+that its rows don't add up to, or a stay beyond the eleven fails the app's gates. A new flow is then
 an argument this page has to carry, never a default (ADR 0019).
 
 Check any of it in one line:
 
 ```bash
-grep -c '^| `' docs/e2e-flow-audit.md                           # 68 rows, one per registry key
-grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 10
+grep -c '^| `' docs/e2e-flow-audit.md                           # 70 rows, one per registry key
+grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 12
 grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 53
 grep -c '^| `[a-z0-9-]*` | delete |' docs/e2e-flow-audit.md    # 3
 grep -c '^| `[a-z0-9-]*` | plugin |' docs/e2e-flow-audit.md    # 2
-cd app && pnpm -s e2e list | wc -l                             # 68 keys in the registry
+cd app && pnpm -s e2e list | wc -l                             # 70 keys in the registry
 git show 8a4e842^:app/scripts/e2e/cli.mjs |
   sed -n '/^const FLOWS = {/,/^}$/p' | grep -c '^  [a-z"-]*: {'  # 61, before goal mode left
 ```
@@ -243,7 +245,7 @@ replaced by itself. They are what the end-to-end registry holds once the other 5
 
 | Key | Verdict | What it asserts today | Why only a browser can assert it |
 | --- | --- | --- | --- |
-| `thinking-line` | stay | A turn asked to think out loud and then stall: the working line reading *Writing…* before any reasoning lands, the line open on *Thinking…* with the working line gone from the reply while reasoning streams and no tool has run, one piece on the row with the rest still to come, the line folded to *Thought for 7s* at the first answer token, and a reload of the thread reading a bare *Thought*. | The stream is what no lower tier reaches: the app's line following a host's own reasoning events as they arrive in wall-clock time, a piece at a time — a faked HTTP boundary answers the shape the code expects, and would pass whether or not a host streams reasoning before its answer. The bare *Thought* after it is a real reload clearing the `thinking.ts` module's memory, which a remount in a test process does not; the line, its fold and its label are already `test-thinking-line.tsx`'s, and this flow proves the live path feeds them. |
+| `thinking-line` | stay | A turn whose thinking a tool call breaks: the working line reading *Writing…* before any thinking lands, the reply's first row open on *Thinking…* with the working line gone, then the call landing with the thinking before it folded above it over the span it measured and a second row open below it, both rows folded at the first answer token, and a reload drawing the same two rows in the same places, still reading the numbers they measured. A second turn thinks at length without a call to break it: the open row lands the thread on its newest words and keeps them in view as the pieces arrive, the reader's wheel stops that follow, the run past its cap draws that much of itself with a fade and a 48px Show more, the row's end sits at the foot, Show more reveals the rest inline with the control and the fade gone, and the cap holds at 390px and 834px with the fade following the theme. | The stream is what no lower tier reaches: the app's rows following a host's own reasoning events as they arrive in wall-clock time, a piece at a time, with a real tool call breaking them in the middle — a faked HTTP boundary answers the shape the code expects, and would pass whether or not a host streams reasoning around a call. The reload leg is the span's own proof: the number the live run measured and wrote onto the reply's row is what the thread reads back after a real reload, and a component test would have to seed that row itself, asserting the shape rather than that the live path wrote it. The long run's legs are the same shape of proof for layout and scrolling: a capped box is a height the page computes against a real viewport and a real fade gradient — jsdom has no layout, so the component tests can only hand the row a size — and the follow is a smooth scroll of the thread's own scroller, which a wheel has to be able to stop. The rows, their labels, placement and cap are `test-thinking-line.tsx`'s, and the span landing on the row is `test-live-span.tsx`'s; this flow proves the live path feeds them and that they survive a reload. |
 | `reattach` | stay | A reply still streaming when the page reloads picks its run up again and finishes. | A live run outliving a real reload. A component test can remount a tree, but it has no run still going on a test host to rejoin, so it would pass whether or not reattachment works. |
 | `live-poll` | stay | `runs/live` is read by one shared poll: at most 3 reads in 25s with a session, its project and the sidebar all open. | A request rate over wall-clock, with three screens mounted at once. |
 | `idle-requests` | stay | An idle open chat makes at most 12 requests in 65s. | A request budget over 65 seconds of real time and a real fetch stack. |
@@ -253,6 +255,8 @@ replaced by itself. They are what the end-to-end registry holds once the other 5
 | `stream-writes` | stay | A streaming reply is written to IndexedDB in batches: at most 6 writes a second, where main wrote 7.5. | A write rate measured over a real stream's wall-clock. |
 | `openui` | stay | A reply carrying an `openui-lang` block draws its interface from Gots's own components at 390px and at 768px, in light and dark — a card, a table, a callout and two bar charts, the interface taking the thread's own column, its box's left and right edges on the reply text's own (the glyphs measured by a `Range`, ±1px) with the block's undrawn code form in the same place, the gap above and below it the thread's paragraph gap (12px either side, measured box to box against two paragraphs of that text), no chart's five-digit Y tick label outside the chart's own box, and no sideways scroll of the page or the table inside it — and the patched card is what draws at both widths; a block naming a component the library doesn't have draws as the code the model sent, under the `openui-lang` label, with the reply still reaching its last sentence; and a patch that lands while the thread is scrolled up leaves `[data-slot=message-scroller-viewport]`'s scrollTop exactly where it was, and the interface at the same offset of the screen, while the thread grows under the reader. | Geometry and a scroll offset: a DOM without layout has no sizes and no scrollTop, so a component test can assert the card's text but not its box, nor where a reader's viewport sits when a patch re-renders the interface they are reading. The patch also has to arrive on a real stream inside the one reply — a second user message jumps the thread to the end (`FollowOnSend`) — which is a host's own wiring, not a faked boundary's. |
 | `openui-map` | stay | A reply's block is a `Map` of four labelled places. It draws a map at 390px and at 768px, in light and dark, fitted to its own points — every label's box wholly inside the map's box at both widths — its required summary the accessible name, each point's detail on its marker; the basemap follows the theme (tiles asked for from `World_Street_Map` in light and `World_Dark_Gray_Base` in dark) with `Esri` and `OpenStreetMap` attributed in the chrome, inside the map's box, and the map takes the thread's own column with no sideways scroll. Then the gesture contract: over an untouched map a wheel and a real one-finger swipe both change the thread's scrollTop while the map's view holds to the pixel and `data-active` stays false; a tap makes it active and shows a 44px button; a wheel zooms and a drag pans the active map while the thread's scrollTop holds; the button hands the gestures back, the thread scrolling over the map again at the view the pan left. | Geometry and a gesture contract. A DOM without layout has no sizes, so a component test can prove the labels, the summary and the required props (`test-openui.tsx`) but not that the view is fitted, that a label lands inside the frame, or that the tiles asked for are the theme's. And which element takes one finger — the thread scrolling or the map panning — is decided by `touch-action` and Leaflet's handlers inside the browser's own input pipeline; nothing below a browser has a touchscreen, a scroll offset to move or a frame to pan within. |
+| `question-during-delegation` | stay | A bot delegates and asks in the same turn: the subagent's card reads its child still running; the question card takes the composer's place while the agents route still reports that child running; the answer brings the turn's reply, and then the subagent's result lands as the bot's own message at the thread's end, named above the result it carries, with no bubble and never as the user's; the wake prompt the plugin posts for it draws no message at all, no header, no footer and no user row; and the wake turn that answers it acts on the result and draws as a message of its own, below the delivery, arriving while its run is still going, a piece at a time; and the words the reply said before the question are drawn once, live and again after a reload, never once for each half of the turn. | Composer-replacement timing across a live stream. The question card has to take the composer's place at the instant the host raises it while a child is still working, and the result and the wake turn have to land in the thread as the host writes them, in wall-clock order, under the fold that draws a wake prompt as nothing. A component test over a faked host answers every shape in one step: it asserts the card, the delivery and the wake answer, but not that the card replaced the composer while `runs/live` and the agents route both still said the child was running, nor that the result and the wake turn landed after the reply that answered the question rather than inside it. |
+| `card-widths` | stay | A chat's subagent card and its waiting Question fill the box they are given and never pass the reading column's 768px box (ADR 0047): at 390px the pane is narrower than the box, so a 348px card sits on the thread's 16px and a 366px Question on the slot's own 12px; at 1024px the same, 662px and 672px at 16px each; at 1440px, where the 1120px pane clears the box, each stops at 768px and centres — the card at 171px, the Question at 176px — while message text keeps its 736px column at 187px, the capped card framing it exactly, 768px around 736px with the box's 16px gutter each side. A reintroduced pane-fill (ADR 0041) passes the box at 1440px and a reintroduced 448px cap falls short of the text's frame, so both fail there. | Geometry, and nothing else: a card's width and its left edge's offset are layout, so no DOM without a layout engine has them, and a class assertion cannot tell a card that stops at the box from the same card filling the pane or capped at 448px — which is the whole of ADR 0047. The phone and tablet legs keep the fill honest below the box; the laptop leg is the only one where the cap binds, and the one review loses most easily since the text beside the card does not move at all. |
 
 ## The coverage a demotion leaves with no home
 

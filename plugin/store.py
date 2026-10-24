@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 39
+SCHEMA_VERSION = 40
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -80,7 +80,7 @@ def _version(conn: sqlite3.Connection) -> int:
 
 
 def _carry_hold(conn: sqlite3.Connection, row: Any) -> None:
-    """Moves one project's pre-v39 held task into a row of its own, as the store's first hold.
+    """Moves one project's pre-v40 held task into a row of its own, as the store's first hold.
 
     The task is copied verbatim — the sheet reads it as it is — and its repository and number are
     read out of it for the key. A row whose task isn't JSON, or names no repository or number, is
@@ -526,7 +526,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    PRIMARY KEY (meeting_id, n)
                )"""
         )
-        # v39: a project works several tasks at once, so a hold is a row of its own instead of
+        # v40: a project works several tasks at once, so a hold is a row of its own instead of
         # columns on the project: one per claimed task, carrying the session working it and its own
         # stall clock (afk.py, ADR 0025). The task is the JSON the sheet already reads, and its
         # repository and number are what keep the same task from being held twice.
@@ -559,11 +559,28 @@ def _migrate(conn: sqlite3.Connection) -> None:
         # The one hold a project could have before this becomes its first row, with the session
         # working it and the clock it was claimed on. The old columns stay, as v29's and v30's do,
         # and are left as they are: nothing reads them now, and a copy is what a store older than
-        # this is upgraded from — with its own version already past 39, it is never copied twice.
+        # this is upgraded from — with its own version already past 40, it is never copied twice.
         if "task" in afk_columns:
             for row in conn.execute(
                 """SELECT project_id, task, session_id, claimed_at, stalled, stalled_at
                    FROM project_afk WHERE task IS NOT NULL"""
             ).fetchall():
                 _carry_hold(conn, row)
+        # v39: the wake posted for a finished subagent, and the live id a card stops it by — both
+        # keyed by the child's own session id, since that is all the app has (delegation.py).
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS subagent_wakes (
+                   subagent_id TEXT PRIMARY KEY,
+                   parent_id TEXT NOT NULL,
+                   run_id TEXT,
+                   at INTEGER NOT NULL
+               )"""
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS subagent_agents (
+                   subagent_id TEXT PRIMARY KEY,
+                   agent_id TEXT NOT NULL,
+                   at INTEGER NOT NULL
+               )"""
+        )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

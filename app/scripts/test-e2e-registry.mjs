@@ -1,7 +1,5 @@
-// The end-to-end registry and its audit, held to each other. A flow is a claim that no lower tier can
-// reach its behaviour (ADR 0019), so a key arrives with a row in `docs/e2e-flow-audit.md` naming its
-// verdict, and the stays are the ten the audit argues for. Both files are read as text: importing
-// the registry's CLI would run it.
+// ADR 0019: a flow is a claim no lower tier fails for. The registry and its audit are both read
+// as text: importing the CLI would run it, since its argv and its teardown sit at module scope.
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
@@ -11,7 +9,7 @@ const cli = read("./e2e/cli.mjs")
 const audit = read("../../docs/e2e-flow-audit.md")
 
 const VERDICTS = ["stay", "component", "plugin", "delete"]
-const STAYS = 10
+const STAYS = 12
 
 const registry = () => {
   const start = cli.indexOf("const FLOWS = {")
@@ -64,6 +62,6 @@ test("the audit's own counts are what its rows add up to", () => {
   assert.equal(Number(total?.[1]), all.length, "the total")
 })
 
-test("the flows that stay are the ten the audit argues for", () => {
+test("the flows that stay are the twelve the audit argues for", () => {
   assert.equal(rows().filter((row) => row.verdict === "stay").length, STAYS)
 })

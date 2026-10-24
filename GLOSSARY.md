@@ -49,8 +49,16 @@ A derived fact worked out in the app from what a bot's host holds. Gots doesn't 
 _Avoid_: client-side computation
 
 **Session state**:
-What a project session is doing — idle, working, waiting on the user, or closed by the user as resolved or discarded. A session whose subagents are still at work is working, whether or not a turn is live. Composed from the host's run status, its subagents and this device's own marks, not derived from one source.
+What a project session is doing — idle, working, waiting on the user, or closed by the user as resolved or discarded. Waiting is the user's move: an answer, an approval, a plan review, a stall, or a live pull request's checks to watch. A session whose subagents are still at work is working, whether or not a turn is live. Composed from the host's run status, its subagents and this device's own marks, not derived from one source.
 _Avoid_: status, state machine
+
+**Last activity**:
+The most recent event a session has seen — a turn ending, its pull request moving, the session being resolved or discarded — worked out from those moments rather than stored as one.
+_Avoid_: updated at, updatedAt, last update
+
+**Read mark**:
+When a device last had a session's thread rendered on it. It stays on that device, is never synced, and a session with anything newer has not been read there.
+_Avoid_: last seen, read receipt, unread count
 
 **Question**:
 A bot's ask its user must answer before its turn can go on, drawn in place of the composer, and never kept back by work the bot has running.
@@ -73,11 +81,11 @@ A conversation's messages in the order they happened, as the screen draws them �
 _Avoid_: transcript, message log, feed, timeline
 
 **Thinking**:
-What a model worked out before it answered, drawn in a thread as one row per run of thinking — a run a tool call broke is drawn after that call. A row streams open while its run thinks and folds when the run ends, a tap opening it again. It reads "Thinking…" while it thinks, "Thought for 12s" where this device watched it think, and "Thought it through" where it didn't; the reasoning is kept with the reply, and the span with it on the device that watched. Every thread draws it the same way — a chat's, a delegated agent's sub-thread, a coding session's own thread.
+What a model worked out before it answered, kept with the reply and drawn as rows in the thread: one per run — a run being one contiguous stretch of thinking between tool calls — each in the place it happened, above the tool call it precedes and below the call that broke it, so a turn that ran something shows its working-out on either side of what it ran. Rows drawn with nothing between them are one row, holding their stretches together. A row opens when you watch that thinking happen, and every row of a live turn stays open until the answer begins — or the turn ends, if there is no answer — folding together at that moment; a row drawn from storage starts closed and a tap opens it for as long as the thread is on screen, nothing remembered, so the next load is closed again. The Appearance switch *Fold thinking by default* keeps rows closed whether or not you watched them open. An opened row reads the way the reply does: its whole markdown, nothing held back, landing on the newest of its words and following them while the run still thinks, until the reader scrolls up. It reads "Thinking…" while it thinks, "Thought for 12s" where this device measured every stretch it holds, the spans added, and "Thought it through" where it did not; the thinking is kept with the reply on every device, the span only on the device's own row that measured it. Every thread draws it the same way — a chat's, a delegated agent's sub-thread, a coding session's own thread.
 _Avoid_: chain of thought, scratchpad, reasoning trace
 
 **Command**:
-Something Gots itself does from the composer: opening a thread (a chat, where threads are off), settings, or how a message sent mid-reply goes. A command never reaches the agent as a message.
+Something Gots itself does from the composer: opening a thread (a chat, where threads are off), settings, the Cheatsheet, or how a message sent mid-reply goes. A command never reaches the agent as a message.
 _Avoid_: slash command, action, app skill
 
 **Skill**:
@@ -87,6 +95,35 @@ _Avoid_: command, tool, plugin
 **Slash menu**:
 The list over the composer that a slash opens: the commands and the bot's skills.
 _Avoid_: autocomplete, command palette, picker
+
+**Cheatsheet**:
+The sheet `/cheatsheet` opens from the composer: the keys a hardware keyboard can send in Gots and what each does, by group — and only the shortcuts whose switch is on.
+_Avoid_: hotkey list, keyboard help, command palette, cheat sheet
+
+**Built-in skill**:
+A skill that ships with Hermes and was seeded into the bot's profile. It can be switched off; it is never removed.
+_Avoid_: bundled skill, core skill, essential skill
+
+**Hub skill**:
+A skill installed from a skills hub. Removed through the hub's own uninstall.
+_Avoid_: downloaded skill, store skill, registry skill
+
+**Your skill**:
+A skill written on the bot's own profile, by you or by the bot, rather than one that arrived built in, from the Hub or from a plugin.
+_Avoid_: custom skill, own skill, local skill, user managed skill
+
+**Plugin skill**:
+A skill a Hermes plugin on the host provides. Gots can switch it off and change nothing else about it.
+_Avoid_: plugin-provided skill, provided skill, managed skill
+
+**Project skill**:
+A skill a repository carries in its own skills folder. It belongs to the project, not the bot, so the Skills tab leaves it out.
+_Avoid_: repo skill, repository skill
+
+**Skill sheet**:
+One skill's own panel, opened by its row: its SKILL.md, its linked files, and where it came from, with the host's Readiness and Setup where it has them. No URL of its own — it is about one skill, not a place.
+_Avoid_: skill page, skill detail screen, editor
+
 **Usage window**:
 One thing a provider account can run out of, as that provider measures it: a period, which resets, or a balance, which doesn't.
 _Avoid_: quota, plan limit, usage bar
@@ -144,7 +181,7 @@ An MCP server added by typing its address or its command, rather than picked fro
 _Avoid_: manual server, raw server, own MCP
 
 **Health**:
-How an MCP server is doing, as its row says it in a line: healthy with a tool count where the host knows one, or why it isn't working. A server that is switched off says `Off` there, because that is how it is doing; the switch itself is the separate control beside it. Where the host can start Server access for what it says, the line is the tap that starts it.
+How an MCP server or a skill is doing, as its row says it in a line. A server is healthy with a tool count where the host knows one, or says why it isn't working; a skill says `Ready`, `Off`, or `Doesn't load` with the host's reason. A thing that is switched off says `Off` there, because that is how it is doing; the switch itself is the separate control beside it. Where the host can start Server access for what a server's line says, the line is the tap that starts it.
 _Avoid_: status, state, badge, indicator
 
 **Server sheet**:

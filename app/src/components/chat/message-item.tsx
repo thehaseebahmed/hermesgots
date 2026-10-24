@@ -12,7 +12,7 @@ import { toast } from "sonner"
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { AttachmentTile, AttachmentViewer } from "@/components/chat/attachments"
 import { Markdown } from "@/components/chat/markdown"
-import { AgentCards } from "@/components/chat/agent-card"
+import { AgentCards, SubagentResultCard } from "@/components/chat/agent-card"
 import { MediaTag } from "@/components/chat/media-image"
 import { ClarifyCard, PlanApprovedCard } from "@/components/chat/session-cards"
 import { ThinkingLine } from "@/components/chat/thinking-line"
@@ -26,10 +26,11 @@ import { openable } from "@/lib/attachments"
 import { removeQueued, sendQueued } from "@/lib/chat"
 import type { Attachment, Message, ToolEvent } from "@/lib/db"
 import { describeActivity, formatDuration } from "@/lib/format"
+import { COLUMN } from "@/lib/layout"
 import { mediaImages } from "@/lib/media-tags"
 import { openuiParts, REPLY_INSET } from "@/lib/openui-block.ts"
 import type { InterfaceDraw, ThreadBlock } from "@/lib/openui-thread.ts"
-import { thoughtSpan } from "@/lib/thinking"
+import { runsOf, type ReasoningRun } from "@/lib/thinking"
 import { cn } from "@/lib/utils"
 import { useReveal } from "@/lib/reveal"
 import { isPlanApproval } from "@/lib/workspace"
@@ -53,6 +54,20 @@ type Part =
   | { kind: "tools"; tools: ToolEvent[] }
   | { kind: "clarify"; tool: ToolEvent }
   | { kind: "agent"; tool: ToolEvent }
+  | ({ kind: "thinking" } & RunPart)
+
+type RunPart = {
+  run: ReasoningRun
+  /** This run's row streams open: it is the reply's newest run and the reply is still thinking. */
+  thinking: boolean
+  key: string
+}
+
+/** A stretch of a reply: the text between breaks, and the calls started inside it. */
+type Segment = { start: number; end: number; tools: ToolEvent[] }
+
+/** A segment with no run of its own, so a reply that never thought allocates nothing. */
+const NO_RUNS: RunPart[] = []
 
 function rowBlocks(content: string, blocks: ThreadBlock[] | undefined, streaming: boolean) {
   const parts = openuiParts(content)
@@ -77,12 +92,79 @@ function rowBlocks(content: string, blocks: ThreadBlock[] | undefined, streaming
 }
 
 /**
+ * The segment a run's row belongs to: the one holding the call it follows — or, for a call this
+ * thread doesn't draw as a tool row (a question asked as a form), the one that held it.
+ */
+function segmentOf(run: ReasoningRun, segments: Segment[], tools: ToolEvent[]) {
+  if (!run.afterToolId) return 0
+  const found = segments.findIndex((segment) =>
+    segment.tools.some((tool) => tool.toolCallId === run.afterToolId),
+  )
+  if (found >= 0) return found
+  const at = tools.find((tool) => tool.toolCallId === run.afterToolId)?.contentOffset ?? 0
+  const held = segments.findLastIndex((segment) => at >= segment.start)
+  return Math.max(0, held)
+}
+
+/**
+ * Puts a segment's runs where they happened within it: a run with no anchor opens the segment, and an
+ * anchored run follows the part that holds its call — after the whole group when consecutive calls
+ * merged into one. Insertion is counted per part, because two runs after the same part arrive in
+ * order and a plain "splice after it" would stack the later one above the earlier. A run whose call
+ * this segment doesn't draw follows the last call it does draw, and sits at the segment's top when
+ * it draws none.
+ */
+function placeThinking(parts: Part[], runs: RunPart[]): Part[] {
+  const row = (run: RunPart): Part => ({ kind: "thinking", ...run })
+  const leading = runs.filter((run) => !run.run.afterToolId)
+  const placed: Part[] = [...leading.map(row), ...parts]
+  const lastCall = placed.findLastIndex(
+    (part) => part.kind === "tools" || part.kind === "clarify" || part.kind === "agent",
+  )
+  const top = leading.length - 1
+  const inserted = new Map<number, number>()
+  for (const part of runs) {
+    const id = part.run.afterToolId
+    if (!id) continue
+    const found = placed.findIndex(
+      (one) =>
+        (one.kind === "tools" && one.tools.some((tool) => tool.toolCallId === id)) ||
+        ((one.kind === "clarify" || one.kind === "agent") && one.tool.toolCallId === id),
+    )
+    const at = found >= 0 ? found : lastCall >= 0 ? lastCall : top
+    const count = inserted.get(at) ?? 0
+    placed.splice(at + 1 + count, 0, row(part))
+    inserted.set(at, count + 1)
+  }
+  return placed
+}
+
+/**
+ * The margin that pulls a thinking row toward the tool row it sits beside: the two lines are one
+ * unit of the thread's account of the work, so only the tool-adjacent side closes up — the gap to
+ * the reply's text on the other side stays as it is.
+ */
+function huggingTools(parts: Part[], index: number) {
+  const beside = (part: Part | undefined) => part?.kind === "tools"
+  const top = beside(parts[index - 1])
+  const bottom = beside(parts[index + 1])
+  if (top && bottom) return "-my-2"
+  return top ? "-mt-2" : bottom ? "-mb-2" : undefined
+}
+
+/**
  * Interleaves a slice of the reply (starting at `start`) with the tools run during it. A clarify
  * call is a card of its own (its question and the answer) rather than a tool row, so is a
  * delegation (the agent it started), and the images a reply sends together — only whitespace
  * between their `MEDIA:<path>` tags — are one gallery part.
  */
-function toParts(content: string, tools: ToolEvent[], start: number, spans: RowBlock[]): Part[] {
+function toParts(
+  content: string,
+  tools: ToolEvent[],
+  start: number,
+  spans: RowBlock[],
+  runs: RunPart[],
+): Part[] {
   const end = start + content.length
   const parts: Part[] = []
   let cursor = start
@@ -121,7 +203,7 @@ function toParts(content: string, tools: ToolEvent[], start: number, spans: RowB
     else parts.push({ kind: "tools", tools: [tool] })
   }
   if (cursor < end) pushText(end)
-  return parts
+  return placeThinking(parts, runs)
 }
 
 function Stats({ message }: { message: Message }) {
@@ -163,7 +245,7 @@ function SentAttachments({ attachments, dim }: { attachments: Attachment[]; dim:
 /** Something the user steered the reply with, where it reached the agent. */
 function SteerBubble({ text }: { text: string }) {
   return (
-    <MessageRow align="end">
+    <MessageRow align="end" className={COLUMN}>
       <MessageContent className="items-end gap-1">
         <Bubble variant="default" align="end">
           <BubbleContent className="px-4 py-2.5 text-[15px] whitespace-pre-wrap">
@@ -285,7 +367,6 @@ interface MessageItemProps {
   blocks?: ThreadBlock[]
   /** Whether a reply is streaming in this chat, so queued messages know they'll go on their own. */
   busy?: boolean
-  showThinking?: boolean
 }
 
 /**
@@ -298,7 +379,6 @@ export const MessageItem = memo(function MessageItem({
   showStats,
   blocks,
   busy,
-  showThinking = true,
 }: MessageItemProps) {
   // Replies type out a word at a time, however Hermes delivers them.
   const content = useReveal(message.role === "assistant" ? message.content : "")
@@ -307,6 +387,21 @@ export const MessageItem = memo(function MessageItem({
     [message.content, blocks, message.status],
   )
   const revealing = content.length < message.content.length && message.role === "assistant"
+  // Folded into rows once per change: a streaming reply redraws many times a second as its text is
+  // revealed, and none of that moves a run or opens one.
+  const storedRuns = message.reasoningRuns
+  const storedReasoning = message.reasoning
+  const thinkingOpen = message.status === "streaming" && !message.content
+  const thinking: RunPart[] = useMemo(() => {
+    const runs = runsOf({ reasoningRuns: storedRuns, reasoning: storedReasoning })
+    return runs.map((run, index) => ({
+      run,
+      key: `run-${index}`,
+      // A span is stamped exactly when its run ends, so a run carrying one is done and stays folded:
+      // re-opening it over the call it broke would throw away the number it measured.
+      thinking: index === runs.length - 1 && thinkingOpen && run.spanMs === undefined,
+    }))
+  }, [storedRuns, storedReasoning, thinkingOpen])
   // The turn failed: a user message whose send never got there, or a reply that errored instead of
   // answering. The one kept in the thread waits to be sent again; the other says so plainly.
   const failed = message.status === "error"
@@ -322,7 +417,7 @@ export const MessageItem = memo(function MessageItem({
     // The plugin starts a host-queued message itself, so it only waits for a Send when paused.
     const paused = message.hostQueued ? Boolean(message.queuePaused) : !busy
     return (
-      <MessageRow align="end">
+      <MessageRow align="end" className={COLUMN}>
         <MessageContent className="items-end gap-1">
           {message.attachments?.length ? (
             <SentAttachments attachments={message.attachments} dim={dim} />
@@ -393,7 +488,7 @@ export const MessageItem = memo(function MessageItem({
       node: <SteerBubble text={steer.text} />,
     })
   breaks.sort((a, b) => a.offset - b.offset || a.time - b.time)
-  const segments: { start: number; end: number; tools: ToolEvent[] }[] = []
+  const segments: Segment[] = []
   let start = 0
   let since = -Infinity
   for (const b of [...breaks, { offset: content.length, time: Infinity }]) {
@@ -413,43 +508,49 @@ export const MessageItem = memo(function MessageItem({
     since = b.time
   }
 
-  const reasoning = showThinking ? message.reasoning?.trim() : undefined
-  const thinkingOpen = streaming && !message.content
+  const thinkingBySegment = new Map<number, RunPart[]>()
+  for (const part of thinking) {
+    const at = segmentOf(part.run, segments, tools)
+    const batch = thinkingBySegment.get(at)
+    if (batch) batch.push(part)
+    else thinkingBySegment.set(at, [part])
+  }
+  // With a row open, the working line would say what the row already says.
   const thinkingProgress =
-    Boolean(reasoning) && thinkingOpen && !awaitingApproval && !awaitingClarify
+    thinking.some((part) => part.thinking) && !awaitingApproval && !awaitingClarify
 
   // A reply's stats come only once it is done and fully revealed, so they never count up.
   const statsShown = showStats && !streaming && !revealing && Boolean(message.stats)
   const statusLine = streaming && !runningTool && !thinkingProgress
-  const footer = (
-    <>
-      {statusLine && (
-        <StatusLine
-          text={awaitingApproval ? "Waiting for your approval…" : describeActivity(message)}
-        />
-      )}
-      {/* An error on a reply that streamed says so plainly: it isn't the bot's answer. */}
-      {failed && (
-        <div className="flex items-start gap-2 px-1 text-[15px] text-destructive">{error}</div>
-      )}
-      {message.status === "stopped" && !message.content && (
-        <div className="px-1 text-xs text-muted-foreground">Stopped</div>
-      )}
-      {statsShown && <Stats message={message} />}
-    </>
+  // Empty, the row would still add two of the message's gaps around itself, so it is drawn only
+  // once a line shows.
+  const footerLines = [
+    statusLine && (
+      <StatusLine
+        key="status"
+        text={awaitingApproval ? "Waiting for your approval…" : describeActivity(message)}
+      />
+    ),
+    // An error on a reply that streamed says so plainly: it isn't the bot's answer.
+    failed && (
+      <div key="failed" className="flex items-start gap-2 px-1 text-[15px] text-destructive">
+        {error}
+      </div>
+    ),
+    message.status === "stopped" && !message.content && (
+      <div key="stopped" className="px-1 text-xs text-muted-foreground">
+        Stopped
+      </div>
+    ),
+    statsShown && <Stats key="stats" message={message} />,
+  ].filter(Boolean)
+  const footerShown = footerLines.length > 0
+  const footer = footerShown && (
+    <div className={cn(COLUMN, "flex flex-col gap-3")}>{footerLines}</div>
   )
-
-  const footerShown =
-    statusLine || failed || (message.status === "stopped" && !message.content) || statsShown
   return (
     <div className="flex flex-col gap-3">
-      {reasoning && (
-        <ThinkingLine
-          reasoning={reasoning}
-          thinking={thinkingOpen}
-          spanMs={thoughtSpan(message.id)}
-        />
-      )}
+      {message.subagent && <SubagentResultCard subagent={message.subagent} />}
       {segments.map((segment, i) => {
         const last = i === segments.length - 1
         const parts = toParts(
@@ -457,12 +558,18 @@ export const MessageItem = memo(function MessageItem({
           segment.tools,
           segment.start,
           spans,
+          thinkingBySegment.get(i) ?? NO_RUNS,
         )
         return (
           <Fragment key={breaks[i - 1]?.key ?? "start"}>
             {i > 0 && breaks[i - 1].node}
             {(parts.length > 0 || (last && footerShown)) && (
-              <AssistantRow conversationId={message.conversationId} busy={busy} parts={parts}>
+              <AssistantRow
+                conversationId={message.conversationId}
+                busy={busy}
+                ended={!streaming}
+                parts={parts}
+              >
                 {last && footer}
               </AssistantRow>
             )}
@@ -494,19 +601,22 @@ function sameMessage(a: MessageItemProps, b: MessageItemProps) {
 function AssistantRow({
   conversationId,
   busy,
+  ended,
   parts,
   children,
 }: {
   conversationId: string
   /** A reply is streaming in this chat, so a card that sends (a missed question) waits. */
   busy?: boolean
+  /** The reply has been written: the turn it belongs to has ended. */
+  ended: boolean
   parts: Part[]
   children?: ReactNode
 }) {
   return (
     <MessageRow align="start">
       <MessageContent className="gap-3">
-        {parts.map((part) =>
+        {parts.map((part, index) =>
           part.kind === "clarify" ? (
             <ClarifyCard
               key={part.tool.toolCallId}
@@ -515,24 +625,38 @@ function AssistantRow({
               busy={busy}
             />
           ) : part.kind === "agent" ? (
-            <AgentCards key={part.tool.toolCallId} tool={part.tool} />
+            <AgentCards key={part.tool.toolCallId} tool={part.tool} ended={ended} />
           ) : part.kind === "tools" ? (
-            <div key={part.tools[0].toolCallId} className="w-full max-w-xl">
-              <ToolGroup tools={part.tools} />
+            <div key={part.tools[0].toolCallId} className={COLUMN}>
+              <div className="w-full max-w-xl">
+                <ToolGroup tools={part.tools} />
+              </div>
             </div>
+          ) : part.kind === "thinking" ? (
+            <ThinkingLine
+              key={part.key}
+              reasoning={part.run.text}
+              thinking={part.thinking}
+              spanMs={part.run.spanMs}
+              className={huggingTools(parts, index)}
+            />
           ) : part.kind === "media" ? (
-            <MediaTag key={part.at} conversationId={conversationId} paths={part.paths} />
+            <div key={part.at} className={COLUMN}>
+              <MediaTag conversationId={conversationId} paths={part.paths} />
+            </div>
           ) : part.kind === "openui" ? (
-            <Suspense key={part.at} fallback={null}>
-              <OpenUIBlock
-                source={part.block.source}
-                open={part.block.open}
-                streaming={part.block.streaming}
-                draw={part.block.draw}
-              />
-            </Suspense>
+            <div key={part.at} className={COLUMN}>
+              <Suspense fallback={null}>
+                <OpenUIBlock
+                  source={part.block.source}
+                  open={part.block.open}
+                  streaming={part.block.streaming}
+                  draw={part.block.draw}
+                />
+              </Suspense>
+            </div>
           ) : (
-            <Markdown key={part.at} className={cn(REPLY_INSET, "text-[15px] leading-relaxed")}>
+            <Markdown key={part.at} className={cn(REPLY_INSET, "text-[15px] leading-relaxed", COLUMN)}>
               {part.text}
             </Markdown>
           ),
