@@ -22,6 +22,7 @@ import {
   type SessionMessage,
 } from "@/lib/hermes"
 import { splitAttachments } from "@/lib/attachments"
+import { appendThinking, carrySpans } from "@/lib/thinking"
 import { readLiveRuns } from "@/lib/waiting"
 import { failureReason, TODO_TOOLS } from "@/lib/tools"
 import { isSubagentResult, subagentMessage, subagentResults } from "@/lib/subagent-results.ts"
@@ -333,9 +334,16 @@ export function toMessages(
       }
       continue
     }
+    // The row's reasoning is a stretch of the turn's thinking: it continues the run the last tool
+    // call opened, and a row with its own calls below ends that run where those calls start.
     const reasoning = row.reasoning ?? row.reasoning_content
     if (reasoning)
-      reply.reasoning = reply.reasoning ? `${reply.reasoning}\n\n${reasoning}` : reasoning
+      reply.reasoningRuns = appendThinking(
+        reply.reasoningRuns,
+        reply.tools?.at(-1)?.toolCallId,
+        reasoning,
+        true,
+      )
     if (row.display_kind === "failed_turn") {
       reply.status = "error"
       reply.statusText = row.content || "Hermes couldn't finish this reply."
@@ -370,8 +378,24 @@ export function toMessages(
         if (t.status === "running") Object.assign(t, { status: "completed", endedAt: t.startedAt })
   }
   return messages.filter(
-    (m) => m.role === "user" || m.content || m.tools?.length || m.status === "error" || m.subagent,
+    (m) =>
+      m.role === "user" ||
+      m.content ||
+      m.tools?.length ||
+      m.status === "error" ||
+      m.subagent ||
+      m.reasoningRuns?.length,
   )
+}
+
+/**
+ * The runs to write for a turn the transcript also knows: the host's runs, each keeping the span this
+ * device measured for the same run in the same place (a span never travels, so the transcript has
+ * none), and the local runs when the transcript holds no thinking at all.
+ */
+function mergedRuns(transcript: Message, local: Message | undefined) {
+  const kept = carrySpans(transcript.reasoningRuns, local?.reasoningRuns) ?? local?.reasoningRuns
+  return kept ? { reasoningRuns: kept } : {}
 }
 
 /** A streamed call's preview, which Hermes cuts at 500 characters ("..." marks the cut). */
@@ -793,9 +817,11 @@ async function reconcile(conversationId: string) {
       if (seen) {
         floor = turnEnd(seen)
         if (seen.id === user.id && reply) {
-          // A turn loaded from Hermes earlier, possibly before it finished: refresh its reply.
-          const createdAt = byId.get(reply.id)?.createdAt ?? Math.max(reply.createdAt, floor)
-          writes.push({ ...reply, createdAt })
+          // A turn loaded from Hermes earlier, possibly before it finished: refresh its reply, keeping
+          // the spans this device measured on the runs that are still the same runs.
+          const local = byId.get(reply.id)
+          const createdAt = local?.createdAt ?? Math.max(reply.createdAt, floor)
+          writes.push({ ...reply, createdAt, ...mergedRuns(reply, local) })
           floor = createdAt + 1
         }
         results.forEach(put)
@@ -823,7 +849,7 @@ async function reconcile(conversationId: string) {
           writes.push({
             ...restored,
             tools: withTranscriptToolOffsets(restored, reply),
-            reasoning: local.reasoning ?? reply.reasoning,
+            ...mergedRuns(reply, local),
             steers: local.steers ?? reply.steers,
           })
         } else if (local?.role === "assistant") {

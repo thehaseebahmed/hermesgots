@@ -57,8 +57,12 @@
 // first and slow for the last 12, so a device can open the session while it runs ("sprint" and
 // "relay": all quick).
 // Say "think out loud" for the turn's working-out before any of its answer: four reasoning pieces,
-// paced, as a run's `reasoning.available` events or a completion's `reasoning_content` deltas. Say
-// "stall" as well and the turn then holds 2.5s with nothing else on the wire.
+// paced, as a run's `reasoning.available` events or a completion's `reasoning_content` deltas, with a
+// look at the disk run between the second and the third — so the thinking either side of a call is a
+// run of its own, drawn above and below that call. Say "stall" as well and the turn then holds 2.5s
+// with nothing else on the wire.
+// Say "think at length" for the same working-out at eight paragraphs: one run, longer than a row is
+// drawn tall, so a thread that opens it has to cap it and hold the rest behind a Show more.
 // Say "draw the interface" for a reply that carries one: an `openui-lang` block naming itself with
 // `# id: sales` — a card, a table, a callout and two bar charts whose five-digit ticks have to fit
 // the axes they label, one with both axis labels and one with none — the receipt under it long
@@ -1415,11 +1419,29 @@ const REASONING = [
   "The old gzipped rotations are the bulk of it, and nothing will read them again.",
   "So the answer names the folders and what can go, and leaves the delete to them.",
 ]
+// What a turn asked to think at length says: one long working-out in markdown, paragraph after
+// paragraph, far taller than the height an opened row is drawn to.
+const REASONING_AT_LENGTH = [
+  "They asked for the reasoning itself, so here is the whole of it, in order.",
+  "**What is on the disk:** five gigabytes under /var/log, and almost all of it in two places.",
+  "- `/var/log/journal` holds three of the five gigabytes.\n- The old gzipped rotations hold another one.\n- Everything else, all the small files together, is under a hundred megabytes.",
+  "The journal is the only one still being written to. A rotation is read once, when something has already gone wrong, and then never again — which makes it the cheap thing to lose.",
+  "```sh\ndu -sh /var/log/journal /var/log/*.gz\n```",
+  "If every rotation went, the machine would keep running and the next incident would be harder to read. If the journal went the same is true, but the loss is larger: that is the one with yesterday in it.",
+  "So the order to look at them in is the rotations first, and the journal only if that isn't enough. The rest of it, the small files, isn't worth a command of its own.",
+  "None of this is mine to decide alone, so the answer names the folders and says what each one costs to lose. The deleting is theirs.",
+]
 // On top of the turn's own pause, so a client's working line is up before any reasoning lands.
 const REASONING_LEAD_MS = 2500
 // Between pieces, slow enough that each is seen to arrive as an event of its own.
 const REASONING_PACE_MS = 700
 const REASONING_STALL_MS = 2500
+// The call the thinking is broken by, and what it reads back: half the working-out, then a look at
+// the disk, then the rest — a reply with thinking on both sides of a tool call.
+const REASONING_CALL = "terminal"
+const REASONING_CALL_LABEL = "du -sh /var/log"
+const REASONING_CALL_RESULT = "5.1G\t/var/log"
+const REASONING_CALL_MS = 600
 
 // What a turn asked to draw an interface says.
 const OPENUI_INTRO = "Here's the quarter as a card, and the receipt behind it.\n\n"
@@ -1487,6 +1509,51 @@ const OPENUI_MAP = [
 ].join("\n")
 
 /**
+ * The call a "think out loud" turn makes between its second and third reasoning piece: a look at the
+ * disk. It goes out on whichever wire the turn is on — a completion's `hermes.tool.progress` frames or
+ * a run's `tool.started`/`tool.completed` — and is recorded into the transcript with its result, so a
+ * catch-up after a reload reads the same turn the stream built.
+ */
+async function lookAtTheDisk(req, out) {
+  const id = `call_${randomUUID().slice(0, 8)}`
+  out.tool({
+    tool: REASONING_CALL,
+    emoji: "🖥️",
+    label: REASONING_CALL_LABEL,
+    toolCallId: id,
+    status: "running",
+  })
+  record(req, {
+    role: "assistant",
+    content: null,
+    tool_calls: [
+      {
+        id,
+        type: "function",
+        function: {
+          name: REASONING_CALL,
+          arguments: JSON.stringify({ command: REASONING_CALL_LABEL }),
+        },
+      },
+    ],
+  })
+  await sleep(REASONING_CALL_MS)
+  out.tool({
+    tool: REASONING_CALL,
+    label: REASONING_CALL_LABEL,
+    toolCallId: id,
+    status: "completed",
+    result: REASONING_CALL_RESULT,
+  })
+  record(req, {
+    role: "tool",
+    tool_call_id: id,
+    tool_name: REASONING_CALL,
+    content: REASONING_CALL_RESULT,
+  })
+}
+
+/**
  * The scripted turn behind both endpoints. `out` sends it over the wire: `say` streams a piece of the
  * reply, `status` a status line, `tool` a tool's progress, and `approve` asks and resolves to a choice.
  */
@@ -1551,14 +1618,18 @@ async function playTurn(req, body, last, out) {
 
   // A prompt that asks to think out loud gets its working-out before the answer, in both the shapes
   // Hermes streams reasoning in: a completion's `reasoning_content` delta and a run's
-  // `reasoning.available` event.
-  if (/\bthink out loud\b/i.test(last)) {
+  // `reasoning.available` event. Halfway through it runs a call, so the thinking either side of it
+  // is a run of its own — the app draws one row above the call and one below. Asked to think at
+  // length it says far more of it in one stretch instead, which no row is drawn tall enough for.
+  const atLength = /\bthink at length\b/i.test(last)
+  if (atLength || /\bthink out loud\b/i.test(last)) {
     // After the turn's own pause, so the client's working line is up before any reasoning lands.
     await sleep(REASONING_LEAD_MS)
-    for (const [i, piece] of REASONING.entries()) {
+    for (const [i, piece] of (atLength ? REASONING_AT_LENGTH : REASONING).entries()) {
       if (out.closed()) break
       if (i) await sleep(REASONING_PACE_MS)
       out.reason?.(piece, i)
+      if (!atLength && i === 1) await lookAtTheDisk(req, out)
     }
     // A turn told to stall holds here, thinking and doing nothing else: what the app's thinking line
     // has to stand up to. A run stopped meanwhile isn't held, so Stop lands as on any other turn.

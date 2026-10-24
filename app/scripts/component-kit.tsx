@@ -135,6 +135,65 @@ export async function until(check: () => Promise<boolean>, what: string, ms = 50
   assert.fail(`waited for ${what}`)
 }
 
+/**
+ * Fires the `ResizeObserver`s a screen is watching with, which a DOM without layout never does. With
+ * `near`, only the observers watching that box (or a box inside or around it) report, so a test
+ * measuring one part of a screen doesn't also wake the thread's own scroll maths.
+ */
+export async function resized(near?: string) {
+  const observers = (
+    globalThis as unknown as { __resizeObservers?: { watching: Element[]; report(): void }[] }
+  ).__resizeObservers
+  assert.ok(observers, "the harness records the observers a screen makes")
+  const box = near ? document.querySelector(near) : null
+  const watching = (one: Element) =>
+    !box || one === box || box.contains(one) || one.contains(box)
+  await act(async () => {
+    for (const observer of observers) {
+      if (!observer.watching.length) continue
+      if (!observer.watching.some(watching)) continue
+      observer.report()
+    }
+  })
+  await settle()
+}
+
+export async function withReducedMotion(body: () => Promise<void>) {
+  const media = globalThis.matchMedia
+  const reduced = (query: string) => {
+    const answer = media(query)
+    if (query !== "(prefers-reduced-motion: reduce)") return answer
+    return { ...answer, matches: true }
+  }
+  globalThis.matchMedia = reduced
+  window.matchMedia = reduced
+  try {
+    await body()
+  } finally {
+    globalThis.matchMedia = media
+    window.matchMedia = media
+  }
+}
+
+/**
+ * Records every landing a screen asks for (`scrollIntoView` with `block: "end"`), so a test can read
+ * where it was sent. Restore it when the test is done.
+ */
+export function spyScrollIntoView() {
+  const into: ScrollIntoViewOptions[] = []
+  const scrolled = HTMLElement.prototype.scrollIntoView
+  HTMLElement.prototype.scrollIntoView = function (options?: boolean | ScrollIntoViewOptions) {
+    if (typeof options === "object" && options?.block === "end") into.push(options)
+  }
+  return {
+    /** The landings recorded so far, in the order they were asked for. */
+    into,
+    restore() {
+      HTMLElement.prototype.scrollIntoView = scrolled
+    },
+  }
+}
+
 export async function type(element: Element | null, value: string) {
   assert.ok(element, "the field is on screen")
   const prototype =
@@ -157,7 +216,7 @@ export const findText = (selector: string, label: string) =>
 export const Path = () => <p data-path>{useLocation().pathname}</p>
 export const path = () => find("[data-path]")?.textContent ?? ""
 
-const THINKING_LABEL = /^(Thinking…|Thought|Thought for \d+[sm].*)$/
+const THINKING_LABEL = /^(Thinking…|Thought it through|Thought for \d+[sm].*)$/
 
 export const thinkingLines = () =>
   findAll("button").filter((button) => THINKING_LABEL.test(button.textContent?.trim() ?? ""))

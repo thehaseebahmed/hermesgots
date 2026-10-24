@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { reattachRun, sendMessage } from "@/lib/chat"
 import { db, type Message, type Profile } from "@/lib/db"
-import { thoughtSpan } from "@/lib/thinking"
+import { runsOf } from "@/lib/thinking"
 import {
   botProfile,
   chatScreen,
@@ -100,7 +100,7 @@ const screen = () => chatScreen("chat-1")
 const assistant = async () =>
   (await db.messages.toArray()).filter((message) => message.role === "assistant").at(-1)
 
-test("a turn this device watched reads a span, and keeps it off the reply row", async () => {
+test("a turn this device watched keeps its span on the reply's own run", async () => {
   completionHost()
   await seed([])
   await sendMessage("chat-1", ASK)
@@ -108,31 +108,31 @@ test("a turn this device watched reads a span, and keeps it off the reply row", 
   const reply = await assistant()
   assert.ok(reply, "the reply was written")
   assert.equal(reply.status, "done", "the stream finished")
-  assert.match(reply.reasoning ?? "", /parse\.ts/, "the reasoning arrived")
+  const runs = runsOf(reply)
+  assert.equal(runs.length, 1, "one stretch of thinking, one run")
+  assert.match(runs[0].text, /parse\.ts/, "the reasoning arrived")
   assert.match(reply.content, /keeps its blocks/, "and the answer after it")
-  const span = thoughtSpan(reply.id)
-  assert.ok(span !== undefined, "a span was recorded for the turn this device watched")
-
-  assert.deepEqual(
-    Object.keys(reply).filter((key) => /thought|thinking|span/i.test(key)),
-    [],
-    "no thinking duration on the reply",
+  assert.equal(
+    typeof runs[0].spanMs,
+    "number",
+    "a span was measured for the run this device watched",
   )
-  assert.equal(typeof reply.stats?.durationMs, "number", "only the turn's duration, in its stats")
+  assert.equal(reply.reasoning, undefined, "the pre-runs string is no longer written")
+  assert.equal(typeof reply.stats?.durationMs, "number", "the turn's duration stays in its stats")
 
   await mount(screen(), async () => {
     const line = onlyThinkingLine()
     assert.match(
       lineLabel(line),
       /^Thought for \d+s?m?/,
-      "the screen draws the number this device watched",
+      "the screen draws the number the reply's run carries",
     )
     assert.doesNotMatch(lineLabel(line), /\./, "whole seconds, never the stats line's tenths")
     assert.equal(expanded(line), "false", "folded over an answer")
   })
 })
 
-test("a turn picked up mid-thought reads bare Thought", async () => {
+test("a turn picked up mid-thought reads Thought it through", async () => {
   runHost()
   const streaming: Message = {
     id: "reply-1",
@@ -163,23 +163,29 @@ test("a turn picked up mid-thought reads bare Thought", async () => {
   )
 
   const reply = (await db.messages.get("reply-1"))!
-  assert.match(reply.reasoning ?? "", /parse\.ts/, "the run's reasoning arrived")
+  const runs = runsOf(reply)
+  assert.equal(runs.length, 1, "the run's reasoning was kept with the reply")
+  assert.match(runs[0].text, /parse\.ts/, "the run's reasoning arrived")
   assert.match(reply.content, /keeps its blocks/, "and its answer")
   assert.equal(
-    thoughtSpan(reply.id),
+    runs[0].spanMs,
     undefined,
     "a resumed turn's first delta is mid-thought, not its first",
   )
 
   await mount(screen(), async () => {
     const line = onlyThinkingLine()
-    assert.equal(lineLabel(line), "Thought", "no number for a turn this device didn't watch think")
+    assert.equal(
+      lineLabel(line),
+      "Thought it through",
+      "no number for a turn this device didn't watch think",
+    )
     assert.doesNotMatch(lineLabel(line), /\d/, "no figure at all")
     assert.equal(expanded(line), "false", "and folded")
   })
 })
 
-test("a fresh turn on a host with runs notes the run's reasoning block", async () => {
+test("a fresh turn on a host with runs measures the run's reasoning block", async () => {
   const sent = runPathHost()
   await seed([], runBot)
 
@@ -190,12 +196,14 @@ test("a fresh turn on a host with runs notes the run's reasoning block", async (
   assert.equal(reply.status, "done", "the run finished")
   assert.ok(sent.includes("/v1/runs"), "the send took the run path")
   assert.ok(!sent.includes("/v1/chat/completions"), "not a chat completion")
-  assert.match(reply.reasoning ?? "", /parse\.ts/, "the reasoning block arrived")
+  const runs = runsOf(reply)
+  assert.equal(runs.length, 1, "the block and the answer around it are one run")
+  assert.match(runs[0].text, /parse\.ts/, "the reasoning block arrived")
   assert.match(reply.content, /keeps its blocks/, "and the answer after it")
-  const span = thoughtSpan(reply.id)
-  assert.ok(
-    span !== undefined,
-    "a span was recorded for the run's reasoning.available block and its first message.delta",
+  assert.equal(
+    typeof runs[0].spanMs,
+    "number",
+    "a span was measured for the run's reasoning.available block and its first message.delta",
   )
 
   await mount(screen(), async () => {
