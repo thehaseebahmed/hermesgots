@@ -35,7 +35,7 @@ test("a send that didn't ask to steer queues, whatever it carries", () => {
   assert.equal(midReply([note], askedToQueue), "queue")
 })
 
-test("a reply the host won't take queues, whatever it carries", () => {
-  assert.equal(midReply([], { steer: true, hostTakesIt: false }), "queue")
-  assert.equal(midReply([note], { steer: true, hostTakesIt: false }), "queue")
+test("a reply nothing is running for queues, whatever it carries", () => {
+  assert.equal(midReply([], { steer: true, running: false }), "queue")
+  assert.equal(midReply([note], { steer: true, running: false }), "queue")
 })

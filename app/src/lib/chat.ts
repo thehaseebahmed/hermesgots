@@ -1402,7 +1402,7 @@ function steerOrQueue(
   attachments: Attachment[],
   steer?: boolean,
 ) {
-  return midReply(attachments, { steer: Boolean(steer) }) === "steer"
+  return midReply(attachments, { steer: Boolean(steer), running: true }) === "steer"
     ? steerText(conversationId, content, attachments)
     : queueMessage(conversationId, content, attachments)
 }

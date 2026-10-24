@@ -59,7 +59,7 @@ import {
 } from "@/lib/slash"
 import { isDoubleEscape, isInterrupt } from "@/lib/keys"
 import { useSkills } from "@/lib/skills"
-import { canSteer as canSteerWith, midReply } from "@/lib/steer"
+import { midReply } from "@/lib/steer"
 import { cn, randomId } from "@/lib/utils"
 
 const HOLD_MS = 400
@@ -201,15 +201,17 @@ export function Composer({
   // `/steer` or `/queue` picks how a message sent mid-reply goes; the setting is the default. A
   // steer is text, so a message carrying files can be one — their markers are text — and one
   // carrying a photo can't. An explicit `/steer` asks the host even when the reply looks
-  // unsteerable, and falls back to the queue with a toast.
+  // unsteerable, and falls back to the queue with a toast. This is the one decision: the button,
+  // the field's placeholder and the line under it all read it.
   const steerWanted = (text: string) => {
     const chosen = sendMode(text)
     const mode = chosen?.mode ?? (steerByDefault ? "steer" : "queue")
     return mode === "steer" && (Boolean(chosen) || canSteer)
   }
+  const midRoute = (text: string, carrying: Attachment[]) =>
+    midReply(carrying, { steer: steerWanted(text), running: busy })
   const steersNow = (text: string, carrying: Attachment[]) =>
-    Boolean(onSteer) &&
-    midReply(carrying, { steer: steerWanted(text), hostTakesIt: busy }) === "steer"
+    Boolean(onSteer) && midRoute(text, carrying) === "steer"
 
   const canSend =
     (value.trim().length > 0 || attachments.length > 0) && !disabled && preparing.length === 0
@@ -217,7 +219,8 @@ export function Composer({
   const steering = steersNow(value, attachments)
   // A message that would steer but for a photo says where it goes instead, since the field's
   // placeholder is gone once it has words in it.
-  const waitsForPhoto = Boolean(onSteer) && busy && steerWanted(value) && !canSteerWith(attachments)
+  const waitsForPhoto =
+    Boolean(onSteer) && busy && steerWanted(value) && midRoute(value, attachments) === "queue"
 
   // The menu follows the caret: a `/` that begins a word opens it, wherever in the message it is.
   const token = slashToken(value, caret)

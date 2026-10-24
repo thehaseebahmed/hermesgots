@@ -23,11 +23,12 @@ export function canSteer(attachments: Carried[] = []) {
 
 /**
  * Where a message sent mid-reply goes: `steer` when the send asked to steer — an explicit `/steer`,
- * or the Steer by default setting — the host's reply takes one, and the message can be one.
+ * or the Steer by default setting — a reply is running here for a steer to reach, and the message
+ * can be one.
  */
 export function midReply(
   attachments: Carried[],
-  { steer, hostTakesIt = true }: { steer: boolean; hostTakesIt?: boolean },
+  { steer, running = true }: { steer: boolean; running?: boolean },
 ): MidReply {
-  return steer && hostTakesIt && canSteer(attachments) ? "steer" : "queue"
+  return steer && running && canSteer(attachments) ? "steer" : "queue"
 }
