@@ -30,11 +30,17 @@ list, read and saved inside the host's config write scope, then both of Hermes's
 the change is live for the bot's next turn (ADR 0044). What the host would refuse — a name the bot
 hasn't got, an essential skill — is refused before anything is written, in the sentence the screen
 shows.
+
+One skill is also read on its own, for its sheet (ADR 0045): the row above, its SKILL.md as it is on
+disk, its linked files, and the host's readiness and setup answer. Not through Hermes's ``skill_view``,
+which refuses a switched-off skill — that is exactly the row whose sheet has to open — but the way the
+dashboard's own content route does it, from ``skill_manager_tool._find_skill`` and the file itself.
 """
 
 from __future__ import annotations
 
 import importlib
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 # What a host whose skills scan has moved answers with: the route's 501, and the feature gate's
@@ -42,6 +48,9 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 UNAVAILABLE = "This Hermes version can't list skills from here."
 # And what a host without the switch's own machinery answers with, for the same two callers.
 UNAVAILABLE_WRITE = "This Hermes version can't switch skills from here."
+# And what a host that can't open one skill answers with: its own sentence, because a host can list a
+# profile's skills and still have no way in to one of them (the sheet's ``skills_view``).
+UNAVAILABLE_VIEW = "This Hermes version can't open a skill from here."
 
 # The refusals a switch answers with, in the words the screen shows. Hermes has no sentence of its
 # own for an essential skill: its own toggle simply drops the name from the list it saves, so a
@@ -60,6 +69,12 @@ ESSENTIAL = (
 # names the first two rather than guessing which one fired.
 NOT_SUPPORTED = "Skill '%s' is not supported on this platform or environment."
 AMBIGUOUS = "Ambiguous skill name '%s': another copy shares it."
+
+# What one skill's sheet refuses with: a file's path is only ever read from inside the skill it
+# belongs to, and a name the bot hasn't got is the same not-found sentence the switch uses, at 404.
+OUTSIDE = "'%s' is not a path inside the skill."
+NO_FILE = "Skill '%s' has no file '%s'."
+READ_FAILED = "Failed to read '%s': %s"
 
 
 def _helper(module: str, *names: str) -> Optional[Any]:
@@ -273,6 +288,32 @@ def _plugin_rows(seen: Set[str], disabled: Optional[Set[str]]) -> List[Dict[str,
     return rows
 
 
+def _scan(find: Callable[..., Any], sort: Callable[..., Any]) -> List[Dict[str, Any]]:
+    """Every row the profile holds, read inside the caller's profile scope."""
+    essential = _helper("agent.skill_utils", "ESSENTIAL_SKILLS")
+    project = _helper("agent.skill_utils", "TIER_PROJECT")
+    catalog = _helper("tools.skills_tool", "_skill_catalog")
+    disabled = _disabled()
+    origin = _origins()
+    listed = _all(find)
+    if catalog is not None:
+        # What the plain listing still carries is what loads; the catalog's hidden rows are the
+        # ones whose row says it doesn't.
+        loads = {str(entry.get("name") or "") for entry in listed}
+        rows = _rows_from_catalog(
+            catalog(skip_disabled=True, include_hidden=True),
+            loads,
+            origin,
+            disabled,
+            essential,
+            project,
+        )
+    else:
+        rows = _rows_from_listing(listed, origin, disabled, essential)
+    rows.extend(_plugin_rows({row["name"] for row in rows}, disabled))
+    return sort(rows)
+
+
 def read(profile: Optional[str]) -> List[Dict[str, Any]]:
     # Blocking: the scan reads the skills tree and the scope swaps module globals under a lock.
     # Call from a worker thread (asyncio.to_thread), never the event loop.
@@ -283,28 +324,7 @@ def read(profile: Optional[str]) -> List[Dict[str, Any]]:
 
     find, sort = _listing()
     with _profile_scope(profile):
-        essential = _helper("agent.skill_utils", "ESSENTIAL_SKILLS")
-        project = _helper("agent.skill_utils", "TIER_PROJECT")
-        catalog = _helper("tools.skills_tool", "_skill_catalog")
-        disabled = _disabled()
-        origin = _origins()
-        listed = _all(find)
-        if catalog is not None:
-            # What the plain listing still carries is what loads; the catalog's hidden rows are the
-            # ones whose row says it doesn't.
-            loads = {str(entry.get("name") or "") for entry in listed}
-            rows = _rows_from_catalog(
-                catalog(skip_disabled=True, include_hidden=True),
-                loads,
-                origin,
-                disabled,
-                essential,
-                project,
-            )
-        else:
-            rows = _rows_from_listing(listed, origin, disabled, essential)
-        rows.extend(_plugin_rows({row["name"] for row in rows}, disabled))
-    return sort(rows)
+        return _scan(find, sort)
 
 
 class SkillError(Exception):
@@ -421,11 +441,189 @@ def set_enabled(profile: Optional[str], name: str, enabled: bool) -> Dict[str, A
     return _one(profile, name) or {**row, "enabled": enabled}
 
 
+# What one skill's sheet needs of the host, by the name this module asks for it: the manager's own
+# lookup, which answers for a skill whether or not it is switched off, and the read the host does of
+# a skill's text (utf-8-sig, stray bytes replaced, as `skill_view` reads it). Everything else a sheet
+# carries is best-effort below — a host that can't list linked files or say how ready a skill is
+# still opens its sheet, with those left out rather than guessed.
+_VIEW: Tuple[Tuple[str, str], ...] = (
+    ("tools.skill_manager_tool", "_find_skill"),
+    ("tools.skills_tool", "_read_skill_text"),
+)
+
+
+def _viewer() -> Dict[str, Callable[..., Any]]:
+    """Hermes's machinery for reading one skill: imported at call time, since a plugin loads first."""
+    found: Dict[str, Callable[..., Any]] = {}
+    for module, attribute in _VIEW:
+        try:
+            found[attribute] = getattr(importlib.import_module(module), attribute)
+        except (ImportError, AttributeError) as error:
+            raise SkillError(UNAVAILABLE_VIEW, 501) from error
+    return found
+
+
+def viewable() -> Optional[str]:
+    """Why this host's one skill can't be opened from here, or None when it can.
+
+    Apart from the listing's gate and the switch's: a host can list a profile's skills and still have
+    no lookup that answers for a disabled one. `info` advertises this as `skills_view`, so such a
+    host's tab is a list of rows that open nothing rather than rows that could only fail.
+    """
+    try:
+        _viewer()
+    except SkillError as error:
+        return str(error)
+    return None
+
+
+def _skill_md(name: str, find: Callable[..., Any]) -> Optional[Path]:
+    """Where one skill's SKILL.md is, or None when the bot hasn't got that skill.
+
+    ``_find_skill`` walks the profile's own skills and its external dirs and answers without regard
+    to whether the skill is switched off, which is the whole reason the sheet reads it rather than
+    ``skill_view``, whose first act is to refuse a disabled skill (ADR 0045). A plugin's skill is
+    named ``namespace:skill`` and lives in the plugin's own folder, so the registry is asked second.
+    """
+    found = find(name)
+    root = found.get("path") if isinstance(found, dict) else None
+    if root is None:
+        manager = _helper("hermes_cli.plugins", "get_plugin_manager")
+        if manager is not None:
+            try:
+                root = manager().find_plugin_skill(name)
+            except Exception:  # a registry that can't answer is no path either
+                root = None
+    if root is None:
+        return None
+    path = Path(root)
+    return path if path.name == "SKILL.md" else path / "SKILL.md"
+
+
+def _linked(skill_dir: Path) -> Optional[Dict[str, List[str]]]:
+    """The skill's linked files by group, or None where this host can't list them.
+
+    The host's own listing, so the sheet's groups are the ones `skill_view` would report: nothing of
+    the directory is read here, only its names.
+    """
+    linked = _helper("tools.skills_tool", "_skill_linked_files")
+    if linked is None:
+        return None
+    try:
+        return dict(linked(skill_dir))
+    except Exception:  # a directory this host can't walk says nothing rather than failing the sheet
+        return None
+
+
+def _readiness(name: str, content: str) -> Dict[str, Any]:
+    """The host's readiness and setup answer for one skill, or nothing where it can't give one.
+
+    Its own fields under its own names (`readiness_status`, `setup_needed`, the missing
+    requirements, `setup_help`, `setup_note`), because the sheet shows the host's words rather than
+    a second vocabulary for them. Both halves are private to the host and both are best-effort: a
+    sheet that can't say whether a skill is ready still shows the skill.
+    """
+    parse = _helper("tools.skills_tool", "_safe_frontmatter")
+    readiness = _helper("tools.skills_tool", "_skill_readiness")
+    if parse is None or readiness is None:
+        return {}
+    try:
+        frontmatter = parse(content=content)
+        fields, extras = readiness(frontmatter, str(frontmatter.get("name") or name))
+    except Exception:  # a host that moved either half says nothing rather than failing the sheet
+        return {}
+    return {**fields, **extras}
+
+
+def _inside(skill_dir: Path, path: str) -> Path:
+    """The one file ``path`` names inside ``skill_dir``, refused if its text could leave it.
+
+    Hermes guards the same read with ``skill_lookup_path_error`` and a containment check on the
+    resolved path (``_serve_skill_file``); the two rules are applied here rather than asked of the
+    host, so one sentence refuses it on every host. The resolved check is the one that catches a
+    symlink, which no amount of reading the name can.
+    """
+    if PurePosixPath(path).is_absolute() or ".." in PurePosixPath(path).parts:
+        raise SkillError(OUTSIDE % path, 400)
+    target = skill_dir / path
+    try:
+        inside = target.resolve().is_relative_to(skill_dir.resolve())
+    except (OSError, ValueError) as error:  # a path the filesystem can't resolve is not one to read
+        raise SkillError(OUTSIDE % path, 400) from error
+    if not inside:
+        raise SkillError(OUTSIDE % path, 400)
+    return target
+
+
+def view(profile: Optional[str], name: str) -> Dict[str, Any]:
+    """One skill's own sheet: its row, its SKILL.md, its linked files, and how ready it is.
+
+    The row is the one the list answered, so the sheet and the row it was opened from can't disagree
+    about a skill's origin or its switch. The content is the file as it is on disk — no
+    preprocessing, which is the host's rendering for a model's eyes rather than the text its owner
+    would edit — and the linked files are the host's own listing of them, never a walk of the whole
+    directory (ADR 0045). Readiness and setup come from the host's own answer on the frontmatter,
+    and are left out where it can't give one.
+
+    Works for a switched-off skill, which is the point: ``skill_view`` refuses those. Blocking — a
+    skills scan, then a file read — so call it from a worker thread, never the event loop.
+    """
+    hermes = _viewer()
+    from hermes_cli.web_server_profiles import _profile_scope
+
+    find, sort = _listing()
+    with _profile_scope(profile):
+        row = next((one for one in _scan(find, sort) if one.get("name") == name), None)
+        if row is None:
+            raise SkillError(NOT_FOUND % name, 404)
+        skill_md = _skill_md(name, hermes["_find_skill"])
+        if skill_md is None:
+            # A row the tab lists but the host's lookup won't resolve — a name two copies share, say.
+            # The row's own sentence says why, and it is the one the tab already shows.
+            raise SkillError(row.get("loadError") or NOT_FOUND % name, 404)
+        try:
+            content = hermes["_read_skill_text"](skill_md)
+        except OSError as error:
+            raise SkillError(READ_FAILED % (name, error), 500) from error
+        sheet = dict(row)
+        sheet["content"] = content
+        sheet["linkedFiles"] = _linked(skill_md.parent)
+        sheet.update(_readiness(name, content))
+    return sheet
+
+
+def file(profile: Optional[str], name: str, path: str) -> Dict[str, Any]:
+    """One file inside one skill's folder, read on its own when the sheet asks for it.
+
+    Only the file named: the sheet lists what the host says a skill holds and reads the one thing
+    tapped, so opening a file is never a read of the directory around it. A path that would leave
+    the skill is refused in its own sentence rather than answered with the not-found one, since the
+    two are different things to tell a caller. Blocking — a lookup, then a file read — so call it
+    from a worker thread.
+    """
+    hermes = _viewer()
+    from hermes_cli.web_server_profiles import _profile_scope
+
+    with _profile_scope(profile):
+        skill_md = _skill_md(name, hermes["_find_skill"])
+        if skill_md is None:
+            raise SkillError(NOT_FOUND % name, 404)
+        target = _inside(skill_md.parent, path)
+        if not target.is_file():
+            raise SkillError(NO_FILE % (name, path), 404)
+        try:
+            content = hermes["_read_skill_text"](target)
+        except OSError as error:
+            raise SkillError(READ_FAILED % (path, error), 500) from error
+    return {"name": name, "path": path, "content": content}
+
+
 # What the Skills screen needs of this module, and what `info` advertises: Hermes's own listing,
-# under whichever name this host ships it, and the switch, which needs a different set of Hermes
-# built-ins and so is advertised apart from the listing. The sheet and the removal join them as they
-# land.
+# under whichever name this host ships it, the switch, which needs a different set of Hermes
+# built-ins and so is advertised apart from the listing, and the sheet's read, apart from both. The
+# removal joins them as it lands.
 FEATURES: Tuple[Tuple[str, Callable[[], Optional[str]]], ...] = (
     ("skills", available),
     ("skills_write", writable),
+    ("skills_view", viewable),
 )

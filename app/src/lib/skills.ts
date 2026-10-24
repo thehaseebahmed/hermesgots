@@ -22,19 +22,21 @@ export type { SkillsState } from "@/lib/skills-cache"
 
 /**
  * Every skills feature the tab asks its Bot's Host about, by the key it answers under: `list` gates
- * the tab itself, and `write` gates each row's switch, because a Host can list a profile's skills
- * without the config write a switch is made of, and such a Host offers no switch rather than one
- * whose every tap could only fail (ADR 0044).
+ * the tab itself, `write` gates each row's switch, because a Host can list a profile's skills without
+ * the config write a switch is made of, and such a Host offers no switch rather than one whose every
+ * tap could only fail (ADR 0044), and `view` gates a row's sheet, because a Host can list skills
+ * without a lookup that answers for a switched-off one — the row whose sheet matters most.
  */
 export const SKILL_FEATURES = {
   list: "skills",
   write: "skills_write",
+  view: "skills_view",
 } as const
 
 /** What each of those features this Bot's Host answered (see `PluginFeatureAnswer`). */
 export type SkillFeatureAnswers = Record<keyof typeof SKILL_FEATURES, PluginFeatureAnswer>
 
-/** What this Bot's plugin answered about its skills: `list` for the tab, `write` for a switch. */
+/** What this Bot's plugin answered about its skills: `list`, `write` and `view`. */
 export function useSkillFeatureAnswers(server: PluginServer): SkillFeatureAnswers {
   return usePluginFeatureAnswers(server, SKILL_FEATURES)
 }

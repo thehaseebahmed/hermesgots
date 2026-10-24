@@ -1,12 +1,13 @@
-"""Tests for the profile-scoped skills read and switch (``plugin/skill_catalog.py``).
+"""Tests for the profile-scoped skills read, switch and sheet (``plugin/skill_catalog.py``).
 
-Hermes's skills scan, its provenance reads, its disabled list, its config write scope and its
-caches are stood in for through ``sys.modules`` (the ``test_dictation.py`` pattern), so each test
-asserts only this module's own rules: the row shape the host's answer becomes, which rows are left
-out, that the scan runs inside the scope for the given profile, that the helper's name resolves
-under either spelling, that only a host with neither spelling raises ImportError, and that the
-switch writes one name in the profile's global disabled list inside the host's own write scope —
-with the refusals and the cache clearing that go with it.
+Hermes's skills scan, its provenance reads, its disabled list, its config write scope, its caches and
+the manager's own skill lookup are stood in for through ``sys.modules`` (the ``test_dictation.py``
+pattern), so each test asserts only this module's own rules: the row shape the host's answer becomes,
+which rows are left out, that the scan runs inside the scope for the given profile, that the helper's
+name resolves under either spelling, that only a host with neither spelling raises ImportError, that
+the switch writes one name in the profile's global disabled list inside the host's own write scope —
+with the refusals and the cache clearing that go with it — and that one skill's sheet reads that
+skill's own file, for a switched-off skill too, with one of its files read only when it is asked for.
 """
 
 from __future__ import annotations
@@ -16,6 +17,8 @@ import copy
 import sys
 import types
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest import mock
 
 from plugin import skill_catalog
@@ -50,13 +53,20 @@ def hermes(
     takes_keyword=True,
     omit=(),
     cache_fails=False,
+    skill_dirs=None,
+    plugin_dirs=None,
+    linked=None,
+    readiness=None,
 ):
-    """Fake every host module the read and the switch import lazily, for one test.
+    """Fake every host module the read, the switch and the sheet import lazily, for one test.
 
     ``rows`` is the plain listing's answer; when it is left out it is built from ``catalog``, so a
     catalog row marked ``hidden`` (one the real scan would drop from the listing) is the only thing
     missing from it. ``omit`` names a module to leave unimportable, and ``cache_fails`` makes the
-    skills cache's clear raise, as a host whose cache moved out from under it would.
+    skills cache's clear raise, as a host whose cache moved out from under it would. ``skill_dirs``
+    maps a skill's name to its folder for the manager's own lookup, ``plugin_dirs`` does the same for
+    the registry's, ``linked`` is what the linked-file listing answers, and ``readiness`` is the
+    ``(fields, extras)`` pair the readiness read answers — left out, the host can't say either.
     """
     host = Host()
     scopes, platforms, catalog_calls = host.scopes, host.platforms, host.catalog_calls
@@ -194,11 +204,36 @@ def hermes(
     host.modules["tools.skill_usage"] = usage
 
     manager = types.SimpleNamespace(
-        list_plugin_skill_metadata=lambda: [dict(entry) for entry in (plugin_rows or [])]
+        list_plugin_skill_metadata=lambda: [dict(entry) for entry in (plugin_rows or [])],
+        find_plugin_skill=lambda name: (plugin_dirs or {}).get(name),
     )
     plugins = types.ModuleType("hermes_cli.plugins")
     plugins.get_plugin_manager = lambda: manager
     host.modules["hermes_cli.plugins"] = plugins
+
+    # The sheet's read of one skill: the manager's own lookup, which answers for a switched-off skill
+    # (the whole reason the sheet doesn't go through `skill_view`, which is here to fail loudly if
+    # anything ever reaches for it), and the host's own utf-8-sig read of a skill's text.
+    folders = dict(skill_dirs or {})
+    manager_tool = types.ModuleType("tools.skill_manager_tool")
+    manager_tool._find_skill = lambda name: {"path": folders[name]} if name in folders else None
+    host.modules["tools.skill_manager_tool"] = manager_tool
+
+    def skill_view(*_args, **_kwargs):
+        raise AssertionError("a skill's sheet must not read through skill_view")
+
+    skills.skill_view = skill_view
+    skills._read_skill_text = lambda path: Path(path).read_text(encoding="utf-8-sig")
+    if linked is not None:
+        skills._skill_linked_files = lambda folder: dict(linked)
+    if readiness is not None:
+        skills._safe_frontmatter = lambda path=None, *, content=None: {"name": "plan"}
+
+        def _skill_readiness(frontmatter, skill_name):
+            fields, extras = readiness
+            return dict(fields), dict(extras)
+
+        skills._skill_readiness = _skill_readiness
 
     for module in omit:
         host.modules[module] = None
@@ -550,6 +585,183 @@ class SkillSwitchTests(unittest.TestCase):
         self.assertEqual(str(caught.exception), skill_catalog.UNAVAILABLE_WRITE)
 
 
+class SkillSheetTests(unittest.TestCase):
+    """One skill read on its own: its sheet's payload, and one of its files at a time."""
+
+    def setUp(self) -> None:
+        self.tmp = TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+
+    def skill(self, name: str = "plan", body: str = "# Plan\n\nWrite it down.\n", **files: str) -> Path:
+        """One skill's folder on disk: its SKILL.md, and a file per ``files`` path."""
+        folder = self.root / name
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "SKILL.md").write_text(body, encoding="utf-8")
+        for path, text in files.items():
+            target = folder / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text, encoding="utf-8")
+        return folder
+
+    def viewed(self, host, name="plan", profile="bot-a"):
+        with mock.patch.dict(sys.modules, host.modules):
+            return skill_catalog.view(profile, name)
+
+    def test_a_sheet_is_the_rows_fields_the_skill_and_its_files(self):
+        folder = self.skill(**{"references/api.md": "The API.\n"})
+        host = hermes(
+            catalog=[scanned("plan", description="Make a plan")],
+            bundled=("plan",),
+            skill_dirs={"plan": folder},
+            linked={"references": ["references/api.md"]},
+        )
+        got = self.viewed(host)
+        self.assertEqual(got["name"], "plan")
+        self.assertEqual(got["description"], "Make a plan")
+        self.assertEqual(got["category"], "ops")
+        self.assertEqual(got["origin"], "builtin")
+        self.assertTrue(got["enabled"])
+        self.assertIsNone(got["loadError"])
+        self.assertTrue(got["switchable"])
+        # The file as it is, with nothing preprocessed out of it.
+        self.assertEqual(got["content"], "# Plan\n\nWrite it down.\n")
+        self.assertEqual(got["linkedFiles"], {"references": ["references/api.md"]})
+        # The row is the list's own, read inside the profile's scope like every read here.
+        self.assertEqual(host.scopes, ["bot-a"])
+
+    def test_a_switched_off_skill_opens_like_any_other(self):
+        folder = self.skill()
+        host = hermes(catalog=[scanned("plan")], disabled=("plan",), skill_dirs={"plan": folder})
+        got = self.viewed(host)
+        # The row still says Off — that is what the sheet is opened to look at — and the file is
+        # there: the read never goes near `skill_view`, which refuses exactly this skill.
+        self.assertFalse(got["enabled"])
+        self.assertEqual(got["content"], "# Plan\n\nWrite it down.\n")
+
+    def test_a_name_the_bot_hasnt_got_is_a_404(self):
+        host = hermes(catalog=[scanned("plan")], skill_dirs={})
+        with mock.patch.dict(sys.modules, host.modules):
+            with self.assertRaises(skill_catalog.SkillError) as caught:
+                skill_catalog.view("bot-a", "ghost")
+        self.assertEqual(caught.exception.status, 404)
+        self.assertEqual(str(caught.exception), "Skill 'ghost' isn't on this bot.")
+
+    def test_a_skill_the_host_cannot_resolve_is_refused_in_the_rows_own_words(self):
+        host = hermes(catalog=[scanned("one", status="ambiguous", load_name=None)], skill_dirs={})
+        with mock.patch.dict(sys.modules, host.modules):
+            with self.assertRaises(skill_catalog.SkillError) as caught:
+                skill_catalog.view("bot-a", "one")
+        self.assertEqual(caught.exception.status, 404)
+        self.assertEqual(
+            str(caught.exception), "Ambiguous skill name 'one': another copy shares it."
+        )
+
+    def test_a_plugin_skills_sheet_is_found_in_the_registry(self):
+        folder = self.skill("deploy")
+        host = hermes(
+            catalog=[scanned("plan")],
+            plugin_rows=[
+                {"name": "ops:deploy", "description": "Deploy it", "category": "plugin",
+                 "frontmatter": {}},
+            ],
+            plugin_dirs={"ops:deploy": folder / "SKILL.md"},
+        )
+        got = self.viewed(host, "ops:deploy")
+        self.assertEqual(got["origin"], "plugin")
+        self.assertEqual(got["content"], "# Plan\n\nWrite it down.\n")
+
+    def test_the_hosts_readiness_and_setup_are_carried_under_its_own_names(self):
+        folder = self.skill()
+        host = hermes(
+            catalog=[scanned("plan")],
+            skill_dirs={"plan": folder},
+            readiness=(
+                {
+                    "readiness_status": "setup_needed",
+                    "setup_needed": True,
+                    "missing_required_environment_variables": ["PLAN_TOKEN"],
+                    "required_commands": [],
+                },
+                {"setup_note": "Setup needed before using this skill: missing env $PLAN_TOKEN.",
+                 "setup_help": "Find the token in the plan's settings."},
+            ),
+        )
+        got = self.viewed(host)
+        self.assertEqual(got["readiness_status"], "setup_needed")
+        self.assertTrue(got["setup_needed"])
+        self.assertEqual(got["missing_required_environment_variables"], ["PLAN_TOKEN"])
+        self.assertEqual(
+            got["setup_note"], "Setup needed before using this skill: missing env $PLAN_TOKEN."
+        )
+        self.assertEqual(got["setup_help"], "Find the token in the plan's settings.")
+
+    def test_a_host_that_cannot_say_leaves_those_fields_out(self):
+        folder = self.skill()
+        host = hermes(catalog=[scanned("plan")], skill_dirs={"plan": folder})
+        got = self.viewed(host)
+        # Left out rather than filled in with something the host never said, and the linked-file
+        # listing with them: null is "this host can't list them".
+        for field in ("readiness_status", "setup_needed", "setup_note", "setup_help"):
+            self.assertNotIn(field, got)
+        self.assertIsNone(got["linkedFiles"])
+
+    def test_one_file_is_read_and_nothing_else_of_the_directory(self):
+        folder = self.skill(
+            **{"references/api.md": "The API.\n", "scripts/run.sh": "echo hi\n"}
+        )
+        host = hermes(catalog=[scanned("plan")], skill_dirs={"plan": folder})
+        with mock.patch.dict(sys.modules, host.modules):
+            got = skill_catalog.file("bot-a", "plan", "references/api.md")
+        self.assertEqual(got, {"name": "plan", "path": "references/api.md", "content": "The API.\n"})
+
+    def test_a_path_that_leaves_the_skill_is_refused(self):
+        folder = self.skill(**{"references/api.md": "The API.\n"})
+        (self.root / "outside.md").write_text("Not yours.\n", encoding="utf-8")
+        (folder / "references" / "link.md").symlink_to(self.root / "outside.md")
+        host = hermes(catalog=[scanned("plan")], skill_dirs={"plan": folder})
+        for path in (
+            "../outside.md",
+            "references/../../outside.md",
+            str(self.root / "outside.md"),
+            "references/link.md",
+        ):
+            with self.subTest(path=path):
+                with mock.patch.dict(sys.modules, host.modules):
+                    with self.assertRaises(skill_catalog.SkillError) as caught:
+                        skill_catalog.file("bot-a", "plan", path)
+                self.assertEqual(caught.exception.status, 400)
+                self.assertEqual(str(caught.exception), skill_catalog.OUTSIDE % path)
+
+    def test_a_file_the_skill_hasnt_got_is_a_404(self):
+        folder = self.skill()
+        host = hermes(catalog=[scanned("plan")], skill_dirs={"plan": folder})
+        with mock.patch.dict(sys.modules, host.modules):
+            with self.assertRaises(skill_catalog.SkillError) as caught:
+                skill_catalog.file("bot-a", "plan", "references/gone.md")
+        self.assertEqual(caught.exception.status, 404)
+        self.assertEqual(
+            str(caught.exception), "Skill 'plan' has no file 'references/gone.md'."
+        )
+
+    def test_a_host_without_the_sheets_machinery_refuses_with_its_own_reason(self):
+        folder = self.skill()
+        host = hermes(
+            catalog=[scanned("plan")],
+            skill_dirs={"plan": folder},
+            omit=("tools.skill_manager_tool",),
+        )
+        with mock.patch.dict(sys.modules, host.modules):
+            for call in (
+                lambda: skill_catalog.view("bot-a", "plan"),
+                lambda: skill_catalog.file("bot-a", "plan", "SKILL.md"),
+            ):
+                with self.assertRaises(skill_catalog.SkillError) as caught:
+                    call()
+                self.assertEqual(caught.exception.status, 501)
+                self.assertEqual(str(caught.exception), skill_catalog.UNAVAILABLE_VIEW)
+
+
 class FeatureTests(unittest.TestCase):
     def test_the_gate_says_why_a_host_without_a_listing_cannot_be_read(self):
         with mock.patch.dict(sys.modules, {"tools.skills_tool": None}):
@@ -570,9 +782,20 @@ class FeatureTests(unittest.TestCase):
         with mock.patch.dict(sys.modules, host.modules):
             self.assertIsNone(skill_catalog.writable())
 
-    def test_the_features_are_the_list_and_its_switch(self):
+    def test_the_sheet_gate_says_why_a_host_without_the_lookup_cannot_open_one(self):
+        host = hermes(catalog=[scanned("plan")], omit=("tools.skill_manager_tool",))
+        with mock.patch.dict(sys.modules, host.modules):
+            self.assertEqual(skill_catalog.viewable(), skill_catalog.UNAVAILABLE_VIEW)
+
+    def test_the_sheet_gate_is_quiet_where_the_lookup_imports(self):
+        host = hermes(catalog=[scanned("plan")])
+        with mock.patch.dict(sys.modules, host.modules):
+            self.assertIsNone(skill_catalog.viewable())
+
+    def test_the_features_are_the_list_its_switch_and_its_sheet(self):
         self.assertEqual(
-            [name for name, _gate in skill_catalog.FEATURES], ["skills", "skills_write"]
+            [name for name, _gate in skill_catalog.FEATURES],
+            ["skills", "skills_write", "skills_view"],
         )
 
 

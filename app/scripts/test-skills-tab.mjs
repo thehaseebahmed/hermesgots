@@ -4,7 +4,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { skillHealth, skillSections } from "../src/lib/skills-tab.ts"
+import { skillHealth, skillOrigin, skillSections, skillSetup } from "../src/lib/skills-tab.ts"
 
 const skill = (patch) => ({
   name: "plan",
@@ -100,4 +100,38 @@ test("both sections come back with nothing in them, and one empty section keeps 
   ])
   assert.deepEqual(pluginOnly[0], { id: "yours", title: "Your skills", groups: [] })
   assert.equal(pluginOnly[1].groups[0].skills[0].name, "gots:runbook")
+})
+
+test("a skill's origin is one of the sheet's four lines, and nothing where the row doesn't say", () => {
+  assert.equal(skillOrigin(skill({ origin: "builtin" })), "Built in")
+  assert.equal(skillOrigin(skill({ origin: "hub" })), "Installed from the Hub")
+  assert.equal(skillOrigin(skill({ origin: "yours" })), "Yours")
+  assert.equal(skillOrigin(skill({ origin: "plugin" })), "From a plugin")
+  // An older plugin's row: the tab files it as the profile's own, but the sheet says nothing rather
+  // than claiming it.
+  assert.equal(skillOrigin(skill()), null)
+  assert.equal(skillOrigin(skill({ origin: null })), null)
+})
+
+test("the Host's own setup sentence stands alone, ahead of its status word", () => {
+  const note = "Setup needed before using this skill: missing env $PLAN_TOKEN."
+  assert.deepEqual(skillSetup({ ...skill(), readiness_status: "setup_needed", setup_note: note }), [
+    { label: "Setup", text: note },
+  ])
+  // A note already carries the help, so the help is only its own line when there is no note.
+  assert.deepEqual(
+    skillSetup({ ...skill(), readiness_status: "setup_needed", setup_help: "Add it to .env." }),
+    [{ label: "Setup", text: "Add it to .env." }],
+  )
+  assert.deepEqual(skillSetup({ ...skill(), gateway_setup_hint: "Load it in the CLI." }), [
+    { label: "Setup", text: "Load it in the CLI." },
+  ])
+})
+
+test("a Host with no sentence to give says its status word, and one that says nothing says nothing", () => {
+  assert.deepEqual(skillSetup({ ...skill(), readiness_status: "available" }), [
+    { label: "Readiness", text: "available" },
+  ])
+  assert.deepEqual(skillSetup({ ...skill() }), [])
+  assert.deepEqual(skillSetup({ ...skill(), readiness_status: "  ", setup_note: "" }), [])
 })

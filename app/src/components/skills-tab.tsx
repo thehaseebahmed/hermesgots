@@ -2,6 +2,7 @@ import { SparklesIcon } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 
+import { SkillDetailSheet } from "@/components/skill-detail-sheet"
 import { Group, rowClass, RowText } from "@/components/settings-chrome"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
@@ -21,6 +22,12 @@ type RowControls = {
 }
 
 /**
+ * What the tab is showing over the list: exactly one sheet, or none. A skill's sheet is the only one
+ * there is so far, and the removal adds itself to this state when it lands.
+ */
+type Sheet = { kind: "skill"; name: string }
+
+/**
  * A bot's skills, as a tab of its Settings: everything the profile holds — the skills seeded with
  * Hermes, the ones installed from a Hub, the ones written on it and the ones a plugin provides —
  * in two sections, *Your skills* then *From plugins*, each grouped by category with the rows that
@@ -32,10 +39,11 @@ type RowControls = {
  * under it is dropped, so a bot with no plugin skills shows the one section.
  *
  * The list is the composer's `/` menu's list, unfiltered — that menu keeps what the bot can run,
- * and this screen is the one that has to show what it can't. A row's switch is the one thing to
- * press here: one switch means the bot as a whole (the profile's global disabled list, ADR 0044),
- * and the Host's row replaces the one every consumer reads, so a skill switched off leaves the
- * menu and the pickers at once.
+ * and this screen is the one that has to show what it can't. A row's switch is one thing to press
+ * here: one switch means the bot as a whole (the profile's global disabled list, ADR 0044), and the
+ * Host's row replaces the one every consumer reads, so a skill switched off leaves the menu and the
+ * pickers at once. A row's title is the other: it opens the skill's own sheet, where a Host offers
+ * one, and reads that one skill when it opens.
  */
 export function SkillsTab({ profile }: { profile: Profile }) {
   // The tab is drawn only where the Host advertises listing skills, and its switches only where it
@@ -46,6 +54,7 @@ export function SkillsTab({ profile }: { profile: Profile }) {
   const state = useSkills(profile, answer === "yes")
   // The row whose write is in flight, by name: only that switch waits, and the rest stay pressable.
   const [saving, setSaving] = useState<string | null>(null)
+  const [sheet, setSheet] = useState<Sheet | null>(null)
   if (answer !== "yes") return null
   // The tab arriving, rather than a bot without skills: a first-ever open waits for the read
   // instead of drawing an empty frame the list then fills.
@@ -64,11 +73,18 @@ export function SkillsTab({ profile }: { profile: Profile }) {
   }
 
   const controls = answers.write === "yes" ? { onToggle: toggle, saving } : undefined
+  // A sheet only exists where the Host offers a lookup for it, so a row whose title could open
+  // nothing keeps its name plain (an older plugin).
+  const open =
+    answers.view === "yes" ? (name: string) => setSheet({ kind: "skill", name }) : undefined
   return (
     <div className="flex flex-col gap-4" data-skills-tab>
       {skillSections(state.skills).map((section) => (
-        <Section key={section.id} section={section} controls={controls} />
+        <Section key={section.id} section={section} controls={controls} onOpen={open} />
       ))}
+      {sheet?.kind === "skill" && (
+        <SkillDetailSheet config={profile} name={sheet.name} onClose={() => setSheet(null)} />
+      )}
     </div>
   )
 }
@@ -78,7 +94,16 @@ export function SkillsTab({ profile }: { profile: Profile }) {
  * rows at all is left out — a heading over nothing says there are none — and so is a category the
  * rule handed over empty.
  */
-function Section({ section, controls }: { section: SkillSection; controls?: RowControls }) {
+function Section({
+  section,
+  controls,
+  onOpen,
+}: {
+  section: SkillSection
+  controls?: RowControls
+  /** Opening a skill's sheet, where the Host offers one: every row of both sections has this. */
+  onOpen?: (name: string) => void
+}) {
   const groups = section.groups.filter((group) => group.skills.length > 0)
   if (groups.length === 0) return null
   return (
@@ -96,7 +121,7 @@ function Section({ section, controls }: { section: SkillSection; controls?: RowC
             </h3>
             <Group>
               {group.skills.map((skill) => (
-                <SkillItem key={skill.name} skill={skill} controls={controls} />
+                <SkillItem key={skill.name} skill={skill} controls={controls} onOpen={onOpen} />
               ))}
             </Group>
           </div>
@@ -111,14 +136,25 @@ function Section({ section, controls }: { section: SkillSection; controls?: RowC
  * switch its Host advertises — the same name, badge and description a skill wears in the composer's
  * menu, with the health line an MCP server's row has. The line is the Host's own text where it
  * failed, so it reads as the failure it is.
+ *
+ * The name is the button that opens the skill's sheet, where the Host offers one — the row's own way
+ * in, as a server's name is.
  */
-function SkillItem({ skill, controls }: { skill: Skill; controls?: RowControls }) {
+function SkillItem({
+  skill,
+  controls,
+  onOpen,
+}: {
+  skill: Skill
+  controls?: RowControls
+  onOpen?: (name: string) => void
+}) {
   const health = skillHealth(skill)
   // A row the Host says it will refuse to switch carries none — an essential skill's switch could
   // only come back refused. A row that doesn't say is offered one: a Host that can't answer that is
   // a Host that doesn't advertise `skills_write` either, so a switch here still means something.
   const offers = controls !== undefined && skill.switchable !== false
-  const title = (
+  const name = (
     <span className="flex min-w-0 items-center gap-2">
       <span className="truncate">{skill.name}</span>
       {skill.category && (
@@ -132,7 +168,23 @@ function SkillItem({ skill, controls }: { skill: Skill; controls?: RowControls }
     <div className={rowClass} data-skill={skill.name}>
       <SparklesIcon className="size-5 shrink-0 text-muted-foreground" />
       <div className="flex min-w-0 flex-1 flex-col">
-        <RowText title={title} subtitle={skill.description} />
+        <RowText
+          title={
+            onOpen ? (
+              <button
+                type="button"
+                className="max-w-full rounded-lg text-left outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                aria-haspopup="dialog"
+                onClick={() => onOpen(skill.name)}
+              >
+                {name}
+              </button>
+            ) : (
+              name
+            )
+          }
+          subtitle={skill.description}
+        />
         <span
           className={cn("text-sm", health.failed ? "text-destructive" : "text-muted-foreground")}
         >

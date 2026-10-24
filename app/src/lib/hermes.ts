@@ -422,6 +422,99 @@ export async function setSkillEnabled(
   return data
 }
 
+/**
+ * One skill's own sheet, as the Host answers it (the Gots plugin's `GET /skills/<name>`): the row the
+ * list carries, then the skill itself. The readiness and setup fields keep Hermes's own names, since
+ * they are its words and the sheet shows them as they came.
+ */
+export interface SkillView extends Skill {
+  /** The skill's SKILL.md exactly as it is on disk — nothing preprocessed, nothing rendered. */
+  content: string
+  /** Its files by group (`references`, `templates`, `assets`, `scripts`), or null where the Host can't list them. */
+  linkedFiles: Record<string, string[]> | null
+  /** `available`, `setup_needed` or `unsupported`, where the Host says. */
+  readiness_status?: string | null
+  /** Whether the Host needs something of a skill's own before it can run it. */
+  setup_needed?: boolean
+  /** What to do about it, in the Host's own prose. */
+  setup_help?: string
+  gateway_setup_hint?: string
+  setup_note?: string
+}
+
+/** One linked file of a skill, read when its sheet asks for that file alone. */
+export interface SkillFile {
+  name: string
+  path: string
+  content: string
+}
+
+/** The linked files the Host listed, or null where it listed none: a group's rows are paths only. */
+function readLinkedFiles(value: unknown): Record<string, string[]> | null {
+  if (!value || typeof value !== "object") return null
+  const groups: Record<string, string[]> = {}
+  for (const [group, paths] of Object.entries(value as Record<string, unknown>)) {
+    if (Array.isArray(paths)) {
+      groups[group] = paths.filter((path): path is string => typeof path === "string")
+    }
+  }
+  return groups
+}
+
+/** One path on the bot's plugin under `/skills`, every segment escaped (`/skills/<name>/file`). */
+function skillPath(config: HermesConfig, ...segments: string[]): string {
+  const rest = segments.map((segment) => `/${encodeURIComponent(segment)}`).join("")
+  return `${pluginRoot(config.baseUrl)}/skills${rest}`
+}
+
+/**
+ * One skill's own sheet: its SKILL.md, its linked files, and the Host's readiness and setup where it
+ * has them. It answers for a skill switched off as much as for one that is on, which is the point —
+ * the skill whose sheet matters most is the one that isn't working. A read like any other, so it is
+ * bounded where the caller names no bound; a name the profile hasn't got is refused there in the
+ * Host's own sentence.
+ */
+export async function getSkillView(
+  config: HermesConfig,
+  name: string,
+  signal?: AbortSignal,
+): Promise<SkillView> {
+  const response = await request(skillPath(config, name), {
+    headers: headers(config),
+    signal: signal ?? AbortSignal.timeout(READ_TIMEOUT_MS),
+  })
+  const data = (await response.json())?.data as SkillView | undefined
+  if (!data || typeof data.name !== "string" || typeof data.content !== "string") {
+    throw new HermesError("The host answered without the skill.")
+  }
+  return { ...data, linkedFiles: readLinkedFiles(data.linkedFiles) }
+}
+
+/**
+ * One linked file of one of the bot's skills, read on its own when its sheet asks for it (the Gots
+ * plugin's `GET /skills/<name>/file?path=…`), so opening a file never reads the directory around it.
+ * A path outside the skill is refused there in the Host's own sentence.
+ */
+export async function getSkillFile(
+  config: HermesConfig,
+  name: string,
+  path: string,
+  signal?: AbortSignal,
+): Promise<SkillFile> {
+  const response = await request(
+    `${skillPath(config, name, "file")}?path=${encodeURIComponent(path)}`,
+    {
+      headers: headers(config),
+      signal: signal ?? AbortSignal.timeout(READ_TIMEOUT_MS),
+    },
+  )
+  const data = (await response.json())?.data as Partial<SkillFile> | undefined
+  if (!data || typeof data.content !== "string") {
+    throw new HermesError("The host answered without the file.")
+  }
+  return { name: name, path: path, content: data.content }
+}
+
 /** A bot's MCP server, as the Gots plugin's read reports it: its state in Gots' own words. */
 export type McpState = "on" | "off" | "connecting" | "failed" | "needs_access" | "plugin"
 

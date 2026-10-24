@@ -3,7 +3,7 @@
  * and category groups it sits in. Kept import-free but for types, so `scripts/test-skills-tab.mjs`
  * can drive it without a browser (as `mcp-server.ts` is for the MCP rows).
  */
-import type { Skill } from "@/lib/hermes"
+import type { Skill, SkillView } from "@/lib/hermes"
 
 /** A row's prose line, and whether it is a failure to read — which is what colours it. */
 export interface SkillHealth {
@@ -96,4 +96,50 @@ export function skillSections(skills: Skill[]): SkillSection[] {
     title,
     groups: groupsOf(skills.filter((skill) => (skill.origin === "plugin") === plugins)),
   }))
+}
+
+/**
+ * Where a skill came from, in the sheet's one line, or null where the row doesn't say (ADR 0045).
+ *
+ * An older plugin answers no `origin` at all. The tab's sections have to file such a row somewhere,
+ * and they file it as the profile's own; a line saying where a skill came from is worth nothing if it
+ * is a guess, so the sheet leaves it out rather than repeating that default.
+ */
+export function skillOrigin(skill: Skill): string | null {
+  switch (skill.origin) {
+    case "builtin":
+      return "Built in"
+    case "hub":
+      return "Installed from the Hub"
+    case "yours":
+      return "Yours"
+    case "plugin":
+      return "From a plugin"
+    default:
+      return null
+  }
+}
+
+/** One line of a sheet's readiness and setup: the screen's label, and the Host's own words. */
+export interface SkillSetupLine {
+  label: "Readiness" | "Setup"
+  text: string
+}
+
+/**
+ * The Host's readiness and setup as the sheet's lines, or none where it said nothing about them.
+ *
+ * The Host's own sentence comes first and stands alone where it has one — `setup_note` is written to
+ * be read, and already names what is missing and appends any help — because a sentence built for the
+ * occasion beats a word lifted out of an enum. Only where the Host has no sentence does its status
+ * word stand on its own, under a label: the label is the sheet's own, and it does not dress the word
+ * up into something the Host never said.
+ */
+export function skillSetup(view: SkillView): SkillSetupLine[] {
+  const sentence = [view.setup_note, view.setup_help, view.gateway_setup_hint]
+    .map((line) => line?.trim())
+    .find((line): line is string => Boolean(line))
+  if (sentence) return [{ label: "Setup", text: sentence }]
+  const status = view.readiness_status?.trim()
+  return status ? [{ label: "Readiness", text: status }] : []
 }

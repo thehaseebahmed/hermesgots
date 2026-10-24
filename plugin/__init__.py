@@ -505,6 +505,52 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, str(error), error.status)
         return web.json_response({"object": "skill", "data": row})
 
+    async def view_skill(request: "web.Request") -> "web.Response":
+        """One skill's own sheet: the row, its SKILL.md, its linked files and its readiness.
+
+        A switched-off skill's sheet opens like any other's, which is why this reads the manager's
+        lookup rather than Hermes's ``skill_view`` — the module's own rules, this only guards and
+        maps the refusal. The skill's row keys come first, so the answer is the row it opened from
+        with the skill itself under it.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            found = await asyncio.to_thread(
+                skill_catalog.view, request_profile(), request.match_info["name"]
+            )
+        except ImportError:
+            return _error(web, skill_catalog.UNAVAILABLE, 501)
+        except skill_catalog.SkillError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "skill", "data": found})
+
+    async def read_skill_file(request: "web.Request") -> "web.Response":
+        """One linked file of one skill, named by the request's ``path``, and nothing around it.
+
+        The sheet lists what the host says a skill holds and reads the one file a tap names, so this
+        never walks a directory. A path outside the skill is refused by the module with its own
+        sentence and status, as a name the bot hasn't got is.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        # Read from the query rather than the path: a group's files sit below the skill, and a
+        # relative path with a slash in it is the thing being asked for.
+        path = request.query.get("path") or ""
+        if not path:
+            return _error(web, "Missing path", 400)
+        try:
+            found = await asyncio.to_thread(
+                skill_catalog.file, request_profile(), request.match_info["name"], path
+            )
+        except ImportError:
+            return _error(web, skill_catalog.UNAVAILABLE, 501)
+        except skill_catalog.SkillError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "skill.file", "data": found})
+
     def mcp_route(
         call: Any,
         key: Optional[str],
@@ -1635,9 +1681,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/triage-model", get_triage_model)
     app.router.add_get(f"{PREFIX}/openui", get_openui)
     app.router.add_get(f"{PREFIX}/skills", list_skills)
-    # The list's write, one skill's switch; no static sibling shares the `skills/{name}` space yet,
-    # so it is registered beside the list it answers for.
+    # The list's writes and one skill's read, in the `skills/{name}` space the list answers for. The
+    # word `skills` itself is a static segment above, so it is registered first; no static sibling
+    # shares `skills/{name}`, so the three sit beside each other.
     app.router.add_post(f"{PREFIX}/skills/{{name}}/enabled", set_skill_enabled)
+    app.router.add_get(f"{PREFIX}/skills/{{name}}", view_skill)
+    app.router.add_get(f"{PREFIX}/skills/{{name}}/file", read_skill_file)
     app.router.add_get(f"{PREFIX}/mcp", list_mcp_servers)
     app.router.add_get(f"{PREFIX}/mcp/catalogue", list_mcp_catalogue)
     app.router.add_get(f"{PREFIX}/mcp/catalogue/{{name}}", get_mcp_catalogue_entry)

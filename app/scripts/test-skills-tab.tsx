@@ -52,11 +52,50 @@ const ROWS: Row[] = [
 ]
 
 /**
- * A host with the plugin's two skills answers: what it advertises, the list it holds, and — where
- * it advertises `skills_write` — the one row a switch replaces. `refuse` is the sentence a write
- * comes back with, as a Host that will not switch that skill answers.
+ * What one skill's sheet answers: the SKILL.md the Host reads, the files it says the skill holds and
+ * that one of them's text, and whatever it can say about readiness and setup. `files` is the shared
+ * stand-in host's own map and never reaches the app.
  */
-function host(features: string[], rows: Row[] = ROWS, refuse?: string) {
+type Sheet = {
+  content?: string
+  linkedFiles?: Record<string, string[]> | null
+  readiness_status?: string
+  setup_note?: string
+  setup_help?: string
+  files?: Record<string, string>
+}
+
+/** The sheets the stand-in Host answers, keyed by the skill they belong to. */
+const SHEETS: Record<string, Sheet> = {
+  "pr-review": {
+    content: "# pr-review\n\nRead the diff, then say what is wrong with it.\n",
+    linkedFiles: { references: ["references/checklist.md"] },
+    files: { "references/checklist.md": "- Every hunk read.\n- Nothing invented.\n" },
+    readiness_status: "available",
+  },
+  deploy: {
+    content: "# deploy\n\nShip it.\n",
+    linkedFiles: null,
+    setup_note: "Setup needed before using this skill: missing env $DEPLOY_TOKEN.",
+  },
+  lint: { content: "# lint\n\nRun the linters.\n", linkedFiles: {} },
+  "pr-land": { content: "# pr-land\n\nLand the pull request.\n", linkedFiles: null },
+  plan: { content: "# plan\n\nWrite it down first.\n", linkedFiles: null },
+  "gots:notes": { content: "# notes\n\nNote the session.\n", linkedFiles: null },
+}
+
+/**
+ * A host with the plugin's skills answers: what it advertises, the list it holds, — where it
+ * advertises `skills_write` — the one row a switch replaces, and — where it advertises `skills_view`
+ * — one skill's sheet and one of its files. `refuse` is the sentence a write comes back with, as a
+ * Host that will not switch that skill answers.
+ */
+function host(
+  features: string[],
+  rows: Row[] = ROWS,
+  refuse?: string,
+  sheets: Record<string, Sheet> = SHEETS,
+) {
   const calls: { path: string; method: string; body: Record<string, unknown> | null }[] = []
   const held = rows.map((row) => ({ ...row }))
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -74,6 +113,35 @@ function host(features: string[], rows: Row[] = ROWS, refuse?: string) {
       if (!found) return json({ error: { message: `Skill '${name}' isn't on this bot.` } }, 400)
       found.enabled = body?.enabled === true
       return json({ object: "skill", data: { ...found } })
+    }
+    const file = /\/api\/plugins\/memento\/skills\/([^/]+)\/file$/.exec(url.pathname)
+    if (file && method === "GET") {
+      const name = decodeURIComponent(file[1])
+      const path = url.searchParams.get("path") ?? ""
+      const content = sheets[name]?.files?.[path]
+      if (content === undefined)
+        return json({ error: { message: `Skill '${name}' has no file '${path}'.` } }, 404)
+      return json({ object: "skill.file", data: { name, path, content } })
+    }
+    const view = /\/api\/plugins\/memento\/skills\/([^/]+)$/.exec(url.pathname)
+    if (view && method === "GET") {
+      const name = decodeURIComponent(view[1])
+      const row = held.find((one) => one.name === name)
+      const sheet = sheets[name]
+      if (!row || !sheet)
+        return json({ error: { message: `Skill '${name}' isn't on this bot.` } }, 404)
+      // The row's own fields first, then what this host can say — and nothing it can't.
+      return json({
+        object: "skill",
+        data: {
+          ...row,
+          content: sheet.content ?? "",
+          linkedFiles: sheet.linkedFiles ?? null,
+          ...(sheet.readiness_status ? { readiness_status: sheet.readiness_status } : {}),
+          ...(sheet.setup_note ? { setup_note: sheet.setup_note } : {}),
+          ...(sheet.setup_help ? { setup_help: sheet.setup_help } : {}),
+        },
+      })
     }
     if (url.pathname.endsWith("/api/plugins/memento/skills"))
       return json({ object: "list", data: held.map((row) => ({ ...row })) })
@@ -119,12 +187,18 @@ const rowNames = (section: string) =>
   )
 const row = (name: string) => find(`[data-skill="${name}"]`)
 
-async function seed(name: string, features: string[], rows: Row[] = ROWS, refuse?: string) {
+async function seed(
+  name: string,
+  features: string[],
+  rows: Row[] = ROWS,
+  refuse?: string,
+  sheets: Record<string, Sheet> = SHEETS,
+) {
   await seedSettings()
   await db.profiles.clear()
   await db.skills.clear()
   await db.profiles.put(botProfile(name))
-  const server = host(features, rows, refuse)
+  const server = host(features, rows, refuse, sheets)
   globalThis.fetch = server.fetch
   return server.calls
 }
@@ -309,6 +383,129 @@ test("a write the Host refuses is its own sentence, with the row as it was", asy
       await settle()
       assert.equal(on(switchIn("pr-review")), true, "and the switch keeps the Host's truth")
       assert.match(row("pr-review")?.textContent ?? "", /Ready/, "the row is as it was")
+    })
+  } finally {
+    toast.error = original
+  }
+})
+
+/** A row's way into its sheet: the title button the Host's `skills_view` puts there. */
+const title = (name: string) => find(`[data-skill="${name}"] button[aria-haspopup="dialog"]`)
+const sheetBody = () => find("[data-skill-sheet]")
+const sheetTitle = () => find('[role="dialog"] [data-slot="sheet-title"]')?.textContent?.trim()
+const openSheet = async (name: string) => {
+  await click(title(name))
+  await until(async () => sheetBody() !== null, `the sheet of ${name}`)
+}
+
+test("a row's title opens the skill's own sheet with its SKILL.md on it", async () => {
+  await seed("skills-sheet", ["skills", "skills_view"])
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    await click(title("pr-review"))
+    await until(async () => sheetBody() !== null, "the skill's sheet")
+    // The sheet is a pop-up of this screen: its header names the skill, and its body is the file as
+    // the Host has it, not a rendering of it.
+    assert.equal(sheetTitle(), "pr-review", "the sheet is titled by the skill")
+    assert.match(
+      find('[aria-label="SKILL.md"]')?.textContent ?? "",
+      /Read the diff, then say what is wrong with it\./,
+      "the SKILL.md is on screen",
+    )
+    assert.match(sheetBody()?.textContent ?? "", /Yours/, "and where it came from")
+  })
+})
+
+test("a linked file opens in the same sheet, and the way back returns to the skill", async () => {
+  await seed("skills-sheet-file", ["skills", "skills_view"])
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    await openSheet("pr-review")
+    const linked = find('[data-skill-files="references"] button')
+    assert.match(linked?.textContent ?? "", /references\/checklist\.md/, "the file is listed")
+    await click(linked)
+    await until(async () => find("[data-skill-file]") !== null, "the file's text")
+    assert.match(
+      find("[data-skill-file]")?.textContent ?? "",
+      /Every hunk read\./,
+      "the file's own text, read on the tap",
+    )
+    assert.equal(find("[data-skill-sheet]"), null, "one sheet, showing one thing")
+    await click(find('button[aria-label="Back to the skill"]'))
+    await until(async () => sheetBody() !== null, "the skill again")
+    assert.match(row("pr-review")?.textContent ?? "", /Ready/, "the list behind is untouched")
+  })
+})
+
+test("the sheet says where each skill came from, in the four origins' own words", async () => {
+  const origins: [string, string][] = [
+    ["lint", "Built in"],
+    ["pr-land", "Installed from the Hub"],
+    ["pr-review", "Yours"],
+    ["gots:notes", "From a plugin"],
+  ]
+  for (const [name, words] of origins) {
+    await seed("skills-origin", ["skills", "skills_view"])
+    await mount(editor("/settings/bots/bot-1/skills"), async () => {
+      await drawn()
+      await openSheet(name)
+      assert.equal(find("[data-skill-origin]")?.textContent, words, `${name} came from ${words}`)
+    })
+  }
+})
+
+test("the Host's own readiness and setup are the sheet's next lines", async () => {
+  await seed("skills-setup", ["skills", "skills_view"])
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    await openSheet("deploy")
+    // The Host's sentence, whole: the sheet adds its label and no words of its own.
+    assert.equal(
+      find('[data-skill-setup="setup"]')?.textContent,
+      "Setup Setup needed before using this skill: missing env $DEPLOY_TOKEN.",
+    )
+  })
+})
+
+test("a Host that can't open a skill leaves the rows plain, and nothing opens", async () => {
+  await seed("skills-noview", ["skills", "skills_write"], SWITCHABLE)
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    assert.deepEqual(
+      findAll('[data-skill] button[aria-haspopup="dialog"]'),
+      [],
+      "no row offers a sheet",
+    )
+    await click(row("pr-review"))
+    await settle()
+    assert.equal(find("[data-skill-sheet]"), null, "and a row opens nothing")
+  })
+})
+
+test("opening a sheet reads the Host and keeps nothing on the device", async () => {
+  await seed("skills-sheet-cache", ["skills", "skills_view"])
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    const before = JSON.stringify(await db.skills.toArray())
+    await openSheet("pr-review")
+    await settle()
+    assert.equal(JSON.stringify(await db.skills.toArray()), before, "the device's row is as it was")
+  })
+})
+
+test("a sheet the Host refuses closes on its own sentence", async () => {
+  await seed("skills-sheet-refused", ["skills", "skills_view"], ROWS, undefined, {})
+  const errors: string[] = []
+  const original = toast.error
+  toast.error = ((message: string) => errors.push(String(message))) as typeof toast.error
+  try {
+    await mount(editor("/settings/bots/bot-1/skills"), async () => {
+      await drawn()
+      await click(title("pr-review"))
+      await until(async () => errors.length === 1, "the toast")
+      assert.deepEqual(errors, ["Skill 'pr-review' isn't on this bot."])
+      await settle()
+      assert.equal(find("[data-skill-sheet]"), null, "nothing is left half-drawn")
     })
   } finally {
     toast.error = original
