@@ -1,6 +1,7 @@
 /**
- * The account's prompt library, as rules: what an entry is, the list's order, the one line a row
- * previews a body on, the tags read off a field, and when the library is shown at all. No Dexie and
+ * The account's prompt library, as rules: what an entry is, the list's order, the one rule a
+ * prompt's line is drawn by (a library row's preview and a project's own Prompt row read a body
+ * the same way), the tags read off a field, and when the library is shown at all. No Dexie and
  * no fetch here — `prompt-library-store.ts` keeps the entries on the device — so
  * `scripts/test-prompt-library.mjs` runs these as a pure rule.
  *

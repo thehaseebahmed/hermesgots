@@ -64,7 +64,7 @@ export function PromptLibrarySheet({
             entries={entries}
             label="Prompts"
             reading="Reading prompts…"
-            empty="No prompts yet. Save this project's words to the library to start it."
+            empty="No prompts yet."
             row={(entry) => (
               <SheetPickerRow
                 key={entry.id}

@@ -1175,13 +1175,6 @@ const AFK_FOURTH_TASK = "A pick count fills every place, in order"
 const AFK_FIFTH_TASK = "The bot's budget counts across its projects"
 /** How many tasks a project may hold at once: its own count, one where it never set one. */
 const afkPickCount = (project) => afkPickCounts.get(project.id) ?? 1
-/**
- * The tasks a project's frontier offers, oldest first: five, whatever its pick count. The count
- * decides how many of them are HELD, never how many exist — the plugin's `_plan` slices the holds it
- * fills out of the frontier rather than growing it. A pool that grew with the count would make a
- * raise look like the repository opening tasks (nothing does), and leave the top of the host's own
- * range of five with nothing to claim.
- */
 const afkPool = () => [
   [AFK_TASK, AFK_TITLE],
   [266, AFK_SWITCH_TASK],

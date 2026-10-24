@@ -503,6 +503,11 @@ function isChatTombstone(row: Tombstone): row is ChatTombstone {
   return row.id.startsWith("chat:")
 }
 
+/** Whether a tombstone is a prompt library entry's, read the same way. */
+function isPromptTombstone(row: Tombstone): row is PromptTombstone {
+  return row.id.startsWith("prompt:")
+}
+
 /**
  * The bot tombstones this device still holds. One table keeps every kind, so a reader narrows by the
  * id it reads — and from there on the record's profile is a `string`, not something to guard again.
@@ -516,6 +521,23 @@ export async function botTombstones(): Promise<BotTombstone[]> {
 export async function chatTombstones(): Promise<ChatTombstone[]> {
   const rows = await db.tombstones.where("id").startsWith("chat:").toArray()
   return rows.filter(isChatTombstone)
+}
+
+/** One prompt tombstone as its callers need it: the row to delete, the entry it names, when. */
+export interface PromptTombstoneEntry {
+  id: `prompt:${string}`
+  entryId: string
+  deletedAt: number
+}
+
+/** The prompt library entry tombstones, the prefix that names them read here rather than by each. */
+export async function promptTombstones(): Promise<PromptTombstoneEntry[]> {
+  const rows = await db.tombstones.where("id").startsWith("prompt:").toArray()
+  return rows.filter(isPromptTombstone).map((tombstone) => ({
+    id: tombstone.id,
+    entryId: tombstone.id.slice("prompt:".length),
+    deletedAt: tombstone.deletedAt,
+  }))
 }
 
 /**

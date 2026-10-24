@@ -141,7 +141,7 @@ export function PromptEditor({
               <Button
                 type="button"
                 variant="secondary"
-                className="h-10 rounded-full px-4"
+                className="h-11 rounded-full px-4"
                 disabled={saving}
                 onClick={() => setChoosing(true)}
               >
@@ -150,7 +150,7 @@ export function PromptEditor({
               <Button
                 type="button"
                 variant="ghost"
-                className="h-10 rounded-full px-4"
+                className="h-11 rounded-full px-4"
                 disabled={saving}
                 onClick={() => setWriting("new")}
               >

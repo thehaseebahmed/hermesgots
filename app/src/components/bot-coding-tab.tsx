@@ -57,7 +57,8 @@ export function CodingTab({ profile }: { profile: Profile }) {
   const choose = async (next: number) => {
     // The count the tab already holds is no write, and neither is one past the host's own range: the
     // stepper's buttons are out of reach there, so this is only the guard behind them.
-    if (saving || failed || next < PICK_BUDGET.least || next > PICK_BUDGET.most || next === shown) return
+    if (saving || failed || next < PICK_BUDGET.least || next > PICK_BUDGET.most || next === shown)
+      return
     setDraft(next)
     setSaving(true)
     try {

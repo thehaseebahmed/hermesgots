@@ -19,10 +19,10 @@
 export const AFK_PICKS_FEATURE = "afk_picks"
 
 /**
- * The host's own range for a project's pick count, and the count it works within where it never set
- * one (`afk.py`'s default): one task at a time.
+ * The host's own range for a project's pick count, one task at a time at the low end (ADR 0025):
+ * the bounds the pills offer across it.
  */
-export const PICK_COUNT = { least: 1, most: 5, unset: 1 } as const
+export const PICK_COUNT = { least: 1, most: 5 } as const
 
 /** Every count that range offers, in the order the stepper's pills read them. */
 export const PICK_COUNTS = Array.from(
