@@ -71,6 +71,7 @@ import { useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { MIN_PLUGIN_VERSION, pluginOutdated } from "@/lib/version"
 import { McpsTab } from "@/components/mcps-tab"
+import { SkillsTab } from "@/components/skills-tab"
 
 type Connection =
   | { state: "idle" }
@@ -211,10 +212,14 @@ export function BotEditor({
   // Coding — how the bot works when it is left alone — is a tab only where the plugin says it holds
   // the bot's own AFK numbers: a bot whose host predates them keeps the editor it has.
   const picks = usePluginFeature(profile, AFK_PICKS_FEATURE)
+  // The Skills tab is gated the same way, on its own feature: a Host that can't list skills has no
+  // tab, and a Host that hasn't answered keeps the address and draws General meanwhile.
+  const listsSkills = usePluginFeature(profile, "skills")
   const shown: BotTab =
     (tab === "mcps" && !mcpServers) ||
     (tab === "dictation" && dictates !== "yes") ||
-    (tab === "coding" && picks !== "yes")
+    (tab === "coding" && picks !== "yes") ||
+    (tab === "skills" && listsSkills !== "yes")
       ? "general"
       : tab
 
@@ -238,7 +243,9 @@ export function BotEditor({
       void navigate(`/settings/bots/${profile.id}`, { replace: true })
     if (tab === "coding" && picks === "no")
       void navigate(`/settings/bots/${profile.id}`, { replace: true })
-  }, [tab, answers.list, dictates, picks, navigate, profile.id])
+    if (tab === "skills" && listsSkills === "no")
+      void navigate(`/settings/bots/${profile.id}`, { replace: true })
+  }, [tab, answers.list, dictates, picks, listsSkills, navigate, profile.id])
 
   // One read of the host's model list, for both the tab's own open and General's Test connection.
   const readModels = useCallback(
@@ -316,6 +323,7 @@ export function BotEditor({
         {dictates === "yes" && <TabsTrigger value="dictation">Dictation</TabsTrigger>}
         {mcpServers && <TabsTrigger value="mcps">MCP</TabsTrigger>}
         {picks === "yes" && <TabsTrigger value="coding">Coding</TabsTrigger>}
+        {listsSkills === "yes" && <TabsTrigger value="skills">Skills</TabsTrigger>}
       </TabsList>
 
       <TabsContent value="general">
@@ -543,6 +551,11 @@ export function BotEditor({
       {picks === "yes" && (
         <TabsContent value="coding">
           <CodingTab profile={profile} />
+        </TabsContent>
+      )}
+      {listsSkills === "yes" && (
+        <TabsContent value="skills">
+          <SkillsTab profile={profile} />
         </TabsContent>
       )}
     </Tabs>
