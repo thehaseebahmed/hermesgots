@@ -28,7 +28,7 @@ import time
 from contextlib import closing
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, NamedTuple, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, NamedTuple, Optional, Set, Tuple
 
 from . import approvals, events, push
 from .store import connect
@@ -1147,3 +1147,72 @@ def after_run(**kwargs: Any) -> None:
             stamp(db, record)
     except Exception:
         logger.debug("memento: on_session_end failed", exc_info=True)
+
+
+def marked_wakes(path: Path, subagent_ids: Iterable[str]) -> Set[str]:
+    """The subagents among ``subagent_ids`` whose result has already woken their bot.
+
+    One read for a whole sweep: the watcher asks this about every ended subagent it found, so a
+    per-child lookup would open the store once per child.
+    """
+    ids = [one for one in subagent_ids if one]
+    if not ids or not path.exists():
+        return set()
+    marks = ", ".join("?" for _ in ids)
+    conn = connect(path)
+    try:
+        rows = conn.execute(
+            f"SELECT subagent_id FROM subagent_wakes WHERE subagent_id IN ({marks})", ids
+        ).fetchall()
+    finally:
+        conn.close()
+    return {row[0] for row in rows}
+
+
+def mark_wake(path: Path, subagent_id: str, parent_id: str, run_id: Optional[str]) -> None:
+    """Records that a subagent's result has been posted to its conversation, and the run it started.
+
+    Written after the post answered, never before: a post that failed must be retried, and the
+    ``Idempotency-Key`` it carries is what makes that retry safe.
+    """
+    conn = connect(path)
+    try:
+        conn.execute(
+            """INSERT INTO subagent_wakes (subagent_id, parent_id, run_id, at) VALUES (?, ?, ?, ?)
+               ON CONFLICT(subagent_id) DO UPDATE SET run_id = excluded.run_id""",
+            (subagent_id, parent_id, run_id, int(time.time() * 1000)),
+        )
+    finally:
+        conn.close()
+
+
+def remember_agent(path: Path, subagent_id: str, agent_id: str) -> None:
+    """Keeps the id core knows a running subagent by, against the session id the app has.
+
+    Hermes fires ``subagent_start`` with both (``tools/delegate_tool.py:332-338``): the child's
+    session id, which is what ``GET sessions/{id}/agents`` lists and what a card's Stop is given, and
+    core's own ``sa-…`` id, which is what its registry — and so its stop — is keyed by.
+    """
+    conn = connect(path)
+    try:
+        conn.execute(
+            """INSERT INTO subagent_agents (subagent_id, agent_id, at) VALUES (?, ?, ?)
+               ON CONFLICT(subagent_id) DO UPDATE SET agent_id = excluded.agent_id""",
+            (subagent_id, agent_id, int(time.time() * 1000)),
+        )
+    finally:
+        conn.close()
+
+
+def agent_for(path: Path, subagent_id: str) -> Optional[str]:
+    """The id core knows a subagent by, or None for one this plugin never saw start."""
+    if not path.exists():
+        return None
+    conn = connect(path)
+    try:
+        row = conn.execute(
+            "SELECT agent_id FROM subagent_agents WHERE subagent_id = ?", (subagent_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    return row[0] if row and isinstance(row[0], str) and row[0] else None

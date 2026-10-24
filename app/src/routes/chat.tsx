@@ -572,8 +572,11 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
     Boolean(delegations?.some((t) => t.status === "running")),
   )
   const agentsSource = useMemo(
-    () => (agents && baseUrl && apiKey ? { agents, server: { baseUrl, apiKey } } : null),
-    [agents, baseUrl, apiKey],
+    () =>
+      agents && baseUrl && apiKey
+        ? { agents, server: { baseUrl, apiKey }, sessionId: conversation?.hermesSessionId }
+        : null,
+    [agents, baseUrl, apiKey, conversation?.hermesSessionId],
   )
   // Only persistent /v1/runs work survives losing the app's connection; legacy streams do not.
   useBreakReminderEligibility(
@@ -591,7 +594,11 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
   const streamOpen = useLive(profile)
   useEffect(() => (id ? watchChat(id) : undefined), [id])
   // The host's shared answer says at once when a run started elsewhere, which the timer would find
-  // only at its next round.
+  // only at its next round. Run-scoped on purpose: `reattachRun` only ever picks up a run of this
+  // session (`adoptRun` bails on `knownLiveRun`), so a chat whose turn has ended and whose subagents
+  // still work has nothing here to reattach — its work reads `working` from the state rule
+  // (`session-work.ts`), its results and wake turn land through the catch-up below, and the composer
+  // stays the user's.
   const hostRuns = useSessionRunning(
     tracked && baseUrl && apiKey ? { baseUrl, apiKey } : undefined,
     conversation?.hermesSessionId,

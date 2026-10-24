@@ -194,6 +194,18 @@ def env_value(home: Path, key: str, *, process: bool = False) -> str:
     return value
 
 
+def authorization(home: Path) -> Optional[str]:
+    """The key this home's own runs are posted with, or None to let ``outbox`` resolve its own.
+
+    Read from the home's own ``.env``, the same read ``record`` publishes a bot's key from, rather
+    than through Hermes's credential helper: the plugin posts runs from the gateway's loop — a wake
+    or an AFK stage — where no request's profile scope is set, so the helper would answer the launch
+    profile's key for every home a multiplexed process serves.
+    """
+    key = env_value(home, "API_SERVER_KEY")
+    return f"Bearer {key}" if key else None
+
+
 def bot_id(state: Dict[str, Any], profile: str) -> str:
     return hashlib.sha256(f"{state['hostId']}:{profile}".encode()).hexdigest()[:16]
 

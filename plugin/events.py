@@ -36,6 +36,24 @@ _last_noted: Dict[Tuple[str, Optional[str]], float] = {}
 _waiters: Set[Tuple[asyncio.AbstractEventLoop, asyncio.Event]] = set()
 
 
+def poke(
+    loop: Optional[asyncio.AbstractEventLoop], event: Optional[asyncio.Event]
+) -> None:
+    """Asks a background loop to look now, from any thread (Hermes's hooks run in others).
+
+    Each watcher keeps its own loop and event — they belong to whichever loop set them up — so both
+    are passed in, and a watcher that has never run (no loop yet) is simply left alone. A loop that
+    has closed under a hook's feet raises ``RuntimeError``; the settled watcher is not coming back,
+    so there is nothing to tell it.
+    """
+    if loop is None or event is None:
+        return
+    try:
+        loop.call_soon_threadsafe(event.set)
+    except RuntimeError:
+        pass
+
+
 def _text(value: Any) -> Optional[str]:
     return value if isinstance(value, str) and value else None
 

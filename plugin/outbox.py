@@ -63,13 +63,7 @@ def watch(session_id: str, profile: Optional[str], path: Path, authorization: Op
 
 def wake() -> None:
     """Has the dispatcher look again now; safe from any thread (Hermes's hooks run in others)."""
-    loop, event = _loop, _event
-    if loop is None or event is None:
-        return
-    try:
-        loop.call_soon_threadsafe(event.set)
-    except RuntimeError:
-        pass
+    events.poke(_loop, _event)
 
 
 def _item(row: Any) -> Dict[str, Any]:

@@ -12,7 +12,7 @@ import { toast } from "sonner"
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { AttachmentTile, AttachmentViewer } from "@/components/chat/attachments"
 import { Markdown } from "@/components/chat/markdown"
-import { AgentCards } from "@/components/chat/agent-card"
+import { AgentCards, SubagentResultCard } from "@/components/chat/agent-card"
 import { MediaTag } from "@/components/chat/media-image"
 import { ClarifyCard, PlanApprovedCard } from "@/components/chat/session-cards"
 import { ThinkingLine } from "@/components/chat/thinking-line"
@@ -443,6 +443,7 @@ export const MessageItem = memo(function MessageItem({
     statusLine || failed || (message.status === "stopped" && !message.content) || statsShown
   return (
     <div className="flex flex-col gap-3">
+      {message.subagent && <SubagentResultCard subagent={message.subagent} />}
       {reasoning && (
         <ThinkingLine
           reasoning={reasoning}
@@ -462,7 +463,12 @@ export const MessageItem = memo(function MessageItem({
           <Fragment key={breaks[i - 1]?.key ?? "start"}>
             {i > 0 && breaks[i - 1].node}
             {(parts.length > 0 || (last && footerShown)) && (
-              <AssistantRow conversationId={message.conversationId} busy={busy} parts={parts}>
+              <AssistantRow
+                conversationId={message.conversationId}
+                busy={busy}
+                ended={!streaming}
+                parts={parts}
+              >
                 {last && footer}
               </AssistantRow>
             )}
@@ -494,12 +500,15 @@ function sameMessage(a: MessageItemProps, b: MessageItemProps) {
 function AssistantRow({
   conversationId,
   busy,
+  ended,
   parts,
   children,
 }: {
   conversationId: string
   /** A reply is streaming in this chat, so a card that sends (a missed question) waits. */
   busy?: boolean
+  /** The reply has been written: the turn it belongs to has ended. */
+  ended: boolean
   parts: Part[]
   children?: ReactNode
 }) {
@@ -515,7 +524,7 @@ function AssistantRow({
               busy={busy}
             />
           ) : part.kind === "agent" ? (
-            <AgentCards key={part.tool.toolCallId} tool={part.tool} />
+            <AgentCards key={part.tool.toolCallId} tool={part.tool} ended={ended} />
           ) : part.kind === "tools" ? (
             <div key={part.tools[0].toolCallId} className="w-full max-w-xl">
               <ToolGroup tools={part.tools} />

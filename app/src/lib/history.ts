@@ -24,6 +24,8 @@ import {
 import { splitAttachments } from "@/lib/attachments"
 import { readLiveRuns } from "@/lib/waiting"
 import { failureReason, TODO_TOOLS } from "@/lib/tools"
+import { isSubagentResult, subagentMessage, subagentResults } from "@/lib/subagent-results.ts"
+import { isWakePrompt } from "@/lib/wake-prompt.ts"
 
 /**
  * Message bodies don't sync; every device's turns live in the chat's Hermes session. Opening a chat
@@ -238,6 +240,7 @@ export function toMessages(
   // Where the reply's text since its last tool call starts, and the notice that text was cut by.
   let segment = 0
   let notice: string | undefined
+  const results = subagentResults(rows)
   const newReply = (id: string, createdAt: number) => {
     segment = 0
     notice = undefined
@@ -275,7 +278,23 @@ export function toMessages(
       continue
     }
     if (row.role === "user") {
+      // A subagent's result arrives as a user row and is the bot's own message: it closes no reply
+      // and starts no turn, so the thread reads it where it landed.
+      if (isSubagentResult(row)) {
+        messages.push({
+          id,
+          conversationId,
+          status: "done",
+          createdAt,
+          hermesRowId: row.id,
+          ...subagentMessage(row, results.get(row.id)),
+        })
+        continue
+      }
       reply = undefined
+      // The wake run's input is the model's own, never the user's: it draws no message of its own,
+      // and the reply it closes is what makes the wake turn's answer a message of its own.
+      if (isWakePrompt(row)) continue
       const { text, attachments } = splitAttachments(row.content ?? "")
       messages.push({
         id,
@@ -351,7 +370,7 @@ export function toMessages(
         if (t.status === "running") Object.assign(t, { status: "completed", endedAt: t.startedAt })
   }
   return messages.filter(
-    (m) => m.role === "user" || m.content || m.tools?.length || m.status === "error",
+    (m) => m.role === "user" || m.content || m.tools?.length || m.status === "error" || m.subagent,
   )
 }
 
@@ -556,8 +575,17 @@ export function reconcileHistory(conversationId: string, { changed = false } = {
   return pending
 }
 
+/**
+ * A turn starts at the user's own message. A wake prompt (`isWakePrompt`) stays one even though its
+ * row draws nothing: the wake run is a turn of this conversation, and the reply that answers it is
+ * grouped — and followed live — as that turn's own.
+ */
 const isTurnStart = (row: SessionMessage) =>
-  row.role === "user" && row.display_kind !== "hidden" && !isSteer(row) && !isNotice(row)
+  row.role === "user" &&
+  row.display_kind !== "hidden" &&
+  !isSteer(row) &&
+  !isNotice(row) &&
+  !isSubagentResult(row)
 
 const isStreaming = (messages: Message[]) => messages.some((m) => m.status === "streaming")
 
@@ -614,9 +642,16 @@ function turnsOf(
   return groups.map((group, i) => {
     const live = liveTail && i === groups.length - 1
     const messages = toMessages(conversationId, sessionId, group, { live })
+    const user = messages.find((m) => m.role === "user")
+    const reply = messages.find((m) => m.role === "assistant" && !m.subagent)
+    // A subagent's result is a message of its own in the turn it arrived after, and a catch-up keeps
+    // one reply per turn: the results ride beside it rather than being dropped. The turn a wake run
+    // opened has no user message at all, and its reply is still the thread's next message.
     return {
-      user: messages.find((m) => m.role === "user"),
-      reply: messages.find((m) => m.role === "assistant"),
+      user,
+      reply,
+      wake: isWakePrompt(group[0]),
+      results: messages.filter((m) => m.subagent),
       rows: { first: group[0].id, last: group[group.length - 1].id },
     }
   })
@@ -731,10 +766,26 @@ async function reconcile(conversationId: string) {
     }
     const writes: Message[] = []
     const parts: string[] = []
-    for (const { user, reply, rows: range } of turns) {
+    // Every row this pass inserts lands after what precedes it on Hermes, whatever this device's
+    // clock says: what the floor is for.
+    const put = (message: Message) => {
+      message.createdAt = Math.max(message.createdAt, floor)
+      writes.push(message)
+      floor = message.createdAt + 1
+    }
+    for (const { user, reply, results, wake, rows: range } of turns) {
       if (!user) {
+        // The turn a wake run opened: the prompt draws nothing, and the answer it brought is the
+        // thread's next message — a reply of its own, after the turn it closed.
+        if (wake && reply) {
+          parts.push(...partsOf(current, sessionId, range, reply.id))
+          put(reply)
+          results.forEach(put)
+          continue
+        }
         // A turn longer than every page fetchTail reads: only an empty chat shows its tail.
         if (!current.length && reply) writes.push(reply)
+        if (!current.length) results.forEach(put)
         continue
       }
       parts.push(...partsOf(current, sessionId, range, reply?.id))
@@ -747,6 +798,7 @@ async function reconcile(conversationId: string) {
           writes.push({ ...reply, createdAt })
           floor = createdAt + 1
         }
+        results.forEach(put)
         continue
       }
       const at = user.hermesRowId !== undefined ? hostAt.get(user.hermesRowId) : undefined
@@ -778,6 +830,7 @@ async function reconcile(conversationId: string) {
           const merged = withReplyDetails(local, reply)
           if (merged) writes.push(merged)
         }
+        results.forEach(put)
         continue
       }
       // Hermes's compaction carries the newest turns forward under fresh row ids with their text and
@@ -806,16 +859,14 @@ async function reconcile(conversationId: string) {
           const merged = withReplyDetails(local, reply)
           if (merged) writes.push(merged)
         }
+        results.forEach(put)
         continue
       }
       user.createdAt = Math.max(user.createdAt, floor)
       writes.push(user)
       floor = user.createdAt + 1
-      if (reply) {
-        reply.createdAt = Math.max(reply.createdAt, floor)
-        writes.push(reply)
-        floor = reply.createdAt + 1
-      }
+      if (reply) put(reply)
+      results.forEach(put)
     }
     await db.messages.bulkDelete(parts)
     await db.messages.bulkPut(writes)

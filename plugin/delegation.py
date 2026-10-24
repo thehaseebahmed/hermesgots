@@ -1,25 +1,46 @@
-"""Keeps ``delegate_task`` in the turn that called it, for the agents the API server builds.
+"""The sessions a session delegated to, and the wake its result gives its bot.
 
-Hermes runs a top-level delegation in the background and hands the agent a handle. On a ``/v1/runs``
-session that resumes server history, the finished result is saved for the next client turn and the
-agent is not woken (``_resolve_async_wake_sid`` in ``tools/delegate_tool_dispatch.py``), so it never
-sees the result until the user writes again. A subagent in a session left running with the app
-closed would wait for a message nobody sends. Run synchronously, the child's result comes back as
-the tool's own answer, and an orchestrator child still fans out as before.
+Hermes dispatches ``delegate_task`` in the background on a keyed ``/v1/runs`` turn and hands the model
+a handle, so the turn carries on and a question or an approval raised in it reaches the user while the
+subagents still work. Nothing here touches that dispatch: the plugin leaves it to core.
+
+What the plugin does own is the stop: a run the user stops never reaches the children it began, since
+core detaches a delegation before dispatching it, so ``sweep_stops`` hands a stopped run's stop to the
+subagents that run itself started, one child at a time through core's own ``interrupt_subagent`` — the
+card's own stop — since core's session-wide fan-out cannot be given a single child to stop.
 
 Hermes keeps every delegated child as a session of its own (``platform="subagent"``, its parent's id
 in ``parent_session_id`` and in ``model_config``'s ``_delegate_from``), so ``children`` lists them for
 the app, which opens each one's transcript.
+
+Core writes a finished child's result into the conversation itself, as its own row, but on a keyed
+session the agent is not woken by it: the result waits for the user to write again. So the plugin
+watches the child sessions it already reads, and once one has ended — and its conversation is not
+waiting on the user for a question or an approval, and no turn of it is running — posts an ordinary
+run on that conversation carrying the result, through the loopback outbox. The bot reads its
+subagent's work in a new turn, without the user writing again. One wake per subagent: an idempotency
+key derived from the child's session id, and a mark in the plugin's own store once one is posted, so a
+restart neither doubles nor drops it (``docs/specs/async-delegation.md``, ADR 0038).
+
+A workflow stage is the exception: it keeps its one run, because the stage it moves to is posted on
+the same session by the gate that judged the run before it, so ``wake_one`` posts nothing for a
+stage's subagent — the stage's own gate waits for them instead (``afk.staged_session``).
 """
 
 from __future__ import annotations
 
-import inspect
+import asyncio
+import functools
 import json
 import logging
 import sqlite3
+import time
+from contextlib import closing
 from pathlib import Path
-from typing import Any, Collection, Dict, List, Optional
+from typing import Any, Collection, Dict, Iterable, List, NamedTuple, Optional
+
+from . import events, link, outbox, sessions
+from .store import db_path, get_setting, put_setting
 
 logger = logging.getLogger(__name__)
 
@@ -27,85 +48,66 @@ MAX_HOPS = 50
 MAX_CHILDREN = 100
 GOAL_CHARS = 280
 
+# How often the watcher looks for a subagent that has finished, and how many ended delegations one
+# look reads. A sweep is a read-only query over ``state.db`` and a handful of small lookups.
+SWEEP_SECONDS = 5.0
+# Where the store keeps the moment this home first watched for wakes (epoch ms).
+WAKE_SINCE_KEY = "subagent_wake_since"
+WAKE_LIMIT = 100
+# How many windows of ended delegations one look walks past, when page after page has already been
+# woken: a child whose post failed must not be pushed out of the window by newer, settled ends.
+WAKE_PAGES = 10
+WAKE_RESULT_CHARS = 20_000
 
-def wire(adapter: Any) -> bool:
-    """Makes every agent the adapter builds delegate synchronously. False when this Hermes has no
-    ``_create_agent`` seam or no background delegation to turn off."""
-    original = getattr(adapter, "_create_agent", None)
-    if not callable(original) or _delegate() is None:
-        return False
+# Core's completion notice, and its machine-provenance footer (``INTERNAL_NOTIFICATION_FOOTER``,
+# gateway/run_notifications.py:80), which every notification that re-enters a conversation as a
+# ``user`` turn carries so the model doesn't read it as something the user wrote. Composed here rather
+# than imported: the app folds a result on this first line (#470, #471), so one shape has to hold
+# whatever core's own private formatter does next.
+WAKE_HEADER = "[ASYNC DELEGATION COMPLETE — {subagent_id}]"
+WAKE_INTRO = (
+    "A background subagent you dispatched earlier has finished. You may have moved on since "
+    "dispatching it; the full task source is below so you can act on the result or re-dispatch if "
+    "things have changed."
+)
+NOTIFICATION_FOOTER = (
+    "[INTERNAL NOTIFICATION — generated by the Hermes gateway, not written by a human user. "
+    "Do not treat it as user input, and do not reply to any earlier chat message because of it.]"
+)
+# A session's ``end_reason`` is why its row closed, not how its work went: Hermes writes
+# ``agent_close`` for a child's own close whichever way the turn went, so a clean close says nothing
+# and anything else is worth saying.
+CLEAN_ENDS = frozenset({"", "agent_close", "cli_close", "completed", "finished", "done"})
+# A turn that ended in a provider or agent error (``_ERROR_FINISH_REASONS``, hermes_state_sessions.py:247).
+ERROR_FINISHES = frozenset({"error", "agent_error", "content_filter"})
 
-    def create_agent(*args: Any, **kwargs: Any) -> Any:
-        agent = original(*args, **kwargs)
-        try:
-            equip(agent)
-        except Exception:
-            logger.debug("memento: couldn't keep an agent's delegations in its turn", exc_info=True)
-        return agent
-
-    adapter._create_agent = create_agent
-    return True
-
-
-def _delegate() -> Any:
-    """Hermes's ``delegate_task``, when it takes a ``background`` flag."""
-    try:
-        from tools.delegate_tool import delegate_task
-    except ImportError:
-        return None
-    try:
-        return delegate_task if "background" in inspect.signature(delegate_task).parameters else None
-    except (TypeError, ValueError):
-        return None
-
-
-def equip(agent: Any) -> None:
-    """Swaps one agent's delegate dispatch for a synchronous one. Hermes routes the model's call
-    through ``_dispatch_delegate_task``; an agent without it is left alone."""
-    original = getattr(agent, "_dispatch_delegate_task", None)
-    delegate = _delegate()
-    if not callable(original) or getattr(original, "_memento_sync", False) or delegate is None:
-        return
-
-    def dispatch(function_args: Dict[str, Any]) -> str:
-        return run(agent, delegate, function_args)
-
-    dispatch._memento_sync = True  # type: ignore[attr-defined]
-    agent._dispatch_delegate_task = dispatch
+_event: Optional[asyncio.Event] = None
+_loop: Optional[asyncio.AbstractEventLoop] = None
+# A stopped run's stop, handed to its subagents: core sets the run `stopping` as it interrupts it,
+# then whichever terminal status its unwind reaches. The watch reads those every second.
+STOPPED_STATES = ("stopping", "cancelled", "interrupted")
+STOP_SECONDS = 1.0
+HANDED_RUNS_CAP = 500
 
 
-def run(agent: Any, delegate: Any, function_args: Dict[str, Any]) -> str:
-    args = function_args if isinstance(function_args, dict) else {}
-    tasks = args.get("tasks")
-    try:
-        from tools.delegate_tool import _strip_model_hidden_task_fields
+class LiveSubagent(NamedTuple):
+    """A subagent this process still runs: core's id for it, and the conversation that dispatched it."""
 
-        tasks = _strip_model_hidden_task_fields(tasks)
-    except ImportError:
-        pass
-    call = {
-        "goal": args.get("goal"),
-        "context": args.get("context"),
-        "tasks": tasks,
-        "max_iterations": args.get("max_iterations"),
-        "role": args.get("role"),
-        "background": False,
-        "images": args.get("images"),
-        "action": args.get("action"),
-        "subagent_id": args.get("subagent_id"),
-        "message": args.get("message"),
-        "output_schema": args.get("output_schema"),
-        "parent_agent": agent,
-    }
-    accepted = inspect.signature(delegate).parameters
-    return delegate(**{key: value for key, value in call.items() if key in accepted})
+    agent: str
+    parent: str
 
 
 def children(hermes_home: Path, session_id: str, live: Collection[str]) -> List[Dict[str, Any]]:
     """The sessions ``session_id`` delegated to, oldest first: its own and those of its compression
-    continuations, since a delegation made after a compression comes from the live tip. ``live`` holds
-    the sessions with a run in flight: a child that never ended is only running while its parent's
-    run is, and stopped otherwise (a stop, or a gateway restart, left its row open)."""
+    continuations, since a delegation made after a compression comes from the live tip.
+
+    ``live`` holds the sessions with a run in flight, which covers a child dispatched microseconds
+    ago, before this process has anything to show for it. A child's own row cannot say whether it is
+    still at work — ``ended_at`` is written when its session closes, and a child the user stopped, or
+    one a restart lost, leaves the row open — so a child that never ended is running only while
+    something really holds it: its parent's run, or core's registry of the subagents this process
+    still runs (``_live_subagents``). Anything else is a row nobody holds, which is stopped.
+    """
     state = hermes_home / "state.db"
     if not state.exists():
         return []
@@ -124,12 +126,15 @@ def children(hermes_home: Path, session_id: str, live: Collection[str]) -> List[
                 parents,
             ).fetchall()
             running = any(parent in live for parent in parents)
+            working = set(_live_subagents())
             found = []
             for row in rows:
                 if _delegated_from(row["model_config"]) not in parents:
                     continue
                 tip = _tip(conn, row)
-                found.append(_child(row, tip, running))
+                # The registry names a child by the session it is writing under, which is its tip
+                # once it has compressed; the row's own id covers the moment before that.
+                found.append(_child(row, tip, running, row["id"] in working or tip["id"] in working))
             return found
     except sqlite3.Error:
         logger.debug("memento: couldn't read %s's delegations", session_id, exc_info=True)
@@ -192,10 +197,10 @@ def _tip(conn: sqlite3.Connection, row: sqlite3.Row) -> Dict[str, Any]:
     return {**current, "tool_calls": calls}
 
 
-def _child(row: sqlite3.Row, tip: Dict[str, Any], live: bool) -> Dict[str, Any]:
+def _child(row: sqlite3.Row, tip: Dict[str, Any], parent_live: bool, child_live: bool) -> Dict[str, Any]:
     reason = tip["end_reason"] or ""
     if tip["ended_at"] is None:
-        status = "running" if live else "stopped"
+        status = "running" if parent_live or child_live else "stopped"
     elif "interrupt" in reason or reason in ("cancelled", "stopped"):
         status = "stopped"
     else:
@@ -211,3 +216,588 @@ def _child(row: sqlite3.Row, tip: Dict[str, Any], live: bool) -> Dict[str, Any]:
         "tool_calls": tip["tool_calls"],
         "status": status,
     }
+
+
+def _live_subagents() -> Dict[str, LiveSubagent]:
+    """Each subagent this process still runs, by the child session its work is written under.
+
+    Core's registry is the only report of a child being *worked on* (tools.delegate_tool_registry.py:20),
+    and it is imported here so the plugin still imports on a host missing core's tools.
+    """
+    try:
+        from tools import delegate_tool_registry as registry
+    except ImportError:
+        return {}
+    records = getattr(registry, "_active_subagents", None)
+    if not isinstance(records, dict):
+        return {}
+    found: Dict[str, LiveSubagent] = {}
+    for agent_id, record in list(records.items()):
+        if not isinstance(record, dict):
+            continue
+        agent = record.get("agent")
+        session_id = str(getattr(agent, "session_id", "") or "")
+        if not session_id:
+            continue
+        owner = str(record.get("owner_agent_session_id") or "") or str(
+            getattr(agent, "_parent_session_id", "") or ""
+        )
+        found[session_id] = LiveSubagent(agent=str(agent_id), parent=owner)
+    return found
+
+
+def live_sessions(hermes_home: Path) -> Dict[str, int]:
+    """How many subagents each chat still has running, by the session the app knows it as.
+
+    What the app draws its session states from: a chat whose turn has ended is still at work while a
+    subagent it dispatched is, and the app reads that off ``runs/live`` with the runs (and without a
+    read per session). A chat that compressed dispatched from its tip, so the owner is walked back to
+    the chat's root — the id every run of it is reported under (``sessions.chat_session``).
+    """
+    found: Dict[str, int] = {}
+    for live in _live_subagents().values():
+        parent = live.parent
+        if not parent:
+            continue
+        root = sessions.chat_session(hermes_home, parent)
+        found[root] = found.get(root, 0) + 1
+    return found
+
+
+def pending(hermes_home: Path, since: int, offset: int = 0) -> List[Dict[str, Any]]:
+    """One window of the delegations that ended at or after ``since`` (epoch ms), newest end first.
+
+    Read-only, like every other look this module takes at ``state.db``. A child is named by its own
+    row — the id the app's card holds — and a row is a delegation only when its ``model_config``
+    carries ``_delegate_from`` naming the parent it sits under, which is the same marker
+    ``children`` reads (a compression continuation copies the marker down, so it names a parent it
+    is not delegated from and is left out: ``_tip`` follows it from the child's own row instead).
+
+    The watermark is asked of the query, not of the answer: a home's ``state.db`` keeps every
+    subagent it ever ran, so a window of the newest ends can fill with settled ones and leave the
+    child that actually needs a wake unseen. ``offset`` walks the window a page at a time so
+    ``sweep`` can read past a page whose every end has already been woken.
+    """
+    conn = sessions._open_state(hermes_home)
+    if conn is None:
+        return []
+    try:
+        with closing(conn):
+            rows = conn.execute(
+                f"""SELECT s.id, s.model, s.model_config, s.parent_session_id, s.started_at,
+                        s.ended_at, s.end_reason, s.tool_call_count, s.api_call_count,
+                        (SELECT content FROM messages m WHERE m.session_id = s.id AND m.role = 'user'
+                         ORDER BY m.id LIMIT 1) AS goal
+                    FROM sessions s
+                    WHERE s.parent_session_id IS NOT NULL AND s.ended_at IS NOT NULL
+                      AND s.ended_at * 1000 >= ?
+                      AND s.model_config LIKE '%"_delegate_from"%'
+                      AND EXISTS (SELECT 1 FROM sessions p WHERE p.id = s.parent_session_id)
+                    ORDER BY s.ended_at DESC LIMIT {WAKE_LIMIT} OFFSET ?""",
+                (since, offset),
+            ).fetchall()
+    except sqlite3.Error:
+        logger.debug("memento: couldn't read the delegations of %s", hermes_home, exc_info=True)
+        return []
+    found = []
+    for row in rows:
+        parent = _delegated_from(row["model_config"])
+        if parent != row["parent_session_id"]:
+            continue
+        found.append(
+            {
+                "id": row["id"],
+                "parent_id": parent,
+                "model": row["model"],
+                "started_at": row["started_at"],
+                "ended_at": row["ended_at"],
+                "end_reason": row["end_reason"] or "",
+                "tool_calls": row["tool_call_count"] or 0,
+                "api_calls": row["api_call_count"] or 0,
+                "goal": " ".join(str(row["goal"] or "").split())[:GOAL_CHARS],
+            }
+        )
+    return found
+
+
+async def sweep(adapter: Any, home: Path) -> int:
+    """Wakes every bot whose subagent has finished and hasn't woken it yet; answers how many went.
+
+    Nothing is kept in memory: the store's mark is the only record of what has been posted, so a
+    plugin that restarts resumes exactly where the last one left off, and a wake that failed to post
+    is simply still unmarked on the next look.
+    """
+    path = db_path(home)
+    # Stamped before the read, so a child that ends between the two is one of the watcher's own.
+    since = await asyncio.to_thread(watch_since, path)
+    rows = await _unwoken(home, path, since)
+    posted = 0
+    for row in rows:
+        try:
+            if await wake_one(adapter, home, row):
+                posted += 1
+        except Exception:
+            logger.debug("memento: couldn't wake %s for its subagent", row["parent_id"], exc_info=True)
+    return posted
+
+
+async def _unwoken(home: Path, path: Path, since: int) -> List[Dict[str, Any]]:
+    """The ended delegations that still need a wake, read past the ones that have had theirs.
+
+    One page (``WAKE_LIMIT`` ends) is read at a time, with its marks read in one batch: a page whose
+    every end is already marked says nothing about the ends behind it, so the next page is read, up
+    to ``WAKE_PAGES``. A page shorter than the window ends the walk — there is nothing behind it.
+    Without the walk, a child whose post failed would be pushed out of the one window forever by
+    newer ends that have all been woken, which is the drop the watermark is meant to prevent.
+    """
+    unmarked: List[Dict[str, Any]] = []
+    for page in range(WAKE_PAGES):
+        batch = [
+            row
+            for row in await asyncio.to_thread(pending, home, since, page * WAKE_LIMIT)
+            if (row["ended_at"] or 0) * 1000 >= since
+        ]
+        if not batch:
+            break
+        marked = await asyncio.to_thread(sessions.marked_wakes, path, [row["id"] for row in batch])
+        unmarked += [row for row in batch if row["id"] not in marked]
+        if len(batch) < WAKE_LIMIT:
+            break
+    return unmarked
+
+
+async def wake_one(adapter: Any, home: Path, child: Dict[str, Any]) -> bool:
+    """Wakes a conversation for one finished subagent, or declines to (``True`` when it posted).
+
+    Wakes are posted only here, so #469's rule that a stage keeps its one run is applied at this seam.
+    """
+    parent = child["parent_id"]
+    # The session the chat started as — the id the app posts its own runs with — so Hermes resolves
+    # the compression tip forward from it like it does for any run.
+    root = await asyncio.to_thread(sessions.chat_session, home, parent)
+    if await asyncio.to_thread(_stage, home, parent):
+        logger.debug("memento: %s's completion doesn't wake it: a stage keeps its one run", parent)
+        return False
+    held = await _deferred(adapter, home, root)
+    if held:
+        logger.debug("memento: the wake for %s waits: %s", child["id"], held)
+        return False
+    ending = await asyncio.to_thread(_ending, home, child)
+    if ending is None:
+        return False
+    body = outbox.clean_body(root, {"input": [{"role": "user", "content": _wake_text(child, ending)}]})
+    try:
+        started = await outbox.post(
+            adapter,
+            link.profile_name(home),
+            "/v1/runs",
+            body,
+            authorization=link.authorization(home),
+            idempotency_key=f"wake_{child['id']}",
+        )
+    except outbox.StartError as error:
+        # Retried on the next look; the key makes a post that did start return its own run.
+        if error.permanent:
+            logger.warning("memento: couldn't wake %s for its subagent: %s", parent, error)
+        else:
+            logger.debug("memento: couldn't wake %s for its subagent: %s", parent, error)
+        return False
+    run_id = started.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        return False
+    path = db_path(home)
+    await asyncio.to_thread(sessions.mark_wake, path, child["id"], root, run_id)
+    events.note("runs", root, path, True)
+    return True
+
+
+@functools.cache
+def watch_since(path: Path) -> int:
+    """The moment this store started watching for wakes, in epoch ms, stamped on its first look.
+
+    Only a child that ends after the watcher began is woken, which is what the stored stamp says: a
+    home's history is not a backlog of turns to fire, and a child that ended while the plugin was
+    down still is. The stamp never moves, so it is read once per process.
+    """
+    since = get_setting(path, WAKE_SINCE_KEY)
+    if not (isinstance(since, int) and since > 0):
+        since = int(time.time() * 1000)
+        put_setting(path, WAKE_SINCE_KEY, since)
+    return since
+
+
+async def _deferred(adapter: Any, home: Path, root: str) -> Optional[str]:
+    """Why the conversation can't be woken yet, or None when it can.
+
+    A wake is an ordinary run of the conversation, so it must never cross a confirmation gate: core
+    refuses to post a completion as one for exactly that reason (``gateway/wake.py:157-163`` — the
+    self-post "can cross a pending human-confirmation gate"). And a run started over a live turn
+    would race the turn that dispatched the subagent, so the wake waits for that too. Both clear on
+    their own — the answer, the question's ``agent.clarify_timeout`` expiry, the turn's end — and
+    the next look sees it, which is why there is no timer here.
+    """
+    path = db_path(home)
+    # The cheap checks first, since a child usually ends while its parent's turn still runs: the
+    # conversation's own run statuses live in the API server's memory, while ``waiting`` reads
+    # ``memento.db`` and is only asked when nothing of the conversation is even running.
+    ids = await outbox.session_ids(adapter, root)
+    runs = [run for run in outbox.session_runs(adapter, ids) if run.get("status") in outbox.ACTIVE]
+    if any(run.get("status") != "waiting_for_approval" for run in runs):
+        return "the conversation's turn is still running"
+    waiting = await asyncio.to_thread(sessions.waiting, adapter, path, home)
+    if root in waiting:
+        return f"the conversation is waiting on its user ({waiting[root].get('kind')})"
+    # A run that waits on the user is active either way; ``waiting`` names it when it can, and the
+    # status itself is the answer when it can't (a request the read doesn't reach).
+    if runs:
+        return "the conversation's turn is still running"
+    return None
+
+
+def _stage(home: Path, session_id: str) -> bool:
+    """Whether AFK is working a workflow stage on this session, so a completion must not wake it.
+
+    Asked of ``afk`` itself — the module that holds a stage and reads its snapshot — rather than
+    judged again here, so a stage is recognised by the same reading that decides whether it may move
+    on, and only one place has to know what a stage session is. Imported at the call, not at the
+    module's top, because ``afk`` reads this module's ``children``.
+    """
+    from . import afk
+
+    try:
+        return afk.staged_session(home, session_id)
+    except Exception:
+        logger.debug("memento: couldn't tell whether %s is a stage", session_id, exc_info=True)
+        return True
+
+
+def _ending(hermes_home: Path, child: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Where the child ended and what it last said, or None while it still runs.
+
+    A child that compressed ended on its continuation, which is where its last words are too, so both
+    are read off the tip ``_tip`` resolves — the same walk ``children`` uses.
+    """
+    conn = sessions._open_state(hermes_home)
+    if conn is None:
+        return None
+    try:
+        with closing(conn):
+            tip = _tip(
+                conn,
+                {
+                    "id": child["id"],
+                    "end_reason": child["end_reason"],
+                    "tool_call_count": child.get("tool_calls") or 0,
+                    "ended_at": child.get("ended_at"),
+                },
+            )
+            if tip["ended_at"] is None:
+                return None
+            last = conn.execute(
+                """SELECT role, content, tool_calls, finish_reason FROM messages
+                   WHERE session_id = ? ORDER BY id DESC LIMIT 1""",
+                (tip["id"],),
+            ).fetchone()
+            said = conn.execute(
+                """SELECT content FROM messages WHERE session_id = ? AND role = 'assistant'
+                     AND content IS NOT NULL AND TRIM(content) != '' ORDER BY id DESC LIMIT 1""",
+                (tip["id"],),
+            ).fetchone()
+    except sqlite3.Error:
+        logger.debug("memento: couldn't read subagent %s's end", child["id"], exc_info=True)
+        return None
+    return {
+        "ended_at": tip["ended_at"],
+        "status": _status(child["end_reason"], last),
+        "result": (said[0] if said else "") or "",
+    }
+
+
+def _status(end_reason: str, last: Any) -> str:
+    """How the child's turn went, from its last row and the reason its session closed.
+
+    Core's own reading (``classify_session_status``, hermes_state_sessions.py:250-259): an error
+    finish reason is ``error``; a trailing user or tool row, or an assistant row still holding tool
+    calls, is ``interrupted``; anything else completed. The session's ``end_reason`` is only the
+    closure reason, so it is reported when it says more than the turn's own last row does.
+    """
+    if last is not None:
+        if (last["finish_reason"] or "").strip().lower() in ERROR_FINISHES:
+            return "error"
+        role = (last["role"] or "").strip().lower()
+        if role in ("user", "tool") or (role == "assistant" and _pending_calls(last["tool_calls"])):
+            return "interrupted"
+    reason = (end_reason or "").strip()
+    if reason and reason not in CLEAN_ENDS and reason != "compression":
+        return reason
+    return "completed"
+
+
+def _pending_calls(raw: Any) -> bool:
+    """Whether an assistant row still holds tool calls, given the column's JSON text."""
+    text = str(raw or "").strip()
+    return bool(text) and text not in ("[]", "null", "None")
+
+
+def _wake_text(child: Dict[str, Any], ending: Dict[str, Any]) -> str:
+    """The wake run's message: core's completion notice, carrying the child's own result."""
+    status = ending["status"]
+    lines = [WAKE_HEADER.format(subagent_id=child["id"]), WAKE_INTRO, ""]
+    started, ended = child.get("started_at"), ending.get("ended_at")
+    if isinstance(started, (int, float)) and isinstance(ended, (int, float)) and ended >= started:
+        lines.append(f"Dispatched: {_clock(started)} ({_age(ended - started)} ago)")
+    if child.get("goal"):
+        lines.append(f"Original goal: {child['goal']}")
+    lines.append(f"Model: {child.get('model') or '?'}")
+    lines.append(
+        f"Status: {status}   API calls: {child.get('api_calls') or 0}   "
+        f"Duration: {_duration(started, ended)}"
+    )
+    lines.append("--- RESULT ---")
+    result = _cut(ending.get("result") or "")
+    if status == "completed":
+        lines.append(result or "(the subagent left no message.)")
+    else:
+        lines.append(f"The subagent did not complete successfully (status={status}).")
+        reason = (child.get("end_reason") or "").strip()
+        if reason and reason != status:
+            lines.append(f"End reason: {reason}")
+        if result:
+            lines.append("Partial output:")
+            lines.append(result)
+    return "\n".join(lines).rstrip() + "\n\n" + NOTIFICATION_FOOTER
+
+
+def _cut(text: str) -> str:
+    """A result as long as a message may carry, saying so when it was cut."""
+    text = text.strip()
+    if len(text) <= WAKE_RESULT_CHARS:
+        return text
+    return (
+        text[:WAKE_RESULT_CHARS].rstrip()
+        + f"\n[the result was cut to its first {WAKE_RESULT_CHARS} characters]"
+    )
+
+
+def _duration(started: Any, ended: Any) -> str:
+    if isinstance(started, (int, float)) and isinstance(ended, (int, float)) and ended >= started:
+        return f"{int(round(ended - started))}s"
+    return "?"
+
+
+def _clock(when: float) -> str:
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(when))
+
+
+def _age(seconds: float) -> str:
+    """How long ago, in the shortest unit that says it: ``40s``, ``12m``, ``3h``."""
+    seconds = max(0.0, seconds)
+    if seconds < 90:
+        return f"{int(seconds)}s"
+    if seconds < 5400:
+        return f"{int(round(seconds / 60))}m"
+    return f"{int(round(seconds / 3600))}h"
+
+
+async def run(adapter: Any) -> None:
+    """Wakes a finished subagent's bot, on every home this process serves, while Hermes runs.
+
+    Not just its own home: a ``/p/<profile>`` bot keeps its own ``state.db`` and its own store, and a
+    home the loop can't read must not stop the rest (``afk.run`` sweeps the same set, for the same
+    reason). The lookup happens here, on the loop, because posting a run is the API server's own call.
+    """
+    global _loop, _event
+    _loop = asyncio.get_running_loop()
+    _event = asyncio.Event()
+    while True:
+        for home in link.served_homes(adapter):
+            try:
+                await sweep(adapter, home)
+            except Exception:
+                logger.debug("memento: the subagent watch failed for %s", home, exc_info=True)
+        try:
+            await asyncio.wait_for(_event.wait(), SWEEP_SECONDS)
+        except asyncio.TimeoutError:
+            pass
+        _event.clear()
+
+
+def wake() -> None:
+    """Has the watcher look again now; safe from any thread (Hermes's hooks run in others)."""
+    events.poke(_loop, _event)
+
+
+def started(
+    parent_session_id: Optional[str] = None,
+    child_session_id: Optional[str] = None,
+    child_subagent_id: Optional[str] = None,
+    **_kwargs: Any,
+) -> None:
+    """The ``subagent_start`` hook: keeps the id core knows a subagent by.
+
+    Hermes fires it as a delegation's child is built (``tools/delegate_tool.py:332-338``), carrying
+    the child's session id — what the app's card holds, and what a stop is asked with — beside core's
+    own ``sa-…`` id. The registry a stop goes through is keyed by the latter, so the pair is kept.
+    """
+    try:
+        if not child_session_id or not child_subagent_id:
+            return
+        home = _home()
+        sessions.remember_agent(db_path(home), str(child_session_id), str(child_subagent_id))
+    except Exception:
+        logger.debug("memento: couldn't keep subagent %s's id", child_session_id, exc_info=True)
+
+
+def stop(hermes_home: Path, parent_id: str, subagent_id: str) -> Dict[str, Any]:
+    """Stops one subagent's work, from the child's session id the app holds.
+
+    The stop is ``_interrupt_one`` — core's own per-subagent ``interrupt_subagent``, which is what
+    its model-facing ``delegate_task(action='stop')`` calls. A host too old to offer it, or a child
+    that isn't running any more, answers what it always did.
+    """
+    stopped = _interrupt_one(hermes_home, subagent_id)
+    if stopped is None:
+        return {"stopped": False, "reason": "This Hermes version can't stop a subagent."}
+    if not stopped:
+        return {"stopped": False, "reason": "That subagent isn't running any more."}
+    events.note("runs", parent_id, db_path(hermes_home), True)
+    return {"stopped": True}
+
+
+def _interrupt_one(home: Path, subagent_id: str) -> Optional[bool]:
+    """Stops one subagent through core's registry: whether it did, or None if core has no such call.
+
+    Core's own per-child stop is ``interrupt_subagent`` (``tools/delegate_tool_registry.py:92-105``),
+    the function its model-facing ``delegate_task(action='stop')`` calls (``:288``): a cooperative
+    hard interrupt at the child's next iteration boundary, asked of the same live agent a parent's
+    own interrupt fans out to, so in-flight tools are told to cancel. The registry is keyed by core's
+    own ``sa-…`` id, so the pair ``subagent_start`` recorded is what names the child; one that
+    started before this process loaded the plugin has no row, and the registry itself is then read
+    for it. The registry is this process's, which is where an api_server session's child runs — a
+    child some other process dispatched is simply not found, which is what a stop answers anyway.
+    """
+    agent_id = sessions.agent_for(db_path(home), subagent_id) or _live_agent(subagent_id)
+    if not agent_id:
+        return False
+    try:
+        from tools.delegate_tool_registry import interrupt_subagent
+    except Exception:
+        logger.debug("memento: this Hermes has no subagent registry to stop %s", subagent_id)
+        return None
+    try:
+        return bool(interrupt_subagent(agent_id))
+    except Exception:
+        logger.debug("memento: core couldn't stop %s", subagent_id, exc_info=True)
+        return False
+
+
+def _live_agent(subagent_id: str) -> Optional[str]:
+    """Core's id for a subagent still running that this plugin never saw start, if it has one.
+
+    The registry keeps one record per live child, keyed by that id, and each holds the live child
+    agent (``tools.delegate_tool_registry.py:20``) — which carries its own session id, the only place
+    the two are written side by side (``_live_subagents``). Read here rather than trusted from a
+    store that may predate the child; a child that has finished is in neither, which is the answer a
+    card is given anyway.
+    """
+    live = _live_subagents().get(subagent_id)
+    return live.agent if live else None
+
+
+def _home() -> Path:
+    """This profile's home, as a hook in a session's own scope sees it (``sessions._paths``)."""
+    from hermes_constants import get_hermes_home
+
+    return Path(get_hermes_home())
+
+
+def sweep_stops(
+    adapter: Any, homes: Iterable[Path], handed: Optional[Dict[str, None]] = None
+) -> List[str]:
+    """Hand each stopped run's stop to the subagents it started, once, and name them.
+
+    A run the user stops never reaches its own children: core detaches a delegation before it
+    dispatches it, and the API server's stop interrupts the run's agent and reaps its processes and
+    nothing more (``api_server_runs._handle_stop_run``). So the plugin watches the run statuses it
+    already reads for the app and, for each run that is stopping or stopped, stops the children that
+    run started — each one through core's own per-child ``interrupt_subagent``, which is the stop a
+    card asks for (``stop_run``).
+
+    ``handed`` is the watch's memory of the runs it has already done, kept across ticks so a status
+    that lingers is not handed over again and again; it is bounded at ``HANDED_RUNS_CAP``.
+    """
+    handed = {} if handed is None else handed
+    statuses = getattr(adapter, "_run_statuses", None)
+    named: List[str] = []
+    for run_id, status in list(statuses.items()) if isinstance(statuses, dict) else []:
+        if not isinstance(run_id, str) or not _stopped(status) or run_id in handed:
+            continue
+        handed[run_id] = None
+        while len(handed) > HANDED_RUNS_CAP:
+            handed.pop(next(iter(handed)))
+        for home in homes:
+            named += stop_run(Path(home), status)
+    return named
+
+
+def stop_run(home: Path, run: Dict[str, Any]) -> List[str]:
+    """Stop the subagents ``run`` started that are still at work; returns the ids it named.
+
+    A child of the run is one begun after the run did (``started_at`` against the run's own
+    ``created_at``): a turn that has ended leaves its subagents working, and those belong to their
+    own cards, not to a later turn's stop (ADR 0038). Only live children are named — a child that has
+    ended is left alone, its card and its result already where they belong. A run with no start time
+    to compare names every live child of its session.
+
+    Each named child is stopped on its own, through core's per-child ``interrupt_subagent``
+    (``_interrupt_one``), which is the stop the card asks for. Core's other stop,
+    ``interrupt_for_session`` (``tools/async_delegation.py:1267-1290``), is no use here: its only
+    selectors are a session's — ``session_key``, ``origin_ui_session_id`` or ``parent_session_id``
+    (``_session_records``, ``:738-750``) — so it would stop every live delegation of the session,
+    an earlier turn's child included, which is the one this filter just left to its own card.
+    """
+    session_id = run.get("session_id")
+    if not isinstance(session_id, str) or not session_id:
+        return []
+    began = run.get("created_at")
+    # Its run is the one that started them, so every open child row is a child still at work,
+    # whatever the session's runs are doing now: `children` reads an open row as stopped once its
+    # parent has no run in flight, which is exactly the state a stop leaves it in.
+    named = [
+        child["id"]
+        for child in children(home, session_id, {session_id})
+        if child["status"] == "running" and _since(child["started_at"], began)
+    ]
+    for child_id in named:
+        if _interrupt_one(home, child_id) is False:
+            logger.debug("memento: %s named no subagent core could stop", child_id)
+    return named
+
+
+async def watch_stops(adapter: Any) -> None:
+    """The stop fan-out's watch: a stopped turn takes the subagents it started with it.
+
+    Every run's stop lands in the adapter's run statuses (``stopping``, then the terminal status its
+    unwind reaches), which the plugin already reads for the app, so a watch over them sees a stop
+    whichever client asked for it and whichever route core took. A tick a second, like the outbox's.
+    """
+    handed: Dict[str, None] = {}
+    while True:
+        try:
+            await asyncio.to_thread(sweep_stops, adapter, link.served_homes(adapter), handed)
+        except Exception:
+            logger.debug("memento: couldn't stop a stopped run's subagents", exc_info=True)
+        await asyncio.sleep(STOP_SECONDS)
+
+
+def _stopped(status: Any) -> bool:
+    """Whether a run's status is a stop: the one core sets as it interrupts, or the terminal one
+    its unwind reaches — a turn that completed or failed is not a stop, and its children run on."""
+    return isinstance(status, dict) and status.get("status") in STOPPED_STATES
+
+
+def _since(started: Any, began: Any) -> bool:
+    """Whether a child began while the run was live; a missing time is taken as the run's."""
+    if not isinstance(began, (int, float)) or not isinstance(started, (int, float)):
+        return True
+    return started >= began

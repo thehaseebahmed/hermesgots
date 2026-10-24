@@ -5,7 +5,8 @@ can read cron run history from Hermes's execution ledger instead of piecing it t
 device, keep its chat list on the server (``chats.py``), report each chat's context use
 (``context.py``) and the agent's todo list (``todos.py``), list and create Hermes Projects (``projects.py``) with GitHub repos cloned into
 them in the background (``clones.py``, ``github.py``), add and remove a project's repos (``repos.py``), run project sessions in their own worktrees with a permission mode and save their plans
-(``sessions.py``), let the agent push and open its pull requests, close them when a session is dropped (``ship.py``), file the files it generates in the project's library (``library.py``) and resolve a session once its pull request merges (``merges.py``), research a question into a cited guide, quiz or glossary (``research.py``), let the agent ask the user questions with Hermes's ``clarify`` tool (``clarify.py``), keep its delegations in the turn that made them (``delegation.py``) and
+(``sessions.py``), let the agent push and open its pull requests, close them when a session is dropped (``ship.py``), file the files it generates in the project's library (``library.py``) and resolve a session once its pull request merges (``merges.py``), research a question into a cited guide, quiz or glossary (``research.py``), let the agent ask the user questions with Hermes's ``clarify`` tool (``clarify.py``), list a chat's
+subagents for the app (``delegation.py``) and
 set the profile's main model from a bot's Default model (``host_model.py``), label its chats as Gots's, tell the app what changed as it happens (``events.py``, ``stream.py``), and links the profile to a Gots account (``link.py``). The dashboard half lives in ``dashboard/``.
 """
 
@@ -185,8 +186,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     findings.wire(adapter)
     # The agent files its generated files in the project's library; see library.py.
     library.wire(adapter)
-    # A background delegation's result would wait for the user's next message; see delegation.py.
-    delegation.wire(adapter)
     # Research missions' researchers record their claims; see research.py.
     research.wire(adapter)
     meetings.wire(adapter)
@@ -217,6 +216,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             # Projects left to work their own tasks are swept for work while the host runs; see
             # afk.py. A sweep is woken when one is turned on and when a session finishes.
             asyncio.ensure_future(afk.run(adapter)),
+            # A finished subagent wakes its bot with its result; see delegation.py.
+            asyncio.ensure_future(delegation.run(adapter)),
+            # A stopped turn takes the subagents it started with it; see delegation.py.
+            asyncio.ensure_future(delegation.watch_stops(adapter)),
         ]
         yield
         for task in tasks:
@@ -322,6 +325,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "clarify",
                     "todo_tool",
                     "agents",
+                    "subagent_stop",
                     "attachments",
                     "media",
                     "profile_routes",
@@ -330,7 +334,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "merge_resolve",
                     "events",
                     "push",
-                    "sync_delegation",
                     "host_model",
                     "fallbacks",
                     "delegation_model",
@@ -806,6 +809,19 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         found = await asyncio.to_thread(delegation.children, home, session_id, set(live))
         # Never a 404 for an unknown session: the app reads a 404 as a missing plugin.
         return web.json_response({"object": "memento.agents", "session_id": session_id, "agents": found})
+
+    async def stop_agent(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        session_id = request.match_info["session_id"]
+        agent_id = request.match_info["agent_id"]
+        # On the loop thread, like store_path: the profile scope isn't visible inside to_thread.
+        home = hermes_home()
+        found = await asyncio.to_thread(delegation.stop, home, session_id, agent_id)
+        return web.json_response(
+            {"object": "memento.agent_stop", "session_id": session_id, "agent_id": agent_id, **found}
+        )
 
     async def session_todos(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1434,8 +1450,19 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             host_side = {}
         for session_id, reason in host_side.items():
             waiting.setdefault(session_id, reason)
+        try:
+            subagents = await asyncio.to_thread(delegation.live_sessions, home)
+        except Exception:
+            logger.debug("memento: reading live subagents failed", exc_info=True)
+            subagents = {}
         return web.json_response(
-            {"object": "memento.runs", "sessions": live, "run_ids": run_ids, "waiting": waiting}
+            {
+                "object": "memento.runs",
+                "sessions": live,
+                "run_ids": run_ids,
+                "waiting": waiting,
+                "subagents": subagents,
+            }
         )
 
     async def stream_events(request: "web.Request") -> "web.StreamResponse":
@@ -1551,6 +1578,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/usage", account_usage)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/todos", session_todos)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/agents", session_agents)
+    app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/agents/{{agent_id}}/stop", stop_agent)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/workspace", post_workspace)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/workspace", get_workspace)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/workspace/remove", remove_workspace)
@@ -2400,6 +2428,11 @@ def register(ctx) -> None:
         register_hook("on_session_end", lambda **_kwargs: outbox.wake())
         # And AFK looks for the next task now when a project session ends; see afk.py.
         register_hook("on_session_end", afk.after_run)
+        # A subagent's own session id and core's, so a card's Stop can name the live child it stops;
+        # see delegation.py. Its end is also the moment there is a wake to post, so the watcher looks
+        # again rather than waiting out its tick.
+        register_hook("subagent_start", delegation.started)
+        register_hook("on_session_end", lambda **_kwargs: delegation.wake())
     register_cli = getattr(ctx, "register_cli_command", None)
     if register_cli is not None:
         register_cli(
