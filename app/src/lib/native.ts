@@ -65,14 +65,6 @@ export async function openMediaViewer(
   window.open(url, "_blank")
 }
 
-/**
- * Opens an image at full size in the platform's own viewer: the system photo viewer in the Android
- * app, a browser tab in a browser.
- */
-export async function openImageViewer(url: string) {
-  return openMediaViewer(url, { type: "image/*" })
-}
-
 /** A URL opened outside the app: the platform's browser in the Android app, a new tab on the web. */
 export function openExternal(url: string) {
   if (isNative) {

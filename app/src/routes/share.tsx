@@ -113,10 +113,8 @@ export function SharePage() {
   const [showAll, setShowAll] = useState(false)
   const [note, setNote] = useState("")
   const [removed, setRemoved] = useState<string[]>([])
-  // The share read into what a message carries, with the share it came from: another one's files
-  // are still being read, and nothing of theirs is drawn meanwhile.
   const [read, setRead] = useState<{ share: string; files: Attachment[] } | undefined>(undefined)
-  const stillReading = useRef<string | undefined>(undefined)
+  const readStarted = useRef<string | undefined>(undefined)
   const readHere = share && read?.share === share.id ? read : undefined
   const preparing = Boolean(share) && !readHere
   const prepared = readHere ? readHere.files : NO_FILES
@@ -128,7 +126,6 @@ export function SharePage() {
   const photos = files.filter((attachment) => attachment.image || isPhoto(attachment.type))
   const [sending, setSending] = useState<string | false>(false)
 
-  // Another share can arrive while this one is open; it starts afresh.
   const [shareId, setShareId] = useState(share?.id)
   if (share && share.id !== shareId) {
     setShareId(share.id)
@@ -138,13 +135,11 @@ export function SharePage() {
     setSending(false)
   }
 
-  // Every file under the same caps a pick is held to, refused out loud where it doesn't fit. The
-  // bot the message will go to decides each photo's form, so the read waits for one and is done
-  // once: a bot picked afterwards is the banner's to refuse, not a second read's.
+  // Every file under the same caps a pick is held to, refused out loud where it doesn't fit.
   const imagesAvailable = profile?.imageInput !== false
   useEffect(() => {
-    if (!share || !profile || read?.share === share.id || stillReading.current === share.id) return
-    stillReading.current = share.id
+    if (!share || !profile || readStarted.current === share.id) return
+    readStarted.current = share.id
     let live = true
     void prepareIntake(share.files, { inline: imagesAvailable }).then(
       ({ attachments, refusals }) => {
@@ -156,7 +151,7 @@ export function SharePage() {
     return () => {
       live = false
     }
-  }, [share, profile, imagesAvailable, read])
+  }, [share, profile, imagesAvailable])
 
   const chats = useLiveQuery(async () => {
     if (!profile) return []
