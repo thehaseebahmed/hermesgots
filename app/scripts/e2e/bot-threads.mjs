@@ -1,4 +1,4 @@
-import { app, assert, centred, flow, mock as liveMock, mockAuth, pass, readHeader } from "./lib.mjs"
+import { addBot, app, assert, centred, flow, mockAuth, pass, readHeader, settled } from "./lib.mjs"
 
 const NEW_MOCK = process.env.TRIAGE_NEW_MOCK_URL
 const THREAD_MOCK = process.env.TRIAGE_THREAD_MOCK_URL
@@ -36,8 +36,10 @@ function sequence(page) {
     ([messages, threads]) => {
       const content = document.querySelector('[data-slot="message-scroller-content"]')
       if (!content) return []
+      // Every block the app draws into the content stamps its own slot; the primitive's own filler
+      // stamps none, so the app's contract is what says which children are rows.
       return [...content.children]
-        .filter((child) => !child.hasAttribute("data-message-scroller-spacer"))
+        .filter((child) => child.hasAttribute("data-slot"))
         .flatMap((child) => {
           const slot = child.getAttribute("data-slot")
           const said = child.textContent?.trim() ?? ""
@@ -53,9 +55,23 @@ function sequence(page) {
   )
 }
 
-function seed(page) {
+/**
+ * Seeds the bot's Main: its own messages, its threads drawn as cards, and one thread long enough to
+ * have scrolled somewhere when it opens. Times are hours and days back from now.
+ */
+function seed(
+  page,
+  {
+    threads = THREADS,
+    messages = MESSAGES,
+    hour = HOUR,
+    day = DAY,
+    long = LONG_MESSAGES,
+    note = LONG_NOTE,
+  } = {},
+) {
   return page.evaluate(
-    async ([threads, messages, hour, day, long, note]) => {
+    async ({ threads, messages, hour, day, long, note }) => {
       const { db, ensureMainThread, mainThreadId } = await import("/src/lib/db.ts")
       const profile = (await db.profiles.toArray())[0]
       await ensureMainThread(profile.id)
@@ -109,65 +125,39 @@ function seed(page) {
       await db.conversations.update(mainId, { createdAt: now - 4 * day })
       return mainId
     },
-    [THREADS, MESSAGES, HOUR, DAY, LONG_MESSAGES, LONG_NOTE],
+    { threads, messages, hour, day, long, note },
   )
 }
 
 /**
- * A second bot with a Main thread of its own, so the sidebar's bot switch has two chats to land
- * between. It points at the same mock: no message is sent to it, so nothing else is needed.
- */
-function seedSecondBot(page) {
-  return page.evaluate(
-    async ([name, messages, mock, hour]) => {
-      const { addProfile, db, ensureMainThread, mainThreadId } = await import("/src/lib/db.ts")
-      const profile = await addProfile({
-        name,
-        baseUrl: `${mock}/v1`,
-        apiKey: "mock-key",
-        model: "hermes-agent",
-      })
-      const mainId = mainThreadId(profile.id)
-      await ensureMainThread(profile.id)
-      const now = Date.now()
-      await db.messages.bulkPut(
-        messages.map((content, index) => ({
-          id: `${mainId}-${index}`,
-          conversationId: mainId,
-          role: index % 2 ? "assistant" : "user",
-          content,
-          status: "done",
-          createdAt: now - hour + index,
-        })),
-      )
-      return profile.id
-    },
-    [SECOND_BOT, SECOND_MESSAGES, liveMock, HOUR],
-  )
-}
-
-/**
- * Records what the browser paints from now on, one sample a frame, for the chat surface at `index`:
- * its header title, whether the frame is one of `chats` whole, the wrong states a switch must never
- * paint, and its scroller's place and content. `chats` is read as [the chat being left, the one
+ * Records what the browser paints from now on, one sample a frame, for the pane the shell names
+ * `pane` — `main` and `thread` on a laptop, `route` everywhere else. A pane that isn't there is this
+ * sample's own failure, never a measurement of the container around it. Each sample carries the
+ * pane's header title, whether the frame is one of `chats` whole, the wrong states a switch must
+ * never paint, and its scroller's place and content. `chats` is read as [the chat being left, the one
  * asked for], each `{ title, says }` with a line only that chat draws.
+ *
+ * A frame is read as cheaply as a painted frame allows: the app's own slot says which children are
+ * rows, the one style read is the hold, and where the last row sits is read only once the chat asked
+ * for is on screen — nothing before that is final, and the read costs a layout.
  */
-function watchFrames(page, { chats, index = 0 }) {
+function watchFrames(page, { chats, pane }) {
   return page.evaluate(
-    async ({ chats, index }) => {
+    async ({ chats, pane }) => {
       const { BOTS } = await import("/src/components/bots.tsx")
-      const greetings = ["Good morning.", "Good afternoon.", "Good evening."]
-      const hero = [...BOTS.flatMap((bot) => bot.lines), ...greetings]
+      const { GREETINGS } = await import("/src/lib/greeting.ts")
+      const { SETUP_COPY } = await import("/src/routes/chat.tsx")
+      const hero = [...BOTS.flatMap((bot) => bot.lines), ...GREETINGS]
+      // The rows the app drew: every block it adds stamps a slot, and the primitive's filler does not.
+      const rowsIn = (content) =>
+        content ? [...content.children].filter((child) => child.hasAttribute("data-slot")) : []
       const sample = () => {
-        // The chat's own slot, or the main pane on a build that has no slot of its own.
-        const root =
-          document.querySelectorAll('[data-slot="chat-pane"]')[index] ??
-          (index === 0 ? document.querySelector("main") : undefined)
+        const root = document.querySelector(`[data-pane="${pane}"]`)
         if (!root)
           return {
             title: "",
             match: -1,
-            wrong: ["no chat"],
+            wrong: [`no [data-pane="${pane}"]`],
             held: false,
             scrollTop: 0,
             atEnd: false,
@@ -178,16 +168,19 @@ function watchFrames(page, { chats, index = 0 }) {
         const title = root.querySelector('[data-slot="header-title"]')?.textContent?.trim() ?? ""
         const viewport = root.querySelector('[data-slot="message-scroller-viewport"]')
         const content = root.querySelector('[data-slot="message-scroller-content"]')
+        const mine = rowsIn(content)
+        const match = chats.findIndex((chat) => title === chat.title && text.includes(chat.says))
+        // The scroller holds itself back while it places its content: a `data-pending-scroll`
+        // viewport is `visibility: hidden`, so the browser paints none of that frame, and its
+        // items are still at their `content-visibility: auto` estimate rather than their size.
+        // A frame nobody sees is not a frame the switch paints.
+        const held = viewport ? getComputedStyle(viewport).visibility === "hidden" : false
         return {
           title,
-          match: chats.findIndex((chat) => title === chat.title && text.includes(chat.says)),
-          // The scroller holds itself back while it places its content: a `data-pending-scroll`
-          // viewport is `visibility: hidden`, so the browser paints none of that frame, and its
-          // items are still at their `content-visibility: auto` estimate rather than their size.
-          // A frame nobody sees is not a frame the switch paints.
-          held: viewport ? getComputedStyle(viewport).visibility === "hidden" : false,
+          match,
+          held,
           wrong: [
-            text.includes("Point Gots at your Hermes Agent API server") && "the setup copy",
+            text.includes(SETUP_COPY) && "the setup copy",
             title === "New chat" && 'a "New chat" header',
             hero.some((line) => text.includes(line)) && "the new-chat hero",
           ].filter(Boolean),
@@ -199,27 +192,42 @@ function watchFrames(page, { chats, index = 0 }) {
           atEnd: viewport
             ? Math.abs(viewport.scrollTop + viewport.clientHeight - viewport.scrollHeight) <= 2
             : false,
-          bottom: content
-            ? Math.round(
-                [...content.children]
-                  .filter((child) => !child.hasAttribute("data-message-scroller-spacer"))
-                  .at(-1)
-                  ?.getBoundingClientRect().bottom ?? 0,
-              )
-            : 0,
-          count: content ? content.children.length : 0,
+          bottom:
+            !held && match === 1 && mine.length
+              ? Math.round(mine.at(-1)?.getBoundingClientRect().bottom ?? 0)
+              : 0,
+          count: mine.length,
         }
       }
+      /** Two frames the same: nothing arrived, no fade moved the box, and nothing was placed. */
+      const same = (one, other) =>
+        Boolean(one && other) &&
+        one.title === other.title &&
+        one.match === other.match &&
+        one.held === other.held &&
+        one.scrollTop === other.scrollTop &&
+        one.atEnd === other.atEnd &&
+        one.bottom === other.bottom &&
+        one.count === other.count &&
+        one.wrong.length === other.wrong.length
       window.__frames = []
+      window.__quiet = 0
       window.__watching = true
+      let before = null
       const tick = () => {
         if (!window.__watching) return
-        window.__frames.push(sample())
+        const frame = sample()
+        // The switch is over when frames stop changing: the chat asked for is on screen, the fade
+        // has run out and the scroller has nothing left to place. The caller waits on this, so no
+        // sleep bounds what the assertions read.
+        window.__quiet = same(before, frame) ? window.__quiet + 1 : 0
+        before = frame
+        window.__frames.push(frame)
         requestAnimationFrame(tick)
       }
       requestAnimationFrame(tick)
     },
-    { chats, index },
+    { chats, pane },
   )
 }
 
@@ -229,34 +237,38 @@ function stopFrames(page) {
     () =>
       new Promise((done) => {
         window.__watching = false
-        requestAnimationFrame(() =>
-          requestAnimationFrame(() => done(window.__frames ?? [])),
-        )
+        requestAnimationFrame(() => requestAnimationFrame(() => done(window.__frames ?? [])))
       }),
   )
 }
 
-/** Asserts the chat surface at `what` is drawing a chat ready — its own title and its content. */
-async function ready(page, what) {
-  const seen = await page.evaluate(() => {
-    const pane = document.querySelector('[data-slot="chat-pane"]') ?? document.querySelector("main")
-    const content = pane?.querySelector('[data-slot="message-scroller-content"]')
+/**
+ * Asserts the pane named `pane` is drawing a chat ready — its own title and its content — and
+ * answers what it saw. A pane that isn't there fails here: the shell names its panes, and measuring
+ * whatever else is on the screen is not a reading of a chat.
+ */
+async function ready(page, what, pane = "route") {
+  const seen = await page.evaluate(async (pane) => {
+    const { SETUP_COPY } = await import("/src/routes/chat.tsx")
+    const root = document.querySelector(`[data-pane="${pane}"]`)
+    const content = root?.querySelector('[data-slot="message-scroller-content"]')
     return {
-      title: pane?.querySelector('[data-slot="header-title"]')?.textContent?.trim() ?? "",
-      items: content ? content.children.length : 0,
-      text: pane?.textContent ?? "",
+      found: Boolean(root),
+      title: root?.querySelector('[data-slot="header-title"]')?.textContent?.trim() ?? "",
+      items: content
+        ? [...content.children].filter((child) => child.hasAttribute("data-slot")).length
+        : 0,
+      text: root?.textContent ?? "",
+      setup: SETUP_COPY,
     }
-  })
+  }, pane)
+  assert.ok(seen.found, `${what}: the ${pane} pane is on screen`)
   assert.ok(
     seen.title && seen.title !== "New chat",
     `${what}: the chat draws a title of its own (saw "${seen.title}")`,
   )
   assert.ok(seen.items > 0, `${what}: the chat draws its content (${seen.items} items)`)
-  assert.equal(
-    seen.text.includes("Point Gots at your Hermes Agent API server"),
-    false,
-    `${what}: the chat draws no setup copy`,
-  )
+  assert.equal(seen.text.includes(seen.setup), false, `${what}: the chat draws no setup copy`)
   return seen
 }
 
@@ -310,28 +322,39 @@ function assertSwitchFrames(frames, { what }) {
   return { scrollTop: after[0].scrollTop, frames: frames.length }
 }
 
+/** How many frames running the same say the switch is over: the tail is still sampled after them. */
+const SETTLED_FRAMES = 3
+
 /**
- * Samples a switch: records frames, runs `act`, waits for the chat asked for to be on screen, lets
- * the fade run out, then asserts what was painted and where its scroller stood.
+ * Samples a switch: records frames of the pane `pane`, runs `act`, waits for the chat asked for to be
+ * on screen, then for the pane to stop changing — animations settled, and the same frame several
+ * frames running — and asserts what was painted and where its scroller stood. Nothing is bounded by
+ * a sleep: the pane's own last change is the end signal, and the tail behind it is what a frame that
+ * lands late has to show up in.
  */
-async function sampleSwitch(page, { chats, index = 0, act, what }) {
-  await watchFrames(page, { chats, index })
+async function sampleSwitch(page, { chats, pane = "route", act, what }) {
+  await watchFrames(page, { chats, pane })
   // Two frames first, so the recording opens on the chat being left rather than the click's own.
   await page.evaluate(
     () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))),
   )
   await act()
   await page.waitForFunction(
-    ({ title, index }) =>
+    ({ pane, title }) =>
       document
-        .querySelectorAll('[data-slot="chat-pane"]')
-        [index]?.querySelector('[data-slot="header-title"]')
+        .querySelector(`[data-pane="${pane}"]`)
+        ?.querySelector('[data-slot="header-title"]')
         ?.textContent?.trim() === title,
-    { title: chats[1].title, index },
+    { pane, title: chats[1].title },
     { timeout: 15_000 },
   )
-  // A placement after the first content frame, and the swap's fade, both land inside this window.
-  await page.waitForTimeout(400)
+  // The header lands before the fade and the scroller's placement finish; the sampler's own quiet
+  // frames are what says they have, with `settled` covering the animations it always has.
+  await settled(page)
+  await page.waitForFunction((tail) => window.__quiet >= tail, SETTLED_FRAMES, {
+    timeout: 15_000,
+    polling: "raf",
+  })
   const frames = await stopFrames(page)
   assertSwitchFrames(frames, { what })
   return frames
@@ -683,12 +706,19 @@ await flow(
     const startedCard = cardWith(page, STARTED)
     await startedCard.getByRole("link", { name: /View thread/ }).click()
     await page.waitForURL(`**/c/${threadId}`, { timeout: 15_000 })
-    await page.waitForTimeout(400)
+    // The thread's own pane, drawn and still: a card named again while the first naming is still
+    // settling is two namings, not the same one twice.
+    await until(
+      async () => (await count(page, '[data-pane="thread"] [data-slot="header-title"]')) === 1,
+      15_000,
+      "the thread's own pane beside Main",
+    )
+    await settled(page)
     const held = await page.locator('[data-slot="header-row"]').nth(1).elementHandle()
     // Naming the same thread from its card again — which is what a tap on a thread that is already
     // the screen does — must draw no new pane: redrawing it is what made the thread flicker.
     await startedCard.getByRole("link", { name: /View thread/ }).click()
-    await page.waitForTimeout(400)
+    await settled(page)
     assert.equal(
       new URL(page.url()).pathname,
       `/c/${threadId}`,
@@ -712,7 +742,7 @@ await flow(
       })),
     )
     assert.equal(heads.length, 2, "both panes draw a header")
-    assert.equal(heads[0].title, "Test bot", "Main reads as the bot, not as \"Main\"")
+    assert.equal(heads[0].title, "Test bot", 'Main reads as the bot, not as "Main"')
     assert.notEqual(heads[1].title, "", "the thread beside it reads with its own title")
     assert.notEqual(heads[1].title, "Test bot", "which is the thread's, not the bot's")
     assert.equal(
@@ -727,7 +757,7 @@ await flow(
     )
     const boxes = await readHeader(page.locator('[data-slot="header-row"]').nth(1))
     centred(boxes, "the thread beside Main")
-    await ready(page, "the laptop in light mode")
+    await ready(page, "the laptop in light mode", "main")
     await shot("laptop")
     pass(
       "on a laptop the thread beside Main carries no control of its own, and naming it changes nothing",
@@ -735,7 +765,7 @@ await flow(
 
     // A bot switch is the same change over two bots' Main threads: the sidebar's row is the tap, and
     // every frame it paints is one of the two Mains, whole.
-    const secondBot = await seedSecondBot(page)
+    const secondBot = await addBot(page, { name: SECOND_BOT, messages: SECOND_MESSAGES })
     const secondMain = `/c/main-${secondBot}`
     const secondRow = page.locator(`aside a[href="${secondMain}"]`).first()
     await secondRow.waitFor({ timeout: 15_000 })
@@ -750,6 +780,7 @@ await flow(
         { title: SECOND_BOT, says: SECOND_MESSAGES.at(-1) },
       ],
       what: "the sidebar's bot switch",
+      pane: "main",
       act: () => secondRow.click(),
     })
     await page.waitForURL(`**${secondMain}`, { timeout: 15_000 })
@@ -761,6 +792,7 @@ await flow(
         { title: "Test bot", says: MESSAGES[2] },
       ],
       what: "and back to the first bot",
+      pane: "main",
       act: () => page.locator(`aside a[href="${mainPath}"]`).first().click(),
     })
     await page.waitForURL(`**${mainPath}`, { timeout: 15_000 })
@@ -772,7 +804,7 @@ await flow(
       15_000,
       "the dark theme on a laptop",
     )
-    await ready(page, "the laptop in dark mode")
+    await ready(page, "the laptop in dark mode", "main")
     await shot("laptop-dark")
     pass("the laptop in dark mode draws the chat ready")
   },

@@ -100,7 +100,7 @@ export async function settleNav(page) {
     })
   }
   const settle = async (since) => {
-    for (const end = Date.now() + 8_000; Date.now() < end; ) {
+    for (const end = Date.now() + 8_000; Date.now() < end;) {
       // Requests older than this navigation are the last page's stragglers: an abandoned fetch
       // neither finishes nor fails in the client, and waiting on one burns the whole cap and then
       // still leaves the page to the next navigation. Only this document's graph counts.
@@ -120,7 +120,10 @@ export async function settleNav(page) {
         const state = await page
           .evaluate(async (mock) => {
             const race = (work, label) =>
-              Promise.race([work.then(() => `${label}-ok`), new Promise((no) => setTimeout(() => no(`${label}-hung`), 3000))])
+              Promise.race([
+                work.then(() => `${label}-ok`),
+                new Promise((no) => setTimeout(() => no(`${label}-hung`), 3000)),
+              ])
             const db = await race(import("/src/lib/db.ts"), "db")
             const root = document.querySelector("#root")?.childElementCount
             const more =
@@ -187,20 +190,54 @@ export async function flow(
   }
 }
 
+/**
+ * What pointing a bot's row at the mock holds, in one place: the bot a flow sets up and the second
+ * bot it adds can no longer drift from each other (a missing `pluginChats` is a bot with no chats).
+ */
+const botPatch = (baseUrl) => ({
+  baseUrl: `${baseUrl}/v1`,
+  apiKey: "mock-key",
+  pluginChats: true,
+})
+
 /** Points the first bot at the mock and skips the setup wizard; answers the bot's id. */
 export async function setUpBot(page) {
-  return page.evaluate(async (mock) => {
+  return page.evaluate(async (patch) => {
     const { db } = await import("/src/lib/db.ts")
     const profile = (await db.profiles.toArray())[0]
-    await db.profiles.update(profile.id, {
-      name: "Test bot",
-      baseUrl: `${mock}/v1`,
-      apiKey: "mock-key",
-      pluginChats: true,
-    })
+    await db.profiles.update(profile.id, { ...patch, name: "Test bot" })
     await db.settings.put({ id: "settings", activeProfileId: profile.id, onboarded: true })
     return profile.id
-  }, mock)
+  }, botPatch(mock))
+}
+
+/**
+ * A second bot, pointed at the same mock, so a flow has two chats to land between: no message is
+ * ever sent to it, so nothing else is needed. `messages` become its Main thread's, oldest first.
+ * Answers the bot's id.
+ */
+export async function addBot(page, { name, messages, hour = 3_600_000 }) {
+  return page.evaluate(
+    async ({ name, messages, patch, hour }) => {
+      const { addProfile, db, ensureMainThread, mainThreadId } = await import("/src/lib/db.ts")
+      const profile = await addProfile({ ...patch, name, model: "hermes-agent" })
+      const mainId = mainThreadId(profile.id)
+      await ensureMainThread(profile.id)
+      const now = Date.now()
+      await db.messages.bulkPut(
+        messages.map((content, index) => ({
+          id: `${mainId}-${index}`,
+          conversationId: mainId,
+          role: index % 2 ? "assistant" : "user",
+          content,
+          status: "done",
+          createdAt: now - hour + index,
+        })),
+      )
+      return profile.id
+    },
+    { name, messages, patch: botPatch(mock), hour },
+  )
 }
 
 /** The signed-in account the wizard flows start from, and the one `flow`'s `account` seeds. */
