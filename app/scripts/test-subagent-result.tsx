@@ -247,12 +247,13 @@ test("two results arriving together keep their order, and a catch-up draws each 
       assert.deepEqual(resultsDrawn(), ["parser", "docs"], "in the order they arrived")
       // The chat catches up again, with a turn sent since: the results survive it, once each.
       lines.push({ id: 7, role: "user", content: "Anything else?", timestamp: 22 })
-      await reconcileHistory("chat-1")
-      await settle()
-      await until(
-        async () => rows().some((row) => row.textContent?.includes("Anything else?")),
-        "the turn sent since",
-      )
+      // A catch-up already in flight is shared, and may have read the transcript before this turn
+      // joined it, so ask again until one that began after it has landed.
+      await until(async () => {
+        await reconcileHistory("chat-1")
+        await settle()
+        return rows().some((row) => row.textContent?.includes("Anything else?"))
+      }, "the turn sent since")
       assert.deepEqual(resultsDrawn(), ["parser", "docs"], "and still one row each, in order")
     },
     { rows: lines },
