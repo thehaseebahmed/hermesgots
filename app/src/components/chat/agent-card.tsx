@@ -205,7 +205,7 @@ function AgentCard({
       const next = await stopAgent(source.server, source.sessionId, agent.id)
       setAnswer({ ...next, at: Date.now() / 1000 })
     } catch (error) {
-      setFailure(error instanceof Error ? error.message : "Couldn't stop this sub-agent.")
+      setFailure(error instanceof Error ? error.message : "Couldn't stop this subagent.")
     } finally {
       setBusy(false)
     }
