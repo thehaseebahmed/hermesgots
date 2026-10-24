@@ -1,11 +1,10 @@
 export type MediaPart =
   { kind: "text"; at: number; text: string } | { kind: "media"; at: number; paths: string[] }
 
-// Every type the plugin's media route answers with a type of its own (its `media.py` content-type
-// map: images, video, audio, text, code and data, the SVG included), so a tag naming one of these
-// is a file the host can serve and the thread can draw. The tag still needs its `MEDIA:` prefix and
-// an absolute or quoted path, so a list this wide can't swallow prose (and where one extension
-// starts another, the longer comes first).
+// What the plugin's media route serves, plus the binary tail it hands over as a generic type, so a
+// tag names a file the host can serve whatever it calls it. The `MEDIA:` prefix and a path are still
+// required, so a list this wide can't swallow prose (and where one extension starts another, the
+// longer comes first).
 export const SERVED_EXTS = [
   "jpeg png jpg gif webp bmp svg",
   "mp4 m4v mov webm ogv",

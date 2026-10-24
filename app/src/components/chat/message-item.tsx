@@ -30,7 +30,7 @@ import type { Attachment, Message, ToolEvent } from "@/lib/db"
 import { describeActivity, formatDuration } from "@/lib/format"
 import { COLUMN } from "@/lib/layout"
 import { mediaCell, mediaKind, type MediaCell } from "@/lib/media-kind"
-import { attachmentSources, useMediaSources } from "@/lib/media-source"
+import { attachmentSources, mediaRead, useMediaSources } from "@/lib/media-source"
 import { mediaImages } from "@/lib/media-tags"
 import { openuiParts, REPLY_INSET } from "@/lib/openui-block.ts"
 import type { InterfaceDraw, ThreadBlock } from "@/lib/openui-thread.ts"
@@ -225,11 +225,8 @@ function Stats({ message }: { message: Message }) {
 }
 
 /**
- * A sent message's media and files: the images and clips in one Gallery, a recording in a row of
- * its own, and every other file as a row that saves it. Each draws from the bytes this device holds
- * where it has them, else from the host — so a message read on another device still shows what was
- * sent, and one whose host is unreachable still shows this device's own photos. A file's row saves
- * the file wherever its bytes are, this device's own first.
+ * A sent message's media: this device's own copy where it has one, the host's otherwise, and a file
+ * whose bytes can't be read anywhere as a row that saves it.
  */
 function SentAttachments({
   conversationId,
@@ -244,14 +241,12 @@ function SentAttachments({
     (attachment) => mediaCell(attachment.type, attachment.name) !== "file",
   )
   const sources = useMediaSources(conversationId, attachmentSources(media, attachmentUrl))
-  const source = (attachment: Attachment) => sources.get(attachment.id)
-  // A media file whose bytes can't be read anywhere is drawn as the file it is, so a tap still
-  // saves it.
+  const state = (attachment: Attachment) => sources.get(attachment.id)
   const files = [
     ...attachments.filter((attachment) => mediaCell(attachment.type, attachment.name) === "file"),
-    ...media.filter((attachment) => source(attachment) === null),
+    ...media.filter((attachment) => state(attachment)?.status === "empty"),
   ]
-  const drawn = media.filter((attachment) => source(attachment) !== null)
+  const drawn = media.filter((attachment) => state(attachment)?.status !== "empty")
   const item = (attachment: Attachment, cell: MediaCell): MediaItem => ({
     key: attachment.id,
     kind: mediaKind(attachment.type, attachment.name),
@@ -259,10 +254,8 @@ function SentAttachments({
     name: attachment.name,
     type: attachment.type,
     size: attachment.size,
-    src: source(attachment)?.url,
+    src: mediaRead(state(attachment))?.url,
   })
-  // A row's tap saves the file the message carries, wherever its bytes are: this device's own copy
-  // first, else the host's.
   const download = (one: MediaItem) => {
     const attachment = attachments.find((it) => it.id === one.key)
     if (attachment) void downloadAttachment(conversationId, attachment)
@@ -285,7 +278,6 @@ function SentAttachments({
 
 /** Something the user steered the reply with, where it reached the agent. */
 function SteerBubble({ text }: { text: string }) {
-  // A steer carrying files reached the model as their markers: the bubble shows the words.
   const said = splitAttachments(text).text
   return (
     <MessageRow align="end" className={COLUMN}>

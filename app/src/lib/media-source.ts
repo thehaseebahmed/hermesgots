@@ -4,9 +4,8 @@ import type { Attachment } from "@/lib/db"
 import { loadMediaFile } from "@/lib/media-tags"
 
 /**
- * One piece of media the thread draws: where its bytes are, and — once they are in — where the
- * thread can read them. A path and no local bytes is a device that never held the file, or a
- * message restored from the transcript, so the host's media route fills it in.
+ * One piece of media the thread draws: where its bytes are, or where the host keeps them — which is
+ * the case for another device's file and for a message restored from the transcript.
  */
 export interface MediaSource {
   /** Stable within the message: an attachment's id, or the path a tag names. */
@@ -26,18 +25,20 @@ export interface MediaRead {
   size?: number
 }
 
-/**
- * What each source draws from: this device's own copy, else what the host answered — null where it
- * can't be read at all, undefined while the read is still out. A source that starts with nothing to
- * read answers null at once, so a caller can draw it some other way rather than waiting.
- */
-export type MediaSources = ReadonlyMap<string, MediaRead | null | undefined>
+/** What a source draws from: its bytes, a read still out, or nothing to read at all. */
+export type MediaState =
+  { status: "ready"; read: MediaRead } | { status: "reading" } | { status: "empty" }
+
+export type MediaSources = ReadonlyMap<string, MediaState>
+
+/** The bytes a source draws from, where they are in. */
+export const mediaRead = (state?: MediaState) =>
+  state?.status === "ready" ? state.read : undefined
 
 export function useMediaSources(conversationId: string, sources: MediaSource[]): MediaSources {
   const [host, setHost] = useState<ReadonlyMap<string, MediaRead | null>>(new Map())
-  // A reply streams a chunk at a time, so this list is rebuilt on every render. What has already
-  // been answered stays answered, and only what arrived since is asked for: otherwise a tag's cell
-  // would go back to the route for every token the reply lands.
+  // A reply streams a chunk at a time, so this list is rebuilt on every render: what has been
+  // answered stays answered, or a tag's cell would ask the route again for every token.
   const answered = useRef<{ chat: string; paths: Set<string> }>({
     chat: conversationId,
     paths: new Set(),
@@ -58,8 +59,7 @@ export function useMediaSources(conversationId: string, sources: MediaSource[]):
     const paths = (joined ? joined.split("\n") : []).filter((path) => !asked.has(path))
     if (!paths.length) return
     let stale = false
-    // One read per file, shared across the thread: the route's own cache has the bytes of a path it
-    // has already served, so a group of tags costs one read each however often the thread redraws.
+    // One read per file, shared across the thread: the route caches what it has served.
     void Promise.all(paths.map((path) => loadMediaFile(conversationId, path))).then((read) => {
       if (stale) return
       for (const path of paths) asked.add(path)
@@ -74,12 +74,17 @@ export function useMediaSources(conversationId: string, sources: MediaSource[]):
     }
   }, [conversationId, joined])
 
-  const resolved = new Map<string, MediaRead | null | undefined>()
-  for (const source of sources)
-    resolved.set(
-      source.key,
-      source.local ? { url: source.local } : source.path ? host.get(source.path) : null,
-    )
+  const resolved = new Map<string, MediaState>()
+  for (const source of sources) {
+    const read = source.local ? { url: source.local } : source.path ? host.get(source.path) : null
+    const state: MediaState =
+      read === null
+        ? { status: "empty" }
+        : read === undefined
+          ? { status: "reading" }
+          : { status: "ready", read }
+    resolved.set(source.key, state)
+  }
   return resolved
 }
 
