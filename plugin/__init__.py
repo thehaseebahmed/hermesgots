@@ -1141,7 +1141,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 elif named == "pick_count":
                     await asyncio.to_thread(afk.set_pick_count, hermes_home(), project_id, value)
                 else:
-                    await asyncio.to_thread(afk.set_prompt, hermes_home(), project_id, value)
+                    # A Prompt is written as its words and the entry they were copied from, one
+                    # shape: a plain write brings no entry and clears the one the row held.
+                    text, source = value
+                    await asyncio.to_thread(
+                        afk.set_prompt, hermes_home(), project_id, text, source
+                    )
             except ValueError as why:
                 return _error(web, str(why), 400)
             found = await asyncio.to_thread(

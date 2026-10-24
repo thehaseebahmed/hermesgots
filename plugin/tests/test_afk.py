@@ -610,11 +610,71 @@ class PromptTests(AfkHome):
         self.assertFalse(read(self.home, "p1", self.folders())["on"])
 
     def test_a_write_names_the_prompt_as_its_own_shape(self) -> None:
-        self.assertEqual(write_from({"prompt": "Mine."}), ("prompt", "Mine."))
-        self.assertEqual(write_from({"prompt": "  Mine.  "}), ("prompt", "Mine."), "trimmed")
-        self.assertEqual(write_from({"prompt": ""}), ("prompt", None), "cleared")
-        self.assertEqual(write_from({"prompt": "   "}), ("prompt", None))
-        self.assertEqual(write_from({"prompt": None}), ("prompt", None))
+        self.assertEqual(write_from({"prompt": "Mine."}), ("prompt", ("Mine.", None)))
+        self.assertEqual(write_from({"prompt": "  Mine.  "}), ("prompt", ("Mine.", None)), "trimmed")
+        self.assertEqual(write_from({"prompt": ""}), ("prompt", (None, None)), "cleared")
+        self.assertEqual(write_from({"prompt": "   "}), ("prompt", (None, None)))
+        self.assertEqual(write_from({"prompt": None}), ("prompt", (None, None)))
+
+    def test_a_prompt_and_the_entry_it_copied_are_one_shape(self) -> None:
+        self.assertEqual(
+            write_from({"prompt": "Mine.", "prompt_id": "e-one"}),
+            ("prompt", ("Mine.", "e-one")),
+            "a source is a companion to the words, not a shape beside them",
+        )
+        self.assertEqual(
+            write_from({"prompt": "  Mine.  ", "prompt_id": "  e-one  "}),
+            ("prompt", ("Mine.", "e-one")),
+            "both halves trimmed",
+        )
+
+        set_prompt(self.home, "p1", "Mine.", "e-one")
+        self.assertEqual(self.prompt(), "Mine.", "the words are the ones it copied")
+        self.assertEqual(
+            afk._row(self.home, "p1")["prompt_id"], "e-one", "the row keeps its source"
+        )
+        self.assertEqual(
+            read(self.home, "p1", self.folders())["prompt_id"],
+            "e-one",
+            "and the sheet is told which entry the copy came from",
+        )
+
+    def test_a_plain_prompt_write_clears_its_source(self) -> None:
+        # A hand edit detaches the copy: the row must never call the user's own words a stale one.
+        set_prompt(self.home, "p1", "Mine.", "e-one")
+        set_prompt(self.home, "p1", "Mine, with a line of my own.")
+        self.assertIsNone(afk._row(self.home, "p1")["prompt_id"], "the source goes with the words")
+        self.assertIsNone(read(self.home, "p1", self.folders())["prompt_id"])
+
+    def test_a_workflow_pick_clears_the_prompt_and_its_source(self) -> None:
+        set_prompt(self.home, "p1", "Mine.", "e-one")
+        self.choose()
+        found = afk._row(self.home, "p1")
+        self.assertIsNone(found["prompt"], "a project is never both")
+        self.assertIsNone(found["prompt_id"], "and a copy describes words it no longer holds")
+
+    def test_a_source_without_a_prompt_is_refused(self) -> None:
+        for body in (
+            {"prompt_id": "e-one"},
+            {"prompt_id": None},
+            {"on": True, "prompt_id": "e-one"},
+        ):
+            with self.subTest(body=body):
+                with self.assertRaises(ValueError) as refused:
+                    write_from(body)
+                self.assertEqual(
+                    str(refused.exception),
+                    "prompt_id needs a prompt beside it.",
+                    "an entry id names nothing without the words it describes",
+                )
+
+    def test_a_source_beside_a_prompt_has_to_be_an_id(self) -> None:
+        for source in (3, "", "   ", None):
+            with self.subTest(source=source):
+                with self.assertRaises(ValueError):
+                    write_from({"prompt": "Mine.", "prompt_id": source})
+        with self.assertRaises(ValueError):
+            write_from({"prompt": "Mine.", "prompt_id": "e-one", "on": True})
 
     def test_a_prompt_is_never_written_beside_another_shape(self) -> None:
         for body in (
