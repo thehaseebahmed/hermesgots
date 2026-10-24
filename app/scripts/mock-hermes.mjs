@@ -1068,7 +1068,11 @@ const SKILL_LINKED = {
   },
 }
 const SKILL_FILES = {
-  "references/review-checklist.md": `# Review checklist
+  "references/review-checklist.md": `---
+title: Review checklist
+---
+
+# Review checklist
 
 - The gates pass, and the diff is the change.
 - Every new rule has the test that would catch it.

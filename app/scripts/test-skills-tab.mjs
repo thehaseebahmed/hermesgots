@@ -45,12 +45,12 @@ test("the profile's skills come first, the plugin's second, and no origin is the
   assert.deepEqual(skillSections([runbook, plan]), [
     {
       id: "yours",
-      title: "Your skills",
+      heading: "Your skills",
       groups: [{ category: null, skills: [plan] }],
     },
     {
       id: "plugins",
-      title: "From plugins",
+      heading: "From plugins",
       groups: [{ category: "plugin", skills: [runbook] }],
     },
   ])
@@ -89,17 +89,35 @@ test("an off skill and one that doesn't load are listed, not dropped", () => {
 
 test("both sections come back with nothing in them, and one empty section keeps its place", () => {
   assert.deepEqual(skillSections([]), [
-    { id: "yours", title: "Your skills", groups: [] },
-    { id: "plugins", title: "From plugins", groups: [] },
+    { id: "yours", heading: null, groups: [] },
+    { id: "plugins", heading: null, groups: [] },
   ])
   const pluginOnly = skillSections([
     skill({ name: "gots:runbook", category: "plugin", origin: "plugin" }),
   ])
-  assert.deepEqual(pluginOnly[0], { id: "yours", title: "Your skills", groups: [] })
+  assert.deepEqual(pluginOnly[0], { id: "yours", heading: null, groups: [] })
   assert.equal(pluginOnly[1].groups[0].skills[0].name, "gots:runbook")
 })
 
-test("a skill's origin is one of the sheet's four lines, and nothing where the row doesn't say", () => {
+test("a section names itself only while the other kind holds skills too", () => {
+  const both = skillSections([
+    skill({ name: "plan" }),
+    skill({ name: "gots:runbook", origin: "plugin" }),
+  ])
+  assert.deepEqual(
+    both.map((section) => section.heading),
+    ["Your skills", "From plugins"],
+    "both kinds on the bot, both headings",
+  )
+  const yours = skillSections([skill({ name: "plan" })])
+  assert.deepEqual(
+    yours.map((section) => section.heading),
+    [null, null],
+    "one kind on the bot, the tab opens straight at the categories",
+  )
+})
+
+test("a skill's origin leads the sheet's properties block, and nothing where the row doesn't say", () => {
   assert.equal(skillOrigin(skill({ origin: "builtin" })), "Built in")
   assert.equal(skillOrigin(skill({ origin: "hub" })), "Installed from the Hub")
   assert.equal(skillOrigin(skill({ origin: "yours" })), "Yours")

@@ -37,7 +37,8 @@ export interface SkillGroup {
 
 export interface SkillSection {
   id: SkillSectionId
-  title: string
+  /** What draws over the section, or null where the tab opens straight at its category titles. */
+  heading: string | null
   groups: SkillGroup[]
 }
 
@@ -75,10 +76,18 @@ export function collated(left: string, right: string): number {
 }
 
 export function skillSections(skills: Skill[]): SkillSection[] {
-  return SECTIONS.map(({ id, title, plugins }) => ({
+  const built = SECTIONS.map(({ id, title, plugins }) => ({
     id,
     title,
     groups: groupsOf(skills.filter((skill) => (skill.origin === "plugin") === plugins)),
+  }))
+  // Both kinds on the bot is the only time the split is worth a word: a tab holding one kind
+  // opens straight at its category titles rather than a heading over a single group list.
+  const bothKinds = built.every((section) => section.groups.length > 0)
+  return built.map(({ id, title, groups }) => ({
+    id,
+    heading: bothKinds ? title : null,
+    groups,
   }))
 }
 

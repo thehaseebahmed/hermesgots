@@ -261,12 +261,12 @@ export const FLOWS = {
   "skills-list": {
     script: "e2e/skills-list.mjs",
     about:
-      "A bot's Skills tab: the editor's own tab strip holding it, two sections under heading boxes with Your skills above From plugins, and each row's name drawn inside the row's box, at phone and tablet widths, light and dark",
+      "A bot's Skills tab: the editor's own tab strip holding it, both sections under heading boxes with Your skills above From plugins, every category title with a box of its own, and each row's name drawn inside the row's box, at phone and tablet widths, light and dark",
   },
   "skills-sheet": {
     script: "e2e/skills-sheet.mjs",
     about:
-      "A skill's own sheet: its origin, the Host's readiness and its setup sentence where it has each, its SKILL.md as it is on disk and a linked file opened and backed out of, as a bottom sheet on a phone and the drawer from 1024px, at both widths, light and dark",
+      "A skill's own sheet: a properties block of the Host's facts beside the SKILL.md's own frontmatter, the file's words as prose, and a linked file opened and backed out of, as a bottom sheet on a phone and the drawer from 1024px, at both widths, light and dark",
   },
   "skills-remove": {
     script: "e2e/skills-remove.mjs",

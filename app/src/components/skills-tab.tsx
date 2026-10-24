@@ -1,4 +1,4 @@
-import { SparklesIcon, Trash2Icon } from "lucide-react"
+import { Trash2Icon } from "lucide-react"
 import { useCallback, useState } from "react"
 import { toast } from "sonner"
 
@@ -14,7 +14,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import type { Profile } from "@/lib/db"
@@ -150,7 +149,7 @@ function Section({
   if (section.groups.length === 0) return null
   return (
     <section className="flex flex-col gap-2" data-skill-section={section.id}>
-      <h2 className="px-2 text-sm font-medium text-muted-foreground">{section.title}</h2>
+      {section.heading && <h2 className="px-2 text-base font-semibold">{section.heading}</h2>}
       <div className="flex flex-col gap-3">
         {section.groups.map((group) => (
           <div
@@ -158,7 +157,7 @@ function Section({
             className="flex flex-col gap-1"
             data-skill-group={group.category ?? ""}
           >
-            <h3 className="px-2 text-xs font-medium text-muted-foreground">
+            <h3 className="px-2 text-sm leading-snug font-medium">
               {group.category ?? "No category"}
             </h3>
             <Group>
@@ -184,19 +183,8 @@ function SkillItem({
 }) {
   const health = skillHealth(skill)
   const switchControls = offersSwitch(controls, skill) ? controls : undefined
-  const name = (
-    <span className="flex min-w-0 items-center gap-2">
-      <span className="truncate">{skill.name}</span>
-      {skill.category && (
-        <Badge variant="secondary" className="max-w-28">
-          <span className="truncate">{skill.category}</span>
-        </Badge>
-      )}
-    </span>
-  )
   return (
     <div className={rowClass} data-skill={skill.name}>
-      <SparklesIcon className="size-5 shrink-0 text-muted-foreground" />
       <div className="flex min-w-0 flex-1 flex-col">
         <RowText
           title={
@@ -207,10 +195,10 @@ function SkillItem({
                 aria-haspopup="dialog"
                 onClick={() => onOpen(skill.name)}
               >
-                {name}
+                <span className="truncate">{skill.name}</span>
               </button>
             ) : (
-              name
+              <span className="truncate">{skill.name}</span>
             )
           }
           subtitle={skill.description}

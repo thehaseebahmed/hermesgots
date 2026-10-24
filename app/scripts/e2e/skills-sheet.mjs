@@ -59,26 +59,32 @@ const run = async ({ page, profileId, shot }) => {
   }
 
   assert.equal(
-    (await page.locator('[data-skill-origin]').innerText()).trim(),
+    (await page.locator("[data-skill-origin]").innerText()).trim(),
     "Built in",
-    "the origin line names where the skill came from",
+    "the properties block opens with where the skill came from",
   )
   assert.equal(
-    (await page.locator('[data-skill-setup="readiness"]').innerText()).replace(/\s+/g, " ").trim(),
-    "Readiness available",
-    "the readiness line is the Host's own status word",
+    (await page.locator('[data-skill-setup="readiness"]').innerText()).trim(),
+    "available",
+    "the readiness row is the Host's own status word",
   )
   assert.equal(
     await page.locator('[data-skill-setup="setup"]').count(),
     0,
-    "and a skill with no setup sentence has no setup line",
+    "and a skill with no setup sentence has no setup row",
   )
 
-  const text = page.getByLabel("SKILL.md", { exact: true })
-  await text.waitFor({ timeout: 15_000 })
-  const content = await text.innerText()
-  assert.match(content, /^---\nname: github-pr-workflow/, "the sheet shows the file's own bytes")
-  assert.match(content, /# Pull requests/, "the whole page, not a rendering of it")
+  const prose = page.locator("[data-skill-sheet] [data-slot='markdown']")
+  await prose.waitFor({ timeout: 15_000 })
+  await page.locator("[data-skill-properties]").waitFor({ timeout: 15_000 })
+  assert.equal(
+    await page.locator("[data-skill-properties]").count(),
+    1,
+    "the properties block is one block on screen",
+  )
+  await page
+    .getByRole("heading", { name: "Pull requests", exact: true })
+    .waitFor({ timeout: 15_000 })
   await shot("sheet")
 
   await page.locator('[data-skill-files="references"]').waitFor({ timeout: 15_000 })
@@ -90,35 +96,54 @@ const run = async ({ page, profileId, shot }) => {
   await page.locator('[data-skill-files="references"] button').first().click()
   const file = page.locator(`[data-skill-file="${CHECKLIST}"]`)
   await file.waitFor({ timeout: 15_000 })
+  await page
+    .getByRole("heading", { name: "Review checklist", exact: true })
+    .waitFor({ timeout: 15_000 })
   assert.match(
-    await file.getByLabel(CHECKLIST, { exact: true }).innerText(),
-    /# Review checklist/,
-    "the file reads as its own text",
+    await file.innerText(),
+    /The gates pass, and the diff is the change\./,
+    "a linked markdown file reads as prose too",
   )
   assert.equal(await sheet().count(), 0, "the skill's page is the file's, not both at once")
   await shot("file")
   await page.getByRole("button", { name: "Back to the skill" }).click()
   await file.waitFor({ state: "hidden", timeout: 15_000 })
-  await text.waitFor({ timeout: 15_000 })
-  assert.match(await text.innerText(), /# Pull requests/, "back returns to the skill's own page")
+  await page
+    .getByRole("heading", { name: "Pull requests", exact: true })
+    .waitFor({ timeout: 15_000 })
+  assert.equal(
+    await page.locator("[data-skill-properties]").count(),
+    1,
+    "back returns to the skill's own page, its block and all",
+  )
+  await page.locator('[data-skill-files="scripts"] button').first().click()
+  const script = page.locator('[data-skill-file="scripts/open-pr.sh"]')
+  await script.waitFor({ timeout: 15_000 })
+  assert.match(
+    await script.getByLabel("scripts/open-pr.sh", { exact: true }).innerText(),
+    /gh pr create --draft --fill/,
+    "a file that is not markdown stays the code it is",
+  )
+  await page.getByRole("button", { name: "Back to the skill" }).click()
+  await script.waitFor({ state: "hidden", timeout: 15_000 })
   await shot("back-to-skill")
   await close()
 
   await open("log-rotation")
   assert.equal(
-    (await page.locator('[data-skill-origin]').innerText()).trim(),
+    (await page.locator("[data-skill-origin]").innerText()).trim(),
     "Installed from the Hub",
-    "a Hub skill's origin says where it came from",
+    "a Hub skill's block says where it came from",
   )
   assert.equal(
-    (await page.locator('[data-skill-setup="readiness"]').innerText()).replace(/\s+/g, " ").trim(),
-    "Readiness setup_needed",
-    "the host's readiness is its own line, even when it also has a setup sentence",
+    (await page.locator('[data-skill-setup="readiness"]').innerText()).trim(),
+    "setup_needed",
+    "the host's readiness keeps its own row, even when it also has a setup sentence",
   )
   assert.equal(
-    (await page.locator('[data-skill-setup="setup"]').innerText()).replace(/\s+/g, " ").trim(),
-    `Setup ${SETUP}`,
-    "the setup line is the Host's own sentence, under the readiness",
+    (await page.locator('[data-skill-setup="setup"]').innerText()).trim(),
+    SETUP,
+    "the setup row is the Host's own sentence, under the readiness",
   )
   assert.equal(
     await page.locator("[data-skill-files]").count(),
@@ -130,7 +155,7 @@ const run = async ({ page, profileId, shot }) => {
 
   await open("gots:ship")
   assert.equal(
-    (await page.locator('[data-skill-origin]').innerText()).trim(),
+    (await page.locator("[data-skill-origin]").innerText()).trim(),
     "From a plugin",
     "a plugin's skill says where it came from",
   )
@@ -142,15 +167,19 @@ const run = async ({ page, profileId, shot }) => {
   await close()
   await open("weekly-digest")
   assert.equal(
-    (await page.locator('[data-skill-origin]').innerText()).trim(),
+    (await page.locator("[data-skill-origin]").innerText()).trim(),
     "Yours",
     "a skill written on the profile says so",
   )
-  assert.match(
-    await page.getByLabel("SKILL.md", { exact: true }).innerText(),
-    /# weekly-digest/,
-    "a switched-off skill's sheet opens like any other's",
+  assert.equal(
+    await page.locator("[data-skill-properties] [data-skill-prop]").count(),
+    1,
+    "a skill with no frontmatter has its origin row and nothing invented beside it",
   )
+  await page
+    .locator("[data-skill-sheet] [data-slot='markdown']")
+    .getByRole("heading", { name: "weekly-digest", exact: true })
+    .waitFor({ timeout: 15_000 })
   await shot("switched-off")
   await close()
 
@@ -167,5 +196,5 @@ for (const width of [390, 1024]) {
   }
 }
 pass(
-  "a skill's own sheet opens from its row with its origin, the Host's readiness and its setup sentence where it has each, its SKILL.md as it is on disk and its linked files — one opened into the same sheet, the header's back returning to the skill — as a bottom sheet on a phone and the side drawer from 1024px, for a built-in, a Hub skill, a plugin's and one switched off, at 390 and 1024px, light and dark",
+  "a skill's own sheet opens from its row as a note: a properties block of the Host's origin, readiness and setup beside the SKILL.md's own frontmatter, then the file's words drawn as prose, with its linked files — a markdown one opening into the same sheet and read the same way, the header's back returning to the skill — as a bottom sheet on a phone and the side drawer from 1024px, for a built-in, a Hub skill, a plugin's and one switched off, at 390 and 1024px, light and dark",
 )

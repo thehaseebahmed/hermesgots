@@ -62,6 +62,18 @@ const run = async ({ page, profileId, shot }) => {
     assert.ok(headings[0].y < headings[1].y, "Your skills sits above From plugins")
     await shot("headings")
 
+    // Every category title has a box of its own, in the order its group sits.
+    const titles = panel().locator("[data-skill-group] > h3")
+    const count = await titles.count()
+    assert.ok(count > 0, "the categories title their groups")
+    for (let i = 0; i < count; i++) {
+      const title = titles.nth(i)
+      await title.scrollIntoViewIfNeeded()
+      await settled(page)
+      const box = await title.boundingBox()
+      onScreen(box, viewport, `category title ${i + 1}`)
+    }
+
     // A row per skill, each with its name drawn inside the row's own box.
     for (const name of ROWS) {
       const row = page.locator(`[data-skill="${name}"]`)
@@ -102,5 +114,5 @@ for (const width of [390, 1024]) {
   }
 }
 pass(
-  "the Bot's Skills tab is reached from its editor's own tab strip and draws two sections under heading boxes of their own, Your skills above From plugins, and a row per skill whose name is drawn inside the row's box — the tab, the headings and the rows on screen at 390 and 1024px, light and dark",
+  "the Bot's Skills tab is reached from its editor's own tab strip and draws both sections under heading boxes of their own, Your skills above From plugins, every category title with a box of its own, and a row per skill whose name is drawn inside the row's box — the tab, the headings, the categories and the rows on screen at 390 and 1024px, light and dark",
 )

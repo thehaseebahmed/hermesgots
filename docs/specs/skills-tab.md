@@ -6,7 +6,10 @@ glossary's *Built-in skill*, *Hub skill*, *Your skill*, *Plugin skill*, *Project
 #519 with tickets #520 to #525; the build order at the end is the tickets' shape when implementation
 starts. #519 is blocked by the gate issue (#527) that the docs PR carrying this file (#526) closes —
 work starts on that merge. The spec carries `ready-for-agent` and the tickets stay bare, so the
-agent claims the spec and works the graph in order.
+agent claims the spec and works the graph in order. Re-grilled 2026-10-24 after the build
+landed in #565: decisions 4 and 8 changed — the section headings now show only where both kinds
+of skill share the bot, and the sheet reads as a note — and the rows shed their icon and category
+badge. The tickets below are the original build order and stand as shipped.
 
 ## Goal
 
@@ -47,9 +50,13 @@ where its origin has a removal.
 3. **Every row says how it is doing** ([ADR 0045](../adr/0045-a-skill-row-says-how-it-is-doing.md)):
    `Ready`, `Off`, or `Doesn't load` with the host's own reason — no badges, the same prose
    reasoning as an MCP server's health.
-4. **Two sections, grouped by category**: *Your skills* and *From plugins*, a heading with nothing
-   under it dropped; inside them the groups are the categories, alphabetical, with *No category*
-   last.
+4. **Two sections, grouped by category**: *Your skills* and *From plugins*, each heading drawn
+   bigger than the category titles and shown only while the bot holds both kinds of skill — a
+   one-kind bot's tab opens straight at its categories, and a heading with nothing under it is
+   dropped either way; inside the sections the groups are the categories under titles in the
+   Models tab's field-label style, alphabetical, with *No category* last. Every row is its name
+   over its description with its health under it and its switch to the side — no icon, no
+   category badge: the group already says the category.
 5. **The tab holds what the profile can**: built in, from the Hub, yours, from a plugin — including
    rows that are `Off` and `Doesn't load`, since Remove is the way out of a broken one; project
    skills and shadowed duplicates are the two things kept out.
@@ -59,9 +66,12 @@ where its origin has a removal.
 7. **Remove is one word over three host operations**: a Hub skill's uninstall, a profile skill's
    delete, and nothing at all for a built-in — so Remove appears only where the origin has a removal
    behind it ([ADR 0044](../adr/0044-a-bots-skills-are-managed-through-hermes-own-skill-machinery.md)).
-8. **The skill sheet is the skill itself**: its SKILL.md, its linked files each viewable, one line
-   saying where it came from (Built in / Installed from the Hub / Yours / From a plugin) and the
-   host's Readiness and Setup where it has them; it reads that one skill when it opens.
+8. **The skill sheet reads the skill as a note**: one properties block first — the host's own
+   rows (Origin, then Readiness and Setup where it has them) beside the SKILL.md's frontmatter
+   with every key it holds, in file order, plain text — then the file's own words drawn as
+   rendered markdown through the chat's own renderer, read-only, with the yaml never shown raw;
+   its linked files each viewable below, a markdown one read the same way and any other staying
+   the code it is; it reads that one skill when it opens.
 9. **Four features gate it** as the MCP tab's do: `skills` for the tab, `skills_write` for the
    switch, `skills_remove` for Remove, `skills_view` for the sheet.
 10. **Every write clears the host's own caches** — its skills cache and its prompt cache — so the
@@ -92,7 +102,8 @@ where its origin has a removal.
 - **A chat in flight** keeps the abilities it had; the change is the profile's, not the session's.
 - **A refusal** — a protected built-in, a pinned skill, a host saying no — is the host's own
   sentence as a toast, with the row unchanged.
-- **A bot with no skills under a heading** shows the other section alone.
+- **A bot whose skills all come from one source** shows no headings at all; the categories say
+  the list, and only a bot holding both kinds earns the split a word.
 
 ## Tests
 
@@ -103,8 +114,9 @@ Cheapest tier that would fail for the reason the change can fail (ADR 0019):
   its refusals, plugin skills switch-only and protected built-ins unswitchable — with the suite's
   documented harness rules (plant the host modules imported lazily).
 - **Unit tests** (no DOM, `node --test`) for the pure rules: a row's health line, the grouping
-  (categories alphabetical, *No category* last), and the slash menu's filter over the shared list —
-  following the existing pure-rule tests for the MCP rows and the skills cache.
+  (categories alphabetical, *No category* last, headings only where both kinds are held), the
+  frontmatter read into property rows (`skill-frontmatter.ts`), and the slash menu's filter over
+  the shared list — following the existing pure-rule tests for the MCP rows and the skills cache.
 - **Component tests** over a seeded device database with the HTTP boundary faked: the tab's sections
   and groups, a row's switch, and the skill sheet with its linked files.
 - **End to end** for geometry only: the tab and its sheet at phone and tablet widths in light and

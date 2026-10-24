@@ -2,6 +2,7 @@ import { ArrowLeftIcon, ChevronRightIcon } from "lucide-react"
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { toast } from "sonner"
 
+import { Markdown } from "@/components/chat/markdown"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Group, linkRowClass, RowText } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
@@ -13,6 +14,7 @@ import {
   type SkillFile,
   type SkillView,
 } from "@/lib/hermes"
+import { skillDocument } from "@/lib/skill-frontmatter"
 import { skillOrigin, skillSetup } from "@/lib/skills-tab"
 
 const SHEET_HEIGHT = "h-[min(34rem,85dvh)]"
@@ -20,6 +22,8 @@ const SHEET_HEIGHT = "h-[min(34rem,85dvh)]"
 type Reading = { status: "reading" } | { status: "ok"; view: SkillView }
 
 type OpenFile = { status: "reading"; path: string } | { status: "ok"; file: SkillFile }
+
+type PropertyRow = { key: string; value: string; origin?: boolean; setup?: string }
 
 export function SkillDetailSheet({
   config,
@@ -126,20 +130,22 @@ function SkillBody({
 }) {
   const origin = skillOrigin(view)
   const setup = skillSetup(view)
+  const note = skillDocument(view.content)
+  // Each row carries the hooks it draws with, so nothing is derived from display copy at render.
+  const properties: PropertyRow[] = [
+    ...(origin ? [{ key: "Origin", value: origin, origin: true }] : []),
+    ...setup.map((line) => ({
+      key: line.label,
+      value: line.text,
+      setup: line.label.toLowerCase(),
+    })),
+    ...note.rows,
+  ]
   const groups = Object.entries(view.linkedFiles ?? {}).filter(([, paths]) => paths.length > 0)
   return (
     <div className="flex flex-col gap-4 px-4 pb-6" data-skill-sheet={view.name}>
-      {origin && (
-        <p className="text-sm text-muted-foreground" data-skill-origin>
-          {origin}
-        </p>
-      )}
-      {setup.map((line) => (
-        <p key={line.label} className="text-sm" data-skill-setup={line.label.toLowerCase()}>
-          <span className="text-muted-foreground">{line.label}</span> {line.text}
-        </p>
-      ))}
-      <SkillText text={view.content} label="SKILL.md" />
+      <PropertiesBlock rows={properties} />
+      <Markdown>{note.body}</Markdown>
       {groups.length > 0 && (
         <div className="flex flex-col gap-3">
           <h3 className="px-2 text-xs font-medium text-muted-foreground">Linked files</h3>
@@ -171,10 +177,44 @@ function SkillBody({
 
 function SkillFileBody({ file }: { file: OpenFile }) {
   if (file.status === "reading") return <Pending />
+  const markdown = file.file.path.toLowerCase().endsWith(".md")
+  // A linked note reads the way the skill's own does: its frontmatter as its properties, its
+  // words as prose. Anything else stays the code it is.
+  const note = markdown ? skillDocument(file.file.content) : null
   return (
     <div className="flex flex-col gap-3 px-4 pb-6" data-skill-file={file.file.path}>
       <h3 className="px-2 text-xs font-medium text-muted-foreground">{file.file.path}</h3>
-      <SkillText text={file.file.content} label={file.file.path} />
+      {note ? (
+        <>
+          <PropertiesBlock rows={note.rows} />
+          <Markdown>{note.body}</Markdown>
+        </>
+      ) : (
+        <SkillText text={file.file.content} label={file.file.path} />
+      )}
+    </div>
+  )
+}
+
+function PropertiesBlock({ rows }: { rows: PropertyRow[] }) {
+  if (rows.length === 0) return null
+  return (
+    <div className="rounded-2xl bg-muted/60 p-3" data-skill-properties>
+      {rows.map(({ key, value, origin: originRow, setup: setupKey }) => (
+        <div key={key} className="flex gap-3 py-0.5 text-sm">
+          <span className="w-28 shrink-0 break-words text-muted-foreground" title={key}>
+            {key}
+          </span>
+          <span
+            className="min-w-0 flex-1 break-words whitespace-pre-wrap"
+            data-skill-prop={key}
+            data-skill-origin={originRow ? "" : undefined}
+            data-skill-setup={setupKey}
+          >
+            {value || <span className="text-muted-foreground">Empty</span>}
+          </span>
+        </div>
+      ))}
     </div>
   )
 }

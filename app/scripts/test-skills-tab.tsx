@@ -59,9 +59,12 @@ type Sheet = {
 
 const SHEETS: Record<string, Sheet> = {
   "pr-review": {
-    content: "# pr-review\n\nRead the diff, then say what is wrong with it.\n",
+    content:
+      "---\nname: pr-review\nlicense: MIT\nallowed-tools:\n  - read\n  - write\n---\n# pr-review\n\nRead the diff, then say what is wrong with it.\n",
     linkedFiles: { references: ["references/checklist.md"] },
-    files: { "references/checklist.md": "- Every hunk read.\n- Nothing invented.\n" },
+    files: {
+      "references/checklist.md": "---\ntitle: The checklist\n---\n- Every hunk read.\n- Nothing invented.\n",
+    },
     readiness_status: "available",
   },
   deploy: {
@@ -280,13 +283,25 @@ test("a row that is off or doesn't load is still listed, with its description", 
   })
 })
 
-test("a section with nothing in it has no heading", async () => {
+test("a bot whose skills all come from one source has no headings at all", async () => {
   await seed("skills-plugin-only", ["skills"], [ROWS[7]])
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
     await drawn()
     assert.deepEqual(sections(), ["plugins"], "the empty section is gone")
-    assert.deepEqual(headings(), ["From plugins"], "and so is its heading")
+    assert.deepEqual(headings(), [], "one kind of skill, and the categories say it alone")
     assert.deepEqual(rowNames("plugins"), ["gots:notes"])
+  })
+})
+
+test("a row is its name over its description, with no icon and no category badge", async () => {
+  await seed("skills-row-shape", ["skills"])
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    const lint = row("lint")
+    assert.match(lint?.textContent ?? "", /^lint/, "the name starts the row")
+    assert.match(lint?.textContent ?? "", /Run the linters\./, "its description follows")
+    assert.equal(lint?.querySelector("svg"), null, "no icon speaks for the category")
+    assert.doesNotMatch(lint?.textContent ?? "", /quality/, "and no badge carries it either")
   })
 })
 
@@ -386,19 +401,31 @@ const openSheet = async (name: string) => {
   await until(async () => sheetBody() !== null, `the sheet of ${name}`)
 }
 
-test("a row's title opens the skill's own sheet with its SKILL.md on it", async () => {
+test("a row's title opens the skill's own sheet: properties from its frontmatter, then its prose", async () => {
   await seed("skills-sheet", ["skills", "skills_view"])
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
     await drawn()
     await click(title("pr-review"))
     await until(async () => sheetBody() !== null, "the skill's sheet")
     assert.equal(sheetTitle(), "pr-review", "the sheet is titled by the skill")
-    assert.match(
-      find('[aria-label="SKILL.md"]')?.textContent ?? "",
-      /Read the diff, then say what is wrong with it\./,
-      "the SKILL.md is on screen",
+    assert.equal(find("[data-skill-origin]")?.textContent, "Yours", "where it came from, first")
+    assert.equal(
+      find('[data-skill-prop="name"]')?.textContent,
+      "pr-review",
+      "the frontmatter's keys are the block's rows",
     )
-    assert.match(sheetBody()?.textContent ?? "", /Yours/, "and where it came from")
+    assert.equal(
+      find('[data-skill-prop="allowed-tools"]')?.textContent,
+      "read, write",
+      "a list under a key reads as one line of values",
+    )
+    const prose = find("[data-slot='markdown']")?.textContent ?? ""
+    assert.match(
+      prose,
+      /Read the diff, then say what is wrong with it\./,
+      "the SKILL.md is drawn as prose, not as code",
+    )
+    assert.doesNotMatch(prose, /license|allowed-tools|---/, "the yaml is the block, not the prose")
   })
 })
 
@@ -411,10 +438,24 @@ test("a linked file opens in the same sheet, and the way back returns to the ski
     assert.match(linked?.textContent ?? "", /references\/checklist\.md/, "the file is listed")
     await click(linked)
     await until(async () => find("[data-skill-file]") !== null, "the file's text")
+    await until(
+      async () => find("[data-skill-file] ul") !== null,
+      "the file drawn as prose, its bullets as a list",
+    )
     assert.match(
       find("[data-skill-file]")?.textContent ?? "",
       /Every hunk read\./,
       "the file's own text, read on the tap",
+    )
+    assert.equal(
+      find('[data-skill-file] [data-skill-properties] [data-skill-prop="title"]')?.textContent,
+      "The checklist",
+      "a linked note's frontmatter is its properties, the same way the skill's is",
+    )
+    assert.doesNotMatch(
+      find("[data-skill-file]")?.textContent ?? "",
+      /title: The checklist/,
+      "its yaml is drawn as properties, never as raw text",
     )
     assert.equal(find("[data-skill-sheet]"), null, "one sheet, showing one thing")
     await click(find('button[aria-label="Back to the skill"]'))
@@ -448,13 +489,14 @@ test("the Host's readiness and setup are the sheet's next lines, both where it h
     assert.deepEqual(
       findAll("[data-skill-setup]").map((one) => [
         one.getAttribute("data-skill-setup"),
+        one.parentElement?.firstElementChild?.textContent,
         one.textContent,
       ]),
       [
-        ["readiness", "Readiness setup_needed"],
-        ["setup", "Setup Setup needed before using this skill: missing env $DEPLOY_TOKEN."],
+        ["readiness", "Readiness", "setup_needed"],
+        ["setup", "Setup", "Setup needed before using this skill: missing env $DEPLOY_TOKEN."],
       ],
-      "the host's status, then its sentence, one line each",
+      "the host's status, then its sentence, one value each",
     )
   })
   await seed("skills-setup-none", ["skills", "skills_view"])
@@ -571,6 +613,11 @@ test("a skill whose row says no origin offers no Remove, and no guess at one", a
     await drawn()
     await openSheet("stray")
     assert.equal(find("[data-skill-origin]"), null, "the sheet says nothing it wasn't told")
+    assert.equal(
+      find("[data-skill-properties]"),
+      null,
+      "and a skill holding neither frontmatter nor host facts draws no block at all",
+    )
     assert.equal(removeButton(), null, "and offers no removal behind an origin it can't name")
   })
 })
