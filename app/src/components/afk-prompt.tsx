@@ -3,23 +3,43 @@
  * pop-up, so a drawer from a laptop's width — with the words in a field deep enough to read them in.
  * Done writes it and closes on the host's answer; the sheet's own way out leaves the words unwritten,
  * and a refused write is said by the caller, which is why the draft stays as typed.
+ *
+ * Where the account's library is offered — signed in, with the vault unlocked — the sheet's foot is
+ * one row: the two library doors on the left, Choose from library (which copies an entry's words in
+ * and writes them the way Done does — a pick is a copy, so the host clears a picked workflow as it
+ * does for any Prompt) and Save to library (which keeps the words on screen under a name and tags),
+ * with Done on the right, as the entry sheet's own foot draws its primary action. Without the
+ * library this is the editor it always was, Done alone at the foot.
  */
 import { useState } from "react"
+import { toast } from "sonner"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { PromptEntrySheet, PromptLibrarySheet } from "@/components/prompt-library-sheet"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import type { PromptWrite } from "@/lib/hermes"
+import type { PromptDraft, PromptEntry } from "@/lib/prompt-library"
+import { addPrompt, removePrompt, savePrompt, usePromptEntries } from "@/lib/prompt-library-store"
 
 export function PromptEditor({
   open,
   onOpenChange,
   prompt,
   onSave,
+  library = false,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   prompt: string
-  onSave: (prompt: string) => Promise<"saved" | "refused">
+  /**
+   * Writes the words, and — where they were copied from the account's library — the entry they came
+   * from beside them. Done hands over the words alone, which detaches the copy on the host; a pick
+   * hands over both, so the row can tell a copy whose entry moves on from an original.
+   */
+  onSave: (draft: PromptWrite) => Promise<"saved" | "refused">
+  /** The account's library is drawn here: signed in, with the vault open on this device. */
+  library?: boolean
 }) {
   const [text, setText] = useState(prompt)
   const [saving, setSaving] = useState(false)
@@ -31,6 +51,29 @@ export function PromptEditor({
     if (open) setText(prompt)
   }
 
+  const entries = usePromptEntries(library)
+  const [choosing, setChoosing] = useState(false)
+  // One entry sheet for both doors: a new entry saving the words on screen, or an entry being
+  // renamed, rewritten or deleted.
+  const [writing, setWriting] = useState<PromptEntry | "new" | null>(null)
+
+  /**
+   * One write at a time, said the same way wherever it's made: the sheet's own controls are out of
+   * reach while it runs, and a failure is a toast with the sheet left exactly as it was — open, and
+   * holding what the user typed. `fallback` is what a failure that isn't the host's own words reads
+   * as.
+   */
+  const attempt = async (work: () => Promise<void>, fallback: string) => {
+    setSaving(true)
+    try {
+      await work()
+    } catch (failure) {
+      toast.error(failure instanceof Error ? failure.message : fallback)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const submit = async () => {
     // Done on the words the row already holds is not a write: it would turn the host's default into
     // this project's own words, which nothing then reads as the default again.
@@ -38,12 +81,46 @@ export function PromptEditor({
       onOpenChange(false)
       return
     }
-    setSaving(true)
-    try {
-      if ((await onSave(text)) === "saved") onOpenChange(false)
-    } finally {
-      setSaving(false)
-    }
+    await attempt(async () => {
+      if ((await onSave({ text })) === "saved") onOpenChange(false)
+    }, "Couldn't save that Prompt.")
+  }
+
+  /**
+   * A pick is one write of the entry's own words and its id, through the route Done writes: the host
+   * answers with what it holds now — a Prompt that remembers the entry it came from, so no workflow —
+   * and the sheet stays open on the copy, which Done then closes without a second write. Typing over
+   * the copy afterwards is a plain write, which clears the source: the row never calls the user's own
+   * words stale (ADR 0043).
+   */
+  const pick = async (entry: PromptEntry) => {
+    setChoosing(false)
+    setText(entry.body)
+    await attempt(async () => {
+      await onSave({ text: entry.body, source: entry.id })
+    }, "Couldn't save that Prompt.")
+  }
+
+  const write = async (draft: PromptDraft) => {
+    const editing = writing === "new" ? null : writing
+    await attempt(async () => {
+      if (!editing) {
+        await addPrompt(draft)
+      } else if (!(await savePrompt(editing.id, draft))) {
+        // The entry was deleted on another device: nothing was written, so the sheet keeps the typed
+        // draft and says the entry is gone rather than closing as if it had saved.
+        toast.error("That Prompt is gone from the library.")
+        return
+      }
+      setWriting(null)
+    }, "Couldn't save that Prompt.")
+  }
+
+  const remove = async (entry: PromptEntry) => {
+    await attempt(async () => {
+      await removePrompt(entry.id)
+      setWriting(null)
+    }, "Couldn't delete that Prompt.")
   }
 
   return (
@@ -60,15 +137,74 @@ export function PromptEditor({
             value={text}
             onChange={(event) => setText(event.target.value)}
           />
-          <Button
-            className="h-11 shrink-0 self-end rounded-full px-5"
-            disabled={saving}
-            onClick={() => void submit()}
-          >
-            Done
-          </Button>
+          {library ? (
+            <div className="flex items-center justify-between gap-2" data-prompt-library-actions>
+              <div className="flex min-w-0 flex-1 flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="h-11 rounded-full px-4"
+                  disabled={saving}
+                  onClick={() => setChoosing(true)}
+                >
+                  Choose from library
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="h-11 rounded-full px-4"
+                  disabled={saving}
+                  onClick={() => setWriting("new")}
+                >
+                  Save to library
+                </Button>
+              </div>
+              <Button
+                type="button"
+                className="h-11 shrink-0 rounded-full px-5"
+                disabled={saving}
+                onClick={() => void submit()}
+              >
+                Done
+              </Button>
+            </div>
+          ) : (
+            <Button
+              type="button"
+              className="h-11 shrink-0 self-end rounded-full px-5"
+              disabled={saving}
+              onClick={() => void submit()}
+            >
+              Done
+            </Button>
+          )}
         </div>
       </PopupContent>
+      {library && (
+        <>
+          <PromptLibrarySheet
+            open={choosing}
+            onOpenChange={setChoosing}
+            entries={entries}
+            onPick={(entry) => void pick(entry)}
+            onEdit={(entry) => {
+              setChoosing(false)
+              setWriting(entry)
+            }}
+          />
+          <PromptEntrySheet
+            // Keyed by what it writes: a new open starts from the row it names rather than from the
+            // last thing typed into it.
+            key={writing === null ? "closed" : writing === "new" ? "new" : writing.id}
+            open={writing !== null}
+            onOpenChange={(next) => !next && setWriting(null)}
+            entry={writing === "new" ? null : writing}
+            prompt={text}
+            onSave={write}
+            onDelete={remove}
+          />
+        </>
+      )}
     </Popup>
   )
 }

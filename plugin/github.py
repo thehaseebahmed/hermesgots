@@ -221,7 +221,15 @@ CLAIM_COLOR = "0e8a16"
 CLAIM_DESCRIPTION = "Gots is working this task."
 
 
-def claim_issue(repo: str, number: int, account: str, label: str, auth: Optional[str]) -> None:
+def claim_issue(
+    repo: str,
+    number: int,
+    account: str,
+    label: str,
+    auth: Optional[str],
+    *,
+    labelled: Optional[set] = None,
+) -> None:
     """Claims one issue: marked with ``label`` and assigned to ``account``, in that order.
 
     The label is applied before the assignment, so a write that fails halfway leaves a task that
@@ -229,8 +237,15 @@ def claim_issue(repo: str, number: int, account: str, label: str, auth: Optional
     the label is taken back off, because a task marked as claimed that no sweep holds is one no
     sweep will ever work (ADR 0012). The label itself is created on the repository when it isn't
     there yet, because a label that doesn't exist can't be applied.
+
+    ``labelled`` is the repositories a caller has already made the label on — a sweep claiming
+    several tasks of one repository, say — and the repository is added to it once the label is
+    known to be there. Left None, every claim asks, which is what one claim at a time wants.
     """
-    _ensure_label(repo, label, auth)
+    if labelled is None or repo not in labelled:
+        _ensure_label(repo, label, auth)
+        if labelled is not None:
+            labelled.add(repo)
     _request(f"/repos/{repo}/issues/{number}/labels", auth, "POST", {"labels": [label]})
     try:
         _request(f"/repos/{repo}/issues/{number}/assignees", auth, "POST", {"assignees": [account]})

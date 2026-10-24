@@ -44,13 +44,14 @@ const run = async ({ page, profileId, shot, until }) => {
   await shot("menu")
   await afk.click()
 
-  // Ready: the oldest first, which is the order AFK works them in.
+  // Ready: the oldest first, which is the order AFK works them in. The frontier is five tasks wide
+  // whatever a project's pick count is — the count decides what a sweep holds, not what exists.
   const ready = page.locator('[data-group="ready"]')
   await ready.waitFor({ timeout: 15_000 })
   const order = await ready
     .locator("[data-task]")
     .evaluateAll((nodes) => nodes.map((node) => Number(node.dataset.task)))
-  assert.deepEqual(order, [265, 266], `ready tasks are listed oldest first (${order})`)
+  assert.deepEqual(order, [265, 266, 269, 270, 271], `ready tasks are listed oldest first (${order})`)
 
   // Claimed: marked, with the account that has it.
   const claimed = page.locator('[data-group="claimed"]')

@@ -2899,17 +2899,58 @@ export async function getProjectTasks(
 }
 
 /**
+ * A task AFK holds: the issue, the stage the session working it is in, and why nothing is working
+ * it. One session a hold, so a project up to its pick count holds several (ADR 0025). Needs plugin
+ * 0.80, which made the project's read answer a list.
+ */
+export interface AfkHold extends ProjectIssue {
+  /** The stage that hold's session is in; null for a task running one run, or past its last stage. */
+  stage: AfkStage | null
+  /** That stage's own name in the workflow's words; null once past the last one. */
+  stageName: string | null
+  /** Why nothing is working it, when something stopped; null while its session runs. */
+  stalled: string | null
+}
+
+/**
+ * A bot's own AFK numbers — the ones that span its projects rather than sitting on one of them
+ * (ADR 0042). Both are read tolerantly: a host from before the route answers none, which is nothing
+ * known rather than a failure to read. The bot-level route answers these two alone, and a project's
+ * own read answers them too, so one read draws the whole AFK sheet — `ProjectAfk` is these two plus
+ * everything that belongs to a project.
+ */
+export interface BotAfk {
+  /** How many tasks it may hold across its projects, 1–10; null where the host answers none. */
+  pickBudget: number | null
+  /**
+   * How many tasks it holds right now, every project's holds including the stalled ones; null where
+   * the host answers no count. The AFK sheet draws it against `pickBudget` — the usage those numbers
+   * are about. The bot editor's Coding tab sets the budget and draws the budget alone: what a bot
+   * holds is about the runs in flight, not the number being chosen there.
+   */
+  holdsHeld: number | null
+}
+
+/**
  * A project's AFK switch: whether it is left to work its own tasks, and why it can't be. The
  * setting is the host's, so it is the same on every device the project is opened from. Needs
  * plugin 0.50, 0.51 for the task it holds and the last refusal, 0.56 for the skills its work
  * follows, 0.58 for the stage a staged task is in and 0.60 for the Prompt its runs are told.
  */
-export interface ProjectAfk {
+export interface ProjectAfk extends BotAfk {
   on: boolean
   /** What stops the project being left to work, when something does; null when it can be. */
   reason: string | null
   /** The task AFK has claimed and is working, while it holds one. */
   task: ProjectIssue | null
+  /**
+   * Every task the project's switch holds, oldest first — one session each, up to its pick count,
+   * with the stage that session is in. Null for a host from before picks, which holds at most the
+   * one `task` above; the sheet draws a single Working row from it then.
+   */
+  holds: AfkHold[] | null
+  /** How many tasks it may hold at once, 1–5; null where the host answers no pick count. */
+  pickCount: number | null
   /** Why GitHub last refused the sweep. The switch stays on, so this is not `reason`. */
   refusal: string | null
   /** The bot's skill the project picked to build by, when it picked one. */
@@ -2927,6 +2968,39 @@ export interface ProjectAfk {
    * why the host answers the default rather than nothing.
    */
   prompt: string
+  /**
+   * The account library's entry this Prompt was copied from, where it was one — the row tells a
+   * copy whose entry has moved on from an original by comparing the two. Null where the host
+   * answers none (a plugin from before picks) and where the words are the user's own: a hand edit
+   * clears it on the host, so the row never calls them a stale copy (ADR 0043).
+   */
+  promptId: string | null
+}
+
+function parseHold(value: unknown): AfkHold | null {
+  const issue = parseIssue(value)
+  if (!issue) return null
+  const found = (value ?? {}) as Record<string, unknown>
+  return {
+    ...issue,
+    // A host answers each hold's stage the way it answers the one task's: null is one run.
+    stage: parseStage(found.stage),
+    stageName: str(found.stage_name) || null,
+    stalled: str(found.stalled) || null,
+  }
+}
+
+function parseHolds(value: unknown): AfkHold[] | null {
+  // A plugin from before the pick count answers none, and one that holds nothing answers an empty
+  // list: the first reads as the sheet it always drew, the second as nothing to draw.
+  if (!Array.isArray(value)) return null
+  return value.map(parseHold).filter((hold): hold is AfkHold => hold !== null)
+}
+
+function parseWhole(value: unknown): number | null {
+  // Absent where the plugin predates the field; a whole number is the host's own rule, so a shape
+  // this app can't read is nothing answered rather than a reason to fail the whole read.
+  return typeof value === "number" && Number.isInteger(value) ? value : null
 }
 
 function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
@@ -2941,6 +3015,11 @@ function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
     on: body.on,
     reason: str(body.reason) || null,
     task: parseIssue(body.task),
+    holds: parseHolds(body.holds),
+    pickCount: parseWhole(body.pick_count),
+    // And the bot's own numbers, which a project's read answers so one read draws the sheet: the same
+    // two fields the bot-level route carries, parsed once (`parseBotAfk`).
+    ...parseBotAfk(body),
     refusal: str(body.refusal) || null,
     buildSkill: str(body.build_skill) || null,
     critiqueSkills: skillNames(body.critique_skills),
@@ -2951,6 +3030,8 @@ function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
     workflow: parseWorkflowEntry(body.workflow),
     // A plugin from before the Prompt answers none, which is only read where the host advertises it.
     prompt: str(body.prompt),
+    // And one from before the library answers no source: the words stand as the user's own.
+    promptId: str(body.prompt_id) || null,
   }
 }
 
@@ -3024,6 +3105,23 @@ export function setProjectAfkWorkflow(
 }
 
 /**
+ * A Prompt as it is written: its words, and where they were copied from where they were a library
+ * entry's. One shape through the editor, the sheet and the route, so a pick and a hand edit differ
+ * in a field rather than in an argument's place — and there is one spelling of "no source", which is
+ * the field absent.
+ */
+export interface PromptWrite {
+  text: string
+  /**
+   * The account library's entry the words were copied from, where they were one: a pick writes the
+   * text and its source together, so the row can tell a copy whose entry has moved on. Absent on a
+   * hand edit, which the host reads as a plain write and answers by clearing the source the project
+   * held — how a hand edit detaches the copy (ADR 0043).
+   */
+  source?: string
+}
+
+/**
  * Writes how a project's AFK work is carried out — its Prompt — on its host, answering the setting
  * it now holds. An empty one is the bot's default again, and the answer carries those words, since
  * that is what the project's next run is told.
@@ -3031,9 +3129,64 @@ export function setProjectAfkWorkflow(
 export function setProjectAfkPrompt(
   config: HermesConfig,
   projectId: string,
-  prompt: string,
+  draft: PromptWrite,
 ): Promise<ProjectAfk> {
-  return writeAfk(config, projectId, { prompt })
+  return writeAfk(config, projectId, {
+    prompt: draft.text,
+    ...(draft.source && { prompt_id: draft.source }),
+  })
+}
+
+/**
+ * How many tasks a project's switch may hold at once, 1–5, on its host: one write of its own, since
+ * a count is a shape the host refuses beside another (afk.py's `write_from`). A count out of range is
+ * refused there and nothing is written, so the answer is the count the project still holds.
+ */
+export function setProjectAfkPickCount(
+  config: HermesConfig,
+  projectId: string,
+  pickCount: number,
+): Promise<ProjectAfk> {
+  return writeAfk(config, projectId, { pick_count: pickCount })
+}
+
+function botAfkPath(config: HermesConfig) {
+  return `${pluginRoot(config.baseUrl)}/afk`
+}
+
+/**
+ * `BotAfk`'s two numbers, off whichever read carried them: the bot-level route answers these alone,
+ * and a project's read answers them beside its own fields, so both reads parse them here.
+ */
+function parseBotAfk(body: Record<string, unknown> | null): BotAfk {
+  return {
+    pickBudget: parseWhole(body?.pick_budget),
+    holdsHeld: parseWhole(body?.holds_held),
+  }
+}
+
+/** A bot's own AFK numbers, read from its host: its pick budget and how many tasks it holds now. */
+export async function getBotAfk(config: HermesConfig, signal?: AbortSignal): Promise<BotAfk> {
+  const response = await request(botAfkPath(config), { headers: headers(config), signal })
+  return parseBotAfk((await response.json()) as Record<string, unknown> | null)
+}
+
+/**
+ * How many tasks a bot may hold across its projects at once, 1–10, on its host: one write of its own
+ * through the bot-level route, since a bot has no project to name. A count out of range is refused
+ * there and nothing is written, so the answer is the budget the bot still holds.
+ */
+export async function setBotAfkPickBudget(
+  config: HermesConfig,
+  pickBudget: number,
+): Promise<BotAfk> {
+  const response = await request(botAfkPath(config), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ pick_budget: pickBudget }),
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+  return parseBotAfk((await response.json()) as Record<string, unknown> | null)
 }
 
 function workflowPath(config: HermesConfig, rest = ""): string {

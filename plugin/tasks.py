@@ -71,7 +71,7 @@ def groups(tasks: Iterable[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     ready: List[Dict[str, Any]] = []
     claimed: List[Dict[str, Any]] = []
     blocked: List[Dict[str, Any]] = []
-    for task in sorted(tasks, key=_order):
+    for task in sorted(tasks, key=order):
         if task.get("state") != "open":
             continue
         labels = task.get("labels") or []
@@ -101,8 +101,12 @@ def _claimed(labels: Iterable[Any], assignees: Iterable[Any]) -> bool:
     return CLAIM_LABEL in labels or bool(list(assignees))
 
 
-def _order(task: Dict[str, Any]) -> Tuple[str, int]:
-    """Oldest first: GitHub's own creation time, with the issue number breaking a tie."""
+def order(task: Dict[str, Any]) -> Tuple[str, int]:
+    """Oldest first: GitHub's own creation time, with the issue number breaking a tie.
+
+    The one rule every task list is ordered by — the sheet's groups, and the order a pass claims
+    in — so a task sorts where it sorts however it is asked about.
+    """
     created = task.get("created_at")
     number = task.get("number")
     return (created if isinstance(created, str) else "", number if isinstance(number, int) else 0)
@@ -126,20 +130,20 @@ def read(hermes_home: Path, folders: Iterable[Any]) -> Dict[str, Any]:
     return {"repos": repos, **groups(found)} if repos else empty()
 
 
-def next_ready(hermes_home: Path, folders: Iterable[Any]) -> Optional[Dict[str, Any]]:
-    """The oldest task in the frontier with its issue's body, or None when there is none.
+def frontier(hermes_home: Path, folders: Iterable[Any]) -> List[Dict[str, Any]]:
+    """Every task in the frontier with its issue's body, oldest first.
 
-    The sweep's read rather than the sheet's: the one task it claims opens its run with the text it
-    was judged by, so that body comes off this read and no second request fetches it, while the
-    other rows' bodies, which nothing uses, are never copied into an answer.
+    The sweep's read rather than the sheet's: a pass filling several places takes all of them from
+    one read of GitHub rather than reading the repository again for each. The bodies come off the
+    same read, so each task claimed opens its run with the text it was judged by, while the rows
+    nothing claims are dropped by the caller and their bodies never copied into an answer.
     """
     _, found = _gather(hermes_home, folders)
-    ready = groups(found)["ready"]
-    if not ready:
-        return None
-    first = ready[0]
-    task = next(t for t in found if (t["repo"], t["number"]) == (first["repo"], first["number"]))
-    return {**first, "body": task["body"]}
+    bodies = {(row["repo"], row["number"]): row.get("body") or "" for row in found}
+    return [
+        {**row, "body": bodies.get((row["repo"], row["number"]), "")}
+        for row in groups(found)["ready"]
+    ]
 
 
 def _gather(hermes_home: Path, folders: Iterable[Any]) -> Tuple[List[str], List[Dict[str, Any]]]:
