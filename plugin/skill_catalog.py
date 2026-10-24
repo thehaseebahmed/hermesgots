@@ -330,13 +330,13 @@ class SkillError(Exception):
 
 def _load(
     needs: Tuple[Tuple[str, str], ...], message: str
-) -> Dict[str, Callable[..., Any]]:
+) -> Dict[str, Any]:
     """Hermes's built-ins one flow needs, imported at call time: a plugin loads before the CLI does.
 
     A host whose Hermes has moved or dropped any of them raises ``SkillError`` with a 501 carrying
     ``message`` — what that flow's route answers with, and what its feature gate tells the app.
     """
-    found: Dict[str, Callable[..., Any]] = {}
+    found: Dict[str, Any] = {}
     for module, attribute in needs:
         try:
             found[attribute] = getattr(importlib.import_module(module), attribute)
@@ -385,7 +385,7 @@ def _clear_caches() -> None:
             logger.debug("memento: couldn't clear the skills prompt cache", exc_info=True)
 
 
-def row_of(rows: List[Dict[str, Any]], name: str) -> Optional[Dict[str, Any]]:
+def find_row(rows: List[Dict[str, Any]], name: str) -> Optional[Dict[str, Any]]:
     return next((row for row in rows if row.get("name") == name), None)
 
 
@@ -393,7 +393,7 @@ def row_for(profile: Optional[str], name: str) -> Optional[Dict[str, Any]]:
     """One skill's row as ``profile``'s own scan shapes it, or None when it hasn't got that skill."""
     find, _ = _listing()
     with _scope(profile):
-        return row_of(_scan(find), name)
+        return find_row(_scan(find), name)
 
 
 def set_enabled(profile: Optional[str], name: str, enabled: bool) -> Dict[str, Any]:
@@ -530,7 +530,7 @@ def view(profile: Optional[str], name: str) -> Dict[str, Any]:
     hermes = _load(_VIEW, UNAVAILABLE_VIEW)
     find, _ = _listing()
     with _scope(profile):
-        row = row_of(_scan(find), name)
+        row = find_row(_scan(find), name)
         if row is None:
             raise SkillError(NOT_FOUND % name, 404)
         skill_md = _skill_md(name, hermes["_find_skill"])

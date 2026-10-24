@@ -8,7 +8,7 @@ import {
   type PluginFeatureAnswer,
   type PluginServer,
 } from "@/lib/features"
-import { READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
+import { READ_TIMEOUT_MS } from "@/lib/freshness"
 import {
   listSkills,
   removeSkill as removeFromHost,
@@ -103,7 +103,7 @@ function readSkills(config: HermesConfig, key: string): Promise<Skill[]> {
 }
 
 async function switchSkill(config: HermesConfig, key: string, name: string, enabled: boolean) {
-  const row = await writeSkillEnabled(config, name, enabled, AbortSignal.timeout(WRITE_TIMEOUT_MS))
+  const row = await writeSkillEnabled(config, name, enabled)
   const held = await heldSkills(key)
   if (!held) return
   await keepSkills(
@@ -113,7 +113,7 @@ async function switchSkill(config: HermesConfig, key: string, name: string, enab
 }
 
 async function removeFromBot(config: HermesConfig, key: string, name: string) {
-  await keepSkills(key, await removeFromHost(config, name, AbortSignal.timeout(WRITE_TIMEOUT_MS)))
+  await keepSkills(key, await removeFromHost(config, name))
 }
 
 export type Skills = SkillsState & {
@@ -174,8 +174,9 @@ export function useSkills(config: HermesConfig | null, open: boolean): Skills {
     }
   }, [open, key, baseUrl, apiKey])
 
-  // One write's shape: a bot with nothing to write to answers nothing, and a write that lands
-  // re-reads the list so the row the host answered is the row the tab draws.
+  // One write's shape: a bot with nothing to write to answers nothing, and a write marks the list
+  // read again — the list lives in a Map no render watches, so the fresh settled object is what
+  // draws the row the host answered.
   const write = async (run: (config: HermesConfig) => Promise<void>) => {
     if (!baseUrl || !apiKey) return
     await run({ baseUrl, apiKey })

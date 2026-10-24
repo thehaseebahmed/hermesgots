@@ -136,7 +136,7 @@ def _error(web: Any, message: str, status: int):
     return web.json_response({"error": {"message": message}}, status=status)
 
 
-def request_profile():
+def _request_profile():
     try:
         from gateway.platforms.api_server import _api_request_profile
 
@@ -199,7 +199,7 @@ def _plugin_route(
 
 
 def _keyed(key: Optional[str]) -> Callable[[Any], Dict[str, Any]]:
-    """Hermes's own MCP answer: under its key, or spread for a write that answers more than one."""
+    """Hermes's own MCP answer: the found thing under its key, or standing alone as the answer."""
     return lambda found: {"object": found if key is None else {key: found}}
 
 
@@ -208,7 +208,7 @@ def _named(key: str) -> Callable[[Any], Dict[str, Any]]:
     return lambda found: {"object": key, "data": found}
 
 
-def enabled_body(body: Any) -> Any:
+def _enabled_body(body: Any) -> Any:
     """The switch's new position, which is all a toggle says."""
     if body is None or not isinstance(body.get("enabled"), bool):
         raise ValueError('Body must be {"enabled": true} or {"enabled": false}')
@@ -574,7 +574,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             web,
             call,
             guard=unauthorized,
-            profile=request_profile,
+            profile=_request_profile,
             read_body=json_body,
             error=mcp.McpError,
             answer=_keyed(key),
@@ -597,7 +597,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             web,
             call,
             guard=unauthorized,
-            profile=request_profile,
+            profile=_request_profile,
             read_body=json_body,
             error=skill_catalog.SkillError,
             answer=_named(key),
@@ -663,7 +663,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
 
     # A toggle, a removal, a save and the Server access flow all write this bot's own config through
     # Hermes's writer and reconcile; a server a Hermes plugin provides is refused there.
-    set_mcp_server_enabled = mcp_route(mcp.set_enabled, "server", body=enabled_body)
+    set_mcp_server_enabled = mcp_route(mcp.set_enabled, "server", body=_enabled_body)
     remove_mcp_server = mcp_route(mcp.remove, "servers")
     save_mcp_server = mcp_route(mcp.edit, None, body=server_body)
     start_mcp_access = mcp_route(mcp.start_access, "access", unavailable=mcp.UNAVAILABLE_ACCESS)
@@ -685,7 +685,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     set_skill_enabled = skill_route(
         skill_catalog.set_enabled,
         "skill",
-        body=enabled_body,
+        body=_enabled_body,
         unavailable=skill_catalog.UNAVAILABLE_WRITE,
     )
     view_skill = skill_route(
@@ -825,7 +825,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         # The API server's own per-profile scope (home and secrets) for the request being served, or
         # nothing when this Hermes has none.
         enter = getattr(adapter, "_profile_scope", None)
-        profile = request_profile()
+        profile = _request_profile()
         if not callable(enter):
             return contextlib.nullcontext
         return lambda: enter(profile)
@@ -1962,7 +1962,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         )
 
     def follow_queue(request: "web.Request", session_id: str, path: Path) -> None:
-        outbox.watch(session_id, request_profile(), path, request.headers.get("Authorization"))
+        outbox.watch(session_id, _request_profile(), path, request.headers.get("Authorization"))
         events.note("session", session_id, path, True)
 
     async def get_queue(request: "web.Request") -> "web.Response":
@@ -1987,7 +1987,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         try:
             run = outbox.clean_body(session_id, body.get("body"))
             item = await asyncio.to_thread(
-                outbox.add, path, session_id, request_profile(), body.get("text", ""), files, run
+                outbox.add, path, session_id, _request_profile(), body.get("text", ""), files, run
             )
         except ValueError as error:
             return _error(web, str(error), 400)
@@ -2046,7 +2046,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     started = await asyncio.to_thread(
                         triage.start_thread,
                         path,
-                        request_profile(),
+                        _request_profile(),
                         found["profile_id"],
                         text,
                         files,
@@ -2073,7 +2073,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     delivered = await triage.deliver(
                         adapter,
                         path,
-                        request_profile(),
+                        _request_profile(),
                         found,
                         text,
                         files,
@@ -2161,7 +2161,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 try:
                     await outbox.post(
                         adapter,
-                        request_profile(),
+                        _request_profile(),
                         f"/v1/runs/{item['run_id']}/stop",
                         {},
                         authorization=request.headers.get("Authorization"),
@@ -2170,7 +2170,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     return _error(web, f"Couldn't stop the thread's reply: {error}", 502)
             try:
                 await asyncio.to_thread(
-                    outbox.add, path, session_id, request_profile(), move["text"], move["files"], run
+                    outbox.add, path, session_id, _request_profile(), move["text"], move["files"], run
                 )
             except Exception:
                 logger.debug("memento: couldn't queue an undone move on Main", exc_info=True)
@@ -2227,7 +2227,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         path = store_path()
         steered, failed = await outbox.steer(
             adapter,
-            request_profile(),
+            _request_profile(),
             path,
             session_id,
             request.match_info["item_id"],
@@ -2286,7 +2286,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         reason = research.available()
         if reason:
             return _error(web, reason, 501)
-        path, profile = store_path(), request_profile()
+        path, profile = store_path(), _request_profile()
         try:
             found = await asyncio.to_thread(
                 research.create, path, profile, body.get("input"), body.get("type")
@@ -2304,7 +2304,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
 
     async def start_researcher(request: "web.Request", path: Path, found: Dict[str, Any]) -> None:
         """Starts the mission's researcher as an ordinary run, with the key the app asked with."""
-        profile = request_profile()
+        profile = _request_profile()
         research.watch(path, found["id"], profile)
         try:
             started = await outbox.post(
@@ -2333,7 +2333,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "Body must be a JSON object", 400)
         answer = await research_step(request, research.confirm_brief, body)
         if answer.status == 200:
-            research.spawn(store_path(), request.match_info["mission_id"], request_profile())
+            research.spawn(store_path(), request.match_info["mission_id"], _request_profile())
         return answer
 
     async def research_edit(request: "web.Request") -> "web.Response":
@@ -2357,7 +2357,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "Body must be a JSON object", 400)
         answer = await research_step(request, research.make_format, body.get("format"))
         if answer.status == 200:
-            research.spawn(store_path(), request.match_info["mission_id"], request_profile())
+            research.spawn(store_path(), request.match_info["mission_id"], _request_profile())
         return answer
 
     async def research_followup(request: "web.Request") -> "web.Response":
@@ -2379,7 +2379,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "Body must be a JSON object", 400)
         answer = await research_step(request, research.rewrite, body)
         if answer.status == 200:
-            research.spawn(store_path(), request.match_info["mission_id"], request_profile())
+            research.spawn(store_path(), request.match_info["mission_id"], _request_profile())
         return answer
 
     async def research_retry(request: "web.Request") -> "web.Response":
@@ -2392,7 +2392,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             # The same session, so the researcher carries on from what it already recorded.
             await start_researcher(request, path, found)
         else:
-            research.spawn(path, mission_id, request_profile())
+            research.spawn(path, mission_id, _request_profile())
         return await research_view(path, mission_id)
 
     async def remove_research(request: "web.Request") -> "web.Response":
@@ -2407,7 +2407,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             try:
                 await outbox.post(
                     adapter,
-                    request_profile(),
+                    _request_profile(),
                     f"/v1/runs/{found['run_id']}/stop",
                     {},
                     authorization=request.headers.get("Authorization"),
@@ -2428,7 +2428,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return denied
         path = store_path()
         await asyncio.to_thread(meetings.resume, path)
-        rows = await asyncio.to_thread(meetings.meetings, path, request_profile())
+        rows = await asyncio.to_thread(meetings.meetings, path, _request_profile())
         return web.json_response(
             {"object": "memento.meetings", "meetings": rows, "unavailable": meetings.available()}
         )
@@ -2444,7 +2444,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             found = await asyncio.to_thread(
                 meetings.create,
                 store_path(),
-                request_profile(),
+                _request_profile(),
                 body.get("title"),
                 body.get("project_id"),
                 body.get("parts"),

@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import unittest
 
-from plugin import _named, _plugin_route, enabled_body, skill_catalog
+from plugin import _named, _plugin_route, _enabled_body, skill_catalog
 
 
 class Web:
@@ -128,13 +128,13 @@ class SkillRouteTests(unittest.TestCase):
             seen.append((profile, name, enabled))
             return {"name": name, "enabled": enabled}
 
-        handler = routed(call, body=enabled_body)
+        handler = routed(call, body=_enabled_body)
         answer(handler, Request(body={"enabled": False}))
         self.assertEqual(seen, [("bot-a", "plan", False)])
 
     def test_a_body_this_route_cannot_read_is_a_400(self):
         handler = routed(
-            lambda *args: self.fail("an unreadable body never reaches the call"), body=enabled_body
+            lambda *args: self.fail("an unreadable body never reaches the call"), body=_enabled_body
         )
         self.assertEqual(
             answer(handler, Request(body=None)),

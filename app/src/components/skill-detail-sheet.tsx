@@ -7,6 +7,7 @@ import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup
 import { Group, linkRowClass, RowText } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { READ_TIMEOUT_MS } from "@/lib/freshness"
 import {
   getSkillFile,
   getSkillView,
@@ -41,9 +42,12 @@ export function SkillDetailSheet({
   const [file, setFile] = useState<OpenFile | null>(null)
   const fileRead = useRef<AbortController | null>(null)
 
+  // A read carries both its own cancellation and the timeout no host read goes without.
+  const bounded = (signal: AbortSignal) =>
+    AbortSignal.any([signal, AbortSignal.timeout(READ_TIMEOUT_MS)])
   useEffect(() => {
     const controller = new AbortController()
-    getSkillView({ baseUrl, apiKey }, name, controller.signal).then(
+    getSkillView({ baseUrl, apiKey }, name, bounded(controller.signal)).then(
       (view) => {
         if (!controller.signal.aborted) setReading({ status: "ok", view })
       },
@@ -71,7 +75,7 @@ export function SkillDetailSheet({
     fileRead.current = controller
     setFile({ status: "reading", path })
     try {
-      const read = await getSkillFile({ baseUrl, apiKey }, name, path, controller.signal)
+      const read = await getSkillFile({ baseUrl, apiKey }, name, path, bounded(controller.signal))
       if (!controller.signal.aborted) setFile({ status: "ok", file: read })
     } catch (error) {
       if (controller.signal.aborted) return
