@@ -12,11 +12,13 @@ import { act } from "react"
 import { db, type Attachment, type Message } from "@/lib/db"
 
 import {
+  askedFor,
   botProfile,
   chatScreen,
   click,
   findAll,
-  json,
+  mediaHost,
+  mediaReads,
   mount,
   seedChat,
   text,
@@ -92,31 +94,6 @@ const thread = (): Message[] => [
   },
 ]
 
-/** The host's plugin: its features, and its media route, which can't answer the path it was told not to. */
-function host({ fail = [] as string[] } = {}) {
-  const reads: string[] = []
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const url = new URL(String(input instanceof Request ? input.url : input))
-    const path = url.searchParams.get("path") ?? ""
-    if (url.pathname.endsWith("/plugins/memento/info"))
-      return json({ name: "memento", features: ["attachments", "media"] })
-    if (url.pathname.endsWith("/plugins/memento/media")) {
-      reads.push(path)
-      if (fail.some((name) => path.endsWith(name))) return json({ error: "No such file." }, 404)
-      const type = path.endsWith(".mp4")
-        ? "video/mp4"
-        : path.endsWith(".mp3")
-          ? "audio/mpeg"
-          : path.endsWith(".pdf")
-            ? "application/pdf"
-            : "image/png"
-      return new Response(new Blob(["bytes"], { type }), { headers: { "content-type": type } })
-    }
-    return json({})
-  }) as typeof fetch
-  return reads
-}
-
 const galleries = () => findAll('[role="group"][aria-label="Gallery"]')
 const cell = (name: string) =>
   findAll("button").find((button) => button.getAttribute("aria-label") === `Open ${name}`) ?? null
@@ -164,7 +141,7 @@ test("a thread's sent media and a reply's tags draw through the same cells", asy
   const profile = botProfile("media-reply")
   await seedChat({ id: "c1", profile, messages: thread() })
   // The photo this device holds draws from its own copy; every other file comes from the route.
-  const reads = host({ fail: ["missing.png"] })
+  const asked = mediaHost({ fail: ["missing.png"] })
   const browser = stubBrowser()
   try {
     await mount(chatScreen("c1"), async () => {
@@ -211,13 +188,13 @@ test("a thread's sent media and a reply's tags draw through the same cells", asy
       // One read per file, however many times the thread is drawn — and the sent photo this device
       // already holds is never asked of the host.
       assert.deepEqual(
-        reads.map((path) => path.split("/").pop()).sort(),
+        mediaReads(asked).map((path) => path.split("/").pop()).sort(),
         ["chart.png", "missing.png", "render.mp4", "report.pdf", "take.mp3", "voice.mp3"],
         "each file the thread needed, read once",
       )
-      assert.equal(reads.length, 6, "no file read twice")
+      assert.equal(mediaReads(asked).length, 6, "no file read twice")
       assert.equal(
-        reads.includes(`${SENT}/cat.png`),
+        mediaReads(asked).includes(`${SENT}/cat.png`),
         false,
         "the sent photo draws from this device",
       )
@@ -254,28 +231,14 @@ test("a tag the host couldn't serve is asked again when the reply carries more",
       },
     ],
   })
-  let up = false
-  const reads: string[] = []
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const url = new URL(String(input instanceof Request ? input.url : input))
-    if (url.pathname.endsWith("/plugins/memento/info"))
-      return json({ name: "memento", features: ["attachments", "media"] })
-    if (url.pathname.endsWith("/plugins/memento/media")) {
-      const path = url.searchParams.get("path") ?? ""
-      reads.push(path)
-      if (!up) return json({ error: { message: "The host is away." } }, 503)
-      return new Response(new Blob(["bytes"], { type: "image/png" }), {
-        headers: { "content-type": "image/png" },
-      })
-    }
-    return json({})
-  }) as typeof fetch
+  // The host is out for the first read, then answers: a 503 said nothing about the file.
+  const asked = mediaHost({ fail: ["chart.png"], failure: 503 })
   const browser = stubBrowser()
   try {
     await mount(chatScreen("c1"), async () => {
       await until(async () => text().includes(`MEDIA:${LIBRARY}/chart.png`), "the tag kept as text")
       assert.equal(cell("chart.png"), null, "a host that couldn't answer draws nothing")
-      up = true
+      mediaHost({ asked })
       // The reply carries on and names another file, so its tags are read again.
       await act(async () => {
         await db.messages.update("m1", {
@@ -311,17 +274,10 @@ test("a reply's tag on a plugin without the media route stays its own text", asy
       },
     ],
   })
-  const asked: string[] = []
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const url = new URL(String(input instanceof Request ? input.url : input))
-    if (url.pathname.endsWith("/plugins/memento/info"))
-      return json({ name: "memento", features: ["attachments"] })
-    if (url.pathname.endsWith("/plugins/memento/media")) asked.push(url.search)
-    return json({})
-  }) as typeof fetch
+  const asked = mediaHost({ features: ["attachments"] })
   await mount(chatScreen("c1"), async () => {
     await until(async () => text().includes(`${LIBRARY}/render.mp4`), "the tag's text")
     assert.equal(cell("render.mp4"), null, "a plugin from before the route draws no cell")
-    assert.deepEqual(asked, [], "and its media route is never asked")
+    assert.equal(askedFor(asked, "/plugins/memento/media"), 0, "and its media route is never asked")
   })
 })

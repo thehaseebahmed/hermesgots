@@ -14,13 +14,14 @@ import {
   chatScreen,
   click,
   findAll,
-  json,
+  mediaHost,
   mount,
   seedChat,
   seedSettings,
   text,
   until,
 } from "./component-kit.tsx"
+import type { HostAsk } from "./component-kit.tsx"
 
 const NAME = "field notes.pdf"
 const HOST_PATH = "/home/h/.hermes/memento/attachments/session-1/field notes.pdf"
@@ -44,28 +45,14 @@ const message = (attachments: Attachment[]): Message => ({
   attachments,
 })
 
-/** One host, recording every media read it was sent. */
-function host() {
-  const reads: { path: string; authorization: string | null }[] = []
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = new URL(String(input instanceof Request ? input.url : input))
-    if (!url.host.startsWith("attachment-row")) return json({})
-    if (url.pathname.endsWith("/plugins/memento/info"))
-      return json({ name: "memento", features: ["attachments", "media"] })
-    if (url.pathname.endsWith("/plugins/memento/media")) {
-      reads.push({
-        path: url.searchParams.get("path") ?? "",
-        authorization: new Headers(init?.headers).get("authorization"),
-      })
-      return new Response("bytes", {
-        status: 200,
-        headers: { "content-type": "application/pdf" },
-      })
-    }
-    return json({})
-  }) as typeof fetch
-  return reads
-}
+/** What the media route was asked for, and the key it was asked with. */
+const reads = (asked: HostAsk[]) =>
+  asked
+    .filter((one) => one.path.endsWith("/plugins/memento/media"))
+    .map((one) => ({
+      path: new URLSearchParams(one.search).get("path") ?? "",
+      authorization: one.authorization,
+    }))
 
 const row = () =>
   findAll("button").find(
@@ -78,7 +65,7 @@ test("a message's file draws as a row naming it, and a tap saves it under its ow
   const profile = botProfile("attachment-row")
   await seedSettings()
   await seedChat({ id: "c1", profile, messages: [message([attachment])] })
-  const reads = host()
+  const asked = mediaHost({ host: "attachment-row" })
 
   // jsdom has no object URLs and no download of its own, so both stand in for the browser's effect.
   const saved: string[] = []
@@ -102,7 +89,7 @@ test("a message's file draws as a row naming it, and a tap saves it under its ow
       await until(async () => saved.length > 0, "the download")
       assert.deepEqual(saved, [NAME], "the browser is told the file's own name")
       assert.deepEqual(
-        reads,
+        reads(asked),
         [{ path: HOST_PATH, authorization: "Bearer test-key" }],
         "the bytes come from the media route, behind the bot's key",
       )
@@ -122,7 +109,7 @@ test("a file the host never took is drawn, and a tap says there is no copy of it
     profile,
     messages: [message([{ ...attachment, path: undefined }])],
   })
-  host()
+  mediaHost({ host: "attachment-row" })
   const said: string[] = []
   const original = toast.error
   toast.error = ((message: unknown) => {
@@ -158,7 +145,7 @@ test("a file this device holds is saved from its own bytes, without asking the h
       ]),
     ],
   })
-  const reads = host()
+  const asked = mediaHost({ host: "attachment-row" })
   const saved: string[] = []
   const anchor = window.HTMLAnchorElement.prototype
   const real = {
@@ -178,7 +165,7 @@ test("a file this device holds is saved from its own bytes, without asking the h
       await click(row())
       await until(async () => saved.length > 0, "the download")
       assert.deepEqual(saved, [NAME], "saved under the file's own name")
-      assert.deepEqual(reads, [], "the bytes this device holds are never asked of the host")
+      assert.deepEqual(reads(asked), [], "the bytes this device holds are never asked of the host")
     })
   } finally {
     URL.createObjectURL = real.create

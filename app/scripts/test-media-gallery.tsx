@@ -15,7 +15,8 @@ import {
   click,
   find,
   findAll,
-  json,
+  mediaHost,
+  mediaReads,
   mount,
   seedChat,
   text,
@@ -81,30 +82,6 @@ const message = (attachments: Attachment[]): Message => ({
   attachments,
 })
 
-/** The host's plugin: its features, and its media route — failing the paths it was told to. */
-function host({ fail = [] }: { fail?: string[] } = {}) {
-  const reads: string[] = []
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const url = new URL(String(input instanceof Request ? input.url : input))
-    const root = url.pathname
-    if (root.endsWith("/plugins/memento/info"))
-      return json({ name: "memento", features: ["attachments", "media"] })
-    if (root.endsWith("/plugins/memento/media")) {
-      const path = url.searchParams.get("path") ?? ""
-      reads.push(path)
-      if (fail.some((name) => path.endsWith(name))) return json({ error: "No such file." }, 404)
-      const type = path.endsWith(".mp4")
-        ? "video/mp4"
-        : path.endsWith(".mp3")
-          ? "audio/mpeg"
-          : "image/png"
-      return new Response(new Blob(["bytes"], { type }), { headers: { "content-type": type } })
-    }
-    return json({})
-  }) as typeof fetch
-  return reads
-}
-
 const gallery = () => find('[role="group"][aria-label="Gallery"]')
 const cell = (name: string) =>
   findAll("button").find((button) => button.getAttribute("aria-label") === `Open ${name}`) ?? null
@@ -137,7 +114,7 @@ test("a message's photo and clip draw in one Gallery, its recording in a row of 
     messages: [message([photo, clip, diagram, voice, notes])],
   })
   // The host can't serve the photo: this device's own copy is what draws it.
-  const reads = host({ fail: ["cat.png"] })
+  const asked = mediaHost({ fail: ["cat.png"] })
   const restore = stubUrls()
   const opened: string[] = []
   const realOpen = window.open
@@ -171,12 +148,12 @@ test("a message's photo and clip draw in one Gallery, its recording in a row of 
       assert.ok(picture, "the photo is drawn")
       assert.match(picture!.getAttribute("src") ?? "", /^blob:/, "from this device's own copy")
       assert.deepEqual(
-        reads.filter((path) => path.endsWith("cat.png")),
+        mediaReads(asked).filter((path) => path.endsWith("cat.png")),
         [],
         "a photo this device holds is never asked of a host that can't serve it",
       )
       assert.deepEqual(
-        reads.map((path) => path.replace(`${HOST}/`, "")).sort(),
+        mediaReads(asked).map((path) => path.replace(`${HOST}/`, "")).sort(),
         ["clip.mp4", "diagram.svg", "voice.mp3"],
         "what this device doesn't hold comes from the media route",
       )
@@ -197,7 +174,7 @@ test("a message restored on another device draws its media from the host", async
   // What a restored message keeps: the name, the type, the size and where the host has it.
   const restored: Attachment[] = [{ ...photo, blob: undefined }, clip, voice]
   await seedChat({ id: "c1", profile, messages: [message(restored)] })
-  const reads = host()
+  const asked = mediaHost()
   const restore = stubUrls()
   try {
     await mount(chatScreen("c1"), async () => {
@@ -205,7 +182,7 @@ test("a message restored on another device draws its media from the host", async
       assert.ok(ready(cell("clip.mp4")), "the clip's cell")
       assert.ok(ready(row("voice.mp3")), "the recording's row")
       assert.deepEqual(
-        reads.map((path) => path.replace(`${HOST}/`, "")).sort(),
+        mediaReads(asked).map((path) => path.replace(`${HOST}/`, "")).sort(),
         ["cat.png", "clip.mp4", "voice.mp3"],
         "every one of them read from the host, which is where the bytes are",
       )
@@ -223,7 +200,7 @@ test("a message restored on another device draws its media from the host", async
 test("media whose bytes can't be read falls back to the row that downloads it", async () => {
   const profile = botProfile("media-missing")
   await seedChat({ id: "c1", profile, messages: [message([clip])] })
-  host({ fail: ["clip.mp4"] })
+  mediaHost({ fail: ["clip.mp4"] })
   const restore = stubUrls()
   try {
     await mount(chatScreen("c1"), async () => {
