@@ -6,7 +6,8 @@ subagents still work. Nothing here touches that dispatch: the plugin leaves it t
 
 What the plugin does own is the stop: a run the user stops never reaches the children it began, since
 core detaches a delegation before dispatching it, so ``sweep_stops`` hands a stopped run's stop to the
-subagents of the session it ran on, through core's own ``interrupt_for_session``.
+subagents that run itself started, one child at a time through core's own ``interrupt_subagent`` — the
+card's own stop — since core's session-wide fan-out cannot be given a single child to stop.
 
 Hermes keeps every delegated child as a session of its own (``platform="subagent"``, its parent's id
 in ``parent_session_id`` and in ``model_config``'s ``_delegate_from``), so ``children`` lists them for
@@ -82,7 +83,6 @@ _loop: Optional[asyncio.AbstractEventLoop] = None
 # A stopped run's stop, handed to its subagents: core sets the run `stopping` as it interrupts it,
 # then whichever terminal status its unwind reaches. The watch reads those every second.
 STOPPED_STATES = ("stopping", "cancelled", "interrupted")
-STOP_REASON = "run_stop"
 STOP_SECONDS = 1.0
 HANDED_RUNS_CAP = 500
 
@@ -632,28 +632,44 @@ def started(
 def stop(hermes_home: Path, parent_id: str, subagent_id: str) -> Dict[str, Any]:
     """Stops one subagent's work, from the child's session id the app holds.
 
-    Core's own stop is ``interrupt_subagent`` (``tools.delegate_tool_registry.py:92-105``), the
-    function its model-facing ``delegate_task(action='stop')`` calls (``:288``): a cooperative hard
-    interrupt at the child's next iteration boundary, asked of the same live agent its parent's own
-    interrupt fans out to, so in-flight tools are told to cancel. It needs core's id for the child, so
-    the pair ``subagent_start`` recorded is what names it; a child that started before this process
-    loaded the plugin has no row, and the registry itself is then read for it. The registry is this
-    process's, which is where an api_server session's child runs — a child some other process
-    dispatched is simply not found, and the route answers that it isn't running.
+    The stop is ``_interrupt_one`` — core's own per-subagent ``interrupt_subagent``, which is what
+    its model-facing ``delegate_task(action='stop')`` calls. A host too old to offer it, or a child
+    that isn't running any more, answers what it always did.
     """
-    path = db_path(hermes_home)
-    agent_id = sessions.agent_for(path, subagent_id) or _live_agent(subagent_id)
-    if not agent_id:
+    stopped = _interrupt_one(hermes_home, subagent_id)
+    if stopped is None:
+        return {"stopped": False, "reason": "This Hermes version can't stop a subagent."}
+    if not stopped:
         return {"stopped": False, "reason": "That subagent isn't running any more."}
+    events.note("runs", parent_id, db_path(hermes_home), True)
+    return {"stopped": True}
+
+
+def _interrupt_one(home: Path, subagent_id: str) -> Optional[bool]:
+    """Stops one subagent through core's registry: whether it did, or None if core has no such call.
+
+    Core's own per-child stop is ``interrupt_subagent`` (``tools/delegate_tool_registry.py:92-105``),
+    the function its model-facing ``delegate_task(action='stop')`` calls (``:288``): a cooperative
+    hard interrupt at the child's next iteration boundary, asked of the same live agent a parent's
+    own interrupt fans out to, so in-flight tools are told to cancel. The registry is keyed by core's
+    own ``sa-…`` id, so the pair ``subagent_start`` recorded is what names the child; one that
+    started before this process loaded the plugin has no row, and the registry itself is then read
+    for it. The registry is this process's, which is where an api_server session's child runs — a
+    child some other process dispatched is simply not found, which is what a stop answers anyway.
+    """
+    agent_id = sessions.agent_for(db_path(home), subagent_id) or _live_agent(subagent_id)
+    if not agent_id:
+        return False
     try:
         from tools.delegate_tool_registry import interrupt_subagent
-    except ImportError:
+    except Exception:
         logger.debug("memento: this Hermes has no subagent registry to stop %s", subagent_id)
-        return {"stopped": False, "reason": "This Hermes version can't stop a subagent."}
-    if not interrupt_subagent(agent_id):
-        return {"stopped": False, "reason": "That subagent isn't running any more."}
-    events.note("runs", parent_id, path, True)
-    return {"stopped": True}
+        return None
+    try:
+        return bool(interrupt_subagent(agent_id))
+    except Exception:
+        logger.debug("memento: core couldn't stop %s", subagent_id, exc_info=True)
+        return False
 
 
 def _live_agent(subagent_id: str) -> Optional[str]:
@@ -684,9 +700,9 @@ def sweep_stops(
     A run the user stops never reaches its own children: core detaches a delegation before it
     dispatches it, and the API server's stop interrupts the run's agent and reaps its processes and
     nothing more (``api_server_runs._handle_stop_run``). So the plugin watches the run statuses it
-    already reads for the app and, for each run that is stopping or stopped, stops the subagents that
-    run started the way core stops a session's own background delegations
-    (``tools.async_delegation.interrupt_for_session``).
+    already reads for the app and, for each run that is stopping or stopped, stops the children that
+    run started — each one through core's own per-child ``interrupt_subagent``, which is the stop a
+    card asks for (``stop_run``).
 
     ``handed`` is the watch's memory of the runs it has already done, kept across ticks so a status
     that lingers is not handed over again and again; it is bounded at ``HANDED_RUNS_CAP``.
@@ -712,7 +728,14 @@ def stop_run(home: Path, run: Dict[str, Any]) -> List[str]:
     ``created_at``): a turn that has ended leaves its subagents working, and those belong to their
     own cards, not to a later turn's stop (ADR 0038). Only live children are named — a child that has
     ended is left alone, its card and its result already where they belong. A run with no start time
-    to compare names every live child of its session, as core's own per-session stop would.
+    to compare names every live child of its session.
+
+    Each named child is stopped on its own, through core's per-child ``interrupt_subagent``
+    (``_interrupt_one``), which is the stop the card asks for. Core's other stop,
+    ``interrupt_for_session`` (``tools/async_delegation.py:1267-1290``), is no use here: its only
+    selectors are a session's — ``session_key``, ``origin_ui_session_id`` or ``parent_session_id``
+    (``_session_records``, ``:738-750``) — so it would stop every live delegation of the session,
+    an earlier turn's child included, which is the one this filter just left to its own card.
     """
     session_id = run.get("session_id")
     if not isinstance(session_id, str) or not session_id:
@@ -726,8 +749,9 @@ def stop_run(home: Path, run: Dict[str, Any]) -> List[str]:
         for child in children(home, session_id, {session_id})
         if child["status"] == "running" and _since(child["started_at"], began)
     ]
-    if named:
-        _interrupt(_parents(home, session_id), len(named))
+    for child_id in named:
+        if _interrupt_one(home, child_id) is False:
+            logger.debug("memento: %s named no subagent core could stop", child_id)
     return named
 
 
@@ -758,40 +782,3 @@ def _since(started: Any, began: Any) -> bool:
     if not isinstance(began, (int, float)) or not isinstance(started, (int, float)):
         return True
     return started >= began
-
-
-def _parents(home: Path, session_id: str) -> List[str]:
-    """The session and every compression continuation after it: a child's parent is whichever of
-    them was live when it was dispatched, since a delegation made after a compression comes from the
-    tip."""
-    try:
-        state = home / "state.db"
-        with sqlite3.connect(f"{state.as_uri()}?mode=ro", uri=True, timeout=2) as conn:
-            conn.row_factory = sqlite3.Row
-            return _lineage(conn, session_id)
-    except sqlite3.Error:
-        logger.debug("memento: couldn't read %s's compression lineage", session_id, exc_info=True)
-        return [session_id]
-
-
-def _interrupt(parents: Iterable[str], named: int) -> None:
-    """Signal core's record of the children's work, through the sessions that started them.
-
-    Imported here, not at module load: the plugin has to import on a host that is missing it. Core's
-    call touches only records still running, so a child that has ended by the time it lands is left
-    alone; a stop that reaches no record is not an error (the records live in memory and a restart
-    loses them), and a core too old to have the call must not break the watch.
-    """
-    try:
-        from tools.async_delegation import interrupt_for_session
-    except Exception:
-        logger.debug("memento: this Hermes can't stop a subagent; %d left running", named, exc_info=True)
-        return
-    for parent in parents:
-        try:
-            count = interrupt_for_session(parent_session_id=parent, reason=STOP_REASON)
-        except Exception:
-            logger.debug("memento: couldn't stop %s's subagents", parent, exc_info=True)
-            continue
-        if not count:
-            logger.debug("memento: %s stopped no subagent of %d named", parent, named)
