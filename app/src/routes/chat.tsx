@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { Link, matchPath, useLocation, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
@@ -180,6 +188,45 @@ type FlowEntry =
 
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
+/** The panes a chat is drawn in, each holding its own frame while the next chat answers. */
+export type HoldSlot = "main" | "thread" | "route"
+
+interface HeldFrame {
+  /** The chat the frame is of; absent while the pane held a chat never started. */
+  id?: string
+  frame: ReactNode
+}
+
+/**
+ * Each pane's last ready frame, kept beside the route rather than in the pane: the shell remounts
+ * the chat on every switch, and this is what the next one draws while its own answers come in.
+ */
+const held = new Map<HoldSlot, HeldFrame>()
+
+const landed = new Set<(slot: HoldSlot) => void>()
+
+/** The chat a pane last drew ready, for the fade that plays as the next one replaces it. */
+export const heldChat = (slot: HoldSlot) => held.get(slot)?.id
+
+/** Listens for a pane's ready frame naming another chat: the moment a switch lands. */
+export function onChatSwap(listener: (slot: HoldSlot) => void) {
+  landed.add(listener)
+  return () => {
+    landed.delete(listener)
+  }
+}
+
+function hold(slot: HoldSlot, id: string | undefined, frame: ReactNode) {
+  const before = held.get(slot)
+  held.set(slot, { id, frame })
+  if (before && before.id !== id) for (const listener of landed) listener(slot)
+}
+
+/** What each pane held is the session's own memory of it: forgotten as a fresh load forgets it. */
+export function forgetHeldChats() {
+  held.clear()
+}
+
 /** What a chat or session not started yet says: the greeting, then one of the bot's lines. */
 function ReadyLine({ botId, id }: { botId?: string; id?: string }) {
   const { greeting, line } = useReadyLine(botId ?? DEFAULT_BOT_ID, id)
@@ -257,6 +304,18 @@ function MainEmptyState({
   )
 }
 
+/** A pane with nothing to hold yet: the header stands empty, and the body says the chat is coming. */
+function PendingChat() {
+  return (
+    <>
+      <ChatHeader title="" showBot={false} />
+      <div className="flex flex-1 items-center justify-center">
+        <Spinner className="size-6" />
+      </div>
+    </>
+  )
+}
+
 /** An approval or question card temporarily replaces the composer; once answered, follow the reply again. */
 function FollowAfterApproval({ pending }: { pending: boolean }) {
   const { scrollToEnd } = useMessageScroller()
@@ -279,7 +338,11 @@ function FollowOnSend({ lastUserId }: { lastUserId?: string }) {
   return null
 }
 
-export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?: string } = {}) {
+export function ChatPage({
+  chatId,
+  paneThread,
+  slot = "route",
+}: { chatId?: string; paneThread?: string; slot?: HoldSlot } = {}) {
   const params = useParams()
   const { pathname } = useLocation()
   const id = chatId ?? params.id
@@ -292,7 +355,9 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
   }, [id])
   const navigate = useNavigate()
   const { root, up } = useNav()
-  const settings = useLiveQuery(() => db.settings.get("settings"), [])
+  // Settings answer "no row" on a device that never wrote one, so an absent answer is `null` here
+  // rather than the `undefined` a query that has not run hands back.
+  const settings = useLiveQuery(async () => (await db.settings.get("settings")) ?? null, [])
   const botThreads = useBotThreads()
   const found = useLiveQuery(
     async () => (id ? ((await db.conversations.get(id)) ?? null) : undefined),
@@ -330,6 +395,8 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
   const [outputsOpen, setOutputsOpen] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const [historyMissing, setHistoryMissing] = useState<string>()
+  // The id this pane last drew whole, so an answer that dips for a moment can't put it back on hold.
+  const readyRef = useRef<{ id?: string }>(undefined)
 
   const resolved = { ...DEFAULT_SETTINGS, ...settings }
   const configured = Boolean(profile?.baseUrl.trim())
@@ -351,10 +418,29 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
   )
   const cards = useMemo(
     () =>
-      botThreads && conversation?.main ? threadCards(thread ?? NO_ROWS, threadList) : undefined,
+      botThreads && conversation?.main
+        ? threadList && threadCards(thread ?? NO_ROWS, threadList)
+        : undefined,
     [botThreads, conversation?.main, thread, threadList],
   )
   const threadsDrawnAsCards = useMemo(() => drawnThreadIds(cards), [cards])
+  // Ready is every answer for the id on screen having come back. An answer naming another id is no
+  // answer — the guards above make it one — so a chat is never drawn out of a state it may not be in:
+  // an unanswered profile is not "not configured", nor an unanswered thread list "no threads".
+  const answered =
+    settings !== undefined &&
+    botThreads !== undefined &&
+    (id === undefined || found !== undefined) &&
+    profile !== undefined &&
+    messages !== undefined &&
+    (!(botThreads && conversation?.main) || threadList !== undefined)
+  const keptReady = readyRef.current !== undefined && readyRef.current.id === id
+  const ready = answered || keptReady
+  // Remembered after the commit that drew it, not during a render: the pane is ready for this id
+  // from then on, so a query that dips for a moment never puts it back on hold.
+  useLayoutEffect(() => {
+    if (answered) readyRef.current = { id }
+  })
   const now = useNow()
   const flow = useMemo(() => {
     const entries: FlowEntry[] = []
@@ -654,20 +740,14 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
     if (mainOf) void setActiveProfile(mainOf)
   }, [mainOf])
 
+  // A conversation this device no longer has is an answer, not a gap: the chat counts as ready and
+  // draws its own empty state. A bot's Main is the one row re-made, since Main is the bot's face.
   const mainOwner = id ? mainThreadProfile(id) : undefined
-  // A deleted (or unknown) conversation id falls back to a fresh chat.
   useEffect(() => {
-    if (!id || conversation !== null) return
-    if (mainOwner) {
-      if (botThreads === undefined) return
-      if (botThreads) {
-        void db.profiles
-          .get(mainOwner)
-          .then((owner) => (owner ? ensureMainThread(mainOwner) : root("/")))
-        return
-      }
-    }
-    root("/")
+    if (!id || conversation !== null || !mainOwner || !botThreads) return
+    void db.profiles
+      .get(mainOwner)
+      .then((owner) => (owner ? ensureMainThread(mainOwner) : root("/")))
   }, [id, conversation, root, botThreads, mainOwner])
 
   // A session that was never sent anything isn't kept; typed text is the user's to keep or drop.
@@ -961,7 +1041,8 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
     : isMain
       ? profile?.name || conversation?.title || ""
       : (conversation?.title ?? "New chat")
-  const mainLine = botThreads && isMain ? threadsLine(threadCount(threadList)) : undefined
+  const mainLine =
+    botThreads && isMain && threadList ? threadsLine(threadCount(threadList)) : undefined
   let subtitle: string | undefined
   if (!unstarted)
     subtitle = session
@@ -973,8 +1054,10 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
         })
       : activity || mainLine || repliesLine
 
-  return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
+  // The pane's own children, as they stand. Kept as one element so the next switch can draw exactly
+  // this, unchanged, while its chat answers — a switch lands the new frame in one commit.
+  const frame = (
+    <>
       <ChatHeader
         title={headerTitle}
         subtitle={subtitle}
@@ -986,35 +1069,33 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
         showBot={!session && !unstarted && !besideMain}
         actions={actions}
         leading={
-          mainPath ? (
-            // Beside Main a thread needs no control of its own: the bot is on screen with it, and
-            // the pane keeps the thread wherever the address goes. Below `xl` it is a screen over
-            // Main, and leads back to it.
-            !besideMain && (
-              <Button
-                variant="outline"
-                size="icon-lg"
-                className="size-11 rounded-full bg-background/80 backdrop-blur"
-                onClick={() => up(mainPath)}
-                aria-label={`Back to ${profile?.name ?? "bot"}`}
-              >
-                <ArrowLeftIcon />
-              </Button>
-            )
-          ) : (
-            session &&
-            !beside && (
-              <Button
-                variant="outline"
-                size="icon-lg"
-                className="size-11 rounded-full bg-background/80 backdrop-blur"
-                onClick={leave}
-                aria-label="Back to Code"
-              >
-                <ArrowLeftIcon />
-              </Button>
-            )
-          )
+          mainPath
+            ? // Beside Main a thread needs no control of its own: the bot is on screen with it, and
+              // the pane keeps the thread wherever the address goes. Below `xl` it is a screen over
+              // Main, and leads back to it.
+              !besideMain && (
+                <Button
+                  variant="outline"
+                  size="icon-lg"
+                  className="size-11 rounded-full bg-background/80 backdrop-blur"
+                  onClick={() => up(mainPath)}
+                  aria-label={`Back to ${profile?.name ?? "bot"}`}
+                >
+                  <ArrowLeftIcon />
+                </Button>
+              )
+            : session &&
+              !beside && (
+                <Button
+                  variant="outline"
+                  size="icon-lg"
+                  className="size-11 rounded-full bg-background/80 backdrop-blur"
+                  onClick={leave}
+                  aria-label="Back to Code"
+                >
+                  <ArrowLeftIcon />
+                </Button>
+              )
         }
       />
 
@@ -1406,6 +1487,28 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </>
+  )
+
+  // Written after the commit that landed it, so the next switch has the frame to hold: an effect
+  // rather than a render-time write, since only a committed frame is the one on screen.
+  useLayoutEffect(() => {
+    if (ready) hold(slot, id, frame)
+  })
+
+  // A frame naming the chat this pane is already for is nothing held: drawing it would mount the
+  // same chat twice, once stale, for a chat that is about to be drawn from its own answers.
+  const heldBefore = held.get(slot)
+  const holding = heldBefore && heldBefore.id !== id ? heldBefore.frame : undefined
+
+  return (
+    <div
+      data-slot="chat-pane"
+      className="relative flex min-h-0 flex-1 flex-col"
+      // Every tap, key and send below belongs to the chat that is drawn, never to the one asked for.
+      inert={!ready}
+    >
+      {ready ? frame : (holding ?? <PendingChat />)}
     </div>
   )
 }

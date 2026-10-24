@@ -161,7 +161,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
   // address's thread, else the last opened, else nothing at all.
   const shown = bot && (bot.thread ?? bot.last)
   const botItem = shown ? (
-    <ChatPage key={shown} chatId={shown} />
+    <ChatPage key={shown} chatId={shown} slot="thread" />
   ) : bot && !bot.threads ? (
     <BotPaneEmpty />
   ) : undefined
@@ -169,8 +169,16 @@ export function AppShell({ children }: { children?: ReactNode }) {
     ? {
         screen: `/c/${mainThreadId(bot.profileId)}`,
         open: Boolean(bot.thread || bot.last || !bot.threads),
-        // Main is told what the third pane holds, so its own flow can mark that thread open.
-        node: <ChatPage key={bot.profileId} chatId={mainThreadId(bot.profileId)} paneThread={shown} />,
+        // Main is told what the third pane holds, so its own flow can mark that thread open. Each
+        // pane names itself, so the frame it holds across a remount is its own.
+        node: (
+          <ChatPage
+            key={bot.profileId}
+            chatId={mainThreadId(bot.profileId)}
+            paneThread={shown}
+            slot="main"
+          />
+        ),
         item: botItem,
       }
     : code

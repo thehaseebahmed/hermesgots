@@ -66,12 +66,15 @@ async function latestLine(conversationId: string) {
 /**
  * A bot's chats as threads, oldest started first so the newest sits at the bottom by the composer.
  * They keep the order they were started in, so a new message doesn't move a thread.
+ *
+ * `undefined` is "not answered yet": the hook hands back the answer it already had while the next
+ * one lands, so a list read for another bot is no answer at all rather than no threads.
  */
 export function useThreads(profileId: string | undefined): Thread[] | undefined {
   const live = useWaiting()
   const subagents = useLiveSubagents()
-  const rows = useLiveQuery(async () => {
-    if (!profileId) return []
+  const answer = useLiveQuery(async () => {
+    if (!profileId) return { profileId, rows: [] }
     const chats = await db.conversations
       .where("[profileId+updatedAt]")
       .between([profileId, -Infinity], [profileId, Infinity])
@@ -120,14 +123,18 @@ export function useThreads(profileId: string | undefined): Thread[] | undefined 
       }),
     )
     // Main stays first, whenever it was made.
-    return rows.sort(
-      (a, b) =>
-        Number(Boolean(b.chat.main)) - Number(Boolean(a.chat.main)) ||
-        a.chat.createdAt - b.chat.createdAt,
-    )
+    return {
+      profileId,
+      rows: rows.sort(
+        (a, b) =>
+          Number(Boolean(b.chat.main)) - Number(Boolean(a.chat.main)) ||
+          a.chat.createdAt - b.chat.createdAt,
+      ),
+    }
   }, [profileId])
 
-  return rows?.map(({ chat, opener, last, replies, streaming, failed, local }) => {
+  if (!answer || answer.profileId !== profileId) return undefined
+  return answer.rows.map(({ chat, opener, last, replies, streaming, failed, local }) => {
     const reason = local ?? live[chat.hermesSessionId]
     const state = threadState({
       waiting: Boolean(reason),
