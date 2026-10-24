@@ -155,6 +155,11 @@ const FLOWS = {
     about:
       "A bot's subagent model is recorded as its host's delegation model, cleared back to the bot's own",
   },
+  "delegation-question": {
+    script: "e2e/delegation-question.mjs",
+    about:
+      "A question replaces the composer while the subagent a turn dispatched still runs, then the result lands as the bot's message and the wake turn streams",
+  },
   mcps: {
     script: "e2e/mcps.mjs",
     about:
