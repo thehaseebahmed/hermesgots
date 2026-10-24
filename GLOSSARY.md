@@ -49,8 +49,16 @@ A derived fact worked out in the app from what a bot's host holds. Gots doesn't 
 _Avoid_: client-side computation
 
 **Session state**:
-What a project session is doing — idle, working, waiting on the user, or closed by the user as resolved or discarded. A session whose subagents are still at work is working, whether or not a turn is live. Composed from the host's run status, its subagents and this device's own marks, not derived from one source.
+What a project session is doing — idle, working, waiting on the user, or closed by the user as resolved or discarded. Waiting is the user's move: an answer, an approval, a plan review, a stall, or a live pull request's checks to watch. A session whose subagents are still at work is working, whether or not a turn is live. Composed from the host's run status, its subagents and this device's own marks, not derived from one source.
 _Avoid_: status, state machine
+
+**Last activity**:
+The most recent event a session has seen — a turn ending, its pull request moving, the session being resolved or discarded — worked out from those moments rather than stored as one.
+_Avoid_: updated at, updatedAt, last update
+
+**Read mark**:
+When a device last had a session's thread rendered on it. It stays on that device, is never synced, and a session with anything newer has not been read there.
+_Avoid_: last seen, read receipt, unread count
 
 **Question**:
 A bot's ask its user must answer before its turn can go on, drawn in place of the composer, and never kept back by work the bot has running.
