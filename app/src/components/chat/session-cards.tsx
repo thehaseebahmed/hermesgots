@@ -145,7 +145,7 @@ export function DiscardedCard() {
 }
 
 /** In a session's thread, an exchange that is neither the agent's nor the user's. */
-function CentredCard({
+function ExchangeCard({
   icon,
   title,
   children,
@@ -155,7 +155,7 @@ function CentredCard({
   children?: ReactNode
 }) {
   return (
-    <Card size="sm" className="mx-auto w-full max-w-md rounded-3xl border bg-muted/40 ring-0">
+    <Card size="sm" className="w-full rounded-3xl border bg-muted/40 ring-0">
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
           {icon}
@@ -257,7 +257,7 @@ export function ClarifyCard({
     }
   }
   return (
-    <CentredCard icon={<MessageCircleQuestionIcon className="size-4" />} title={title}>
+    <ExchangeCard icon={<MessageCircleQuestionIcon className="size-4" />} title={title}>
       {running ? (
         <>
           {asked[0]?.question && <p>{asked[0].question}</p>}
@@ -300,13 +300,13 @@ export function ClarifyCard({
           </div>
         ))
       )}
-    </CentredCard>
+    </ExchangeCard>
   )
 }
 
 export function PlanApprovedCard() {
   return (
-    <CentredCard
+    <ExchangeCard
       icon={<CheckCircle2Icon className="size-4 text-success" />}
       title="Plan approved"
     />

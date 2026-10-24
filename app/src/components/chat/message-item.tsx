@@ -478,13 +478,7 @@ export const MessageItem = memo(function MessageItem({
       key: "approval",
       offset: approval.contentOffset,
       time: approval.requestedAt ?? Infinity,
-      // A card holds the column's width until every card fills the pane (#496), so an answered
-      // approval keeps the width it has today in both of the places it renders.
-      node: (
-        <div className={COLUMN}>
-          <ApprovalCard message={message} />
-        </div>
-      ),
+      node: <ApprovalCard message={message} />,
     })
   for (const steer of message.steers ?? [])
     breaks.push({
@@ -580,9 +574,7 @@ export const MessageItem = memo(function MessageItem({
       })}
       {/* A pending approval lives in the composer slot; one answered with no place in the text follows the reply. */}
       {approval?.resolved && approval.contentOffset === undefined && (
-        <div className={COLUMN}>
-          <ApprovalCard message={message} />
-        </div>
+        <ApprovalCard message={message} />
       )}
     </div>
   )

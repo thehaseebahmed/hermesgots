@@ -59,7 +59,7 @@ function CardShell({
   children: React.ReactNode
 }) {
   const box =
-    "mx-auto flex w-full max-w-md flex-col gap-2 rounded-3xl border bg-muted/40 px-4 py-3 text-left"
+    "flex w-full flex-col gap-2 rounded-3xl border bg-muted/40 px-4 py-3 text-left"
   if (!action)
     return onClick ? (
       <button
@@ -84,7 +84,7 @@ function CardShell({
   return (
     <div
       data-slot={slot}
-      className="mx-auto flex w-full max-w-md flex-col rounded-3xl border bg-muted/40"
+      className="flex w-full flex-col rounded-3xl border bg-muted/40"
     >
       {onClick ? (
         <button
