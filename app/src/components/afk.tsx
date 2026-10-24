@@ -187,8 +187,6 @@ export function AfkPopup({
   // The pickers' list is the bot's own skills, read the way the composer's `/` menu reads them: only
   // what this profile can run now. Asked only where the host can hold a choice at all.
   const skills = useSkills(config, open && (skillsDrawn || libraryOffered))
-  // One rule over the one list (ADR 0044): a skill switched off or one that doesn't load leaves the
-  // pickers too, as it leaves the `/` menu — a project's work can't follow a skill that can't run.
   const runnable = skills.status === "ok" ? runnableSkills(skills.skills) : []
   // The device can turn the switch off from another screen while a sheet is open, or turn the
   // workflow library on, which takes the Prompt row's place.

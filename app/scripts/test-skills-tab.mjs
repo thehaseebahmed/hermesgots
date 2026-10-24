@@ -1,6 +1,3 @@
-// What a Skills row says and how the tab groups it: the rules themselves are pure
-// (`src/lib/skills-tab.ts`), so the cases that read oddly — a skill that doesn't load, a row with no
-// category, a row an older plugin didn't say the origin of — are here rather than in the browser.
 import assert from "node:assert/strict"
 import test from "node:test"
 
@@ -107,8 +104,6 @@ test("a skill's origin is one of the sheet's four lines, and nothing where the r
   assert.equal(skillOrigin(skill({ origin: "hub" })), "Installed from the Hub")
   assert.equal(skillOrigin(skill({ origin: "yours" })), "Yours")
   assert.equal(skillOrigin(skill({ origin: "plugin" })), "From a plugin")
-  // An older plugin's row: the tab files it as the profile's own, but the sheet says nothing rather
-  // than claiming it.
   assert.equal(skillOrigin(skill()), null)
   assert.equal(skillOrigin(skill({ origin: null })), null)
 })
@@ -118,7 +113,6 @@ test("the Host's own setup sentence stands alone, ahead of its status word", () 
   assert.deepEqual(skillSetup({ ...skill(), readiness_status: "setup_needed", setup_note: note }), [
     { label: "Setup", text: note },
   ])
-  // A note already carries the help, so the help is only its own line when there is no note.
   assert.deepEqual(
     skillSetup({ ...skill(), readiness_status: "setup_needed", setup_help: "Add it to .env." }),
     [{ label: "Setup", text: "Add it to .env." }],
@@ -133,8 +127,6 @@ test("only the two origins with a removal behind them can be removed", () => {
   assert.equal(canRemove(skill({ origin: "yours" })), true, "a profile skill through the delete")
   assert.equal(canRemove(skill({ origin: "builtin" })), false, "a built-in is never removed")
   assert.equal(canRemove(skill({ origin: "plugin" })), false, "a plugin's skill is switch-only")
-  // An older plugin's row says nothing about where the skill came from, which is not a thing to
-  // promise a removal over.
   assert.equal(canRemove(skill()), false)
   assert.equal(canRemove(skill({ origin: null })), false)
 })

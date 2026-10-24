@@ -83,12 +83,6 @@ type Connection =
 /** Hermes's default model id; any other advertised id is the profile's name. */
 const UNNAMED_MODEL = "hermes-agent"
 
-/**
- * The feature each gated tab needs its Bot's Host to advertise, by the tab's own name: a tab absent
- * from this table is one every Host draws. The address being read, the tab being shown, the trigger
- * drawn for it and the panel behind it all read this one table, so a tab can't be listed and then
- * missing from the screen.
- */
 const TAB_FEATURES = {
   dictation: DICTATION,
   mcps: MCP_FEATURES.list,
@@ -98,7 +92,6 @@ const TAB_FEATURES = {
 
 type GatedTab = keyof typeof TAB_FEATURES
 
-/** Whether this tab is a gated one, and so has an answer to read before it is drawn. */
 function gated(tab: BotTab): tab is GatedTab {
   return tab in TAB_FEATURES
 }
@@ -225,9 +218,6 @@ export function BotEditor({
   const [models, setModels] = useState<string[]>([])
   const [modelsFailed, setModelsFailed] = useState(false)
   const [connection, setConnection] = useState<Connection>({ state: "idle" })
-  // The Bot's MCP servers, its Dictation, its Coding and its Skills are tabs of their own; each
-  // exists only where the plugin says it carries it, and a Host that hasn't answered yet shows
-  // General rather than flashing a tab away.
   const answers = usePluginFeatureAnswers(profile, TAB_FEATURES)
   const gate = gated(tab) ? answers[tab] : undefined
   const shown: BotTab = gate !== undefined && gate !== "yes" ? "general" : tab

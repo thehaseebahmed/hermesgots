@@ -359,17 +359,12 @@ export async function listModels(config: HermesConfig, signal?: AbortSignal): Pr
   return Array.isArray(body?.data) ? body.data.map((m: { id: string }) => m.id) : []
 }
 
-/** Where a skill came from, as the plugin words it: Hermes's own seeding, a Hub install, one the
- * bot's profile holds, or a Hermes plugin on the host. */
 export type SkillOrigin = "builtin" | "hub" | "yours" | "plugin"
 
 export interface Skill {
   name: string
   description?: string | null
   category?: string | null
-  // The four below are the plugin's richer row. Each is optional because a device row cached before
-  // it, or an older plugin, answers the old three keys — and an absent field has to mean "nothing
-  // known", never "off".
   origin?: SkillOrigin | null
   /** Whether the bot's profile has it switched on; absent where the host couldn't say, which is on. */
   enabled?: boolean | null
@@ -379,7 +374,6 @@ export interface Skill {
   switchable?: boolean | null
 }
 
-/** The rows of one skills answer, dropping anything without a name. */
 function skillsIn(body: unknown): Skill[] {
   const data = (body as { data?: unknown })?.data
   return Array.isArray(data)
@@ -424,13 +418,6 @@ export async function setSkillEnabled(
   return data
 }
 
-/**
- * Takes one of the bot's skills away on its Host (the Gots plugin's `DELETE /skills/<name>`),
- * answering the skills the bot has left. Removal is Hermes's own operation for the skill's origin —
- * a Hub skill's uninstall, a profile skill's delete — so a built-in has no removal at all and a
- * plugin's skill only its switch; both are refused there, as is one Hermes's delete guards refuse
- * (pinned, essential) and a name the profile doesn't have, each in the Host's own sentence.
- */
 export async function removeSkill(
   config: HermesConfig,
   name: string,
@@ -441,16 +428,9 @@ export async function removeSkill(
     headers: headers(config),
     signal: signal ?? AbortSignal.timeout(WRITE_TIMEOUT_MS),
   })
-  // The Host's own answer is what the list becomes, so a row that went and one that moved with it
-  // cannot disagree with what the bot now holds.
   return skillsIn(await response.json())
 }
 
-/**
- * One skill's own sheet, as the Host answers it (the Gots plugin's `GET /skills/<name>`): the row the
- * list carries, then the skill itself. The readiness and setup fields keep Hermes's own names, since
- * they are its words and the sheet shows them as they came.
- */
 export interface SkillView extends Skill {
   /** The skill's SKILL.md exactly as it is on disk — nothing preprocessed, nothing rendered. */
   content: string
@@ -458,20 +438,17 @@ export interface SkillView extends Skill {
   linkedFiles: Record<string, string[]> | null
   /** `available`, `setup_needed` or `unsupported`, where the Host says. */
   readiness_status?: string | null
-  /** What to do about it, in the Host's own prose. */
   setup_help?: string
   gateway_setup_hint?: string
   setup_note?: string
 }
 
-/** One linked file of a skill, read when its sheet asks for that file alone. */
 export interface SkillFile {
   name: string
   path: string
   content: string
 }
 
-/** The linked files the Host listed, or null where it listed none: a group's rows are paths only. */
 function readLinkedFiles(value: unknown): Record<string, string[]> | null {
   if (!value || typeof value !== "object") return null
   const groups: Record<string, string[]> = {}
@@ -483,19 +460,11 @@ function readLinkedFiles(value: unknown): Record<string, string[]> | null {
   return groups
 }
 
-/** One path on the bot's plugin under `/skills`, every segment escaped (`/skills/<name>/file`). */
 function skillPath(config: HermesConfig, ...segments: string[]): string {
   const rest = segments.map((segment) => `/${encodeURIComponent(segment)}`).join("")
   return `${pluginRoot(config.baseUrl)}/skills${rest}`
 }
 
-/**
- * One skill's own sheet: its SKILL.md, its linked files, and the Host's readiness and setup where it
- * has them. It answers for a skill switched off as much as for one that is on, which is the point —
- * the skill whose sheet matters most is the one that isn't working. A read like any other, so it is
- * bounded where the caller names no bound; a name the profile hasn't got is refused there in the
- * Host's own sentence.
- */
 export async function getSkillView(
   config: HermesConfig,
   name: string,
@@ -512,11 +481,6 @@ export async function getSkillView(
   return { ...data, linkedFiles: readLinkedFiles(data.linkedFiles) }
 }
 
-/**
- * One linked file of one of the bot's skills, read on its own when its sheet asks for it (the Gots
- * plugin's `GET /skills/<name>/file?path=…`), so opening a file never reads the directory around it.
- * A path outside the skill is refused there in the Host's own sentence.
- */
 export async function getSkillFile(
   config: HermesConfig,
   name: string,

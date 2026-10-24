@@ -63,9 +63,6 @@ test("a bot the app reads no plugin route for is never loading", () => {
   })
 })
 
-// What the `/` menu and every picker offer: the one rule ADR 0044 states, so a skill switched off or
-// broken leaves all of them at once.
-
 test("a skill the bot can run is offered", () => {
   const rows = [{ name: "plan", enabled: true, loadError: null }]
   assert.deepEqual(runnableSkills(rows), rows)
@@ -91,8 +88,6 @@ test("an empty loadError is no reason to hide a skill", () => {
 })
 
 test("what doesn't load is the host's reason, trimmed, and nothing else", () => {
-  // The tab's health line and the menu are one rule over one list: a reason that is only spaces
-  // says nothing, so it can't hide a row the tab reads as Ready.
   assert.equal(
     loadFailure({ name: "plan", loadError: "  Skill 'plan' is not supported.  " }),
     "Skill 'plan' is not supported.",

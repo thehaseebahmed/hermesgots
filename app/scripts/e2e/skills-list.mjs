@@ -1,14 +1,6 @@
-// A bot's skills, as a tab of its own settings at /settings/bots/<botId>/skills: the profile's own
-// under *Your skills* and the ones a Hermes plugin provides under *From plugins*, each grouped by
-// category with the rows that have none last, every row its name over how it is doing — Ready, Off,
-// or Doesn't load with the Host's own reason — and a switch where the Host says it will honour one.
-// A switch flipped off leaves the row reading Off and the skill gone from the composer's `/` menu,
-// because one list serves them all. Back returns to the bot's General tab. Phone and tablet, light
-// and dark. Geometry is why this is a flow: five tabs and two sections of rows at 390px.
 import { app, assert, flow, mock, pass } from "./lib.mjs"
 
 const LOAD_ERROR = "Doesn't load: SKILL.md names a tool this Hermes doesn't have: `import_legacy`."
-/** The tab's own sections, in the order it draws them: the groups, and each group's rows by name. */
 const SECTIONS = {
   yours: {
     groups: ["core", "docs", "github", "ops", "release", "review", ""],
@@ -24,7 +16,6 @@ const SECTIONS = {
   },
   plugins: { groups: ["plugin"], rows: { plugin: ["gots:ship"] } },
 }
-/** How each row is doing, in the words the tab uses: the Host's reason where it has one. */
 const HEALTH = {
   "code-review": "Ready",
   "code-review-deep": "Ready",
@@ -55,7 +46,6 @@ const run = async ({ page, profileId, shot, until }) => {
     panel().locator(`[data-skill-section="${section}"] [data-skill-group="${group}"] [data-skill]`)
 
   try {
-    // The Bot's editor carries the tab, and it opens a screen of its own.
     await page.goto(`${app}${editor}`)
     const tab = page.getByRole("tab", { name: "Skills", exact: true })
     await tab.waitFor({ timeout: 15_000 })
@@ -64,7 +54,6 @@ const run = async ({ page, profileId, shot, until }) => {
     await page.waitForURL(`**${screen}`, { timeout: 15_000 })
     await page.locator('[data-skill="code-review"]').waitFor({ timeout: 15_000 })
 
-    // The tab is a history entry of its own, so back returns to the Bot's General tab.
     await page.goBack()
     await page.waitForURL(`**${editor}`, { timeout: 15_000 })
     await page.getByRole("button", { name: "Test connection" }).waitFor({ timeout: 15_000 })
@@ -73,8 +62,6 @@ const run = async ({ page, profileId, shot, until }) => {
     await page.waitForURL(`**${screen}`, { timeout: 15_000 })
     await page.locator('[data-skill="code-review"]').waitFor({ timeout: 15_000 })
 
-    // Two sections, each under its own heading, each grouped by category in the tab's own order:
-    // alphabetical with the rows that have none last, and every group's rows by name.
     assert.equal(await panel().count(), 1, "the tab is drawn")
     for (const [section, title] of [
       ["yours", "Your skills"],
@@ -120,7 +107,6 @@ const run = async ({ page, profileId, shot, until }) => {
       "and that group is the last one",
     )
 
-    // Every row says how it is doing under its name, in the Host's own words where it doesn't load.
     for (const [name, health] of Object.entries(HEALTH)) {
       const row = page.locator(`[data-skill="${name}"]`)
       await row.waitFor({ timeout: 10_000 })
@@ -131,8 +117,6 @@ const run = async ({ page, profileId, shot, until }) => {
     }
     await shot("rows")
 
-    // A switch on every row the Host says it will honour, and none on the one it won't: eleven of
-    // the twelve rows, since `identity` is essential.
     assert.equal(
       await panel().getByRole("switch").count(),
       11,
@@ -144,9 +128,6 @@ const run = async ({ page, profileId, shot, until }) => {
       "a skill the Host won't switch has none",
     )
 
-    // Flipping one off is one decision: the row reads Off here, and the composer's `/` menu no
-    // longer offers it — nor any of the skills that can't run: the one that was already off and
-    // the one that doesn't load.
     const plan = page.getByRole("switch", { name: "plan on", exact: true })
     assert.equal(await plan.getAttribute("aria-checked"), "true", "plan starts on")
     await plan.click()
@@ -180,7 +161,6 @@ const run = async ({ page, profileId, shot, until }) => {
       )
     await shot("menu-without-plan")
 
-    // Switched back on, the row reads Ready again: the mock is left as it was found.
     await page.goto(`${app}${screen}`)
     const back = page.getByRole("switch", { name: "plan on", exact: true })
     await back.waitFor({ timeout: 15_000 })
@@ -200,7 +180,6 @@ const run = async ({ page, profileId, shot, until }) => {
 
     assert.deepEqual(errors, [], `no error in the console (${errors.join("; ")})`)
   } finally {
-    // The rest of the suite finds the mock's whole list again, switched on and still there.
     await fetch(`${mock}/__mock/skills`, { method: "POST" })
   }
 }

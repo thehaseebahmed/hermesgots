@@ -20,7 +20,6 @@ import {
   until,
 } from "./component-kit.tsx"
 
-/** A row as the plugin answers it: the three keys, then whatever this host can say about it. */
 type Row = {
   name: string
   description: string
@@ -31,7 +30,6 @@ type Row = {
   loadError?: string
 }
 
-/** The rows one host answers with: every shape a row can have, and enough to prove the order. */
 const ROWS: Row[] = [
   { name: "pr-review", description: "Review a change.", category: "review", origin: "yours" },
   { name: "pr-land", description: "Land a pull request.", category: "review", origin: "hub" },
@@ -47,15 +45,9 @@ const ROWS: Row[] = [
   { name: "plan", description: "Write a plan first.", category: null, origin: "yours" },
   { name: "journal", description: "Keep a note.", category: "", origin: "yours" },
   { name: "gots:notes", description: "Note a session.", category: "plugin", origin: "plugin" },
-  // An older plugin's row: it never said where the skill came from, so it is the profile's own.
   { name: "stray", description: "Came from nowhere.", category: null },
 ]
 
-/**
- * What one skill's sheet answers: the SKILL.md the Host reads, the files it says the skill holds and
- * that one of them's text, and whatever it can say about readiness and setup. `files` is the shared
- * stand-in host's own map and never reaches the app.
- */
 type Sheet = {
   content?: string
   linkedFiles?: Record<string, string[]> | null
@@ -65,7 +57,6 @@ type Sheet = {
   files?: Record<string, string>
 }
 
-/** The sheets the stand-in Host answers, keyed by the skill they belong to. */
 const SHEETS: Record<string, Sheet> = {
   "pr-review": {
     content: "# pr-review\n\nRead the diff, then say what is wrong with it.\n",
@@ -84,13 +75,6 @@ const SHEETS: Record<string, Sheet> = {
   "gots:notes": { content: "# notes\n\nNote the session.\n", linkedFiles: null },
 }
 
-/**
- * A host with the plugin's skills answers: what it advertises, the list it holds, — where it
- * advertises `skills_write` — the one row a switch replaces, — where it advertises `skills_view` —
- * one skill's sheet and one of its files, and — where it advertises `skills_remove` — a removal
- * answering the list it has left. `refuse` is the sentence a write comes back with, as a Host that
- * will not switch or remove answers.
- */
 function host(
   features: string[],
   rows: Row[] = ROWS,
@@ -121,7 +105,6 @@ function host(
       const name = decodeURIComponent(removal[1])
       const index = held.findIndex((one) => one.name === name)
       if (index < 0) return json({ error: { message: `Skill '${name}' isn't on this bot.` } }, 404)
-      // The Host's own answer is the list it has left, so the app replaces its whole list with it.
       held.splice(index, 1)
       return json({ object: "list", data: held.map((row) => ({ ...row })) })
     }
@@ -141,7 +124,6 @@ function host(
       const sheet = sheets[name]
       if (!row || !sheet)
         return json({ error: { message: `Skill '${name}' isn't on this bot.` } }, 404)
-      // The row's own fields first, then what this host can say — and nothing it can't.
       return json({
         object: "skill",
         data: {
@@ -214,7 +196,6 @@ async function seed(
   return server.calls
 }
 
-/** Waits for the tab's own read to land and be drawn. */
 const drawn = () => until(async () => find("[data-skills-tab]") !== null, "the skills list")
 
 test("the editor's Skills tab is the tab's own address", async () => {
@@ -318,7 +299,6 @@ test("a host that can't list skills has no Skills tab, and its address lands on 
   })
 })
 
-/** The rows the switch's tests read: one on, one off, one no Host will switch, a plugin's skill. */
 const SWITCHABLE: Row[] = [
   { name: "pr-review", description: "Review a change.", category: "review", origin: "yours" },
   { name: "deploy", description: "Ship it.", category: "ops", origin: "yours", enabled: false },
@@ -332,7 +312,6 @@ const SWITCHABLE: Row[] = [
   { name: "gots:notes", description: "Note a session.", category: "plugin", origin: "plugin" },
 ]
 
-/** The host's sentence for an essential skill, which is what a refusal comes back with. */
 const ESSENTIAL =
   "Skill 'pr-review' is essential to Hermes (the agent's own operating manual referenced by the " +
   "system prompt), so it can't be switched off."
@@ -373,8 +352,6 @@ test("flipping a switch writes it to the Host, and the row shows what it answere
     )
     await until(async () => /Off/.test(row("pr-review")?.textContent ?? ""), "the row to say Off")
     assert.equal(on(switchIn("pr-review")), false, "the switch shows what the Host now holds")
-    // The one list every consumer reads took the same row, so the `/` menu and the pickers drop a
-    // skill switched off without waiting for a read (ADR 0044).
     const stored = (await db.skills.toArray()).flatMap((cached) => cached.skills)
     assert.equal(stored.find((skill) => skill.name === "pr-review")?.enabled, false)
   })
@@ -400,7 +377,6 @@ test("a write the Host refuses is its own sentence, with the row as it was", asy
   }
 })
 
-/** A row's way into its sheet: the title button the Host's `skills_view` puts there. */
 const title = (name: string) => find(`[data-skill="${name}"] button[aria-haspopup="dialog"]`)
 const sheetBody = () => find("[data-skill-sheet]")
 const sheetTitle = () => find('[role="dialog"] [data-slot="sheet-title"]')?.textContent?.trim()
@@ -415,8 +391,6 @@ test("a row's title opens the skill's own sheet with its SKILL.md on it", async 
     await drawn()
     await click(title("pr-review"))
     await until(async () => sheetBody() !== null, "the skill's sheet")
-    // The sheet is a pop-up of this screen: its header names the skill, and its body is the file as
-    // the Host has it, not a rendering of it.
     assert.equal(sheetTitle(), "pr-review", "the sheet is titled by the skill")
     assert.match(
       find('[aria-label="SKILL.md"]')?.textContent ?? "",
@@ -470,7 +444,6 @@ test("the Host's own readiness and setup are the sheet's next lines", async () =
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
     await drawn()
     await openSheet("deploy")
-    // The Host's sentence, whole: the sheet adds its label and no words of its own.
     assert.equal(
       find('[data-skill-setup="setup"]')?.textContent,
       "Setup Setup needed before using this skill: missing env $DEPLOY_TOKEN.",
@@ -523,7 +496,6 @@ test("a sheet the Host refuses closes on its own sentence", async () => {
   }
 })
 
-/** The rows the removal's tests read: one of each origin, each with a sheet behind it. */
 const ORIGINS: Row[] = [
   { name: "pr-review", description: "Review a change.", category: "review", origin: "yours" },
   { name: "pr-land", description: "Land a pull request.", category: "review", origin: "hub" },
@@ -531,7 +503,6 @@ const ORIGINS: Row[] = [
   { name: "gots:notes", description: "Note a session.", category: "plugin", origin: "plugin" },
 ]
 
-/** A sheet's Remove: the footer button the skill's own origin and the Host's feature put there. */
 const removeButton = () =>
   findAll('[role="dialog"] button').find((one) => one.textContent?.trim() === "Remove") ?? null
 const alert = () => find('[role="alertdialog"]')
@@ -539,7 +510,6 @@ const alertButton = (label: string) =>
   findAll('[role="alertdialog"] button').find((one) => one.textContent?.trim() === label) ?? null
 
 test("a skill's origin decides whether its sheet offers Remove, where the Host can remove", async () => {
-  // A Hub skill and one written on the profile each have a removal behind them (ADR 0044).
   for (const name of ["pr-land", "pr-review"]) {
     await seed("skills-remove-offered", ["skills", "skills_view", "skills_remove"], ORIGINS)
     await mount(editor("/settings/bots/bot-1/skills"), async () => {
@@ -551,8 +521,6 @@ test("a skill's origin decides whether its sheet offers Remove, where the Host c
 })
 
 test("a built-in and a plugin's skill offer no Remove at all", async () => {
-  // A built-in is never removed and a plugin's skill gets the switch and nothing else, so neither
-  // sheet carries the button that would promise it (ADR 0044).
   for (const name of ["lint", "gots:notes"]) {
     await seed("skills-remove-origins", ["skills", "skills_view", "skills_remove"], ORIGINS)
     await mount(editor("/settings/bots/bot-1/skills"), async () => {
@@ -603,8 +571,6 @@ test("confirming removes the skill, and the row leaves every list at once", asyn
       ["/api/plugins/memento/skills/pr-review"],
       "one removal, of the skill the sheet was opened on",
     )
-    // The row goes because the Host answered the list it has left, not because the app crossed one
-    // out: the tab and the `/` menu's own copy are both that answer now (ADR 0044).
     await until(async () => row("pr-review") === null, "the row to leave the tab")
     assert.equal(alert(), null, "both dialogs are closed")
     assert.equal(sheetBody(), null, "the sheet went with the skill")

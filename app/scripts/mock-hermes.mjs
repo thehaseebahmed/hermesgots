@@ -10,14 +10,9 @@
 // The plugin also keeps the chat list (GET and POST /api/plugins/memento/chats, newer record wins) and
 // labels a chat as Gots's on POST /api/plugins/memento/sessions/{id}/label. Its
 // GET /api/plugins/memento/sessions/{id}/context reports a keyed session's latest model call, and
-// GET /api/plugins/memento/skills serves the Skills tab and the composer's `/` menu — every row with
-// what the tab draws: name, description, category, origin, enabled, loadError and switchable — and
-// POST …/skills/{name}/enabled switches one, GET …/skills/{name} opens one's sheet with its SKILL.md,
-// its linked files and the Host's readiness, GET …/skills/{name}/file?path= reads one of those files,
-// and DELETE …/skills/{name} takes one away and answers the list left (MOCK_SKILLS=off is a Hermes
-// whose plugin can't list skills; POST /__mock/skills puts back what a flow switched or removed).
-// GET /api/plugins/memento/mcp serves the Bot's MCP servers the Bot's editor lists in its MCP tab (name, state,
-// source, and the Host's own reason on a failed one; MOCK_MCP=off is a Hermes whose plugin can't).
+// GET /api/plugins/memento/mcp serves the Bot's MCP servers the Bot's editor lists in its MCP tab
+// (name, state, source, and the Host's own reason on a failed one; MOCK_MCP=off is a Hermes whose
+// plugin can't).
 // GET /api/plugins/memento/usage?provider=… serves two windows (Session + Weekly) whose
 // used_percent is MOCK_USAGE_PERCENT (default 94 so the composer banner shows; 0 → no windows), and
 // one Ollama Cloud account's monthly allowance with a purchased-credits detail when the provider is
@@ -908,14 +903,7 @@ const mcpWritableServer = (res, name) => {
   return server
 }
 
-// MOCK_SKILLS=off is a Hermes whose plugin can't offer the Skills screen at all: no route and none of
-// the `skills*` features, the way MOCK_MCP=off leaves the MCP tab out.
 const SKILLS = process.env.MOCK_SKILLS !== "off"
-// The skills a bot's profile holds, as the plugin's list reads them: the seven keys every row carries
-// (name, description, category, origin, enabled, loadError, switchable), across the four origins and
-// both of the tab's sections — a category of its own, an alphabetical neighbour, a row with none, one
-// switched off, one that doesn't load and one the host won't switch. A plugin skill's name is its
-// qualified `namespace:skill`, since that is the name Hermes honours and the one a switch writes.
 const SKILL_ROWS = [
   {
     name: "code-review",
@@ -1026,8 +1014,6 @@ const SKILL_ROWS = [
     switchable: true,
   },
 ]
-// What a flow's writes leave behind, held apart from the rows above so the rest of the suite still
-// finds every one of them: the switch each skill was last given, and the ones taken away.
 const skillSwitched = new Map()
 const skillRemoved = new Set()
 const skillRows = () =>
@@ -1036,9 +1022,6 @@ const skillRows = () =>
     name,
     enabled: skillSwitched.has(name) ? skillSwitched.get(name) : enabled,
   }))
-// The refusals this host answers a removal with, word for word from the plugin's module: an origin
-// with no removal behind it, and a profile skill Hermes's delete guards keep (its pinned sentence,
-// which is the one the screen shows rather than one written for the occasion).
 const skillRemovalRefusal = (row) => {
   if (row.origin === "plugin")
     return `Skill '${row.name}' comes from a plugin, so it can't be removed; switch it off instead.`
@@ -1051,12 +1034,9 @@ const skillRemovalRefusal = (row) => {
     )
   return null
 }
-// The refusal a switch answers with, against the same list the screen drew its switch from.
 const skillEssential = (name) =>
   `Skill '${name}' is essential to Hermes (the agent's own operating manual referenced by the system ` +
   `prompt), so it can't be switched off.`
-// One skill's SKILL.md as the sheet shows it: the file's own bytes, frontmatter and all, as a host
-// would hand them over. The rest are one short page, so every row opens.
 const SKILL_CONTENT = {
   "github-pr-workflow": `---
 name: github-pr-workflow
@@ -1071,8 +1051,6 @@ description: Open, review and land pull requests.
 `,
 }
 const skillContent = (row) => SKILL_CONTENT[row.name] ?? `# ${row.name}\n\n${row.description}\n`
-// The files a skill holds, by group, and their text — the sheet's "linked files" and the one file a
-// tap reads. A skill with none says so by answering null, as a host that can't list them does.
 const SKILL_LINKED = {
   "github-pr-workflow": {
     references: ["references/review-checklist.md"],
@@ -1091,8 +1069,6 @@ git push -u origin HEAD
 gh pr create --draft --fill
 `,
 }
-// How ready a host says a skill is: the status word where it has one, and the sentence a flow reads
-// on a skill that needs setting up (the sheet shows the Host's own words, never a word of its own).
 const SKILL_READINESS = {
   "github-pr-workflow": { readiness_status: "available", setup_needed: false },
   "log-rotation": {
@@ -3728,16 +3704,10 @@ http
       }
       return json(res, 405, { error: { message: "That method isn't routed." } })
     }
-    // The profile's skills, as its Skills tab and the composer's `/` menu read them: the seven keys
-    // every row carries, health and origin included. A row a flow switched reads the flag it wrote
-    // and a removed one is gone, so a later read agrees with the write; POST /__mock/skills puts
-    // both back.
     if (PLUGIN && SKILLS && !profile && url.pathname === "/api/plugins/memento/skills") {
       if (req.method === "GET") return json(res, 200, { object: "list", data: skillRows() })
       return json(res, 405, { error: { message: "That method isn't routed." } })
     }
-    // One skill's switch, answered with its row as the list read shapes it. A name the profile
-    // hasn't got and a row the host says it won't switch each answer the plugin's own refusal.
     const skillEnabled = url.pathname.match(/^\/api\/plugins\/memento\/skills\/([^/]+)\/enabled$/)
     if (PLUGIN && SKILLS && !profile && skillEnabled && req.method === "POST") {
       const name = decodeURIComponent(skillEnabled[1])
@@ -3757,9 +3727,6 @@ http
         data: skillRows().find((one) => one.name === name),
       })
     }
-    // One skill's own sheet: the row it opened from, then the SKILL.md as it is on disk, the files
-    // its host lists by group, and how ready it says the skill is. A switched-off skill opens like
-    // any other — the sheet whose skill matters most is the one that isn't working.
     const skillView = url.pathname.match(/^\/api\/plugins\/memento\/skills\/([^/]+)$/)
     if (PLUGIN && SKILLS && !profile && skillView && req.method === "GET") {
       const name = decodeURIComponent(skillView[1])
@@ -3775,8 +3742,6 @@ http
         },
       })
     }
-    // One linked file of one skill, named by the request's `path` and nothing around it: a path that
-    // leaves the skill and a file the skill hasn't got each answer their own sentence.
     const skillFile = url.pathname.match(/^\/api\/plugins\/memento\/skills\/([^/]+)\/file$/)
     if (PLUGIN && SKILLS && !profile && skillFile && req.method === "GET") {
       const name = decodeURIComponent(skillFile[1])
@@ -3792,10 +3757,6 @@ http
         })
       return json(res, 200, { object: "skill.file", data: { name, path, content: SKILL_FILES[path] } })
     }
-    // Taking one away, the way the plugin's own DELETE does: a Hub skill or one the profile wrote
-    // goes, and the answer is the list left, so the app's list is the mock's own rather than the one
-    // it held with a row crossed out. A plugin's skill, a built-in, a pinned one and a name the bot
-    // hasn't got each answer the sentence Hermes answers with.
     if (PLUGIN && SKILLS && !profile && skillView && req.method === "DELETE") {
       const name = decodeURIComponent(skillView[1])
       const row = skillRows().find((one) => one.name === name)
@@ -5277,9 +5238,6 @@ http
       return json(res, 200, { ok: true })
     }
     if (url.pathname === "/__mock/skills" && req.method === "POST") {
-      // Dev only: puts back every skill a flow switched or removed, so the rest of the suite finds
-      // the mock's whole list as it started — the one change here that isn't undone by the flow
-      // that made it.
       skillSwitched.clear()
       skillRemoved.clear()
       return json(res, 200, { object: "list", data: skillRows() })

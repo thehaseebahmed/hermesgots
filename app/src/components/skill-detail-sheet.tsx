@@ -15,32 +15,12 @@ import {
 } from "@/lib/hermes"
 import { skillOrigin, skillSetup } from "@/lib/skills-tab"
 
-/** How tall a skill's sheet is, held between its SKILL.md and one of its files. */
 const SHEET_HEIGHT = "h-[min(34rem,85dvh)]"
 
-/** The sheet's one read of the skill: still coming, or here. A failure closes the sheet instead. */
 type Reading = { status: "reading" } | { status: "ok"; view: SkillView }
 
-/** One of the skill's files, read on the tap that asked for it: still coming, or here. */
 type OpenFile = { status: "reading"; path: string } | { status: "ok"; file: SkillFile }
 
-/**
- * One skill's own sheet: where it came from, how ready its Host says it is, its SKILL.md as it is on
- * disk, and its linked files — each opened into the same sheet, with the way back in its header
- * (ADR 0045, "the row is a summary; the sheet is the thing itself").
- *
- * It reads that one skill when it opens and nothing else: the SKILL.md and the list of files its Host
- * says it holds, then one file at a time as one is tapped, so opening a file is never a read of the
- * directory around it. Nothing is kept on the device — a sheet is a look at the Host's own copy, and a
- * skill can change between two opens.
- *
- * The SKILL.md is shown as the text it is, in a plain monospaced block rather than through the chat's
- * markdown renderer: this is the file's own bytes, which is what its owner would edit on the host, and
- * the renderer is a lazy chunk the composer loads for replies. A server's Config tab reads its block
- * the same way.
- *
- * `footer` is where a sheet's own actions about the skill sit, under its content.
- */
 export function SkillDetailSheet({
   config,
   name,
@@ -48,18 +28,13 @@ export function SkillDetailSheet({
   footer,
 }: {
   config: Pick<HermesConfig, "baseUrl" | "apiKey">
-  /** The skill to read: the row whose title was tapped. */
   name: string
-  /** Dismissing the sheet, which is also where a read that failed leaves it. */
   onClose: () => void
   footer?: ReactNode
 }) {
   const { baseUrl, apiKey } = config
   const [reading, setReading] = useState<Reading>({ status: "reading" })
   const [file, setFile] = useState<OpenFile | null>(null)
-  // Each file read is a request of its own, and this is the one that counts: bumped by the next tap,
-  // by the way back, and by the sheet closing, so the answer to a read this screen has moved on from
-  // is dropped rather than drawn under the wrong file.
   const opened = useRef(0)
   useEffect(
     () => () => {
@@ -68,8 +43,6 @@ export function SkillDetailSheet({
     [],
   )
 
-  // One read per skill and connection: `onClose` is the tab's own, held still there, so a render of
-  // the tab around this sheet doesn't read the skill again.
   useEffect(() => {
     let live = true
     getSkillView({ baseUrl, apiKey }, name).then(
@@ -78,8 +51,6 @@ export function SkillDetailSheet({
       },
       (error: unknown) => {
         if (!live) return
-        // The Host's own sentence, with nothing half-drawn behind it: a sheet that can't read its
-        // skill closes rather than sitting there empty.
         toast.error(error instanceof Error ? error.message : "Couldn't open that skill.")
         onClose()
       },
@@ -89,7 +60,6 @@ export function SkillDetailSheet({
     }
   }, [baseUrl, apiKey, name, onClose])
 
-  /** Back to the skill itself, which also abandons a file read still in flight. */
   const back = () => {
     opened.current += 1
     setFile(null)
@@ -103,7 +73,6 @@ export function SkillDetailSheet({
       if (request === opened.current) setFile({ status: "ok", file: read })
     } catch (error) {
       if (request !== opened.current) return
-      // Back to the skill's own sheet, so the refusal leaves the one thing that was read on screen.
       setFile(null)
       toast.error(error instanceof Error ? error.message : "Couldn't read that file.")
     }
@@ -138,7 +107,6 @@ export function SkillDetailSheet({
   )
 }
 
-/** A sheet waiting on its one read: the heading it was opened by, and nothing invented under it. */
 function Pending() {
   return (
     <div className="flex flex-1 items-center justify-center pb-8" data-skill-pending>
@@ -147,7 +115,6 @@ function Pending() {
   )
 }
 
-/** One skill, in the order its sheet reads it: origin, readiness, the file, then its files. */
 function SkillBody({
   view,
   onOpenFile,
@@ -202,7 +169,6 @@ function SkillBody({
   )
 }
 
-/** One of the skill's files, read on the tap that asked for it. */
 function SkillFileBody({ file }: { file: OpenFile }) {
   if (file.status === "reading") return <Pending />
   return (
@@ -213,10 +179,6 @@ function SkillFileBody({ file }: { file: OpenFile }) {
   )
 }
 
-/**
- * One text as it is, in a block of its own that scrolls inside the sheet: a SKILL.md runs to pages,
- * and the sheet around it still has to reach its files.
- */
 function SkillText({ text, label }: { text: string; label: string }) {
   return (
     <pre

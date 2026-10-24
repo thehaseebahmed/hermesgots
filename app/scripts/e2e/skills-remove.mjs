@@ -1,9 +1,3 @@
-// A skill can be taken away from its own sheet, where its origin has a removal behind it: a Hub
-// skill's uninstall or one written on the profile's delete. A built-in and a plugin's skill offer
-// none, since Hermes has no removal for either. Remove asks for confirmation first — a cancel sends
-// nothing and leaves the skill where it was — and a confirmed one takes the row away with the tab
-// showing what is left, because the Host's remaining list replaces the whole one. A removal the Host
-// refuses is its own sentence, with the row still there. Phone and tablet, light and dark.
 import { app, assert, flow, mock, pass } from "./lib.mjs"
 
 const REFUSAL =
@@ -40,15 +34,12 @@ const run = async ({ page, profileId, shot, until }) => {
     await row("hub-audit").waitFor({ timeout: 15_000 })
     const listed = await page.locator("[data-skills-tab] [data-skill]").count()
 
-    // A built-in and a plugin's skill have no removal: their own packages and Hermes own them.
     for (const name of ["identity", "gots:ship"]) {
       await open(name)
       assert.equal(await remove().count(), 0, `${name} offers no removal`)
       await close()
     }
 
-    // A Hub skill's sheet offers one, and the confirmation asks first: a cancel sends nothing and
-    // leaves the skill, with its sheet back where it was.
     await open("hub-audit")
     assert.equal(await remove().count(), 1, "a Hub skill's sheet offers a removal")
     await shot("offered")
@@ -62,8 +53,6 @@ const run = async ({ page, profileId, shot, until }) => {
     assert.ok(await sheet().isVisible(), "the skill's sheet comes back")
     assert.ok(await row("hub-audit").isVisible(), "the skill a cancel was asked about is still there")
 
-    // Confirming takes it away, and the tab shows what is left: the Host's own answer, not a row
-    // the app crossed out.
     await remove().click()
     await dialog.getByText("Remove hub-audit?", { exact: true }).waitFor({ timeout: 15_000 })
     await dialog.getByRole("button", { name: "Remove", exact: true }).click()
@@ -77,7 +66,6 @@ const run = async ({ page, profileId, shot, until }) => {
     assert.equal(await sheet().count(), 0, "the sheet went with the skill")
     await shot("removed")
 
-    // A removal the Host refuses is its own sentence in a toast, with the row exactly as it was.
     await open("pinned-notes")
     assert.equal(await remove().count(), 1, "a skill written on the profile offers a removal")
     await remove().click()
@@ -100,14 +88,12 @@ const run = async ({ page, profileId, shot, until }) => {
       "its row is as it was",
     )
 
-    // The filters below are the browser's own logging of the refused request, not the app's error.
     assert.deepEqual(
       errors.filter((text) => !/Failed to load resource|CORS policy/.test(text)),
       [],
       `no error in the console (${errors.join("; ")})`,
     )
   } finally {
-    // The rest of the suite finds the mock's whole list again.
     await fetch(`${mock}/__mock/skills`, { method: "POST" })
   }
 }

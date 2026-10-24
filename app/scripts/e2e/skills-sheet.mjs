@@ -1,10 +1,5 @@
-// A skill's own sheet, opened from its row on the Skills tab: where it came from, how ready its Host
-// says it is, its SKILL.md as it is on disk, and the files it holds — one opened into the same sheet
-// with the way back in its header. Geometry is why this is a flow: a bottom sheet on a phone and the
-// side drawer from a laptop's width, both of which have to stay on screen at their own sizes.
 import { app, assert, flow, pass, settled } from "./lib.mjs"
 
-/** The width the app's pop-ups become side drawers at, which the sheet takes from the same rule. */
 const LAPTOP = 1024
 const CHECKLIST = "references/review-checklist.md"
 const SETUP = "Run `gots setup hub` once to install the Hub's CLI."
@@ -30,8 +25,6 @@ const run = async ({ page, profileId, shot }) => {
   await page.goto(`${app}${screen}`)
   await page.locator('[data-skill="github-pr-workflow"]').waitFor({ timeout: 15_000 })
 
-  // The row's title opens its sheet, and the sheet is a bottom sheet below a laptop's width, the
-  // side drawer from it: on screen, at its own size, at either one.
   await open("github-pr-workflow")
   const box = await page.getByRole("dialog").last().boundingBox()
   const viewport = page.viewportSize()
@@ -65,7 +58,6 @@ const run = async ({ page, profileId, shot }) => {
     assert.ok(width >= 412 && width <= 549, `a drawer's width (${width}px)`)
   }
 
-  // Where it came from and how ready its Host says it is, in the Host's own words.
   assert.equal(
     (await page.locator('[data-skill-origin]').innerText()).trim(),
     "Built in",
@@ -77,7 +69,6 @@ const run = async ({ page, profileId, shot }) => {
     "the readiness line is the Host's own status word",
   )
 
-  // The SKILL.md as it is on disk, in a block of its own rather than through the reply renderer.
   const text = page.getByLabel("SKILL.md", { exact: true })
   await text.waitFor({ timeout: 15_000 })
   const content = await text.innerText()
@@ -85,7 +76,6 @@ const run = async ({ page, profileId, shot }) => {
   assert.match(content, /# Pull requests/, "the whole page, not a rendering of it")
   await shot("sheet")
 
-  // Its files by group, one opened into the same sheet, and the header's way back to the skill.
   await page.locator('[data-skill-files="references"]').waitFor({ timeout: 15_000 })
   assert.equal(
     await page.locator('[data-skill-files="scripts"]').count(),
@@ -109,7 +99,6 @@ const run = async ({ page, profileId, shot }) => {
   await shot("back-to-skill")
   await close()
 
-  // A Hub skill says so, and says what setting it up needs in the Host's own sentence.
   await open("log-rotation")
   assert.equal(
     (await page.locator('[data-skill-origin]').innerText()).trim(),
@@ -129,8 +118,6 @@ const run = async ({ page, profileId, shot }) => {
   await shot("hub")
   await close()
 
-  // A plugin's skill opens too, and a skill the Host has switched off — the one whose sheet matters
-  // most — with its row's own page.
   await open("gots:ship")
   assert.equal(
     (await page.locator('[data-skill-origin]').innerText()).trim(),

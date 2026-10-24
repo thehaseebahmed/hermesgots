@@ -214,8 +214,6 @@ export function Composer({
   // The menu follows the caret: a `/` that begins a word opens it, wherever in the message it is.
   const token = slashToken(value, caret)
   const skills = useSkills(connection, Boolean(token) && !disabled)
-  // Only what the bot can run: a skill switched off or broken is not offered, and the same rule
-  // takes it out of every picker, since they read the one list.
   const skillItems: SlashItem[] =
     skills.status === "ok"
       ? runnableSkills(skills.skills).map((skill) => ({ kind: "skill", ...skill }))
