@@ -7,6 +7,7 @@ import { toast } from "sonner"
 import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { BOTS } from "@/components/bots"
+import { CodingTab } from "@/components/bot-coding-tab"
 import { DictationTab } from "@/components/bot-dictation-tab"
 import {
   DefaultModelSetting,
@@ -44,6 +45,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { AFK_PICKS_FEATURE } from "@/lib/afk-picks"
 import {
   db,
   deleteProfile,
@@ -206,8 +208,15 @@ export function BotEditor({
   const answers = useMcpFeatureAnswers(profile)
   const mcpServers = answers.list === "yes"
   const dictates = usePluginFeature(profile, DICTATION)
+  // Coding — how the bot works when it is left alone — is a tab only where the plugin says it holds
+  // the bot's own AFK numbers: a bot whose host predates them keeps the editor it has.
+  const picks = usePluginFeature(profile, AFK_PICKS_FEATURE)
   const shown: BotTab =
-    (tab === "mcps" && !mcpServers) || (tab === "dictation" && dictates !== "yes") ? "general" : tab
+    (tab === "mcps" && !mcpServers) ||
+    (tab === "dictation" && dictates !== "yes") ||
+    (tab === "coding" && picks !== "yes")
+      ? "general"
+      : tab
 
   // Local drafts so typing isn't fighting the live query; persisted on every change.
   const [name, setName] = useState(profile.name)
@@ -227,7 +236,9 @@ export function BotEditor({
       void navigate(`/settings/bots/${profile.id}`, { replace: true })
     if (tab === "dictation" && dictates === "no")
       void navigate(`/settings/bots/${profile.id}`, { replace: true })
-  }, [tab, answers.list, dictates, navigate, profile.id])
+    if (tab === "coding" && picks === "no")
+      void navigate(`/settings/bots/${profile.id}`, { replace: true })
+  }, [tab, answers.list, dictates, picks, navigate, profile.id])
 
   // One read of the host's model list, for both the tab's own open and General's Test connection.
   const readModels = useCallback(
@@ -304,6 +315,7 @@ export function BotEditor({
         <TabsTrigger value="models">Models</TabsTrigger>
         {dictates === "yes" && <TabsTrigger value="dictation">Dictation</TabsTrigger>}
         {mcpServers && <TabsTrigger value="mcps">MCP</TabsTrigger>}
+        {picks === "yes" && <TabsTrigger value="coding">Coding</TabsTrigger>}
       </TabsList>
 
       <TabsContent value="general">
@@ -525,6 +537,12 @@ export function BotEditor({
       {mcpServers && (
         <TabsContent value="mcps">
           <McpsTab profile={profile} />
+        </TabsContent>
+      )}
+
+      {picks === "yes" && (
+        <TabsContent value="coding">
+          <CodingTab profile={profile} />
         </TabsContent>
       )}
     </Tabs>

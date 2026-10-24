@@ -19,7 +19,8 @@ ten, default five) shared across its projects, so the lower of the two numbers i
 works and a freed place goes to the oldest ready task across the whole bot. The account gets a
 **prompt library** — one per signed-in account, synced and encrypted with the bots — managed inside
 the project's prompt editor, whose picks are copies carried to the host with their source recorded,
-so a prompt row can say "changed in library" and one tap pulls the new text in.
+so a prompt row can show an Update available label, and the editor can offer the entry's newer
+words for Done to write.
 
 ## What this is not
 
@@ -31,7 +32,7 @@ so a prompt row can say "changed in library" and one tap pulls the new text in.
 - **Not presets.** The library starts empty; the host's default prompt stays the host's default
   rather than an entry that drifts with plugin versions.
 - **Not automatic propagation.** Editing an entry does not push into projects that picked it; the
-  prompt row offers the pull where the change is visible.
+  prompt row labels the copy, and the editor offers the newer words to write.
 - **Not a pointer the host resolves.** The host cannot decrypt the account's library, so it never
   reads it — the app carries the text across at pick time.
 - **Not a shared or public library, and not variables.** One account's entries, plain text, no
@@ -49,7 +50,7 @@ so a prompt row can say "changed in library" and one tap pulls the new text in.
    before any GitHub read; effective ceiling is the lower of the project's pick count and the bot's
    remaining budget; a freed place goes to the oldest ready task across the bot; stalled holds
    count; lowering abandons nothing; a held-back sweep records a refusal on each skipped project,
-   and the budget is answered on the project's read so one read draws "Pick budget 3 of 5".
+   and the budget is answered on the project's read (the pop-up draws no usage line for now).
 3. **One flag, one back-compat field**: `afk_picks` gates every new control (amending ADR 0026's
    reserved `afk_parallel`), and the project's read keeps answering `task` as the oldest hold so an
    app already shipped still draws its one Working row.
@@ -138,7 +139,7 @@ plugin/tests -t .`).
 
 ## Risks
 
-- **The hold migration** is where an existing host breaks: a project row written before v39 must
+- **The hold migration** is where an existing host breaks: a project row written before v40 must
   become exactly one hold, or a working claim is lost or doubled — pinned by a test that migrates a
   populated row.
 - **The sweep ordering across projects** is new: the pass now sorts the whole bot's ready tasks, so

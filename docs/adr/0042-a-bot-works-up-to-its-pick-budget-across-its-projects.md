@@ -17,8 +17,9 @@ The rules that follow:
 - **Lowering the budget abandons nothing** — the same rule as lowering a pick count: what runs
   finishes, and the next claim waits for a free place.
 - **A sweep held back by the budget records a refusal** on each project it would have claimed for, in
-  the host's own words, and the budget is answered on the project's own read, so the pop-up's one read
-  draws the usage line ("Pick budget 3 of 5") beside the pick count.
+  the host's own words, and the budget is answered on the project's own read (the numbers stay on the
+  wire), though the pop-up draws no usage line beside the pick count — cut for now; the Coding tab's
+  control and the refusal line stand.
 - **The budget is read once per pass, before any GitHub read** — the bot's holds are counted from its
   own store; a sweep never asks GitHub how full it is.
 
@@ -36,7 +37,7 @@ The rules that follow:
 
 ## Consequences
 
-- Schema v39 in one bump: the holds table and `pick_count` ADR 0025 specifies, a settings row for the
+- Schema v40 in one bump: the holds table and `pick_count` ADR 0025 specifies, a settings row for the
   bot's pick budget, and `prompt_id` on `project_afk` for ADR 0043. ADR 0025 is amended where its
   schema line had gone stale.
 - A bot-level `GET`/`POST /afk` beside the project's own routes — the route ADR 0026 already named —

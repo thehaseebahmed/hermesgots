@@ -95,10 +95,27 @@ class StageCase(unittest.TestCase):
             "p1",
             enabled=1,
             at=int(time.time() * 1000),
-            task=json.dumps({key: TASK.get(key) for key in afk.HELD}),
-            session_id=SESSION,
-            claimed_at=int(time.time()),
         )
+        # The hold is a row of its own since a project could hold several tasks (store v40): the
+        # task this session works, claimed a moment ago, the way a claim writes it.
+        held = afk._held_fields(TASK)
+        plant = sqlite3.connect(db_path(self.home))
+        plant.execute(
+            """INSERT INTO holds
+                   (project_id, task, repo, number, created_at, claimed_at, session_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "p1",
+                json.dumps(held),
+                held["repo"],
+                held["number"],
+                held["created_at"],
+                int(time.time()),
+                SESSION,
+            ),
+        )
+        plant.commit()
+        plant.close()
         # A hold is the process's, kept across the sweep's own looks: no test may inherit another's.
         afk._held.clear()
         self.addCleanup(afk._held.clear)

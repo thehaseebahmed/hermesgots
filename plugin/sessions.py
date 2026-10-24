@@ -184,19 +184,25 @@ def set_pipeline(path: Path, session_id: str, pipeline: Optional[Dict[str, Any]]
     _set_json(path, session_id, "pipeline", pipeline)
 
 
-def pipeline_of(path: Path, session_id: str) -> Any:
-    """The pipeline column alone, for a poll that only asks which stage a task is in.
+def pipelines_of(path: Path, session_ids: Iterable[str]) -> Dict[str, Any]:
+    """Every named session's pipeline column in one read, for a sheet asking about all its holds.
 
-    The whole row isn't read: a five-second poll for a stage has no use for the other columns.
+    One connection for every hold rather than one per hold: a project may hold several tasks, and
+    its pop-up is polled every few seconds.
     """
+    wanted = list(dict.fromkeys(one for one in session_ids if one))
+    if not wanted or not path.exists():
+        return {}
     conn = connect(path)
     try:
-        row = conn.execute(
-            "SELECT pipeline FROM project_sessions WHERE session_id = ?", (session_id,)
-        ).fetchone()
+        marks = ", ".join("?" for _ in wanted)
+        rows = conn.execute(
+            f"SELECT session_id, pipeline FROM project_sessions WHERE session_id IN ({marks})",
+            wanted,
+        ).fetchall()
     finally:
         conn.close()
-    return _json(row[0], None) if row else None
+    return {str(row[0]): _json(row[1], None) for row in rows}
 
 
 def _set_json(path: Path, session_id: str, column: str, value: Any) -> None:

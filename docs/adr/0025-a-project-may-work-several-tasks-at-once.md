@@ -53,8 +53,8 @@ The rules that follow:
 
 ## Consequences
 
-- Schema v39 (v30 when this was written — that number was taken by `project_afk.prompt`, and the
-  store is already past it): a holds table keyed by the task, with `project_afk` losing its `task`, `session_id`,
+- Schema v40 (v30 when this was written — that number was taken by `project_afk.prompt`, 39 by the
+  subagent wake tables, and the store is already past both): a holds table keyed by the task, with `project_afk` losing its `task`, `session_id`,
   `claimed_at`, `stalled` and `stalled_at` columns' meaning (their rows are migrated into it) — and
   gaining `pick_count`. A project's row written before the migration is one hold.
 - **A session finds its project through the holds table**, so `holding_project`, `release_session` and

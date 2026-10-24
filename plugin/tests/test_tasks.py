@@ -20,9 +20,9 @@ from plugin.tests._helpers import issue_row
 from plugin.tasks import (
     CLAIM_LABEL,
     READY_LABEL,
+    frontier,
     groups,
     next_page,
-    next_ready,
     parse_blocked_by,
     read,
 )
@@ -239,21 +239,21 @@ class ReadTests(unittest.TestCase):
         self.serve(
             {"/repos/mock-user/memento/issues?": [issue_row(265, body=body), issue_row(266, body="x")]}
         )
-        task = next_ready(Path(self.home.name), self.folders)
+        task = frontier(Path(self.home.name), self.folders)[0]
         self.assertEqual((task["number"], task["body"]), (265, body))
         self.assertEqual(len(self.paths), 1, "the body comes with the list, not from a second read")
 
-    def test_the_sweeps_read_of_an_empty_frontier_is_none(self) -> None:
+    def test_the_sweeps_read_of_an_empty_frontier_is_empty(self) -> None:
         self.serve({"/repos/mock-user/memento/issues?": []})
-        self.assertIsNone(next_ready(Path(self.home.name), self.folders))
+        self.assertEqual(frontier(Path(self.home.name), self.folders), [])
 
     def test_an_issue_with_no_body_is_an_empty_one(self) -> None:
         self.serve({"/repos/mock-user/memento/issues?": [issue_row(265, body=None)]})
-        self.assertEqual(next_ready(Path(self.home.name), self.folders)["body"], "")
+        self.assertEqual(frontier(Path(self.home.name), self.folders)[0]["body"], "")
 
     def test_a_web_edited_body_reads_with_unix_line_endings(self) -> None:
         self.serve({"/repos/mock-user/memento/issues?": [issue_row(265, body="a\r\n\r\nb\rc")]})
-        self.assertEqual(next_ready(Path(self.home.name), self.folders)["body"], "a\n\nb\nc")
+        self.assertEqual(frontier(Path(self.home.name), self.folders)[0]["body"], "a\n\nb\nc")
 
     def test_a_repository_pages_until_github_offers_no_more(self) -> None:
         first = (

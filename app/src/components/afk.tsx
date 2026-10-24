@@ -10,6 +10,16 @@
  * that is the host's record and not this screen's. With that library off, a plugin that advertises
  * `afk_prompt` draws the Prompt row instead: the project's words for how its work is carried out,
  * opened in its own sheet.
+ *
+ * Where the plugin advertises `afk_picks`, a project works several tasks at once: the Working block
+ * is one row per task it holds — its number, title and stage — over a count of the holds against the
+ * project's pick count, and a pick count of one to five sits under the switch, one write of its own.
+ * A host that advertises none of that keeps the sheet it had: one Working row, drawn from the task
+ * the read names. And where the Prompt was copied from the account's library, the row tells a copy
+ * from an original: an entry rewritten since its pick shows an **Update available** label right
+ * after the row's title — a label, not a control — and the editor offers the entry's newer words as
+ * a line of its own whose button fills the writing surface (Done writes them; the rule is
+ * `prompt-source.ts`'s, the write is the Prompt's own; ADR 0043).
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react"
@@ -17,9 +27,11 @@ import { toast } from "sonner"
 
 import { PromptEditor } from "@/components/afk-prompt"
 import { RowText } from "@/components/settings-chrome"
+import { Segmented } from "@/components/segmented"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { WorkflowEditor } from "@/components/workflow-editor"
 import { WorkflowSheet } from "@/components/workflow-sheet"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -39,6 +51,7 @@ import {
 import { Separator } from "@/components/ui/separator"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
+import { AFK_PICKS_FEATURE, PICK_COUNTS } from "@/lib/afk-picks"
 import { connectionKey } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { useAfkWorkflowsOn } from "@/lib/afk-workflows"
@@ -51,19 +64,25 @@ import {
   getProjectTasks,
   listWorkflows,
   setProjectAfk,
+  setProjectAfkPickCount,
   setProjectAfkPrompt,
   setProjectAfkSkills,
   setProjectAfkWorkflow,
   updateWorkflow,
+  type AfkHold,
   type HermesConfig,
   type ProjectAfk,
   type ProjectIssue,
-  type ProjectTasks,
   type ProjectTask,
+  type ProjectTasks,
+  type PromptWrite,
   type Skill,
 } from "@/lib/hermes"
 import { STAGE_WORDS, type AfkStage } from "@/lib/pipeline"
 import { usePoll } from "@/lib/poll"
+import { promptLine } from "@/lib/prompt-library"
+import { usePromptEntry, usePromptLibraryReady } from "@/lib/prompt-library-store"
+import { promptSourceState } from "@/lib/prompt-source"
 import { noteFailure } from "@/lib/report"
 import { useSkills } from "@/lib/skills"
 import { workflowShape, type Workflow, type WorkflowEntry } from "@/lib/workflow"
@@ -109,20 +128,31 @@ export function AfkPopup({
   onOpenChange,
   config,
   projectId,
+  library,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   config: HermesConfig
   projectId: string
+  /**
+   * The account's prompt library is offered here — signed in, with its vault open on this device.
+   * Where it isn't given, the sheet reads the device's own answer; the component tier hands it over
+   * because it mounts the sheet over a seeded database with no account behind it.
+   */
+  library?: boolean
 }) {
   const [tasks, setTasks] = useState<ProjectTasks>()
   const [error, setError] = useState<string>()
   const [afk, setAfk] = useState<ProjectAfk>()
   const [afkError, setAfkError] = useState<string>()
   const [saving, setSaving] = useState(false)
+  // The pick count the row shows while its write is on its way; nothing else while it is null, so a
+  // refused write falls back to the count the host last answered.
+  const [pickDraft, setPickDraft] = useState<number | null>(null)
+  const [savingPicks, setSavingPicks] = useState(false)
   // The workflow library, read when a sheet needs it: the picker and the editor share one list, so a
   // save in either shows at once.
-  const [library, setLibrary] = useState<WorkflowEntry[]>()
+  const [workflowLibrary, setWorkflowLibrary] = useState<WorkflowEntry[]>()
   const [libraryError, setLibraryError] = useState<string>()
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [editing, setEditing] = useState<WorkflowEntry | "new" | null>(null)
@@ -133,9 +163,23 @@ export function AfkPopup({
   const withSkills = usePluginFeature(config, AFK_SKILLS_FEATURE)
   const libraryOffered = useLibraryOffered(config)
   const withPrompt = usePluginFeature(config, AFK_PROMPT_FEATURE)
+  // One answer for the whole change: the count row, the pills, the Working list and the library
+  // behind the Prompt row are drawn where the host advertises it, and the sheet is the one it
+  // always was where it doesn't. Read once — two reads of one feature is two answers that can
+  // disagree for a frame.
+  const picks = usePluginFeatureOn(config, AFK_PICKS_FEATURE)
   // One row or the other: the library offered is a project running stages, and the Prompt is the
   // words a project running one run is told instead.
   const promptOffered = withPrompt === "yes" && !libraryOffered
+  // The account's own prompt library: the host has to advertise the change, and the account has to
+  // be signed in with its vault open here — the library lives in that store, not on a host.
+  const deviceLibrary = usePromptLibraryReady()
+  const promptLibrary = library ?? deviceLibrary
+  // Where the project's Prompt was copied from the account's library, the row needs the entry to
+  // compare with: read here, so an entry edited or deleted on any device shows without a re-read of
+  // the project. A library this device doesn't hold (signed out, vault locked) finds nothing, and
+  // the copy stands unmarked.
+  const promptEntry = usePromptEntry(afk?.promptId ?? null, picks && promptLibrary)
   // A Prompt names its own skills in its words, so the build and critique pickers are not drawn beside
   // it and their list is not read: it is the workflow's own choice.
   const skillsDrawn = withSkills === "yes" && !promptOffered
@@ -214,7 +258,7 @@ export function AfkPopup({
         .then((next) => {
           if (signal.aborted) return
           setLibraryError(undefined)
-          setLibrary(next)
+          setWorkflowLibrary(next)
         })
         .catch((failure: unknown) => {
           if (signal.aborted) return
@@ -239,25 +283,29 @@ export function AfkPopup({
   // and the task it claims, or why GitHub refused it, lands after the switch's own answer.
   usePoll(readAfk, afk?.on ? AFK_MS : false, [key, projectId], {
     active:
-      open && (switchable === "yes" || withSkills === "yes" || libraryOffered || promptOffered),
+      open &&
+      (switchable === "yes" || withSkills === "yes" || libraryOffered || promptOffered || picks),
     onShow: false,
   })
 
-  // Taking a task moves it out of the frontier, so the list is read again when AFK's answer names
-  // the one it holds — and when it lets one go, which puts it back. Not when the frontier already
-  // has it claimed: that read is the same list, only fresher.
-  const held = afk?.task ? `${afk.task.repo}#${afk.task.number}` : ""
-  const listed =
-    Boolean(held) && Boolean(tasks?.claimed.some((row) => `${row.repo}#${row.number}` === held))
-  const seen = useRef(held)
+  const holds = afk?.holds ?? (afk?.task ? [afk.task] : [])
+  const heldKey = holds.map((one) => `${one.repo}#${one.number}`).join(",")
+  const everyHoldAlreadyClaimed =
+    holds.length > 0 &&
+    holds.every((one) =>
+      Boolean(
+        tasks?.claimed.some((row) => `${row.repo}#${row.number}` === `${one.repo}#${one.number}`),
+      ),
+    )
+  const seen = useRef(heldKey)
   useEffect(() => {
-    if (seen.current === held) return
-    seen.current = held
-    if (listed) return
+    if (seen.current === heldKey) return
+    seen.current = heldKey
+    if (everyHoldAlreadyClaimed) return
     const controller = new AbortController()
     read(controller.signal)
     return () => controller.abort()
-  }, [held, listed, read])
+  }, [heldKey, everyHoldAlreadyClaimed, read])
 
   // Every write shows the host's answer: a write it refused never reads back as done.
   const save = async (write: () => Promise<ProjectAfk>) => {
@@ -271,13 +319,28 @@ export function AfkPopup({
     }
   }
   const turn = (on: boolean) => save(() => setProjectAfk(config, projectId, on))
+  const pickCount = pickDraft ?? afk?.pickCount ?? null
+  const choosePicks = async (count: number) => {
+    if (count === pickCount || savingPicks) return
+    setPickDraft(count)
+    setSavingPicks(true)
+    try {
+      setAfk(await setProjectAfkPickCount(config, projectId, count))
+    } catch (failure) {
+      toast.error(failure instanceof Error ? failure.message : "Couldn't save that pick count.")
+    } finally {
+      setPickDraft(null)
+      setSavingPicks(false)
+    }
+  }
   const choose = (buildSkill: string | null, critiqueSkills: string[]) =>
     save(() => setProjectAfkSkills(config, projectId, buildSkill, critiqueSkills))
   // A refusal is the host's, said here the way the other writes are, and answered to the editor so it
-  // keeps the words typed rather than closing on a fail.
-  const writePrompt = async (prompt: string): Promise<"saved" | "refused"> => {
+  // keeps the words typed rather than closing on a fail. A source rides with the words it describes:
+  // a pick writes both, and a hand edit writes the words alone, which clears the copy on the host.
+  const writePrompt = async (draft: PromptWrite): Promise<"saved" | "refused"> => {
     try {
-      setAfk(await setProjectAfkPrompt(config, projectId, prompt))
+      setAfk(await setProjectAfkPrompt(config, projectId, draft))
       return "saved"
     } catch (failure) {
       toast.error(failure instanceof Error ? failure.message : "Couldn't save that Prompt.")
@@ -300,12 +363,12 @@ export function AfkPopup({
   // including the copy a preset's save forked.
   const writeWorkflow = async (body: Workflow, id: string | null) => {
     const next = id ? await updateWorkflow(config, id, body) : await createWorkflow(config, body)
-    setLibrary(next)
+    setWorkflowLibrary(next)
     setLibraryError(undefined)
   }
   const removeWorkflow = async (entry: WorkflowEntry) => {
     try {
-      setLibrary(await deleteWorkflow(config, entry.id))
+      setWorkflowLibrary(await deleteWorkflow(config, entry.id))
       setEditing(null)
       // The project may have run under it: the host answers what it holds now.
       setAfk(await getProjectAfk(config, projectId))
@@ -323,8 +386,8 @@ export function AfkPopup({
           <PopupTitle>Away From Keyboard</PopupTitle>
         </PopupHeader>
         <div className="flex flex-col gap-6 px-4 pb-4 sm:px-6">
-          {/* The switch and the Prompt it writes for are one list: the row sits under the switch with
-              nothing but its own item padding between them. */}
+          {/* The switch, the Prompt it writes for and the pick count are one list: each row sits
+              under the switch with nothing but its own item padding between them. */}
           <div className="flex flex-col">
             <AfkSwitch
               answer={switchable}
@@ -334,7 +397,20 @@ export function AfkPopup({
               onToggle={(on) => void turn(on)}
             />
             {promptOffered && afk && !afkError && (
-              <PromptRow prompt={afk.prompt} onOpen={() => setPromptOpen(true)} />
+              <PromptRow
+                prompt={afk.prompt}
+                changed={promptSourceState(afk.promptId, afk.prompt, promptEntry) === "changed"}
+                onOpen={() => setPromptOpen(true)}
+              />
+            )}
+            {/* Under the switch, and at the foot of its list where a Prompt row takes the place
+                right under it: how many tasks this project may hold at once. */}
+            {picks && afk && !afkError && pickCount !== null && (
+              <PickCountRow
+                count={pickCount}
+                saving={savingPicks}
+                onChange={(count) => void choosePicks(count)}
+              />
             )}
           </div>
           {libraryOffered && afk && !afkError && (
@@ -353,6 +429,8 @@ export function AfkPopup({
           {afk?.on && (
             <Working
               task={afk.task}
+              holds={picks ? afk.holds : null}
+              pickCount={picks ? pickCount : null}
               stage={afk.stage}
               stageName={afk.stageName}
               refusal={afk.refusal}
@@ -373,7 +451,7 @@ export function AfkPopup({
             <WorkflowSheet
               open={libraryOpen}
               onOpenChange={setLibraryOpen}
-              entries={library}
+              entries={workflowLibrary}
               error={libraryError}
               chosenId={afk?.workflow?.id}
               saving={savingWorkflow}
@@ -406,7 +484,9 @@ export function AfkPopup({
             open={promptOpen}
             onOpenChange={setPromptOpen}
             prompt={afk?.prompt ?? ""}
+            promptId={afk?.promptId ?? null}
             onSave={writePrompt}
+            library={promptOffered && picks && promptLibrary}
           />
         )}
       </PopupContent>
@@ -514,35 +594,89 @@ function WorkflowRow({ workflow, onOpen }: { workflow: WorkflowEntry | null; onO
 }
 
 /**
- * How this project's work is carried out, as the host answers it: the row opens the editor, where the
- * words are written. The host answers its default method where the project wrote none, so an
- * untouched project says what its next run will be told rather than reading as empty.
+ * How many tasks this project's switch may hold at once — its pick count, one to five — kept on the
+ * project's host, titled like the rows above it. The pills are the app's control for a short choice,
+ * which is exactly a count of one to five; nothing is written for the count the row already holds,
+ * and the row keeps what it has until the host's answer lands, so a write the host refused leaves
+ * the count it had on screen.
  */
-function PromptRow({ prompt, onOpen }: { prompt: string; onOpen: () => void }) {
+function PickCountRow({
+  count,
+  saving,
+  onChange,
+}: {
+  /** The project's own count. */
+  count: number
+  /** A write is on its way: the pills are out of reach until its answer lands. */
+  saving: boolean
+  onChange: (count: number) => void
+}) {
   return (
-    <button
-      type="button"
-      data-afk-prompt
-      aria-label="Prompt"
-      onClick={onOpen}
-      className="flex min-h-11 w-full items-center gap-3 rounded-2xl px-1 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
-    >
-      <RowText title="Prompt" subtitle={promptLine(prompt)} />
-      <ChevronRightIcon className="shrink-0 text-muted-foreground" />
-    </button>
+    <div className="flex flex-col gap-2 px-1 pt-2" data-afk-picks data-pick-count={count}>
+      <h3 className="text-base">Pick count</h3>
+      <Segmented
+        label="Pick count"
+        options={PICK_COUNTS.map((each) => ({ id: each, label: String(each) }))}
+        value={count}
+        onChange={onChange}
+        disabled={saving}
+      />
+    </div>
   )
 }
 
 /**
- * The row's own line for a Prompt: markdown's block marks taken off and its lines run together, since
- * the row names the instruction rather than drawing it — the editor is where it reads as written.
+ * How this project's work is carried out, as the host answers it: the row opens the editor, where
+ * the words are written. The host answers its default method where the project wrote none, so an
+ * untouched project says what its next run will be told rather than reading as empty.
+ *
+ * Where the words were copied from the account's library and that entry has been rewritten since, an
+ * **Update available** label sits right after the row's title, on the title's own line. It is a
+ * label and not a control — the row's whole tap still opens the editor, where the entry's newer
+ * words wait behind their own line's button (ADR 0043). Nothing else carries the label — an
+ * original, a copy whose entry was deleted, and words the user typed are all silent, because none of
+ * them is stale. The row's own tap is the transparent button laid over the whole row, so the title
+ * line is free to end with a label that isn't a target of its own.
  */
-function promptLine(prompt: string) {
-  return prompt
-    .split("\n")
-    .map((line) => line.replace(/^\s*(#{1,6}|[-*+]|\d+\.)\s+/, "").trim())
-    .filter(Boolean)
-    .join(" · ")
+function PromptRow({
+  prompt,
+  changed,
+  onOpen,
+}: {
+  prompt: string
+  /** The entry it was copied from now says other words: the label is drawn. */
+  changed: boolean
+  onOpen: () => void
+}) {
+  return (
+    <div
+      className="relative flex min-h-11 items-center rounded-2xl px-1 hover:bg-muted"
+      data-afk-prompt
+    >
+      <span className="flex min-w-0 flex-1 items-center gap-3 px-1">
+        <RowText
+          title={
+            <span className="flex items-center gap-1.5">
+              Prompt
+              {changed && (
+                <Badge data-afk-prompt-changed className="min-h-6" variant="secondary">
+                  Update available
+                </Badge>
+              )}
+            </span>
+          }
+          subtitle={promptLine(prompt)}
+        />
+        <ChevronRightIcon className="shrink-0 text-muted-foreground" />
+      </span>
+      <button
+        type="button"
+        aria-label="Prompt"
+        onClick={onOpen}
+        className="absolute inset-0 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      />
+    </div>
+  )
 }
 
 /**
@@ -698,28 +832,48 @@ function AfkSkills({
 }
 
 /**
- * What the sweep is doing: the task AFK holds, the stage it is in, and why GitHub last refused it.
- * None of them is the switch's own reason — a refusal leaves the switch on — so they read as the
- * sweep's answer rather than as the project's, and each simply disappears when there is nothing to
- * say. A project that isn't left to work says nothing: the task it holds is released with the claim
- * (#270), not here.
+ * What the sweep is doing: the tasks AFK holds, the stage each is in, how many of its places are
+ * taken, and why GitHub last refused it. None of them is the switch's own reason — a refusal leaves
+ * the switch on — so they read as the sweep's answer rather than as the project's, and each simply
+ * disappears when there is nothing to say. A project that isn't left to work says nothing: the tasks
+ * it holds are released with the claim (#270), not here.
+ *
+ * Where the host holds several tasks, its answer names them all and the block is a row each, oldest
+ * first, over the count of them against the project's pick count. A host that names none of that
+ * holds at most the one task, and keeps the single row the app has always drawn.
  */
 function Working({
   task,
+  holds,
+  pickCount,
   stage,
   stageName,
   refusal,
   manyRepos,
 }: {
   task: ProjectIssue | null | undefined
+  /** Every task it holds, oldest first; null where the host answers no list. */
+  holds: AfkHold[] | null | undefined
+  /** How many it may hold at once, drawn over the list; null where the host answers none. */
+  pickCount: number | null | undefined
   stage: AfkStage | null | undefined
   /** The stage's own name from the task's snapshot, so a workflow's words show rather than ours. */
   stageName: string | null | undefined
   refusal: string | null | undefined
   manyRepos: boolean
 }) {
-  if (!task && !refusal) return null
-  const label = stageName ?? (stage ? STAGE_LABELS[stage] : null)
+  const held = holds && holds.length > 0 ? holds : null
+  const rows: ({ hold: AfkHold; kind: "hold" } | { hold: AfkHold; kind: "task" })[] = held
+    ? held.map((hold) => ({ hold, kind: "hold" as const }))
+    : task
+      ? [
+          {
+            hold: { ...task, stage: stage ?? null, stageName: stageName ?? null, stalled: null },
+            kind: "task" as const,
+          },
+        ]
+      : []
+  if (!refusal && !rows.length) return null
   return (
     <div className="flex flex-col gap-3">
       {refusal && (
@@ -727,14 +881,44 @@ function Working({
           {refusal}
         </p>
       )}
-      {task && (
+      {rows.length > 0 && (
         <section aria-label="Working" data-working data-stage={stage ?? undefined}>
           <h3 className="px-1 pb-1 text-sm text-muted-foreground">Working</h3>
-          <TaskLink task={task} label={label} note={manyRepos ? task.repo : undefined} />
+          {/* Only a host that answered a list is counted: one task against a count of one is a
+              sentence about nothing. */}
+          {held && typeof pickCount === "number" && (
+            <p
+              data-holds={held.length}
+              data-pick-count={pickCount}
+              className="px-1 pb-1 text-sm text-muted-foreground"
+            >
+              {`${held.length} of ${pickCount} held`}
+            </p>
+          )}
+          <ul>
+            {rows.map(({ hold, kind }) => (
+              <li
+                key={`${hold.repo}#${hold.number}`}
+                data-hold={kind === "hold" ? hold.number : undefined}
+                data-stage={kind === "hold" ? (hold.stage ?? undefined) : undefined}
+              >
+                <TaskLink
+                  task={hold}
+                  label={holdRowLabel(hold)}
+                  note={manyRepos ? hold.repo : undefined}
+                />
+              </li>
+            ))}
+          </ul>
         </section>
       )}
     </div>
   )
+}
+
+/** One hold's stage as its row prefixes the title: the workflow's own word first, then ours. */
+function holdRowLabel(hold: AfkHold) {
+  return hold.stageName ?? (hold.stage ? STAGE_LABELS[hold.stage] : null)
 }
 
 /** The groups that hold something, or the one line that says why none does. */

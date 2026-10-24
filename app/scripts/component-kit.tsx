@@ -114,9 +114,10 @@ export function mountAfk(
   config: { baseUrl: string; apiKey?: string },
   projectId: string,
   body: () => Promise<void>,
+  { library }: { library?: boolean } = {},
 ) {
   return mount(
-    <AfkPopup open onOpenChange={() => {}} config={config} projectId={projectId} />,
+    <AfkPopup open onOpenChange={() => {}} config={config} projectId={projectId} library={library} />,
     body,
   )
 }
@@ -357,6 +358,37 @@ export const mediaReads = (asked: HostAsk[]) =>
     .filter((one) => one.path.endsWith("/plugins/memento/media"))
     .map((one) => new URLSearchParams(one.search).get("path") ?? "")
 
+/** One hold as a test gives it: number and title, and the stage its session is in. */
+export type HoldRow = {
+  number: number
+  repo?: string
+  title?: string
+  stage?: string | null
+  stage_name?: string | null
+  stalled?: string | null
+}
+
+/**
+ * The account's prompt library as this device holds it, cleared and then seeded: entries go in with
+ * their own clock, and no `prompt:` tombstone from an earlier test is left behind to fight them.
+ */
+export async function seedPrompts(
+  entries: { id?: string; name: string; tags?: string[]; body: string; updatedAt?: number }[],
+) {
+  await db.prompts.clear()
+  const tombstones = await db.tombstones.where("id").startsWith("prompt:").toArray()
+  await db.tombstones.bulkDelete(tombstones.map((one) => one.id))
+  await db.prompts.bulkPut(
+    entries.map((entry, index) => ({
+      id: entry.id ?? `e-${index + 1}`,
+      name: entry.name,
+      tags: entry.tags ?? [],
+      body: entry.body,
+      updatedAt: entry.updatedAt ?? index + 1,
+    })),
+  )
+}
+
 export function afkHost({
   projectId = "project-1",
   features = ["afk", "afk_switch", "afk_workflows", "afk_pipeline", "afk_prompt"],
@@ -364,7 +396,14 @@ export function afkHost({
   stage = "build",
   stageName = "Build",
   prompt = DEFAULT_AFK_PROMPT,
+  promptId = null,
   promptRefusal = null,
+  holds = null,
+  pickCount = null,
+  pickRefusal = null,
+  pickBudget = null,
+  holdsHeld = null,
+  budgetRefusal = null,
 }: {
   projectId?: string
   features?: string[]
@@ -372,7 +411,22 @@ export function afkHost({
   stage?: string | null
   stageName?: string | null
   prompt?: string
+  /** The library entry the host says the Prompt was copied from; null is words typed here. */
+  promptId?: string | null
   promptRefusal?: string | null
+  /** The holds the host answers, oldest first; null is a host from before the pick count. */
+  holds?: HoldRow[] | null
+  /** The project's pick count; null is a host that answers none. */
+  pickCount?: number | null
+  /** What a pick count write is refused with, where the host refuses one. */
+  pickRefusal?: string | null
+  /** The bot's pick budget, 1–10, on both the project's read and the bot's own; null is a host from
+   * before the budget, which answers its own default on the bot-level route. */
+  pickBudget?: number | null
+  /** How many tasks the bot holds now across its projects; null is a host that answers no count. */
+  holdsHeld?: number | null
+  /** What a pick budget write is refused with, where the host refuses one. */
+  budgetRefusal?: string | null
 } = {}) {
   const library: Record<string, unknown>[] = [
     {
@@ -398,19 +452,54 @@ export function afkHost({
   const calls: Call[] = []
   let chosen: string | null = workflow
   let words = prompt
+  // The entry the Prompt was copied from: a pick names one, a hand edit names none.
+  let source = promptId
+  // The holds as the wire spells them: the oldest first, each with the stage its session is in.
+  const held =
+    holds === null
+      ? null
+      : holds.map((hold) => ({
+          repo: hold.repo ?? "owner/repo",
+          number: hold.number,
+          title: hold.title ?? `Task ${hold.number}`,
+          url: `https://x/${hold.number}`,
+          created_at: "2026-10-01T00:00:00Z",
+          stage: hold.stage ?? null,
+          stage_name: hold.stage_name ?? null,
+          stalled: hold.stalled ?? null,
+        }))
+  let count = pickCount
+  // The bot's own budget: what the host holds, the host's default where it holds none, and what a
+  // write leaves it at.
+  let budget = pickBudget
+  const botAnswer = () => ({
+    object: "memento.afk.bot",
+    pick_budget: budget ?? 5,
+    holds_held: holdsHeld ?? 0,
+  })
   const answer = () => ({
     object: "memento.afk",
     project_id: projectId,
     on: true,
     reason: null,
-    task: { repo: "owner/repo", number: 338, title: "Pick a workflow", url: "https://x/338" },
+    // The oldest hold is the task a host from before the pick count would name on its own.
+    task:
+      held === null
+        ? { repo: "owner/repo", number: 338, title: "Pick a workflow", url: "https://x/338" }
+        : (held[0] ?? null),
+    ...(held === null ? {} : { holds: held }),
+    ...(count === null ? {} : { pick_count: count }),
+    ...(budget === null ? {} : { pick_budget: budget }),
+    ...(holdsHeld === null ? {} : { holds_held: holdsHeld }),
     refusal: null,
     build_skill: null,
     critique_skills: [],
-    stage,
-    stage_name: stageName,
+    stage: held === null ? stage : (held[0]?.stage ?? null),
+    stage_name: held === null ? stageName : (held[0]?.stage_name ?? null),
     workflow: library.find((entry) => entry.id === chosen),
     prompt: words,
+    // Null where the words are the project's own: a host from before the library answers none.
+    prompt_id: source,
   })
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input))
@@ -418,6 +507,14 @@ export function afkHost({
     const body = init?.body ? JSON.parse(String(init.body)) : null
     calls.push({ method, path: url.pathname, body })
     if (url.pathname.endsWith("/plugins/memento/info")) return json({ name: "memento", features })
+    // The bot's own AFK route, beside the project's: no project segment, one write of its own.
+    if (url.pathname.endsWith("/plugins/memento/afk")) {
+      if (method === "POST" && typeof body?.pick_budget === "number") {
+        if (budgetRefusal) return json({ error: { message: budgetRefusal } }, 400)
+        budget = body.pick_budget
+      }
+      return json(botAnswer())
+    }
     if (url.pathname.endsWith("/plugins/memento/skills"))
       return json({
         object: "list",
@@ -447,6 +544,13 @@ export function afkHost({
         // A Prompt and a pick are one choice between them, as the plugin writes them.
         words = body.prompt.trim() || DEFAULT_AFK_PROMPT
         chosen = null
+        // The source rides the words: a pick names the entry it copied, and a plain write clears it.
+        source = typeof body.prompt_id === "string" ? body.prompt_id : null
+      }
+      // A pick count is a write of its own, and one the host refuses writes nothing.
+      if (typeof body?.pick_count === "number") {
+        if (pickRefusal) return json({ error: { message: pickRefusal } }, 400)
+        count = body.pick_count
       }
       return json(answer())
     }
@@ -454,5 +558,10 @@ export function afkHost({
       return json({ repos: [], ready: [], claimed: [], blocked: [] })
     return json({ error: { message: `No route for ${method} ${url.pathname}` } }, 404)
   }
-  return { calls, fetch, library }
+  /**
+   * What the host holds now: the workflow a Prompt's write cleared, the words it answered, and the
+   * entry those words were copied from (null for the project's own).
+   */
+  const state = () => ({ chosen, words, source })
+  return { calls, fetch, library, state }
 }

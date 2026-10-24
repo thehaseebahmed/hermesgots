@@ -3,12 +3,66 @@
 // it, Done writing it back to the host, which the next read answers. Geometry is why this is a flow:
 // the row's place in the switch's list, the sheet's height and the drawer's edge — none of which a
 // DOM without layout can measure.
-import { app, assert, flow, makeProject, openAfk, pass, settled } from "./lib.mjs"
+//
+// The account's prompt library is here too, because it needs a signed-in account with its vault
+// open on the device and a browser that can hold one: the words are saved to the library by name,
+// picked in ANOTHER project as a copy that remembers the entry it came from, and — once the entry is
+// rewritten on the library's side — the row wears an `Update available` label, and the editor
+// offers the entry's newer words behind a line of its own, whose Done writes them with their entry.
+import {
+  accountUser,
+  afkRead,
+  app,
+  assert,
+  flow,
+  makeProject,
+  openAfk,
+  pass,
+  seedVault,
+  settled,
+} from "./lib.mjs"
 
 const DEFAULT_PROMPT = "Work in checkpoints: small slices of the issue, one at a time."
 const MINE = "# Mine\n\n- Read the issue first.\n- Run the repo's own gates."
+const EDITED = "# Mine, as the library has it now\n\n- Read the issue first.\n- Run every gate."
+const ENTRY = "House rules"
 /** The width the app's pop-ups become side drawers at, which the editor takes from the same rule. */
 const LAPTOP = 1024
+
+/**
+ * The account's library is sealed with the vault's key, so a device that never opened the vault
+ * isn't offered it. This is that device: a key seeded the way the recovery-code flows seed one, and
+ * the sync documents answered, sealed with the same key, as an account with nothing in it yet. The
+ * app reads those documents as it starts, and a 404 the stub would otherwise answer is a console
+ * error the flow can't tell from the app's own.
+ */
+const openVault = async (page, profileId) => {
+  await seedVault(page, accountUser.id)
+  const docs = ["bots", "prompts", "settings", `chats/${profileId}`]
+  const sealed = await page.evaluate(
+    async ({ userId, docs }) => {
+      const vault = await import("/src/lib/vault.ts")
+      const { db } = await import("/src/lib/db.ts")
+      const { key } = await db.vault.get("key")
+      const answers = {}
+      for (const doc of docs) answers[doc] = await vault.seal(key, {}, `memento:${userId}:${doc}`)
+      return answers
+    },
+    { userId: accountUser.id, docs },
+  )
+  const context = page.context()
+  await context.route("**/.netlify/functions/sync?**", async (route) => {
+    const request = route.request()
+    const doc = new URL(request.url()).searchParams.get("doc")
+    // A write, and the vault's own document, are the helper's stub's to answer.
+    if (request.method() !== "GET" || !sealed[doc]) return route.fallback()
+    return route.fulfill({ json: { data: sealed[doc], etag: "v1" } })
+  })
+  await context.route("**/.netlify/functions/registry?**", (route) =>
+    route.fulfill({ json: { bots: {} } }),
+  )
+  await page.reload()
+}
 
 const run = async ({ page, profileId, shot, until }) => {
   const errors = []
@@ -16,20 +70,27 @@ const run = async ({ page, profileId, shot, until }) => {
   page.on("console", (message) => {
     if (message.type() === "error") errors.push(message.text())
   })
-  const screen = `${app}/projects/${profileId}/${await makeProject(until, "AFK Prompt")}`
+  await openVault(page, profileId)
+
+  const projectId = await makeProject(until, "AFK Prompt")
+  const screen = `${app}/projects/${profileId}/${projectId}`
 
   // The shared opener, then the sheet's slide-in let alone: a box read mid-animation is a moving
   // target, and every measurement here is a box.
-  const openPrompt = async () => {
-    await openAfk(page, screen)
+  const openPrompt = async (where) => {
+    await openAfk(page, where)
     const row = page.locator("[data-afk-prompt]")
     await row.waitFor({ timeout: 15_000 })
     await settled(page)
     return row
   }
 
-  const row = await openPrompt()
-  assert.match(await row.innerText(), /Work in checkpoints/, "the row reads the host's default Prompt")
+  const row = await openPrompt(screen)
+  assert.match(
+    await row.innerText(),
+    /Work in checkpoints/,
+    "the row reads the host's default Prompt",
+  )
   assert.equal(await page.locator("[data-afk-workflow]").count(), 0, "no Workflow row with it off")
   assert.equal(
     await page.locator("[data-afk-skills]").count(),
@@ -47,14 +108,20 @@ const run = async ({ page, profileId, shot, until }) => {
   )
   await shot("row")
 
+  // The words the project's runs are told, written by hand: a plain write, so the row never reads
+  // as a copy of anything (`prompt-source.ts`).
   await page.locator('button[aria-label="Prompt"]').click()
   const field = page.locator('textarea[aria-label="Prompt"]')
   await field.waitFor({ timeout: 15_000 })
   assert.equal(await field.inputValue(), DEFAULT_PROMPT, "the field holds the host's words")
+  // The library is offered here, which is the account's answer, not the host's: signed in with the
+  // vault open, this device holds the account's own entries.
+  const doors = page.locator("[data-prompt-library-actions]")
+  await doors.waitFor({ timeout: 15_000 })
   assert.equal(
-    await page.getByRole("button", { name: "Preview" }).count(),
-    0,
-    "there is nothing to preview: the Prompt is written",
+    await page.getByRole("button", { name: "Choose from library" }).count(),
+    1,
+    "the editor offers the library it can reach",
   )
 
   // A bottom sheet below a laptop's width, the side drawer from it, and either way room to write.
@@ -105,13 +172,168 @@ const run = async ({ page, profileId, shot, until }) => {
     15_000,
     "the row to read the Prompt the host took",
   )
+  const typed = await afkRead(projectId)
+  assert.equal(typed.prompt, MINE, "the host kept the words as they were written")
+  assert.equal(typed.prompt_id, null, "and a Prompt typed by hand names no library entry")
   await shot("saved")
 
-  const again = await openPrompt()
+  // The same words go to the account's library, by name and tags: a copy on the device, which later
+  // reads say came from this entry.
+  await page.locator('button[aria-label="Prompt"]').click()
+  await field.waitFor({ timeout: 15_000 })
+  await page.getByRole("button", { name: "Save to library" }).click()
+  const entrySheet = page.locator("[data-prompt-entry]")
+  await entrySheet.waitFor({ timeout: 15_000 })
+  assert.equal(
+    await entrySheet.locator('textarea[aria-label="Body"]').inputValue(),
+    MINE,
+    "the entry starts from the words on screen",
+  )
+  await entrySheet.locator('input[aria-label="Name"]').fill(ENTRY)
+  await entrySheet.locator('input[aria-label="Tags"]').fill("afk, quality")
+  await entrySheet.getByRole("button", { name: "Save" }).click()
+  await entrySheet.waitFor({ state: "detached", timeout: 15_000 })
+  const entries = await page.evaluate(async () =>
+    (await import("/src/lib/db.ts")).db.prompts.toArray(),
+  )
+  assert.deepEqual(
+    entries.map(({ name, tags, body }) => ({ name, tags, body })),
+    [{ name: ENTRY, tags: ["afk", "quality"], body: MINE }],
+    "the library keeps the entry under its name, tags and words",
+  )
+  await shot("library")
+
+  // Elsewhere: another project of the same bot, where the account's library is the same one. Its
+  // own Prompt is the host's default — nothing of the first project's words follow it — and picking
+  // the entry writes the words and the entry they came from in one go.
+  const elsewhereId = await makeProject(until, "AFK Prompt pick")
+  const elsewhere = `${app}/projects/${profileId}/${elsewhereId}`
+  const other = await openPrompt(elsewhere)
+  assert.match(await other.innerText(), /Work in checkpoints/, "the other project's own Prompt")
+  await page.locator('button[aria-label="Prompt"]').click()
+  await field.waitFor({ timeout: 15_000 })
+  assert.equal(await field.inputValue(), DEFAULT_PROMPT, "reading the host's default, not a copy")
+  await page.getByRole("button", { name: "Choose from library" }).click()
+  const library = page.locator("[data-prompt-library]")
+  await library.waitFor({ timeout: 15_000 })
+  const use = library.getByRole("button", { name: `Use ${ENTRY}` })
+  await use.waitFor({ timeout: 15_000 })
+  assert.match(await library.innerText(), /quality/, "the entry keeps the tags it was saved with")
+  await use.click()
+  await library.waitFor({ state: "detached", timeout: 15_000 })
+  await until(
+    async () => (await afkRead(elsewhereId)).prompt_id !== null,
+    15_000,
+    "the host to take the words and their source",
+  )
+  const picked = await afkRead(elsewhereId)
+  assert.equal(picked.prompt, MINE, "the pick wrote the entry's words")
+  assert.match(picked.prompt_id, /^e-/, "and the entry they were copied from")
+  await page.getByRole("button", { name: "Done" }).click()
+  await field.waitFor({ state: "detached", timeout: 15_000 })
+  await until(
+    async () =>
+      (await page.locator("[data-afk-prompt]").innerText()).includes("Read the issue first"),
+    15_000,
+    "the row to read the copy",
+  )
+  assert.equal(
+    await page.locator("[data-afk-prompt-changed]").count(),
+    0,
+    "a copy that matches its entry is not marked",
+  )
+  // The project the words were typed in was never a copy, so it isn't marked either.
+  const first = await afkRead(projectId)
+  assert.equal(first.prompt_id, null, "the first project's own words never named an entry")
+  await shot("picked")
+
+  // The entry is rewritten on the library's side — its words, not the project's — and the row says
+  // so, since the copy is now stale.
+  await page.locator('button[aria-label="Prompt"]').click()
+  await field.waitFor({ timeout: 15_000 })
+  await page.getByRole("button", { name: "Choose from library" }).click()
+  await library.waitFor({ timeout: 15_000 })
+  await library.getByRole("button", { name: `Edit ${ENTRY}` }).click()
+  await entrySheet.waitFor({ timeout: 15_000 })
+  await entrySheet.locator('textarea[aria-label="Body"]').fill(EDITED)
+  await entrySheet.getByRole("button", { name: "Save" }).click()
+  await entrySheet.waitFor({ state: "detached", timeout: 15_000 })
+  await page.getByRole("button", { name: "Done" }).click()
+  await field.waitFor({ state: "detached", timeout: 15_000 })
+  const marker = page.locator("[data-afk-prompt-changed]")
+  await marker.waitFor({ timeout: 15_000 })
+  assert.equal(
+    (await marker.innerText()).trim(),
+    "Update available",
+    "the label right after the title names the entry that has moved on",
+  )
   assert.match(
-    await again.innerText(),
+    await page.locator("[data-afk-prompt]").innerText(),
     /Read the issue first/,
+    "while still reading the words the project holds",
+  )
+  await shot("changed")
+
+  // The label is not a control: the row's tap still opens the editor, where the entry's newer
+  // words wait behind their own line. Filling writes nothing — Done writes the words with their
+  // entry, and the label goes with them.
+  await page.locator('button[aria-label="Prompt"]').click()
+  await field.waitFor({ timeout: 15_000 })
+  const update = page.locator("[data-prompt-update]")
+  await update.waitFor({ timeout: 15_000 })
+  assert.match(
+    await update.innerText(),
+    /The library's entry has newer words/,
+    "the editor offering the entry's newer words",
+  )
+  await shot("update-line")
+  await update.getByRole("button", { name: "Update" }).click()
+  assert.equal(
+    await field.inputValue(),
+    EDITED,
+    "the offer fills the writing surface with the entry's current words",
+  )
+  await update.waitFor({ state: "detached", timeout: 15_000 })
+  const before = await afkRead(elsewhereId)
+  assert.notEqual(before.prompt, EDITED, "filling alone writes nothing")
+  await page.getByRole("button", { name: "Done" }).click()
+  await field.waitFor({ state: "detached", timeout: 15_000 })
+  await until(
+    async () => (await afkRead(elsewhereId)).prompt === EDITED,
+    15_000,
+    "the update to land",
+  )
+  await marker.waitFor({ state: "detached", timeout: 15_000 })
+  const updated = await afkRead(elsewhereId)
+  assert.equal(
+    updated.prompt_id,
+    picked.prompt_id,
+    "the updated words keep the entry they came from",
+  )
+  await until(
+    async () =>
+      (await page.locator("[data-afk-prompt]").innerText()).includes("as the library has it now"),
+    15_000,
+    "the row to read what was updated",
+  )
+  assert.equal(
+    await page.locator("[data-afk-prompt-changed]").count(),
+    0,
+    "and the label to be gone",
+  )
+  await shot("updated")
+
+  // What a reload reads is the host's answer: the updated words, still marked as the entry's copy.
+  await openPrompt(elsewhere)
+  assert.match(
+    await page.locator("[data-afk-prompt]").innerText(),
+    /as the library has it now/,
     "a reload reads the Prompt the host kept",
+  )
+  assert.equal(
+    await page.locator("[data-afk-prompt-changed]").count(),
+    0,
+    "and a copy that matches its entry is still unlabelled",
   )
 
   assert.deepEqual(errors, [], `no console error (${errors.join("; ")})`)
@@ -123,9 +345,10 @@ for (const width of [390, 768, LAPTOP]) {
     await flow(`afk-prompt-${look}`, run, {
       viewport: { width, height: width < 768 ? 844 : 768 },
       dark,
+      account: true,
     })
   }
 }
 pass(
-  "a project's pop-up draws the Prompt its runs are told — the host's default included, with none of the workflow's skill pickers — and opens one writing surface for it in a bottom sheet, the side drawer from a laptop's width, Done writing it back: at 390, 768 and 1024px, light and dark",
+  "a project's pop-up draws the Prompt its runs are told — the host's default included, with none of the workflow's skill pickers — and opens one writing surface for it in a bottom sheet, the side drawer from a laptop's width, Done writing it back; the account's library saves those words by name, picks them into another project as a copy, and a rewritten entry labels the copy `Update available` while the editor offers the entry's newer words, whose Done writes them with their entry: at 390, 768 and 1024px, light and dark",
 )

@@ -21,10 +21,13 @@ import {
   DEFAULT_PROFILE,
   DEFAULT_SETTINGS,
   adoptAppearance,
+  botTombstones,
+  chatTombstones,
   db,
   deleteConversation,
   deleteProfile,
   getSettings,
+  promptTombstones,
   saveSettings,
   type Appearance,
   type Conversation,
@@ -387,7 +390,7 @@ async function localBots(): Promise<Doc<BotValue>> {
   for (const profile of await db.profiles.toArray()) {
     doc[profile.id] = { at: profile.updatedAt, value: botValue(profile) }
   }
-  for (const tombstone of await db.tombstones.where("id").startsWith("bot:").toArray()) {
+  for (const tombstone of await botTombstones()) {
     doc[tombstone.profileId] = { at: tombstone.deletedAt, deleted: true }
   }
   return doc
@@ -442,10 +445,63 @@ async function syncBots(key: CryptoKey) {
     },
   )
   // Pushed deletions live on in the merged document; their chat lists can go.
-  for (const tombstone of await db.tombstones.where("id").startsWith("bot:").toArray()) {
+  for (const tombstone of await botTombstones()) {
     if (merged[tombstone.profileId]?.at !== tombstone.deletedAt) continue
     await deleteDoc(`chats/${tombstone.profileId}`).catch(() => undefined)
     await db.tombstones.delete(tombstone.id)
+  }
+}
+
+/**
+ * One entry of the account's prompt library, as the `prompts` document holds it: the name it is
+ * found by, the tags it is searched with, and the body a pick copies into a project's Prompt.
+ */
+interface PromptValue {
+  name: string
+  tags: string[]
+  body: string
+}
+
+async function localPrompts(): Promise<Doc<PromptValue>> {
+  const doc: Doc<PromptValue> = {}
+  for (const entry of await db.prompts.toArray()) {
+    const { name, tags, body } = entry
+    doc[entry.id] = { at: entry.updatedAt, value: { name, tags, body } }
+  }
+  for (const tombstone of await promptTombstones()) {
+    doc[tombstone.entryId] = { at: tombstone.deletedAt, deleted: true }
+  }
+  return doc
+}
+
+/**
+ * The account's prompts, merged record by record like the bots: two devices editing different
+ * entries never fight, and a deletion is a tombstone that outlives the row. Two devices editing the
+ * same entry keep the later clock, the last-write-wins a bot's own rename already has.
+ */
+async function syncPrompts(key: CryptoKey) {
+  try {
+    const merged = await syncDoc<PromptValue>(key, "prompts", localPrompts, async (pull) => {
+      for (const [id, entry] of pull) {
+        if (entry.deleted) {
+          if (await db.prompts.get(id)) await db.prompts.delete(id)
+        } else if (entry.value) {
+          await db.transaction("rw", db.prompts, db.tombstones, async () => {
+            await db.prompts.put({ ...entry.value!, id, updatedAt: entry.at })
+            await db.tombstones.delete(`prompt:${id}`)
+          })
+        }
+      }
+    })
+    // A deletion this device pushed lives on in the document; the row itself needn't be named again.
+    for (const tombstone of await promptTombstones()) {
+      if (merged[tombstone.entryId]?.at === tombstone.deletedAt)
+        await db.tombstones.delete(tombstone.id)
+    }
+  } catch (error) {
+    // A sync function that doesn't know this document yet — a newer app against an older deployment
+    // — mustn't take the bots and the chat lists down with it, so it is noted and goes by.
+    noteFailure("Syncing the prompt library", error)
   }
 }
 
@@ -502,8 +558,8 @@ async function localChats(profileId: string, drafts: boolean): Promise<Doc<ChatV
       delete value.draftText
     doc[c.id] = { at: c.changedAt, value }
   }
-  const tombstones = await db.tombstones.where("id").startsWith("chat:").toArray()
-  for (const tombstone of tombstones.filter((t) => t.profileId === profileId)) {
+  for (const tombstone of await chatTombstones()) {
+    if (tombstone.profileId !== profileId) continue
     doc[tombstone.id.slice("chat:".length)] = { at: tombstone.deletedAt, deleted: true }
   }
   return doc
@@ -540,8 +596,8 @@ async function applyChats(profileId: string, pull: [string, Entry<ChatValue>][])
 
 /** Drops tombstones the merged list now carries. */
 async function settleChatTombstones(profileId: string, merged: Doc<ChatValue>) {
-  const tombstones = await db.tombstones.where("id").startsWith("chat:").toArray()
-  for (const tombstone of tombstones.filter((t) => t.profileId === profileId)) {
+  for (const tombstone of await chatTombstones()) {
+    if (tombstone.profileId !== profileId) continue
     const id = tombstone.id.slice("chat:".length)
     if (merged[id]?.at === tombstone.deletedAt) await db.tombstones.delete(tombstone.id)
   }
@@ -582,7 +638,7 @@ async function fingerprint() {
   ])
   const bots = profiles.map((p) => `${p.id}@${p.updatedAt}`).join(",")
   const appearance = APPEARANCE_FIELDS.map((field) => `${settings[field] ? 1 : 0}`).join("")
-  return `${bots}|${count}@${newest?.changedAt ?? 0}|${tombstones}|${settings.onboarded}|${appearance}@${settings.appearanceAt ?? 0}`
+  return `${bots}|${count}@${newest?.changedAt ?? 0}|${tombstones}|${settings.onboarded}|${appearance}@${settings.appearanceAt ?? 0}|prompts@${settings.promptsAt ?? 0}`
 }
 
 let running: Promise<void> | undefined
@@ -593,9 +649,9 @@ async function runSync() {
   const key = state.vault === "unlocked" ? await localKey() : undefined
   try {
     if (key) await ensureInbox(key)
-    // Bots and the appearance switches are separate documents, so they go side by side; the
-    // registry read follows, since it wants the inbox key.
-    if (key) await Promise.all([syncBots(key), syncAppearance(key)])
+    // Bots, the appearance switches and the prompt library are separate documents, so they go side
+    // by side; the registry read follows, since it wants the inbox key.
+    if (key) await Promise.all([syncBots(key), syncAppearance(key), syncPrompts(key)])
     if (key) await pullRegistry()
     await syncChatLists(key)
     syncedFingerprint = await fingerprint()

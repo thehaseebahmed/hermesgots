@@ -10,10 +10,12 @@ The host can never read that document: sync is sealed with the account's data ke
 not have, and the sweep runs with the app closed. So a pick is a **copy**: the app writes the entry's
 text into the project's prompt over the route the plugin already serves, and the project also records
 which entry it took. The prompt row then tells copy from original — an entry whose current text no
-longer matches the copy shows "changed in library", and one tap pulls the new text in; hand-editing
-the prompt clears the recorded source, so the marker cannot lie about the user's own words; an entry
-deleted from the library leaves the copy standing with no marker. A pick keeps the standing rule that
-a project's prompt and its workflow are mutually exclusive.
+longer matches the copy puts an **Update available** label right after the row's title, a label and
+not a control, and the editor offers the entry's newer words as a line of its own: the button fills
+the writing surface, and Done writes the words with the entry id beside them, so the update keeps
+the copy a copy; hand-editing the prompt clears the recorded source, so the label cannot lie about
+the user's own words; an entry deleted from the library leaves the copy standing unlabelled. A pick
+keeps the standing rule that a project's prompt and its workflow are mutually exclusive.
 
 ## Considered options
 

@@ -77,6 +77,16 @@ PREFIX = "/api/plugins/memento"
 # Gots shows 24 runs per job.
 DEFAULT_PER_JOB = 24
 MAX_PER_JOB = 200
+# What each shape a project AFK write names is written with: one writer per shape, named once, so
+# `afk.write_from`'s answer is handed to the writer that takes it and no shape can fall through to
+# another (`afk.py`). `on` also takes the project's folders and whether it is archived, which the
+# route adds — it is the one write that has to ask whether the project can be left to work at all.
+AFK_WRITES = {
+    "on": afk.set_on,
+    "workflow": afk.set_workflow,
+    "prompt": afk.set_prompt,
+    "pick_count": afk.set_pick_count,
+}
 
 
 def _version() -> str:
@@ -317,6 +327,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # starts: an app that predates it draws the sheet it has rather than a field the
                     # host would refuse (afk.py, prompt_builder.py).
                     "afk_prompt",
+                    # How many of its tasks a project holds at once, and the read that answers every
+                    # hold rather than one: the sheet's pick stepper and its Working rows are drawn
+                    # only where a host says it holds more than one, so a host that predates picks
+                    # shows the screen it always did (afk.py, ADR 0025).
+                    "afk_picks",
                     # Still advertised while the app draws a staged session's pipeline, which this
                     # host answers from the task's workflow snapshot (`pipeline.for_app`): the pill
                     # is drawn only where a host claims it, so dropping it here would take the
@@ -1126,31 +1141,31 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "The project is still being created.", 409)
         body = await json_body(request) or {}
         try:
-            named, value = afk.write_from(body)
+            kind, payload = afk.write_from(body)
         except ValueError as why:
             return _error(web, str(why), 400)
         project, refused = await resolve_project(project_id)
         if refused is not None:
             return refused
-        if named == "on":
+        writer = AFK_WRITES.get(kind)
+        if writer is None:
+            return _error(web, "That isn't a write this host takes.", 400)
+        if kind == "on":
+            with_project = {
+                **payload,
+                "folders": project.folders,
+                "archived": bool(getattr(project, "archived", False)),
+            }
             try:
                 found = await asyncio.to_thread(
-                    afk.set_on,
-                    hermes_home(),
-                    project_id,
-                    project.folders,
-                    value,
-                    bool(getattr(project, "archived", False)),
+                    writer, hermes_home(), project_id, **with_project
                 )
             except afk.Refused as why:
                 # The project can't be left to work: its reason is the answer, and nothing is written.
                 return _error(web, str(why), 409)
         else:
             try:
-                if named == "workflow":
-                    await asyncio.to_thread(afk.set_workflow, hermes_home(), project_id, value)
-                else:
-                    await asyncio.to_thread(afk.set_prompt, hermes_home(), project_id, value)
+                await asyncio.to_thread(writer, hermes_home(), project_id, **payload)
             except ValueError as why:
                 return _error(web, str(why), 400)
             found = await asyncio.to_thread(
@@ -1161,6 +1176,37 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 bool(getattr(project, "archived", False)),
             )
         return web.json_response({"object": "memento.afk", "project_id": project_id, **found})
+
+    async def bot_afk(request: "web.Request") -> "web.Response":
+        """The bot's own AFK numbers: the pick budget it works within, and how much of it is held.
+
+        Bot-level, so there is no project to resolve and no project id to answer: the budget is one
+        number on this bot's own store, and the holds it is counted against are every project's
+        (ADR 0042). A usage threshold has no field here yet — ADR 0026's is its own change — and the
+        shape leaves room for one beside these.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        return await bot_afk_answer()
+
+    async def post_bot_afk(request: "web.Request") -> "web.Response":
+        """Writes the bot's pick budget, answering the same dict the read does."""
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request) or {}
+        try:
+            budget = afk.budget_from(body)
+        except ValueError as why:
+            return _error(web, str(why), 400)
+        await asyncio.to_thread(afk.set_pick_budget, hermes_home(), budget)
+        return await bot_afk_answer()
+
+    async def bot_afk_answer() -> "web.Response":
+        """The one answer both of the bot's writes and its read carry."""
+        found = await asyncio.to_thread(afk.bot_read, hermes_home())
+        return web.json_response({"object": "memento.afk.bot", **found})
 
     async def workflows_response() -> "web.Response":
         """The library as it stands: what every write to it answers."""
@@ -1541,6 +1587,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/projects/{{project_id}}/tasks", project_tasks)
     app.router.add_get(f"{PREFIX}/projects/{{project_id}}/afk", project_afk)
     app.router.add_post(f"{PREFIX}/projects/{{project_id}}/afk", post_project_afk)
+    # The bot's own AFK numbers, beside the project's: a pick budget is one number over every
+    # project, so it has no project segment, and the profile mirror below serves it per bot with
+    # the rest (ADR 0042).
+    app.router.add_get(f"{PREFIX}/afk", bot_afk)
+    app.router.add_post(f"{PREFIX}/afk", post_bot_afk)
     app.router.add_get(f"{PREFIX}/workflows", list_workflows)
     app.router.add_post(f"{PREFIX}/workflows", create_workflow)
     app.router.add_get(f"{PREFIX}/workflows/{{workflow_id}}", read_workflow)
