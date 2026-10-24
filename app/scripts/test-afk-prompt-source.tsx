@@ -1,11 +1,12 @@
 /**
- * A Prompt that came from the account's library, inside the AFK pop-up: the row says `changed in
- * library` where the entry it was copied from has been rewritten since, and one tap there pulls the
- * entry's current words in — one write of the text and its source together, which takes the marker
- * with it; a pull that can't reach the host is a toast and the marker stands, because the copy still
- * isn't the entry's. And the cases that are silent: a copy that still matches its entry, an entry
- * deleted from the library, a host that answers no source at all, and a Prompt typed by hand, whose
- * plain write detaches the copy on the host so the row never calls the user's own words stale.
+ * A Prompt that came from the account's library, inside the AFK pop-up: an **Update** badge in front
+ * of the row's title where the entry it was copied from has been rewritten since, and tapping it
+ * asks in a dialog before one pull writes the entry's current words and their source together,
+ * which takes the badge with it — Cancel writes nothing, and a pull that can't reach the host is a
+ * toast with the badge standing, because the copy still isn't the entry's. And the cases that are
+ * silent: a copy that still matches its entry, an entry deleted from the library, a host that
+ * answers no source at all, and a Prompt typed by hand, whose plain write detaches the copy on the
+ * host so the row never calls the user's own words stale.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -20,6 +21,7 @@ import {
   mountAfk,
   seedPrompts,
   seedSettings,
+  settle,
   type,
 } from "./component-kit.tsx"
 
@@ -52,18 +54,39 @@ async function copied(host: Host, body: () => Promise<void>) {
   await mountAfk(server, project, body, { library: true })
 }
 
-test("a copy whose entry moved on says so, and one tap pulls the new words in", async () => {
+test("a copy whose entry moved on wears an Update badge, and tapping it asks before writing", async () => {
   await seedPrompts([{ id: "e-one", name: "Review first", body: NOW }])
   const host = afkHost({ features: FEATURES, prompt: COPY, promptId: "e-one" })
   await copied(host, async () => {
     assert.match(row()?.textContent ?? "", /Read the diff first/, "the row reads the copy it holds")
-    assert.equal(
-      markerText(),
-      "changed in library",
-      "the entry says other words, so the row says the copy has moved on",
-    )
+    assert.equal(markerText(), "Update", "the entry says other words, so the badge offers theirs")
 
     await click(marker())
+    await settle()
+    const asking = find('[role="alertdialog"]')
+    assert.ok(asking, "the badge asks first")
+    assert.match(asking!.textContent ?? "", /Update this Prompt\?/, "asking to update this Prompt")
+    assert.match(
+      asking!.textContent ?? "",
+      /The library's latest version replaces what this project holds/,
+      "and saying what the update does",
+    )
+    assert.deepEqual(afkWrites(host), [], "the question itself writes nothing")
+
+    await click(findText('[role="alertdialog"] button', "Cancel"))
+    assert.equal(find('[role="alertdialog"]'), null, "Cancel closes the question")
+    assert.equal(markerText(), "Update", "with the badge still standing")
+    assert.deepEqual(afkWrites(host), [], "and nothing written")
+  })
+})
+
+test("confirming Update pulls the new words in", async () => {
+  await seedPrompts([{ id: "e-one", name: "Review first", body: NOW }])
+  const host = afkHost({ features: FEATURES, prompt: COPY, promptId: "e-one" })
+  await copied(host, async () => {
+    await click(marker())
+    await settle()
+    await click(findText('[role="alertdialog"] button', "Update"))
 
     assert.deepEqual(
       afkWrites(host).map((call) => call.body),
@@ -76,7 +99,11 @@ test("a copy whose entry moved on says so, and one tap pulls the new words in", 
       /Read the issue first/,
       "and the row reads what the pull wrote",
     )
-    assert.equal(host.state().source, "e-one", "a pull keeps the source: it is a pick, not a hand edit")
+    assert.equal(
+      host.state().source,
+      "e-one",
+      "a pull keeps the source: it is a pick, not a hand edit",
+    )
   })
 })
 
@@ -98,14 +125,20 @@ test("a pull that cannot reach the host is a toast, and the marker stands", asyn
     })
     await copied(host, async () => {
       await click(marker())
+      await settle()
+      await click(findText('[role="alertdialog"] button', "Update"))
 
       assert.deepEqual(said, [REFUSAL], "the host's own refusal reaches the user as a toast")
       assert.equal(
         markerText(),
-        "changed in library",
+        "Update",
         "nothing was written, so the copy is still not the entry's",
       )
-      assert.match(row()?.textContent ?? "", /Read the diff first/, "and the row still reads the copy")
+      assert.match(
+        row()?.textContent ?? "",
+        /Read the diff first/,
+        "and the row still reads the copy",
+      )
     })
   } finally {
     toast.error = real
@@ -137,15 +170,19 @@ test("an original, a deleted entry and a host without a source are all unmarked"
   // A host from before the library answers no source at all, whatever the device holds.
   await seedPrompts([{ id: "e-one", name: "Review first", body: COPY }])
   await copied(afkHost({ features: FEATURES, prompt: NOW }), async () => {
-    assert.equal(marker(), null, "words the host doesn't say were copied from anywhere are the user's")
+    assert.equal(
+      marker(),
+      null,
+      "words the host doesn't say were copied from anywhere are the user's",
+    )
   })
 })
 
-test("a hand edit writes the words alone, and the marker is gone for the next read", async () => {
+test("a hand edit writes the words alone, and the badge is gone for the next read", async () => {
   await seedPrompts([{ id: "e-one", name: "Review first", body: NOW }])
   const host = afkHost({ features: FEATURES, prompt: COPY, promptId: "e-one" })
   await copied(host, async () => {
-    assert.equal(markerText(), "changed in library", "the copy starts marked")
+    assert.equal(markerText(), "Update", "the copy starts badged")
 
     await click(find('button[aria-label="Prompt"]'))
     await type(find('textarea[aria-label="Prompt"]'), MINE)

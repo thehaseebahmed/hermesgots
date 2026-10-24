@@ -7,8 +7,8 @@
 // The account's prompt library is here too, because it needs a signed-in account with its vault
 // open on the device and a browser that can hold one: the words are saved to the library by name,
 // picked in ANOTHER project as a copy that remembers the entry it came from, and — once the entry is
-// rewritten on the library's side — the row says `changed in library` and one tap pulls the new
-// words in, which is a pick again.
+// rewritten on the library's side — the row wears an `Update` badge whose dialog asks before it
+// pulls the new words in, which is a pick again.
 import {
   accountUser,
   afkRead,
@@ -86,7 +86,11 @@ const run = async ({ page, profileId, shot, until }) => {
   }
 
   const row = await openPrompt(screen)
-  assert.match(await row.innerText(), /Work in checkpoints/, "the row reads the host's default Prompt")
+  assert.match(
+    await row.innerText(),
+    /Work in checkpoints/,
+    "the row reads the host's default Prompt",
+  )
   assert.equal(await page.locator("[data-afk-workflow]").count(), 0, "no Workflow row with it off")
   assert.equal(
     await page.locator("[data-afk-skills]").count(),
@@ -260,8 +264,8 @@ const run = async ({ page, profileId, shot, until }) => {
   await marker.waitFor({ timeout: 15_000 })
   assert.equal(
     (await marker.innerText()).trim(),
-    "changed in library",
-    "the row says the entry it copied has moved on",
+    "Update",
+    "the badge in front of the title offers the entry's words",
   )
   assert.match(
     await page.locator("[data-afk-prompt]").innerText(),
@@ -270,10 +274,21 @@ const run = async ({ page, profileId, shot, until }) => {
   )
   await shot("changed")
 
-  // One tap pulls the entry's new words in, writing them and their source together: the marker goes
-  // with them, and the host holds the library's words.
+  // The badge asks first, and confirming pulls the entry's new words in — writing them and their
+  // source together: the badge goes with them, and the host holds the library's words.
   await marker.click()
-  await until(async () => (await afkRead(elsewhereId)).prompt === EDITED, 15_000, "the pull to land")
+  const asking = page.getByRole("alertdialog")
+  await asking.waitFor({ timeout: 15_000 })
+  await asking.getByText("Update this Prompt?", { exact: true }).waitFor({ timeout: 15_000 })
+  await shot("update-dialog")
+  const before = await afkRead(elsewhereId)
+  assert.notEqual(before.prompt, EDITED, "asking alone writes nothing")
+  await asking.getByRole("button", { name: "Update" }).click()
+  await until(
+    async () => (await afkRead(elsewhereId)).prompt === EDITED,
+    15_000,
+    "the pull to land",
+  )
   await marker.waitFor({ state: "detached", timeout: 15_000 })
   const pulled = await afkRead(elsewhereId)
   assert.equal(pulled.prompt_id, picked.prompt_id, "the pulled words keep the entry they came from")
@@ -317,5 +332,5 @@ for (const width of [390, 768, LAPTOP]) {
   }
 }
 pass(
-  "a project's pop-up draws the Prompt its runs are told — the host's default included, with none of the workflow's skill pickers — and opens one writing surface for it in a bottom sheet, the side drawer from a laptop's width, Done writing it back; the account's library saves those words by name, picks them into another project as a copy, and says a rewritten entry is `changed in library` until one tap pulls it in: at 390, 768 and 1024px, light and dark",
+  "a project's pop-up draws the Prompt its runs are told — the host's default included, with none of the workflow's skill pickers — and opens one writing surface for it in a bottom sheet, the side drawer from a laptop's width, Done writing it back; the account's library saves those words by name, picks them into another project as a copy, and a rewritten entry shows an `Update` badge whose dialog asks, then pulls the new words in: at 390, 768 and 1024px, light and dark",
 )

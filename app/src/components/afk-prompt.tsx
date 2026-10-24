@@ -4,11 +4,12 @@
  * Done writes it and closes on the host's answer; the sheet's own way out leaves the words unwritten,
  * and a refused write is said by the caller, which is why the draft stays as typed.
  *
- * Where the account's library is offered — signed in, with the vault unlocked — two doors stand under
- * the field: Choose from library, which copies an entry's words in and writes them the way Done does
- * (a pick is a copy, so the host clears a picked workflow as it does for any Prompt), and Save to
- * library, which keeps the words on screen under a name and tags. Without the library this is the
- * editor it always was.
+ * Where the account's library is offered — signed in, with the vault unlocked — the sheet's foot is
+ * one row: the two library doors on the left, Choose from library (which copies an entry's words in
+ * and writes them the way Done does — a pick is a copy, so the host clears a picked workflow as it
+ * does for any Prompt) and Save to library (which keeps the words on screen under a name and tags),
+ * with Done on the right, as the entry sheet's own foot draws its primary action. Without the
+ * library this is the editor it always was, Done alone at the foot.
  */
 import { useState } from "react"
 import { toast } from "sonner"
@@ -136,35 +137,47 @@ export function PromptEditor({
             value={text}
             onChange={(event) => setText(event.target.value)}
           />
-          {library && (
-            <div className="flex flex-wrap gap-2" data-prompt-library-actions>
+          {library ? (
+            <div className="flex items-center justify-between gap-2" data-prompt-library-actions>
+              <div className="flex min-w-0 flex-1 flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="h-11 rounded-full px-4"
+                  disabled={saving}
+                  onClick={() => setChoosing(true)}
+                >
+                  Choose from library
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="h-11 rounded-full px-4"
+                  disabled={saving}
+                  onClick={() => setWriting("new")}
+                >
+                  Save to library
+                </Button>
+              </div>
               <Button
                 type="button"
-                variant="secondary"
-                className="h-11 rounded-full px-4"
+                className="h-11 shrink-0 rounded-full px-5"
                 disabled={saving}
-                onClick={() => setChoosing(true)}
+                onClick={() => void submit()}
               >
-                Choose from library
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                className="h-11 rounded-full px-4"
-                disabled={saving}
-                onClick={() => setWriting("new")}
-              >
-                Save to library
+                Done
               </Button>
             </div>
+          ) : (
+            <Button
+              type="button"
+              className="h-11 shrink-0 self-end rounded-full px-5"
+              disabled={saving}
+              onClick={() => void submit()}
+            >
+              Done
+            </Button>
           )}
-          <Button
-            className="h-11 shrink-0 self-end rounded-full px-5"
-            disabled={saving}
-            onClick={() => void submit()}
-          >
-            Done
-          </Button>
         </div>
       </PopupContent>
       {library && (

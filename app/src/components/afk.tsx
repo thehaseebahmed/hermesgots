@@ -16,8 +16,9 @@
  * project's pick count, and a pick count of one to five sits under the switch, one write of its own.
  * A host that advertises none of that keeps the sheet it had: one Working row, drawn from the task
  * the read names. And where the Prompt was copied from the account's library, the row tells a copy
- * from an original: an entry rewritten since its pick says `changed in library`, and one tap pulls
- * the new words in — the rule is `prompt-source.ts`'s, the write is the Prompt's own (ADR 0043).
+ * from an original: an entry rewritten since its pick shows an **Update** badge in front of the row's
+ * title, and tapping it asks before pulling the new words in — the rule is `prompt-source.ts`'s,
+ * the write is the Prompt's own (ADR 0043).
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react"
@@ -29,6 +30,18 @@ import { Segmented } from "@/components/segmented"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { WorkflowEditor } from "@/components/workflow-editor"
 import { WorkflowSheet } from "@/components/workflow-sheet"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -155,17 +168,17 @@ export function AfkPopup({
   const [editing, setEditing] = useState<WorkflowEntry | "new" | null>(null)
   const [savingWorkflow, setSavingWorkflow] = useState(false)
   const [promptOpen, setPromptOpen] = useState(false)
-  // A pull of the library's changed words is on its way: the marker is out of reach until its answer.
+  // A pull of the library's changed words is on its way: the badge is out of reach until its answer.
   const [pulling, setPulling] = useState(false)
   const key = connectionKey(config)
   const switchable = usePluginFeature(config, AFK_SWITCH_FEATURE)
   const withSkills = usePluginFeature(config, AFK_SKILLS_FEATURE)
   const libraryOffered = useLibraryOffered(config)
   const withPrompt = usePluginFeature(config, AFK_PROMPT_FEATURE)
-  // One answer for the whole change: the count row, the stepper, the Working list, the budget line
-  // and the library behind the Prompt row are drawn where the host advertises it, and the sheet is
-  // the one it always was where it doesn't. Read once — two reads of one feature is two answers
-  // that can disagree for a frame.
+  // One answer for the whole change: the count row, the pills, the Working list and the library
+  // behind the Prompt row are drawn where the host advertises it, and the sheet is the one it
+  // always was where it doesn't. Read once — two reads of one feature is two answers that can
+  // disagree for a frame.
   const picks = usePluginFeatureOn(config, AFK_PICKS_FEATURE)
   // One row or the other: the library offered is a project running stages, and the Prompt is the
   // words a project running one run is told instead.
@@ -420,13 +433,10 @@ export function AfkPopup({
               />
             )}
             {/* Under the switch, and at the foot of its list where a Prompt row takes the place
-                right under it: how many tasks this project may hold at once, and how full its
-                bot's own budget is beside it. */}
-            {picks && afk && !afkError && (pickCount !== null || afk.pickBudget !== null) && (
+                right under it: how many tasks this project may hold at once. */}
+            {picks && afk && !afkError && pickCount !== null && (
               <PickCountRow
                 count={pickCount}
-                budget={afk.pickBudget}
-                used={afk.holdsHeld ?? 0}
                 saving={savingPicks}
                 onChange={(count) => void choosePicks(count)}
               />
@@ -613,70 +623,46 @@ function WorkflowRow({ workflow, onOpen }: { workflow: WorkflowEntry | null; onO
 
 /**
  * How many tasks this project's switch may hold at once — its pick count, one to five — kept on the
- * project's host, and beside it how full its bot's pick budget is: the same number's ceiling over
- * every project the bot serves (ADR 0042), used against what it holds now. The pills are the app's
- * control for a short choice, which is exactly a count of one to five; nothing is written for the
- * count the row already holds, and the row keeps what it has until the host's answer lands, so a
- * write the host refused leaves the count it had on screen. The budget line is the host's answer
- * only: a project on a host from before it draws the count and nothing else.
+ * project's host, titled like the rows above it. The pills are the app's control for a short choice,
+ * which is exactly a count of one to five; nothing is written for the count the row already holds,
+ * and the row keeps what it has until the host's answer lands, so a write the host refused leaves
+ * the count it had on screen.
  */
 function PickCountRow({
   count,
-  budget,
-  used,
   saving,
   onChange,
 }: {
-  /** The project's own count; null where the host answers no count, leaving the budget line alone. */
-  count: number | null
-  /** The bot's pick budget, 1–10; null where the host answers none. */
-  budget: number | null
-  /** How many tasks the bot holds now, across its projects. */
-  used: number
+  /** The project's own count. */
+  count: number
   /** A write is on its way: the pills are out of reach until its answer lands. */
   saving: boolean
   onChange: (count: number) => void
 }) {
   return (
-    <div
-      className="flex flex-col gap-2 px-1 pt-2"
-      data-afk-picks
-      data-pick-count={count ?? undefined}
-    >
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-        <h3 className="pb-1 text-sm text-muted-foreground">Pick count</h3>
-        {budget !== null && (
-          <p
-            data-afk-budget={budget}
-            data-holds-held={used}
-            className="pb-1 text-sm text-muted-foreground"
-          >
-            {`Pick budget ${used} of ${budget}`}
-          </p>
-        )}
-      </div>
-      {count !== null && (
-        <Segmented
-          label="Pick count"
-          options={PICK_COUNTS.map((each) => ({ id: each, label: String(each) }))}
-          value={count}
-          onChange={onChange}
-          disabled={saving}
-        />
-      )}
+    <div className="flex flex-col gap-2 px-1 pt-2" data-afk-picks data-pick-count={count}>
+      <h3 className="text-base">Pick count</h3>
+      <Segmented
+        label="Pick count"
+        options={PICK_COUNTS.map((each) => ({ id: each, label: String(each) }))}
+        value={count}
+        onChange={onChange}
+        disabled={saving}
+      />
     </div>
   )
 }
 
 /**
- * How this project's work is carried out, as the host answers it: the row opens the editor, where the
- * words are written. The host answers its default method where the project wrote none, so an
+ * How this project's work is carried out, as the host answers it: the row opens the editor, where
+ * the words are written. The host answers its default method where the project wrote none, so an
  * untouched project says what its next run will be told rather than reading as empty.
  *
- * Where the words were copied from the account's library and that entry has been rewritten since,
- * the row says so under itself — `changed in library` — and one tap there pulls the entry's new words
- * in (`onPull`), which is a pick again. Nothing else carries the marker: an original, a copy whose
- * entry was deleted, and words the user typed are all silent, because none of them is stale.
+ * Where the words were copied from the account's library and that entry has been rewritten since, an
+ * **Update** badge stands in front of the row's title: asking in a dialog before it pulls the
+ * entry's new words in (`onPull`), which is a pick again. Nothing else carries the badge — an
+ * original, a copy whose entry was deleted, and words the user typed are all silent, because none of
+ * them is stale (ADR 0043).
  */
 function PromptRow({
   prompt,
@@ -686,35 +672,59 @@ function PromptRow({
   onOpen,
 }: {
   prompt: string
-  /** The entry it was copied from now says other words: the marker, and the pull, are drawn. */
+  /** The entry it was copied from now says other words: the badge, and the pull, are drawn. */
   changed: boolean
-  /** A pull is on its way: the marker waits rather than writing twice. */
+  /** A pull is on its way: the badge waits rather than writing twice. */
   pulling: boolean
   onPull: () => void
   onOpen: () => void
 }) {
   return (
-    <div className="flex flex-col" data-afk-prompt>
+    <div className="flex min-h-11 items-center gap-2 px-1" data-afk-prompt>
+      {changed && (
+        <AlertDialog>
+          <AlertDialogTrigger
+            render={
+              <Badge
+                data-afk-prompt-changed
+                className="min-h-6"
+                render={<button type="button" disabled={pulling} />}
+              />
+            }
+          >
+            Update
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Update this Prompt?</AlertDialogTitle>
+              <AlertDialogDescription>
+                The library's latest version replaces what this project holds.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel render={<Button type="button" variant="ghost" />}>
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                render={<Button type="button" />}
+                disabled={pulling}
+                onClick={onPull}
+              >
+                Update
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
       <button
         type="button"
         aria-label="Prompt"
         onClick={onOpen}
-        className="flex min-h-11 w-full items-center gap-3 rounded-2xl px-1 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+        className="flex min-h-11 flex-1 items-center gap-3 rounded-2xl px-1 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
       >
         <RowText title="Prompt" subtitle={promptLine(prompt)} />
         <ChevronRightIcon className="shrink-0 text-muted-foreground" />
       </button>
-      {changed && (
-        <button
-          type="button"
-          data-afk-prompt-changed
-          disabled={pulling}
-          onClick={onPull}
-          className="min-h-11 self-start rounded-full px-1 text-left text-sm text-muted-foreground underline underline-offset-4 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
-        >
-          changed in library
-        </button>
-      )}
     </div>
   )
 }

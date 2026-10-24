@@ -374,8 +374,9 @@ def holds_held(hermes_home: Path) -> int:
 def bot_read(hermes_home: Path) -> Dict[str, Any]:
     """The bot's own AFK numbers: the pick budget it works within, and how much of it is held.
 
-    Answered by the bot-level route, and beside the project's own read so one read still draws the
-    sheet: "Pick budget 3 of 5" is these two numbers, whatever project the sheet was opened on.
+    Answered by the bot-level route, and beside the project's own read so one read still carries both
+    numbers, whatever project it is: the pop-up draws no usage line for now (ADR 0042), but the wire
+    keeps answering them for whatever reads them next.
     """
     return {"pick_budget": pick_budget(hermes_home), "holds_held": holds_held(hermes_home)}
 
