@@ -1,21 +1,18 @@
-// ADR 0019: a flow is a claim no lower tier fails for. The registry and its audit are both read
-// as text: importing the CLI would run it, since its argv and its teardown sit at module scope.
+// ADR 0019: a flow is a claim no lower tier fails for. The registry is read as data — the CLI
+// exports its FLOWS — and the audit as text: importing the CLI itself would run it.
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 
+import { FLOWS } from "./e2e/cli.mjs"
+
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8")
-const cli = read("./e2e/cli.mjs")
 const audit = read("../../docs/e2e-flow-audit.md")
 
 const VERDICTS = ["stay", "component", "plugin", "delete"]
 const STAYS = 14
 
-const registry = () => {
-  const start = cli.indexOf("const FLOWS = {")
-  const body = cli.slice(start, cli.indexOf("\n}\n", start))
-  return [...body.matchAll(/^ {2}"?([a-z0-9-]+)"?: \{/gm)].map((match) => match[1])
-}
+const registry = () => Object.keys(FLOWS)
 
 const rows = () =>
   [...audit.matchAll(/^\| `([a-z0-9-]+)` \| ([a-z]+) \|/gm)].map(([, key, verdict]) => ({
