@@ -120,6 +120,13 @@ test("an original, a deleted entry and a host without a source are all unmarked"
     assert.equal(marker(), null, "the same words in both is no change to say")
   })
 
+  // The entry was saved with a trailing newline, and the host trimmed what it was given: a pick of
+  // it lands without the ends, and that is still its copy — not a change the moment it was picked.
+  await seedPrompts([{ id: "e-one", name: "Review first", body: `${NOW}\n` }])
+  await copied(afkHost({ features: FEATURES, prompt: NOW, promptId: "e-one" }), async () => {
+    assert.equal(marker(), null, "the ends a write trims are not a change in the library")
+  })
+
   // Deleted from the library: the copy stands, and nothing calls it stale.
   await seedPrompts([])
   await copied(afkHost({ features: FEATURES, prompt: NOW, promptId: "e-one" }), async () => {
