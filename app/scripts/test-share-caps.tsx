@@ -24,6 +24,16 @@ const screen = () => (
   </MemoryRouter>
 )
 
+// jsdom decodes no image and makes no object URL, so a photo has to be one the browser made a
+// bitmap of, and its tile needs a URL to draw: both stand in for the browser's own effect.
+globalThis.createImageBitmap = (async () => ({
+  width: 2,
+  height: 2,
+  close: () => {},
+})) as unknown as typeof createImageBitmap
+URL.createObjectURL = () => "blob:shared-photo"
+URL.revokeObjectURL = () => {}
+
 async function seedBot() {
   await seedSettings({ activeProfileId: "bot-1" })
   await db.profiles.clear()
@@ -99,6 +109,48 @@ test("a share of more than ten files keeps ten and names the rest", async () => 
       await until(async () => said.length > 0, "the refusal")
       assert.deepEqual(said, ["A message can carry 10 attachments, so 2 were left out."])
       await until(async () => tiles().length === MAX_ATTACHMENTS, "the ten it keeps")
+    })
+  })
+})
+
+test("a photo shared to a model with no image input still reads as a photo", async () => {
+  // Without the plugin a photo has no other form to reach the model in, so the screen says why it
+  // can't go: the bot's own answer decides how each file is read here, not the screen.
+  await seedSettings({ activeProfileId: "bot-1" })
+  await db.profiles.clear()
+  await db.profiles.put(botProfile("share-no-images", { imageInput: false, apiKey: "" }))
+  await withToasts(async () => {
+    receiveShare(toShare({ files: [new File(["png"], "cat.png", { type: "image/png" })] }))
+    await mount(screen(), async () => {
+      await until(async () => tiles().length === 1, "the photo's tile")
+      assert.match(text(), /can't take images/, "the screen refuses it rather than send it")
+    })
+  })
+})
+
+test("a photo lands as a photo for a model that takes images, and as its file for one that doesn't", async () => {
+  const thumbnail = () =>
+    Boolean(document.querySelector("[aria-label^='Remove ']")?.parentElement?.querySelector("img"))
+  const photo = () => new File(["png"], "cat.png", { type: "image/png", lastModified: 3 })
+
+  await seedBot()
+  await withToasts(async () => {
+    receiveShare(toShare({ files: [photo()] }))
+    await mount(screen(), async () => {
+      await until(async () => tiles().length === 1, "the photo's tile")
+      assert.equal(thumbnail(), true, "a model that takes images gets the photo itself")
+    })
+  })
+
+  // The same share to a bot whose model takes no images: the plugin can still carry it as a file.
+  await seedSettings({ activeProfileId: "bot-1" })
+  await db.profiles.clear()
+  await db.profiles.put(botProfile("share-no-images", { imageInput: false }))
+  await withToasts(async () => {
+    receiveShare(toShare({ files: [photo()] }))
+    await mount(screen(), async () => {
+      await until(async () => tiles().length === 1, "the photo's tile")
+      assert.equal(thumbnail(), false, "and one that doesn't gets the file it is")
     })
   })
 })

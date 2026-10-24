@@ -10,8 +10,8 @@ import { AttachmentTile } from "@/components/chat/attachments"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
-import { fitsInline, inlineRefusal, intake, type Refusal } from "@/lib/attachment-caps"
-import { inlineSize, prepareAttachment } from "@/lib/attachments"
+import { isPhoto } from "@/lib/attachment-caps"
+import { prepareIntake } from "@/lib/attachments"
 import { queueMessage, sendMessage } from "@/lib/chat"
 import {
   createConversation,
@@ -30,6 +30,8 @@ import { useBotThreads, useNow } from "@/lib/threads"
 /** How many of a bot's newest chats are offered before Show more. */
 const FIRST = 5
 const MORE = 30
+/** No files at all, kept as one array so a share with nothing read yet doesn't rebuild on render. */
+const NO_FILES: Attachment[] = []
 
 function hostOf(link: string) {
   try {
@@ -72,7 +74,7 @@ export function SharePage() {
   const [params] = useSearchParams()
   const webId = params.get("id")
   const share = useIncomingShare()
-  const [reading, setReading] = useState(Boolean(webId))
+  const [opening, setOpening] = useState(Boolean(webId))
   const botThreads = useBotThreads()
   const noun = botThreads ? "thread" : "chat"
   const now = useNow()
@@ -83,7 +85,7 @@ export function SharePage() {
     let cancelled = false
     void readWebShare(webId).then(() => {
       if (cancelled) return
-      setReading(false)
+      setOpening(false)
       navigate("/share", { replace: true, state: { quiet: true } })
     })
     return () => {
@@ -93,7 +95,7 @@ export function SharePage() {
 
   // Set once the screen sends or closes, which clears the share on its way out.
   const leaving = useRef(false)
-  const missing = !share && !reading && !webId
+  const missing = !share && !opening && !webId
   useEffect(() => {
     if (missing && !leaving.current) root("/")
   }, [missing, root])
@@ -111,16 +113,19 @@ export function SharePage() {
   const [showAll, setShowAll] = useState(false)
   const [note, setNote] = useState("")
   const [removed, setRemoved] = useState<string[]>([])
-  // The share's files, read once into what a message carries; the caps are asked before each read.
-  const [prepared, setPrepared] = useState<Attachment[]>([])
-  // The share whose files are in `prepared`; another one's are still being read.
-  const [read, setRead] = useState<string>()
-  const preparing = Boolean(share) && read !== share?.id
+  // The share read into what a message carries, with the share it came from: another one's files
+  // are still being read, and nothing of theirs is drawn meanwhile.
+  const [read, setRead] = useState<{ share: string; files: Attachment[] } | undefined>(undefined)
+  const stillReading = useRef<string | undefined>(undefined)
+  const readHere = share && read?.share === share.id ? read : undefined
+  const preparing = Boolean(share) && !readHere
+  const prepared = readHere ? readHere.files : NO_FILES
   const files = useMemo(
     () => prepared.filter((attachment) => !removed.includes(attachment.id)),
     [prepared, removed],
   )
-  const photos = files.filter((attachment) => attachment.image)
+  // A photo is a photo whatever form it lands in: one a model can't take images from goes as a file.
+  const photos = files.filter((attachment) => attachment.image || isPhoto(attachment.type))
   const [sending, setSending] = useState<string | false>(false)
 
   // Another share can arrive while this one is open; it starts afresh.
@@ -129,46 +134,29 @@ export function SharePage() {
     setShareId(share.id)
     setNote("")
     setRemoved([])
-    setPrepared([])
     setShowAll(false)
     setSending(false)
   }
 
-  // Every file under the same caps a pick is held to, refused out loud where it doesn't fit.
+  // Every file under the same caps a pick is held to, refused out loud where it doesn't fit. The
+  // bot the message will go to decides each photo's form, so the read waits for one and is done
+  // once: a bot picked afterwards is the banner's to refuse, not a second read's.
+  const imagesAvailable = profile?.imageInput !== false
   useEffect(() => {
-    if (!share) return
+    if (!share || !profile || read?.share === share.id || stillReading.current === share.id) return
+    stillReading.current = share.id
     let live = true
-    const { take, refusals } = intake(share.files, 0)
-    const said: Refusal[] = [...share.refused, ...refusals]
-    const kept: Attachment[] = []
-    let inline = 0
-    void (async () => {
-      for (const file of take) {
-        try {
-          const attachment = await prepareAttachment(file, true)
-          const size = inlineSize(attachment)
-          if (!fitsInline(size, inline)) {
-            said.push(inlineRefusal(attachment.name))
-            continue
-          }
-          inline += size
-          kept.push(attachment)
-        } catch (error) {
-          said.push({
-            limit: "read",
-            message: error instanceof Error ? error.message : `Couldn't attach ${file.name}.`,
-          })
-        }
-      }
-      if (!live) return
-      for (const refusal of said) toast.error(refusal.message)
-      setPrepared(kept)
-      setRead(share.id)
-    })()
+    void prepareIntake(share.files, { inline: imagesAvailable }).then(
+      ({ attachments, refusals }) => {
+        if (!live) return
+        for (const refusal of [...share.refused, ...refusals]) toast.error(refusal.message)
+        setRead({ share: share.id, files: attachments })
+      },
+    )
     return () => {
       live = false
     }
-  }, [share])
+  }, [share, profile, imagesAvailable, read])
 
   const chats = useLiveQuery(async () => {
     if (!profile) return []

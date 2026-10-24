@@ -25,8 +25,8 @@ import {
   InputGroupTextarea,
 } from "@/components/ui/input-group"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { fitsInline, fresh, inlineRefusal, intake, MAX_ATTACHMENTS } from "@/lib/attachment-caps"
-import { inlineBytes, inlineSize, prepareAttachment } from "@/lib/attachments"
+import { fresh, MAX_ATTACHMENTS } from "@/lib/attachment-caps"
+import { prepareIntake } from "@/lib/attachments"
 import type { Attachment } from "@/lib/db"
 import type { PluginFeatureAnswer } from "@/lib/features"
 
@@ -296,34 +296,24 @@ export function Composer({
     // A paste and the drop the browser can also fire carry the same file, which lands once.
     const added = fresh(files, recent.current, Date.now())
     if (!added.length) return
-    const { take, refusals } = intake(added, attachments.length + preparing.length, {
+    let placeholders: { id: string; name: string; image: boolean }[] = []
+    const { attachments: prepared, refusals } = await prepareIntake(added, {
+      held: attachments,
+      reserved: preparing.length,
       inline: imagesAvailable,
+      onTake: (take) => {
+        placeholders = take.map((file) => ({
+          id: randomId(),
+          name: file.name,
+          image: file.type.startsWith("image/"),
+        }))
+        setPreparing((current) => [...current, ...placeholders])
+      },
     })
     for (const refusal of refusals) toast.error(refusal.message)
-    const placeholders = take.map((file) => ({
-      id: randomId(),
-      name: file.name,
-      image: file.type.startsWith("image/"),
-    }))
-    setPreparing((current) => [...current, ...placeholders])
-    let inline = inlineBytes(attachments)
-    for (const [index, file] of take.entries()) {
-      try {
-        const attachment = await prepareAttachment(file, imagesAvailable)
-        const size = inlineSize(attachment)
-        if (!fitsInline(size, inline)) {
-          toast.error(inlineRefusal(attachment.name).message)
-        } else {
-          inline += size
-          setAttachments((current) => [...current, attachment].slice(0, MAX_ATTACHMENTS))
-        }
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : `Couldn't attach ${file.name}.`)
-      } finally {
-        const done = placeholders[index].id
-        setPreparing((current) => current.filter((p) => p.id !== done))
-      }
-    }
+    if (prepared.length)
+      setAttachments((current) => [...current, ...prepared].slice(0, MAX_ATTACHMENTS))
+    setPreparing((current) => current.filter((one) => !placeholders.some((p) => p.id === one.id)))
     textarea.current?.focus()
   }
 

@@ -1,6 +1,15 @@
 import { useSyncExternalStore } from "react"
 
-import { isPhoto, keptImage, MAX_FILE_BYTES, sizeRefusal } from "@/lib/attachment-caps"
+import {
+  fitsInline,
+  inlineRefusal,
+  intake,
+  isPhoto,
+  keptImage,
+  MAX_FILE_BYTES,
+  sizeRefusal,
+  type Refusal,
+} from "@/lib/attachment-caps"
 import { attachmentParts } from "@/lib/attachment-text"
 import { db, type Attachment } from "@/lib/db"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
@@ -93,6 +102,71 @@ export const inlineSize = (attachment: Attachment) =>
 /** The bytes a message's photos add to its request. */
 export const inlineBytes = (attachments: Attachment[]) =>
   attachments.reduce((sum, attachment) => sum + inlineSize(attachment), 0)
+
+/** What a set of files became on a message: the attachments it took, and why it took no others. */
+export interface PreparedIntake {
+  attachments: Attachment[]
+  refusals: Refusal[]
+}
+
+/**
+ * What `files` becomes on a message already holding `held` attachments — the one intake a pick, a
+ * paste, a drop and a share all land through. The count and per-file limits are asked before a read
+ * (`intake`), then every file is read at once, in the order it arrived, and a photo that leaves the
+ * message's inline room, or a file that can't be read, is refused instead of landing. `onTake` is
+ * how a surface holds the place of the files it is now reading.
+ */
+export async function prepareIntake(
+  files: File[],
+  {
+    held = [],
+    reserved = 0,
+    inline = true,
+    onTake,
+  }: {
+    /** The attachments the message already carries, whose count and inline room these share. */
+    held?: Attachment[]
+    /** Files already being read for this message, which hold a place in the count. */
+    reserved?: number
+    /** Whether the model takes images; with none, an image goes as the file it is. */
+    inline?: boolean
+    /** Called with the files that passed the caps, before any of them is read. */
+    onTake?: (take: File[]) => void
+  } = {},
+): Promise<PreparedIntake> {
+  const { take, refusals } = intake(files, held.length + reserved, { inline })
+  onTake?.(take)
+  const answers = await Promise.all(
+    take.map(async (file): Promise<{ attachment?: Attachment; error?: Error }> => {
+      try {
+        return { attachment: await prepareAttachment(file, inline) }
+      } catch (error) {
+        return {
+          error: error instanceof Error ? error : new Error(`Couldn't attach ${file.name}.`),
+        }
+      }
+    }),
+  )
+  let used = inlineBytes(held)
+  const attachments: Attachment[] = []
+  for (const [index, answer] of answers.entries()) {
+    if (!answer.attachment) {
+      refusals.push({
+        limit: "read",
+        message: answer.error?.message ?? `Couldn't attach ${take[index].name}.`,
+      })
+      continue
+    }
+    const size = inlineSize(answer.attachment)
+    if (!fitsInline(size, used)) {
+      refusals.push(inlineRefusal(answer.attachment.name))
+      continue
+    }
+    used += size
+    attachments.push(answer.attachment)
+  }
+  return { attachments, refusals }
+}
 
 /**
  * Saves a file this device doesn't hold — one another device sent, or one a restored message names
