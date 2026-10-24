@@ -121,6 +121,14 @@ export function wantedCategories(prefs: PushPrefs | undefined) {
   )
 }
 
+/**
+ * The categories this device can reach, and so the channels it gets: Meetings' two exist only once
+ * that experiment is on, the other fourteen always.
+ */
+export function reachableCategories(meetings?: boolean) {
+  return PUSH_CATEGORIES.filter((category) => category.feature !== "meetings" || Boolean(meetings))
+}
+
 /** The category's name in Android's notification settings, where the feature isn't a heading. */
 export function channelName(category: PushCategoryInfo) {
   const feature = PUSH_FEATURES.find((f) => f.id === category.feature)?.title

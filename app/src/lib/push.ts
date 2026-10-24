@@ -23,6 +23,7 @@ import {
   categoryOn,
   channelName,
   pushPath,
+  reachableCategories,
   wantedCategories,
   type PushCategory,
   type PushFeature,
@@ -343,12 +344,12 @@ async function listen(push: Push) {
     if (openers.size) openers.forEach((open) => open(path))
     else pendingOpen = path
   })
-  // One channel per category: Android lets the user turn each off in its own settings too. The
-  // test notification has the one the app made before there were categories.
-  await push
-    .createChannel({ id: "sessions", name: "Test notification", importance: 4 })
-    .catch(() => {})
-  for (const category of PUSH_CATEGORIES) {
+  // One channel per category this device can reach: Android lets the user turn each off in its own
+  // settings too. Meetings' two wait for that experiment, so a phone that never turns it on is never
+  // shown channels for notes it cannot get. A channel made again with its own id is updated in
+  // place — its name tracks the code, while an importance the user edited stays theirs.
+  const { meetings } = await getSettings()
+  for (const category of reachableCategories(meetings)) {
     await push
       .createChannel({
         id: category.id,
@@ -357,6 +358,9 @@ async function listen(push: Push) {
       })
       .catch(() => {})
   }
+  // The test notification's channel is made on the tap that sends one, so the one an earlier build
+  // made for every device is deleted rather than left to sit in the phone's settings.
+  await push.deleteChannel({ id: "sessions" }).catch(() => {})
 }
 
 async function enableNative(): Promise<PushPermission> {
@@ -437,6 +441,12 @@ function startNative() {
 export async function sendTestPush() {
   const { fcm } = await getSettings()
   if (!isNative || !fcm?.on) throw new Error("Notifications are off")
+  // Its channel is made here, on the tap that sends one, so a device that never sends a test never
+  // lists it. Before the POST: a push must never arrive ahead of the channel it names.
+  const { push } = await plugin()
+  await push
+    .createChannel({ id: "test_notification", name: "Test notification", importance: 4 })
+    .catch(() => {})
   const response = await callFunction(
     "POST",
     functionUrl("registry", { route: "push-test", id: fcm.device }),
