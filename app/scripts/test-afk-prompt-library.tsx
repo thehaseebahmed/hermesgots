@@ -10,6 +10,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { useState } from "react"
+import { toast } from "sonner"
 
 import { PromptEditor } from "@/components/afk-prompt"
 import { db } from "@/lib/db"
@@ -53,9 +54,9 @@ const entries = () => db.prompts.toArray()
 function Editor({ host, library }: { host: Host; library: boolean }) {
   const [prompt, setPrompt] = useState(DEFAULT_AFK_PROMPT)
   const [open, setOpen] = useState(true)
-  const save = async (next: string, id?: string | null) => {
+  const save = async (draft: { text: string; source?: string }) => {
     try {
-      setPrompt((await setProjectAfkPrompt(config, project, next, id ?? null)).prompt)
+      setPrompt((await setProjectAfkPrompt(config, project, draft)).prompt)
       return "saved" as const
     } catch {
       return "refused" as const
@@ -224,6 +225,42 @@ test("deleting an entry tombstones it and leaves every project's Prompt standing
     )
     assert.equal(find("[data-prompt-entry]"), null, "and the entry sheet closes on the delete")
   })
+})
+
+test("an entry deleted on another device is said, not closed over", async () => {
+  await seedPrompts([{ id: "e-one", name: "Review first", tags: ["review"], body: "# Review" }])
+  const said: unknown[] = []
+  const real = toast.error
+  toast.error = ((message: unknown) => {
+    said.push(message)
+    return ""
+  }) as typeof toast.error
+  try {
+    await editor(afkHost({ features: PICKS_FEATURES }), async () => {
+      await click(findText("button", "Choose from library"))
+      await click(find('button[aria-label="Edit Review first"]'))
+      await type(find('textarea[aria-label="Body"]'), "# Review\n\nRead it twice.")
+      // The account's other device deleted the entry while this sheet was open on it.
+      await db.prompts.delete("e-one")
+      await settle()
+      await click(findText("[data-prompt-entry] button", "Save"))
+
+      assert.deepEqual(await entries(), [], "nothing was written for an entry that is gone")
+      assert.deepEqual(
+        said,
+        ["That Prompt is gone from the library."],
+        "the sheet says why the save did nothing",
+      )
+      assert.ok(find("[data-prompt-entry]"), "and stays open rather than closing as if it had saved")
+      assert.match(
+        (find('textarea[aria-label="Body"]') as HTMLTextAreaElement | null)?.value ?? "",
+        /Read it twice/,
+        "holding the words that were typed",
+      )
+    })
+  } finally {
+    toast.error = real
+  }
 })
 
 test("signed out, the Prompt editor is the textarea it always was", async () => {

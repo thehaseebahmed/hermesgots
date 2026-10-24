@@ -48,6 +48,7 @@ import {
 import { Separator } from "@/components/ui/separator"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
+import { AFK_PICKS_FEATURE, PICK_COUNTS } from "@/lib/afk-picks"
 import { connectionKey } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { useAfkWorkflowsOn } from "@/lib/afk-workflows"
@@ -69,12 +70,14 @@ import {
   type HermesConfig,
   type ProjectAfk,
   type ProjectIssue,
-  type ProjectTasks,
   type ProjectTask,
+  type ProjectTasks,
+  type PromptWrite,
   type Skill,
 } from "@/lib/hermes"
 import { STAGE_WORDS, type AfkStage } from "@/lib/pipeline"
 import { usePoll } from "@/lib/poll"
+import { promptLine } from "@/lib/prompt-library"
 import { usePromptEntry, usePromptLibraryReady } from "@/lib/prompt-library-store"
 import { promptSourceState } from "@/lib/prompt-source"
 import { noteFailure } from "@/lib/report"
@@ -96,23 +99,11 @@ export const AFK_WORKFLOWS_FEATURE = "afk_workflows"
 export const AFK_PROMPT_FEATURE = "afk_prompt"
 
 /**
- * And the one it advertises when a project may hold several tasks at once and a project's Prompt can
- * draw on the account's library of them: its pick count, the list of what it holds, the bot's usage
- * against its pick budget, and the library behind the Prompt row. A plugin from before it holds one
- * task, answers no count and has no library, so nothing of this is drawn there and the pop-up is the
- * one it always was.
- */
-export const AFK_PICKS_FEATURE = "afk_picks"
-
-/**
  * What a staged task's stage reads as in the Working row: the stage itself is the host's, and a
  * project with no critique skill has none to name. `done` has no word here — nothing is held by
  * then, so this row never says it.
  */
 const STAGE_LABELS: Record<AfkStage, string | null> = { ...STAGE_WORDS, done: null }
-
-/** How many tasks a project may hold at once, one to five: the host's own range for its pick count. */
-const PICK_COUNTS = [1, 2, 3, 4, 5] as const
 
 /** A Bot whose plugin answers without the route is left alone for a while, like every other read. */
 const unsupported = cooldown()
@@ -171,16 +162,16 @@ export function AfkPopup({
   const withSkills = usePluginFeature(config, AFK_SKILLS_FEATURE)
   const libraryOffered = useLibraryOffered(config)
   const withPrompt = usePluginFeature(config, AFK_PROMPT_FEATURE)
-  const withPicks = usePluginFeature(config, AFK_PICKS_FEATURE)
-  // The count row, the stepper and the Working list are one answer: a host that advertises none of
-  // them holds the one task it always did, and the sheet stays the one it always was.
-  const picksDrawn = withPicks === "yes"
+  // One answer for the whole change: the count row, the stepper, the Working list, the budget line
+  // and the library behind the Prompt row are drawn where the host advertises it, and the sheet is
+  // the one it always was where it doesn't. Read once — two reads of one feature is two answers
+  // that can disagree for a frame.
+  const picks = usePluginFeatureOn(config, AFK_PICKS_FEATURE)
   // One row or the other: the library offered is a project running stages, and the Prompt is the
   // words a project running one run is told instead.
   const promptOffered = withPrompt === "yes" && !libraryOffered
   // The account's own prompt library: the host has to advertise the change, and the account has to
   // be signed in with its vault open here — the library lives in that store, not on a host.
-  const picks = usePluginFeatureOn(config, AFK_PICKS_FEATURE)
   const deviceLibrary = usePromptLibraryReady()
   const promptLibrary = library ?? deviceLibrary
   // Where the project's Prompt was copied from the account's library, the row needs the entry to
@@ -296,7 +287,7 @@ export function AfkPopup({
         withSkills === "yes" ||
         libraryOffered ||
         promptOffered ||
-        picksDrawn),
+        picks),
     onShow: false,
   })
 
@@ -356,12 +347,9 @@ export function AfkPopup({
   // A refusal is the host's, said here the way the other writes are, and answered to the editor so it
   // keeps the words typed rather than closing on a fail. A source rides with the words it describes:
   // a pick writes both, and a hand edit writes the words alone, which clears the copy on the host.
-  const writePrompt = async (
-    prompt: string,
-    promptId: string | null = null,
-  ): Promise<"saved" | "refused"> => {
+  const writePrompt = async (draft: PromptWrite): Promise<"saved" | "refused"> => {
     try {
-      setAfk(await setProjectAfkPrompt(config, projectId, prompt, promptId))
+      setAfk(await setProjectAfkPrompt(config, projectId, draft))
       return "saved"
     } catch (failure) {
       toast.error(failure instanceof Error ? failure.message : "Couldn't save that Prompt.")
@@ -376,7 +364,7 @@ export function AfkPopup({
     if (pulling || !source || !promptEntry) return
     setPulling(true)
     try {
-      setAfk(await setProjectAfkPrompt(config, projectId, promptEntry.body, source))
+      setAfk(await setProjectAfkPrompt(config, projectId, { text: promptEntry.body, source }))
     } catch (failure) {
       toast.error(failure instanceof Error ? failure.message : "Couldn't pull that Prompt in.")
     } finally {
@@ -448,7 +436,7 @@ export function AfkPopup({
             {/* Under the switch, and at the foot of its list where a Prompt row takes the place
                 right under it: how many tasks this project may hold at once, and how full its
                 bot's own budget is beside it. */}
-            {picksDrawn && afk && !afkError && (pickCount !== null || afk.pickBudget !== null) && (
+            {picks && afk && !afkError && (pickCount !== null || afk.pickBudget !== null) && (
               <PickCountRow
                 count={pickCount}
                 budget={afk.pickBudget}
@@ -474,8 +462,8 @@ export function AfkPopup({
           {afk?.on && (
             <Working
               task={afk.task}
-              holds={picksDrawn ? afk.holds : null}
-              pickCount={picksDrawn ? pickCount : null}
+              holds={picks ? afk.holds : null}
+              pickCount={picks ? pickCount : null}
               stage={afk.stage}
               stageName={afk.stageName}
               refusal={afk.refusal}
@@ -746,18 +734,6 @@ function PromptRow({
 }
 
 /**
- * The row's own line for a Prompt: markdown's block marks taken off and its lines run together, since
- * the row names the instruction rather than drawing it — the editor is where it reads as written.
- */
-function promptLine(prompt: string) {
-  return prompt
-    .split("\n")
-    .map((line) => line.replace(/^\s*(#{1,6}|[-*+]|\d+\.)\s+/, "").trim())
-    .filter(Boolean)
-    .join(" · ")
-}
-
-/**
  * The skills this project's work follows, kept on its host with the switch. A name the profile has
  * since lost still shows on the row, so the project says what it holds; the menus offer only what the
  * bot can run now.
@@ -940,9 +916,21 @@ function Working({
   refusal: string | null | undefined
   manyRepos: boolean
 }) {
+  // One list of what it holds, however much the host named: its own rows where it answers a list,
+  // and the one task it answers otherwise, wearing the stage the read carries for it. A row is a
+  // hold only in the first case — that is what `data-hold` marks, and what the count row counts.
   const held = holds && holds.length > 0 ? holds : null
-  if (!task && !refusal && !held) return null
-  const label = stageName ?? (stage ? STAGE_LABELS[stage] : null)
+  const rows: { hold: AfkHold; holdRow: boolean }[] = held
+    ? held.map((hold) => ({ hold, holdRow: true }))
+    : task
+      ? [
+          {
+            hold: { ...task, stage: stage ?? null, stageName: stageName ?? null, stalled: null },
+            holdRow: false,
+          },
+        ]
+      : []
+  if (!refusal && !rows.length) return null
   return (
     <div className="flex flex-col gap-3">
       {refusal && (
@@ -950,10 +938,12 @@ function Working({
           {refusal}
         </p>
       )}
-      {held ? (
+      {rows.length > 0 && (
         <section aria-label="Working" data-working data-stage={stage ?? undefined}>
           <h3 className="px-1 pb-1 text-sm text-muted-foreground">Working</h3>
-          {pickCount !== null && (
+          {/* Only a host that answered a list is counted: one task against a count of one is a
+              sentence about nothing. */}
+          {held && pickCount !== null && (
             <p
               data-holds={held.length}
               data-pick-count={pickCount}
@@ -963,11 +953,11 @@ function Working({
             </p>
           )}
           <ul>
-            {held.map((hold) => (
+            {rows.map(({ hold, holdRow }) => (
               <li
                 key={`${hold.repo}#${hold.number}`}
-                data-hold={hold.number}
-                data-stage={hold.stage ?? undefined}
+                data-hold={holdRow ? hold.number : undefined}
+                data-stage={holdRow ? (hold.stage ?? undefined) : undefined}
               >
                 <TaskLink
                   task={hold}
@@ -978,13 +968,6 @@ function Working({
             ))}
           </ul>
         </section>
-      ) : (
-        task && (
-          <section aria-label="Working" data-working data-stage={stage ?? undefined}>
-            <h3 className="px-1 pb-1 text-sm text-muted-foreground">Working</h3>
-            <TaskLink task={task} label={label} note={manyRepos ? task.repo : undefined} />
-          </section>
-        )
       )}
     </div>
   )

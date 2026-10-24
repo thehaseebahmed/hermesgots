@@ -23,6 +23,12 @@ export interface Settings {
   navShortcuts?: boolean
   /** The clock on this device's copy of the appearance record: a change made here, or one pulled. */
   appearanceAt?: number
+  /**
+   * The clock on this device's own edits to the account's prompt library — a save, a rename or a
+   * delete. Sync's fingerprint reads this instead of the entries, so an edit asks for a pass without
+   * every body being read and cloned on each one.
+   */
+  promptsAt?: number
   /** Shows the Developer section in Settings (tapping the version five times). */
   developer?: boolean
   /** The bot-first layout: bots in the sidebar, each chat a thread in its bot. Developer, local. */
@@ -412,14 +418,58 @@ export interface Message {
 }
 
 /**
- * A local deletion sync hasn't pushed yet: `bot:<profileId>`, `chat:<conversationId>` or
- * `prompt:<entryId>`. A prompt entry is the account's rather than a bot's, so only the last kind
- * carries no `profileId`.
+ * A local deletion sync hasn't pushed yet. One table holds every kind, and the id says which: a bot's
+ * is `bot:<profileId>`, a chat's `chat:<conversationId>` and a library entry's `prompt:<entryId>`.
+ * A bot and a chat belong to a profile, so their tombstones carry it — the sync's readers go by it —
+ * while an entry is the account's rather than a bot's, which is why only that kind has none. The
+ * shape is what keeps the profile there: a `bot:` or `chat:` tombstone without one doesn't compile,
+ * rather than syncing to nothing.
  */
-export interface Tombstone {
-  id: string
+interface TombstoneOf<Id extends string> {
+  id: Id
   deletedAt: number
-  profileId?: string
+}
+
+/** A bot's deletion, named by the bot it deletes; its id is the profile's. */
+export interface BotTombstone extends TombstoneOf<`bot:${string}`> {
+  profileId: string
+}
+
+/** A chat's deletion, named by the chat; the profile it belonged to rides along. */
+export interface ChatTombstone extends TombstoneOf<`chat:${string}`> {
+  profileId: string
+}
+
+/** A prompt library entry's deletion: the account's, so it names no bot. */
+export interface PromptTombstone extends TombstoneOf<`prompt:${string}`> {
+  profileId?: never
+}
+
+export type Tombstone = BotTombstone | ChatTombstone | PromptTombstone
+
+/** Whether a tombstone is a bot's: the id it carries is what says which kind a row is. */
+function isBotTombstone(row: Tombstone): row is BotTombstone {
+  return row.id.startsWith("bot:")
+}
+
+/** Whether a tombstone is a chat's, read the same way. */
+function isChatTombstone(row: Tombstone): row is ChatTombstone {
+  return row.id.startsWith("chat:")
+}
+
+/**
+ * The bot tombstones this device still holds. One table keeps every kind, so a reader narrows by the
+ * id it reads — and from there on the record's profile is a `string`, not something to guard again.
+ */
+export async function botTombstones(): Promise<BotTombstone[]> {
+  const rows = await db.tombstones.where("id").startsWith("bot:").toArray()
+  return rows.filter(isBotTombstone)
+}
+
+/** The chat tombstones, each with the profile its chat belonged to. */
+export async function chatTombstones(): Promise<ChatTombstone[]> {
+  const rows = await db.tombstones.where("id").startsWith("chat:").toArray()
+  return rows.filter(isChatTombstone)
 }
 
 /**

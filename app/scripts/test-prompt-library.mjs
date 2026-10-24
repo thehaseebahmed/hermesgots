@@ -13,6 +13,7 @@ import {
   bodyPreview,
   libraryReady,
   promptFilled,
+  promptLine,
   promptTags,
   promptTitle,
   sortedPrompts,
@@ -60,6 +61,20 @@ test("a row previews a body on one line, its markdown marks off it", () => {
   const long = bodyPreview("a".repeat(120), 20)
   assert.equal(long.length, 20, "a preview is cut at the width it is given")
   assert.ok(long.endsWith("…"), "and says so with an ellipsis rather than stopping mid-word silently")
+})
+
+test("the project's row and the library's row read a body by the same rule", () => {
+  assert.equal(
+    promptLine("# Review\n\n- Read the issue"),
+    bodyPreview("# Review\n\n- Read the issue"),
+    "one line for a Prompt, whether it is the project's copy or the entry it came from",
+  )
+  assert.equal(
+    promptLine("#Heading"),
+    "#Heading",
+    "a mark is a mark only with a space after it: a '#Heading' is the words the user wrote",
+  )
+  assert.equal(bodyPreview("a".repeat(120), 20), `${"a".repeat(19)}…`, "the preview cuts the line it shares")
 })
 
 test("the library needs a signed-in account with its vault open", () => {

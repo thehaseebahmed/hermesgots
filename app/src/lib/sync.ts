@@ -21,6 +21,8 @@ import {
   DEFAULT_PROFILE,
   DEFAULT_SETTINGS,
   adoptAppearance,
+  botTombstones,
+  chatTombstones,
   db,
   deleteConversation,
   deleteProfile,
@@ -387,8 +389,8 @@ async function localBots(): Promise<Doc<BotValue>> {
   for (const profile of await db.profiles.toArray()) {
     doc[profile.id] = { at: profile.updatedAt, value: botValue(profile) }
   }
-  for (const tombstone of await db.tombstones.where("id").startsWith("bot:").toArray()) {
-    if (tombstone.profileId) doc[tombstone.profileId] = { at: tombstone.deletedAt, deleted: true }
+  for (const tombstone of await botTombstones()) {
+    doc[tombstone.profileId] = { at: tombstone.deletedAt, deleted: true }
   }
   return doc
 }
@@ -442,8 +444,7 @@ async function syncBots(key: CryptoKey) {
     },
   )
   // Pushed deletions live on in the merged document; their chat lists can go.
-  for (const tombstone of await db.tombstones.where("id").startsWith("bot:").toArray()) {
-    if (!tombstone.profileId) continue
+  for (const tombstone of await botTombstones()) {
     if (merged[tombstone.profileId]?.at !== tombstone.deletedAt) continue
     await deleteDoc(`chats/${tombstone.profileId}`).catch(() => undefined)
     await db.tombstones.delete(tombstone.id)
@@ -554,8 +555,8 @@ async function localChats(profileId: string, drafts: boolean): Promise<Doc<ChatV
       delete value.draftText
     doc[c.id] = { at: c.changedAt, value }
   }
-  const tombstones = await db.tombstones.where("id").startsWith("chat:").toArray()
-  for (const tombstone of tombstones.filter((t) => t.profileId === profileId)) {
+  for (const tombstone of await chatTombstones()) {
+    if (tombstone.profileId !== profileId) continue
     doc[tombstone.id.slice("chat:".length)] = { at: tombstone.deletedAt, deleted: true }
   }
   return doc
@@ -592,8 +593,8 @@ async function applyChats(profileId: string, pull: [string, Entry<ChatValue>][])
 
 /** Drops tombstones the merged list now carries. */
 async function settleChatTombstones(profileId: string, merged: Doc<ChatValue>) {
-  const tombstones = await db.tombstones.where("id").startsWith("chat:").toArray()
-  for (const tombstone of tombstones.filter((t) => t.profileId === profileId)) {
+  for (const tombstone of await chatTombstones()) {
+    if (tombstone.profileId !== profileId) continue
     const id = tombstone.id.slice("chat:".length)
     if (merged[id]?.at === tombstone.deletedAt) await db.tombstones.delete(tombstone.id)
   }
@@ -625,23 +626,20 @@ async function mergePluginChats(profile: Profile) {
 }
 
 async function fingerprint() {
-  const [profiles, count, newest, tombstones, settings, prompts] = await Promise.all([
+  const [profiles, count, newest, tombstones, settings] = await Promise.all([
     db.profiles.toArray(),
     db.conversations.count(),
     db.conversations.orderBy("changedAt").last(),
     db.tombstones.count(),
     getSettings(),
-    db.prompts.toArray(),
   ])
   const bots = profiles.map((p) => `${p.id}@${p.updatedAt}`).join(",")
   const appearance = APPEARANCE_FIELDS.map((field) => `${settings[field] ? 1 : 0}`).join("")
-  // The library is a document of its own: an edit here moves this key, which is what asks for a
-  // sync, the same way a bot's rename does.
-  const library = prompts
-    .map((entry) => `${entry.id}@${entry.updatedAt}`)
-    .sort()
-    .join(",")
-  return `${bots}|${count}@${newest?.changedAt ?? 0}|${tombstones}|${settings.onboarded}|${appearance}@${settings.appearanceAt ?? 0}|${library}`
+  // The library is a document of its own, and its own clock says when it moved: an entry saved,
+  // renamed or deleted here bumps `promptsAt`, which is what asks for a sync. Reading the entries —
+  // every body, on every pass this key re-runs for any other device's write — was the cost of
+  // knowing that, and `syncPrompts` reads them anyway when a pass runs.
+  return `${bots}|${count}@${newest?.changedAt ?? 0}|${tombstones}|${settings.onboarded}|${appearance}@${settings.appearanceAt ?? 0}|prompts@${settings.promptsAt ?? 0}`
 }
 
 let running: Promise<void> | undefined

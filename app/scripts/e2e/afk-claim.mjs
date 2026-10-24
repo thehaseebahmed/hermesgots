@@ -5,7 +5,7 @@
 // budget line reads the bot's own two numbers. A GitHub refusal leaves the switch on and shows its
 // reason in the same pop-up. The read is the plugin's own route, so the whole thing is covered
 // against the mock. Phone, tablet and laptop, light and dark, with no console error.
-import { afkOn, app, assert, flow, makeProject, mock, openAfk, pass, say } from "./lib.mjs"
+import { afkOn, afkRead, app, assert, flow, makeProject, mock, openAfk, pass, say } from "./lib.mjs"
 
 const HELD = 265
 const HELD_TITLE = "The frontier is read from GitHub and listed"
@@ -18,9 +18,6 @@ const THIRD_TITLE = "A hold is a row, not a column on the project"
 const REFUSAL = "Couldn't reach GitHub from the server."
 /** What a bot that never set one works within. */
 const BUDGET = 5
-
-const afkRead = async (projectId) =>
-  (await fetch(`${mock}/api/plugins/memento/projects/${projectId}/afk`)).json()
 
 const botAfk = () => fetch(`${mock}/api/plugins/memento/afk`).then((response) => response.json())
 
@@ -154,16 +151,19 @@ const run = async ({ page, profileId, shot, until }) => {
   )
   await shot("staged")
 
-  // A claimed task leaves the frontier — every one of them — and is listed as claimed.
+  // A claimed task leaves the frontier — every one of them — and is listed as claimed. The tasks the
+  // sweep hasn't reached are still offered: a project holding three of five leaves two ready.
   await until(
     async () => (await page.locator('[data-group="claimed"] [data-task="269"]').count()) === 1,
     15_000,
     "the frontier to list the third task as claimed",
   )
-  assert.equal(
-    await page.locator('[data-group="ready"] [data-task]').count(),
-    0,
-    "nothing AFK holds is offered as ready",
+  assert.deepEqual(
+    await page
+      .locator('[data-group="ready"] [data-task]')
+      .evaluateAll((links) => links.map((link) => Number(link.dataset.task))),
+    [270, 271],
+    "nothing AFK holds is offered as ready, and what it doesn't hold still is",
   )
   for (const number of [HELD, SECOND, THIRD]) {
     assert.equal(
@@ -244,5 +244,5 @@ for (const width of [390, 768, 1024]) {
   }
 }
 pass(
-  "AFK claims the oldest ready task when a project is turned on — and filling its pick count to three makes the pop-up name every task it holds, oldest first and each with the stage of the session working it, over a count row and a budget line the bot answers — with the frontier dropping them all and a reload reading them back, and a GitHub refusal leaving the switch on with its reason shown, at 390, 768 and 1024px, light and dark",
+  "AFK claims the oldest ready task when a project is turned on — and filling its pick count to three makes the pop-up name every task it holds, oldest first and each with the stage of the session working it, over a count row and a budget line the bot answers — with the frontier dropping every task it took and still offering the rest, and a reload reading them back, and a GitHub refusal leaving the switch on with its reason shown, at 390, 768 and 1024px, light and dark",
 )

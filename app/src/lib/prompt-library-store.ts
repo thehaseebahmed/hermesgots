@@ -9,7 +9,7 @@
  */
 import { useLiveQuery } from "dexie-react-hooks"
 
-import { db } from "@/lib/db"
+import { db, getSettings, saveSettings } from "@/lib/db"
 import {
   libraryReady,
   promptTitle,
@@ -19,6 +19,16 @@ import {
 } from "@/lib/prompt-library"
 import { useSyncState } from "@/lib/sync"
 import { randomId } from "@/lib/utils"
+
+/**
+ * Moves the library's own clock, which is what asks sync for a pass: the rows are read when it runs,
+ * so this stamp is all sync needs to know one moved — the way `appearanceAt` already stamps the
+ * appearance document.
+ */
+async function stampPrompts(at: number) {
+  const { promptsAt } = await getSettings()
+  await saveSettings({ promptsAt: Math.max(at, (promptsAt ?? 0) + 1) })
+}
 
 /** A new entry's id, minted on this device: the document is keyed by it, so it exists before a push. */
 export function newPromptId(): string {
@@ -67,6 +77,7 @@ export async function addPrompt(draft: PromptDraft): Promise<PromptEntry> {
     updatedAt: Date.now(),
   }
   await db.prompts.put(entry)
+  await stampPrompts(entry.updatedAt)
   return entry
 }
 
@@ -85,6 +96,7 @@ export async function savePrompt(
     updatedAt: Math.max(Date.now(), existing.updatedAt + 1),
   }
   await db.prompts.put(entry)
+  await stampPrompts(entry.updatedAt)
   return entry
 }
 
@@ -93,13 +105,14 @@ export async function savePrompt(
  * pick is a copy, so a deleted entry leaves the words standing in every Prompt that took them.
  */
 export async function removePrompt(id: string): Promise<void> {
-  await db.transaction("rw", db.prompts, db.tombstones, async () => {
+  const deletedAt = await db.transaction("rw", db.prompts, db.tombstones, async () => {
     const existing = await db.prompts.get(id)
-    if (!existing) return
+    if (!existing) return 0
     await db.prompts.delete(id)
-    await db.tombstones.put({
-      id: `prompt:${id}`,
-      deletedAt: Math.max(Date.now(), existing.updatedAt + 1),
-    })
+    const at = Math.max(Date.now(), existing.updatedAt + 1)
+    await db.tombstones.put({ id: `prompt:${id}`, deletedAt: at })
+    return at
   })
+  // Nothing was there to delete: an entry another device already took needs no pass of its own.
+  if (deletedAt) await stampPrompts(deletedAt)
 }
