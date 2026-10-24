@@ -481,11 +481,13 @@ class WorkflowChoiceTests(AfkHome):
         )
 
     def test_a_write_names_the_switch_or_a_workflow(self) -> None:
-        self.assertEqual(write_from({"on": True}), ("on", True))
-        self.assertEqual(write_from({"on": False}), ("on", False))
-        self.assertEqual(write_from({"workflow_id": "wf-1"}), ("workflow", "wf-1"))
+        self.assertEqual(write_from({"on": True}), ("on", {"on": True}))
+        self.assertEqual(write_from({"on": False}), ("on", {"on": False}))
+        self.assertEqual(write_from({"workflow_id": "wf-1"}), ("workflow", {"workflow_id": "wf-1"}))
         self.assertEqual(
-            write_from({"workflow_id": "  wf-1  "}), ("workflow", "wf-1"), "the id is trimmed"
+            write_from({"workflow_id": "  wf-1  "}),
+            ("workflow", {"workflow_id": "wf-1"}),
+            "the id is trimmed",
         )
 
     def test_a_write_names_one_shape_at_a_time(self) -> None:
@@ -610,21 +612,29 @@ class PromptTests(AfkHome):
         self.assertFalse(read(self.home, "p1", self.folders())["on"])
 
     def test_a_write_names_the_prompt_as_its_own_shape(self) -> None:
-        self.assertEqual(write_from({"prompt": "Mine."}), ("prompt", ("Mine.", None)))
-        self.assertEqual(write_from({"prompt": "  Mine.  "}), ("prompt", ("Mine.", None)), "trimmed")
-        self.assertEqual(write_from({"prompt": ""}), ("prompt", (None, None)), "cleared")
-        self.assertEqual(write_from({"prompt": "   "}), ("prompt", (None, None)))
-        self.assertEqual(write_from({"prompt": None}), ("prompt", (None, None)))
+        self.assertEqual(
+            write_from({"prompt": "Mine."}), ("prompt", {"prompt": "Mine.", "prompt_id": None})
+        )
+        self.assertEqual(
+            write_from({"prompt": "  Mine.  "}),
+            ("prompt", {"prompt": "Mine.", "prompt_id": None}),
+            "trimmed",
+        )
+        self.assertEqual(
+            write_from({"prompt": ""}), ("prompt", {"prompt": None, "prompt_id": None}), "cleared"
+        )
+        self.assertEqual(write_from({"prompt": "   "}), ("prompt", {"prompt": None, "prompt_id": None}))
+        self.assertEqual(write_from({"prompt": None}), ("prompt", {"prompt": None, "prompt_id": None}))
 
     def test_a_prompt_and_the_entry_it_copied_are_one_shape(self) -> None:
         self.assertEqual(
             write_from({"prompt": "Mine.", "prompt_id": "e-one"}),
-            ("prompt", ("Mine.", "e-one")),
+            ("prompt", {"prompt": "Mine.", "prompt_id": "e-one"}),
             "a source is a companion to the words, not a shape beside them",
         )
         self.assertEqual(
             write_from({"prompt": "  Mine.  ", "prompt_id": "  e-one  "}),
-            ("prompt", ("Mine.", "e-one")),
+            ("prompt", {"prompt": "Mine.", "prompt_id": "e-one"}),
             "both halves trimmed",
         )
 
@@ -754,6 +764,40 @@ class PromptTests(AfkHome):
         self.assertIn(
             "isn't repeated here", body["instructions"], "a later run has to read the issue itself"
         )
+
+
+class WriteShapeTests(unittest.TestCase):
+    """Every shape a project write names has one writer, and that writer takes what it carries.
+
+    The route hands a shape's arguments straight to the writer the table names (`AFK_WRITES`), so a
+    payload key no writer accepts is a 500 on a write the sheet offers — not a refusal the user can
+    read — and a shape the table forgot is a write nothing performs.
+    """
+
+    BODIES = (
+        {"on": True},
+        {"workflow_id": "wf-1"},
+        {"prompt": "Mine.", "prompt_id": "e-one"},
+        {"pick_count": 2},
+    )
+
+    def test_every_shape_a_write_names_has_a_writer_that_takes_its_arguments(self) -> None:
+        import inspect
+
+        import plugin
+
+        for body in self.BODIES:
+            with self.subTest(body=body):
+                kind, payload = write_from(body)
+                writer = plugin.AFK_WRITES.get(kind)
+                self.assertIsNotNone(writer, f"{kind} is a write this host performs")
+                takes = set(inspect.signature(writer).parameters)
+                # `on` also takes the project's folders and whether it is archived: the route adds
+                # those, because it is the one write that asks whether the project can work at all.
+                wanted = set(payload) | ({"folders", "archived"} if kind == "on" else set())
+                self.assertEqual(
+                    wanted - takes, set(), f"{kind}'s arguments are the ones its writer takes"
+                )
 
 
 class ClaimStubTests(unittest.TestCase):
@@ -1086,7 +1130,7 @@ class PickCountTests(ClaimStubTests):
         self.assertEqual(self.shown()["holds"], [])
 
     def test_a_count_a_write_names_is_what_the_sheet_reads_back(self) -> None:
-        self.assertEqual(write_from({"pick_count": 4}), ("pick_count", 4))
+        self.assertEqual(write_from({"pick_count": 4}), ("pick_count", {"count": 4}))
         afk.set_pick_count(self.home, "p1", 4)
         self.assertEqual(self.shown()["pick_count"], 4)
 
@@ -1118,6 +1162,45 @@ class PickCountTests(ClaimStubTests):
         self.assertEqual(self.shown()["pick_count"], 1)
         self.sweep()
         self.assertEqual(len(self.hold()), 3, "the next pass fills to the new count, not under it")
+
+    def test_the_read_asks_for_every_holds_stage_in_one_look(self) -> None:
+        """Three holds, one read of the session store, and each Working row draws its own stage."""
+        self.fill(3, [265, 266, 267])
+        repos = [
+            {
+                "name": "mock-user/memento",
+                "repo_root": str(self.checkout),
+                "path": f"/trees/afk-{number}",
+                "branch": f"hermes/afk-{number}",
+            }
+            for number in (265, 266)
+        ]
+        for number, kind in ((265, pipeline.BUILD), (266, pipeline.GATE_CHECK)):
+            session_id = f"memento-afk-{number}"
+            sessions._upsert(db_path(self.home), session_id, "p1", repos, "auto", None)
+            sessions.set_pipeline(db_path(self.home), session_id, staged_record(kind))
+        with patch.object(
+            sessions, "pipelines_of", wraps=sessions.pipelines_of
+        ) as pipelines_of:
+            shown = self.shown()
+        self.assertEqual(
+            pipelines_of.call_count, 1, "a project's holds are one read, not one connection each"
+        )
+        self.assertEqual(
+            sorted(pipelines_of.call_args.args[1]),
+            ["memento-afk-265", "memento-afk-266", "memento-afk-267"],
+            "one ask names every session holding a task",
+        )
+        self.assertEqual(
+            [(hold["stage"], hold["stage_name"]) for hold in shown["holds"]],
+            [
+                (pipeline.BUILD, "Build"),
+                (pipeline.GATE_CHECK, "Test"),
+                (None, None),
+            ],
+            "each hold answers its own session's stage, and a session with no stage answers none",
+        )
+        self.assertEqual(shown["stage"], pipeline.BUILD, "`stage` is still the oldest hold's")
 
     def test_a_stalled_hold_keeps_its_place_and_its_own_clock(self) -> None:
         self.fill(2, [265, 266])
@@ -1313,6 +1396,10 @@ class PickBudgetTests(unittest.TestCase):
         self.issues: Dict[str, List[dict]] = {repo: [] for repo in self.REPOS.values()}
         self.reads: List[str] = []
         self.writes: List[tuple] = []
+        # What a pass asked GitHub about itself rather than about a repository: whose the token is,
+        # and whether the claim label is there yet. Both are once-per-pass facts to a sweep.
+        self.logins: List[str] = []
+        self.label_reads: List[str] = []
         self.write_error: Optional[Exception] = None
         self.write_error_on: Optional[str] = None
         for one in (
@@ -1334,8 +1421,10 @@ class PickBudgetTests(unittest.TestCase):
 
     def answer_get(self, path: str, auth: Any) -> Any:
         if path == "/user":
+            self.logins.append(path)
             return {"login": "mock-user"}
         if "/labels/" in path:
+            self.label_reads.append(path)
             return {"name": CLAIM_LABEL}
         for repo, issues in self.issues.items():
             if path.startswith(f"/repos/{repo}/issues?"):
@@ -1423,6 +1512,70 @@ class PickBudgetTests(unittest.TestCase):
             "the project the budget skipped is the one that says so",
         )
         self.assertIsNone(self.shown("p2")["refusal"], "the project that claimed says nothing")
+
+    def test_two_projects_of_one_repository_claim_the_issue_once(self) -> None:
+        """A shared checkout: both projects read the same frontier, and a pass hands a task out once.
+
+        Two projects pointing at one repository plan from one list of ready issues, so a pass that
+        claimed each project's oldest would take the same issue twice — two holds on one task, four
+        GitHub writes, and one of them left with nothing working it.
+        """
+        self.REPOS = {**self.REPOS, "p2": "mock-user/one"}
+        self.turn_on("p1", 1)
+        self.turn_on("p2", 1)
+        self.issues["mock-user/one"] = [issue_row(265)]
+        claimed = self.pass_()
+        self.assertEqual(len(claimed), 1, "one ready issue is one claim")
+        winner = claimed[0][0]
+        self.assertEqual(
+            [project_id for project_id in ("p1", "p2") if self.holds(project_id)],
+            [winner],
+            "exactly one of the two projects holds the task",
+        )
+        other = "p2" if winner == "p1" else "p1"
+        self.assertEqual(self.holds(other), [], "the other project holds nothing")
+        self.assertIsNone(
+            self.shown(other)["refusal"],
+            "it had nothing to claim rather than being held back by the budget, so it says nothing",
+        )
+        self.assertEqual(
+            len(self.writes), 2, "one claim's label and assignment, not two claims' worth"
+        )
+        self.assertEqual(
+            sorted(self.reads), ["mock-user/one", "mock-user/one"], "each project reads it once"
+        )
+
+    def test_a_shared_repository_still_hands_its_oldest_tasks_out_in_the_bots_order(self) -> None:
+        """The bot-wide ordering survives two projects of one repository, and neither task doubles."""
+        self.REPOS = {**self.REPOS, "p2": "mock-user/one"}
+        set_pick_budget(self.home, 2)
+        self.turn_on("p1", 1)
+        self.turn_on("p2", 1)
+        self.issues["mock-user/one"] = [
+            issue_row(266, created="2026-10-02T00:00:00Z"),
+            issue_row(265),
+        ]
+        claimed = self.pass_()
+        self.assertEqual(
+            [(project_id, task["number"]) for project_id, task in claimed],
+            [("p1", 265), ("p2", 266)],
+            "one place each, the oldest ready task first, and no task claimed for both",
+        )
+        self.assertEqual(self.holds("p1"), [265])
+        self.assertEqual(self.holds("p2"), [266])
+        self.assertEqual(len(self.writes), 4, "two claims")
+
+    def test_a_pass_asks_whose_the_token_is_and_makes_the_label_once(self) -> None:
+        """Three claims of one repository are one read of the account and one look for the label."""
+        self.turn_on("p1", 3)
+        self.issues["mock-user/one"] = [
+            issue_row(265),
+            issue_row(266, created="2026-10-02T00:00:00Z"),
+            issue_row(267, created="2026-10-03T00:00:00Z"),
+        ]
+        self.assertEqual(len(self.pass_()), 3)
+        self.assertEqual(self.logins, ["/user"], "one read of /user, not one per claim")
+        self.assertEqual(len(self.label_reads), 1, "the label is looked for once per repository")
 
     def test_the_budget_is_counted_once_a_pass_before_any_github_read(self) -> None:
         """A sweep the budget holds back asks GitHub nothing at all, not even what is ready."""
@@ -1808,6 +1961,53 @@ class RunEndTests(AfkSessionTests):
         self.assertEqual(self.shown()["task"], self.task)
         wake.assert_called_once()
 
+    def test_a_record_that_lost_its_task_gives_back_the_hold_its_session_works(self) -> None:
+        """A session gives back its own hold, never the project's oldest by accident.
+
+        Two tasks in flight, and the newer one's record names neither of them — the shape a record
+        written by an older build has. Its run finishing gives back the task *that* session worked,
+        and leaves the older one, which something else is still working, exactly where it is.
+        """
+        newer = {
+            **self.task,
+            "number": 266,
+            "title": "Task 266",
+            "created_at": "2026-10-02T00:00:00Z",
+        }
+        afk._hold(self.home, "p1", newer)
+        repos = [
+            {
+                "name": "mock-user/memento",
+                "repo_root": str(self.checkout),
+                "path": "/trees/afk-266",
+                "branch": "hermes/afk-266",
+            }
+        ]
+        sessions._upsert(db_path(self.home), "memento-afk-s2", "p1", repos, "auto", "/files/afk-266")
+        afk._adopt(self.home, "p1", "memento-afk-s2", newer)
+        sessions.set_task(db_path(self.home), "memento-afk-s2", None)
+        self.assertIsNone(
+            sessions.read(db_path(self.home), "memento-afk-s2")["task"],
+            "the record names no task, which is what a run's end then has to go on",
+        )
+
+        self.ended("memento-afk-s2", completed=True)
+        self.assertEqual(
+            [hold.task["number"] for hold in afk._holds(self.home, "p1")],
+            [265],
+            "the newer task's hold goes and the older one's stays",
+        )
+        self.assertEqual(held_task(self.home).session_id, self.SESSION, "the older task is untouched")
+
+    def test_giving_a_task_back_without_naming_one_frees_nothing(self) -> None:
+        """A hold is given back by naming it, not by falling back on whichever is oldest."""
+        afk._free(self.home, "p1")
+        self.assertEqual(
+            [hold.task["number"] for hold in afk._holds(self.home, "p1")],
+            [265],
+            "nothing named and no session behind it: the project's oldest is not a default",
+        )
+
 
 class StallTests(AfkSessionTests):
     """A claim nothing is working, where waiting sessions appear."""
@@ -1844,7 +2044,8 @@ class StallTests(AfkSessionTests):
         self.assertIn(self.SESSION, afk.stalled(self.home), "its own reason stands in for the wait")
 
     def test_a_project_holding_nothing_stalls_nothing(self) -> None:
-        afk._free(self.home, "p1")
+        afk._free(self.home, "p1", self.task)
+        self.assertEqual(afk._holds(self.home, "p1"), [])
         self.assertEqual(afk.stalled(self.home), {})
 
 
@@ -2321,6 +2522,22 @@ class WakeTests(unittest.TestCase):
 
     def test_waking_a_sweep_that_is_not_running_is_harmless(self) -> None:
         afk.wake()
+
+    def test_raising_a_number_wakes_the_sweep_and_lowering_it_does_not(self) -> None:
+        """Only a raise makes a place the sweep should fill; a lower frees none, so it buys no pass."""
+        tmp = TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        home = Path(tmp.name)
+        afk.set_pick_count(home, "p1", 1)
+        afk.set_pick_budget(home, 3)
+        with patch.object(afk, "wake") as wake:
+            afk.set_pick_count(home, "p1", 3)
+            afk.set_pick_budget(home, 5)
+        self.assertEqual(wake.call_count, 2, "each raise asks the sweep to fill what it just made")
+        with patch.object(afk, "wake") as wake:
+            afk.set_pick_count(home, "p1", 1)
+            afk.set_pick_budget(home, 2)
+        wake.assert_not_called()
 
 
 class StagedRunTests(AfkSessionTests):
@@ -2838,7 +3055,11 @@ class StageRunTests(unittest.TestCase):
         ):
             asyncio.run(afk.work_stage(self.adapter(), self.home, self.record, self.task))
         stall.assert_called_once_with(
-            self.home, "p1", self.task, afk.STAGE_FAILED.format(name="Review")
+            self.home,
+            "p1",
+            self.task,
+            afk.STAGE_FAILED.format(name="Review"),
+            self.record["session_id"],
         )
 
     def test_the_hook_starts_it_on_the_loop_that_owns_the_runs(self) -> None:

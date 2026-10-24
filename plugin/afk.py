@@ -50,7 +50,7 @@ import sqlite3
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Tuple
+from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple
 
 from . import (
     chats,
@@ -87,8 +87,10 @@ SWEEP_SECONDS = 180
 HELD = ("repo", "number", "title", "url", "created_at")
 # How many tasks a project holds at once when it names no count, and the most it may ask for: one
 # place per task, which is what the user means by "how many at once" when they look at the list
-# (ADR 0025).
+# (ADR 0025). The floor is its own number: a stored count of zero reads as the fewest it can be,
+# which is a different thing from a count nobody set.
 DEFAULT_PICK_COUNT = 1
+LOWEST_PICK_COUNT = 1
 MAX_PICK_COUNT = 5
 # The bot's own pick budget: how many tasks the projects of one bot hold together, the range it may
 # be set to, and the settings row it lives under (ADR 0042). One number over the projects, because
@@ -233,7 +235,7 @@ def read(
     if on and why == ARCHIVED:
         turn_off(hermes_home, project_id)
         on = False
-    holds = [_hold_answer(hermes_home, hold) for hold in found["holds"]]
+    holds = _hold_answers(hermes_home, found["holds"])
     # The oldest hold is the one the sheet's single Working row has always drawn, and an app that
     # knows nothing of picks keeps drawing exactly that.
     oldest = holds[0] if holds else {"stage": None, "stage_name": None}
@@ -263,23 +265,67 @@ def read(
     }
 
 
-def _hold_answer(hermes_home: Path, hold: "Hold") -> Dict[str, Any]:
-    """One hold as the sheet reads it: the task, the stage its session is in, and why it stalled."""
-    staged = _held_task_stage(hermes_home, hold)
-    return {
-        **{key: hold.task.get(key) for key in HELD},
-        "stage": staged.step,
-        "stage_name": staged.name,
-        "stalled": hold.stalled,
-    }
+def _hold_answers(hermes_home: Path, holds: Iterable["Hold"]) -> List[Dict[str, Any]]:
+    """Every hold as the sheet reads it: the task, the stage its session is in, and why it stalled.
+
+    The stage is read once for the whole list — a project may hold several tasks and the sheet is
+    polled every few seconds — and the rule for one hold is unchanged: only a held task's stage is
+    named, and it comes off its session's own record, which outlives the hold (the strip that reads
+    a finished task is its own change, #319).
+    """
+    held = list(holds)
+    stages = _stages(hermes_home, held)
+    answers: List[Dict[str, Any]] = []
+    for hold in held:
+        staged = stages.get(hold.session_id) if hold.task and hold.session_id else None
+        answers.append(
+            {
+                **{key: hold.task.get(key) for key in HELD},
+                "stage": staged.step if staged is not None else None,
+                "stage_name": staged.name if staged is not None else None,
+                "stalled": hold.stalled,
+            }
+        )
+    return answers
+
+
+def _stages(hermes_home: Path, holds: Iterable["Hold"]) -> Dict[str, HeldStage]:
+    """Each hold's stage, by session id, in one look at the session store rather than one per hold.
+
+    A store that can't be read answers no stage at all: the sheet is worth more than the stage
+    beside it, and a poll that failed to read would otherwise fail whole.
+    """
+    wanted = [hold.session_id for hold in holds if hold.task and hold.session_id]
+    if not wanted:
+        return {}
+    try:
+        stored = sessions.pipelines_of(db_path(hermes_home), wanted)
+    except Exception:
+        logger.debug("memento: couldn't read the stage of %s", wanted, exc_info=True)
+        return {}
+    stages: Dict[str, HeldStage] = {}
+    for session_id, value in stored.items():
+        record = pipeline.read(value)
+        stages[session_id] = HeldStage(pipeline.stage(record), pipeline.stage_name(record))
+    return stages
+
+
+def _whole(value: Any) -> bool:
+    """Whether a value is a whole number: a bool is a flag, never a count."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _range(name: str, lowest: int, highest: int) -> str:
+    """The words a write outside a range is refused with, naming the field and both of its ends."""
+    return f"{name} must be a whole number from {lowest} to {highest}."
 
 
 def _pick_count(found: Dict[str, Any]) -> int:
     """How many tasks this project may hold at once: one unless it says, and never outside 1–5."""
     value = found.get("pick_count")
-    if isinstance(value, bool) or not isinstance(value, int):
+    if not _whole(value):
         return DEFAULT_PICK_COUNT
-    return max(DEFAULT_PICK_COUNT, min(MAX_PICK_COUNT, value))
+    return max(LOWEST_PICK_COUNT, min(MAX_PICK_COUNT, value))
 
 
 def pick_budget(hermes_home: Path) -> int:
@@ -290,7 +336,7 @@ def pick_budget(hermes_home: Path) -> int:
     wrote by hand and a bot that never opened its Coding tab all answer the same number (ADR 0042).
     """
     value = get_setting(db_path(hermes_home), PICK_BUDGET_KEY)
-    if isinstance(value, bool) or not isinstance(value, int):
+    if not _whole(value):
         return DEFAULT_PICK_BUDGET
     return max(LOWEST_PICK_BUDGET, min(HIGHEST_PICK_BUDGET, value))
 
@@ -372,35 +418,16 @@ class HeldStage(NamedTuple):
     name: Optional[str]
 
 
-def _held_task_stage(hermes_home: Path, hold: Optional["Hold"]) -> HeldStage:
-    """The step one hold's task is in, and the stage's own name, off its session's record.
-
-    Only while it holds one: the stage outlives the hold on the session's own row — so a finished
-    task can still say how it got there — but nothing in the sheet names a task it isn't working,
-    and the strip that reads a finished one is its own change (#319). A store that can't be read
-    answers no stage rather than failing the sheet.
-    """
-    session_id = hold.session_id if hold is not None else None
-    if hold is None or not hold.task or not session_id:
-        return HeldStage(None, None)
-    try:
-        stored = sessions.pipeline_of(db_path(hermes_home), session_id)
-    except Exception:
-        logger.debug("memento: couldn't read the stage of %s", session_id, exc_info=True)
-        return HeldStage(None, None)
-    record = pipeline.read(stored)
-    return HeldStage(pipeline.stage(record), pipeline.stage_name(record))
-
-
-def write_from(body: Dict[str, Any]) -> Tuple[str, Any]:
-    """What a write names — ``"on"`` with its flag, ``"workflow"`` with an id, ``"prompt"`` with
-    its text and the library entry it was copied from, or ``"pick_count"`` with how many tasks it
-    may hold — or ValueError.
+def write_from(body: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    """What a write names and the arguments that write takes — or ValueError.
 
     One write, one shape: two fields in one body could write one of them and then be refused, leaving
     half of it written. A Prompt's source is no shape of its own, because an id without words names
-    nothing to write: it rides with the text as that shape's second half, None for a plain write
+    nothing to write: it rides with the text as that shape's second argument, None for a plain write
     (which clears whatever source the row held — ADR 0043).
+
+    The answer is the shape's name and the arguments its writer is called with, so the route names
+    each writer once, in one table, rather than unpacking a value whose type depends on the shape.
     """
     if "prompt_id" in body and "prompt" not in body:
         raise ValueError("prompt_id needs a prompt beside it.")
@@ -411,18 +438,18 @@ def write_from(body: Dict[str, Any]) -> Tuple[str, Any]:
         on = body["on"]
         if not isinstance(on, bool):
             raise ValueError("on must be true or false.")
-        return "on", on
+        return "on", {"on": on}
     if "workflow_id" in body:
         workflow_id = body["workflow_id"]
         if not isinstance(workflow_id, str) or not workflow_id.strip():
             raise ValueError("workflow_id must be a workflow's id.")
-        return "workflow", workflow_id.strip()
+        return "workflow", {"workflow_id": workflow_id.strip()}
     if "prompt" in body:
         text = prompt_text(body["prompt"])
         source = prompt_source(body["prompt_id"]) if "prompt_id" in body else None
-        return "prompt", (text, source)
+        return "prompt", {"prompt": text, "prompt_id": source}
     if "pick_count" in body:
-        return "pick_count", pick_count_of(body["pick_count"])
+        return "pick_count", {"count": pick_count_of(body["pick_count"])}
     raise ValueError("on, workflow_id, prompt or pick_count is needed.")
 
 
@@ -432,8 +459,8 @@ def pick_count_of(value: Any) -> int:
     Refused rather than clamped, like every other write shape: a count the user didn't ask for
     silently held is worse than a sheet that says what it takes.
     """
-    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= MAX_PICK_COUNT:
-        raise ValueError(f"pick_count must be a whole number from 1 to {MAX_PICK_COUNT}.")
+    if not _whole(value) or not LOWEST_PICK_COUNT <= value <= MAX_PICK_COUNT:
+        raise ValueError(_range("pick_count", LOWEST_PICK_COUNT, MAX_PICK_COUNT))
     return value
 
 
@@ -516,10 +543,25 @@ def set_pick_count(hermes_home: Path, project_id: str, count: int) -> None:
 
     Lowering it abandons nothing: the holds it has stay until their own work is done, and the next
     pass fills to the new count rather than trimming to it (ADR 0025). Raising it is worth a wake —
-    the places it just made are the sweep's to fill now, not in three minutes.
+    the places it just made are the sweep's to fill now, not in three minutes — and lowering it is
+    not: it frees no place, so the sweep it would ask for would find nothing it didn't have.
     """
+    before = _stored_pick_count(hermes_home, project_id)
     _upsert(hermes_home, project_id, pick_count=count, at=int(time.time()))
-    wake()
+    if count > before:
+        wake()
+
+
+def _stored_pick_count(hermes_home: Path, project_id: str) -> int:
+    """The count the project's row holds now, read as its sheet reads it: unset is the default."""
+    conn = connect(db_path(hermes_home))
+    try:
+        row = conn.execute(
+            "SELECT pick_count FROM project_afk WHERE project_id = ?", (project_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    return _pick_count({"pick_count": row[0] if row is not None else None})
 
 
 def budget_from(body: Dict[str, Any]) -> int:
@@ -531,14 +573,8 @@ def budget_from(body: Dict[str, Any]) -> int:
     (ADR 0026's usage threshold is the one expected to land on this route).
     """
     value = body.get("pick_budget")
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, int)
-        or not LOWEST_PICK_BUDGET <= value <= HIGHEST_PICK_BUDGET
-    ):
-        raise ValueError(
-            f"pick_budget must be a whole number from {LOWEST_PICK_BUDGET} to {HIGHEST_PICK_BUDGET}."
-        )
+    if not _whole(value) or not LOWEST_PICK_BUDGET <= value <= HIGHEST_PICK_BUDGET:
+        raise ValueError(_range("pick_budget", LOWEST_PICK_BUDGET, HIGHEST_PICK_BUDGET))
     return value
 
 
@@ -548,14 +584,19 @@ def set_pick_budget(hermes_home: Path, budget: int) -> None:
     Lowering it abandons nothing: every hold stays until its own work is done, and the projects that
     are over the new number simply stop claiming until the bot is under it again — the same rule as
     lowering a pick count (ADR 0042). Raising it is worth a wake, since the places it just made are
-    the sweep's to fill now.
+    the sweep's to fill now; lowering it frees none, so it wakes nothing.
     """
+    before = pick_budget(hermes_home)
     put_setting(db_path(hermes_home), PICK_BUDGET_KEY, budget)
-    wake()
+    if budget > before:
+        wake()
 
 
 def release(
-    hermes_home: Path, project_id: str, task: Optional[Dict[str, Any]] = None
+    hermes_home: Path,
+    project_id: str,
+    task: Optional[Dict[str, Any]] = None,
+    holds: Optional[List["Hold"]] = None,
 ) -> None:
     """Gives a claimed task back: the mark and the assignment come off GitHub, its hold goes.
 
@@ -567,9 +608,13 @@ def release(
     GitHub refusal is recorded for the sheet, and the hold goes anyway: nothing on the host is
     working the task either way, and the next sweep's read is what says whether it is back in the
     frontier.
+
+    ``holds`` is the project's holds as the caller already read them, so a settle that gives back
+    several tasks reads the project once rather than once per task; left None, they are read here.
     """
-    found = _row(hermes_home, project_id)
-    holds = found["holds"] if found is not None else []
+    if holds is None:
+        found = _row(hermes_home, project_id)
+        holds = found["holds"] if found is not None else []
     held = task if task is not None else (holds[0].task if holds else None)
     if held is None:
         return
@@ -658,7 +703,7 @@ def stalled(
     found: Dict[str, Dict[str, Any]] = {}
     now = time.time()
     waiting: List[Hold] = []
-    for hold in _holding_rows(hermes_home):
+    for hold in _holds(hermes_home):
         if not hold.session_id or (live and hold.session_id in live):
             continue
         if hold.session_id in _held:
@@ -761,7 +806,15 @@ def sweep(
     so, since a forgotten argument would quietly turn the check off.
     """
     budget = _Budget(hermes_home)
-    plan = _plan(hermes_home, project_id, folders, archived, skills=skills, budget=budget)
+    plan = _plan(
+        hermes_home,
+        project_id,
+        folders,
+        archived,
+        skills=skills,
+        budget=budget,
+        promised=set(),
+    )
     return [task for _, task in _claims(hermes_home, [plan], budget)]
 
 
@@ -773,6 +826,7 @@ def _plan(
     *,
     skills: Optional[Iterable[str]],
     budget: _Budget,
+    promised: Set[Tuple[Any, Any]],
 ) -> Plan:
     """What one project could claim in this pass, and the reason it can claim nothing at all.
 
@@ -782,6 +836,12 @@ def _plan(
     and none at all for a project with no free place or one the bot's budget already holds back.
     A refusal recorded here is the project's own answer for this pass: GitHub's, a skill the bot has
     lost, or the bot's budget being full.
+
+    ``promised`` is the tasks an earlier project of this pass has already planned (or claimed): two
+    projects can point at one repository, so their frontiers are the same list, and a task planned
+    twice is a task claimed twice. The tasks taken here are added to it, so the pass hands each task
+    out once; a project whose whole frontier was taken is one with nothing to claim rather than one
+    the budget held back, and says nothing of it.
     """
     found = _row(hermes_home, project_id)
     if found is None:
@@ -799,7 +859,10 @@ def _plan(
         # before would sit beside that reason saying something GitHub no longer says.
         _forget_refusal(hermes_home, project_id, found)
         return Plan(project_id, [])
-    holds = _holds(hermes_home, project_id)
+    # The holds `_row` answered with, less the ones this pass just gave back: one read of the
+    # project's holds per pass, and the places below counted off what it says.
+    gave_back = {_key(task) for task in given_back}
+    holds = [hold for hold in found["holds"] if _key(hold.task) not in gave_back]
     places = _pick_count(found) - len(holds)
     if places <= 0:
         return Plan(project_id, [])
@@ -819,14 +882,17 @@ def _plan(
     except github.GitHubError as error:
         _refuse(hermes_home, project_id, str(error))
         return Plan(project_id, [])
-    # A task the project holds, or one this pass just gave back, is not one to claim now: the
-    # release took its marks off GitHub, so it is back in the frontier the read above sees.
+    # A task the project holds, one this pass just gave back, or one an earlier project of this
+    # pass already has, is not one to claim now: the release took its marks off GitHub, so it is
+    # back in the frontier the read above sees, and two projects of one repository plan from the
+    # same list.
     taken = {_key(hold.task) for hold in holds} | {_key(task) for task in given_back}
-    candidates = [task for task in ready if _key(task) not in taken][:places]
+    candidates = [task for task in ready if _key(task) not in taken | promised][:places]
     if not candidates:
         # GitHub answered and has nothing to give: whatever it refused before is stale.
         _forget_refusal(hermes_home, project_id, found)
         return Plan(project_id, [])
+    promised.update(_key(task) for task in candidates)
     return Plan(project_id, candidates)
 
 
@@ -847,15 +913,28 @@ def _claims(
     """
     ordered = sorted(
         ((task, plan.project_id) for plan in plans for task in plan.candidates),
-        key=lambda pair: (_created(pair[0]), pair[0].get("number") or 0, pair[1]),
+        key=lambda pair: (*tasks.order(pair[0]), pair[1]),
     )
     if not ordered:
         return []
     auth, _ = github.token(hermes_home)
     claimed: List[Tuple[str, Dict[str, Any]]] = []
+    # What this pass has taken, the repositories it has already made the claim label on, the
+    # projects GitHub refused and the projects it told the budget is full: each is a per-pass fact,
+    # so a whole pass pays for it once rather than once per task.
+    seen: Set[Tuple[Any, Any]] = set()
+    labelled: set = set()
     stopped: set = set()
     refused: set = set()
+    # Whose account a claim is assigned to, resolved on the first claim and not once per task: it
+    # is one read of GitHub's own answer about the token, and the same answer every time.
+    account: Optional[str] = None
     for task, project_id in ordered:
+        key = _key(task)
+        if key in seen:
+            # One repository, two projects: both planned this ready issue from their own read of
+            # it. The first claim is the only one — a second would claim one task twice.
+            continue
         if project_id in stopped:
             # GitHub refused this project's last claim: the rest of its tasks wait for the next pass.
             continue
@@ -865,8 +944,15 @@ def _claims(
                 _refuse(hermes_home, project_id, _budget_full(budget))
             continue
         try:
+            if account is None:
+                account = github.login(auth)
             github.claim_issue(
-                task["repo"], task["number"], github.login(auth), tasks.CLAIM_LABEL, auth
+                task["repo"],
+                task["number"],
+                account,
+                tasks.CLAIM_LABEL,
+                auth,
+                labelled=labelled,
             )
         except github.GitHubError as error:
             # Nothing was taken, so the place the claim would have used is the pass's again.
@@ -877,23 +963,13 @@ def _claims(
         # The hold clears the last refusal in the same write: this sweep just got an answer.
         _hold(hermes_home, project_id, task)
         claimed.append((project_id, task))
+        seen.add(key)
     return claimed
 
 
 def _budget_full(budget: _Budget) -> str:
     """The words a project the bot's budget held back records, naming both numbers."""
     return PICK_BUDGET_FULL.format(held=budget.held, budget=budget.total)
-
-
-def _created(task: Dict[str, Any]) -> str:
-    """A task's creation time on GitHub, as the order a pass claims in reads it.
-
-    The oldest first, and a task that somehow carries no time sorted ahead: the holds are ordered
-    the same way, a NULL reading as the oldest there (``HOLD_ORDER``), so a bot's holds and its
-    claims answer one order rather than two.
-    """
-    value = task.get("created_at")
-    return value if isinstance(value, str) else ""
 
 
 def new_session_id() -> str:
@@ -1106,7 +1182,7 @@ def sweep_all(hermes_home: Path) -> List[Tuple[str, Dict[str, Any]]]:
     Answers what the pass claimed, in the order it took them, so the caller can start those sessions
     one after another; a project that claimed nothing isn't in the list.
     """
-    held = [hold.project_id for hold in _holding_rows(hermes_home)]
+    held = [hold.project_id for hold in _holds(hermes_home)]
     due = list(dict.fromkeys([*enabled_projects(hermes_home), *held]))
     if not due:
         return []
@@ -1120,6 +1196,9 @@ def sweep_all(hermes_home: Path) -> List[Tuple[str, Dict[str, Any]]]:
     # judges nothing. Read only when a project has picked one to judge.
     skills = _profile_skills(hermes_home) if workflows.any_steps(hermes_home) else None
     plans: List[Plan] = []
+    # The tasks this pass has already given to a project: two projects can point at one repository,
+    # so their frontiers are one list and each task is planned once.
+    promised: Set[Tuple[Any, Any]] = set()
     for project_id in due:
         project = projects.get(project_id)
         if project is None:
@@ -1134,6 +1213,7 @@ def sweep_all(hermes_home: Path) -> List[Tuple[str, Dict[str, Any]]]:
                     bool(getattr(project, "archived", False)),
                     skills=skills,
                     budget=budget,
+                    promised=promised,
                 )
             )
         except Exception:
@@ -1230,14 +1310,15 @@ def after_run(
         )
         project_id = holding_project(home, str(record.get("session_id") or ""))
         staged = pipeline.read(record.get("pipeline"))
+        session_id = record.get("session_id")
         if project_id is not None:
             if staged is not None:
                 _stage_end(home, path, project_id, record, staged, stopped)
                 return
             if not stopped.finished:
-                _stall(home, project_id, record.get("task"), _stopped(stopped))
+                _stall(home, project_id, record.get("task"), _stopped(stopped), session_id)
                 return
-            _free(home, project_id, record.get("task"))
+            _free(home, project_id, record.get("task"), session_id)
         wake()
     except Exception:
         logger.debug("memento: couldn't wake AFK's sweep", exc_info=True)
@@ -1273,8 +1354,9 @@ def _stage_end(
     )
     moved = pipeline.moved(staged, step)
     sessions.set_pipeline(path, record["session_id"], moved)
+    session_id = record.get("session_id")
     if step.stall:
-        _stall(hermes_home, project_id, record.get("task"), step.stall)
+        _stall(hermes_home, project_id, record.get("task"), step.stall, session_id)
         return
     if pipeline.ships(staged):
         # The stage that just ended is the one that opens the pull request, so the draft is what
@@ -1282,12 +1364,12 @@ def _stage_end(
         unshipped = _unshipped(hermes_home, record)
         if unshipped is not None:
             sessions.set_pipeline(path, record["session_id"], pipeline.failed(moved, unshipped))
-            _stall(hermes_home, project_id, record.get("task"), unshipped)
+            _stall(hermes_home, project_id, record.get("task"), unshipped, session_id)
             return
     if not pipeline.posts_now(moved):
         # Nothing is left to run: the task's work is in review, so its hold goes and the sweep looks
         # for the project's next task.
-        _free(hermes_home, project_id, record.get("task"))
+        _free(hermes_home, project_id, record.get("task"), session_id)
         wake()
         return
     # The next stage is the same session's next run: the hold keeps the task, and the stall clock
@@ -1378,8 +1460,11 @@ def _start_stage(hermes_home: Path, record: Dict[str, Any]) -> None:
     another task of the same project may be further along.
     """
     project_id = str(record.get("project_id") or "")
-    hold = _hold_for_session(hermes_home, record["session_id"]) if project_id else None
-    task = hold.task if hold is not None else None
+    task = (
+        _held_task(hermes_home, project_id, session_id=record["session_id"])
+        if project_id
+        else None
+    )
     loop = _loop
     name = pipeline.stage_name(pipeline.read(record.get("pipeline"))) or ""
     if not isinstance(task, dict) or loop is None:
@@ -1410,7 +1495,13 @@ async def work_stage(
         )
         project_id = str(record.get("project_id") or "")
         if project_id and holding_project(hermes_home, record["session_id"]) == project_id:
-            _stall(hermes_home, project_id, task, STAGE_FAILED.format(name=name))
+            _stall(
+                hermes_home,
+                project_id,
+                task,
+                STAGE_FAILED.format(name=name),
+                record["session_id"],
+            )
         return
     logger.info(
         "memento: AFK is working %s's \"%s\" stage in %s (run %s)",
@@ -1508,10 +1599,10 @@ def _hold(hermes_home: Path, project_id: str, task: Dict[str, Any]) -> None:
     conn = connect(db_path(hermes_home))
     try:
         conn.execute(
-            """INSERT INTO holds
+            f"""INSERT INTO holds
                    (project_id, task, repo, number, created_at, claimed_at, session_id, stalled, stalled_at)
                VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL)
-               ON CONFLICT(project_id, repo, number) DO UPDATE SET
+               ON CONFLICT({', '.join(HOLD_COLUMNS)}) DO UPDATE SET
                    task = excluded.task, created_at = excluded.created_at,
                    claimed_at = excluded.claimed_at, session_id = NULL,
                    stalled = NULL, stalled_at = NULL""",
@@ -1532,65 +1623,108 @@ def _hold(hermes_home: Path, project_id: str, task: Dict[str, Any]) -> None:
         conn.close()
 
 
-def _adopt(hermes_home: Path, project_id: str, session_id: str, task: Any) -> None:
+def _write_hold(hermes_home: Path, project_id: str, task: Any, **fields: Any) -> None:
+    """Writes the named columns of one hold; naming none, the hold goes.
+
+    The one writer for a hold's columns, so the three writers below agree on which row they mean —
+    this project's hold for this task, never the oldest one it happens to have — and on what a
+    write that finds no such row says. A delete that finds none says nothing: a task already given
+    back is what a second end of the same run means.
+    """
+    held = _held_fields(task) if isinstance(task, dict) else {}
+    keys = (project_id, held.get("repo"), held.get("number"))
+    conn = connect(db_path(hermes_home))
+    try:
+        if not fields:
+            conn.execute(f"DELETE FROM holds WHERE {HOLD_KEY}", keys)
+            return
+        assignments = ", ".join(f"{name} = ?" for name in fields)
+        cursor = conn.execute(
+            f"UPDATE holds SET {assignments} WHERE {HOLD_KEY}", (*fields.values(), *keys)
+        )
+        if cursor.rowcount == 0:
+            logger.warning("memento: AFK had no hold for project %s to write", project_id)
+    finally:
+        conn.close()
+
+
+def _held_task(
+    hermes_home: Path, project_id: str, task: Any = None, session_id: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """The task a hook is about: the one its record names, or else the one its session holds.
+
+    Never the project's oldest, which is what a missing task used to mean: a project may hold
+    several, and a record that names none must not have a run's end give back whichever of them
+    happened to be claimed first. A caller that can name neither a task nor a session holding one
+    has nothing to write about.
+    """
+    if isinstance(task, dict) and task:
+        return task
+    if not session_id:
+        return None
+    hold = _hold_for_session(hermes_home, session_id)
+    if hold is None or hold.project_id != project_id or not hold.task:
+        return None
+    return hold.task
+
+
+def _adopt(
+    hermes_home: Path, project_id: str, session_id: str, task: Any = None
+) -> None:
     """Names the session working a held task, so a restart adopts that one and nothing else.
 
     Written before the run is posted, so a run that ends at once still finds the hold naming its
     session, and cleared only when the task is finished or given back. It also restarts the clock a
     stalled claim is measured from — this hold's clock, not its neighbours'.
     """
-    held = _held_fields(task) if isinstance(task, dict) else {}
-    conn = connect(db_path(hermes_home))
-    try:
-        cursor = conn.execute(
-            """UPDATE holds SET session_id = ?, claimed_at = ?, stalled = NULL, stalled_at = NULL
-                WHERE project_id = ? AND repo = ? AND number = ?""",
-            (session_id, int(time.time()), project_id, held.get("repo"), held.get("number")),
+    held = _held_task(hermes_home, project_id, task, session_id)
+    if held is None:
+        logger.warning(
+            "memento: AFK had no hold for project %s to name a session on", project_id
         )
-        if cursor.rowcount == 0:
-            logger.warning(
-                "memento: AFK had no hold for project %s to name a session on", project_id
-            )
-    finally:
-        conn.close()
+        return
+    _write_hold(
+        hermes_home,
+        project_id,
+        held,
+        session_id=session_id,
+        claimed_at=int(time.time()),
+        stalled=None,
+        stalled_at=None,
+    )
 
 
-def _free(hermes_home: Path, project_id: str, task: Optional[Dict[str, Any]] = None) -> None:
+def _free(
+    hermes_home: Path,
+    project_id: str,
+    task: Any = None,
+    session_id: Optional[str] = None,
+) -> None:
     """Lets go of a held task without giving the claim back: its work is in review on GitHub.
 
-    ``task`` is the one that session worked, and the project's oldest hold only where the caller
-    cannot say which: giving one task back gives back one row and never the project's others.
+    ``task`` is the one that session worked, and it is the hold the session is working that says so
+    when the caller names none: giving one task back gives back one row and never the project's
+    others, and never one the record can't name.
     """
-    held = task
-    if not isinstance(held, dict):
-        found = _row(hermes_home, project_id)
-        held = found["task"] if found is not None else None
-    if not isinstance(held, dict):
+    held = _held_task(hermes_home, project_id, task, session_id)
+    if held is None:
         return
-    conn = connect(db_path(hermes_home))
-    try:
-        conn.execute(
-            "DELETE FROM holds WHERE project_id = ? AND repo = ? AND number = ?",
-            (project_id, held.get("repo"), held.get("number")),
-        )
-    finally:
-        conn.close()
+    _write_hold(hermes_home, project_id, held)
 
 
-def _stall(hermes_home: Path, project_id: str, task: Any, why: str) -> None:
+def _stall(
+    hermes_home: Path,
+    project_id: str,
+    task: Any,
+    why: str,
+    session_id: Optional[str] = None,
+) -> None:
     """Records why nothing is working a held task, which the app shows where a wait is shown."""
-    held = _held_fields(task) if isinstance(task, dict) else {}
-    conn = connect(db_path(hermes_home))
-    try:
-        cursor = conn.execute(
-            """UPDATE holds SET stalled = ?, stalled_at = ?
-                WHERE project_id = ? AND repo = ? AND number = ?""",
-            (why, int(time.time()), project_id, held.get("repo"), held.get("number")),
-        )
-        if cursor.rowcount == 0:
-            logger.warning("memento: AFK had no hold for project %s to stall", project_id)
-    finally:
-        conn.close()
+    held = _held_task(hermes_home, project_id, task, session_id)
+    if held is None:
+        logger.warning("memento: AFK had no hold for project %s to stall", project_id)
+        return
+    _write_hold(hermes_home, project_id, held, stalled=why, stalled_at=int(time.time()))
 
 
 def _settle(
@@ -1621,7 +1755,7 @@ def _settle(
                 continue
         elif not chats.closed(chats.one(db_path(hermes_home), hold.session_id)):
             continue
-        release(hermes_home, project_id, task)
+        release(hermes_home, project_id, task, holds)
         given_back.append(task)
     return given_back
 
@@ -1719,24 +1853,25 @@ HOLD_FIELDS = "project_id, task, session_id, stalled, claimed_at, stalled_at"
 # Oldest first: the task's own creation time on GitHub, with the issue number breaking a tie, so the
 # first hold is the task AFK has waited longest for.
 HOLD_ORDER = "created_at, number"
+# The one key a hold has — its project and its task — so every write names the same row.
+HOLD_COLUMNS = ("project_id", "repo", "number")
+HOLD_KEY = " AND ".join(f"{column} = ?" for column in HOLD_COLUMNS)
 
 
-def _holds(hermes_home: Path, project_id: str) -> List[Hold]:
-    """Every task one project holds, oldest first."""
-    conn = connect(db_path(hermes_home))
-    try:
-        return _read_holds(conn, project_id)
-    finally:
-        conn.close()
+def _holds(
+    hermes_home: Path,
+    project_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+) -> List[Hold]:
+    """The rows one project holds, one session works, or every project holds — oldest first.
 
-
-def _holding_rows(hermes_home: Path) -> List[Hold]:
-    """Every task any project holds, whatever its switch says: a project switched off mid-run still
-    has a claim on GitHub, and nothing else would ever look at it again.
+    One look at the store answers all three: a sheet asks for a project's holds, a sweep for every
+    project's — whatever their switches say, since a project switched off mid-run still has a claim
+    on GitHub that nothing else would ever look at again — and a hook for the one its session works.
     """
     conn = connect(db_path(hermes_home))
     try:
-        return _read_holds(conn, None)
+        return _read_holds(conn, project_id, session_id)
     finally:
         conn.close()
 
@@ -1745,28 +1880,28 @@ def _hold_for_session(hermes_home: Path, session_id: str) -> Optional[Hold]:
     """The hold this session is working, or None when AFK isn't holding it — the one read a hook
     needs to know whose task a run's end is.
     """
-    conn = connect(db_path(hermes_home))
-    try:
-        rows = conn.execute(
-            f"SELECT {HOLD_FIELDS} FROM holds WHERE session_id = ? ORDER BY {HOLD_ORDER}",
-            (session_id,),
-        ).fetchall()
-    finally:
-        conn.close()
-    return _as_hold(rows[0]) if rows else None
+    return next(iter(_holds(hermes_home, session_id=session_id)), None)
 
 
-def _read_holds(conn: sqlite3.Connection, project_id: Optional[str]) -> List[Hold]:
-    """A connection's holds, oldest first: one project's, or every project's when none is named."""
-    if project_id is None:
-        rows = conn.execute(
-            f"SELECT {HOLD_FIELDS} FROM holds ORDER BY project_id, {HOLD_ORDER}"
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            f"SELECT {HOLD_FIELDS} FROM holds WHERE project_id = ? ORDER BY {HOLD_ORDER}",
-            (project_id,),
-        ).fetchall()
+def _read_holds(
+    conn: sqlite3.Connection,
+    project_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+) -> List[Hold]:
+    """A connection's holds, oldest first: one project's, one session's, or every project's."""
+    narrows: List[str] = []
+    values: List[Any] = []
+    if project_id is not None:
+        narrows.append("project_id = ?")
+        values.append(project_id)
+    if session_id is not None:
+        narrows.append("session_id = ?")
+        values.append(session_id)
+    where = f"WHERE {' AND '.join(narrows)} " if narrows else ""
+    order = f"project_id, {HOLD_ORDER}" if project_id is None else HOLD_ORDER
+    rows = conn.execute(
+        f"SELECT {HOLD_FIELDS} FROM holds {where}ORDER BY {order}", values
+    ).fetchall()
     return [_as_hold(row) for row in rows]
 
 
