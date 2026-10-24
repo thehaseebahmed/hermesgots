@@ -247,6 +247,10 @@ test("two results arriving together keep their order, and a catch-up draws each 
       assert.deepEqual(resultsDrawn(), ["parser", "docs"], "in the order they arrived")
       // The chat catches up again, with a turn sent since: the results survive it, once each.
       lines.push({ id: 7, role: "user", content: "Anything else?", timestamp: 22 })
+      // A reconcile may still be in flight from the catch-up that drew the results, and this call
+      // would join it and read before the row was pushed; once none runs, a second call always
+      // reads it.
+      await reconcileHistory("chat-1")
       await reconcileHistory("chat-1")
       await settle()
       await until(
