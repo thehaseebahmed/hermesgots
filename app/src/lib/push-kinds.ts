@@ -122,6 +122,38 @@ export function wantedCategories(prefs: PushPrefs | undefined) {
 }
 
 /**
+ * A channel as Android lists it for this app: its id and the importance the user left it at. The
+ * plugin answers with the whole channel; only these two decide what is still allowed.
+ */
+export interface PhoneChannel {
+  id: string
+  /** Android's importance: 0 is the user's off, 2 to 4 are still on, absent says nothing. */
+  importance?: number
+}
+
+export interface PhoneChannels {
+  /** Whether the phone lets this app notify at all: its master switch, read as the permission. */
+  allowed: boolean
+  /** The channels the phone lists; one it doesn't list has not been created yet. */
+  channels: PhoneChannel[]
+}
+
+/**
+ * The categories the registry should be told this phone still allows. The phone is read, not
+ * asked: a channel at importance none was switched off by the user in Android's settings and is
+ * left out, one the phone doesn't list has not been created yet and counts as allowed, and with
+ * the phone's notifications off altogether nothing is allowed. The universe is every category, so
+ * a first launch registers the full list.
+ */
+export function allowedCategories(report: PhoneChannels): PushCategory[] {
+  if (!report.allowed) return []
+  const off = new Set(
+    report.channels.filter((channel) => channel.importance === 0).map((channel) => channel.id),
+  )
+  return PUSH_CATEGORIES.filter((category) => !off.has(category.id)).map((category) => category.id)
+}
+
+/**
  * The categories this device can reach, and so the channels it gets: Meetings' two exist only once
  * that experiment is on, the other fourteen always.
  */

@@ -20,11 +20,13 @@ import { callFunction, failure, functionUrl } from "@/lib/account"
 import {
   PUSH_CATEGORIES,
   PUSH_FEATURES,
+  allowedCategories,
   categoryOn,
   channelName,
   pushPath,
   reachableCategories,
   wantedCategories,
+  type PhoneChannel,
   type PushCategory,
   type PushFeature,
 } from "@/lib/push-kinds"
@@ -281,7 +283,8 @@ function step<T>(what: string, promise: Promise<T>, ms = 15_000): Promise<T> {
 }
 
 async function sendToken(device: string, token: string) {
-  const categories = wantedCategories((await getSettings()).pushCategories)
+  const { push } = await plugin()
+  const categories = await allowedHere(push)
   const response = await callFunction(
     "POST",
     functionUrl("registry", { route: "devices", id: device }),
@@ -292,14 +295,38 @@ async function sendToken(device: string, token: string) {
   sentCategories = categories.join()
 }
 
+/**
+ * The categories this phone still allows, read from Android's own channel list rather than from
+ * anything the app stored: a channel the user switched off there is at importance none, one with
+ * no importance reported was left alone. A read that fails is a phone that said nothing, not one
+ * that switched everything off, so nothing is left out — a push must never be blocked by an answer
+ * that didn't arrive. With the phone's notifications off altogether, nothing is allowed.
+ */
+async function allowedHere(push: Push): Promise<PushCategory[]> {
+  if ((await push.checkPermissions()).receive !== "granted") return []
+  let channels: PhoneChannel[] = []
+  try {
+    channels = (await push.listChannels()).channels
+  } catch {
+    // No answer: treat it as a phone that has switched none of them off.
+  }
+  return allowedCategories({ allowed: true, channels })
+}
+
 /** The categories the registry last heard for this device, so only a change is sent again. */
 let sentCategories: string | undefined
 
-/** Tells the registry which categories this phone wants. An older app's registration has none. */
+/**
+ * Tells the registry which categories this phone still allows. A PATCH needs only the device id:
+ * with the phone's notifications off no token ever arrives, and the empty list must still reach
+ * the registry. Only a change is sent, so a device carrying an older list is told the live one
+ * exactly once and then leaves it alone.
+ */
 async function syncCategories() {
-  const { fcm, pushCategories } = await getSettings()
-  if (!fcm?.on || !registeredToken) return
-  const categories = wantedCategories(pushCategories)
+  const { fcm } = await getSettings()
+  if (!fcm?.on) return
+  const { push } = await plugin()
+  const categories = await allowedHere(push)
   if (categories.join() === sentCategories) return
   const response = await callFunction(
     "PATCH",
@@ -424,10 +451,15 @@ function startNative() {
     }
     if (!fcm?.on || !nativeConfigured) return
     const { push } = await plugin()
-    if ((await push.checkPermissions()).receive !== "granted") return
+    // The channels must exist before they are read: a first launch that read them first would
+    // register an empty list and get nothing until the app was brought back to the front.
     await listen(push)
-    await guarded(fcm.device, () => push.register())
-    // The registration event brings the token; an install from before categories says them now.
+    // With the phone's notifications off there is no token to collect, and nothing to register.
+    if ((await push.checkPermissions()).receive === "granted") {
+      await guarded(fcm.device, () => push.register())
+    }
+    // The registration event brings the token; either way the list is read again now, so coming
+    // back from Android's own screen is enough for a channel switched off there to stop being sent.
     setTimeout(() => void syncCategories().catch(() => {}), 3000)
   }
   void sync().catch(() => {})
@@ -460,8 +492,9 @@ async function setCategories(ids: PushCategory[], on: boolean) {
   await saveSettings({
     pushCategories: { ...pushCategories, ...Object.fromEntries(ids.map((id) => [id, on])) },
   })
-  if (isNative) await syncCategories()
-  else {
+  // The app's own list is the web's switch only: on Android the phone's channels are read instead,
+  // and a stored value left on a phone is dead weight (ADR 0050).
+  if (!isNative) {
     // Every bot's plugin keeps what this device asked for with its subscription.
     given.clear()
     await syncPush()
