@@ -71,7 +71,7 @@ def groups(tasks: Iterable[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     ready: List[Dict[str, Any]] = []
     claimed: List[Dict[str, Any]] = []
     blocked: List[Dict[str, Any]] = []
-    for task in sorted(tasks, key=_order):
+    for task in sorted(tasks, key=order):
         if task.get("state") != "open":
             continue
         labels = task.get("labels") or []
@@ -101,8 +101,12 @@ def _claimed(labels: Iterable[Any], assignees: Iterable[Any]) -> bool:
     return CLAIM_LABEL in labels or bool(list(assignees))
 
 
-def _order(task: Dict[str, Any]) -> Tuple[str, int]:
-    """Oldest first: GitHub's own creation time, with the issue number breaking a tie."""
+def order(task: Dict[str, Any]) -> Tuple[str, int]:
+    """Oldest first: GitHub's own creation time, with the issue number breaking a tie.
+
+    The one rule every task list is ordered by — the sheet's groups, and the order a pass claims
+    in — so a task sorts where it sorts however it is asked about.
+    """
     created = task.get("created_at")
     number = task.get("number")
     return (created if isinstance(created, str) else "", number if isinstance(number, int) else 0)
