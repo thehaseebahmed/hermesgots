@@ -1,19 +1,32 @@
 export type MediaPart =
   { kind: "text"; at: number; text: string } | { kind: "media"; at: number; paths: string[] }
 
-// Raster formats the plugin serves (its `MEDIA_TYPES` map), longest first like Hermes's own
-// extension alternation.
-const IMAGE_EXTS = "jpeg|png|jpg|gif|webp|bmp"
+// Every type the plugin's media route answers with a type of its own (its `media.py` content-type
+// map: images, video, audio, text, code and data, the SVG included), then a shorter tail of what the
+// same route still hands over as a generic binary — a tag names a file the host can serve whatever
+// the host calls it. The tag still needs its `MEDIA:` prefix and an absolute or quoted path, so a
+// list this wide can't swallow prose. Where one extension starts another, the longer comes first.
+const MEDIA_EXTS = [
+  "jpeg png jpg gif webp bmp svg",
+  "mp4 m4v mov webm ogv",
+  "mp3 m4a aac wav ogg oga opus flac",
+  "markdown md txt log csv tsv html htm css xml json pdf yaml yml toml ini",
+  "py rb go rs cc cpp hpp cs java kt swift tsx ts jsx js mjs cjs sh bash zsh sql php lua pl r scala exs ex erl hs clj vue svelte dart zig c h",
+  "zip tar gz docx xlsx pptx epub apk wasm ics vcf srt vtt",
+]
+  .flatMap((group) => group.split(" "))
+  .join("|")
 const CJK_TERMINATORS = "（）〈〉《》：，。；！？、“”‘’【】"
 /**
  * The `MEDIA:<path>` tag shape Hermes's own `MEDIA_TAG_CLEANUP_RE` strips for messaging adapters,
- * narrowed to the image extensions, so a reply shows here exactly the images it would send there.
+ * limited to the extensions the plugin's media route serves, so a reply draws here whatever file the
+ * agent produced there — nothing it can fetch is left as a dead path in the text.
  */
 const TAG = new RegExp(
   "[`\"'*_]{0,3}MEDIA:\\s*" +
     "(?<path>`[^`\\n]+?`|\"[^\"\\n]+?\"|'[^'\\n]+?'|" +
     "(?:~/|/|[A-Za-z]:[/\\\\])\\S+?(?:[^\\S\\n]+\\S+?)*?\\.(?:" +
-    IMAGE_EXTS +
+    MEDIA_EXTS +
     "))" +
     "(?=[\\s`\"'*_,;:)\\]\\[}\\" +
     CJK_TERMINATORS +
@@ -66,9 +79,10 @@ function group(parts: MediaPart[]): MediaPart[] {
 }
 
 /**
- * Splits a reply into text and the images it names with `MEDIA:<path>` tags: each tag its own part,
- * and the tags sent together (only whitespace between) one gallery part. A tag inside a fenced code
- * block is an example, not an image, and stays in the text.
+ * Splits a reply into text and the media it names with `MEDIA:<path>` tags: each tag its own part,
+ * and the tags sent together (only whitespace between) one part, which draws as one Gallery. What a
+ * part's files are — and so where each one draws — is the reader's to say, from the type the host
+ * answers. A tag inside a fenced code block is an example, not media, and stays in the text.
  */
 export function mediaImages(text: string): MediaPart[] {
   const parts: MediaPart[] = []
