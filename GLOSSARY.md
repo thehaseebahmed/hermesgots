@@ -188,12 +188,16 @@ The model a bot's delegated tasks run on, set in its settings and held on its ho
 _Avoid_: second opinion, delegation model, child model
 
 **AFK**:
-A project being worked without its user present. On, Gots claims its ready tasks and works up to its pick count at a time, and stops picking up while the bot's account is over its usage threshold, until the switch is turned off. A task runs one run on the project's **prompt**, unless the project has picked a **workflow**.
+A project being worked without its user present. On, Gots claims its ready tasks and works up to its pick count at a time, within its bot's **pick budget**, and stops picking up while the bot's account is over its usage threshold, until the switch is turned off. A task runs one run on the project's **prompt**, unless the project has picked a **workflow**.
 _Avoid_: autopilot, unattended mode, auto mode, yolo
 
 **Prompt**:
-How a project's AFK work is carried out, told to the run beside AFK's fixed rules: the words the user writes for it. It lives on the host with the project, starts as the bot's default method, and an empty one means that default again.
+How a project's AFK work is carried out, told to the run beside AFK's fixed rules: the words the user writes for it, or the ones they pick from the **prompt library**. It lives on the host with the project, starts as the bot's default method, and an empty one means that default again.
 _Avoid_: instructions, system prompt, template, playbook
+
+**Prompt library**:
+The prompts kept for AFK work, one library per account: named pieces of text shared by every bot, project and signed-in device, from which a project picks the words its **prompt** runs with.
+_Avoid_: snippet library, template library, prompt bank, presets
 
 **Ready task**:
 A task the user has marked for an agent to work, by the tracker's `ready-for-agent` mark.
@@ -227,8 +231,12 @@ _Avoid_: lock, lease, slot
 How many tasks a project's AFK will hold at once, from one to five, set in its AFK pop-up.
 _Avoid_: concurrency, parallelism, workers, slots
 
+**Pick budget**:
+How many tasks one bot's AFK may hold at once across all of its projects, from one to ten, set in the bot's Coding tab. Each project is still held to its own **pick count**, so the bot works the lower of the two.
+_Avoid_: concurrency, parallelism, cap, quota, limit
+
 **Refusal**:
-Why a project's sweep claimed nothing, in the host's own words: GitHub's answer, a skill the workflow names that its bot no longer has, or the account being over its usage threshold.
+Why a project's sweep claimed nothing, in the host's own words: GitHub's answer, a skill the workflow names that its bot no longer has, the account being over its usage threshold, or the bot's pick budget being full.
 _Avoid_: error, failure, block
 
 **Usage threshold**:
