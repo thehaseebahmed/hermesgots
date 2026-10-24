@@ -158,6 +158,42 @@ export async function resized(near?: string) {
   await settle()
 }
 
+export async function withReducedMotion(body: () => Promise<void>) {
+  const media = globalThis.matchMedia
+  const reduced = (query: string) => {
+    const answer = media(query)
+    if (query !== "(prefers-reduced-motion: reduce)") return answer
+    return { ...answer, matches: true }
+  }
+  globalThis.matchMedia = reduced
+  window.matchMedia = reduced
+  try {
+    await body()
+  } finally {
+    globalThis.matchMedia = media
+    window.matchMedia = media
+  }
+}
+
+/**
+ * Records every landing a screen asks for (`scrollIntoView` with `block: "end"`), so a test can read
+ * where it was sent. Restore it when the test is done.
+ */
+export function spyScrollIntoView() {
+  const into: ScrollIntoViewOptions[] = []
+  const scrolled = HTMLElement.prototype.scrollIntoView
+  HTMLElement.prototype.scrollIntoView = function (options?: boolean | ScrollIntoViewOptions) {
+    if (typeof options === "object" && options?.block === "end") into.push(options)
+  }
+  return {
+    /** The landings recorded so far, in the order they were asked for. */
+    into,
+    restore() {
+      HTMLElement.prototype.scrollIntoView = scrolled
+    },
+  }
+}
+
 export async function type(element: Element | null, value: string) {
   assert.ok(element, "the field is on screen")
   const prototype =

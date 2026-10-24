@@ -16,7 +16,9 @@ import {
   resized,
   seedChat,
   settle,
+  spyScrollIntoView,
   thinkingLines,
+  withReducedMotion,
 } from "./component-kit.tsx"
 
 const bot = botProfile("thinking", { name: "Thinking" })
@@ -116,9 +118,7 @@ const follows = (first: Element, second: Element) =>
 
 /** The one row the reply's tool calls are drawn as (calls that ran back to back are one group). */
 const toolRow = (root: Element) => {
-  const found = [...root.querySelectorAll("button[aria-label]")].find((button) =>
-    /command|file|code/i.test(button.getAttribute("aria-label") ?? ""),
-  )
+  const found = root.querySelector("[data-slot=tool-group]")
   assert.ok(found, "the call was drawn")
   return found
 }
@@ -128,7 +128,6 @@ async function stream(id: string) {
   await settle()
 }
 
-/** The box the opened run's words sit in, and the two things a run too tall for it draws. */
 const cap = () => find("[data-slot=thinking-cap]")
 const fade = () => find("[data-slot=thinking-fade]")
 const more = () => findText("button", "Show more")
@@ -139,7 +138,6 @@ function sized(element: Element, size: { client: number; scroll: number }) {
   Object.defineProperty(element, "scrollHeight", { value: size.scroll, configurable: true })
 }
 
-/** The thread's own scroll box: what a reader scrolls, and what the row's end is kept in view of. */
 const viewport = () => {
   const found = find("[data-slot=message-scroller-viewport]")
   assert.ok(found, "the thread has a scroll box")
@@ -340,6 +338,30 @@ test("a run this device measured reads in whole seconds, not the stats line's fi
   })
 })
 
+test("a run that already ended stays folded while the call it broke runs", async () => {
+  host()
+  const id = "ended-run"
+  await screen(
+    undefined,
+    turn({
+      id,
+      // The call that ended the run is still going: its own row says what it is doing.
+      tools: [{ ...call("call-1"), status: "running" }],
+      reasoningRuns: [run(REASONING, { spanMs: 12_000 })],
+    }),
+    async () => {
+      await stream(id)
+      const line = onlyThinkingLine()
+      assert.equal(lineLabel(line), "Thought for 12s", "the number it measured is what it reads")
+      assert.equal(
+        expanded(line),
+        "false",
+        "an ended run does not re-open as Thinking… while the call it broke runs",
+      )
+    },
+  )
+})
+
 test("a restored reply reads Thought it through and keeps its duration in the stats", async () => {
   host()
   const reply = {
@@ -426,6 +448,34 @@ test("a reply whose thinking is broken by tool calls draws a row above them and 
     assert.ok(follows(before, calls), "the thinking before the call is drawn above it")
     assert.ok(follows(calls, after), "and the thinking after it below, once the calls are one row")
     assert.ok(follows(after, text), "where it happened, before the text that followed")
+  })
+})
+
+test("two calls back to back keep each run after its own call, in the order they arrived", async () => {
+  host()
+  const messages = turn({
+    id: "arrival-order",
+    content: "I ran both, then answered.",
+    // Nothing between the calls, so the thread draws them as one group.
+    tools: [call("call-1"), call("call-2", "read_file", "parse.ts")],
+    reasoningRuns: [
+      run(REASONING),
+      run("What the first call printed.", { afterToolId: "call-1" }),
+      run(SECOND, { afterToolId: "call-2" }),
+    ],
+  })
+  await screen(undefined, messages, async () => {
+    const rows = thinkingLines()
+    assert.equal(rows.length, 3, "one row per stretch of thinking")
+    const calls = toolRow(item(rows[0]))
+    assert.ok(follows(rows[0], calls), "the run before any call is drawn above the group")
+    assert.ok(follows(calls, rows[1]), "the run after the first call follows the group")
+    assert.ok(
+      follows(rows[1], rows[2]),
+      "and the run after the second call follows it, rather than the other way round",
+    )
+    assert.match(reasoned(rows[1]).textContent ?? "", /first call printed/, "each row its own stretch")
+    assert.match(reasoned(rows[2]).textContent ?? "", /blocks are what matter/)
   })
 })
 
@@ -520,6 +570,8 @@ test("a coding session's thread draws the same rows, in place, as the same reply
       ...(await db.messages.get("session-reply"))!,
       content: "",
       status: "streaming",
+      // A live turn's newest run hasn't ended, so it carries no span to re-open against.
+      reasoningRuns: [run(REASONING), run(SECOND, { afterToolId: "call-2" })],
     })
     await settle()
     const streaming = thinkingLines()
@@ -588,6 +640,24 @@ test("an opened run reads as markdown, the way the reply's own answer does", asy
   )
 })
 
+test("a folded run's links wait for the open, as its words do", async () => {
+  host()
+  const messages = turn({
+    id: "inert",
+    reasoningRuns: [run("The scan is in [parse.ts](./parse.ts).")],
+    content: ANSWER,
+  })
+  await screen(undefined, messages, async () => {
+    const folded = reasoned(onlyThinkingLine())
+    assert.equal(folded.hasAttribute("inert"), true, "a folded body is out of the tab order")
+    assert.equal(folded.getAttribute("aria-hidden"), "true", "and out of the tree")
+    await click(onlyThinkingLine())
+    const shown = reasoned(onlyThinkingLine())
+    assert.equal(shown.hasAttribute("inert"), false, "an opened one can be reached again")
+    assert.equal(shown.getAttribute("aria-hidden"), "false")
+  })
+})
+
 test("a run taller than its cap draws a fade and a Show more, which reveals the rest", async () => {
   host()
   await screen(
@@ -597,7 +667,6 @@ test("a run taller than its cap draws a fade and a Show more, which reveals the 
       await click(onlyThinkingLine())
       const box = cap()
       assert.ok(box, "the opened run's words sit in their own box")
-      assert.match(box.className, /max-h-\[30dvh\]/, "capped against the screen's own height")
       assert.equal(fade(), null, "nothing is hidden yet, so no fade")
       assert.equal(more(), null, "and nothing to reveal")
 
@@ -612,11 +681,6 @@ test("a run taller than its cap draws a fade and a Show more, which reveals the 
       await click(control)
       assert.equal(more(), null, "revealing the rest drops the control")
       assert.equal(fade(), null, "and the fade with it")
-      assert.doesNotMatch(
-        cap()?.className ?? "",
-        /max-h-/,
-        "and the cap, so the whole run reads inline",
-      )
       assert.match(
         reasoned(onlyThinkingLine()).textContent ?? "",
         /markdownBlocks\(text\)/,
@@ -629,97 +693,104 @@ test("a run taller than its cap draws a fade and a Show more, which reveals the 
 test("opening a run lands on its newest words, and the tail follows until a scroll up", async () => {
   host()
   const id = "following"
-  const into: ScrollIntoViewOptions[] = []
-  const scrolled = HTMLElement.prototype.scrollIntoView
-  const media = globalThis.matchMedia
-  HTMLElement.prototype.scrollIntoView = function (options?: boolean | ScrollIntoViewOptions) {
-    if (typeof options === "object" && options?.block === "end") into.push(options)
-  }
+  const spy = spyScrollIntoView()
   try {
     await screen(undefined, turn({ id, reasoningRuns: [run(REASONING)] }), async () => {
       await stream(id)
+      // The thread has less room than its words need, so the row's end is not in view already.
+      sized(viewport(), { client: 400, scroll: 1_200 })
       // Fold it and open it again, the way a reader opens a row: opening is what lands on the end.
       await click(onlyThinkingLine())
-      into.length = 0
+      spy.into.length = 0
       await click(onlyThinkingLine())
-      assert.equal(into.at(-1)?.block, "end", "opening puts the run's end in view")
-      assert.equal(into.at(-1)?.behavior, "smooth", "gliding there, as the thread's own moves do")
+      assert.equal(spy.into.at(-1)?.block, "end", "opening puts the run's end in view")
+      assert.equal(
+        spy.into.at(-1)?.behavior,
+        "smooth",
+        "gliding there, as the thread's own moves do",
+      )
 
-      // The words arrive: the row's end is put back in view as it grows.
-      into.length = 0
+      spy.into.length = 0
       await db.messages.put({
         ...(await db.messages.get(id))!,
         reasoningRuns: [run(`${REASONING} Then the blocks.`)],
       })
       await settle()
       await resized("[data-slot=thinking-body]")
-      assert.ok(into.length > 0, "growth keeps the end of the row in view")
+      assert.equal(spy.into.length, 0, "the report an observer gets at once is not growth")
+      await resized("[data-slot=thinking-body]")
+      assert.ok(spy.into.length > 0, "growth keeps the end of the row in view")
 
-      // A reader scrolling the thread up leaves the follow where it was: it stays off for this row.
-      const view = viewport()
-      view.dispatchEvent(new window.WheelEvent("wheel", { deltaY: -120, bubbles: true }))
-      into.length = 0
+      viewport().dispatchEvent(new window.WheelEvent("wheel", { deltaY: -120, bubbles: true }))
+      spy.into.length = 0
       await db.messages.put({
         ...(await db.messages.get(id))!,
         reasoningRuns: [run(`${REASONING} Then the blocks. Its scan is cheap.`)],
       })
       await settle()
       await resized("[data-slot=thinking-body]")
-      assert.equal(into.length, 0, "a scroll up stops the follow, for good")
+      await resized("[data-slot=thinking-body]")
+      assert.equal(spy.into.length, 0, "a scroll up stops the follow, for good")
 
-      // Opening it again re-arms it.
       await click(onlyThinkingLine())
-      into.length = 0
+      spy.into.length = 0
       await click(onlyThinkingLine())
-      assert.ok(into.length > 0, "and opening the row again follows it once more")
+      assert.ok(spy.into.length > 0, "and opening the row again follows it once more")
     })
 
-    // With motion asked against, the same landing happens without an animation.
-    const reduced = (query: string) => {
-      const answer = media(query)
-      if (query !== "(prefers-reduced-motion: reduce)") return answer
-      return { ...answer, matches: true }
-    }
-    globalThis.matchMedia = reduced
-    window.matchMedia = reduced
-    await screen(undefined, turn({ id: "no-motion", reasoningRuns: [run(REASONING)], content: ANSWER }), async () => {
-      into.length = 0
-      await click(onlyThinkingLine())
-      assert.equal(into.at(-1)?.block, "end", "still the run's end")
-      assert.equal(into.at(-1)?.behavior, "auto", "placed with no motion at all")
+    await withReducedMotion(async () => {
+      const quiet = (id: string) =>
+        screen(undefined, turn({ id, reasoningRuns: [run(REASONING)], content: ANSWER }), async () => {
+          spy.into.length = 0
+          await click(onlyThinkingLine())
+          assert.equal(spy.into.at(-1)?.block, "end", "still the run's end")
+          assert.equal(spy.into.at(-1)?.behavior, "auto", "placed with no motion at all")
+        })
+      await quiet("no-motion")
     })
   } finally {
-    HTMLElement.prototype.scrollIntoView = scrolled
-    globalThis.matchMedia = media
-    window.matchMedia = media
+    spy.restore()
+  }
+})
+
+test("a run that opens on its own leaves a reader who has scrolled away where they were", async () => {
+  host()
+  const id = "auto-open"
+  const spy = spyScrollIntoView()
+  try {
+    await screen(undefined, turn({ id, reasoningRuns: [run(REASONING)], content: ANSWER }), async () => {
+      // The reader is reading higher up the thread when the turn's next run starts.
+      const view = viewport()
+      sized(view, { client: 400, scroll: 1_600 })
+      view.scrollTop = 0
+      spy.into.length = 0
+      await db.messages.put({
+        ...(await db.messages.get(id))!,
+        status: "streaming",
+        content: "",
+        reasoningRuns: [run(REASONING), run(SECOND, { afterToolId: "call-1" })],
+      })
+      await settle()
+      const rows = thinkingLines()
+      assert.equal(rows.length, 2, "the turn's two runs, one row each")
+      assert.equal(expanded(rows[1]), "true", "the new run opens as it streams")
+      assert.equal(spy.into.length, 0, "and the reader is not pulled down to it")
+    })
+  } finally {
+    spy.restore()
   }
 })
 
 test("with reduced motion asked for, a tap still opens the row and a second folds it", async () => {
   host()
-  const media = globalThis.matchMedia
-  const reduced = (query: string) => {
-    const answer = media(query)
-    if (query !== "(prefers-reduced-motion: reduce)") return answer
-    return { ...answer, matches: true }
-  }
-  globalThis.matchMedia = reduced
-  window.matchMedia = reduced
-  try {
-    const messages = turn({
-      id: "reduced",
-      reasoningRuns: [run(REASONING)],
-      content: ANSWER,
-    })
-    await screen(undefined, messages, async () => {
+  const messages = turn({ id: "reduced", reasoningRuns: [run(REASONING)], content: ANSWER })
+  await withReducedMotion(() =>
+    screen(undefined, messages, async () => {
       assert.equal(expanded(onlyThinkingLine()), "false", "folded to start")
       await click(onlyThinkingLine())
       assert.equal(expanded(onlyThinkingLine()), "true", "a tap opens it, with no motion needed")
       await click(onlyThinkingLine())
       assert.equal(expanded(onlyThinkingLine()), "false", "and a second folds it")
-    })
-  } finally {
-    globalThis.matchMedia = media
-    window.matchMedia = media
-  }
+    }),
+  )
 })

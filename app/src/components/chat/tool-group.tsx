@@ -268,6 +268,7 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
       <button
         ref={row}
         type="button"
+        data-slot="tool-group"
         aria-label={full}
         className="relative flex min-h-11 w-full items-center gap-2 text-left text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         onClick={() => setOpen(true)}

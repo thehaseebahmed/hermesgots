@@ -12,9 +12,14 @@ import { cn } from "@/lib/utils"
  */
 const CAP = "max-h-[30dvh]"
 
+/** How close to the thread's end a reader counts as reading it, so a row that opens on its own follows. */
+const NEAR_END = 40
+
+/** How close to the thread's end still counts as its end, for words that landed in view already. */
+const AT_END = 4
+
 const reducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
 
-/** The box this row scrolls in: the thread's own viewport, or the nearest box that scrolls. */
 function scroller(node: HTMLElement | null): HTMLElement | null {
   const thread = node?.closest<HTMLElement>("[data-slot=message-scroller-viewport]")
   if (thread) return thread
@@ -24,6 +29,9 @@ function scroller(node: HTMLElement | null): HTMLElement | null {
   }
   return null
 }
+
+/** How a run reads once open: whole when it fits, capped while the rest waits, revealed once asked. */
+type Read = "whole" | "capped" | "revealed"
 
 /**
  * One run of a reply's thinking: a folded row that opens on a tap, reads its words as the reply's
@@ -41,20 +49,13 @@ export const ThinkingLine = memo(function ThinkingLine({
   spanMs?: number
 }) {
   const [override, setOverride] = useState<boolean | null>(null)
-  // The reader asked for the rest of a long run, so this row's cap is off.
-  const [revealed, setRevealed] = useState(false)
-  // The run's words are taller than its cap, so the rest waits behind a Show more.
-  const [overflowing, setOverflowing] = useState(false)
+  const [read, setRead] = useState<Read>("whole")
   const id = useId()
   const root = useRef<HTMLDivElement | null>(null)
   const box = useRef<HTMLDivElement | null>(null)
   const body = useRef<HTMLDivElement | null>(null)
-  // This row's end is the reader's place in the thread, until they scroll away from it.
   const following = useRef(false)
   const open = override ?? thinking
-  const capped = !revealed
-  // A run past its cap, open and not yet revealed: the fade and the control are what say so.
-  const folded = open && capped && overflowing
 
   // Opening reads from the newest words down: the row's end is put at the foot of the thread, and
   // kept there as the row grows — the fold's own transition and the run's arriving words both grow
@@ -66,16 +67,45 @@ export const ThinkingLine = memo(function ThinkingLine({
     const node = body.current
     const row = root.current
     if (!node || !row) return
+    const view = scroller(node)
+    // A tap is the reader asking for this run, so its end comes into view; a row that opens on its
+    // own follows only for a reader already at the thread's end, and never pulls someone who has
+    // scrolled up back down to a run they did not ask for.
+    following.current =
+      override !== null ||
+      !view ||
+      view.scrollTop + view.clientHeight >= view.scrollHeight - NEAR_END
+    if (!following.current) return
     const end = (behavior: ScrollBehavior) => node.scrollIntoView({ block: "end", behavior })
-    following.current = true
     end(reducedMotion() ? "auto" : "smooth")
     if (typeof ResizeObserver === "undefined") return
+    // A browser reports once as soon as an observer is registered, and that report lands while the
+    // smooth arrival is still moving the thread: it would cancel it. The run's growth is waited for.
+    let fresh = true
+    let queued = 0
+    const keep = () => {
+      queued = 0
+      if (!following.current) return
+      // The row's end is in view already, so there is nothing to write — and a write would cancel a
+      // scroll the thread is making for its own reasons.
+      if (view && Math.abs(view.scrollTop + view.clientHeight - view.scrollHeight) <= AT_END) return
+      end("auto")
+    }
     const observer = new ResizeObserver(() => {
-      if (following.current) end("auto")
+      if (fresh) {
+        fresh = false
+        return
+      }
+      // One write per frame: the words arrive in many small steps, and a scroll per step would
+      // fight the smooth arrival that is still moving the thread.
+      if (following.current && !queued) queued = requestAnimationFrame(keep)
     })
     observer.observe(row)
-    return () => observer.disconnect()
-  }, [open])
+    return () => {
+      observer.disconnect()
+      cancelAnimationFrame(queued)
+    }
+  }, [open, override])
 
   // Scrolling the thread up takes the reader somewhere else, so the follow stops for this row and
   // stays off however much more its run has to say. Only the reader's own scrolling counts: the
@@ -114,23 +144,23 @@ export const ThinkingLine = memo(function ThinkingLine({
     }
   }, [open])
 
-  // Only a run that actually outgrows its cap gets the fade and the control: a short one is drawn
-  // whole, with nothing hidden and nothing to reveal.
   useEffect(() => {
-    if (!open || !capped) {
-      setOverflowing(false)
-      return
-    }
+    if (!open) return
     const node = box.current
-    if (!node) return
-    const measure = () => setOverflowing(node.scrollHeight > node.clientHeight + 1)
+    const words = node?.firstElementChild
+    if (!node || !words) return
+    const measure = () =>
+      setRead((was) =>
+        was === "revealed" ? was : node.scrollHeight > node.clientHeight + 1 ? "capped" : "whole",
+      )
     measure()
     if (typeof ResizeObserver === "undefined") return
+    // The words are what grows: a capped box stops at its cap, so watching it would miss the run
+    // getting taller, and this wrapper is the one element whose height follows the words.
     const observer = new ResizeObserver(measure)
-    observer.observe(node)
-    for (const child of Array.from(node.children)) observer.observe(child)
+    observer.observe(words)
     return () => observer.disconnect()
-  }, [open, capped])
+  }, [open])
 
   return (
     <div ref={root} className="-my-2 flex flex-col" data-slot="thinking-line">
@@ -152,8 +182,10 @@ export const ThinkingLine = memo(function ThinkingLine({
       </button>
       <div
         id={id}
-        // Folded text would still be read out, so it leaves the tree until the line opens.
+        // Folded text would still be read out, and its links would still take a tab, so the line
+        // leaves the tree and the tab order until it opens.
         aria-hidden={!open}
+        inert={!open}
         className={cn(
           "grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none",
           open ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
@@ -162,34 +194,28 @@ export const ThinkingLine = memo(function ThinkingLine({
         <div className="overflow-hidden">
           {/* `scroll-mb-16` keeps the row's end clear of the thread's own floating scroll control
               when landing on it: the newest words are what the reader came for. */}
-          <div
-            ref={body}
-            data-slot="thinking-body"
-            className="flex min-w-0 scroll-mb-16 flex-col"
-          >
-            {/* The reply's own markdown, so a run reads the way the answer under it does. */}
+          <div ref={body} data-slot="thinking-body" className="flex min-w-0 scroll-mb-16 flex-col">
             <div
               ref={box}
               data-slot="thinking-cap"
-              className={cn("relative min-w-0", capped && [CAP, "overflow-hidden"])}
+              className={cn("relative min-w-0", read !== "revealed" && [CAP, "overflow-hidden"])}
             >
               <Markdown className="px-1 pt-1 text-sm leading-relaxed text-muted-foreground">
                 {reasoning}
               </Markdown>
-              {folded && (
+              {open && read === "capped" && (
                 <div
                   data-slot="thinking-fade"
-                  // The rest of the run is under this edge; it must not take a tap meant for the text.
                   aria-hidden
                   className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-b from-transparent to-background"
                 />
               )}
             </div>
-            {folded && (
+            {open && read === "capped" && (
               <button
                 type="button"
                 className="flex min-h-12 w-full items-center justify-center gap-1 rounded-lg px-1 text-xs font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                onClick={() => setRevealed(true)}
+                onClick={() => setRead("revealed")}
               >
                 Show more
                 <ChevronDownIcon className="size-3.5 shrink-0" aria-hidden />

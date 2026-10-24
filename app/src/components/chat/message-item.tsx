@@ -55,13 +55,18 @@ type Part =
   | { kind: "agent"; tool: ToolEvent }
   | ({ kind: "thinking" } & RunPart)
 
-/** One of a reply's thinking runs, as the thread draws it: a row of its own, open while it thinks. */
 type RunPart = {
   run: ReasoningRun
   /** This run's row streams open: it is the reply's newest run and the reply is still thinking. */
   thinking: boolean
   key: string
 }
+
+/** A stretch of a reply: the text between breaks, and the calls started inside it. */
+type Segment = { start: number; end: number; tools: ToolEvent[] }
+
+/** A segment with no run of its own, so a reply that never thought allocates nothing. */
+const NO_RUNS: RunPart[] = []
 
 function rowBlocks(content: string, blocks: ThreadBlock[] | undefined, streaming: boolean) {
   const parts = openuiParts(content)
@@ -86,28 +91,49 @@ function rowBlocks(content: string, blocks: ThreadBlock[] | undefined, streaming
 }
 
 /**
- * Puts each thinking run where it happened: a run with no anchor opens the segment, and a run
- * anchored to a call follows the part that holds that call — after the whole group when consecutive
- * calls merged into one, and after everything when the call is drawn on another segment.
+ * The segment a run's row belongs to: the one holding the call it follows — or, for a call this
+ * thread doesn't draw as a tool row (a question asked as a form), the one that held it.
+ */
+function segmentOf(run: ReasoningRun, segments: Segment[], tools: ToolEvent[]) {
+  if (!run.afterToolId) return 0
+  const found = segments.findIndex((segment) =>
+    segment.tools.some((tool) => tool.toolCallId === run.afterToolId),
+  )
+  if (found >= 0) return found
+  const at = tools.find((tool) => tool.toolCallId === run.afterToolId)?.contentOffset ?? 0
+  const held = segments.findLastIndex((segment) => at >= segment.start)
+  return Math.max(0, held)
+}
+
+/**
+ * Puts a segment's runs where they happened within it: a run with no anchor opens the segment, and an
+ * anchored run follows the part that holds its call — after the whole group when consecutive calls
+ * merged into one. Insertion is counted per part, because two runs after the same part arrive in
+ * order and a plain "splice after it" would stack the later one above the earlier. A run whose call
+ * this segment doesn't draw follows the last call it does draw, and sits at the segment's top when
+ * it draws none.
  */
 function placeThinking(parts: Part[], runs: RunPart[]): Part[] {
   const row = (run: RunPart): Part => ({ kind: "thinking", ...run })
-  const placed: Part[] = [...runs.filter((run) => !run.run.afterToolId).map(row), ...parts]
-  const after = new Map<string, number>()
+  const leading = runs.filter((run) => !run.run.afterToolId)
+  const placed: Part[] = [...leading.map(row), ...parts]
+  const lastCall = placed.findLastIndex(
+    (part) => part.kind === "tools" || part.kind === "clarify" || part.kind === "agent",
+  )
+  const top = leading.length - 1
+  const inserted = new Map<number, number>()
   for (const part of runs) {
     const id = part.run.afterToolId
     if (!id) continue
-    let at = after.get(id)
-    if (at === undefined) {
-      const found = placed.findIndex(
-        (one) =>
-          (one.kind === "tools" && one.tools.some((tool) => tool.toolCallId === id)) ||
-          ((one.kind === "clarify" || one.kind === "agent") && one.tool.toolCallId === id),
-      )
-      at = found < 0 ? placed.length : found
-    }
-    placed.splice(at + 1, 0, row(part))
-    after.set(id, at + 1)
+    const found = placed.findIndex(
+      (one) =>
+        (one.kind === "tools" && one.tools.some((tool) => tool.toolCallId === id)) ||
+        ((one.kind === "clarify" || one.kind === "agent") && one.tool.toolCallId === id),
+    )
+    const at = found >= 0 ? found : lastCall >= 0 ? lastCall : top
+    const count = inserted.get(at) ?? 0
+    placed.splice(at + 1 + count, 0, row(part))
+    inserted.set(at, count + 1)
   }
   return placed
 }
@@ -347,6 +373,21 @@ export const MessageItem = memo(function MessageItem({
     [message.content, blocks, message.status],
   )
   const revealing = content.length < message.content.length && message.role === "assistant"
+  // Folded into rows once per change: a streaming reply redraws many times a second as its text is
+  // revealed, and none of that moves a run or opens one.
+  const storedRuns = message.reasoningRuns
+  const storedReasoning = message.reasoning
+  const thinkingOpen = message.status === "streaming" && !message.content
+  const thinking: RunPart[] = useMemo(() => {
+    const runs = runsOf({ reasoningRuns: storedRuns, reasoning: storedReasoning })
+    return runs.map((run, index) => ({
+      run,
+      key: `run-${index}`,
+      // A span is stamped exactly when its run ends, so a run carrying one is done and stays folded:
+      // re-opening it over the call it broke would throw away the number it measured.
+      thinking: index === runs.length - 1 && thinkingOpen && run.spanMs === undefined,
+    }))
+  }, [storedRuns, storedReasoning, thinkingOpen])
   // The turn failed: a user message whose send never got there, or a reply that errored instead of
   // answering. The one kept in the thread waits to be sent again; the other says so plainly.
   const failed = message.status === "error"
@@ -433,7 +474,7 @@ export const MessageItem = memo(function MessageItem({
       node: <SteerBubble text={steer.text} />,
     })
   breaks.sort((a, b) => a.offset - b.offset || a.time - b.time)
-  const segments: { start: number; end: number; tools: ToolEvent[] }[] = []
+  const segments: Segment[] = []
   let start = 0
   let since = -Infinity
   for (const b of [...breaks, { offset: content.length, time: Infinity }]) {
@@ -453,31 +494,16 @@ export const MessageItem = memo(function MessageItem({
     since = b.time
   }
 
-  // A reply keeps its thinking in runs, one per stretch between tool calls, and draws one row per
-  // run where it happened — in every thread: a chat's, a delegated agent's, a coding session's. A row
-  // stored before runs folds into one at the top, so nothing older has to be migrated to be drawn.
-  const runs = runsOf(message).filter((run) => run.text.trim())
-  const thinkingOpen = streaming && !message.content
-  const thinkingParts: RunPart[] = runs.map((run, index) => ({
-    run,
-    key: `run-${index}`,
-    thinking: index === runs.length - 1 && thinkingOpen,
-  }))
-  // A run's row is drawn in the segment that holds the call it follows; one whose call this thread
-  // isn't drawing (a question being asked as a form) still belongs where the call was made.
-  const segmentOf = (run: ReasoningRun) => {
-    if (!run.afterToolId) return 0
-    const found = segments.findIndex((segment) =>
-      segment.tools.some((tool) => tool.toolCallId === run.afterToolId),
-    )
-    if (found >= 0) return found
-    const at = tools.find((tool) => tool.toolCallId === run.afterToolId)?.contentOffset ?? 0
-    return Math.max(0, segments.findLastIndex((segment) => at >= segment.start))
+  const thinkingBySegment = new Map<number, RunPart[]>()
+  for (const part of thinking) {
+    const at = segmentOf(part.run, segments, tools)
+    const batch = thinkingBySegment.get(at)
+    if (batch) batch.push(part)
+    else thinkingBySegment.set(at, [part])
   }
-  const thinkingAt = runs.map(segmentOf)
   // With a row open, the working line would say what the row already says.
   const thinkingProgress =
-    thinkingParts.some((part) => part.thinking) && !awaitingApproval && !awaitingClarify
+    thinking.some((part) => part.thinking) && !awaitingApproval && !awaitingClarify
 
   // A reply's stats come only once it is done and fully revealed, so they never count up.
   const statsShown = showStats && !streaming && !revealing && Boolean(message.stats)
@@ -512,7 +538,7 @@ export const MessageItem = memo(function MessageItem({
           segment.tools,
           segment.start,
           spans,
-          thinkingParts.filter((_, index) => thinkingAt[index] === i),
+          thinkingBySegment.get(i) ?? NO_RUNS,
         )
         return (
           <Fragment key={breaks[i - 1]?.key ?? "start"}>
