@@ -1,9 +1,9 @@
 """``$HERMES_HOME/memento/memento.db``: the chat list (``chats.py``), context use (``context.py``) and
 the models each chat's calls ran on (``model_changes.py``), project sessions (``sessions.py``),
 projects still cloning (``clones.py``), repos being added to or removed from a project (``repos.py``),
-pinned projects (``projects.py``), merged pull requests (``merges.py``), a project's AFK switch
-(``afk.py``) and recent changes for the app's live stream (``events.py``), devices' push
-subscriptions (``push.py``) and messages waiting for a session's run (``outbox.py``) and research
+pinned projects (``projects.py``), merged pull requests (``merges.py``), a project's AFK switch and
+the tasks it holds (``afk.py``) and recent changes for the app's live stream (``events.py``), devices'
+push subscriptions (``push.py``) and messages waiting for a session's run (``outbox.py``) and research
 missions with their evidence ledgers (``research.py``)."""
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 38
+SCHEMA_VERSION = 39
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -77,6 +77,38 @@ def put_setting(path: Path, key: str, value: Optional[Any]) -> None:
 
 def _version(conn: sqlite3.Connection) -> int:
     return conn.execute("PRAGMA user_version").fetchone()[0]
+
+
+def _carry_hold(conn: sqlite3.Connection, row: Any) -> None:
+    """Moves one project's pre-v39 held task into a row of its own, as the store's first hold.
+
+    The task is copied verbatim — the sheet reads it as it is — and its repository and number are
+    read out of it for the key. A row whose task isn't JSON, or names no repository or number, is
+    nothing one can hold, so the INSERT's IGNORE drops it rather than failing the migration.
+    """
+    project_id, task, session_id, claimed_at, stalled, stalled_at = row
+    try:
+        held = json.loads(task) if isinstance(task, str) and task else None
+    except ValueError:
+        return
+    if not isinstance(held, dict):
+        return
+    conn.execute(
+        """INSERT OR IGNORE INTO holds
+               (project_id, task, repo, number, created_at, claimed_at, session_id, stalled, stalled_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            project_id,
+            task,
+            held.get("repo"),
+            held.get("number"),
+            held.get("created_at"),
+            claimed_at,
+            session_id,
+            stalled,
+            stalled_at,
+        ),
+    )
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -494,4 +526,44 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    PRIMARY KEY (meeting_id, n)
                )"""
         )
+        # v39: a project works several tasks at once, so a hold is a row of its own instead of
+        # columns on the project: one per claimed task, carrying the session working it and its own
+        # stall clock (afk.py, ADR 0025). The task is the JSON the sheet already reads, and its
+        # repository and number are what keep the same task from being held twice.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS holds (
+                   project_id TEXT NOT NULL,
+                   task TEXT NOT NULL,
+                   repo TEXT NOT NULL,
+                   number INTEGER NOT NULL,
+                   created_at TEXT,
+                   claimed_at INTEGER,
+                   session_id TEXT,
+                   stalled TEXT,
+                   stalled_at INTEGER,
+                   PRIMARY KEY (project_id, repo, number)
+               )"""
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS holds_session ON holds (session_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS holds_project ON holds (project_id, created_at)")
+        afk_columns = {row[1] for row in conn.execute("PRAGMA table_info(project_afk)")}
+        for column, kind in (
+            # How many tasks the project may hold at once, nothing being one (afk.py).
+            ("pick_count", "INTEGER"),
+            # The prompt library entry the project's Prompt was copied from, and nothing for a
+            # Prompt nobody copied (ADR 0043).
+            ("prompt_id", "TEXT"),
+        ):
+            if column not in afk_columns:
+                conn.execute(f"ALTER TABLE project_afk ADD COLUMN {column} {kind}")
+        # The one hold a project could have before this becomes its first row, with the session
+        # working it and the clock it was claimed on. The old columns stay, as v29's and v30's do,
+        # and are left as they are: nothing reads them now, and a copy is what a store older than
+        # this is upgraded from — with its own version already past 39, it is never copied twice.
+        if "task" in afk_columns:
+            for row in conn.execute(
+                """SELECT project_id, task, session_id, claimed_at, stalled, stalled_at
+                   FROM project_afk WHERE task IS NOT NULL"""
+            ).fetchall():
+                _carry_hold(conn, row)
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
