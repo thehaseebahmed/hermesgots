@@ -228,6 +228,9 @@ export function afkHost({
   holds = null,
   pickCount = null,
   pickRefusal = null,
+  pickBudget = null,
+  holdsHeld = null,
+  budgetRefusal = null,
 }: {
   projectId?: string
   features?: string[]
@@ -242,6 +245,13 @@ export function afkHost({
   pickCount?: number | null
   /** What a pick count write is refused with, where the host refuses one. */
   pickRefusal?: string | null
+  /** The bot's pick budget, 1–10, on both the project's read and the bot's own; null is a host from
+   * before the budget, which answers its own default on the bot-level route. */
+  pickBudget?: number | null
+  /** How many tasks the bot holds now across its projects; null is a host that answers no count. */
+  holdsHeld?: number | null
+  /** What a pick budget write is refused with, where the host refuses one. */
+  budgetRefusal?: string | null
 } = {}) {
   const library: Record<string, unknown>[] = [
     {
@@ -282,6 +292,14 @@ export function afkHost({
           stalled: hold.stalled ?? null,
         }))
   let count = pickCount
+  // The bot's own budget: what the host holds, the host's default where it holds none, and what a
+  // write leaves it at.
+  let budget = pickBudget
+  const botAnswer = () => ({
+    object: "memento.afk.bot",
+    pick_budget: budget ?? 5,
+    holds_held: holdsHeld ?? 0,
+  })
   const answer = () => ({
     object: "memento.afk",
     project_id: projectId,
@@ -294,6 +312,8 @@ export function afkHost({
         : (held[0] ?? null),
     ...(held === null ? {} : { holds: held }),
     ...(count === null ? {} : { pick_count: count }),
+    ...(budget === null ? {} : { pick_budget: budget }),
+    ...(holdsHeld === null ? {} : { holds_held: holdsHeld }),
     refusal: null,
     build_skill: null,
     critique_skills: [],
@@ -308,6 +328,14 @@ export function afkHost({
     const body = init?.body ? JSON.parse(String(init.body)) : null
     calls.push({ method, path: url.pathname, body })
     if (url.pathname.endsWith("/plugins/memento/info")) return json({ name: "memento", features })
+    // The bot's own AFK route, beside the project's: no project segment, one write of its own.
+    if (url.pathname.endsWith("/plugins/memento/afk")) {
+      if (method === "POST" && typeof body?.pick_budget === "number") {
+        if (budgetRefusal) return json({ error: { message: budgetRefusal } }, 400)
+        budget = body.pick_budget
+      }
+      return json(botAnswer())
+    }
     if (url.pathname.endsWith("/plugins/memento/skills"))
       return json({
         object: "list",
