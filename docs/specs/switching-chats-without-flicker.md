@@ -73,7 +73,8 @@ The shell's fade stays, but plays at the swap rather than at the navigation.
 
 | Path | What it is |
 | --- | --- |
-| `app/src/routes/chat.tsx` | The ready flag over the chat's live queries, three-state answers, the hold, the one-commit swap, the inert controls, the cold-start spinner |
+| `app/src/routes/chat.tsx` | The ready flag over the chat's live queries, three-state answers, the pane the hold is drawn into, the one-commit swap, the inert controls, the cold-start spinner |
+| `app/src/lib/chat-hold.ts` | What each pane holds: the last frame it drew ready, and who hears a switch land |
 | `app/src/lib/threads.ts` | The thread list's three-state answer and the thread-list half of the ready gate |
 | `app/src/lib/greeting.ts` | The ready line, mounted only where a chat is unstarted and ready |
 | `app/src/components/app-shell.tsx` | The pane keys the hold has to survive, and the transition retimed to the swap |

@@ -44,7 +44,7 @@ const botScreen = (
   <MemoryRouter initialEntries={["/b/bot-1"]}>
     <Routes>
       <Route path="b/:profileId" element={<BotThreadsPage />} />
-      <Route path="c/:id" element={<ChatPage />} />
+      <Route path="c/:id" element={<ChatPage slot="route" />} />
     </Routes>
   </MemoryRouter>
 )
@@ -124,7 +124,7 @@ test("Main has no Delete or Discard, in its menu or in the data layer", async ()
   await mount(
     <MemoryRouter initialEntries={[`/c/${id}`]}>
       <Routes>
-        <Route path="/c/:id" element={<ChatPage />} />
+        <Route path="/c/:id" element={<ChatPage slot="route" />} />
       </Routes>
     </MemoryRouter>,
     async () => {

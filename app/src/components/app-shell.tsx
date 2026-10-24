@@ -22,7 +22,8 @@ import { useCodePane, useMeetingsPane, useProjectsPane, useResearchPane } from "
 import { useSidebarCollapsed } from "@/lib/sidebar"
 import { useBotPane, useBotThreads } from "@/lib/threads"
 import { cn } from "@/lib/utils"
-import { ChatPage, onChatSwap } from "@/routes/chat"
+import { onChatSwap } from "@/lib/chat-hold"
+import { ChatPage } from "@/routes/chat"
 
 /**
  * A list kept on screen beside what it opened: a bot beside its thread (from `xl`), or Code's

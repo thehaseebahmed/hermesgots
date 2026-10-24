@@ -78,7 +78,7 @@ const screen = (entry: string) => (
     </Link>
     <Routes>
       <Route element={<AppShell />}>
-        <Route path="c/:id" element={<ChatPage />} />
+        <Route path="c/:id" element={<ChatPage slot="route" />} />
       </Route>
     </Routes>
   </MemoryRouter>
@@ -231,12 +231,20 @@ test(
     await mount(screen(`/c/${MAIN}`), async () => {
       await until(async () => titles().includes("Thread t-a"), "the thread beside Main")
       await until(async () => openCards().length === 1, "the card marked open")
-      assert.equal(openCards()[0]?.getAttribute("href"), "/c/t-a", "the card of the thread on screen")
+      assert.equal(
+        openCards()[0]?.getAttribute("href"),
+        "/c/t-a",
+        "the card of the thread on screen",
+      )
       const pane = findAll('[data-slot="header-row"]')[1]
 
       await click(openCards()[0])
       await until(async () => path() === "/c/t-a", "the address names the thread")
-      assert.deepEqual(titles(), ["Mainly", "Thread t-a"], "Main and its thread are both still there")
+      assert.deepEqual(
+        titles(),
+        ["Mainly", "Thread t-a"],
+        "Main and its thread are both still there",
+      )
       assert.equal(
         findAll('[data-slot="header-row"]')[1]?.isSameNode(pane),
         true,
@@ -253,10 +261,7 @@ test(
     await seed(["t-a", "t-b"])
     localStorage.setItem(lastThreadKey(bot.id), "t-a")
     await mount(screen("/c/t-a"), async () => {
-      await until(
-        async () => openCards().length === 1,
-        "the card marked open",
-      )
+      await until(async () => openCards().length === 1, "the card marked open")
       const open = openCards()[0]
 
       await click(open)

@@ -1,12 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { Link, matchPath, useLocation, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
@@ -173,6 +165,7 @@ import {
 } from "@/lib/workspace"
 import { lastActivityAt } from "@/lib/session-work"
 import { useReadyLine } from "@/lib/greeting"
+import { heldFrame, hold, type HoldSlot } from "@/lib/chat-hold"
 import { SUGGESTIONS } from "@/lib/suggestions"
 import { DEFAULT_BOT_ID } from "@/components/bots"
 import { useBotThreads, useNow, useThreads, type Thread } from "@/lib/threads"
@@ -187,45 +180,6 @@ type FlowEntry =
   | { kind: "message"; message: Message }
 
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
-
-/** The panes a chat is drawn in, each holding its own frame while the next chat answers. */
-export type HoldSlot = "main" | "thread" | "route"
-
-interface HeldFrame {
-  /** The chat the frame is of; absent while the pane held a chat never started. */
-  id?: string
-  frame: ReactNode
-}
-
-/**
- * Each pane's last ready frame, kept beside the route rather than in the pane: the shell remounts
- * the chat on every switch, and this is what the next one draws while its own answers come in.
- */
-const held = new Map<HoldSlot, HeldFrame>()
-
-const landed = new Set<(slot: HoldSlot) => void>()
-
-/** The chat a pane last drew ready, for the fade that plays as the next one replaces it. */
-export const heldChat = (slot: HoldSlot) => held.get(slot)?.id
-
-/** Listens for a pane's ready frame naming another chat: the moment a switch lands. */
-export function onChatSwap(listener: (slot: HoldSlot) => void) {
-  landed.add(listener)
-  return () => {
-    landed.delete(listener)
-  }
-}
-
-function hold(slot: HoldSlot, id: string | undefined, frame: ReactNode) {
-  const before = held.get(slot)
-  held.set(slot, { id, frame })
-  if (before && before.id !== id) for (const listener of landed) listener(slot)
-}
-
-/** What each pane held is the session's own memory of it: forgotten as a fresh load forgets it. */
-export function forgetHeldChats() {
-  held.clear()
-}
 
 /** What a chat or session not started yet says: the greeting, then one of the bot's lines. */
 function ReadyLine({ botId, id }: { botId?: string; id?: string }) {
@@ -341,8 +295,13 @@ function FollowOnSend({ lastUserId }: { lastUserId?: string }) {
 export function ChatPage({
   chatId,
   paneThread,
-  slot = "route",
-}: { chatId?: string; paneThread?: string; slot?: HoldSlot } = {}) {
+  slot,
+}: {
+  chatId?: string
+  paneThread?: string
+  /** The pane this chat is drawn in. Named by the shell, so a frame held is its own. */
+  slot: HoldSlot
+}) {
   const params = useParams()
   const { pathname } = useLocation()
   const id = chatId ?? params.id
@@ -1501,7 +1460,7 @@ export function ChatPage({
 
   // A frame naming the chat this pane is already for is nothing held: drawing it would mount the
   // same chat twice, once stale, for a chat that is about to be drawn from its own answers.
-  const heldBefore = held.get(slot)
+  const heldBefore = heldFrame(slot)
   const holding = heldBefore && heldBefore.id !== id ? heldBefore.frame : undefined
 
   return (

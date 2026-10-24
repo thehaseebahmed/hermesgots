@@ -62,7 +62,7 @@ const mainScreen = (
         path="/c/:id"
         element={
           <>
-            <ChatPage />
+            <ChatPage slot="route" />
             <Path />
           </>
         }
@@ -82,7 +82,7 @@ test("Main's header is the bot's face: the bot's name, its thread count, and the
     assert.equal(
       find('[data-slot="header-title"]')?.textContent,
       "Chrome",
-      "the title is the bot's name, not the \"Main\" its record is stored under",
+      'the title is the bot\'s name, not the "Main" its record is stored under',
     )
     assert.equal(headerLine(), "2 threads", "the bot's threads, Main not counted as one")
 
