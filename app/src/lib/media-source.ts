@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 
 import type { Attachment } from "@/lib/db"
-import { loadMediaFile } from "@/lib/media-tags"
+import { askMediaFile } from "@/lib/media-tags"
 
 /**
  * One piece of media the thread draws: where its bytes are, or where the host keeps them — which is
@@ -60,12 +60,16 @@ export function useMediaSources(conversationId: string, sources: MediaSource[]):
     if (!paths.length) return
     let stale = false
     // One read per file, shared across the thread: the route caches what it has served.
-    void Promise.all(paths.map((path) => loadMediaFile(conversationId, path))).then((read) => {
+    void Promise.all(paths.map((path) => askMediaFile(conversationId, path))).then((answers) => {
       if (stale) return
-      for (const path of paths) asked.add(path)
+      // Only an answer settles a path. One the host couldn't answer for stays unasked, so the next
+      // time this thread's media changes it is asked again rather than the tag staying dead.
+      paths.forEach((path, i) => {
+        if (answers[i].answered) asked.add(path)
+      })
       setHost((current) => {
         const next = new Map(current)
-        paths.forEach((path, i) => next.set(path, read[i]))
+        paths.forEach((path, i) => next.set(path, answers[i].file))
         return next
       })
     })

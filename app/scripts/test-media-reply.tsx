@@ -7,8 +7,9 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
+import { act } from "react"
 
-import type { Attachment, Message } from "@/lib/db"
+import { db, type Attachment, type Message } from "@/lib/db"
 
 import {
   botProfile,
@@ -229,6 +230,65 @@ test("a thread's sent media and a reply's tags draw through the same cells", asy
       await click(download("report.pdf"))
       await until(async () => browser.saved.length > 0, "the download")
       assert.deepEqual(browser.saved, ["report.pdf"], "saved under the name the tag named")
+    })
+  } finally {
+    browser.restore()
+  }
+})
+
+test("a tag the host couldn't serve is asked again when the reply carries more", async () => {
+  // A host that was out isn't a route that has no such file: the tag is left as text rather than
+  // settled, and the next read of the reply's media asks for it again.
+  const profile = botProfile("media-retry")
+  await seedChat({
+    id: "c1",
+    profile,
+    messages: [
+      {
+        id: "m1",
+        conversationId: "c1",
+        role: "assistant",
+        content: `Made this: MEDIA: ${LIBRARY}/chart.png`,
+        status: "done",
+        createdAt: 1,
+      },
+    ],
+  })
+  let up = false
+  const reads: string[] = []
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input instanceof Request ? input.url : input))
+    if (url.pathname.endsWith("/plugins/memento/info"))
+      return json({ name: "memento", features: ["attachments", "media"] })
+    if (url.pathname.endsWith("/plugins/memento/media")) {
+      const path = url.searchParams.get("path") ?? ""
+      reads.push(path)
+      if (!up) return json({ error: { message: "The host is away." } }, 503)
+      return new Response(new Blob(["bytes"], { type: "image/png" }), {
+        headers: { "content-type": "image/png" },
+      })
+    }
+    return json({})
+  }) as typeof fetch
+  const browser = stubBrowser()
+  try {
+    await mount(chatScreen("c1"), async () => {
+      await until(async () => text().includes(`MEDIA:${LIBRARY}/chart.png`), "the tag kept as text")
+      assert.equal(cell("chart.png"), null, "a host that couldn't answer draws nothing")
+      up = true
+      // The reply carries on and names another file, so its tags are read again.
+      await act(async () => {
+        await db.messages.update("m1", {
+          content: `Made this: MEDIA: ${LIBRARY}/chart.png MEDIA: ${LIBRARY}/second.png`,
+        })
+      })
+      await until(async () => ready(cell("chart.png")), "the tag drawn once the host answers")
+      assert.equal(
+        text().includes(`MEDIA:${LIBRARY}/chart.png`),
+        false,
+        "and the tag is no longer left as text",
+      )
+      assert.ok(ready(cell("second.png")), "the file it named next draws too")
     })
   } finally {
     browser.restore()
