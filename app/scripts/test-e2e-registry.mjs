@@ -1,7 +1,5 @@
-// The end-to-end registry and its audit, held to each other. A flow is a claim that no lower tier can
-// reach its behaviour (ADR 0019), so a key arrives with a row in `docs/e2e-flow-audit.md` naming its
-// verdict, and the stays are the eleven the audit argues for. Both files are read as text: importing
-// the registry's CLI would run it.
+// ADR 0019: a flow is a claim no lower tier fails for. The registry and its audit are both read
+// as text: importing the CLI would run it, since its argv and its teardown sit at module scope.
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"

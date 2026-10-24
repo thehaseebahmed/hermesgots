@@ -7,6 +7,5 @@ export const COLUMN = "mx-auto w-full max-w-[736px]"
 
 /**
  * The box COLUMN is the interior of: the two differ by the 16px gutters either side of the text.
- * The composer, header, bot picker and banner draw in this box, so it moves with the column.
  */
 export const COLUMN_BOX = "mx-auto w-full max-w-3xl"

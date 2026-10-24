@@ -213,11 +213,11 @@ Projects, attach it to your reply, or describe what it shows. Never commit scree
   parent wears, so probe the element that carries the property.
 - When a selector stops matching, check whether the app renamed it before you blame your change.
   The sidebar's chat list went from "Conversations" to "Recents".
-- A chat's pane is not the window's width: at a 1024px viewport the docked sidebar takes 303px, so
-  the thread is 704px wide — narrower than the 768px reading column — and its text and its cards
-  take the same width there. A flow that asserts the column needs a laptop width (1440px), and one
-  that measures a card against the pane must subtract the scrollbar the thread reserves
-  (`offsetWidth - clientWidth`, 10px with `scrollbar-thin`) before comparing.
+- A chat's pane is not the window's width: at a 1024px viewport the docked sidebar takes 320px, so
+  the pane is 704px and the thread's box 694px — narrower than the 768px reading column — and its
+  text and its cards take the same width there. A flow that asserts the column needs a laptop width
+  (1440px), and one that measures a card against the pane must subtract the scrollbar the thread
+  reserves (`offsetWidth - clientWidth`, 10px with `scrollbar-thin`) before comparing.
 - Don't `pkill -f` with a pattern from your own command line, because it kills your shell. Use
   `pnpm e2e down`, or a bracketed pattern that can't match itself (`pkill -f 'mock-herme[s]'`).
   `fuser` isn't installed everywhere, so `fuser -k <port>/tcp` can no-op silently: an old server

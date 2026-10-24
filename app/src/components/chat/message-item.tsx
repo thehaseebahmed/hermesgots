@@ -522,9 +522,8 @@ export const MessageItem = memo(function MessageItem({
   // A reply's stats come only once it is done and fully revealed, so they never count up.
   const statsShown = showStats && !streaming && !revealing && Boolean(message.stats)
   const statusLine = streaming && !runningTool && !thinkingProgress
-  // The footer's lines are one part of the reply, so they carry the column together and keep the
-  // gap they had as direct children of the row. A footer with no lines would be a gap of its own,
-  // so there is no row at all until one shows.
+  // Empty, the row would still add two of the message's gaps around itself, so it is drawn only
+  // once a line shows.
   const footerLines = [
     statusLine && (
       <StatusLine
