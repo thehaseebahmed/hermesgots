@@ -6,6 +6,8 @@
  */
 import type { Message, SubagentRef } from "@/lib/db"
 import type { SessionMessage } from "@/lib/hermes"
+// Relative with its extension, so `scripts/test-subagent-results.mjs` runs this rule as it stands.
+import { readEnvelope } from "./tools.ts"
 
 /** The `display_kind` Hermes writes a subagent's result under. */
 export const SUBAGENT_RESULT_KIND = "async_delegation_complete"
@@ -56,12 +58,10 @@ function dispatchedBy(rows: SessionMessage[]) {
   const found = new Map<string, SubagentRef>()
   for (const row of rows) {
     if (row.role !== "tool" || typeof row.content !== "string") continue
-    let payload
-    try {
-      payload = JSON.parse(row.content)
-    } catch {
-      continue
-    }
+    // Nothing to key on otherwise, and a transcript is mostly rows of other kinds.
+    if (!row.content.includes("delegation_id")) continue
+    // Read as far as it goes: a clip can cut this row's tail, and what it says before that stands.
+    const payload = readEnvelope(row.content)?.fields
     const ids: string[] = Array.isArray(payload?.subagent_ids) ? payload.subagent_ids : []
     const goals: string[] = Array.isArray(payload?.goals) ? payload.goals : []
     const delegationId = payload?.delegation_id
@@ -93,6 +93,8 @@ function dispatchedBy(rows: SessionMessage[]) {
  * result, by its goal alone.
  */
 export function subagentResults(rows: SessionMessage[]) {
+  // Most threads delegated nothing: no call to read, no delivery to find.
+  if (!rows.some(isSubagentResult)) return new Map<number, SubagentResult>()
   const calls = dispatchedBy(rows)
   const found = new Map<number, SubagentResult>()
   for (const row of rows) {

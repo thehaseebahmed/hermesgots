@@ -6,6 +6,7 @@
  * imported chat folds it the same way.
  */
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import test from "node:test"
 
 import { isSubagentResult, subagentResults } from "../src/lib/subagent-results.ts"
@@ -105,4 +106,30 @@ test("a transcript from before wakes existed folds as it did", () => {
     { id: 3, role: "user", content: "Thanks!", timestamp: 3 },
   ]
   assert.deepEqual(rows.map(isWakePrompt), [false, false, false], "nothing claims to be a wake")
+})
+
+/**
+ * The pinned line-1 prefix is authored three times — by the plugin that posts the wake, by this app
+ * that folds on it, and by the mock the e2e flows run against — and drift between them is silent:
+ * a wake the app no longer recognises draws as the user's own message. So each file is read here
+ * as it stands, and their literals are held to one another.
+ */
+const pluginSource = readFileSync(new URL("../../plugin/delegation.py", import.meta.url), "utf8")
+const mockSource = readFileSync(new URL("./mock-hermes.mjs", import.meta.url), "utf8")
+
+test("the plugin, the app and the mock post one header", () => {
+  const template = pluginSource.match(/^WAKE_HEADER = "(\[ASYNC DELEGATION COMPLETE [^"]*)"/m)?.[1]
+  assert.ok(template, "plugin/delegation.py states a WAKE_HEADER this test can read")
+  const posted = template.replace("{subagent_id}", CHILD)
+
+  const written = mockSource.match(/`(\[ASYNC DELEGATION COMPLETE [^`]*)\$\{child\.id\}\]`/)?.[1]
+  assert.ok(written, "scripts/mock-hermes.mjs writes a delegation notice this test can read")
+  const mocked = `${written}${CHILD}]`
+
+  assert.equal(posted, mocked, "the mock posts the plugin's own header")
+  assert.equal(
+    posted,
+    WAKE_PROMPT_HEADER + CHILD + "]",
+    "the app folds on exactly the prefix the plugin writes",
+  )
 })

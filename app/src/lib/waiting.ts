@@ -50,7 +50,6 @@ const listeners = new Set<() => void>()
 let timer: number | undefined
 let rounds = 0
 const NO_RUNS: Record<string, LiveRunStatus> = {}
-const NO_SUBAGENTS: Record<string, number> = {}
 
 function notify() {
   found = Object.assign(
@@ -164,7 +163,7 @@ export function useAllLiveRuns() {
  */
 export function useLiveSubagents(): Record<string, number> {
   useWaiting()
-  return useSyncExternalStore(subscribe, () => subagents || NO_SUBAGENTS)
+  return useSyncExternalStore(subscribe, () => subagents)
 }
 
 /** A session's run in flight on its server, from the shared poll's last answer. */

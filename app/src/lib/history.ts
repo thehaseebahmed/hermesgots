@@ -767,24 +767,23 @@ async function reconcile(conversationId: string) {
     }
     const writes: Message[] = []
     const parts: string[] = []
+    // Every row this pass inserts lands after what precedes it on Hermes, whatever this device's
+    // clock says: what the floor is for.
+    const put = (message: Message) => {
+      message.createdAt = Math.max(message.createdAt, floor)
+      writes.push(message)
+      floor = message.createdAt + 1
+    }
     // A subagent's result lands at the thread's end, in the order it arrived: after the turn it came
     // in with, and never as a turn of its own.
-    const addResults = (results: Message[]) => {
-      for (const result of results) {
-        result.createdAt = Math.max(result.createdAt, floor)
-        writes.push(result)
-        floor = result.createdAt + 1
-      }
-    }
+    const addResults = (results: Message[]) => results.forEach(put)
     for (const { user, reply, results, wake, rows: range } of turns) {
       if (!user) {
         // The turn a wake run opened: the prompt draws nothing, and the answer it brought is the
         // thread's next message — a reply of its own, after the turn it closed.
         if (wake && reply) {
           parts.push(...partsOf(current, sessionId, range, reply.id))
-          reply.createdAt = Math.max(reply.createdAt, floor)
-          writes.push(reply)
-          floor = reply.createdAt + 1
+          put(reply)
           addResults(results)
           continue
         }
@@ -870,11 +869,7 @@ async function reconcile(conversationId: string) {
       user.createdAt = Math.max(user.createdAt, floor)
       writes.push(user)
       floor = user.createdAt + 1
-      if (reply) {
-        reply.createdAt = Math.max(reply.createdAt, floor)
-        writes.push(reply)
-        floor = reply.createdAt + 1
-      }
+      if (reply) put(reply)
       addResults(results)
     }
     await db.messages.bulkDelete(parts)

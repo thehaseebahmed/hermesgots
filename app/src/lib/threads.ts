@@ -18,8 +18,6 @@ import { useXLarge } from "@/lib/media"
 import { threadState, type ThreadState } from "@/lib/session-work"
 import { useLiveSubagents, useWaiting, type WaitingReason } from "@/lib/waiting"
 
-export type { ThreadState }
-
 /** How many of a bot's newest threads its screen lists, and Main draws as cards. */
 const THREADS = 50
 

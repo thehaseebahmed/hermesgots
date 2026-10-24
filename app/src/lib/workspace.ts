@@ -323,7 +323,7 @@ export function sessionGroup(
   local?: { streaming?: boolean; waiting?: boolean },
   subagents?: number,
 ): { state: SessionState; prTick: boolean } {
-  const state = sessionState(conversation, live, local, subagents)
+  const state = sessionState({ ...conversation, live, local, subagents })
   if (state !== "idle" || !hasOpenPr(conversation)) return { state, prTick: false }
   return prChecksPending(conversation.prs)
     ? { state: "working", prTick: false }
