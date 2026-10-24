@@ -67,6 +67,7 @@ const SHEETS: Record<string, Sheet> = {
   deploy: {
     content: "# deploy\n\nShip it.\n",
     linkedFiles: null,
+    readiness_status: "setup_needed",
     setup_note: "Setup needed before using this skill: missing env $DEPLOY_TOKEN.",
   },
   lint: { content: "# lint\n\nRun the linters.\n", linkedFiles: {} },
@@ -439,14 +440,31 @@ test("the sheet says where each skill came from, in the four origins' own words"
   }
 })
 
-test("the Host's own readiness and setup are the sheet's next lines", async () => {
+test("the Host's readiness and setup are the sheet's next lines, both where it has both", async () => {
   await seed("skills-setup", ["skills", "skills_view"])
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
     await drawn()
     await openSheet("deploy")
-    assert.equal(
-      find('[data-skill-setup="setup"]')?.textContent,
-      "Setup Setup needed before using this skill: missing env $DEPLOY_TOKEN.",
+    assert.deepEqual(
+      findAll("[data-skill-setup]").map((one) => [
+        one.getAttribute("data-skill-setup"),
+        one.textContent,
+      ]),
+      [
+        ["readiness", "Readiness setup_needed"],
+        ["setup", "Setup Setup needed before using this skill: missing env $DEPLOY_TOKEN."],
+      ],
+      "the host's status, then its sentence, one line each",
+    )
+  })
+  await seed("skills-setup-none", ["skills", "skills_view"])
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    await openSheet("pr-land")
+    assert.deepEqual(
+      findAll("[data-skill-setup]"),
+      [],
+      "a host that says neither draws neither line",
     )
   })
 })
@@ -537,6 +555,23 @@ test("a Host that advertises no removal puts no Remove on any sheet", async () =
     await drawn()
     await openSheet("pr-review")
     assert.equal(removeButton(), null, "the sheet is the skill and nothing it can't do")
+  })
+})
+
+test("a skill whose row says no origin offers no Remove, and no guess at one", async () => {
+  const unknown: Row[] = [{ name: "stray", description: "Came from nowhere.", category: null }]
+  await seed(
+    "skills-remove-unknown",
+    ["skills", "skills_view", "skills_remove"],
+    unknown,
+    undefined,
+    { stray: { content: "# stray\n\nCame from nowhere.\n", linkedFiles: null } },
+  )
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    await openSheet("stray")
+    assert.equal(find("[data-skill-origin]"), null, "the sheet says nothing it wasn't told")
+    assert.equal(removeButton(), null, "and offers no removal behind an origin it can't name")
   })
 })
 

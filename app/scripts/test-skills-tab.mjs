@@ -108,18 +108,31 @@ test("a skill's origin is one of the sheet's four lines, and nothing where the r
   assert.equal(skillOrigin(skill({ origin: null })), null)
 })
 
-test("the Host's own setup sentence stands alone, ahead of its status word", () => {
+test("the Host's readiness and its setup sentence are both drawn, readiness first", () => {
   const note = "Setup needed before using this skill: missing env $PLAN_TOKEN."
   assert.deepEqual(skillSetup({ ...skill(), readiness_status: "setup_needed", setup_note: note }), [
+    { label: "Readiness", text: "setup_needed" },
     { label: "Setup", text: note },
   ])
   assert.deepEqual(
     skillSetup({ ...skill(), readiness_status: "setup_needed", setup_help: "Add it to .env." }),
-    [{ label: "Setup", text: "Add it to .env." }],
+    [
+      { label: "Readiness", text: "setup_needed" },
+      { label: "Setup", text: "Add it to .env." },
+    ],
   )
   assert.deepEqual(skillSetup({ ...skill(), gateway_setup_hint: "Load it in the CLI." }), [
     { label: "Setup", text: "Load it in the CLI." },
   ])
+  assert.deepEqual(skillSetup({ ...skill(), readiness_status: "available" }), [
+    { label: "Readiness", text: "available" },
+  ])
+  assert.deepEqual(skillSetup(skill()), [], "a host that says neither draws nothing")
+  assert.deepEqual(
+    skillSetup({ ...skill(), readiness_status: "  ", setup_note: " " }),
+    [],
+    "a blank line is no line",
+  )
 })
 
 test("only the two origins with a removal behind them can be removed", () => {

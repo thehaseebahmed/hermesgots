@@ -113,11 +113,17 @@ export interface SkillSetupLine {
   text: string
 }
 
+/**
+ * The lines the sheet draws about a skill's own state, in the order it has them: the host's readiness
+ * status, then its setup sentence. Both are kept, because a host that says it needs setup also says
+ * how ready it is, and the two answer different questions. A host that says neither draws nothing.
+ */
 export function skillSetup(view: SkillView): SkillSetupLine[] {
-  const sentence = [view.setup_note, view.setup_help, view.gateway_setup_hint]
-    .map((line) => line?.trim())
-    .find((line): line is string => Boolean(line))
-  if (sentence) return [{ label: "Setup", text: sentence }]
+  const lines: SkillSetupLine[] = []
   const status = view.readiness_status?.trim()
-  return status ? [{ label: "Readiness", text: status }] : []
+  if (status) lines.push({ label: "Readiness", text: status })
+  const setup =
+    view.setup_note?.trim() || view.setup_help?.trim() || view.gateway_setup_hint?.trim()
+  if (setup) lines.push({ label: "Setup", text: setup })
+  return lines
 }

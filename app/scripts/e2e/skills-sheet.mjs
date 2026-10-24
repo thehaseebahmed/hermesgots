@@ -68,6 +68,11 @@ const run = async ({ page, profileId, shot }) => {
     "Readiness available",
     "the readiness line is the Host's own status word",
   )
+  assert.equal(
+    await page.locator('[data-skill-setup="setup"]').count(),
+    0,
+    "and a skill with no setup sentence has no setup line",
+  )
 
   const text = page.getByLabel("SKILL.md", { exact: true })
   await text.waitFor({ timeout: 15_000 })
@@ -106,9 +111,14 @@ const run = async ({ page, profileId, shot }) => {
     "a Hub skill's origin says where it came from",
   )
   assert.equal(
+    (await page.locator('[data-skill-setup="readiness"]').innerText()).replace(/\s+/g, " ").trim(),
+    "Readiness setup_needed",
+    "the host's readiness is its own line, even when it also has a setup sentence",
+  )
+  assert.equal(
     (await page.locator('[data-skill-setup="setup"]').innerText()).replace(/\s+/g, " ").trim(),
     `Setup ${SETUP}`,
-    "the setup line is the Host's own sentence",
+    "the setup line is the Host's own sentence, under the readiness",
   )
   assert.equal(
     await page.locator("[data-skill-files]").count(),
@@ -157,5 +167,5 @@ for (const width of [390, 1024]) {
   }
 }
 pass(
-  "a skill's own sheet opens from its row with its origin, the Host's readiness, its SKILL.md as it is on disk and its linked files — one opened into the same sheet, the header's back returning to the skill — as a bottom sheet on a phone and the side drawer from 1024px, for a built-in, a Hub skill, a plugin's and one switched off, at 390 and 1024px, light and dark",
+  "a skill's own sheet opens from its row with its origin, the Host's readiness and its setup sentence where it has each, its SKILL.md as it is on disk and its linked files — one opened into the same sheet, the header's back returning to the skill — as a bottom sheet on a phone and the side drawer from 1024px, for a built-in, a Hub skill, a plugin's and one switched off, at 390 and 1024px, light and dark",
 )
