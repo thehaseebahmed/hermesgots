@@ -8,6 +8,7 @@ import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/in
 import { Spinner } from "@/components/ui/spinner"
 import type { Skill } from "@/lib/hermes"
 import { runnableSkills } from "@/lib/skills-cache"
+import { collated } from "@/lib/skills-tab"
 
 /**
  * A bot's skills, to choose from: searchable over the name, the category and the description, one
@@ -55,11 +56,7 @@ export function SkillSheet({
   }
 
   const sorted = useMemo(() => {
-    // Only what the bot can run, by the rule the composer's menu uses: a skill switched off or
-    // broken is not on offer here either.
-    const ordered = runnableSkills(skills).sort((one, other) =>
-      one.name.localeCompare(other.name, "en", { sensitivity: "base" }),
-    )
+    const ordered = runnableSkills(skills).sort((one, other) => collated(one.name, other.name))
     const needle = query.trim().toLowerCase()
     if (!needle) return ordered
     return ordered.filter((skill) =>

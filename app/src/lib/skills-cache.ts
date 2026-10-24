@@ -28,13 +28,6 @@ export function skillsState({
   return settled === key ? { status: "ok", skills: [] } : { status: "loading" }
 }
 
-/**
- * Why a skill doesn't load, in the Host's own words, or null when it does.
- *
- * The one definition of that question, because two screens ask it: the tab's health line and what the
- * `/` menu offers. A reason that is only whitespace says nothing — an older plugin, or a device row
- * written before the field — so it is no reason either, and a row it came on stays on offer.
- */
 export function loadFailure(skill: Skill): string | null {
   return skill.loadError?.trim() || null
 }

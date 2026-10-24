@@ -37,10 +37,8 @@ export const SKILL_FEATURES = {
   view: "skills_view",
 } as const
 
-/** What each of those features this Bot's Host answered (see `PluginFeatureAnswer`). */
 export type SkillFeatureAnswers = Record<keyof typeof SKILL_FEATURES, PluginFeatureAnswer>
 
-/** What this Bot's plugin answered about its skills: `list`, `write` and `view`. */
 export function useSkillFeatureAnswers(server: PluginServer): SkillFeatureAnswers {
   return usePluginFeatureAnswers(server, SKILL_FEATURES)
 }
@@ -57,23 +55,22 @@ async function readStored(key: string) {
   return (await db.skills.get(key))?.skills
 }
 
-/**
- * Keeps one list of skills as the one every consumer reads: this page's `memory`, and the device's
- * row with it, so a write reaches the composer's `/` menu and the pickers at once (ADR 0044).
- *
- * Keeping the row is a favour to the next page load, not part of an answer: a Dexie failure here (a
- * blocked upgrade, a full quota) must not throw away what the Host just sent. And what didn't change
- * isn't written, because a fresh row would wake anything reading this one.
- */
+async function putIfChanged(key: string, skills: Skill[]) {
+  if (JSON.stringify(await readStored(key)) === JSON.stringify(skills)) return
+  await db.skills.put({ id: key, skills })
+}
+
 async function keepSkills(key: string, skills: Skill[]) {
   memory.set(key, skills)
   try {
-    if (JSON.stringify(await readStored(key)) !== JSON.stringify(skills)) {
-      await db.skills.put({ id: key, skills })
-    }
+    await putIfChanged(key, skills)
   } catch (error) {
     noteFailure("Saving the bot's skills", error)
   }
+}
+
+async function heldSkills(key: string) {
+  return memory.get(key) ?? (await readStored(key))
 }
 
 /** Reads the profile's skills for this server and keeps them, unless the bot can't list them. */
@@ -105,20 +102,9 @@ function readSkills(config: HermesConfig, key: string): Promise<Skill[]> {
   return request
 }
 
-/**
- * Switches one skill on the Host, and takes the row the Host answers into the one list every
- * consumer reads — this page's `memory` and the device's row both — so the composer's `/` menu and
- * the skill pickers drop a skill switched off without waiting for a read (ADR 0044: one list
- * serves them all).
- *
- * A write the Host refuses is thrown, with the list as it was, so the screen shows the Host's own
- * sentence and the row it refused stays the row it was.
- */
 async function switchSkill(config: HermesConfig, key: string, name: string, enabled: boolean) {
   const row = await writeSkillEnabled(config, name, enabled, AbortSignal.timeout(WRITE_TIMEOUT_MS))
-  // The list this page holds, or the device's where the page hasn't read one yet: a list nobody has
-  // read is no list to patch, and the next read fills it in from the Host.
-  const held = memory.get(key) ?? (await readStored(key))
+  const held = await heldSkills(key)
   if (!held) return
   await keepSkills(
     key,
@@ -126,23 +112,12 @@ async function switchSkill(config: HermesConfig, key: string, name: string, enab
   )
 }
 
-/**
- * Takes one skill off the Host, and replaces the one list every consumer reads — this page's
- * `memory` and the device's row both — with the list the Host says is left, so the tab, the
- * composer's `/` menu and the skill pickers all see the row gone at once (ADR 0044).
- *
- * A write the Host refuses is thrown, with the list as it was: the skill stays where it was, and the
- * screen shows the Host's own sentence.
- */
 async function removeFromBot(config: HermesConfig, key: string, name: string) {
   await keepSkills(key, await removeFromHost(config, name, AbortSignal.timeout(WRITE_TIMEOUT_MS)))
 }
 
-/** The bot's skills as this page knows them, and the writes the tab makes over them. */
 export type Skills = SkillsState & {
-  /** Switches one skill on its Host; a refusal is thrown, leaving the list as it was. */
   setEnabled: (name: string, enabled: boolean) => Promise<void>
-  /** Takes one skill off its Host; a refusal is thrown, leaving the list as it was. */
   remove: (name: string) => Promise<void>
 }
 
@@ -151,11 +126,6 @@ export type Skills = SkillsState & {
  * page holds answers at once and a read that lands replaces it, so a skill installed a moment ago
  * shows without a reload, and a read that fails leaves it standing, so the menu never opens empty on
  * a bot whose host is away. A bot whose plugin has no skills route has none to show.
- *
- * `setEnabled` is the Skills tab's switch: the Host's row replaces that one row in the list every
- * consumer reads, so a skill switched off leaves the `/` menu and the pickers at once. `remove` is
- * its removal, and the Host's remaining list replaces the whole of it, so the row that went is gone
- * from every consumer too (ADR 0044: one list serves them all).
  */
 export function useSkills(config: HermesConfig | null, open: boolean): Skills {
   // A bot the app reads plugin routes for at all: with no key, no route is read, as everywhere else.
@@ -204,17 +174,12 @@ export function useSkills(config: HermesConfig | null, open: boolean): Skills {
     }
   }, [open, key, baseUrl, apiKey])
 
-  // Not memoized: it is handed to a row that is drawn from this render anyway, and the list it
-  // writes is `memory`'s rather than a state of its own.
   const setEnabled = async (name: string, enabled: boolean) => {
     if (!baseUrl || !apiKey) return
     await switchSkill({ baseUrl, apiKey }, key, name, enabled)
-    // A fresh object, so the row the write replaced is drawn even when it is the shape it had.
     setSettled({ key })
   }
 
-  // Also not memoized, and for the same reason: the list it writes is `memory`'s, and the row that
-  // goes is drawn from the render that asked for it.
   const remove = async (name: string) => {
     if (!baseUrl || !apiKey) return
     await removeFromBot({ baseUrl, apiKey }, key, name)
