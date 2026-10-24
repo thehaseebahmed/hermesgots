@@ -277,7 +277,9 @@ class SwitchTests(unittest.TestCase):
                 "created_at": "2026-10-01T00:00:00Z",
             },
         )
-        projects.remove(self.home, "p1")
+        with patch("plugin.afk.github.token", return_value=(None, None)):
+            # Nothing to release with: the switch is what this test is about.
+            projects.remove(self.home, "p1")
         self.assertFalse(read(self.home, "p1", self.folders())["on"])
         self.assertEqual(
             afk._holds(self.home, "p1"), [], "its holds go with it: nothing is left holding a claim"
@@ -298,6 +300,35 @@ class SwitchTests(unittest.TestCase):
             # The record is gone either way: a switch left behind is a row nothing reads, and the
             # caller must not be told a delete that happened was a failure.
             self.assertTrue(projects.remove(self.home, "p1"))
+
+    def test_deleting_a_project_gives_every_holds_claim_back(self) -> None:
+        self.stub_projects()
+        (self.home / "projects.db").write_text("")
+        set_on(self.home, "p1", self.folders(), True)
+        for number in (265, 266):
+            afk._hold(
+                self.home,
+                "p1",
+                {
+                    "repo": "mock-user/memento",
+                    "number": number,
+                    "title": f"Task {number}",
+                    "url": f"https://github.com/mock-user/memento/issues/{number}",
+                    "created_at": "2026-10-01T00:00:00Z",
+                },
+            )
+        with (
+            patch("plugin.afk.github.token", return_value=("token", None)),
+            patch("plugin.afk.github.release_claim") as release_claim,
+        ):
+            self.assertTrue(projects.remove(self.home, "p1"))
+        released = sorted(call.args[:2] for call in release_claim.call_args_list)
+        self.assertEqual(
+            released,
+            [("mock-user/memento", 265), ("mock-user/memento", 266)],
+            "a task left labelled and assigned would never be read as ready again (ADR 0012)",
+        )
+        self.assertEqual(afk._holds(self.home, "p1"), [])
 
 
 def default_workflow() -> Dict[str, Any]:

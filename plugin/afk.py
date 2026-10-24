@@ -192,9 +192,24 @@ def turn_off(hermes_home: Path, project_id: str) -> None:
 def forget(hermes_home: Path, project_id: str) -> None:
     """Drops a project's switch: the project's record is gone, so there is nothing to leave off.
 
-    Its holds go with it: a claim whose project no longer exists would never be looked at again,
-    and the tasks it named are back in their frontier for their repository to hand to someone else.
+    Each hold's claim is given back first, best effort: a task left labelled and assigned with no
+    project to work it would stay out of every future frontier forever (ADR 0012 — the frontier
+    excludes an issue carrying either mark). A GitHub that can't answer only loses the attempt: the
+    record is going away either way, and the repository's next sweep is what reads the task back.
     """
+    auth, _ = github.token(hermes_home)
+    if auth:
+        for hold in _holds(hermes_home, project_id):
+            if not hold.task:
+                continue
+            try:
+                github.release_claim(
+                    str(hold.task["repo"]), int(hold.task["number"]), tasks.CLAIM_LABEL, auth
+                )
+            except (github.GitHubError, KeyError, TypeError, ValueError):
+                logger.warning(
+                    "memento: couldn't release %s with its project", hold.task, exc_info=True
+                )
     conn = connect(db_path(hermes_home))
     try:
         conn.execute("DELETE FROM project_afk WHERE project_id = ?", (project_id,))
@@ -859,8 +874,6 @@ def _plan(
         # before would sit beside that reason saying something GitHub no longer says.
         _forget_refusal(hermes_home, project_id, found)
         return Plan(project_id, [])
-    # The holds `_row` answered with, less the ones this pass just gave back: one read of the
-    # project's holds per pass, and the places below counted off what it says.
     gave_back = {_key(task) for task in given_back}
     holds = [hold for hold in found["holds"] if _key(hold.task) not in gave_back]
     places = _pick_count(found) - len(holds)
@@ -919,10 +932,7 @@ def _claims(
         return []
     auth, _ = github.token(hermes_home)
     claimed: List[Tuple[str, Dict[str, Any]]] = []
-    # What this pass has taken, the repositories it has already made the claim label on, the
-    # projects GitHub refused and the projects it told the budget is full: each is a per-pass fact,
-    # so a whole pass pays for it once rather than once per task.
-    seen: Set[Tuple[Any, Any]] = set()
+    claimed_this_pass: Set[Tuple[Any, Any]] = set()
     labelled: set = set()
     stopped: set = set()
     refused: set = set()
@@ -931,9 +941,7 @@ def _claims(
     account: Optional[str] = None
     for task, project_id in ordered:
         key = _key(task)
-        if key in seen:
-            # One repository, two projects: both planned this ready issue from their own read of
-            # it. The first claim is the only one — a second would claim one task twice.
+        if key in claimed_this_pass:
             continue
         if project_id in stopped:
             # GitHub refused this project's last claim: the rest of its tasks wait for the next pass.
@@ -963,7 +971,7 @@ def _claims(
         # The hold clears the last refusal in the same write: this sweep just got an answer.
         _hold(hermes_home, project_id, task)
         claimed.append((project_id, task))
-        seen.add(key)
+        claimed_this_pass.add(key)
     return claimed
 
 
