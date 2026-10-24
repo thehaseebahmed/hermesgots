@@ -7,7 +7,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { sessionGroup, sessionState, threadState } from "../src/lib/session-work.ts"
+import { lastActivityAt, sessionGroup, sessionState, threadState } from "../src/lib/session-work.ts"
 
 const session = (facts = {}) => ({
   resolvedAt: undefined,
@@ -17,14 +17,14 @@ const session = (facts = {}) => ({
 })
 
 /** A pull request of a session's, live or not, with the checks of its head commit. */
-const pr = (state = "open", checks = null) => ({
+const pr = (state = "open", checks = null, at = 5) => ({
   repo: "acme/gots",
   number: 7,
   title: "A change",
   state,
   checks,
   url: "https://example.test/7",
-  at: 5,
+  at,
 })
 
 test("a live subagent with no live turn reads working", () => {
@@ -147,4 +147,39 @@ test("a session nothing runs and no pull request opens is idle", () => {
     state: "idle",
     prTick: false,
   })
+})
+
+// The row's trailing time: the newest moment the session has seen, whichever kind it is.
+
+test("a row's time is the newest moment, not just the turn's", () => {
+  assert.equal(lastActivityAt(session({ updatedAt: 10 })), 10, "the turn's end, alone")
+  assert.equal(
+    lastActivityAt(session({ updatedAt: 10, prs: [pr("open", "success", 25)] })),
+    25,
+    "a pull request moving after the turn carries the time",
+  )
+  assert.equal(
+    lastActivityAt(session({ updatedAt: 30, prs: [pr("open", "pending", 25)] })),
+    30,
+    "an older pull request never drags it back",
+  )
+  assert.equal(
+    lastActivityAt(session({ updatedAt: 10, prs: [pr("open", "success", 25), pr("merged", null, 40)] })),
+    40,
+    "the newest of several pull requests",
+  )
+})
+
+test("a resolve or discard carries the time when it is the newest", () => {
+  assert.equal(
+    lastActivityAt(session({ updatedAt: 10, resolvedAt: 40, prs: [pr("open", "success", 25)] })),
+    40,
+    "resolved after everything else",
+  )
+  assert.equal(lastActivityAt(session({ updatedAt: 10, discardedAt: 40 })), 40, "discarded after the turn")
+  assert.equal(
+    lastActivityAt(session({ updatedAt: 30, resolvedAt: 5, prs: [pr("merged", null, 25)] })),
+    30,
+    "an older resolve never drags it back",
+  )
 })

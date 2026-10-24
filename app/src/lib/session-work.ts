@@ -104,6 +104,19 @@ export function sessionGroup(
 }
 
 /**
+ * A session's last activity: the newest of its turn's clock, its pull requests' updates and its
+ * resolve or discard — derived from moments that already exist (ADR 0046), never stored, so no
+ * field joins sync to carry it. The Code row's trailing time is this, and the unread dot measures
+ * against it.
+ */
+export function lastActivityAt(
+  session: Pick<Conversation, "updatedAt" | "resolvedAt" | "discardedAt" | "prs">,
+): number {
+  const settled = Math.max(session.updatedAt, session.resolvedAt ?? 0, session.discardedAt ?? 0)
+  return (session.prs ?? []).reduce((newest, pr) => Math.max(newest, pr.at), settled)
+}
+
+/**
  * A thread's state as its card draws it: the session's own ladder, with no session of its own to be
  * resolved or discarded, and a reply that failed saying so only once nothing of the thread's is at
  * work. A subagent still writing is the thread still working, and its failure is the turn that is

@@ -41,7 +41,7 @@ import {
   useWaiting,
   type WaitingReason,
 } from "@/lib/waiting"
-import { sessionGroup, type SessionState } from "@/lib/workspace"
+import { lastActivityAt, sessionGroup, type SessionState } from "@/lib/workspace"
 
 const DAY_MS = 86_400_000
 const LAST_PROJECT = "memento:last-session-project"
@@ -456,7 +456,7 @@ function SessionItem({
           </Badge>
         ) : undefined
       }
-      when={formatWhen(session.updatedAt, now)}
+      when={formatWhen(lastActivityAt(session), now)}
       line={line && <span className="truncate">{line}</span>}
       selected={session.id === pane?.selected}
       link={{ to: `/c/${session.id}`, replace: Boolean(pane?.open), state: { code: true } }}
