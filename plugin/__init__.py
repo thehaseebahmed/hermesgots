@@ -76,6 +76,16 @@ PREFIX = "/api/plugins/memento"
 # Gots shows 24 runs per job.
 DEFAULT_PER_JOB = 24
 MAX_PER_JOB = 200
+# What each shape a project AFK write names is written with: one writer per shape, named once, so
+# `afk.write_from`'s answer is handed to the writer that takes it and no shape can fall through to
+# another (`afk.py`). `on` also takes the project's folders and whether it is archived, which the
+# route adds — it is the one write that has to ask whether the project can be left to work at all.
+AFK_WRITES = {
+    "on": afk.set_on,
+    "workflow": afk.set_workflow,
+    "prompt": afk.set_prompt,
+    "pick_count": afk.set_pick_count,
+}
 
 
 def _version() -> str:
@@ -1115,38 +1125,33 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "The project is still being created.", 409)
         body = await json_body(request) or {}
         try:
-            named, value = afk.write_from(body)
+            kind, payload = afk.write_from(body)
         except ValueError as why:
             return _error(web, str(why), 400)
         project, refused = await resolve_project(project_id)
         if refused is not None:
             return refused
-        if named == "on":
+        writer = AFK_WRITES.get(kind)
+        if writer is None:
+            # `write_from` names one of the four, so a fifth is this plugin's own fault, not a
+            # client's; answering it here keeps the route from writing something else instead.
+            return _error(web, "That isn't a write this host takes.", 400)
+        if kind == "on":
+            with_project = {
+                **payload,
+                "folders": project.folders,
+                "archived": bool(getattr(project, "archived", False)),
+            }
             try:
                 found = await asyncio.to_thread(
-                    afk.set_on,
-                    hermes_home(),
-                    project_id,
-                    project.folders,
-                    value,
-                    bool(getattr(project, "archived", False)),
+                    writer, hermes_home(), project_id, **with_project
                 )
             except afk.Refused as why:
                 # The project can't be left to work: its reason is the answer, and nothing is written.
                 return _error(web, str(why), 409)
         else:
             try:
-                if named == "workflow":
-                    await asyncio.to_thread(afk.set_workflow, hermes_home(), project_id, value)
-                elif named == "pick_count":
-                    await asyncio.to_thread(afk.set_pick_count, hermes_home(), project_id, value)
-                else:
-                    # A Prompt is written as its words and the entry they were copied from, one
-                    # shape: a plain write brings no entry and clears the one the row held.
-                    text, source = value
-                    await asyncio.to_thread(
-                        afk.set_prompt, hermes_home(), project_id, text, source
-                    )
+                await asyncio.to_thread(writer, hermes_home(), project_id, **payload)
             except ValueError as why:
                 return _error(web, str(why), 400)
             found = await asyncio.to_thread(
