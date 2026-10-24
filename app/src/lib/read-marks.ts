@@ -40,7 +40,8 @@ const persist = (next: Record<string, number>) => {
 /**
  * The thread has rendered on this device as of `at`: what clears its row's dot. Monotonic — a
  * mark never moves back — and the oldest marks drop once the store is full, so a device that
- * reads everything cannot grow it without bound.
+ * reads everything cannot grow it without bound. An evicted mark reads as never opened: its row
+ * dots again until the thread is opened once more.
  */
 export function markRead(sessionId: string, at = Date.now()) {
   const current = marks.get()
