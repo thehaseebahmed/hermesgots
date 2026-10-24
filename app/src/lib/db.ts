@@ -14,6 +14,9 @@ export type BotSort = "recent" | "waiting" | "name" | "added"
 
 export type LibrarySort = "new" | "old" | "az" | "za"
 
+/** How the Code list orders each of its groups. */
+export type CodeSort = "created" | "activity" | "title"
+
 export interface Settings {
   id: "settings"
   /** A message sent while a reply runs steers it, instead of waiting in the queue. */
@@ -49,6 +52,8 @@ export interface Settings {
   sidebarCollapsed?: boolean
   /** How the Library tab orders folders and files; unset is `new`. Local. */
   librarySort?: LibrarySort
+  /** How the Code list orders each group; unset is `created`. Local. */
+  codeSort?: CodeSort
   activeProfileId?: string
   /** When sync last finished without an error. */
   syncedAt?: number

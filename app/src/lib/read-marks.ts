@@ -46,4 +46,5 @@ const subscribe = (listen: () => void) => {
 }
 
 /** Re-renders whatever draws the dots when a mark moves. */
-export const useReadMarks = (): Record<string, number> => useSyncExternalStore(subscribe, () => snapshot)
+export const useReadMarks = (): Record<string, number> =>
+  useSyncExternalStore(subscribe, () => snapshot)

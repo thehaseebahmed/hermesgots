@@ -6,7 +6,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { codeGroupOf, codeGroups } from "../src/lib/item-groups.ts"
+import { codeGroupOf, codeGroups, codeOrder } from "../src/lib/item-groups.ts"
 
 const row = (id, state, createdAt) => ({ id, state, createdAt })
 
@@ -77,5 +77,46 @@ test("the order is whatever the caller passes — the dropdown's other choices r
   assert.deepEqual(
     byTitle[0].items.map((r) => r.id),
     ["a", "b"],
+  )
+})
+
+// The sort-by dropdown's own three orders.
+
+const pick = { created: (r) => r.at, activity: (r) => r.act, title: (r) => r.title }
+const mixed = [
+  { id: "a", at: 3, act: 9, title: "Zebra" },
+  { id: "b", at: 1, act: 20, title: "apple" },
+  { id: "c", at: 2, act: 15, title: "Mango" },
+]
+const ids = (sort, rows = mixed) => [...rows].sort(codeOrder(sort, pick)).map((r) => r.id)
+
+test("created runs newest first by default, activity newest first, title A–Z", () => {
+  assert.deepEqual(ids("created"), ["a", "c", "b"], "newest created first")
+  assert.deepEqual(ids("activity"), ["b", "c", "a"], "the newest activity first")
+  assert.deepEqual(ids("title"), ["b", "c", "a"], "A–Z, case-insensitively")
+})
+
+test("the chosen order runs inside every group, and flat across everything filtered", () => {
+  const grouped = codeGroups(
+    [
+      { id: "a", state: "idle", at: 3, act: 9, title: "Zebra" },
+      { id: "b", state: "waiting", at: 1, act: 20, title: "apple" },
+      { id: "c", state: "idle", at: 2, act: 15, title: "Mango" },
+    ],
+    (r) => codeGroupOf(r.state),
+    codeOrder("title", pick),
+  )
+  assert.deepEqual(
+    grouped.map((group) => [group.key, group.items.map((r) => r.id)]),
+    [
+      ["waiting", ["b"]],
+      ["idle", ["c", "a"]],
+    ],
+    "each group A–Z on its own",
+  )
+  assert.deepEqual(
+    [...grouped.flatMap((group) => group.items)].sort(codeOrder("activity", pick)).map((r) => r.id),
+    ["b", "c", "a"],
+    "flat across groups under the same choice",
   )
 })

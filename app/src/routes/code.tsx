@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   ArchiveXIcon,
+  ArrowDownUpIcon,
   CheckIcon,
   CircleAlertIcon,
   CodeXmlIcon,
@@ -19,14 +20,32 @@ import { ItemGroup, ItemRow, ItemSearch } from "@/components/item-list"
 import { NewSessionPopup, type SessionTarget } from "@/components/new-session"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Spinner } from "@/components/ui/spinner"
 import { projectKey, startBlocked, useProjectSessions, useSessionFollowUps } from "@/lib/code"
 import { connectionKey } from "@/lib/connection"
-import { createConversation, db, prIsLive, type Conversation, type Profile } from "@/lib/db"
+import {
+  createConversation,
+  db,
+  getSettings,
+  prIsLive,
+  saveSettings,
+  type CodeSort,
+  type Conversation,
+  type Profile,
+} from "@/lib/db"
 import { useDraft } from "@/lib/drafts"
 import { formatRelative } from "@/lib/format"
 import type { HermesProject } from "@/lib/hermes"
-import { codeGroupOf, codeGroups } from "@/lib/item-groups"
+import { codeGroupOf, codeGroups, codeOrder } from "@/lib/item-groups"
 import { useAnyChange } from "@/lib/live"
 import { useNav } from "@/lib/nav"
 import { itemToOpen, useCodePane, type FeaturePane } from "@/lib/pane"
@@ -41,13 +60,7 @@ import {
   useWaiting,
   type WaitingReason,
 } from "@/lib/waiting"
-import {
-  isUnread,
-  lastActivityAt,
-  rowTone,
-  sessionGroup,
-  type SessionState,
-} from "@/lib/workspace"
+import { isUnread, lastActivityAt, rowTone, sessionGroup, type SessionState } from "@/lib/workspace"
 import { readMark, useReadMarks } from "@/lib/read-marks"
 
 const DAY_MS = 86_400_000
@@ -108,6 +121,18 @@ interface Row {
   key: string
 }
 
+const CODE_SORTS: Record<CodeSort, string> = {
+  created: "Created",
+  activity: "Last activity",
+  title: "Title A–Z",
+}
+
+/** The Code list's order over each group, kept on this device (unset: created). */
+function useCodeSort(): [CodeSort, (sort: CodeSort) => void] {
+  const sort = useLiveQuery(async () => (await getSettings()).codeSort, []) ?? "created"
+  return [sort, (codeSort) => void saveSettings({ codeSort })]
+}
+
 function CodeList({ pane }: { pane?: FeaturePane }) {
   const openDrawer = useOpenDrawer()
   const navigate = useNavigate()
@@ -123,6 +148,7 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
   const [query, setQuery] = useState("")
   const [chip, setChip] = useState<string>()
   const [starting, setStarting] = useState(false)
+  const [sort, setSort] = useCodeSort()
 
   const sessions = listed?.sessions
   const profiles = listed?.profiles
@@ -182,14 +208,18 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
     .filter(([key, { project }]) => !project.archived || rows.some((r) => r.key === key))
     .sort((a, b) => a[1].project.name.localeCompare(b[1].project.name))
   const shown = rows.filter((r) => (!chip || r.key === chip) && matches(r, query))
-  // What waits on the user first, then working, idle and closed — each group newest-created first,
-  // so the order is deterministic rather than a live timestamp chasing itself.
-  const grouped = codeGroups(
-    shown,
-    (r) => codeGroupOf(r.state),
-    (a, b) => b.c.createdAt - a.c.createdAt,
-  )
   const filtering = Boolean(query.trim() || chip)
+  // The chosen order runs over every group, and flat across all rows while a search or chip
+  // filters: filtering is the list with its headers removed, never a second ordering rule.
+  const order = codeOrder<Row>(sort, {
+    created: (row) => row.c.createdAt,
+    activity: (row) => lastActivityAt(row.c),
+    title: (row) => row.c.title,
+  })
+  // What waits on the user first, then working, idle and closed — deterministic, not a live
+  // timestamp chasing itself.
+  const grouped = codeGroups(shown, (r) => codeGroupOf(r.state), order)
+  const flat = filtering ? [...shown].sort(order) : undefined
 
   const targets: SessionTarget[] = [...projects.entries()]
     // A project with no repository has nowhere for a session to work, so it isn't offered.
@@ -223,6 +253,20 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
     })
   }
 
+  // One row, drawn in its group or in the flat filtered list.
+  const draw = (row: Row) => (
+    <li key={row.c.id}>
+      <SessionItem
+        row={row}
+        botId={profiles?.get(row.c.profileId)?.botId}
+        showProject={!chip}
+        pane={pane}
+        now={listed?.now ?? 0}
+        waiting={waits[row.c.hermesSessionId]}
+      />
+    </li>
+  )
+
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
@@ -237,6 +281,40 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
             <MenuIcon />
           </Button>
           <h1 className="flex-1 text-xl font-semibold tracking-tight">Code</h1>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  className="h-11 shrink-0 gap-1.5 rounded-full px-3 text-xs text-muted-foreground"
+                  aria-label={`Sort sessions by ${CODE_SORTS[sort]}`}
+                />
+              }
+            >
+              <ArrowDownUpIcon />
+              {CODE_SORTS[sort]}
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-44">
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>Sort by</DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={sort}
+                  onValueChange={(value) => setSort(value as CodeSort)}
+                >
+                  {(Object.keys(CODE_SORTS) as CodeSort[]).map((option) => (
+                    <DropdownMenuRadioItem
+                      key={option}
+                      value={option}
+                      className="min-h-11"
+                      closeOnClick
+                    >
+                      {CODE_SORTS[option]}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </header>
 
@@ -289,22 +367,16 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
           </div>
         )}
 
-        {grouped.map((group) => (
-          <ItemGroup key={group.key} group={group} sticky>
-            {group.items.map((row) => (
-              <li key={row.c.id}>
-                <SessionItem
-                  row={row}
-                  botId={profiles?.get(row.c.profileId)?.botId}
-                  showProject={!chip}
-                  pane={pane}
-                  now={listed?.now ?? 0}
-                  waiting={waits[row.c.hermesSessionId]}
-                />
-              </li>
-            ))}
-          </ItemGroup>
-        ))}
+        {flat ? (
+          // Filtering drops the headers: one flat list, the chosen order over everything shown.
+          <ul className="flex flex-col">{flat.map(draw)}</ul>
+        ) : (
+          grouped.map((group) => (
+            <ItemGroup key={group.key} group={group} sticky>
+              {group.items.map(draw)}
+            </ItemGroup>
+          ))
+        )}
       </div>
 
       <div className="pointer-events-none sticky bottom-0 mt-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">

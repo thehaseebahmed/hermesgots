@@ -1,4 +1,5 @@
 import type { SessionState } from "@/lib/session-work"
+import type { CodeSort } from "@/lib/db"
 
 /** What an item needs, which puts it ahead of the dated groups (or, closed, after them). */
 export type ItemNeed = "waiting" | "working" | "closed" | undefined
@@ -89,4 +90,22 @@ export function codeGroups<T>(
         .sort(order),
     }))
     .filter((grouped) => grouped.items.length)
+}
+
+/**
+ * The sort-by dropdown's three orders over a group's rows (ADR 0046): created, newest first by
+ * default; last activity, newest first; or the title A–Z. Every group runs on the same one, and a
+ * filtered list runs it flat.
+ */
+export function codeOrder<T>(
+  sort: CodeSort,
+  fields: {
+    created: (item: T) => number
+    activity: (item: T) => number
+    title: (item: T) => string
+  },
+): (a: T, b: T) => number {
+  if (sort === "title") return (a, b) => fields.title(a).localeCompare(fields.title(b))
+  const newest = sort === "activity" ? fields.activity : fields.created
+  return (a, b) => newest(b) - newest(a)
 }
