@@ -90,7 +90,9 @@ export function SkillsTab({ profile }: { profile: Profile }) {
   }
 
   // The Host's own sentence again, and the skill still in the list: the row goes only because the
-  // list was replaced with what the Host says is left, never because a removal was asked for.
+  // list was replaced with what the Host says is left, never because a removal was asked for. A
+  // refused removal closes the confirmation and goes back to the skill's sheet, so the refusal
+  // leaves the one thing that was read on screen rather than a dialog with nothing left to answer.
   const confirmRemove = async (name: string) => {
     setRemoving(true)
     try {
@@ -98,6 +100,7 @@ export function SkillsTab({ profile }: { profile: Profile }) {
       setSheet(null)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't remove that skill.")
+      setSheet({ kind: "skill", name })
     } finally {
       setRemoving(false)
     }

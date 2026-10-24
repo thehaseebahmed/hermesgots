@@ -258,6 +258,21 @@ export const FLOWS = {
     about:
       "Server access starts from a waiting server's own health line, shows the Host's URL, takes the pasted callback, and clears the row by itself, at phone and tablet widths",
   },
+  "skills-list": {
+    script: "e2e/skills-list.mjs",
+    about:
+      "A bot's Skills tab: its two sections grouped by category with No category last, each row a name over its health, a switch on each the Host will honour, and one flipped off reading Off and leaving the composer's / menu, at phone and tablet widths, light and dark",
+  },
+  "skills-sheet": {
+    script: "e2e/skills-sheet.mjs",
+    about:
+      "A skill's own sheet: its origin, the Host's readiness, its SKILL.md as it is on disk and a linked file opened and backed out of, as a bottom sheet on a phone and the drawer from 1024px, at both widths, light and dark",
+  },
+  "skills-remove": {
+    script: "e2e/skills-remove.mjs",
+    about:
+      "Remove is offered on the sheets of a Hub skill and one written on the profile and on neither a built-in's nor a plugin's, asks first, takes the row away once confirmed, and shows the Host's own refusal with the row still there, at phone and tablet widths, light and dark",
+  },
   "fallbacks-silent-host": {
     script: "e2e/fallbacks-silent-host.mjs",
     about: "A host that never answers a fallback write gives the field back instead of wedging it",

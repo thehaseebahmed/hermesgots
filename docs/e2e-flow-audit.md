@@ -17,20 +17,20 @@ ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
 
-The registry in `app/scripts/e2e/cli.mjs` holds **71 keys**, and every one of them has a row
-below. `pnpm e2e list` prints the same 71 keys, and the rows here are grouped by the ticket that
+The registry in `app/scripts/e2e/cli.mjs` holds **74 keys**, and every one of them has a row
+below. `pnpm e2e list` prints the same 74 keys, and the rows here are grouped by the ticket that
 takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
 | --- | --- |
 | stay | 14 |
-| component | 53 |
+| component | 56 |
 | plugin | 2 |
 | delete | 2 |
-| **total** | **71** |
+| **total** | **74** |
 
-Of those 71, 65 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
-reuses `todos.mjs`, so 64 distinct files there) and 6 point at the older
+Of those 74, 68 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
+reuses `todos.mjs`, so 67 distinct files there) and 6 point at the older
 `app/scripts/regression-*.mjs`.
 
 #297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**.
@@ -72,21 +72,26 @@ corner is geometry, and that opening the thread clears it while new activity bri
 no reload is wiring no DOM test has. So the registry holds 59 + 13 = 72 keys, less
 `image-viewer`'s own: **71**. The component verdicts are still **53**, the stays are the plan's 7
 plus seven: **14**, and the deletes are **3** less one: **2**.
+Three keys have arrived since, with #525: `skills-list`, `skills-sheet` and `skills-remove` are
+components by the same rule, since the tab's sections, a row's health, the sheet's fields and a
+removal's refusals are all rules over the plugin's answers, and only the tab's fifth width and the
+sheet's own box are geometry. So the registry holds 71 + 3 = **74** keys, the component verdicts are
+the 53 above plus those three: **56**, and the stays are unchanged at **14**.
 
 `app/scripts/test-e2e-registry.mjs`, a unit test, holds the registry and this page to each other:
 a key with no row here, a row with no key, a verdict outside the four, a count in the table above
-that its rows don't add up to, or a stay beyond the twelve fails the app's gates. A new flow is then
+that its rows don't add up to, or a stay beyond the fourteen fails the app's gates. A new flow is then
 an argument this page has to carry, never a default (ADR 0019).
 
 Check any of it in one line:
 
 ```bash
-grep -c '^| `' docs/e2e-flow-audit.md                           # 70 rows, one per registry key
+grep -c '^| `' docs/e2e-flow-audit.md                           # 74 rows, one per registry key
 grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 14
-grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 53
+grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 56
 grep -c '^| `[a-z0-9-]*` | delete |' docs/e2e-flow-audit.md    # 2
 grep -c '^| `[a-z0-9-]*` | plugin |' docs/e2e-flow-audit.md    # 2
-cd app && pnpm -s e2e list | wc -l                             # 70 keys in the registry
+cd app && pnpm -s e2e list | wc -l                             # 74 keys in the registry
 git show 8a4e842^:app/scripts/e2e/cli.mjs |
   sed -n '/^const FLOWS = {/,/^}$/p' | grep -c '^  [a-z"-]*: {'  # 61, before goal mode left
 ```
@@ -211,6 +216,18 @@ Five keys: the sheets that add a server, describe one, remove one, and land its 
 | `mcps-remove` | component | Remove server on a bot's own servers and none on a plugin's, a confirmation first (a cancel sends nothing), and the list showing what is left with no manual refresh. | A control's presence and one delete. | A component test asserts Remove's absence on a plugin server, cancel sending nothing, and the row gone after a confirmed delete. |
 | `mcps-access` | component | A waiting server's health line starts Server access, shows the host's URL with a copy, the row keeps saying it waits, a pasted callback address lands the access, the row clears by itself, and a server without access — or a plugin's — offers no such line. | A flow's wiring over the host's routes: start, show the URL, paste the callback back, clear. | A component test drives start, the pasted callback and the clearing read, asserting the URL shown, the payload sent and the row clearing. |
 
+### The Skills tab — #525
+
+Three keys: the tab's list, one skill's sheet, and taking a skill away from it. #520–#524 each
+brought their own tests; #525 is the ticket whose job is the flows, and the spec calls them geometry
+proofs — the tab and its sheet at a phone's and a tablet's width, light and dark.
+
+| Key | Verdict | What it asserts today | Why it moves | What replaces it |
+| --- | --- | --- | --- | --- |
+| `skills-list` | component | The Skills tab opens from the bot editor at its own URL and back returns to General; *Your skills* and *From plugins* sit under their headings; categories run alphabetically with *No category* last and each group's rows by name; every row carries its health — Ready, Off, or Doesn't load with the Host's own reason; eleven of the twelve rows carry a switch and the essential one carries none; a switch flipped off reads Off and the skill leaves the composer's `/` menu, with the one already off and the one that doesn't load; switching it back reads Ready. | Which sections, groups and rows a list draws, and what a switch writes, are rules over the plugin's answers (`skillHealth`, `skillSections`, `runnableSkills`) — the header's fifth tab crowding the editor at 390px is the geometry. | `app/scripts/test-skills-tab.tsx` over a seeded device database: the sections and groups, each row's health and switch, the switch's write, and the `/` menu's filter over the shared list. The flow stays in the registry as the one proof the path holds end to end, and as the width assertion the spec asks for. |
+| `skills-sheet` | component | A row's title opens the skill's sheet: its origin line (Built in, Installed from the Hub, Yours, From a plugin), the Host's readiness or its setup sentence, its SKILL.md as the file's own bytes, its linked files by group, one file opened into the same sheet and the header's back returning to the skill; a switched-off skill's sheet opens like any other's. It is a bottom sheet on a phone and the side drawer from 1024px, on screen at both. | The sheet's fields are a render over the Host's answer — `skillOrigin` and `skillSetup` are pure rules the unit tests own — while the sheet's own box, its bottom edge and the drawer's right edge are geometry no DOM without layout has. | The sheet's leg of `app/scripts/test-skills-tab.tsx`, which opens it, opens a linked file and backs out; the drawer-versus-sheet choice is `usePopupDrawer`, not a width the DOM knows. |
+| `skills-remove` | component | Remove is offered on the sheet of a Hub skill and of one written on the profile, and on neither a built-in's nor a plugin's; a cancel sends nothing and leaves the skill with its sheet; a confirmed removal takes the row away and the tab shows what is left, with the sheet gone; a removal the Host refuses is its own pinned sentence in a toast, with the row as it was. | A control's presence and one delete over the Host's answer: the origins that carry a removal are `canRemove`'s rule, and the list after one is the Host's own. | The removal's leg of `app/scripts/test-skills-tab.tsx`, which asserts Remove's absence on a built-in and a plugin's skill, a cancel sending nothing, the row gone after a confirmed delete, and the Host's refusal verbatim. |
+
 ### AFK — #304
 
 Nine keys: seven about the pop-up and the session it names, two about what the plugin itself
@@ -250,7 +267,7 @@ One key, the only one that walks the whole feature: #417–#421 each brought the
 ## The fourteen that stay, and why only a browser can assert each
 
 Every one of these earns its browser by a mechanism no lower tier reproduces, and a stay is
-replaced by itself. They are what the end-to-end registry holds once the other 57 keys leave
+replaced by itself. They are what the end-to-end registry holds once the other 60 keys leave
 (#314).
 
 | Key | Verdict | What it asserts today | Why only a browser can assert it |
@@ -272,7 +289,7 @@ replaced by itself. They are what the end-to-end registry holds once the other 5
 
 ## The coverage a demotion leaves with no home
 
-The 58 keys that leave — 53 demoted, 3 deleted as duplicates, 2 moved to the plugin — take away
+The 61 keys that leave — 56 demoted, 3 deleted as duplicates, 2 moved to the plugin — take away
 the assertion of things a component test cannot see: geometry, real timers and real capture, and a
 reload with a live stream. Four of those have a home: the two request budgets and the write rate
 stay with `live-poll`, `idle-requests` and `stream-writes`, and the real reload stays with

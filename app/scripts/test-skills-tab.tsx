@@ -634,6 +634,8 @@ test("a removal the Host refuses is its own sentence, with the row as it was", a
       await until(async () => errors.length === 1, "the toast")
       assert.deepEqual(errors, [refusal], "the Host's own words, nothing added")
       await settle()
+      assert.equal(alert(), null, "the confirmation closes with the refusal")
+      assert.ok(sheetBody(), "back on the skill's own sheet")
       assert.ok(row("pr-review"), "the skill is still the bot's")
       assert.match(row("pr-review")?.textContent ?? "", /Ready/, "and its row is as it was")
       const stored = (await db.skills.toArray()).flatMap((cached) => cached.skills)
