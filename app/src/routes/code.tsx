@@ -41,7 +41,12 @@ import {
   useWaiting,
   type WaitingReason,
 } from "@/lib/waiting"
-import { lastActivityAt, sessionGroup, type SessionState } from "@/lib/workspace"
+import {
+  lastActivityAt,
+  rowTone,
+  sessionGroup,
+  type SessionState,
+} from "@/lib/workspace"
 
 const DAY_MS = 86_400_000
 const LAST_PROJECT = "memento:last-session-project"
@@ -446,7 +451,7 @@ function SessionItem({
           <StateIcon state={state} />
         )
       }
-      waiting={state === "waiting" && !prTick}
+      tone={rowTone(session, { state, prTick: prTick ?? false })}
       botId={botId}
       title={session.title}
       badge={

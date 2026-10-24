@@ -27,16 +27,31 @@ import {
   type SessionWorkspace,
 } from "@/lib/hermes"
 import { syncNow } from "@/lib/sync"
-import { lastActivityAt, sessionGroup, sessionState, type SessionState } from "@/lib/session-work"
+import {
+  lastActivityAt,
+  rowTone,
+  sessionGroup,
+  sessionState,
+  type RowTone,
+  type SessionState,
+} from "@/lib/session-work"
 
 /**
  * Where a session stands, from the pure rules in `src/lib/session-work.ts` — a screen keeps reading it
  * from here: `live` is what the plugin reports for the server, `local` what this device sees of its
  * own turn (exact here, invisible elsewhere), and `subagents` how many the host still runs for it.
- * `sessionGroup` is the Code row's claim: the same ladder with the session's pull requests in it,
- * and `lastActivityAt` the newest moment it has seen — the row's trailing time.
+ * `sessionGroup` is the Code row's claim: the same ladder with the session's pull requests in it;
+ * `rowTone` the colour that claim's icon wears, `lastActivityAt` the newest moment it has seen —
+ * the row's trailing time.
  */
-export { lastActivityAt, sessionGroup, sessionState, type SessionState }
+export {
+  lastActivityAt,
+  rowTone,
+  sessionGroup,
+  sessionState,
+  type RowTone,
+  type SessionState,
+}
 
 /**
  * A project session's workspace: the worktrees the Gots plugin made for it on the Hermes host

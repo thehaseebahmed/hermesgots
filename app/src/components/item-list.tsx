@@ -80,12 +80,20 @@ export function ItemGroup({
   )
 }
 
+/** The icon's three colours, whichever list picks them. */
+const TONES = {
+  warning: "bg-warning/15 text-warning",
+  success: "bg-primary/10 text-primary",
+  muted: "bg-muted text-muted-foreground",
+} as const
+
 /**
  * One row of a list: the feature's icon with the bot in its corner, the title and time, one status
  * line, and anything below it. The open item is tinted.
  */
 export function ItemRow({
   icon,
+  tone,
   waiting,
   botId,
   title,
@@ -99,7 +107,12 @@ export function ItemRow({
   link,
 }: {
   icon: ReactNode
-  /** Waits on the user: the icon takes the warning tone. */
+  /**
+   * The icon's colour, when the list picks it per row (Code: warning for what waits, success for
+   * done or healthy, muted for at rest).
+   */
+  tone?: "warning" | "success" | "muted"
+  /** Waits on the user: the icon takes the warning tone. Ignored where `tone` is given. */
   waiting?: boolean
   botId?: string
   title: string
@@ -124,7 +137,7 @@ export function ItemRow({
         <span
           className={cn(
             "flex size-10 items-center justify-center rounded-full [&_svg]:size-5",
-            waiting ? "bg-warning/15 text-warning" : "bg-primary/10 text-primary",
+            tone ? TONES[tone] : waiting ? TONES.warning : TONES.success,
           )}
         >
           {icon}

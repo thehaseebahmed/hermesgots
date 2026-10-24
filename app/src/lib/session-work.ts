@@ -77,6 +77,12 @@ export function sessionState(facts: SessionFacts): SessionState {
 /** The slice of a session `sessionGroup` reads: its closure and wait marks, and its pull requests. */
 type SessionPrs = Pick<Conversation, "resolvedAt" | "discardedAt" | "planPending" | "prs">
 
+/** Where a Code row's session stands: the group's state, and whether a pull request's arrow claims it. */
+export interface SessionClaim {
+  state: SessionState
+  prTick: boolean
+}
+
 /**
  * Where a Code row's session stands, with its pull requests claimed in: the highest claim wins.
  * Closed first, then anything waiting on the user — a question, an approval, a plan, a stall, or a
@@ -90,7 +96,7 @@ export function sessionGroup(
   live?: LiveTurn,
   local?: LocalTurn,
   subagents?: number,
-): { state: SessionState; prTick: boolean } {
+): SessionClaim {
   const state = sessionState({ ...conversation, live, local, subagents })
   if (state === "resolved" || state === "discarded") return { state, prTick: false }
   // An answer to ask outranks every pull request: the alert glyph is the question, not the arrow.
@@ -101,6 +107,28 @@ export function sessionGroup(
   if (state === "working") return { state: "working", prTick: false }
   if (livePrs.length) return { state: "waiting", prTick: true }
   return { state: "idle", prTick: false }
+}
+
+/** What the Code row's round icon wears: the colour that says what is needed. */
+export type RowTone = "warning" | "success" | "muted"
+
+/**
+ * The colour behind a Code row's glyph, top rule winning (ADR 0046): Discarded grey, Resolved
+ * green, then any wait yellow — on the human (the claim waiting without the pull request's arrow)
+ * or on a live pull request's checks running or failed, which wait on the watcher — then a draft
+ * pull request grey, then an open pull request needing nothing green, then everything else at rest
+ * grey. Finished pull requests are in none of it: green names an open pull request literally, and a
+ * merged one's checks wait on nothing.
+ */
+export function rowTone(conversation: SessionPrs, claim: SessionClaim): RowTone {
+  if (claim.state === "discarded") return "muted"
+  if (claim.state === "resolved") return "success"
+  if (claim.state === "waiting" && !claim.prTick) return "warning"
+  const live = (conversation.prs ?? []).filter(prIsLive)
+  if (live.some((pr) => pr.checks === "pending" || pr.checks === "failure")) return "warning"
+  if (live.some((pr) => pr.state === "draft")) return "muted"
+  if (live.some((pr) => pr.state === "open")) return "success"
+  return "muted"
 }
 
 /**
