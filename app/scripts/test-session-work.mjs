@@ -7,7 +7,15 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { sessionState, threadState } from "../src/lib/session-work.ts"
+import {
+  isUnread,
+  lastActivityAt,
+  rowTone,
+  sessionGroup,
+  sessionState,
+  threadState,
+} from "../src/lib/session-work.ts"
+import { pr } from "./fixtures/pr.ts"
 
 const session = (facts = {}) => ({
   resolvedAt: undefined,
@@ -55,4 +63,179 @@ test("a thread waiting on the user keeps waiting over its subagents", () => {
 test("a failed reply reads failed, unless something still works", () => {
   assert.equal(threadState({ failed: true }), "failed")
   assert.equal(threadState({ failed: true, subagents: 1 }), "working")
+})
+
+
+test("a pull request's checks running or failed wait on the watcher, not the agent", () => {
+  assert.deepEqual(sessionGroup(session({ prs: [pr("open", "pending")] })), {
+    state: "waiting",
+    prTick: true,
+  })
+  assert.deepEqual(sessionGroup(session({ prs: [pr("open", "failure")] })), {
+    state: "waiting",
+    prTick: true,
+  })
+  assert.deepEqual(sessionGroup(session({ prs: [pr("open", "pending")] }), "running"), {
+    state: "waiting",
+    prTick: true,
+  })
+  assert.deepEqual(sessionGroup(session({ prs: [pr("draft", "pending")] }), undefined, undefined, 2), {
+    state: "waiting",
+    prTick: true,
+  })
+})
+
+test("checks that have settled stop waiting — unless the pull request still does", () => {
+  assert.deepEqual(sessionGroup(session({ prs: [pr("open", "success")] })), {
+    state: "waiting",
+    prTick: true,
+  })
+  assert.deepEqual(sessionGroup(session({ prs: [pr("draft", "success")] })), {
+    state: "waiting",
+    prTick: true,
+  })
+  assert.deepEqual(sessionGroup(session({ prs: [pr("merged", "failure")] })), {
+    state: "idle",
+    prTick: false,
+  })
+})
+
+test("an open question outranks the pull request watching beside it", () => {
+  const question = session({ prs: [pr("open", "pending")] })
+  assert.deepEqual(sessionGroup(question, "running", { waiting: true }, 1), {
+    state: "waiting",
+    prTick: false,
+  })
+  assert.deepEqual(sessionGroup(question, undefined, { waiting: true }), {
+    state: "waiting",
+    prTick: false,
+  })
+})
+
+test("an agent running with no wait is working, whatever its pull requests finished", () => {
+  assert.deepEqual(sessionGroup(session({ prs: [pr("open", "success")] }), "running"), {
+    state: "working",
+    prTick: false,
+  })
+  assert.deepEqual(sessionGroup(session({ prs: [pr("merged", null)] }), undefined, undefined, 1), {
+    state: "working",
+    prTick: false,
+  })
+})
+
+test("a closed session stays closed, its pull requests claiming nothing", () => {
+  assert.deepEqual(sessionGroup(session({ resolvedAt: 5, prs: [pr("open", "pending")] })), {
+    state: "resolved",
+    prTick: false,
+  })
+  assert.deepEqual(sessionGroup(session({ discardedAt: 5, prs: [pr("open", "success")] })), {
+    state: "discarded",
+    prTick: false,
+  })
+})
+
+test("a session nothing runs and no pull request opens is idle", () => {
+  assert.deepEqual(sessionGroup(session()), { state: "idle", prTick: false })
+  assert.deepEqual(sessionGroup(session({ prs: [pr("merged", null)] })), {
+    state: "idle",
+    prTick: false,
+  })
+})
+
+
+test("a row's time is the newest moment, not just the turn's", () => {
+  assert.equal(lastActivityAt(session({ updatedAt: 10 })), 10, "the turn's end, alone")
+  assert.equal(
+    lastActivityAt(session({ updatedAt: 10, prs: [pr("open", "success", 25)] })),
+    25,
+    "a pull request moving after the turn carries the time",
+  )
+  assert.equal(
+    lastActivityAt(session({ updatedAt: 30, prs: [pr("open", "pending", 25)] })),
+    30,
+    "an older pull request never drags it back",
+  )
+  assert.equal(
+    lastActivityAt(session({ updatedAt: 10, prs: [pr("open", "success", 25), pr("merged", null, 40)] })),
+    40,
+    "the newest of several pull requests",
+  )
+})
+
+test("a resolve or discard carries the time when it is the newest", () => {
+  assert.equal(
+    lastActivityAt(session({ updatedAt: 10, resolvedAt: 40, prs: [pr("open", "success", 25)] })),
+    40,
+    "resolved after everything else",
+  )
+  assert.equal(lastActivityAt(session({ updatedAt: 10, discardedAt: 40 })), 40, "discarded after the turn")
+  assert.equal(
+    lastActivityAt(session({ updatedAt: 30, resolvedAt: 5, prs: [pr("merged", null, 25)] })),
+    30,
+    "an older resolve never drags it back",
+  )
+})
+
+
+test("a session this device has never opened is unread", () => {
+  assert.equal(isUnread(session({ updatedAt: 10 }), undefined), true, "no mark at all")
+  assert.equal(isUnread(session({ updatedAt: 10 }), 0), true, "a zero mark reads as none")
+})
+
+test("the dot shows only while activity is newer than the mark", () => {
+  const seen = session({ updatedAt: 40, prs: [pr("open", "success", 35)] })
+  assert.equal(isUnread(seen, 50), false, "the thread rendered after everything")
+  assert.equal(isUnread(seen, 40), false, "the moment the last activity landed counts as read")
+  assert.equal(isUnread(seen, 30), true, "something landed since")
+})
+
+
+test("Discarded and Resolved outrank every pull request for the colour", () => {
+  const claim = (state) => ({ state, prTick: false })
+  assert.equal(rowTone(session({ discardedAt: 5, prs: [pr("open", "pending")] }), claim("discarded")), "muted")
+  assert.equal(rowTone(session({ resolvedAt: 5, prs: [pr("draft", "pending")] }), claim("resolved")), "success")
+})
+
+test("anything waiting on the human or on bad checks is yellow", () => {
+  assert.equal(rowTone(session(), { state: "waiting", prTick: false }), "warning")
+  assert.equal(
+    rowTone(session({ prs: [pr("open", "pending")] }), { state: "waiting", prTick: true }),
+    "warning",
+  )
+  assert.equal(
+    rowTone(session({ prs: [pr("draft", "failure")] }), { state: "waiting", prTick: true }),
+    "warning",
+  )
+})
+
+test("a draft pull request wears grey unless it owes an answer or its checks", () => {
+  const draft = session({ prs: [pr("draft", "success")] })
+  assert.equal(rowTone(draft, { state: "waiting", prTick: true }), "muted", "settled, awaiting review")
+  assert.equal(rowTone(draft, { state: "working", prTick: false }), "muted", "the agent runs beside it")
+  assert.equal(rowTone(draft, { state: "waiting", prTick: false }), "warning", "an open question still wins")
+  assert.equal(
+    rowTone(session({ prs: [pr("draft", "pending")] }), { state: "waiting", prTick: true }),
+    "warning",
+    "checks running still win",
+  )
+})
+
+test("an open pull request needing nothing is green whatever else the session does", () => {
+  const open = session({ prs: [pr("open", "success")] })
+  assert.equal(rowTone(open, { state: "waiting", prTick: true }), "success", "waiting for its merge")
+  assert.equal(rowTone(open, { state: "working", prTick: false }), "success", "the agent runs beside it")
+  assert.equal(rowTone(open, { state: "idle", prTick: false }), "success", "idle with the pull request open")
+})
+
+test("everything at rest is grey, finished pull requests included", () => {
+  assert.equal(rowTone(session(), { state: "idle", prTick: false }), "muted", "nothing happens")
+  assert.equal(rowTone(session(), { state: "working", prTick: false }), "muted", "the agent runs")
+  assert.equal(
+    rowTone(session({ prs: [pr("merged", "success"), pr("closed", "failure")] }), {
+      state: "idle",
+      prTick: false,
+    }),
+    "muted",
+    "merged and closed wait on nothing, their checks or not",
+  )
 })

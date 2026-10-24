@@ -5,12 +5,14 @@ import { spawn, spawnSync } from "node:child_process"
 import { existsSync, mkdirSync, openSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
-import { fileURLToPath } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 
 import { laneOf, MAX_LANES } from "./lanes.mjs"
 
 const here = dirname(fileURLToPath(import.meta.url))
 const appDir = resolve(here, "../..")
+// Running the CLI is for the command line only: `test-e2e-registry.mjs` imports `FLOWS` as data.
+const invokedDirectly = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href
 
 // Mocks by what they leave out; each runs on its own port so flows can mix them. A parallel lane
 // takes its own set (E2E_MOCK_BASE + its four), so lanes never share mock state.
@@ -28,7 +30,7 @@ const APP_PORT = Number(process.env.E2E_APP_PORT ?? 15173)
 
 // `script` is relative to app/scripts; `mock` the one MOCK_URL points at (live by default);
 // `alsoPolling` runs it again on the polling mock under `all`; `extra` adds more mock URLs.
-const FLOWS = {
+export const FLOWS = {
   "chat-message": {
     script: "e2e/chat-message.mjs",
     about: "Start a new chat, send a message, get the whole reply and find it in Recents",
@@ -55,8 +57,13 @@ const FLOWS = {
   approval: {
     script: "e2e/approval.mjs",
     about:
-      "A project session waits on an approval in the sidebar and in Code, then lands under Today",
+      "A project session waits on an approval in the sidebar and in Code, then lands under Idle",
     alsoPolling: true,
+  },
+  "code-list": {
+    script: "e2e/code-list.mjs",
+    about:
+      "The Code list grouped by session state: four headed groups with counts and Closed collapsed, the sort menu kept on the device, one flat list under a search, and the unread dot at the icon's corner cleared by reading",
   },
   "approval-missed": {
     script: "e2e/approval-missed.mjs",
@@ -199,7 +206,7 @@ const FLOWS = {
   "afk-stalled": {
     script: "e2e/afk-stalled.mjs",
     about:
-      "A stalled AFK session waits where the user finds it: the sidebar's Waiting for input and Code's Waiting on you, with the host's reason under it",
+      "A stalled AFK session waits where the user finds it: the sidebar's Waiting for input and Code's Waiting for You, with the host's reason under it",
   },
   "afk-stage": {
     script: "e2e/afk-stage.mjs",
@@ -632,103 +639,105 @@ function laneRun(lane, lanes, argv) {
   })
 }
 
-process.on("SIGINT", () => {
-  stopStarted()
-  process.exit(130)
-})
+if (invokedDirectly) {
+  process.on("SIGINT", () => {
+    stopStarted()
+    process.exit(130)
+  })
 
-try {
-  if (!Number.isInteger(jobs) || jobs < 1 || jobs > MAX_LANES)
-    throw new Error(`--jobs is 1-${MAX_LANES}, not ${jobs}`)
-  if (jobs > 1 && command !== "all" && !FLOWS[command])
-    throw new Error("--jobs runs flows (one or more, or all), nothing else")
-  if (!command || command === "help" || command === "--help") {
-    console.log(HELP)
-  } else if (command === "list") {
-    const pad = Math.max(...Object.keys(FLOWS).map((name) => name.length))
-    for (const [name, flow] of Object.entries(FLOWS)) {
-      const mock = flow.mock ? ` [${flow.mock} mock]` : ""
-      console.log(`${name.padEnd(pad)}  ${flow.about}${mock}`)
-    }
-  } else if (command === "down") {
-    stopAll()
-  } else if (command === "up") {
-    console.log(`app  ${await serveApp()}`)
-    for (const name of Object.keys(MOCKS))
-      console.log(`mock ${name.padEnd(12)} ${await serveMock(name)}`)
-    started.length = 0
-  } else if (command === "shot") {
-    if (!rest[0]?.startsWith("/")) throw new Error("shot needs a path in the app, like /code")
-    await shot(rest[0])
-  } else {
-    const swept = command === "all" ? Object.keys(FLOWS) : [command, ...rest]
-    const unknown = swept.filter((name) => !FLOWS[name])
-    if (unknown.length) throw new Error(`No flow named ${unknown.join(", ")}; see pnpm e2e list`)
-    // A lane runs its own slice of the sweep (round-robin over registry order) and its own mocks;
-    // every lane drives the one shared app.
-    const names = laneOf(
-      swept,
-      Number(process.env.E2E_LANES ?? 1),
-      Number(process.env.E2E_LANE ?? 0),
-    )
-    if (jobs > 1) {
-      await serveApp()
-      await warm()
-      const lanes = await Promise.all(
-        Array.from({ length: jobs }, (_, lane) => laneRun(lane, jobs, args)),
-      )
-      console.log(`\nScreenshots: ${shots}\nServer logs: ${logs}`)
-      const failures = lanes.flatMap((lane) =>
-        [...lane.out.matchAll(/^FAILED: (.+)$/gm)].flatMap((match) => match[1].split(", ")),
-      )
-      const crashed = lanes.filter((lane) => lane.code !== 0 && !/^FAILED: /m.test(lane.out))
-      const passed = lanes.reduce(
-        (count, lane) => count + Number(lane.out.match(/^All (\d+) passed$/m)?.[1] ?? 0),
-        0,
-      )
-      // The sweep's own rule made mechanical: a failure under lanes re-runs serially before it
-      // counts. Four browsers sharing one dev server flake where one alone passes.
-      const still = []
-      for (const label of failures) {
-        const name =
-          Object.keys(FLOWS).find((key) => label === key) ??
-          Object.keys(FLOWS).find((key) => label.startsWith(`${key} (`))
-        const mock = name ? (/\((\S+) mock\)/.exec(label)?.[1] ?? FLOWS[name].mock ?? "live") : null
-        console.log(`\n== serial re-run of ${label}`)
-        if (name && (await runFlow(name, mock)) === null) {
-          console.log(`passed serially, a lane flake: ${label}`)
-          continue
-        }
-        still.push(label)
+  try {
+    if (!Number.isInteger(jobs) || jobs < 1 || jobs > MAX_LANES)
+      throw new Error(`--jobs is 1-${MAX_LANES}, not ${jobs}`)
+    if (jobs > 1 && command !== "all" && !FLOWS[command])
+      throw new Error("--jobs runs flows (one or more, or all), nothing else")
+    if (!command || command === "help" || command === "--help") {
+      console.log(HELP)
+    } else if (command === "list") {
+      const pad = Math.max(...Object.keys(FLOWS).map((name) => name.length))
+      for (const [name, flow] of Object.entries(FLOWS)) {
+        const mock = flow.mock ? ` [${flow.mock} mock]` : ""
+        console.log(`${name.padEnd(pad)}  ${flow.about}${mock}`)
       }
-      if (still.length || crashed.length) {
-        if (still.length) console.log(`FAILED: ${still.join(", ")}`)
-        for (const lane of crashed)
-          console.log(`FAILED: lane ${lane.lane} of ${jobs} exited ${lane.code} with no summary`)
-        process.exitCode = 1
-      } else if (failures.length)
-        console.log(`All ${passed + failures.length} passed (${failures.length} only serially)`)
-      else console.log(`All ${passed} passed across ${jobs} lanes`)
+    } else if (command === "down") {
+      stopAll()
+    } else if (command === "up") {
+      console.log(`app  ${await serveApp()}`)
+      for (const name of Object.keys(MOCKS))
+        console.log(`mock ${name.padEnd(12)} ${await serveMock(name)}`)
+      started.length = 0
+    } else if (command === "shot") {
+      if (!rest[0]?.startsWith("/")) throw new Error("shot needs a path in the app, like /code")
+      await shot(rest[0])
     } else {
-      await warm()
-      const failed = []
-      for (const name of names) {
-        const mock = polling && !FLOWS[name].mock ? "polling" : (FLOWS[name].mock ?? "live")
-        failed.push(await runFlow(name, mock))
-        if (command === "all" && FLOWS[name].alsoPolling && !polling)
-          failed.push(await runFlow(name, "polling"))
+      const swept = command === "all" ? Object.keys(FLOWS) : [command, ...rest]
+      const unknown = swept.filter((name) => !FLOWS[name])
+      if (unknown.length) throw new Error(`No flow named ${unknown.join(", ")}; see pnpm e2e list`)
+      // A lane runs its own slice of the sweep (round-robin over registry order) and its own mocks;
+      // every lane drives the one shared app.
+      const names = laneOf(
+        swept,
+        Number(process.env.E2E_LANES ?? 1),
+        Number(process.env.E2E_LANE ?? 0),
+      )
+      if (jobs > 1) {
+        await serveApp()
+        await warm()
+        const lanes = await Promise.all(
+          Array.from({ length: jobs }, (_, lane) => laneRun(lane, jobs, args)),
+        )
+        console.log(`\nScreenshots: ${shots}\nServer logs: ${logs}`)
+        const failures = lanes.flatMap((lane) =>
+          [...lane.out.matchAll(/^FAILED: (.+)$/gm)].flatMap((match) => match[1].split(", ")),
+        )
+        const crashed = lanes.filter((lane) => lane.code !== 0 && !/^FAILED: /m.test(lane.out))
+        const passed = lanes.reduce(
+          (count, lane) => count + Number(lane.out.match(/^All (\d+) passed$/m)?.[1] ?? 0),
+          0,
+        )
+        // The sweep's own rule made mechanical: a failure under lanes re-runs serially before it
+        // counts. Four browsers sharing one dev server flake where one alone passes.
+        const still = []
+        for (const label of failures) {
+          const name =
+            Object.keys(FLOWS).find((key) => label === key) ??
+            Object.keys(FLOWS).find((key) => label.startsWith(`${key} (`))
+          const mock = name ? (/\((\S+) mock\)/.exec(label)?.[1] ?? FLOWS[name].mock ?? "live") : null
+          console.log(`\n== serial re-run of ${label}`)
+          if (name && (await runFlow(name, mock)) === null) {
+            console.log(`passed serially, a lane flake: ${label}`)
+            continue
+          }
+          still.push(label)
+        }
+        if (still.length || crashed.length) {
+          if (still.length) console.log(`FAILED: ${still.join(", ")}`)
+          for (const lane of crashed)
+            console.log(`FAILED: lane ${lane.lane} of ${jobs} exited ${lane.code} with no summary`)
+          process.exitCode = 1
+        } else if (failures.length)
+          console.log(`All ${passed + failures.length} passed (${failures.length} only serially)`)
+        else console.log(`All ${passed} passed across ${jobs} lanes`)
+      } else {
+        await warm()
+        const failed = []
+        for (const name of names) {
+          const mock = polling && !FLOWS[name].mock ? "polling" : (FLOWS[name].mock ?? "live")
+          failed.push(await runFlow(name, mock))
+          if (command === "all" && FLOWS[name].alsoPolling && !polling)
+            failed.push(await runFlow(name, "polling"))
+        }
+        const failures = failed.filter(Boolean)
+        console.log(`\nScreenshots: ${shots}\nServer logs: ${logs}`)
+        if (failures.length) {
+          console.log(`FAILED: ${failures.join(", ")}`)
+          process.exitCode = 1
+        } else console.log(`All ${failed.length} passed`)
       }
-      const failures = failed.filter(Boolean)
-      console.log(`\nScreenshots: ${shots}\nServer logs: ${logs}`)
-      if (failures.length) {
-        console.log(`FAILED: ${failures.join(", ")}`)
-        process.exitCode = 1
-      } else console.log(`All ${failed.length} passed`)
     }
+  } catch (error) {
+    console.error(error.message)
+    process.exitCode = 1
+  } finally {
+    stopStarted()
   }
-} catch (error) {
-  console.error(error.message)
-  process.exitCode = 1
-} finally {
-  stopStarted()
 }

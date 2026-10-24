@@ -390,7 +390,7 @@ function PendingItem({ row, onChanged }: { row: ProjectRow; onChanged: () => voi
       <div className="min-w-0 flex-1">
         <ItemRow
           icon={failed ? <FolderGit2Icon /> : <Spinner />}
-          waiting={failed}
+          tone={failed ? "warning" : "success"}
           botId={profile.botId}
           title={project.name}
           warn={failed}

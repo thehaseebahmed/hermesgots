@@ -24,7 +24,6 @@ import {
   type HermesProject,
   type HermesProjectFolder,
   type KeptWorktree,
-  type LiveRunStatus,
   type SessionWorkspace,
 } from "@/lib/hermes"
 import { syncNow } from "@/lib/sync"
@@ -51,6 +50,8 @@ const unsupported = cooldown()
  * so a read that found the same count doesn't wake every query the conversation covers.
  */
 const libraryRead = new Map<string, number>()
+/** When this device last read a session's pull requests — the freshness gate's own clock. */
+const prsRead = new Map<string, number>()
 
 /** Whether any of a session's live pull requests still has checks running. */
 export const prChecksPending = (prs: PullRequestRef[] | undefined) =>
@@ -204,9 +205,15 @@ export async function refreshPrs(conversationId: string, { force = false } = {})
   )
     return
   const { conversation, profile } = found
-  const newest = Math.min(...(conversation.prs ?? []).map((pr) => pr.at))
+  // When this device last read, not when a pull request last moved: `pr.at` carries the move (a
+  // Code row's last activity reads it), so the gate keeps its own clock — the way refreshLibrary
+  // keeps `libraryRead` beside `library.at`.
+  const newest = (conversation.prs ?? []).length
+    ? Math.min(...(conversation.prs ?? []).map((pr) => pr.at))
+    : 0
+  const readAt = prsRead.get(conversationId) ?? newest
   const trusted = prChecksPending(conversation.prs) ? PR_PENDING_MS : PR_MS
-  if (!force && conversation.prs?.length && Date.now() - newest < trusted) return
+  if (!force && conversation.prs?.length && Date.now() - readAt < trusted) return
   let prs
   try {
     prs = await getSessionPrs(
@@ -220,14 +227,31 @@ export async function refreshPrs(conversationId: string, { force = false } = {})
     return
   }
   unsupported.clear(found.key)
-  const at = Date.now()
-  await db.conversations.update(conversationId, { prs: prs.map((pr) => ({ ...pr, at })) })
+  prsRead.set(conversationId, Date.now())
+  const before = new Map((conversation.prs ?? []).map((pr) => [prKey(pr), pr]))
+  // A pull request carries its moment on its own record, and it means the pull request's last
+  // move: re-reads with nothing changed write nothing (and stamp nothing), so a row's last
+  // activity only follows real updates. Compared per pull request: a session keeps the ones it
+  // already finished, so one merge isn't "the newest of its repo became merged" but that pull
+  // request's own change.
+  const stamped = prs.map((pr) => {
+    const old = before.get(prKey(pr))
+    const same =
+      old &&
+      old.state === pr.state &&
+      old.checks === pr.checks &&
+      old.title === pr.title &&
+      old.url === pr.url
+    return same ? old : { ...pr, at: Date.now() }
+  })
+  const previous = conversation.prs ?? []
+  const changed =
+    stamped.length !== previous.length || stamped.some((pr) => !previous.includes(pr))
+  if (changed) await db.conversations.update(conversationId, { prs: stamped })
   // The plugin resolves the session once its pull request merges; the chat list brings that here.
-  // Compared per pull request: a session keeps the ones it already finished, so one merge isn't
-  // "the newest of its repo became merged" but that pull request's own change.
-  const known = new Map((conversation.prs ?? []).map((pr) => [prKey(pr), pr.state]))
+  const wasState = new Map(previous.map((pr) => [prKey(pr), pr.state]))
   const merged = (pr: { repo: string; number: number; state: string }) =>
-    pr.state === "merged" && known.get(prKey(pr)) !== "merged"
+    pr.state === "merged" && wasState.get(prKey(pr)) !== "merged"
   if (!conversation.resolvedAt && prs.some(merged)) void syncNow()
 }
 
@@ -306,28 +330,6 @@ export async function closeSessionWork(
       errors: [error instanceof Error ? error.message : "Couldn't reach the plugin."],
     }
   }
-}
-
-/** A pull request still open (a draft included) is a session waiting to be reviewed and merged. */
-export const hasOpenPr = (conversation: Pick<Conversation, "prs">) =>
-  (conversation.prs ?? []).some(prIsLive)
-
-/**
- * Where a session stands as the project screen groups it: an idle session left with an open pull
- * request waits to be reviewed and merged (`prTick`), unless its checks are still running, which is
- * work it has left to do. `subagents` is how many the host still runs for it (`useLiveSubagents`).
- */
-export function sessionGroup(
-  conversation: Pick<Conversation, "resolvedAt" | "discardedAt" | "planPending" | "prs">,
-  live?: LiveRunStatus,
-  local?: { streaming?: boolean; waiting?: boolean },
-  subagents?: number,
-): { state: SessionState; prTick: boolean } {
-  const state = sessionState({ ...conversation, live, local, subagents })
-  if (state !== "idle" || !hasOpenPr(conversation)) return { state, prTick: false }
-  return prChecksPending(conversation.prs)
-    ? { state: "working", prTick: false }
-    : { state: "waiting", prTick: true }
 }
 
 const PLAN_GO_AHEAD = "Go ahead with the plan"

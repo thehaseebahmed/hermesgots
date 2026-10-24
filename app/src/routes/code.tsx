@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   ArchiveXIcon,
@@ -17,16 +17,26 @@ import { prLabel, prLook } from "@/components/chat/pr-look"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { ItemGroup, ItemRow, ItemSearch } from "@/components/item-list"
 import { NewSessionPopup, type SessionTarget } from "@/components/new-session"
+import { SortMenu } from "@/components/sort-menu"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { projectKey, startBlocked, useProjectSessions, useSessionFollowUps } from "@/lib/code"
 import { connectionKey } from "@/lib/connection"
-import { createConversation, db, prIsLive, type Conversation, type Profile } from "@/lib/db"
+import {
+  createConversation,
+  db,
+  getSettings,
+  prIsLive,
+  saveSettings,
+  type CodeSort,
+  type Conversation,
+  type Profile,
+} from "@/lib/db"
 import { useDraft } from "@/lib/drafts"
 import { formatRelative } from "@/lib/format"
 import type { HermesProject } from "@/lib/hermes"
-import { itemGroups } from "@/lib/item-groups"
+import { codeGroupOf, codeGroups, codeOrder } from "@/lib/item-groups"
 import { useAnyChange } from "@/lib/live"
 import { useNav } from "@/lib/nav"
 import { itemToOpen, useCodePane, type FeaturePane } from "@/lib/pane"
@@ -41,7 +51,15 @@ import {
   useWaiting,
   type WaitingReason,
 } from "@/lib/waiting"
-import { sessionGroup, type SessionState } from "@/lib/workspace"
+import {
+  isUnread,
+  lastActivityAt,
+  rowTone,
+  sessionGroup,
+  type SessionClaim,
+  type SessionState,
+} from "@/lib/session-work"
+import { useReadMarks } from "@/lib/read-marks"
 
 const DAY_MS = 86_400_000
 const LAST_PROJECT = "memento:last-session-project"
@@ -93,12 +111,22 @@ export function CodePane({ pane }: { pane: FeaturePane }) {
   return <CodeList pane={pane} />
 }
 
-interface Row {
+interface Row extends SessionClaim {
   c: Conversation
-  state: SessionState
-  prTick?: boolean
   project?: HermesProject
   key: string
+}
+
+const CODE_SORTS: Record<CodeSort, string> = {
+  created: "Created",
+  activity: "Last activity",
+  title: "Title A–Z",
+}
+
+/** The Code list's order over each group, kept on this device (unset: created). */
+function useCodeSort(): [CodeSort, (sort: CodeSort) => void] {
+  const sort = useLiveQuery(async () => (await getSettings()).codeSort, []) ?? "created"
+  return [sort, (codeSort) => void saveSettings({ codeSort }).catch(quietly("Saving the sort order"))]
 }
 
 function CodeList({ pane }: { pane?: FeaturePane }) {
@@ -111,9 +139,11 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
   const waits = useWaiting()
   const lists = useAllProjects()
   const changes = useAnyChange("projects")
+  const marks = useReadMarks()
   const [query, setQuery] = useState("")
   const [chip, setChip] = useState<string>()
   const [starting, setStarting] = useState(false)
+  const [sort, setSort] = useCodeSort()
 
   const sessions = listed?.sessions
   const profiles = listed?.profiles
@@ -173,18 +203,16 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
     .filter(([key, { project }]) => !project.archived || rows.some((r) => r.key === key))
     .sort((a, b) => a[1].project.name.localeCompare(b[1].project.name))
   const shown = rows.filter((r) => (!chip || r.key === chip) && matches(r, query))
-  const grouped = itemGroups(
-    shown,
-    (r) =>
-      r.state === "resolved" || r.state === "discarded"
-        ? "closed"
-        : r.state === "idle"
-          ? undefined
-          : r.state,
-    (r) => r.c.updatedAt,
-    listed?.now ?? 0,
-  )
   const filtering = Boolean(query.trim() || chip)
+  const order = codeOrder<Row>(sort, {
+    created: (row) => row.c.createdAt,
+    activity: (row) => lastActivityAt(row.c),
+    title: (row) => row.c.title,
+  })
+  // What waits on the user first, then working, idle and closed — deterministic, not a live
+  // timestamp chasing itself.
+  const grouped = filtering ? undefined : codeGroups(shown, (r) => codeGroupOf(r.state), order)
+  const flat = filtering ? [...shown].sort(order) : undefined
 
   const targets: SessionTarget[] = [...projects.entries()]
     // A project with no repository has nowhere for a session to work, so it isn't offered.
@@ -218,9 +246,31 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
     })
   }
 
+  const draw = (row: Row) => (
+    <li key={row.c.id}>
+      <SessionItem
+        row={row}
+        botId={profiles?.get(row.c.profileId)?.botId}
+        showProject={!chip}
+        pane={pane}
+        now={listed?.now ?? 0}
+        waiting={waits[row.c.hermesSessionId]}
+        mark={marks[row.c.id]}
+      />
+    </li>
+  )
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-      <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
+    <div
+      className="flex min-h-0 flex-1 flex-col overflow-y-auto"
+      style={
+        {
+          "--list-header-pt": "max(0.75rem, env(safe-area-inset-top))",
+          "--list-header-h": "calc(var(--list-header-pt) + 3.5rem)",
+        } as CSSProperties
+      }
+    >
+      <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[var(--list-header-pt)] pb-3 backdrop-blur">
         <div className="mx-auto flex max-w-2xl items-center gap-3">
           <Button
             variant="outline"
@@ -232,6 +282,7 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
             <MenuIcon />
           </Button>
           <h1 className="flex-1 text-xl font-semibold tracking-tight">Code</h1>
+          <SortMenu by="sessions" options={CODE_SORTS} value={sort} onSort={setSort} />
         </div>
       </header>
 
@@ -284,22 +335,15 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
           </div>
         )}
 
-        {grouped.map((group) => (
-          <ItemGroup key={group.key} group={group}>
-            {group.items.map((row) => (
-              <li key={row.c.id}>
-                <SessionItem
-                  row={row}
-                  botId={profiles?.get(row.c.profileId)?.botId}
-                  showProject={!chip}
-                  pane={pane}
-                  now={listed?.now ?? 0}
-                  waiting={waits[row.c.hermesSessionId]}
-                />
-              </li>
-            ))}
-          </ItemGroup>
-        ))}
+        {flat ? (
+          <ul className="flex flex-col">{flat.map(draw)}</ul>
+        ) : (
+          grouped?.map((group) => (
+            <ItemGroup key={group.key} group={group} sticky>
+              {group.items.map(draw)}
+            </ItemGroup>
+          ))
+        )}
       </div>
 
       <div className="pointer-events-none sticky bottom-0 mt-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
@@ -415,13 +459,15 @@ function removedRepos(c: Conversation, project: HermesProject | undefined) {
   return (c.worktree?.repos ?? []).map((r) => r.name).filter((name) => !current.has(name))
 }
 
-function SessionItem({
-  row: { c: session, state, prTick, project },
+/** One Code row's body, exported so a component test can draw it over a seeded device. */
+export function SessionItem({
+  row,
   botId,
   showProject,
   pane,
   now,
   waiting,
+  mark,
 }: {
   row: Row
   botId?: string
@@ -431,7 +477,10 @@ function SessionItem({
   now: number
   /** Why the server says the session waits on the user, if it does. */
   waiting?: WaitingReason
+  /** This device's read mark for the session, if it has one; newer activity dots the row. */
+  mark?: number
 }) {
+  const { c: session, state, prTick, project } = row
   const removed = removedRepos(session, project)
   const draft = useDraft(session.id)
   const wait = waiting ? reasonText(waiting) : undefined
@@ -450,7 +499,8 @@ function SessionItem({
           <StateIcon state={state} />
         )
       }
-      waiting={state === "waiting" && !prTick}
+      tone={rowTone(session, row)}
+      unread={isUnread(session, mark)}
       botId={botId}
       title={session.title}
       badge={
@@ -460,7 +510,7 @@ function SessionItem({
           </Badge>
         ) : undefined
       }
-      when={formatWhen(session.updatedAt, now)}
+      when={formatWhen(lastActivityAt(session), now)}
       line={line && <span className="truncate">{line}</span>}
       selected={session.id === pane?.selected}
       link={{ to: `/c/${session.id}`, replace: Boolean(pane?.open), state: { code: true } }}

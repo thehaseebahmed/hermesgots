@@ -15,6 +15,7 @@ import {
   type Profile,
 } from "@/lib/db"
 import { useXLarge } from "@/lib/media"
+import { byName } from "@/lib/compare"
 import { threadState, type ThreadState } from "@/lib/session-work"
 import { useLiveSubagents, useWaiting, type WaitingReason } from "@/lib/waiting"
 
@@ -164,8 +165,7 @@ export function useBotSort(): [BotSort, (sort: BotSort) => void] {
 
 const active = (summary: BotSummary) => (summary.main ?? summary.latest)?.updatedAt ?? -Infinity
 const byRecent = (a: BotSummary, b: BotSummary) => active(b) - active(a)
-const byName = (a: BotSummary, b: BotSummary) =>
-  a.bot.name.localeCompare(b.bot.name, undefined, { sensitivity: "base", numeric: true })
+const byBotName = (a: BotSummary, b: BotSummary) => byName(a.bot.name, b.bot.name)
 
 /**
  * `recent`: the newest thread first, bots without one last. `waiting`: the most threads waiting on
@@ -173,10 +173,10 @@ const byName = (a: BotSummary, b: BotSummary) =>
  */
 export function sortBots(bots: BotSummary[], sort: BotSort): BotSummary[] {
   const sorted = [...bots]
-  if (sort === "recent") sorted.sort((a, b) => byRecent(a, b) || byName(a, b))
+  if (sort === "recent") sorted.sort((a, b) => byRecent(a, b) || byBotName(a, b))
   if (sort === "waiting")
-    sorted.sort((a, b) => b.waiting - a.waiting || byRecent(a, b) || byName(a, b))
-  if (sort === "name") sorted.sort(byName)
+    sorted.sort((a, b) => b.waiting - a.waiting || byRecent(a, b) || byBotName(a, b))
+  if (sort === "name") sorted.sort(byBotName)
   return sorted
 }
 

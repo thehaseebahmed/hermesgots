@@ -10,15 +10,22 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import type { ItemGroupKey } from "@/lib/item-groups"
+import type { CodeGroupKey, ItemGroupKey } from "@/lib/item-groups"
+import type { RowTone } from "@/lib/session-work"
 import { cn } from "@/lib/utils"
 
-/** A titled group of rows with its count; Closed starts folded. */
+/**
+ * A titled group of rows with its count; Closed starts folded. `sticky` pins the heading under the
+ * screen's own header while the group scrolls (Code's four): the header publishes its height as
+ * `--list-header-h` on the list's scroll container, and the heading stops beneath it.
+ */
 export function ItemGroup({
   group,
+  sticky,
   children,
 }: {
-  group: { key: ItemGroupKey; label: string; items: unknown[] }
+  group: { key: ItemGroupKey | CodeGroupKey; label: string; items: unknown[] }
+  sticky?: boolean
   children: ReactNode
 }) {
   const heading = (
@@ -27,18 +34,24 @@ export function ItemGroup({
       <span
         className={cn(
           "rounded-full px-1.5 text-xs leading-5 font-semibold tabular-nums",
-          group.key === "waiting" ? "bg-warning/15 text-warning" : "bg-muted",
+          group.key === "waiting" ? TONES.warning : TONES.muted,
         )}
       >
         {group.items.length}
       </span>
     </>
   )
+  const stickyClass = sticky ? "sticky z-[5] bg-background top-[var(--list-header-h)]" : ""
   const list = <ul className="flex flex-col">{children}</ul>
   if (group.key !== "closed")
     return (
       <section className="flex flex-col gap-1" aria-label={group.label}>
-        <h2 className="flex min-h-8 items-center gap-2 px-1 text-sm font-medium text-muted-foreground">
+        <h2
+          className={cn(
+            "flex min-h-8 items-center gap-2 px-1 text-sm font-medium text-muted-foreground",
+            stickyClass,
+          )}
+        >
           {heading}
         </h2>
         {list}
@@ -50,7 +63,12 @@ export function ItemGroup({
       render={<section className="flex flex-col gap-1" aria-label={group.label} />}
     >
       <h2>
-        <CollapsibleTrigger className="group -mx-1 flex min-h-11 items-center gap-2 rounded-xl px-2 text-sm font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
+        <CollapsibleTrigger
+          className={cn(
+            "group -mx-1 flex min-h-11 items-center gap-2 rounded-xl px-2 text-sm font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+            stickyClass,
+          )}
+        >
           {heading}
           <ChevronUpIcon className="size-4 rotate-180 transition-transform group-data-panel-open:rotate-0 motion-reduce:transition-none" />
         </CollapsibleTrigger>
@@ -60,13 +78,21 @@ export function ItemGroup({
   )
 }
 
+/** The icon's three tones, whichever list picks them. */
+const TONES: Record<RowTone, string> = {
+  warning: "bg-warning/15 text-warning",
+  success: "bg-primary/10 text-primary",
+  muted: "bg-muted text-muted-foreground",
+}
+
 /**
  * One row of a list: the feature's icon with the bot in its corner, the title and time, one status
  * line, and anything below it. The open item is tinted.
  */
 export function ItemRow({
   icon,
-  waiting,
+  tone,
+  unread,
   botId,
   title,
   badge,
@@ -79,8 +105,13 @@ export function ItemRow({
   link,
 }: {
   icon: ReactNode
-  /** Waits on the user: the icon takes the warning tone. */
-  waiting?: boolean
+  /**
+   * The icon's colour, when the list picks it per row (Code: warning for what waits, success for
+   * done or healthy, muted for at rest).
+   */
+  tone?: RowTone
+  /** New activity since this device last rendered the thread: the blue dot on the icon's corner. */
+  unread?: boolean
   botId?: string
   title: string
   /** A mark beside the title, for what the row is rather than what it's doing. */
@@ -104,7 +135,7 @@ export function ItemRow({
         <span
           className={cn(
             "flex size-10 items-center justify-center rounded-full [&_svg]:size-5",
-            waiting ? "bg-warning/15 text-warning" : "bg-primary/10 text-primary",
+            tone ? TONES[tone] : TONES.success,
           )}
         >
           {icon}
@@ -113,6 +144,16 @@ export function ItemRow({
           <span className="absolute -right-1 -bottom-1 flex size-5 items-center justify-center overflow-hidden rounded-full bg-background ring-2 ring-background">
             <Bot id={botId} className="size-[85%]" />
           </span>
+        )}
+        {unread && (
+          <>
+            <span className="sr-only">New activity</span>
+            <span
+              data-unread
+              aria-hidden
+              className="absolute -top-0.5 -right-0.5 size-2.5 rounded-full bg-info ring-2 ring-background"
+            />
+          </>
         )}
       </span>
       <span className="flex min-w-0 flex-1 flex-col gap-1">

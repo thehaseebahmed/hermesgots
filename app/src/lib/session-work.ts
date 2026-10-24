@@ -12,8 +12,12 @@
  * One facts object and one ladder: a thread's pill is this answer with no session of its own to be
  * resolved or discarded, so the two can't drift.
  *
- * Pure: no imports, no clock, so `scripts/test-session-work.mjs` runs it as a rule.
+ * Pure: no clock, and the one value it imports (`pull-state.ts`) is a rule's own — so
+ * `scripts/test-session-work.mjs` drives it as a rule.
  */
+
+import { prChecksWait, prIsLive } from "./pull-state.ts"
+import type { Conversation } from "@/lib/db"
 
 export type SessionState = "working" | "waiting" | "idle" | "resolved" | "discarded"
 
@@ -68,6 +72,82 @@ export function sessionState(facts: SessionFacts): SessionState {
   if (facts.local?.streaming || facts.live === "running" || working(facts.subagents))
     return "working"
   return "idle"
+}
+
+/** The slice of a session `sessionGroup` reads: its closure and wait marks, and its pull requests. */
+type SessionPrs = Pick<Conversation, "resolvedAt" | "discardedAt" | "planPending" | "prs">
+
+/** A session's own moments and its pull requests: what last activity and the unread dot read. */
+export type SessionActivity = Pick<Conversation, "updatedAt" | "resolvedAt" | "discardedAt" | "prs">
+
+/** Where a Code row's session stands: the group's state, and whether a pull request's arrow claims it. */
+export interface SessionClaim {
+  state: SessionState
+  prTick: boolean
+}
+
+/**
+ * Where a Code row's session stands, with its pull requests claimed in: the highest claim wins.
+ * Closed first, then anything waiting on the user — a question, an approval, a plan, a stall, or a
+ * live pull request's checks running or failed, which wait on the watcher rather than the agent.
+ * A live pull request with nothing wrong still waits for its review and merge, as it always has.
+ */
+export function sessionGroup(
+  conversation: SessionPrs,
+  live?: LiveTurn,
+  local?: LocalTurn,
+  subagents?: number,
+): SessionClaim {
+  const state = sessionState({ ...conversation, live, local, subagents })
+  if (state === "resolved" || state === "discarded") return { state, prTick: false }
+  // An answer to ask outranks every pull request: the alert glyph is the question, not the arrow.
+  if (state === "waiting") return { state, prTick: false }
+  const livePrs = (conversation.prs ?? []).filter(prIsLive)
+  if (livePrs.some(prChecksWait)) return { state: "waiting", prTick: true }
+  if (state === "working") return { state: "working", prTick: false }
+  if (livePrs.length) return { state: "waiting", prTick: true }
+  return { state: "idle", prTick: false }
+}
+
+/** What the Code row's round icon wears: the colour that says what is needed. */
+export type RowTone = "warning" | "success" | "muted"
+
+/**
+ * The colour behind a Code row's glyph, top rule winning (ADR 0046): Discarded grey, Resolved
+ * green, then any wait yellow — on the human (the claim waiting without the pull request's arrow)
+ * or on a live pull request's checks running or failed, which wait on the watcher — then a draft
+ * pull request grey, then an open pull request needing nothing green, then everything else at rest
+ * grey. Finished pull requests are in none of it: green names an open pull request literally, and a
+ * merged one's checks wait on nothing.
+ */
+export function rowTone(conversation: Pick<Conversation, "prs">, claim: SessionClaim): RowTone {
+  if (claim.state === "discarded") return "muted"
+  if (claim.state === "resolved") return "success"
+  if (claim.state === "waiting" && !claim.prTick) return "warning"
+  const live = (conversation.prs ?? []).filter(prIsLive)
+  if (live.some(prChecksWait)) return "warning"
+  if (live.some((pr) => pr.state === "draft")) return "muted"
+  if (live.some((pr) => pr.state === "open")) return "success"
+  return "muted"
+}
+
+/**
+ * A session's last activity: the newest of its turn's clock, its pull requests' updates and its
+ * resolve or discard — derived from moments that already exist (ADR 0046), never stored, so no
+ * field joins sync to carry it. The Code row's trailing time is this, and the unread dot measures
+ * against it.
+ */
+export function lastActivityAt(session: SessionActivity): number {
+  const settled = Math.max(session.updatedAt, session.resolvedAt ?? 0, session.discardedAt ?? 0)
+  return (session.prs ?? []).reduce((newest, pr) => Math.max(newest, pr.at), settled)
+}
+
+/**
+ * Whether the Code row shows its unread dot: the session's last activity is newer than this
+ * device's read mark — and a session this device has never opened has no mark, so it is unread.
+ */
+export function isUnread(session: SessionActivity, mark: number | undefined): boolean {
+  return lastActivityAt(session) > (mark ?? 0)
 }
 
 /**

@@ -1,7 +1,6 @@
 import { useLiveQuery } from "dexie-react-hooks"
 import { matchPath, NavLink, useLocation, type NavLinkProps } from "react-router"
 import {
-  ArrowDownUpIcon,
   AudioLinesIcon,
   BellOffIcon,
   ChevronRightIcon,
@@ -21,20 +20,12 @@ import {
 } from "lucide-react"
 
 import { Bot } from "@/components/bot"
+import { SortMenu } from "@/components/sort-menu"
 import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { Separator } from "@/components/ui/separator"
 import Dexie from "dexie"
 import { previewLine } from "@/lib/bot-chrome"
-import type { BotSort, Message } from "@/lib/db"
+import type { Message } from "@/lib/db"
 import { db, mainThreadId } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { useMeetingsEnabled } from "@/lib/meetings"
@@ -219,40 +210,7 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
           <h2 id="bots-heading" className="text-sm font-medium text-muted-foreground">
             Bots
           </h2>
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  className="h-11 gap-1.5 rounded-full px-3 text-xs text-muted-foreground"
-                  aria-label={`Sort bots by ${BOT_SORTS[sort]}`}
-                />
-              }
-            >
-              <ArrowDownUpIcon />
-              {BOT_SORTS[sort]}
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-40">
-              <DropdownMenuGroup>
-                <DropdownMenuLabel>Sort bots by</DropdownMenuLabel>
-                <DropdownMenuRadioGroup
-                  value={sort}
-                  onValueChange={(value) => setSort(value as BotSort)}
-                >
-                  {(Object.keys(BOT_SORTS) as BotSort[]).map((option) => (
-                    <DropdownMenuRadioItem
-                      key={option}
-                      value={option}
-                      className="min-h-11"
-                      closeOnClick
-                    >
-                      {BOT_SORTS[option]}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <SortMenu by="bots" label="Sort bots by" options={BOT_SORTS} value={sort} onSort={setSort} />
         </div>
       )}
       <ul className={cn("flex flex-col gap-0.5", collapsed && "items-center")}>

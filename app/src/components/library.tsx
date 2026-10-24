@@ -1,7 +1,6 @@
 import { useCallback, useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
-  ArrowDownUpIcon,
   ChevronDownIcon,
   FileIcon,
   FileTextIcon,
@@ -9,18 +8,10 @@ import {
   ImageIcon,
 } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
+import { SortMenu } from "@/components/sort-menu"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
+import { byName } from "@/lib/compare"
 import { connectionKey } from "@/lib/connection"
 import { getSettings, saveSettings, type LibrarySort } from "@/lib/db"
 import { LIST_MS, READ_TIMEOUT_MS } from "@/lib/freshness"
@@ -117,16 +108,15 @@ function newestAt(folder: LibraryFolder) {
  * files the same way. Names compare the way the sidebar's do — case-blind, digits as numbers.
  */
 function sortFolders(folders: LibraryFolder[], sort: LibrarySort): LibraryFolder[] {
-  const byName = sort === "az" || sort === "za"
+  const alphabetical = sort === "az" || sort === "za"
   const desc = sort === "new" || sort === "za"
-  const name = (a: string, b: string) =>
-    a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }) * (desc ? -1 : 1)
+  const name = (a: string, b: string) => byName(a, b) * (desc ? -1 : 1)
   const files = (folder: LibraryFolder) =>
     [...folder.files].sort((a, b) =>
-      byName ? name(a.name, b.name) : (a.at - b.at) * (desc ? -1 : 1),
+      alphabetical ? name(a.name, b.name) : (a.at - b.at) * (desc ? -1 : 1),
     )
   return [...folders]
-    .sort((a, b) => (byName ? name(a.name, b.name) : (newestAt(a) - newestAt(b)) * (desc ? -1 : 1)))
+    .sort((a, b) => (alphabetical ? name(a.name, b.name) : (newestAt(a) - newestAt(b)) * (desc ? -1 : 1)))
     .map((folder) => ({ ...folder, files: files(folder) }))
 }
 
@@ -240,40 +230,12 @@ export function LibraryTree({
     <div className="px-3 pb-4 sm:px-4">
       {onSort && (
         <div className="sticky top-0 z-10 flex justify-end bg-background py-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  className="h-11 gap-1.5 rounded-full px-3 text-xs text-muted-foreground"
-                  aria-label={`Sort the library by ${LIBRARY_SORTS[order]}`}
-                />
-              }
-            >
-              <ArrowDownUpIcon />
-              {LIBRARY_SORTS[order]}
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-40">
-              <DropdownMenuGroup>
-                <DropdownMenuLabel>Sort by</DropdownMenuLabel>
-                <DropdownMenuRadioGroup
-                  value={order}
-                  onValueChange={(value) => onSort(value as LibrarySort)}
-                >
-                  {(Object.keys(LIBRARY_SORTS) as LibrarySort[]).map((option) => (
-                    <DropdownMenuRadioItem
-                      key={option}
-                      value={option}
-                      className="min-h-11"
-                      closeOnClick
-                    >
-                      {LIBRARY_SORTS[option]}
-                    </DropdownMenuRadioItem>
-                  ))}
-                </DropdownMenuRadioGroup>
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <SortMenu
+            by="the library"
+            options={LIBRARY_SORTS}
+            value={order}
+            onSort={onSort}
+          />
         </div>
       )}
       <div className={cn("space-y-6", own && "space-y-1 pt-2")}>
