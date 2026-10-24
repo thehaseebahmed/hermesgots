@@ -4,6 +4,7 @@ import { BotIcon, CheckIcon, ChevronRightIcon, PauseIcon } from "lucide-react"
 import { AGENT_WORK_MS } from "@/lib/freshness"
 import { Banner } from "@/components/banner"
 import { MessageItem } from "@/components/chat/message-item"
+import { FLAT_CARD } from "@/components/chat/session-cards"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -58,8 +59,7 @@ function CardShell({
   action?: React.ReactNode
   children: React.ReactNode
 }) {
-  const box =
-    "mx-auto flex w-full max-w-md flex-col gap-2 rounded-3xl border bg-muted/40 px-4 py-3 text-left"
+  const box = cn(FLAT_CARD, "flex flex-col gap-2 px-4 py-3 text-left")
   if (!action)
     return onClick ? (
       <button
@@ -84,7 +84,7 @@ function CardShell({
   return (
     <div
       data-slot={slot}
-      className="mx-auto flex w-full max-w-md flex-col rounded-3xl border bg-muted/40"
+      className={cn(FLAT_CARD, "flex flex-col")}
     >
       {onClick ? (
         <button
@@ -214,6 +214,7 @@ function AgentCard({
   return (
     <>
       <CardShell
+        slot="agent-card"
         onClick={() => setOpen(true)}
         action={
           canStop || note ? (

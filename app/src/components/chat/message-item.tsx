@@ -26,6 +26,7 @@ import { openable } from "@/lib/attachments"
 import { removeQueued, sendQueued } from "@/lib/chat"
 import type { Attachment, Message, ToolEvent } from "@/lib/db"
 import { describeActivity, formatDuration } from "@/lib/format"
+import { COLUMN } from "@/lib/layout"
 import { mediaImages } from "@/lib/media-tags"
 import { openuiParts, REPLY_INSET } from "@/lib/openui-block.ts"
 import type { InterfaceDraw, ThreadBlock } from "@/lib/openui-thread.ts"
@@ -244,7 +245,7 @@ function SentAttachments({ attachments, dim }: { attachments: Attachment[]; dim:
 /** Something the user steered the reply with, where it reached the agent. */
 function SteerBubble({ text }: { text: string }) {
   return (
-    <MessageRow align="end">
+    <MessageRow align="end" className={COLUMN}>
       <MessageContent className="items-end gap-1">
         <Bubble variant="default" align="end">
           <BubbleContent className="px-4 py-2.5 text-[15px] whitespace-pre-wrap">
@@ -416,7 +417,7 @@ export const MessageItem = memo(function MessageItem({
     // The plugin starts a host-queued message itself, so it only waits for a Send when paused.
     const paused = message.hostQueued ? Boolean(message.queuePaused) : !busy
     return (
-      <MessageRow align="end">
+      <MessageRow align="end" className={COLUMN}>
         <MessageContent className="items-end gap-1">
           {message.attachments?.length ? (
             <SentAttachments attachments={message.attachments} dim={dim} />
@@ -521,26 +522,32 @@ export const MessageItem = memo(function MessageItem({
   // A reply's stats come only once it is done and fully revealed, so they never count up.
   const statsShown = showStats && !streaming && !revealing && Boolean(message.stats)
   const statusLine = streaming && !runningTool && !thinkingProgress
-  const footer = (
-    <>
-      {statusLine && (
-        <StatusLine
-          text={awaitingApproval ? "Waiting for your approval…" : describeActivity(message)}
-        />
-      )}
-      {/* An error on a reply that streamed says so plainly: it isn't the bot's answer. */}
-      {failed && (
-        <div className="flex items-start gap-2 px-1 text-[15px] text-destructive">{error}</div>
-      )}
-      {message.status === "stopped" && !message.content && (
-        <div className="px-1 text-xs text-muted-foreground">Stopped</div>
-      )}
-      {statsShown && <Stats message={message} />}
-    </>
+  // Empty, the row would still add two of the message's gaps around itself, so it is drawn only
+  // once a line shows.
+  const footerLines = [
+    statusLine && (
+      <StatusLine
+        key="status"
+        text={awaitingApproval ? "Waiting for your approval…" : describeActivity(message)}
+      />
+    ),
+    // An error on a reply that streamed says so plainly: it isn't the bot's answer.
+    failed && (
+      <div key="failed" className="flex items-start gap-2 px-1 text-[15px] text-destructive">
+        {error}
+      </div>
+    ),
+    message.status === "stopped" && !message.content && (
+      <div key="stopped" className="px-1 text-xs text-muted-foreground">
+        Stopped
+      </div>
+    ),
+    statsShown && <Stats key="stats" message={message} />,
+  ].filter(Boolean)
+  const footerShown = footerLines.length > 0
+  const footer = footerShown && (
+    <div className={cn(COLUMN, "flex flex-col gap-3")}>{footerLines}</div>
   )
-
-  const footerShown =
-    statusLine || failed || (message.status === "stopped" && !message.content) || statsShown
   return (
     <div className="flex flex-col gap-3">
       {message.subagent && <SubagentResultCard subagent={message.subagent} />}
@@ -620,8 +627,10 @@ function AssistantRow({
           ) : part.kind === "agent" ? (
             <AgentCards key={part.tool.toolCallId} tool={part.tool} ended={ended} />
           ) : part.kind === "tools" ? (
-            <div key={part.tools[0].toolCallId} className="w-full max-w-xl">
-              <ToolGroup tools={part.tools} />
+            <div key={part.tools[0].toolCallId} className={COLUMN}>
+              <div className="w-full max-w-xl">
+                <ToolGroup tools={part.tools} />
+              </div>
             </div>
           ) : part.kind === "thinking" ? (
             <ThinkingLine
@@ -632,18 +641,22 @@ function AssistantRow({
               className={huggingTools(parts, index)}
             />
           ) : part.kind === "media" ? (
-            <MediaTag key={part.at} conversationId={conversationId} paths={part.paths} />
+            <div key={part.at} className={COLUMN}>
+              <MediaTag conversationId={conversationId} paths={part.paths} />
+            </div>
           ) : part.kind === "openui" ? (
-            <Suspense key={part.at} fallback={null}>
-              <OpenUIBlock
-                source={part.block.source}
-                open={part.block.open}
-                streaming={part.block.streaming}
-                draw={part.block.draw}
-              />
-            </Suspense>
+            <div key={part.at} className={COLUMN}>
+              <Suspense fallback={null}>
+                <OpenUIBlock
+                  source={part.block.source}
+                  open={part.block.open}
+                  streaming={part.block.streaming}
+                  draw={part.block.draw}
+                />
+              </Suspense>
+            </div>
           ) : (
-            <Markdown key={part.at} className={cn(REPLY_INSET, "text-[15px] leading-relaxed")}>
+            <Markdown key={part.at} className={cn(REPLY_INSET, "text-[15px] leading-relaxed", COLUMN)}>
               {part.text}
             </Markdown>
           ),

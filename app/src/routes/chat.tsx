@@ -23,6 +23,7 @@ import {
   SAFETY_MS,
   SEND_CAUGHT_UP_MS,
 } from "@/lib/freshness"
+import { COLUMN_BOX } from "@/lib/layout"
 import { quietly } from "@/lib/report"
 import { threadCount, threadsLine } from "@/lib/bot-chrome"
 import { repoCap, sessionSubtitle } from "@/lib/repo-line"
@@ -993,7 +994,7 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
         <MessageScrollerProvider autoScroll defaultScrollPosition="end">
           <MessageScroller className="flex-1">
             <MessageScrollerViewport aria-label="Messages">
-              <MessageScrollerContent className="mx-auto w-full max-w-3xl gap-6 px-4 pt-32 pb-6">
+              <MessageScrollerContent className="w-full gap-6 px-4 pt-32 pb-6">
                 {conversation?.olderThan && (
                   <Button
                     variant="outline"
@@ -1074,7 +1075,11 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
         />
       )}
 
-      <div data-toast-above className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4">
+      <div
+        data-slot="composer-slot"
+        data-toast-above
+        className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4"
+      >
         {(stagedPipeline || todos.length > 0 || prs.length > 0 || outputs > 0) && (
           // One line, centred; wider than the screen it scrolls, from the first pill.
           <div className="-mx-3 flex [scrollbar-width:none] overflow-x-auto px-3 pb-2 sm:-mx-4 sm:px-4 [&::-webkit-scrollbar]:hidden">
@@ -1103,12 +1108,12 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
           </div>
         )}
         {!id && profile && !botThreads && (
-          <div className="mx-auto flex w-full max-w-3xl pb-2">
+          <div className={`${COLUMN_BOX} flex pb-2`}>
             <BotPicker profile={profile} />
           </div>
         )}
         {notice && provider && !noticeDismissed && (
-          <div className="mx-auto w-full max-w-3xl pb-2" data-toast-above>
+          <div className={`${COLUMN_BOX} pb-2`} data-toast-above>
             <LimitBanner
               notice={notice}
               onDismiss={() =>
@@ -1122,39 +1127,27 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
           </div>
         )}
         {session?.discardedAt ? (
-          <div className="mx-auto w-full max-w-3xl">
-            <DiscardedCard />
-          </div>
+          <DiscardedCard />
         ) : session?.resolvedAt ? (
-          <div className="mx-auto w-full max-w-3xl">
-            <ResolvedCard
-              onReopen={() => updateConversation(session.id, { resolvedAt: undefined })}
-            />
-          </div>
+          <ResolvedCard
+            onReopen={() => updateConversation(session.id, { resolvedAt: undefined })}
+          />
         ) : awaitingApproval ? (
-          <div className="mx-auto w-full max-w-3xl">
-            <ApprovalCard message={awaitingApproval} />
-          </div>
+          <ApprovalCard message={awaitingApproval} />
         ) : awaitingClarify ? (
-          <div className="mx-auto w-full max-w-3xl">
-            <QuestionCard key={awaitingClarify.clarify!.clarifyId} message={awaitingClarify} />
-          </div>
+          <QuestionCard key={awaitingClarify.clarify!.clarifyId} message={awaitingClarify} />
         ) : session?.blocked && !busy ? (
-          <div className="mx-auto w-full max-w-3xl">
-            <BlockedCard reason={session.blocked} />
-          </div>
+          <BlockedCard reason={session.blocked} />
         ) : session?.planPending && session.mode === "plan" && !busy ? (
-          <div className="mx-auto w-full max-w-3xl">
-            <PlanReadyCard
-              autoAvailable={tracked}
-              model={modelPill({ display: "block" })}
-              onApprove={async (mode) => {
-                await setSessionMode(session.id, mode)
-                await send(planApprovalMessage(session.planFile))
-              }}
-              onKeepPlanning={() => setSessionMode(session.id, "plan")}
-            />
-          </div>
+          <PlanReadyCard
+            autoAvailable={tracked}
+            model={modelPill({ display: "block" })}
+            onApprove={async (mode) => {
+              await setSessionMode(session.id, mode)
+              await send(planApprovalMessage(session.planFile))
+            }}
+            onKeepPlanning={() => setSessionMode(session.id, "plan")}
+          />
         ) : (
           <Composer
             // Sessions are swapped in place beside Code's list; each keeps its own text.

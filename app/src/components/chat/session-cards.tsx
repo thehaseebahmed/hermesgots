@@ -16,8 +16,21 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/componen
 import { Spinner } from "@/components/ui/spinner"
 import { sendMessage } from "@/lib/chat"
 import type { ToolEvent } from "@/lib/db"
+import { COLUMN_BOX } from "@/lib/layout"
 
-const CARD = "w-full rounded-3xl border shadow-xl ring-0 shadow-black/10 dark:shadow-black/40"
+/**
+ * The width rule every card the app draws inside a chat shares: the reading column's own
+ * COLUMN_BOX — full width of its container until that box arrives, then centred inside it — so a
+ * card fills a narrow chat and stops at the measure the text sits in on a wide one, never passing
+ * it (ADR 0047). The ring stays off: every one of them was drawn without one.
+ */
+export const CARD_BASE = `${COLUMN_BOX} rounded-3xl border ring-0`
+
+/** A card floating in the composer slot, shadowed over the thread behind it. */
+export const CARD = `${CARD_BASE} shadow-xl shadow-black/10 dark:shadow-black/40`
+
+/** A card drawn flat in a thread, against the pane rather than over it. */
+export const FLAT_CARD = `${CARD_BASE} bg-muted/40`
 
 /**
  * In place of the composer once a plan-mode turn has finished: the plan waits for the user, who
@@ -145,7 +158,7 @@ export function DiscardedCard() {
 }
 
 /** In a session's thread, an exchange that is neither the agent's nor the user's. */
-function CentredCard({
+function ExchangeCard({
   icon,
   title,
   children,
@@ -155,7 +168,7 @@ function CentredCard({
   children?: ReactNode
 }) {
   return (
-    <Card size="sm" className="mx-auto w-full max-w-md rounded-3xl border bg-muted/40 ring-0">
+    <Card size="sm" className={FLAT_CARD}>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
           {icon}
@@ -257,7 +270,7 @@ export function ClarifyCard({
     }
   }
   return (
-    <CentredCard icon={<MessageCircleQuestionIcon className="size-4" />} title={title}>
+    <ExchangeCard icon={<MessageCircleQuestionIcon className="size-4" />} title={title}>
       {running ? (
         <>
           {asked[0]?.question && <p>{asked[0].question}</p>}
@@ -300,13 +313,13 @@ export function ClarifyCard({
           </div>
         ))
       )}
-    </CentredCard>
+    </ExchangeCard>
   )
 }
 
 export function PlanApprovedCard() {
   return (
-    <CentredCard
+    <ExchangeCard
       icon={<CheckCircle2Icon className="size-4 text-success" />}
       title="Plan approved"
     />
