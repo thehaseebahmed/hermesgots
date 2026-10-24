@@ -41,7 +41,7 @@ const composer = (draftKey: string, sent: { text: string; attachments: Attachmen
     onStop={() => {}}
     onCommand={() => {}}
     connection={bot}
-    filesAvailable={false}
+    files="unknown"
     imagesAvailable
     draftKey={draftKey}
   />

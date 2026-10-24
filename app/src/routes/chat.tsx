@@ -124,6 +124,7 @@ import { moveMarks, openedThread } from "@/lib/move-marks"
 import { undoMove } from "@/lib/moves"
 import { drawnThreadIds, threadCards } from "@/lib/thread-cards"
 import { serverConfig } from "@/lib/connection"
+import { usePluginFeature } from "@/lib/features"
 import { describeActivity } from "@/lib/format"
 import { supportsSteer, type HermesProject, type Move } from "@/lib/hermes"
 import { readProjects, useProjects } from "@/lib/projects"
@@ -330,6 +331,9 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
 
   const resolved = { ...DEFAULT_SETTINGS, ...settings }
   const configured = Boolean(profile?.baseUrl.trim())
+  // Files ride the plugin's upload route, so the `+` menu offers them where the host advertises it,
+  // and refuses them there with the reason where it doesn't (or hasn't answered yet).
+  const files = usePluginFeature(profile, "attachments")
   const streaming = messages?.find((m) => m.status === "streaming")
   const busy = Boolean(streaming)
   // Queued messages sit faded at the end of the thread until their turn, whichever clock stamped
@@ -1187,7 +1191,7 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
                   : steerText(id, text)
                 : send(text)
             }
-            filesAvailable={Boolean(profile?.apiKey)}
+            files={files}
             imagesAvailable={profile?.imageInput !== false}
             onStop={() => id && stopMessage(id)}
             main={Boolean(botThreads && isMain)}

@@ -52,7 +52,7 @@ const composer = (
     onStop={() => {}}
     onCommand={() => {}}
     connection={config}
-    filesAvailable={false}
+    files="unknown"
     imagesAvailable
     draftKey={CHAT}
   />

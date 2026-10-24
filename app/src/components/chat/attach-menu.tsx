@@ -6,6 +6,7 @@ import { ModeIcon, ModeOptions, type ModeSettings } from "@/components/chat/mode
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
 import type { SessionMode } from "@/lib/db"
+import type { PluginFeatureAnswer } from "@/lib/features"
 import { cn } from "@/lib/utils"
 import { MODE_LABELS } from "@/lib/workspace"
 
@@ -20,7 +21,7 @@ const SOURCES: { id: Source; label: string; icon: LucideIcon }[] = [
 /** The composer's `+` button: photos and files to add to the message, and a session's mode. */
 export function AttachMenu({
   disabled,
-  filesAvailable,
+  files,
   imagesAvailable,
   onAdd,
   session,
@@ -28,8 +29,12 @@ export function AttachMenu({
   disabled?: boolean
   /** A project session's permission mode, picked in the same sheet. */
   session?: ModeSettings
-  /** Files only reach Hermes through the Gots plugin; photos also go inline. */
-  filesAvailable: boolean
+  /**
+   * What the bot's host answered about the plugin's `attachments` feature: Files reach Hermes only
+   * through the plugin's upload route, so they are offered where the host advertises it. An answer
+   * the host never gave is not a no, so it gets the reason that names the plugin itself.
+   */
+  files: PluginFeatureAnswer
   /** Camera and Photos send images the model has to read itself. */
   imagesAvailable: boolean
   onAdd: (files: File[]) => void
@@ -62,6 +67,7 @@ export function AttachMenu({
 
   // The mode isn't on screen any more, so one that changes what the agent may do marks the button.
   const flagged = session && session.mode !== "accept_edits"
+  const filesAvailable = files === "yes"
 
   return (
     <>
@@ -112,7 +118,11 @@ export function AttachMenu({
           </PopupHeader>
           {!filesAvailable && (
             <div className="px-4 pb-4 sm:px-6">
-              <Banner>File uploads need the Gots plugin.</Banner>
+              <Banner>
+                {files === "no"
+                  ? "File uploads need a newer Gots plugin."
+                  : "File uploads need the Gots plugin."}
+              </Banner>
             </div>
           )}
           <div

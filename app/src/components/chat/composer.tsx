@@ -31,6 +31,7 @@ import {
   prepareAttachment,
 } from "@/lib/attachments"
 import type { Attachment } from "@/lib/db"
+import type { PluginFeatureAnswer } from "@/lib/features"
 
 import { flushDrafts, loadDraft, saveDraft, useDraftText } from "@/lib/drafts"
 import type { HermesConfig } from "@/lib/hermes"
@@ -79,7 +80,7 @@ export function Composer({
   dictationWords,
   model,
   session,
-  filesAvailable,
+  files,
   imagesAvailable,
   draftKey,
   onDraft,
@@ -110,8 +111,8 @@ export function Composer({
   model?: ReactNode
   /** A project session: its permission mode, picked in the `+` menu. */
   session?: ModeSettings
-  /** Whether files can be attached (they need the Gots plugin); photos always can. */
-  filesAvailable: boolean
+  /** What the bot's host answered about the plugin's `attachments` feature (photos also go inline). */
+  files: PluginFeatureAnswer
   /** False when the model doesn't take images. */
   imagesAvailable: boolean
   disabled?: boolean
@@ -323,7 +324,7 @@ export function Composer({
   const attach = (
     <AttachMenu
       disabled={disabled}
-      filesAvailable={filesAvailable}
+      files={files}
       imagesAvailable={imagesAvailable}
       onAdd={(files) => void addFiles(files)}
       session={session}
