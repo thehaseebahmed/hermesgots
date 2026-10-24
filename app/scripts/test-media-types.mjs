@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs"
 import test from "node:test"
 
 import { mediaKind } from "../src/lib/media-kind.ts"
-import { BINARY_EXTS, SERVED_EXTS } from "../src/lib/media-parts.ts"
+import { MEDIA_NAMES } from "../src/lib/media-parts.ts"
 
 const SOURCE = readFileSync(new URL("../../plugin/media.py", import.meta.url), "utf8")
 
@@ -46,7 +46,7 @@ const served = new Set(MAPS.flatMap((name) => declared(name)))
 const drawn = (name) => mediaKind("application/octet-stream", `file.${name}`)
 
 test("every extension the route serves is one a tag may name", () => {
-  const missing = [...served].filter((name) => !SERVED_EXTS.includes(name)).sort()
+  const missing = [...served].filter((name) => !MEDIA_NAMES.served.includes(name)).sort()
   assert.deepEqual(
     missing,
     [],
@@ -56,15 +56,15 @@ test("every extension the route serves is one a tag may name", () => {
 })
 
 test("the grammar names nothing the route doesn't serve or declare as a binary", () => {
-  const stray = [...SERVED_EXTS, ...BINARY_EXTS].filter(
-    (name) => !served.has(name) && !BINARY_EXTS.includes(name),
+  const stray = [...MEDIA_NAMES.served, ...MEDIA_NAMES.binary].filter(
+    (name) => !served.has(name) && !MEDIA_NAMES.binary.includes(name),
   )
   assert.deepEqual(stray, [], `media-parts.ts names extensions nothing serves: ${stray.join(", ")}`)
-  assert.ok(BINARY_EXTS.length > 0, "the grammar declares no binary tail at all")
+  assert.ok(MEDIA_NAMES.binary.length > 0, "the grammar declares no binary tail at all")
 })
 
 test("the binary tail is the route's generic answers, never one of its named types", () => {
-  const both = BINARY_EXTS.filter((name) => served.has(name))
+  const both = MEDIA_NAMES.binary.filter((name) => served.has(name))
   assert.deepEqual(
     both,
     [],

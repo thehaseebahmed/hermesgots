@@ -54,12 +54,3 @@ test("a missing key is not a read, and does not disturb the order", () => {
   store.set("c", "url:c")
   assert.equal(store.get("a"), undefined, "a was still the oldest")
 })
-
-test("clearing lets go of everything held", () => {
-  const { store, dropped } = storeOf(4)
-  store.set("a", "url:a")
-  store.set("b", "url:b")
-  store.clear()
-  assert.deepEqual(dropped.sort(), ["url:a", "url:b"])
-  assert.equal(store.get("a"), undefined)
-})

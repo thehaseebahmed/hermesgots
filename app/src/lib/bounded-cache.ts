@@ -44,8 +44,5 @@ export function boundedStore<T>({
     has(key: string) {
       return entries.has(key)
     },
-    clear() {
-      for (const key of [...entries.keys()]) drop(key)
-    },
   }
 }
