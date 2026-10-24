@@ -192,11 +192,18 @@ function ReadyLine({ botId, id }: { botId?: string; id?: string }) {
   )
 }
 
+/**
+ * What a device with no bot pointed at anything says. The one state that is not a chat, and the copy
+ * the tests read to prove it was never painted as one.
+ */
+export const SETUP_COPY = "Point Gots at your Hermes Agent API server to start chatting."
+
 function EmptyState({
   botId,
   configured,
   session,
   id,
+  line = true,
 }: {
   botId?: string
   configured: boolean
@@ -204,20 +211,23 @@ function EmptyState({
   session?: { repos: RepoRef[] }
   /** The chat or session on screen, none for a new chat. */
   id?: string
+  /**
+   * Whether the ready line belongs here. It does only on a chat that never started: a chat this
+   * device no longer has draws the same empty state, but a line would count a turn it never took.
+   */
+  line?: boolean
 }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-6 px-4 pt-24 pb-8 text-center">
       <Bot id={botId} animate className="size-24" />
       {configured ? (
         <div className="flex max-w-md flex-col items-center gap-3">
-          <ReadyLine botId={botId} id={id} />
+          {line && <ReadyLine botId={botId} id={id} />}
           {session && <RepoChips repos={session.repos} />}
         </div>
       ) : (
         <>
-          <p className="max-w-sm text-sm text-muted-foreground">
-            Point Gots at your Hermes Agent API server to start chatting.
-          </p>
+          <p className="max-w-sm text-sm text-muted-foreground">{SETUP_COPY}</p>
           <Button nativeButton={false} render={<Link to="/settings" replace />} size="lg">
             <SettingsIcon data-icon="inline-start" />
             Open settings
@@ -326,6 +336,9 @@ export function ChatPage({
   // so a session swapped in place beside Code's list can still hand back the one before it: nothing
   // of that session may render or be acted on here — its plan card's Approve would send its plan.
   const conversation = found && found.id !== id ? undefined : found
+  // The conversation answered "gone" — this device has no such chat. That is an answer, not a gap:
+  // the chat is ready, and draws the empty state it honestly has, under the title it had.
+  const gone = id !== undefined && conversation === null
   // A chat talks to its own bot; a new chat goes to the selected one. Same rule as the row above:
   // the query answers with the id it ran for, so a stale answer can't pass for this route's.
   const owners = useLiveQuery(async () => {
@@ -386,10 +399,12 @@ export function ChatPage({
   // Ready is every answer for the id on screen having come back. An answer naming another id is no
   // answer — the guards above make it one — so a chat is never drawn out of a state it may not be in:
   // an unanswered profile is not "not configured", nor an unanswered thread list "no threads".
+  // The conversation's own answer is the id-filtered one, `null` included: a chat this device no
+  // longer has answered "gone", and counts as ready rather than as a gap.
   const answered =
     settings !== undefined &&
     botThreads !== undefined &&
-    (id === undefined || found !== undefined) &&
+    (id === undefined || conversation !== undefined) &&
     profile !== undefined &&
     messages !== undefined &&
     (!(botThreads && conversation?.main) || threadList !== undefined)
@@ -616,7 +631,7 @@ export function ChatPage({
   const updatedAt = conversation?.updatedAt
   const hasMessages = (messages?.length ?? 0) > 0
   const hasCards = Boolean(cards && (cards.before.size || cards.trailing.length))
-  const unstarted = configured && !hasMessages && !hasCards && !loadingHistory
+  const unstarted = !gone && configured && !hasMessages && !hasCards && !loadingHistory
   // The agents this chat's agent delegated to, for their cards in the thread.
   const delegations = messages
     ?.flatMap((m) => m.tools ?? [])
@@ -994,12 +1009,19 @@ export function ChatPage({
   const centered = Boolean(session) || besideMain
   // Nothing started has no title yet, and its bot is the big one in the middle. Main is the bot's
   // face, so its title is the bot's name rather than the `Main` its record is stored under: the
-  // name Bot settings edits, so a rename shows here at once.
-  const headerTitle = unstarted
-    ? ""
-    : isMain
-      ? profile?.name || conversation?.title || ""
-      : (conversation?.title ?? "New chat")
+  // name Bot settings edits, so a rename shows here at once. A chat this device no longer has keeps
+  // the title it was read under — Main's name, or the one its card drew — and stands empty where no
+  // row is left to read, never "New chat", which would say a chat had been started here.
+  const goneTitle = mainOwner
+    ? (profile?.name ?? "")
+    : (threadList?.find((one) => one.chat.id === id)?.chat.title ?? "")
+  const headerTitle = gone
+    ? goneTitle
+    : unstarted
+      ? ""
+      : isMain
+        ? profile?.name || conversation?.title || ""
+        : (conversation?.title ?? "New chat")
   const mainLine =
     botThreads && isMain && threadList ? threadsLine(threadCount(threadList)) : undefined
   let subtitle: string | undefined
@@ -1144,6 +1166,9 @@ export function ChatPage({
           configured={configured}
           session={session && { repos: sessionRepos }}
           id={conversation?.id}
+          // A chat that is gone was never started here, so it draws no line: one would count a turn
+          // this device never had, and swallow the greeting of a chat that was genuinely new.
+          line={!gone}
         />
       )}
 
