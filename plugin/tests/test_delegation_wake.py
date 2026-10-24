@@ -184,6 +184,34 @@ class WakeTest(unittest.TestCase):
         self.assertEqual(self.sweep(), 0)
         self.assertEqual(self.posted, [])
 
+    def test_a_page_of_woken_ends_never_hides_the_one_that_failed(self) -> None:
+        """The window is a page, not the answer: 100 newer ends that have all been woken must not
+        push a child whose post failed out of reach — it is still unmarked, and still to wake."""
+        self.chat("s")
+        self.child("c1", "s", said="the post for this one failed")
+        for i in range(delegation.WAKE_LIMIT):
+            self.child(f"settled-{i}", "s", said="done")
+            sessions.mark_wake(db_path(self.home), f"settled-{i}", "s", f"run-{i}")
+        # The failed one is the oldest end, and page one is now entirely woken ones.
+        self.assertEqual(self.sweep(), 1)
+        self.assertEqual([post["key"] for post in self.posted], ["wake_c1"])
+        self.assertEqual(sessions.marked_wakes(db_path(self.home), ["c1"]), {"c1"})
+
+    def test_an_end_that_is_never_woken_does_not_hide_an_older_one_either(self) -> None:
+        """A stage's child is never woken by design — the stage keeps its one run — so a page of
+        them stays unmarked among the newest ends. The walk must still reach the failed post behind
+        it, which a page of "candidates found" would have called done."""
+        self.chat("s")
+        self.chat("stage")
+        self.child("c1", "s", said="the post for this one failed")
+        for i in range(delegation.WAKE_LIMIT):
+            self.child(f"staged-{i}", "stage", said="a stage's subagent")
+        stages = mock.patch.object(delegation, "_stage", lambda home, session_id: session_id == "stage")
+        stages.start()
+        self.addCleanup(stages.stop)
+        self.assertEqual(self.sweep(), 1)
+        self.assertEqual([post["key"] for post in self.posted], ["wake_c1"])
+
     def test_no_wake_while_the_user_is_being_asked(self) -> None:
         self.chat("s")
         self.child("c1", "s", said="done")

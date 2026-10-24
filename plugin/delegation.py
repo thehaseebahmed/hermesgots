@@ -54,6 +54,9 @@ SWEEP_SECONDS = 5.0
 # Where the store keeps the moment this home first watched for wakes (epoch ms).
 WAKE_SINCE_KEY = "subagent_wake_since"
 WAKE_LIMIT = 100
+# How many windows of ended delegations one look walks past, when page after page has already been
+# woken: a child whose post failed must not be pushed out of the window by newer, settled ends.
+WAKE_PAGES = 10
 WAKE_RESULT_CHARS = 20_000
 
 # Core's completion notice, and its machine-provenance footer (``INTERNAL_NOTIFICATION_FOOTER``,
@@ -261,8 +264,8 @@ def live_sessions(hermes_home: Path) -> Dict[str, int]:
     return found
 
 
-def pending(hermes_home: Path, since: int) -> List[Dict[str, Any]]:
-    """The delegations that ended at or after ``since`` (epoch ms), the newest end first.
+def pending(hermes_home: Path, since: int, offset: int = 0) -> List[Dict[str, Any]]:
+    """One window of the delegations that ended at or after ``since`` (epoch ms), newest end first.
 
     Read-only, like every other look this module takes at ``state.db``. A child is named by its own
     row — the id the app's card holds — and a row is a delegation only when its ``model_config``
@@ -271,9 +274,9 @@ def pending(hermes_home: Path, since: int) -> List[Dict[str, Any]]:
     is not delegated from and is left out: ``_tip`` follows it from the child's own row instead).
 
     The watermark is asked of the query, not of the answer: a home's ``state.db`` keeps every
-    subagent it ever ran, so a bounded window of the newest ends can fill with settled ones and
-    leave the child that actually needs a wake unseen. What it reads is then what still needs one —
-    including a child whose post failed, which stays among them until it succeeds.
+    subagent it ever ran, so a window of the newest ends can fill with settled ones and leave the
+    child that actually needs a wake unseen. ``offset`` walks the window a page at a time so
+    ``sweep`` can read past a page whose every end has already been woken.
     """
     conn = sessions._open_state(hermes_home)
     if conn is None:
@@ -290,8 +293,8 @@ def pending(hermes_home: Path, since: int) -> List[Dict[str, Any]]:
                       AND s.ended_at * 1000 >= ?
                       AND s.model_config LIKE '%"_delegate_from"%'
                       AND EXISTS (SELECT 1 FROM sessions p WHERE p.id = s.parent_session_id)
-                    ORDER BY s.ended_at DESC LIMIT {WAKE_LIMIT}""",
-                (since,),
+                    ORDER BY s.ended_at DESC LIMIT {WAKE_LIMIT} OFFSET ?""",
+                (since, offset),
             ).fetchall()
     except sqlite3.Error:
         logger.debug("memento: couldn't read the delegations of %s", hermes_home, exc_info=True)
@@ -327,24 +330,40 @@ async def sweep(adapter: Any, home: Path) -> int:
     path = db_path(home)
     # Stamped before the read, so a child that ends between the two is one of the watcher's own.
     since = await asyncio.to_thread(watch_since, path)
-    rows = [
-        row
-        for row in await asyncio.to_thread(pending, home, since)
-        if (row["ended_at"] or 0) * 1000 >= since
-    ]
-    if not rows:
-        return 0
-    marked = await asyncio.to_thread(sessions.marked_wakes, path, [row["id"] for row in rows])
+    rows = await _unwoken(home, path, since)
     posted = 0
     for row in rows:
-        if row["id"] in marked:
-            continue
         try:
             if await wake_one(adapter, home, row):
                 posted += 1
         except Exception:
             logger.debug("memento: couldn't wake %s for its subagent", row["parent_id"], exc_info=True)
     return posted
+
+
+async def _unwoken(home: Path, path: Path, since: int) -> List[Dict[str, Any]]:
+    """The ended delegations that still need a wake, read past the ones that have had theirs.
+
+    One page (``WAKE_LIMIT`` ends) is read at a time, with its marks read in one batch: a page whose
+    every end is already marked says nothing about the ends behind it, so the next page is read, up
+    to ``WAKE_PAGES``. A page shorter than the window ends the walk — there is nothing behind it.
+    Without the walk, a child whose post failed would be pushed out of the one window forever by
+    newer ends that have all been woken, which is the drop the watermark is meant to prevent.
+    """
+    unmarked: List[Dict[str, Any]] = []
+    for page in range(WAKE_PAGES):
+        batch = [
+            row
+            for row in await asyncio.to_thread(pending, home, since, page * WAKE_LIMIT)
+            if (row["ended_at"] or 0) * 1000 >= since
+        ]
+        if not batch:
+            break
+        marked = await asyncio.to_thread(sessions.marked_wakes, path, [row["id"] for row in batch])
+        unmarked += [row for row in batch if row["id"] not in marked]
+        if len(batch) < WAKE_LIMIT:
+            break
+    return unmarked
 
 
 async def wake_one(adapter: Any, home: Path, child: Dict[str, Any]) -> bool:
