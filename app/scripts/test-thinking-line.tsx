@@ -42,6 +42,14 @@ const MARKDOWN = [
 
 const run = (text: string, extra: Partial<ReasoningRun> = {}): ReasoningRun => ({ text, ...extra })
 
+/**
+ * A working-out no screen holds: the fixture repeated, with a last line of its own to look for. An
+ * open row draws all of it, so the words at the end are the ones a cap would have hidden.
+ */
+const LONG = [...Array.from({ length: 6 }, () => MARKDOWN), "The scan is cheap in the end."].join(
+  "\n\n",
+)
+
 function call(toolCallId: string, tool = "terminal", label = "ls"): ToolEvent {
   return {
     toolCallId,
@@ -127,10 +135,6 @@ async function stream(id: string) {
   await db.messages.put({ ...(await db.messages.get(id))!, status: "streaming" })
   await settle()
 }
-
-const cap = () => find("[data-slot=thinking-cap]")
-const fade = () => find("[data-slot=thinking-fade]")
-const more = () => findText("button", "Show more")
 
 /** The size a browser would report for a box; a DOM without layout has none to report. */
 function sized(element: Element, size: { client: number; scroll: number }) {
@@ -827,34 +831,34 @@ test("a folded run's links wait for the open, as its words do", async () => {
   })
 })
 
-test("a run taller than its cap draws a fade and a Show more, which reveals the rest", async () => {
+test("an open row longer than a screen shows its last words, with no cap and no Show more", async () => {
   host()
   await screen(
     undefined,
-    turn({ id: "capped", reasoningRuns: [run(MARKDOWN)], content: ANSWER }),
+    turn({ id: "uncapped", reasoningRuns: [run(LONG)], content: ANSWER }),
     async () => {
+      const folded = onlyThinkingLine()
+      assert.equal(expanded(folded), "false", "an answered reply starts folded")
+      assert.equal(lineLabel(folded), "Thought it through", "under the label its run earned")
+      assert.ok(folded.querySelector("svg"), "with its chevron to turn")
+      const hidden = reasoned(folded)
+      assert.equal(hidden.getAttribute("aria-hidden"), "true", "a folded row hides its words")
+      assert.equal(hidden.hasAttribute("inert"), true, "and keeps them out of reach")
+
       await click(onlyThinkingLine())
-      const box = cap()
-      assert.ok(box, "the opened run's words sit in their own box")
-      assert.equal(fade(), null, "nothing is hidden yet, so no fade")
-      assert.equal(more(), null, "and nothing to reveal")
-
-      // A browser measures the box; this one has to be told. The run is three times its cap.
-      sized(box, { client: 240, scroll: 720 })
-      await resized("[data-slot=thinking-cap]")
-      assert.ok(fade(), "a fade at the edge the rest of the run falls past")
-      const control = more()
-      assert.ok(control, "and a Show more under it")
-      assert.equal(lineLabel(control), "Show more", "worded plainly")
-
-      await click(control)
-      assert.equal(more(), null, "revealing the rest drops the control")
-      assert.equal(fade(), null, "and the fade with it")
+      const line = onlyThinkingLine()
+      assert.equal(expanded(line), "true", "a tap opens it")
       assert.match(
-        reasoned(onlyThinkingLine()).textContent ?? "",
-        /markdownBlocks\(text\)/,
-        "the last of it still there",
+        reasoned(line).textContent ?? "",
+        /The scan is cheap in the end/,
+        "the whole run reads, down to its last words",
       )
+      // Asked as flags: an element handed to `assert.equal` is inspected whole when it fails, and a
+      // diff of a run this long is more than the reporter can hold.
+      assert.equal(Boolean(find("[data-slot=thinking-fade]")), false, "no fade over the rest")
+      assert.equal(Boolean(find("[data-slot=thinking-cap]")), false, "no box measuring a cap")
+      assert.equal(Boolean(findText("button", "Show more")), false, "and no Show more to reveal it")
+      assert.doesNotMatch(screenText(), /Show more/, "nowhere on the screen")
     },
   )
 })

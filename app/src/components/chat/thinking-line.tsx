@@ -1,17 +1,10 @@
 import { memo, useEffect, useId, useRef, useState } from "react"
-import { ChevronDownIcon, ChevronRightIcon } from "lucide-react"
+import { ChevronRightIcon } from "lucide-react"
 
 import { Markdown } from "@/components/chat/markdown"
 import { COLUMN } from "@/lib/layout"
 import { thinkingLabel } from "@/lib/thinking"
 import { cn } from "@/lib/utils"
-
-/**
- * How much of a run reads before the rest waits behind Show more, in the screen's own units so a
- * phone and a tablet each keep a screenful for the reply: a long working-out is common, and it must
- * never push the answer it belongs to off the bottom.
- */
-const CAP = "max-h-[30dvh]"
 
 /** How close to the thread's end a reader counts as reading it, so a row that opens on its own follows. */
 const NEAR_END = 40
@@ -31,14 +24,11 @@ function scroller(node: HTMLElement | null): HTMLElement | null {
   return null
 }
 
-/** How a run reads once open: whole when it fits, capped while the rest waits, revealed once asked. */
-type Read = "whole" | "capped" | "revealed"
-
 /**
  * One run of a reply's thinking: a folded row that opens on a tap, reads its words as the reply's
- * own markdown while open, and lands the reader on its newest ones. A row opens when the reader
- * watches its thinking stream and stays open until the turn stops working (`autoOpen`, latched by
- * the thread); a tap overrides either way, until the fold moment drops it.
+ * own markdown while open, however long they run, and lands the reader on its newest ones. A row
+ * opens when the reader watches its thinking stream and stays open until the turn stops working
+ * (`autoOpen`, latched by the thread); a tap overrides either way, until the fold moment drops it.
  */
 export const ThinkingLine = memo(function ThinkingLine({
   reasoning,
@@ -61,11 +51,9 @@ export const ThinkingLine = memo(function ThinkingLine({
   className?: string
 }) {
   const [override, setOverride] = useState<boolean | null>(null)
-  const [read, setRead] = useState<Read>("whole")
   const [wasWorking, setWasWorking] = useState(working)
   const id = useId()
   const root = useRef<HTMLDivElement | null>(null)
-  const box = useRef<HTMLDivElement | null>(null)
   const body = useRef<HTMLDivElement | null>(null)
   const following = useRef(false)
 
@@ -167,24 +155,6 @@ export const ThinkingLine = memo(function ThinkingLine({
     }
   }, [open])
 
-  useEffect(() => {
-    if (!open) return
-    const node = box.current
-    const words = node?.firstElementChild
-    if (!node || !words) return
-    const measure = () =>
-      setRead((was) =>
-        was === "revealed" ? was : node.scrollHeight > node.clientHeight + 1 ? "capped" : "whole",
-      )
-    measure()
-    if (typeof ResizeObserver === "undefined") return
-    // The words are what grows: a capped box stops at its cap, so watching it would miss the run
-    // getting taller, and this wrapper is the one element whose height follows the words.
-    const observer = new ResizeObserver(measure)
-    observer.observe(words)
-    return () => observer.disconnect()
-  }, [open])
-
   return (
     <div ref={root} className={cn("flex flex-col", className, COLUMN)} data-slot="thinking-line">
       <button
@@ -218,32 +188,9 @@ export const ThinkingLine = memo(function ThinkingLine({
           {/* `scroll-mb-16` keeps the row's end clear of the thread's own floating scroll control
               when landing on it: the newest words are what the reader came for. */}
           <div ref={body} data-slot="thinking-body" className="flex min-w-0 scroll-mb-16 flex-col">
-            <div
-              ref={box}
-              data-slot="thinking-cap"
-              className={cn("relative min-w-0", read !== "revealed" && [CAP, "overflow-hidden"])}
-            >
-              <Markdown className="px-1 pt-1 text-sm leading-relaxed text-muted-foreground">
-                {reasoning}
-              </Markdown>
-              {open && read === "capped" && (
-                <div
-                  data-slot="thinking-fade"
-                  aria-hidden
-                  className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-b from-transparent to-background"
-                />
-              )}
-            </div>
-            {open && read === "capped" && (
-              <button
-                type="button"
-                className="flex min-h-12 w-full items-center justify-center gap-1 rounded-lg px-1 text-xs font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                onClick={() => setRead("revealed")}
-              >
-                Show more
-                <ChevronDownIcon className="size-3.5 shrink-0" aria-hidden />
-              </button>
-            )}
+            <Markdown className="px-1 pt-1 text-sm leading-relaxed text-muted-foreground">
+              {reasoning}
+            </Markdown>
           </div>
         </div>
       </div>
