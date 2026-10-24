@@ -1149,8 +1149,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return refused
         writer = AFK_WRITES.get(kind)
         if writer is None:
-            # `write_from` names one of the four, so a fifth is this plugin's own fault, not a
-            # client's; answering it here keeps the route from writing something else instead.
             return _error(web, "That isn't a write this host takes.", 400)
         if kind == "on":
             with_project = {
