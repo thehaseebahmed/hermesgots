@@ -19,8 +19,8 @@ test("the switch picks the command's name: /thread on, /new off", () => {
 })
 
 test("one name at a time: the other command is never in the list", () => {
-  assert.deepEqual(names(localCommands(true)), ["thread", "settings"])
-  assert.deepEqual(names(localCommands(false)), ["new", "settings"])
+  assert.deepEqual(names(localCommands(true)), ["thread", "settings", "cheatsheet"])
+  assert.deepEqual(names(localCommands(false)), ["new", "settings", "cheatsheet"])
   assert.ok(!names(localCommands(true)).includes("new"))
   assert.ok(!names(localCommands(false)).includes("thread"))
 })
@@ -29,6 +29,28 @@ test("only /thread carries the message it opens a thread with", () => {
   assert.equal(carriesMessage("thread"), true)
   assert.equal(carriesMessage("new"), false)
   assert.equal(carriesMessage("settings"), false)
+  assert.equal(carriesMessage("cheatsheet"), false)
+})
+
+test("/cheatsheet opens the sheet, and takes no text with it", () => {
+  assert.deepEqual(localCommand("/cheatsheet"), { command: "cheatsheet", text: "" })
+  assert.deepEqual(localCommand("/cheatsheet", true), { command: "cheatsheet", text: "" })
+  assert.equal(
+    localCommand("/cheatsheet anything"),
+    null,
+    "text behind it is a message for the host, as /settings' is",
+  )
+})
+
+test("the menu offers /cheatsheet as a command, and only while it is the whole message", () => {
+  assert.deepEqual(names(rankSlashItems(localCommands(false), tokenAt("/cheatsheet"))), [
+    "cheatsheet",
+  ])
+  assert.deepEqual(names(rankSlashItems(localCommands(false), tokenAt("/cheat"))), ["cheatsheet"])
+  assert.deepEqual(
+    names(rankSlashItems(localCommands(false), tokenAt("/cheatsheet anything", 11))),
+    [],
+  )
 })
 
 test("/thread alone is a command with no message", () => {
@@ -69,7 +91,11 @@ test("the menu offers /thread with its message behind it, since running it keeps
   const commands = localCommands(true)
   assert.deepEqual(names(rankSlashItems(commands, tokenAt("/thread do the thing", 7))), ["thread"])
   assert.deepEqual(names(rankSlashItems(commands, tokenAt("/thread"))), ["thread"])
-  assert.deepEqual(names(rankSlashItems(commands, tokenAt("/"))), ["thread", "settings"])
+  assert.deepEqual(names(rankSlashItems(commands, tokenAt("/"))), [
+    "thread",
+    "settings",
+    "cheatsheet",
+  ])
 })
 
 test("the menu never offers /new where threads are on, nor /thread where they're off", () => {

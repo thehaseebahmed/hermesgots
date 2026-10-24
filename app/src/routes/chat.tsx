@@ -38,6 +38,7 @@ import { DayHeading } from "@/components/chat/day-heading"
 import { MovedMarker } from "@/components/chat/moved-marker"
 import { ThreadCard } from "@/components/chat/thread-card"
 import { prLabel } from "@/components/chat/pr-look"
+import { Cheatsheet } from "@/components/chat/cheatsheet"
 import { PipelinePill, PipelineSheet } from "@/components/chat/pipeline"
 import { PrPill } from "@/components/chat/pr-pill"
 import { LibraryPill } from "@/components/chat/library-pill"
@@ -111,6 +112,7 @@ import {
   ensureMainThread,
   getActiveProfile,
   getMessages,
+  getSettings,
   mainThreadId,
   mainThreadProfile,
   setActiveProfile,
@@ -317,6 +319,10 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
   // A new chat's pick, held until its first message makes the chat; it follows the chosen bot.
   const [pendingModel, setPendingModel] = useState<{ profileId?: string; choice?: ModelChoice }>()
   const [todosOpen, setTodosOpen] = useState(false)
+  const [cheatsheetOpen, setCheatsheetOpen] = useState(false)
+  const [cheatsheetNavShortcuts, setCheatsheetNavShortcuts] = useState(
+    DEFAULT_SETTINGS.navShortcuts,
+  )
   const [pipelineOpen, setPipelineOpen] = useState(false)
   const [outputsOpen, setOutputsOpen] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
@@ -818,6 +824,14 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
     }
   }
 
+  const openCheatsheet = async () => {
+    const navShortcuts = await getSettings()
+      .then((settings) => settings.navShortcuts)
+      .catch(quietly("Reading the cheatsheet's navigation switch"))
+    setCheatsheetNavShortcuts(navShortcuts ?? DEFAULT_SETTINGS.navShortcuts)
+    setCheatsheetOpen(true)
+  }
+
   const mainChrome = Boolean(botThreads && isMain && profile)
   const actions = conversation && (
     <div className="flex items-center gap-2">
@@ -1177,11 +1191,22 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
             imagesAvailable={profile?.imageInput !== false}
             onStop={() => id && stopMessage(id)}
             main={Boolean(botThreads && isMain)}
-            onCommand={(command, message) =>
-              command === "thread"
-                ? startThread(message?.text ?? "", message?.attachments ?? [])
-                : root(command === "new" ? (mainPath ?? "/") : "/settings")
-            }
+            onCommand={(command, message) => {
+              switch (command) {
+                case "thread":
+                  return startThread(message?.text ?? "", message?.attachments ?? [])
+                case "new":
+                  return root(mainPath ?? "/")
+                case "settings":
+                  return root("/settings")
+                case "cheatsheet":
+                  return openCheatsheet()
+                default: {
+                  const unhandled: never = command
+                  return unhandled
+                }
+              }
+            }}
             connection={serverConfig(profile)}
             botName={profile?.name}
             dictationWords={profile?.vocabulary}
@@ -1233,6 +1258,11 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
         items={todos}
         progress={todoProgress}
         live={busy}
+      />
+      <Cheatsheet
+        open={cheatsheetOpen}
+        onOpenChange={setCheatsheetOpen}
+        navShortcuts={cheatsheetNavShortcuts}
       />
       {session && (
         <OutputsDrawer

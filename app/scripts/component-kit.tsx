@@ -84,13 +84,15 @@ export async function seedChat({
   projectId,
   messages = [],
   profile,
+  settings = {},
 }: {
   id: string
   projectId?: string
   messages?: Message[]
   profile: Profile
+  settings?: Partial<Omit<Settings, "id">>
 }) {
-  await seedSettings()
+  await seedSettings(settings)
   await db.profiles.clear()
   await db.profiles.put(profile)
   await db.messages.clear()
@@ -211,6 +213,20 @@ export const find = (selector: string) => document.querySelector(selector)
 export const findAll = (selector: string) => [...document.querySelectorAll(selector)]
 export const findText = (selector: string, label: string) =>
   findAll(selector).find((one) => one.textContent?.includes(label)) ?? null
+
+export const composerField = () =>
+  find('textarea[aria-label="Message"]') as HTMLTextAreaElement | null
+export const slashOptions = () => findAll('[role="option"]').map((row) => row.textContent ?? "")
+export const offersCommand = (name: string) => slashOptions().some((row) => row.startsWith(name))
+
+export async function pressEnter() {
+  await act(async () => {
+    composerField()?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    )
+  })
+  await settle()
+}
 
 /** The address on screen, drawn beside the router so a test can read it without asking one. */
 export const Path = () => <p data-path>{useLocation().pathname}</p>
