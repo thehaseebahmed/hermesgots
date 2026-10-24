@@ -135,6 +135,16 @@
 // address. The features it advertises follow its route set (`mcps`, `mcps_write`, `mcps_remove`,
 // `mcps_catalogue`, `mcps_add`, `mcps_access`, `mcps_config`, `mcps_tools`); with MOCK_MCP=off a
 // plugin that has none of them. POST /__mock/mcp puts back every server a flow removed.
+// The Bot's skills, for its Skills tab and the composer's `/` menu: GET …/skills lists them — each row
+// named and described, with its category, where it came from, whether it is on, why it doesn't load
+// and whether the Host will switch it — POST …/skills/{name}/enabled switches one (the one the Host
+// protects is refused), GET …/skills/{name} is one skill's sheet (its SKILL.md, its linked files and
+// the Host's readiness and setup status), GET …/skills/{name}/file?path= reads one linked file, and
+// DELETE …/skills/{name} takes one away where its origin has a removal behind it (a built-in's, a
+// plugin's and a pinned one are refused in the Host's own words). Its features follow its route set
+// (`skills`, `skills_write`, `skills_view`, `skills_remove`); with MOCK_SKILLS=off a Hermes whose
+// plugin has none of it. POST /__mock/skills puts back every skill a flow removed and every switch
+// one flipped.
 // Research missions (GET and POST /api/plugins/memento/research, …/research/{id} and its actions)
 // live in mock-research.mjs.
 // Meetings (GET and POST /api/plugins/memento/meetings, …/meetings/{id} and its actions) live in
