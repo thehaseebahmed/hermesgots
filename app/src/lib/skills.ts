@@ -11,6 +11,7 @@ import {
 import { READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
 import {
   listSkills,
+  removeSkill as removeFromHost,
   setSkillEnabled as writeSkillEnabled,
   type HermesConfig,
   type Skill,
@@ -24,12 +25,15 @@ export type { SkillsState } from "@/lib/skills-cache"
  * Every skills feature the tab asks its Bot's Host about, by the key it answers under: `list` gates
  * the tab itself, `write` gates each row's switch, because a Host can list a profile's skills without
  * the config write a switch is made of, and such a Host offers no switch rather than one whose every
- * tap could only fail (ADR 0044), and `view` gates a row's sheet, because a Host can list skills
- * without a lookup that answers for a switched-off one — the row whose sheet matters most.
+ * tap could only fail (ADR 0044), `remove` gates the sheet's Remove, because a Host can switch a
+ * skill without having either removal the two origins behind it need, and `view` gates a row's
+ * sheet, because a Host can list skills without a lookup that answers for a switched-off one — the
+ * row whose sheet matters most.
  */
 export const SKILL_FEATURES = {
   list: "skills",
   write: "skills_write",
+  remove: "skills_remove",
   view: "skills_view",
 } as const
 
@@ -119,10 +123,33 @@ async function switchSkill(config: HermesConfig, key: string, name: string, enab
   return row
 }
 
-/** The bot's skills as this page knows them, and the one write the tab makes over them. */
+/**
+ * Takes one skill off the Host, and replaces the one list every consumer reads — this page's
+ * `memory` and the device's row both — with the list the Host says is left, so the tab, the
+ * composer's `/` menu and the skill pickers all see the row gone at once (ADR 0044).
+ *
+ * A write the Host refuses is thrown, with the list as it was: the skill stays where it was, and the
+ * screen shows the Host's own sentence.
+ */
+async function removeFromBot(config: HermesConfig, key: string, name: string) {
+  const left = await removeFromHost(config, name, AbortSignal.timeout(WRITE_TIMEOUT_MS))
+  memory.set(key, left)
+  try {
+    // Keeping the row is a favour to the next page load, as a read's is: a Dexie failure must not
+    // throw away the list the Host just answered.
+    await db.skills.put({ id: key, skills: left })
+  } catch (error) {
+    noteFailure("Saving the bot's skills", error)
+  }
+  return left
+}
+
+/** The bot's skills as this page knows them, and the writes the tab makes over them. */
 export type Skills = SkillsState & {
   /** Switches one skill on its Host; a refusal is thrown, leaving the list as it was. */
   setEnabled: (name: string, enabled: boolean) => Promise<void>
+  /** Takes one skill off its Host; a refusal is thrown, leaving the list as it was. */
+  remove: (name: string) => Promise<void>
 }
 
 /**
@@ -132,7 +159,9 @@ export type Skills = SkillsState & {
  * a bot whose host is away. A bot whose plugin has no skills route has none to show.
  *
  * `setEnabled` is the Skills tab's switch: the Host's row replaces that one row in the list every
- * consumer reads, so a skill switched off leaves the `/` menu and the pickers at once.
+ * consumer reads, so a skill switched off leaves the `/` menu and the pickers at once. `remove` is
+ * its removal, and the Host's remaining list replaces the whole of it, so the row that went is gone
+ * from every consumer too (ADR 0044: one list serves them all).
  */
 export function useSkills(config: HermesConfig | null, open: boolean): Skills {
   // A bot the app reads plugin routes for at all: with no key, no route is read, as everywhere else.
@@ -190,5 +219,13 @@ export function useSkills(config: HermesConfig | null, open: boolean): Skills {
     setSettled({ key })
   }
 
-  return { ...state, setEnabled }
+  // Also not memoized, and for the same reason: the list it writes is `memory`'s, and the row that
+  // goes is drawn from the render that asked for it.
+  const remove = async (name: string) => {
+    if (!baseUrl || !apiKey) return
+    await removeFromBot({ baseUrl, apiKey }, key, name)
+    setSettled({ key })
+  }
+
+  return { ...state, setEnabled, remove }
 }

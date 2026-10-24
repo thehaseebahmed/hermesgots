@@ -551,6 +551,28 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, str(error), error.status)
         return web.json_response({"object": "skill.file", "data": found})
 
+    async def remove_skill(request: "web.Request") -> "web.Response":
+        """One skill taken away, answered with the list the Host has left.
+
+        Which Host operation the removal is — a Hub uninstall, a profile skill's delete — is
+        skill_catalog.py's: the origin the list read decides it, and so are the refusals (a built-in,
+        a plugin's skill, a pinned one, a name this bot hasn't got). This only guards, maps the
+        refusal, and answers the refreshed list, so the app replaces its whole list with what the
+        Host says is left rather than the list it held with one row crossed out.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            left = await asyncio.to_thread(
+                skill_catalog.remove, request_profile(), request.match_info["name"]
+            )
+        except ImportError:
+            return _error(web, skill_catalog.UNAVAILABLE, 501)
+        except skill_catalog.SkillError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "list", "data": left})
+
     def mcp_route(
         call: Any,
         key: Optional[str],
@@ -1683,10 +1705,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/skills", list_skills)
     # The list's writes and one skill's read, in the `skills/{name}` space the list answers for. The
     # word `skills` itself is a static segment above, so it is registered first; no static sibling
-    # shares `skills/{name}`, so the three sit beside each other.
+    # shares `skills/{name}`, so the four sit beside each other.
     app.router.add_post(f"{PREFIX}/skills/{{name}}/enabled", set_skill_enabled)
     app.router.add_get(f"{PREFIX}/skills/{{name}}", view_skill)
     app.router.add_get(f"{PREFIX}/skills/{{name}}/file", read_skill_file)
+    app.router.add_delete(f"{PREFIX}/skills/{{name}}", remove_skill)
     app.router.add_get(f"{PREFIX}/mcp", list_mcp_servers)
     app.router.add_get(f"{PREFIX}/mcp/catalogue", list_mcp_catalogue)
     app.router.add_get(f"{PREFIX}/mcp/catalogue/{{name}}", get_mcp_catalogue_entry)

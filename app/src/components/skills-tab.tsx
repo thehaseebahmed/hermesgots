@@ -1,15 +1,26 @@
-import { SparklesIcon } from "lucide-react"
+import { SparklesIcon, Trash2Icon } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 
 import { SkillDetailSheet } from "@/components/skill-detail-sheet"
 import { Group, rowClass, RowText } from "@/components/settings-chrome"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import type { Profile } from "@/lib/db"
 import type { Skill } from "@/lib/hermes"
 import { useSkillFeatureAnswers, useSkills } from "@/lib/skills"
-import { skillHealth, skillSections, type SkillSection } from "@/lib/skills-tab"
+import { canRemove, skillHealth, skillSections, type SkillSection } from "@/lib/skills-tab"
 import { cn } from "@/lib/utils"
 
 /**
@@ -22,10 +33,12 @@ type RowControls = {
 }
 
 /**
- * What the tab is showing over the list: exactly one sheet, or none. A skill's sheet is the only one
- * there is so far, and the removal adds itself to this state when it lands.
+ * What the tab is showing over the list: exactly one sheet, or none. A skill's sheet and the
+ * confirmation its Remove opens exclude each other — the removal replaces the sheet and cancelling
+ * goes back to it — so one state says what the screen is showing rather than two booleans that have
+ * to be kept in agreement.
  */
-type Sheet = { kind: "skill"; name: string }
+type Sheet = { kind: "skill"; name: string } | { kind: "remove"; name: string }
 
 /**
  * A bot's skills, as a tab of its Settings: everything the profile holds — the skills seeded with
@@ -43,7 +56,9 @@ type Sheet = { kind: "skill"; name: string }
  * here: one switch means the bot as a whole (the profile's global disabled list, ADR 0044), and the
  * Host's row replaces the one every consumer reads, so a skill switched off leaves the menu and the
  * pickers at once. A row's title is the other: it opens the skill's own sheet, where a Host offers
- * one, and reads that one skill when it opens.
+ * one, and reads that one skill when it opens. The sheet's last action takes the skill away, where
+ * its origin has a removal behind it — one word over Hermes's own uninstall and delete — and the
+ * Host's remaining list replaces the whole one every consumer reads, so the row goes everywhere.
  */
 export function SkillsTab({ profile }: { profile: Profile }) {
   // The tab is drawn only where the Host advertises listing skills, and its switches only where it
@@ -54,6 +69,8 @@ export function SkillsTab({ profile }: { profile: Profile }) {
   const state = useSkills(profile, answer === "yes")
   // The row whose write is in flight, by name: only that switch waits, and the rest stay pressable.
   const [saving, setSaving] = useState<string | null>(null)
+  // While a removal is in flight both dialogs hold still, so a second tap can't ask twice.
+  const [removing, setRemoving] = useState(false)
   const [sheet, setSheet] = useState<Sheet | null>(null)
   if (answer !== "yes") return null
   // The tab arriving, rather than a bot without skills: a first-ever open waits for the read
@@ -72,20 +89,97 @@ export function SkillsTab({ profile }: { profile: Profile }) {
     }
   }
 
+  // The Host's own sentence again, and the skill still in the list: the row goes only because the
+  // list was replaced with what the Host says is left, never because a removal was asked for.
+  const confirmRemove = async (name: string) => {
+    setRemoving(true)
+    try {
+      await state.remove(name)
+      setSheet(null)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't remove that skill.")
+    } finally {
+      setRemoving(false)
+    }
+  }
+
   const controls = answers.write === "yes" ? { onToggle: toggle, saving } : undefined
   // A sheet only exists where the Host offers a lookup for it, so a row whose title could open
   // nothing keeps its name plain (an older plugin).
   const open =
     answers.view === "yes" ? (name: string) => setSheet({ kind: "skill", name }) : undefined
+  // Remove is offered only where the Host advertises a removal and the skill's own origin has one
+  // behind it (ADR 0044): the row is the list's, so the two can't disagree about either.
+  const opened =
+    sheet?.kind === "skill" ? state.skills.find((one) => one.name === sheet.name) : undefined
+  const offersRemove = opened !== undefined && answers.remove === "yes" && canRemove(opened)
   return (
     <div className="flex flex-col gap-4" data-skills-tab>
       {skillSections(state.skills).map((section) => (
         <Section key={section.id} section={section} controls={controls} onOpen={open} />
       ))}
       {sheet?.kind === "skill" && (
-        <SkillDetailSheet config={profile} name={sheet.name} onClose={() => setSheet(null)} />
+        <SkillDetailSheet
+          config={profile}
+          name={sheet.name}
+          onClose={() => setSheet(null)}
+          footer={
+            offersRemove ? (
+              <RemoveSkill onRemove={() => setSheet({ kind: "remove", name: sheet.name })} />
+            ) : undefined
+          }
+        />
       )}
+      <AlertDialog
+        open={sheet?.kind === "remove"}
+        onOpenChange={(next) => {
+          if (next || removing) return
+          // Cancelling goes back to the skill's own sheet, the one Remove was offered from.
+          setSheet(sheet?.kind === "remove" ? { kind: "skill", name: sheet.name } : null)
+        }}
+      >
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Remove {sheet?.kind === "remove" ? sheet.name : ""}?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              The bot stops having it, and its files go with it. A Hub skill is uninstalled, and one
+              written on the profile is deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={removing}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={removing}
+              onClick={() => sheet?.kind === "remove" && void confirmRemove(sheet.name)}
+            >
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
+  )
+}
+
+/**
+ * Taking a skill away: the skill sheet's last button, offered only where the Host has a removal for
+ * the skill's origin. One word whatever it does underneath (ADR 0044) — the origin decides which
+ * host operation it is, and the confirmation says what will go.
+ */
+function RemoveSkill({ onRemove }: { onRemove: () => void }) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      className="h-11 self-start rounded-full text-destructive"
+      onClick={onRemove}
+    >
+      <Trash2Icon data-icon="inline-start" />
+      Remove
+    </Button>
   )
 }
 

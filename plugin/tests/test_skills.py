@@ -7,7 +7,9 @@ which rows are left out, that the scan runs inside the scope for the given profi
 name resolves under either spelling, that only a host with neither spelling raises ImportError, that
 the switch writes one name in the profile's global disabled list inside the host's own write scope —
 with the refusals and the cache clearing that go with it — and that one skill's sheet reads that
-skill's own file, for a switched-off skill too, with one of its files read only when it is asked for.
+skill's own file, for a switched-off skill too, with one of its files read only when it is asked for,
+and that a removal takes the operation its origin has (the Hub's uninstall, the manager's delete) or
+answers that origin's own refusal.
 """
 
 from __future__ import annotations
@@ -37,6 +39,12 @@ class Host:
         self.write_scopes = []
         self.saves = []
         self.caches = []
+        # The removal's own: which helper was called, with what, and inside which scope.
+        self.uninstalls = []
+        self.deletes = []
+        # How many profile scopes are held right now, so a removal records whether the helper it
+        # called ran inside the one the request makes.
+        self.inside = 0
 
 
 def hermes(
@@ -57,6 +65,8 @@ def hermes(
     plugin_dirs=None,
     linked=None,
     readiness=None,
+    uninstall=(True, "Uninstalled"),
+    delete=None,
 ):
     """Fake every host module the read, the switch and the sheet import lazily, for one test.
 
@@ -67,6 +77,8 @@ def hermes(
     maps a skill's name to its folder for the manager's own lookup, ``plugin_dirs`` does the same for
     the registry's, ``linked`` is what the linked-file listing answers, and ``readiness`` is the
     ``(fields, extras)`` pair the readiness read answers — left out, the host can't say either.
+    ``uninstall`` is what the Hub's own uninstall answers — its ``(ok, message)`` pair — and
+    ``delete`` what the manager's delete answers (its own dict, or None for a plain success).
     """
     host = Host()
     scopes, platforms, catalog_calls = host.scopes, host.platforms, host.catalog_calls
@@ -74,7 +86,11 @@ def hermes(
     @contextlib.contextmanager
     def _profile_scope(profile):
         scopes.append(profile)
-        yield
+        host.inside += 1
+        try:
+            yield
+        finally:
+            host.inside -= 1
 
     profiles = types.ModuleType("hermes_cli.web_server_profiles")
     profiles._profile_scope = _profile_scope
@@ -218,6 +234,45 @@ def hermes(
     manager_tool = types.ModuleType("tools.skill_manager_tool")
     manager_tool._find_skill = lambda name: {"path": folders[name]} if name in folders else None
     host.modules["tools.skill_manager_tool"] = manager_tool
+
+    # The two removals, each the host's own answer: the Hub's tuple for a name its lock file knows,
+    # the manager's dict for a skill on the profile — a refusal included, which is the sentence the
+    # screen shows. A removal that lands takes the row out of the listing, so the read after it is
+    # the list the host would really answer.
+    def forget(name):
+        # Both the plain listing and the scan's resolved rows, since which one the read uses is the
+        # host's own business: after a removal neither carries the skill any more.
+        listed[:] = [row for row in listed if row.get("name") != name]
+        if entries is not None:
+            entries[:] = [
+                entry
+                for entry in entries
+                if entry.get("load_name") != name and entry.get("name") != name
+            ]
+
+    def uninstall_skill(name):
+        host.uninstalls.append({"name": name, "in_scope": host.inside > 0})
+        if uninstall[0]:
+            forget(name)
+        return uninstall
+
+    hub_install = types.ModuleType("tools.skills_hub_install")
+    hub_install.uninstall_skill = uninstall_skill
+    host.modules["tools.skills_hub_install"] = hub_install
+
+    def _delete_skill(name, absorbed_into=None):
+        host.deletes.append(
+            {"name": name, "absorbed_into": absorbed_into, "in_scope": host.inside > 0}
+        )
+        if delete is None:
+            answer = {"success": True, "message": f"Skill '{name}' deleted."}
+        else:
+            answer = dict(delete)
+        if answer.get("success"):
+            forget(name)
+        return answer
+
+    manager_tool._delete_skill = _delete_skill
 
     def skill_view(*_args, **_kwargs):
         raise AssertionError("a skill's sheet must not read through skill_view")
@@ -762,6 +817,123 @@ class SkillSheetTests(unittest.TestCase):
                 self.assertEqual(str(caught.exception), skill_catalog.UNAVAILABLE_VIEW)
 
 
+class SkillRemoveTests(unittest.TestCase):
+    """Removal: one word, three host operations, and each origin's own path or refusal."""
+
+    def removed(self, host, name="plan", profile="bot-a"):
+        with mock.patch.dict(sys.modules, host.modules):
+            return skill_catalog.remove(profile, name)
+
+    def test_a_hub_skill_goes_through_the_hubs_own_uninstall(self):
+        host = hermes(catalog=[scanned("plan"), scanned("log")], hub=("plan",))
+        left = self.removed(host)
+        self.assertEqual(host.uninstalls, [{"name": "plan", "in_scope": True}])
+        self.assertEqual(host.deletes, [])
+        # The answer is the list read again, so the app's whole list is the host's own: the skill
+        # that went is gone from it and the one that stayed is still there, in the list's row shape.
+        self.assertEqual([row["name"] for row in left], ["log"])
+        self.assertEqual(set(left[0]), {"name", "description", "category", "origin", "enabled",
+                                        "loadError", "switchable"})
+
+    def test_the_hubs_refusal_is_its_own_sentence(self):
+        message = "'plan' is not a hub-installed skill (may be a builtin)"
+        host = hermes(catalog=[scanned("plan")], hub=("plan",), uninstall=(False, message))
+        with mock.patch.dict(sys.modules, host.modules):
+            with self.assertRaises(skill_catalog.SkillError) as caught:
+                skill_catalog.remove("bot-a", "plan")
+        self.assertEqual(caught.exception.status, 400)
+        self.assertEqual(str(caught.exception), message)
+        # A refusal is no removal: the other helper was never reached, and no cache was cleared.
+        self.assertEqual(host.deletes, [])
+        self.assertEqual(host.caches, [])
+
+    def test_a_skill_written_on_the_profile_goes_through_the_managers_delete(self):
+        folder = Path("/skills/plan")
+        host = hermes(catalog=[scanned("plan"), scanned("log")], skill_dirs={"plan": folder})
+        left = self.removed(host)
+        self.assertEqual(host.deletes, [
+            {"name": "plan", "absorbed_into": None, "in_scope": True},
+        ])
+        self.assertEqual(host.uninstalls, [])
+        self.assertEqual([row["name"] for row in left], ["log"])
+
+    def test_the_delete_guards_refusal_is_the_hosts_own_sentence(self):
+        message = (
+            "Skill 'plan' is pinned and cannot be deleted by skill_manage. Ask the user to run "
+            "`hermes curator unpin plan` if they want to delete it."
+        )
+        host = hermes(catalog=[scanned("plan")], delete={"success": False, "error": message})
+        with mock.patch.dict(sys.modules, host.modules):
+            with self.assertRaises(skill_catalog.SkillError) as caught:
+                skill_catalog.remove("bot-a", "plan")
+        self.assertEqual(caught.exception.status, 400)
+        self.assertEqual(str(caught.exception), message)
+        self.assertEqual(host.caches, [])
+
+    def test_a_builtin_is_refused_without_either_helper(self):
+        host = hermes(catalog=[scanned("hermes-agent")], bundled=("hermes-agent",))
+        with mock.patch.dict(sys.modules, host.modules):
+            with self.assertRaises(skill_catalog.SkillError) as caught:
+                skill_catalog.remove("bot-a", "hermes-agent")
+        self.assertEqual(caught.exception.status, 400)
+        self.assertEqual(
+            str(caught.exception), "Skill 'hermes-agent' is built into Hermes, so it can't be removed."
+        )
+        self.assertEqual(host.uninstalls, [])
+        self.assertEqual(host.deletes, [])
+
+    def test_a_plugin_skill_is_refused_without_either_helper(self):
+        host = hermes(
+            catalog=[scanned("plan")],
+            plugin_rows=[{"name": "ops:deploy", "description": "", "category": "plugin"}],
+        )
+        with mock.patch.dict(sys.modules, host.modules):
+            with self.assertRaises(skill_catalog.SkillError) as caught:
+                skill_catalog.remove("bot-a", "ops:deploy")
+        self.assertEqual(caught.exception.status, 400)
+        self.assertEqual(
+            str(caught.exception),
+            "Skill 'ops:deploy' comes from a plugin, so it can't be removed; switch it off instead.",
+        )
+        self.assertEqual(host.uninstalls, [])
+        self.assertEqual(host.deletes, [])
+
+    def test_a_name_the_bot_hasnt_got_is_a_404(self):
+        host = hermes(catalog=[scanned("plan")], hub=("plan",))
+        with mock.patch.dict(sys.modules, host.modules):
+            with self.assertRaises(skill_catalog.SkillError) as caught:
+                skill_catalog.remove("bot-a", "ghost")
+        self.assertEqual(caught.exception.status, 404)
+        self.assertEqual(str(caught.exception), "Skill 'ghost' isn't on this bot.")
+        self.assertEqual(host.uninstalls, [])
+        self.assertEqual(host.deletes, [])
+
+    def test_a_removal_clears_both_of_hermes_caches(self):
+        host = hermes(catalog=[scanned("plan"), scanned("log")], hub=("plan",))
+        self.removed(host)
+        self.assertEqual(host.caches, ["skills", ("prompt", True)])
+
+    def test_a_cache_that_cant_be_cleared_still_answers_the_removal(self):
+        host = hermes(
+            catalog=[scanned("plan"), scanned("log")], hub=("plan",), cache_fails=True
+        )
+        left = self.removed(host)
+        self.assertEqual(host.caches, ["skills", ("prompt", True)])
+        self.assertEqual([row["name"] for row in left], ["log"])
+
+    def test_a_host_without_either_removal_refuses_with_its_own_reason(self):
+        for missing in ("tools.skills_hub_install", "tools.skill_manager_tool"):
+            with self.subTest(missing=missing):
+                host = hermes(catalog=[scanned("plan")], hub=("plan",), omit=(missing,))
+                with mock.patch.dict(sys.modules, host.modules):
+                    with self.assertRaises(skill_catalog.SkillError) as caught:
+                        skill_catalog.remove("bot-a", "plan")
+                self.assertEqual(caught.exception.status, 501)
+                self.assertEqual(str(caught.exception), skill_catalog.UNAVAILABLE_REMOVE)
+                self.assertEqual(host.uninstalls, [])
+                self.assertEqual(host.deletes, [])
+
+
 class FeatureTests(unittest.TestCase):
     def test_the_gate_says_why_a_host_without_a_listing_cannot_be_read(self):
         with mock.patch.dict(sys.modules, {"tools.skills_tool": None}):
@@ -792,10 +964,22 @@ class FeatureTests(unittest.TestCase):
         with mock.patch.dict(sys.modules, host.modules):
             self.assertIsNone(skill_catalog.viewable())
 
-    def test_the_features_are_the_list_its_switch_and_its_sheet(self):
+    def test_the_remove_gate_says_why_a_host_without_the_removals_cannot_remove(self):
+        for missing in ("tools.skills_hub_install", "tools.skill_manager_tool"):
+            with self.subTest(missing=missing):
+                host = hermes(catalog=[scanned("plan")], omit=(missing,))
+                with mock.patch.dict(sys.modules, host.modules):
+                    self.assertEqual(skill_catalog.removable(), skill_catalog.UNAVAILABLE_REMOVE)
+
+    def test_the_remove_gate_is_quiet_where_both_removals_import(self):
+        host = hermes(catalog=[scanned("plan")])
+        with mock.patch.dict(sys.modules, host.modules):
+            self.assertIsNone(skill_catalog.removable())
+
+    def test_the_features_are_the_list_its_switch_its_removal_and_its_sheet(self):
         self.assertEqual(
             [name for name, _gate in skill_catalog.FEATURES],
-            ["skills", "skills_write", "skills_view"],
+            ["skills", "skills_write", "skills_remove", "skills_view"],
         )
 
 

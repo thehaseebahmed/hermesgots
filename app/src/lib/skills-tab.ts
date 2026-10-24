@@ -120,6 +120,16 @@ export function skillOrigin(skill: Skill): string | null {
   }
 }
 
+/**
+ * Whether the skill's origin has a removal behind it, which is what offers Remove on its sheet
+ * (ADR 0044): a Hub skill's own uninstall, and a profile skill's delete. A built-in is Hermes's own
+ * and is never removed, a plugin's skill belongs to its package and gets the switch and nothing
+ * else, and a row that doesn't say where it came from is not one to promise a removal for.
+ */
+export function canRemove(skill: Skill): boolean {
+  return skill.origin === "hub" || skill.origin === "yours"
+}
+
 /** One line of a sheet's readiness and setup: the screen's label, and the Host's own words. */
 export interface SkillSetupLine {
   label: "Readiness" | "Setup"

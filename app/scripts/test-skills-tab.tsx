@@ -86,9 +86,10 @@ const SHEETS: Record<string, Sheet> = {
 
 /**
  * A host with the plugin's skills answers: what it advertises, the list it holds, — where it
- * advertises `skills_write` — the one row a switch replaces, and — where it advertises `skills_view`
- * — one skill's sheet and one of its files. `refuse` is the sentence a write comes back with, as a
- * Host that will not switch that skill answers.
+ * advertises `skills_write` — the one row a switch replaces, — where it advertises `skills_view` —
+ * one skill's sheet and one of its files, and — where it advertises `skills_remove` — a removal
+ * answering the list it has left. `refuse` is the sentence a write comes back with, as a Host that
+ * will not switch or remove answers.
  */
 function host(
   features: string[],
@@ -113,6 +114,16 @@ function host(
       if (!found) return json({ error: { message: `Skill '${name}' isn't on this bot.` } }, 400)
       found.enabled = body?.enabled === true
       return json({ object: "skill", data: { ...found } })
+    }
+    const removal = /\/api\/plugins\/memento\/skills\/([^/]+)$/.exec(url.pathname)
+    if (removal && method === "DELETE") {
+      if (refuse) return json({ error: { message: refuse } }, 400)
+      const name = decodeURIComponent(removal[1])
+      const index = held.findIndex((one) => one.name === name)
+      if (index < 0) return json({ error: { message: `Skill '${name}' isn't on this bot.` } }, 404)
+      // The Host's own answer is the list it has left, so the app replaces its whole list with it.
+      held.splice(index, 1)
+      return json({ object: "list", data: held.map((row) => ({ ...row })) })
     }
     const file = /\/api\/plugins\/memento\/skills\/([^/]+)\/file$/.exec(url.pathname)
     if (file && method === "GET") {
@@ -506,6 +517,127 @@ test("a sheet the Host refuses closes on its own sentence", async () => {
       assert.deepEqual(errors, ["Skill 'pr-review' isn't on this bot."])
       await settle()
       assert.equal(find("[data-skill-sheet]"), null, "nothing is left half-drawn")
+    })
+  } finally {
+    toast.error = original
+  }
+})
+
+/** The rows the removal's tests read: one of each origin, each with a sheet behind it. */
+const ORIGINS: Row[] = [
+  { name: "pr-review", description: "Review a change.", category: "review", origin: "yours" },
+  { name: "pr-land", description: "Land a pull request.", category: "review", origin: "hub" },
+  { name: "lint", description: "Run the linters.", category: "quality", origin: "builtin" },
+  { name: "gots:notes", description: "Note a session.", category: "plugin", origin: "plugin" },
+]
+
+/** A sheet's Remove: the footer button the skill's own origin and the Host's feature put there. */
+const removeButton = () =>
+  findAll('[role="dialog"] button').find((one) => one.textContent?.trim() === "Remove") ?? null
+const alert = () => find('[role="alertdialog"]')
+const alertButton = (label: string) =>
+  findAll('[role="alertdialog"] button').find((one) => one.textContent?.trim() === label) ?? null
+
+test("a skill's origin decides whether its sheet offers Remove, where the Host can remove", async () => {
+  // A Hub skill and one written on the profile each have a removal behind them (ADR 0044).
+  for (const name of ["pr-land", "pr-review"]) {
+    await seed("skills-remove-offered", ["skills", "skills_view", "skills_remove"], ORIGINS)
+    await mount(editor("/settings/bots/bot-1/skills"), async () => {
+      await drawn()
+      await openSheet(name)
+      assert.ok(removeButton(), `${name}'s sheet offers Remove`)
+    })
+  }
+})
+
+test("a built-in and a plugin's skill offer no Remove at all", async () => {
+  // A built-in is never removed and a plugin's skill gets the switch and nothing else, so neither
+  // sheet carries the button that would promise it (ADR 0044).
+  for (const name of ["lint", "gots:notes"]) {
+    await seed("skills-remove-origins", ["skills", "skills_view", "skills_remove"], ORIGINS)
+    await mount(editor("/settings/bots/bot-1/skills"), async () => {
+      await drawn()
+      await openSheet(name)
+      assert.equal(removeButton(), null, `${name}'s sheet offers no Remove`)
+    })
+  }
+})
+
+test("a Host that advertises no removal puts no Remove on any sheet", async () => {
+  await seed("skills-remove-absent", ["skills", "skills_view"], ORIGINS)
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    await openSheet("pr-review")
+    assert.equal(removeButton(), null, "the sheet is the skill and nothing it can't do")
+  })
+})
+
+test("Remove asks first, and cancelling goes back to the skill's sheet", async () => {
+  await seed("skills-remove-cancel", ["skills", "skills_view", "skills_remove"], ORIGINS)
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    await openSheet("pr-review")
+    await click(removeButton())
+    assert.ok(alert(), "the confirmation is up")
+    assert.match(alert()?.textContent ?? "", /Remove pr-review\?/, "it names the skill")
+    await click(alertButton("Cancel"))
+    assert.equal(alert(), null, "cancelling closes the confirmation")
+    assert.ok(sheetBody(), "and leaves the skill's own sheet where it was")
+  })
+})
+
+test("confirming removes the skill, and the row leaves every list at once", async () => {
+  const calls = await seed(
+    "skills-remove-confirm",
+    ["skills", "skills_view", "skills_remove"],
+    ORIGINS,
+  )
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    await openSheet("pr-review")
+    await click(removeButton())
+    await click(alertButton("Remove"))
+    await until(async () => calls.some((call) => call.method === "DELETE"), "the removal")
+    assert.deepEqual(
+      calls.filter((call) => call.method === "DELETE").map((call) => call.path),
+      ["/api/plugins/memento/skills/pr-review"],
+      "one removal, of the skill the sheet was opened on",
+    )
+    // The row goes because the Host answered the list it has left, not because the app crossed one
+    // out: the tab and the `/` menu's own copy are both that answer now (ADR 0044).
+    await until(async () => row("pr-review") === null, "the row to leave the tab")
+    assert.equal(alert(), null, "both dialogs are closed")
+    assert.equal(sheetBody(), null, "the sheet went with the skill")
+    const stored = (await db.skills.toArray()).flatMap((cached) => cached.skills)
+    assert.deepEqual(
+      stored.map((skill) => skill.name),
+      ["pr-land", "lint", "gots:notes"],
+      "the device's row is the Host's list, with the skill gone",
+    )
+  })
+})
+
+test("a removal the Host refuses is its own sentence, with the row as it was", async () => {
+  const refusal =
+    "Skill 'pr-review' is pinned and cannot be deleted by skill_manage. Ask the user to run " +
+    "`hermes curator unpin pr-review` if they want to delete it."
+  await seed("skills-remove-refused", ["skills", "skills_view", "skills_remove"], ORIGINS, refusal)
+  const errors: string[] = []
+  const original = toast.error
+  toast.error = ((message: string) => errors.push(String(message))) as typeof toast.error
+  try {
+    await mount(editor("/settings/bots/bot-1/skills"), async () => {
+      await drawn()
+      await openSheet("pr-review")
+      await click(removeButton())
+      await click(alertButton("Remove"))
+      await until(async () => errors.length === 1, "the toast")
+      assert.deepEqual(errors, [refusal], "the Host's own words, nothing added")
+      await settle()
+      assert.ok(row("pr-review"), "the skill is still the bot's")
+      assert.match(row("pr-review")?.textContent ?? "", /Ready/, "and its row is as it was")
+      const stored = (await db.skills.toArray()).flatMap((cached) => cached.skills)
+      assert.ok(stored.some((skill) => skill.name === "pr-review"), "the device keeps it too")
     })
   } finally {
     toast.error = original

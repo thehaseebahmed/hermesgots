@@ -379,6 +379,14 @@ export interface Skill {
   switchable?: boolean | null
 }
 
+/** The rows of one skills answer, dropping anything without a name. */
+function skillsIn(body: unknown): Skill[] {
+  const data = (body as { data?: unknown })?.data
+  return Array.isArray(data)
+    ? data.filter((s): s is Skill => typeof s?.name === "string" && s.name.length > 0)
+    : []
+}
+
 /** The skills the bot's profile can run, for the composer's `/` menu. Hermes's own `/v1/skills`
  * is unscoped and fails on current Hermes, so the plugin lists them under the profile instead. */
 export async function listSkills(config: HermesConfig, signal?: AbortSignal): Promise<Skill[]> {
@@ -386,10 +394,7 @@ export async function listSkills(config: HermesConfig, signal?: AbortSignal): Pr
     headers: headers(config),
     signal,
   })
-  const data: unknown = (await response.json())?.data
-  return Array.isArray(data)
-    ? data.filter((s): s is Skill => typeof s?.name === "string" && s.name.length > 0)
-    : []
+  return skillsIn(await response.json())
 }
 
 /**
@@ -420,6 +425,28 @@ export async function setSkillEnabled(
     throw new HermesError("The host answered without the skill.")
   }
   return data
+}
+
+/**
+ * Takes one of the bot's skills away on its Host (the Gots plugin's `DELETE /skills/<name>`),
+ * answering the skills the bot has left. Removal is Hermes's own operation for the skill's origin —
+ * a Hub skill's uninstall, a profile skill's delete — so a built-in has no removal at all and a
+ * plugin's skill only its switch; both are refused there, as is one Hermes's delete guards refuse
+ * (pinned, essential) and a name the profile doesn't have, each in the Host's own sentence.
+ */
+export async function removeSkill(
+  config: HermesConfig,
+  name: string,
+  signal?: AbortSignal,
+): Promise<Skill[]> {
+  const response = await request(skillPath(config, name), {
+    method: "DELETE",
+    headers: headers(config),
+    signal,
+  })
+  // The Host's own answer is what the list becomes, so a row that went and one that moved with it
+  // cannot disagree with what the bot now holds.
+  return skillsIn(await response.json())
 }
 
 /**

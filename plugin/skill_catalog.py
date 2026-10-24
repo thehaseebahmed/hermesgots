@@ -35,6 +35,10 @@ One skill is also read on its own, for its sheet (ADR 0045): the row above, its 
 disk, its linked files, and the host's readiness and setup answer. Not through Hermes's ``skill_view``,
 which refuses a switched-off skill — that is exactly the row whose sheet has to open — but the way the
 dashboard's own content route does it, from ``skill_manager_tool._find_skill`` and the file itself.
+
+And one skill can be taken away, wherever its origin has a removal behind it (ADR 0044): a Hub skill
+through the Hub's own uninstall, one written on the profile through Hermes's delete helper. A built-in
+and a plugin's skill have no removal at all, so they are refused rather than promised one.
 """
 
 from __future__ import annotations
@@ -51,6 +55,9 @@ UNAVAILABLE_WRITE = "This Hermes version can't switch skills from here."
 # And what a host that can't open one skill answers with: its own sentence, because a host can list a
 # profile's skills and still have no way in to one of them (the sheet's ``skills_view``).
 UNAVAILABLE_VIEW = "This Hermes version can't open a skill from here."
+# And what a host without either removal helper answers with, for the same two callers: a removal is
+# one word over three host operations, so a host missing one of the two is one with no removal at all.
+UNAVAILABLE_REMOVE = "This Hermes version can't remove skills from here."
 
 # The refusals a switch answers with, in the words the screen shows. Hermes has no sentence of its
 # own for an essential skill: its own toggle simply drops the name from the list it saves, so a
@@ -75,6 +82,15 @@ AMBIGUOUS = "Ambiguous skill name '%s': another copy shares it."
 OUTSIDE = "'%s' is not a path inside the skill."
 NO_FILE = "Skill '%s' has no file '%s'."
 READ_FAILED = "Failed to read '%s': %s"
+
+# The two origins a removal is behind — a Hub install's uninstall, a profile skill's delete — and the
+# sentences the other two answer with. A built-in is Hermes's own and is never removed (ADR 0044); a
+# plugin's skill belongs to its package, its host's write helpers never walk that namespace, and the
+# switch is all it gets.
+REMOVABLE = ("hub", "yours")
+BUILTIN_REMOVAL = "Skill '%s' is built into Hermes, so it can't be removed."
+PLUGIN_REMOVAL = "Skill '%s' comes from a plugin, so it can't be removed; switch it off instead."
+NO_REMOVAL = "Skill '%s' can't be removed from here."
 
 
 def _helper(module: str, *names: str) -> Optional[Any]:
@@ -618,12 +634,110 @@ def file(profile: Optional[str], name: str, path: str) -> Dict[str, Any]:
     return {"name": name, "path": path, "content": content}
 
 
+# What a removal needs of the host, by the name this module asks for it: the Hub's own uninstall, whose
+# lock file knows what a Hub install is, and the manager's delete, whose guards know what a pinned or
+# essential skill is. Both are asked for because the two origins are two operations and this module
+# never picks one without the whole machinery being there to pick from.
+_REMOVE: Tuple[Tuple[str, str], ...] = (
+    ("tools.skills_hub_install", "uninstall_skill"),
+    ("tools.skill_manager_tool", "_delete_skill"),
+)
+
+
+def _remover() -> Dict[str, Callable[..., Any]]:
+    """Hermes's machinery for taking one skill away: imported at call time, since a plugin loads first."""
+    found: Dict[str, Callable[..., Any]] = {}
+    for module, attribute in _REMOVE:
+        try:
+            found[attribute] = getattr(importlib.import_module(module), attribute)
+        except (ImportError, AttributeError) as error:
+            raise SkillError(UNAVAILABLE_REMOVE, 501) from error
+    return found
+
+
+def removable() -> Optional[str]:
+    """Why this host's skills can't be removed from here, or None when they can.
+
+    A gate of its own, apart from the switch's and the sheet's: a host can list, switch and open a
+    profile's skills and predate one of the two removals a row's origin decides between. `info`
+    advertises this as `skills_remove`, so such a host's sheet offers no Remove at all rather than a
+    button whose every tap could only fail.
+    """
+    try:
+        _remover()
+    except SkillError as error:
+        return str(error)
+    return None
+
+
+def _removal_refusal(name: str, origin: Any) -> str:
+    """The sentence an origin with no removal behind it answers with.
+
+    The read folds every row to one of four origins, so two of them get here; the third sentence is
+    for a row this host couldn't classify, which is not a row to promise a removal for.
+    """
+    if origin == "plugin":
+        return PLUGIN_REMOVAL % name
+    return BUILTIN_REMOVAL % name if origin == "builtin" else NO_REMOVAL % name
+
+
+def remove(profile: Optional[str], name: str) -> List[Dict[str, Any]]:
+    """Take one of ``profile``'s skills away, and answer the skills it has left.
+
+    ADR 0044: removal is one word over Hermes's own operations, and the origin the list read decides
+    which one — a Hub skill goes through the Hub's own uninstall, so its lock file, its audit log and
+    its usage record move with it, and one written on the profile goes through the manager's delete,
+    which is the same hard delete a user-driven screen wants. Each helper's own refusal is raised in
+    its own words — the Hub's "not a hub-installed skill (may be a builtin)", the delete guards'
+    pinned and essential sentences — because those are the sentences the screen shows.
+
+    A built-in and a plugin's skill are refused before either helper is called: a built-in is never
+    removed, and a plugin's skill belongs to its package and gets the switch and nothing else.
+
+    ``profile`` is a profile name, or None for the process's own. Blocking — a skills scan, then a
+    delete and another scan — so call it from a worker thread, never the event loop. Answers the
+    profile's remaining skills as ``read`` shapes them, so the app's whole list is the Host's own
+    answer rather than the list it held with one row crossed out.
+    """
+    hermes = _remover()
+    row = _one(profile, name)
+    if row is None:
+        raise SkillError(NOT_FOUND % name, 404)
+    origin = row.get("origin")
+    if origin not in REMOVABLE:
+        raise SkillError(_removal_refusal(name, origin), 400)
+    # The read's scope rather than the switch's config write scope: a removal writes no config. It
+    # writes the skills tree, and both helpers find it through the profile — the manager through the
+    # SKILLS_DIR globals this scope retargets, the Hub through a resolver that reads the profile's
+    # home at call time — which is the one scope that covers the two of them.
+    from hermes_cli.web_server_profiles import _profile_scope
+
+    with _profile_scope(profile):
+        if origin == "hub":
+            ok, message = hermes["uninstall_skill"](name)
+            if not ok:
+                raise SkillError(message, 400)
+        else:
+            result = hermes["_delete_skill"](name)
+            if not isinstance(result, dict) or not result.get("success"):
+                # The manager's own refusal, shaped ``{"success": False, "error": <sentence>}``: its
+                # pinned and essential guards' words, which are the ones the screen shows.
+                raise SkillError(
+                    (result.get("error") if isinstance(result, dict) else None)
+                    or "The host couldn't remove '%s'." % name,
+                    400,
+                )
+    _clear_caches()
+    return read(profile)
+
+
 # What the Skills screen needs of this module, and what `info` advertises: Hermes's own listing,
 # under whichever name this host ships it, the switch, which needs a different set of Hermes
-# built-ins and so is advertised apart from the listing, and the sheet's read, apart from both. The
-# removal joins them as it lands.
+# built-ins and so is advertised apart from the listing, the sheet's read, apart from both, and the
+# removal, which is the two helpers a row's origin decides between.
 FEATURES: Tuple[Tuple[str, Callable[[], Optional[str]]], ...] = (
     ("skills", available),
     ("skills_write", writable),
+    ("skills_remove", removable),
     ("skills_view", viewable),
 )

@@ -4,7 +4,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { skillHealth, skillOrigin, skillSections, skillSetup } from "../src/lib/skills-tab.ts"
+import { canRemove, skillHealth, skillOrigin, skillSections, skillSetup } from "../src/lib/skills-tab.ts"
 
 const skill = (patch) => ({
   name: "plan",
@@ -126,6 +126,17 @@ test("the Host's own setup sentence stands alone, ahead of its status word", () 
   assert.deepEqual(skillSetup({ ...skill(), gateway_setup_hint: "Load it in the CLI." }), [
     { label: "Setup", text: "Load it in the CLI." },
   ])
+})
+
+test("only the two origins with a removal behind them can be removed", () => {
+  assert.equal(canRemove(skill({ origin: "hub" })), true, "a Hub skill goes through the uninstall")
+  assert.equal(canRemove(skill({ origin: "yours" })), true, "a profile skill through the delete")
+  assert.equal(canRemove(skill({ origin: "builtin" })), false, "a built-in is never removed")
+  assert.equal(canRemove(skill({ origin: "plugin" })), false, "a plugin's skill is switch-only")
+  // An older plugin's row says nothing about where the skill came from, which is not a thing to
+  // promise a removal over.
+  assert.equal(canRemove(skill()), false)
+  assert.equal(canRemove(skill({ origin: null })), false)
 })
 
 test("a Host with no sentence to give says its status word, and one that says nothing says nothing", () => {
