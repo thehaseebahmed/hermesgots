@@ -1692,7 +1692,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
 
     async def served_file(request: "web.Request", resolve: Any, allowed: Any = None) -> "web.StreamResponse":
         """Serves the file a query's ``path`` names: ``resolve`` validates it, ``allowed`` may refuse
-        it (a library file has to sit under a project's library folder)."""
+        it (a library file has to sit under a project's library folder). What the platform shows is
+        served in place; anything else is handed over as a download named as the file."""
         denied = unauthorized(request)
         if denied is not None:
             return denied
@@ -1702,16 +1703,20 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, str(error), error.status)
         if allowed is not None and not await asyncio.to_thread(allowed, file):
             return _error(web, "Not a library file.", 404)
-        return web.FileResponse(file, headers={"content-type": media.content_type(file)})
+        headers = {"content-type": media.content_type(file)}
+        download = media.disposition(file)
+        if download:
+            headers["content-disposition"] = download
+        return web.FileResponse(file, headers=headers)
 
     async def serve_media(request: "web.Request") -> "web.StreamResponse":
-        return await served_file(request, media.image_file)
+        return await served_file(request, media.media_file)
 
     app.router.add_get(f"{PREFIX}/media", serve_media)
 
     async def serve_library_file(request: "web.Request") -> "web.StreamResponse":
         return await served_file(
-            request, media.library_file, lambda file: library.holds(hermes_home(), file)
+            request, media.media_file, lambda file: library.holds(hermes_home(), file)
         )
 
     app.router.add_get(f"{PREFIX}/library/file", serve_library_file)
