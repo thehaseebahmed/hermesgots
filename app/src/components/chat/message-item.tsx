@@ -159,8 +159,8 @@ function huggingTools(parts: Part[], index: number) {
 /**
  * Interleaves a slice of the reply (starting at `start`) with the tools run during it. A clarify
  * call is a card of its own (its question and the answer) rather than a tool row, so is a
- * delegation (the agent it started), and the images a reply sends together — only whitespace
- * between their `MEDIA:<path>` tags — are one gallery part.
+ * delegation (the agent it started), and the media a reply sends together — only whitespace between
+ * their `MEDIA:<path>` tags — are one part, which draws as one Gallery.
  */
 function toParts(
   content: string,

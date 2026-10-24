@@ -1,9 +1,15 @@
 import { useEffect, useState } from "react"
 
-import { CELL } from "@/components/chat/media-gallery"
+import { toast } from "sonner"
+
+import { AttachmentTile } from "@/components/chat/attachments"
+import { AudioRow, CELL, MediaGallery, type MediaItem } from "@/components/chat/media-gallery"
 import { Skeleton } from "@/components/ui/skeleton"
+import { downloadAttachment } from "@/lib/attachments"
+import type { Attachment } from "@/lib/db"
 import { useImageReady } from "@/lib/image"
-import { loadMediaImage } from "@/lib/media-tags"
+import { mediaCell, mediaKind, type MediaCell } from "@/lib/media-kind"
+import { loadMediaFile, type MediaFile } from "@/lib/media-tags"
 import { openImageViewer } from "@/lib/native"
 import { cn } from "@/lib/utils"
 
@@ -33,7 +39,7 @@ export function MediaImage({ src, alt }: { src: string; alt?: string }) {
   )
 }
 
-/** A `MEDIA:<path>` tag kept visible as text, because the image behind it can't load. */
+/** A `MEDIA:<path>` tag kept visible as text, because the file behind it can't be read. */
 function Tag({ path }: { path: string }) {
   return (
     <code className="w-fit rounded-md bg-background/60 px-1.5 py-0.5 font-mono text-[0.85em] text-muted-foreground">
@@ -42,41 +48,106 @@ function Tag({ path }: { path: string }) {
   )
 }
 
+/** The name a tag's path ends in, which is how the thread names the file. */
+function nameOf(path: string) {
+  return path.split(/[\\/]/).pop() || path
+}
+
+/** One tag, once the host has answered for it — or not yet, or not at all. */
+interface Tagged {
+  /** This tag's place in its part: the same path may be named twice. */
+  key: string
+  path: string
+  name: string
+  /** The file the host answered with: `undefined` while it is still being read, `null` if it can't. */
+  file?: MediaFile | null
+  cell: MediaCell
+  item: MediaItem
+}
+
 /**
- * The images behind a reply's `MEDIA:<path>` tags, one or several sent together, each in the same
- * cell: one image is one cell, which is exactly what a gallery's images are. An image still being
- * read holds its cell with a skeleton; a tag that can't load stays visible as its text.
+ * The media behind a reply's `MEDIA:<path>` tags, drawn through the thread's own cells: the images
+ * and clips take one Gallery — a group of tags sent together is one Gallery, its cells in the order
+ * they were written — each recording a row of its own, and every other file a row that downloads it,
+ * drawn in that order, and any tag the host can't answer last, as the text it came from. What each
+ * file is comes from what the host answered, read through `mediaCell`, so a reply reads exactly like
+ * a message the user sent. A tag still being read holds its place — a cell where its extension says
+ * media, a row for the rest.
  */
 export function MediaTag({ conversationId, paths }: { conversationId: string; paths: string[] }) {
   // The list's identity moves on every render (it comes from splitting a streaming reply), so the
-  // join keys the fetch below.
+  // join keys the read below.
   const joined = paths.join("\n")
   const list = joined.split("\n")
-  // By path, so a reply that grows while it streams keeps the images it has, and a new tag is
-  // loading, not shown as text, until its read is in.
-  const [loaded, setLoaded] = useState<Map<string, string | null>>(new Map())
+  // By path, so a reply that grows while it streams keeps the files it has; `null` is one the host
+  // couldn't answer, and no entry at all is one still being read.
+  const [read, setRead] = useState<Map<string, MediaFile | null>>(new Map())
   useEffect(() => {
     let stale = false
-    const paths = joined.split("\n")
-    void Promise.all(paths.map((path) => loadMediaImage(conversationId, path))).then((next) => {
-      if (!stale) setLoaded(new Map(paths.map((path, i) => [path, next[i]])))
+    const asked = joined.split("\n")
+    void Promise.all(asked.map((path) => loadMediaFile(conversationId, path))).then((answers) => {
+      if (!stale) setRead(new Map(asked.map((path, i) => [path, answers[i]])))
     })
     return () => {
       stale = true
     }
   }, [conversationId, joined])
+
+  const tagged: Tagged[] = list.map((path, at) => {
+    const file = read.get(path)
+    const name = nameOf(path)
+    return {
+      key: `${at}:${path}`,
+      path,
+      name,
+      file,
+      cell: mediaCell(file?.type ?? "", path),
+      item: {
+        key: `${at}:${path}`,
+        kind: mediaKind(file?.type, path),
+        name,
+        type: file?.type ?? "",
+        size: file?.size,
+        src: file?.url,
+      },
+    }
+  })
+  // The file as the row that downloads it draws it, saved under the name the tag gave.
+  const asAttachment = (tag: Tagged): Attachment => ({
+    id: tag.path,
+    name: tag.name,
+    type: tag.file?.type ?? "",
+    size: tag.file?.size ?? 0,
+    image: false,
+    path: tag.path,
+  })
+  const download = (tag: Tagged) =>
+    void downloadAttachment(conversationId, asAttachment(tag)).catch(() => {
+      toast.error(`Couldn't download ${tag.name}.`)
+    })
+  const drawn = tagged.filter((tag) => tag.file !== null)
+  const unread = tagged.filter((tag) => tag.file === null)
   return (
-    <div
-      className={cn(
-        "grid w-full max-w-[min(100%,42rem)] gap-2",
-        list.length >= 5 ? "grid-cols-3" : "grid-cols-2",
-      )}
-    >
-      {list.map((path, i) => {
-        const url = loaded.get(path)
-        if (url === undefined) return <Skeleton key={i} className={CELL} />
-        return url ? <MediaImage key={i} src={url} /> : <Tag key={i} path={path} />
-      })}
+    <div className="flex w-full max-w-[min(100%,42rem)] flex-col items-start gap-2">
+      <MediaGallery items={drawn.filter((tag) => tag.cell === "gallery").map((tag) => tag.item)} />
+      {drawn
+        .filter((tag) => tag.cell === "audio")
+        .map((tag) => (
+          <AudioRow key={tag.key} item={tag.item} />
+        ))}
+      {drawn
+        .filter((tag) => tag.cell === "file")
+        .map((tag) => (
+          <AttachmentTile
+            key={tag.key}
+            attachment={asAttachment(tag)}
+            action="download"
+            onOpen={tag.file ? () => download(tag) : undefined}
+          />
+        ))}
+      {unread.map((tag) => (
+        <Tag key={tag.key} path={tag.path} />
+      ))}
     </div>
   )
 }
