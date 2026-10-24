@@ -32,7 +32,10 @@ export interface PushCategoryInfo {
   title: string
   /** On until the user turns it off; the quieter ones start off. */
   on: boolean
-  /** Android's importance for its channel: 4 makes a sound and peeks, 3 makes a sound, 2 is silent. */
+  /**
+   * Android's importance for its channel: 4 makes a sound and peeks, 3 makes a sound, 2 is silent.
+   * Only what waits on the user may peek; a failure or a completion must not take over the screen.
+   */
   importance: 2 | 3 | 4
 }
 
@@ -52,7 +55,7 @@ export const PUSH_CATEGORIES: PushCategoryInfo[] = [
     on: true,
     importance: 4,
   },
-  { id: "chat_run_failed", feature: "chats", title: "Run failed", on: true, importance: 4 },
+  { id: "chat_run_failed", feature: "chats", title: "Run failed", on: true, importance: 3 },
   { id: "chat_run_done", feature: "chats", title: "Run finished", on: false, importance: 3 },
   {
     id: "code_input",
@@ -61,7 +64,7 @@ export const PUSH_CATEGORIES: PushCategoryInfo[] = [
     on: true,
     importance: 4,
   },
-  { id: "code_run_failed", feature: "code", title: "Run failed", on: true, importance: 4 },
+  { id: "code_run_failed", feature: "code", title: "Run failed", on: true, importance: 3 },
   { id: "code_run_done", feature: "code", title: "Run finished", on: false, importance: 3 },
   {
     id: "code_pr_checks",
@@ -80,7 +83,7 @@ export const PUSH_CATEGORIES: PushCategoryInfo[] = [
   {
     id: "code_afk_pr",
     feature: "code",
-    title: "A task's pull request is ready to review",
+    title: "Pull request ready to review",
     on: true,
     importance: 3,
   },
@@ -95,7 +98,7 @@ export const PUSH_CATEGORIES: PushCategoryInfo[] = [
   {
     id: "research_input",
     feature: "research",
-    title: "Brief and scope to review",
+    title: "Brief or scope to review",
     on: true,
     importance: 4,
   },
