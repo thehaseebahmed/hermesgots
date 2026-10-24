@@ -100,7 +100,7 @@ export async function settleNav(page) {
     })
   }
   const settle = async (since) => {
-    for (const end = Date.now() + 8_000; Date.now() < end; ) {
+    for (const end = Date.now() + 8_000; Date.now() < end;) {
       // Requests older than this navigation are the last page's stragglers: an abandoned fetch
       // neither finishes nor fails in the client, and waiting on one burns the whole cap and then
       // still leaves the page to the next navigation. Only this document's graph counts.
@@ -120,7 +120,10 @@ export async function settleNav(page) {
         const state = await page
           .evaluate(async (mock) => {
             const race = (work, label) =>
-              Promise.race([work.then(() => `${label}-ok`), new Promise((no) => setTimeout(() => no(`${label}-hung`), 3000))])
+              Promise.race([
+                work.then(() => `${label}-ok`),
+                new Promise((no) => setTimeout(() => no(`${label}-hung`), 3000)),
+              ])
             const db = await race(import("/src/lib/db.ts"), "db")
             const root = document.querySelector("#root")?.childElementCount
             const more =
@@ -539,6 +542,38 @@ export async function afkOn(page, screen, until) {
   )
   return control
 }
+
+/**
+ * A header row's boxes: the row, its title, and the last control its actions carry. The control is
+ * the last button inside the actions slot, not the slot itself — the slot stretched to its whole
+ * track even when the buttons inside sat at that track's left edge, which is how a row once drew its
+ * controls anywhere but the corner and still measured as ending on the row's edge. Each box is
+ * asserted, so a header that draws no title or no action fails by name rather than as a null.
+ */
+export async function headerBoxes(page, index = 0) {
+  const boxes = await page.evaluate((index) => {
+    const row = document.querySelectorAll('[data-slot="header-row"]')[index]
+    const box = (element) => {
+      if (!element) return null
+      const { x, width } = element.getBoundingClientRect()
+      return { x, width, right: x + width }
+    }
+    const buttons =
+      row?.querySelector('[data-slot="header-actions"]')?.querySelectorAll("button") ?? []
+    return {
+      row: box(row),
+      title: box(row?.querySelector('[data-slot="header-title"]')),
+      actions: box(buttons[buttons.length - 1]),
+    }
+  }, index)
+  assert.ok(boxes.row, `header row ${index} is drawn`)
+  assert.ok(boxes.title, `header row ${index} carries a title`)
+  assert.ok(boxes.actions, `header row ${index} carries an action to hold its corner`)
+  return boxes
+}
+
+/** A box's horizontal centre, for the geometry assertions `headerBoxes` feeds. */
+export const centre = (box) => box.x + box.width / 2
 
 /**
  * Fails unless the element's text fits on one line. Its height is compared with a line, since a block

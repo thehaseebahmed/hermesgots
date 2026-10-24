@@ -1,7 +1,17 @@
 // Projects, a project, Code, Routines, a chat and a coding session load their data at phone and
 // tablet widths, in light and dark mode, with no errors in the console; the session's header is
 // centred, with its bot and its repositories under the title rather than a picture beside it.
-import { app, assert, assertOneLine, flow, pass, runId, settled } from "./lib.mjs"
+import {
+  app,
+  assert,
+  assertOneLine,
+  centre,
+  flow,
+  headerBoxes,
+  pass,
+  runId,
+  settled,
+} from "./lib.mjs"
 
 const SESSION_TITLE =
   "Give a coding session's screen the centred header it was promised, with every repository named"
@@ -94,30 +104,21 @@ for (const width of [390, 1024]) {
 
         // Both flanks are a fr share of the row, so the block sits on the row's centre at every
         // width, and the actions — pinned to their track's end — hold its right edge.
+        const boxes = await headerBoxes(page)
         const geometry = await header.evaluate((el) => {
           const rect = (slot) => {
             const r = el.querySelector(`[data-slot="${slot}"]`).getBoundingClientRect()
             return { x: r.x, width: r.width, right: r.right }
           }
+          const title = el.querySelector('[data-slot="header-title"]')
+          const line = el.querySelector('[data-slot="header-line"]')
           return {
-            scroll: el.querySelector('[data-slot="header-title"]').scrollWidth,
-            client: el.querySelector('[data-slot="header-title"]').clientWidth,
-            lineScroll: el.querySelector('[data-slot="header-line"]').scrollWidth,
-            lineClient: el.querySelector('[data-slot="header-line"]').clientWidth,
-            title: rect("header-title"),
+            scroll: title.scrollWidth,
+            client: title.clientWidth,
+            lineScroll: line.scrollWidth,
+            lineClient: line.clientWidth,
             line: rect("header-line"),
             middle: rect("header-middle"),
-            row: rect("header-row"),
-            // The last button, not the actions div: the div stretched to its whole track even when
-            // the buttons inside sat at that track's left edge, which is how this row once drew
-            // its controls anywhere but the corner.
-            actions: (() => {
-              const buttons = el
-                .querySelector('[data-slot="header-row"]')
-                .lastElementChild.querySelectorAll("button")
-              const r = buttons[buttons.length - 1].getBoundingClientRect()
-              return { x: r.x, width: r.width, right: r.right }
-            })(),
           }
         })
         assert.ok(
@@ -129,28 +130,26 @@ for (const width of [390, 1024]) {
           geometry.lineScroll <= geometry.lineClient + 1,
           `the session's line fits at ${look} (${geometry.lineScroll}px of ${geometry.lineClient}px)`,
         )
-        const centre = (box) => box.x + box.width / 2
         assert.ok(
-          geometry.title.x >= geometry.middle.x - 2 &&
-            geometry.title.right <= geometry.middle.right + 2,
+          boxes.title.x >= geometry.middle.x - 2 && boxes.title.right <= geometry.middle.right + 2,
           `the title stays in the room the controls leave at ${look}`,
         )
         assert.ok(
-          Math.abs(centre(geometry.title) - centre(geometry.middle)) <= 2,
+          Math.abs(centre(boxes.title) - centre(geometry.middle)) <= 2,
           `the title is centred in that room at ${look}`,
         )
         assert.ok(
-          Math.abs(centre(geometry.line) - centre(geometry.title)) <= 2,
+          Math.abs(centre(geometry.line) - centre(boxes.title)) <= 2,
           `the session's line is centred under the title at ${look}`,
         )
         assert.ok(
-          Math.abs(centre(geometry.title) - centre(geometry.row)) <= 2,
-          `the title is centred on the row at ${look} (${Math.round(centre(geometry.title))} against ${Math.round(centre(geometry.row))})`,
+          Math.abs(centre(boxes.title) - centre(boxes.row)) <= 2,
+          `the title is centred on the row at ${look} (${Math.round(centre(boxes.title))} against ${Math.round(centre(boxes.row))})`,
         )
         // Whatever the title does — it truncates at both widths above — the actions hold the corner.
         assert.ok(
-          Math.abs(geometry.actions.right - geometry.row.right) <= 2,
-          `the actions end on the row's right edge at ${look} (${Math.round(geometry.actions.right)} against ${Math.round(geometry.row.right)})`,
+          Math.abs(boxes.actions.right - boxes.row.right) <= 2,
+          `the actions end on the row's right edge at ${look} (${Math.round(boxes.actions.right)} against ${Math.round(boxes.row.right)})`,
         )
 
         await page.goto(app)

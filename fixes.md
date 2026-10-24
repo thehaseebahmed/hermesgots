@@ -1942,3 +1942,50 @@ stores the send as the wire request and the attachments as metadata, not the com
   plugin and vice versa, so the new field has to fall back to the body re-parse for as long as old
   items can exist.
 
+---
+
+# Deferred fixes from the simplify pass on the centred header's edge
+
+A cleanup review of `fix(chat): hold a centred header's actions on the row's right edge` (four
+parallel reviewers: reuse, quality, efficiency, altitude) turned up one change too wide for this
+branch. Everything else is applied on this branch: the last-button measurement both flows carried
+inline — already drifted between them, a `<= 2` two-sided tolerance in one and a `< 4` one-sided
+`+1` in the other — is one `headerBoxes` in `lib.mjs`, asserted so a header without a title or an
+action fails by name instead of as a null; the actions div joined the row's `data-slot` contract
+instead of being walked as `lastElementChild`; the thread flow's gate matches the session's; and
+the component's comment no longer names a width it cannot promise (the old "exactly 768px" case was
+wrong — full-pane 768 leaves each flank 178px — so the comment now states the rule and the squeeze
+in general terms).
+
+## Risky, pre-existing
+
+### 1. A drawer's heading centres inside the room its close button keeps
+
+`popup.tsx`'s `PopupHeader` reserves `pr-14` for the drawer's close button and `PopupTitle` centres
+in every form, so a drawer-form heading sits ~28px left of the popup's own centre at every width —
+the same drift class this branch fixed in `ChatHeader`, reached by asymmetric padding rather than an
+`auto` track. Overflow is already handled (`max-w-full truncate`), so only the drift half applies.
+
+- Cost: every drawer form's heading is visibly off-centre beside its close button, and the component's
+  own docstring claims the heading is "centred in every form".
+- Suggested fix: reserve both sides (`pl-14` alongside `pr-14`) so the centring is real, or
+  start-align drawer headings, which is what Material side sheets — cited in that docstring — do.
+- Why it is not applied here: `popup.tsx` is untouched by this branch and the two fixes disagree
+  about what a drawer heading should do, so the choice belongs with whoever owns the popup's design.
+- Why it is risky: `PopupHeader` renders above every sheet, drawer and menu in the app; a padding
+  change moves every pop-up's heading at once and no flow measures a drawer heading's centre today.
+
+## Not entries
+
+Declined with the evidence, each for what it is:
+
+- **Hoisting the actions div's `className` into module constants** — the efficiency reviewer's own
+  figure was one memoised `twMerge` over three short strings per header render, sub-microsecond, and
+  the row above already calls `cn()` the same way; two constants would trade that for indirection.
+- **Measuring the actions div by its new `header-actions` slot instead of its last button** — the
+  div hugged its content after `justify-self-end`, but a div's right edge is trivially the row's when
+  it stretches, which is the exact false green this branch removed; the last button inside the slot
+  is the invariant, so the helper measures that.
+- **A named constant for the `2fr` middle track** — the string has one consumer and its rationale
+  sits in the adjacent comment; `COLUMN_BOX` lives in `layout.ts` because two files read it.
+

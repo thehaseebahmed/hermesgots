@@ -1,4 +1,4 @@
-import { app, assert, flow, mockAuth, pass } from "./lib.mjs"
+import { app, assert, centre, flow, headerBoxes, mockAuth, pass } from "./lib.mjs"
 
 const NEW_MOCK = process.env.TRIAGE_NEW_MOCK_URL
 const THREAD_MOCK = process.env.TRIAGE_THREAD_MOCK_URL
@@ -433,31 +433,14 @@ await flow(
       [1, 0],
       "Main keeps the bot's picture, and the thread beside it carries none",
     )
-    const boxes = await page.evaluate(() => {
-      const row = document.querySelectorAll('[data-slot="header-row"]')[1]
-      const box = (element) => {
-        if (!element) return null
-        const { x, width } = element.getBoundingClientRect()
-        return { x, width }
-      }
-      // The last button, not the actions div: the div stretched to its whole track even when the
-      // buttons inside sat at that track's left edge, which is how this row once drew its controls
-      // anywhere but the corner.
-      const actions = row?.lastElementChild.querySelectorAll("button") ?? []
-      return {
-        row: box(row),
-        title: box(row?.querySelector('[data-slot="header-title"]')),
-        actions: box(actions[actions.length - 1]),
-      }
-    })
-    const centre = (rect) => (rect ? rect.x + rect.width / 2 : 0)
+    const boxes = await headerBoxes(page, 1)
     assert.ok(
-      Math.abs(centre(boxes.title) - centre(boxes.row)) < 4,
+      Math.abs(centre(boxes.title) - centre(boxes.row)) <= 2,
       `the thread's title sits on its pane's centre (title at ${Math.round(centre(boxes.title))}, row at ${Math.round(centre(boxes.row))})`,
     )
     assert.ok(
-      boxes.actions.x + boxes.actions.width <= boxes.row.x + boxes.row.width + 1,
-      "the thread's actions end at the row's own edge",
+      Math.abs(boxes.actions.right - boxes.row.right) <= 2,
+      `the thread's actions end on the row's right edge (${Math.round(boxes.actions.right)} against ${Math.round(boxes.row.right)})`,
     )
     await shot("laptop")
     pass(
