@@ -71,7 +71,7 @@ function host(name: string) {
     if (url.pathname.endsWith("/capabilities"))
       return json({ features: { run_submission: true, run_events_sse: true } })
     if (url.pathname.endsWith("/plugins/memento/info"))
-      return json({ features: ["queue", "triage", "moves"] })
+      return json({ features: ["attachments", "queue", "triage", "moves"] })
     if (url.pathname.endsWith("/skills")) return json({ object: "list", data: [] })
     if (url.pathname.endsWith("/triage"))
       return json({ decision: "new", thread: "made-by-triage", item: { id: "q_1" } })
