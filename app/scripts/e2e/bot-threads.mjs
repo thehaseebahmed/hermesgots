@@ -413,14 +413,14 @@ await flow(
     const heads = await page.evaluate(() =>
       [...document.querySelectorAll('[data-slot="header-row"]')].map((row) => ({
         title: row.querySelector('[data-slot="header-title"]')?.textContent ?? "",
-        controls: [...row.querySelectorAll("button")].map((button) =>
-          button.getAttribute("aria-label") ?? "",
+        controls: [...row.querySelectorAll("button")].map(
+          (button) => button.getAttribute("aria-label") ?? "",
         ),
         pictures: row.querySelectorAll('[role="img"]').length,
       })),
     )
     assert.equal(heads.length, 2, "both panes draw a header")
-    assert.equal(heads[0].title, "Test bot", "Main reads as the bot, not as \"Main\"")
+    assert.equal(heads[0].title, "Test bot", 'Main reads as the bot, not as "Main"')
     assert.notEqual(heads[1].title, "", "the thread beside it reads with its own title")
     assert.notEqual(heads[1].title, "Test bot", "which is the thread's, not the bot's")
     assert.equal(
@@ -440,10 +440,14 @@ await flow(
         const { x, width } = element.getBoundingClientRect()
         return { x, width }
       }
+      // The last button, not the actions div: the div stretched to its whole track even when the
+      // buttons inside sat at that track's left edge, which is how this row once drew its controls
+      // anywhere but the corner.
+      const actions = row?.lastElementChild.querySelectorAll("button") ?? []
       return {
         row: box(row),
         title: box(row?.querySelector('[data-slot="header-title"]')),
-        actions: box(row?.lastElementChild),
+        actions: box(actions[actions.length - 1]),
       }
     })
     const centre = (rect) => (rect ? rect.x + rect.width / 2 : 0)

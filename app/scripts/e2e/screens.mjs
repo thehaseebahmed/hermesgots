@@ -92,7 +92,8 @@ for (const width of [390, 1024]) {
         await assertOneLine(title, `the session's title at ${look}`)
         await assertOneLine(subtitle.first(), `the session's line at ${look}`)
 
-        // The block and the row share a centre on a phone only: from 768px the actions carry a ring.
+        // Both flanks are a fr share of the row, so the block sits on the row's centre at every
+        // width, and the actions — pinned to their track's end — hold its right edge.
         const geometry = await header.evaluate((el) => {
           const rect = (slot) => {
             const r = el.querySelector(`[data-slot="${slot}"]`).getBoundingClientRect()
@@ -107,6 +108,16 @@ for (const width of [390, 1024]) {
             line: rect("header-line"),
             middle: rect("header-middle"),
             row: rect("header-row"),
+            // The last button, not the actions div: the div stretched to its whole track even when
+            // the buttons inside sat at that track's left edge, which is how this row once drew
+            // its controls anywhere but the corner.
+            actions: (() => {
+              const buttons = el
+                .querySelector('[data-slot="header-row"]')
+                .lastElementChild.querySelectorAll("button")
+              const r = buttons[buttons.length - 1].getBoundingClientRect()
+              return { x: r.x, width: r.width, right: r.right }
+            })(),
           }
         })
         assert.ok(
@@ -132,11 +143,15 @@ for (const width of [390, 1024]) {
           Math.abs(centre(geometry.line) - centre(geometry.title)) <= 2,
           `the session's line is centred under the title at ${look}`,
         )
-        if (width < 768)
-          assert.ok(
-            Math.abs(centre(geometry.title) - centre(geometry.row)) <= 2,
-            `the title is centred on the row at ${look}`,
-          )
+        assert.ok(
+          Math.abs(centre(geometry.title) - centre(geometry.row)) <= 2,
+          `the title is centred on the row at ${look} (${Math.round(centre(geometry.title))} against ${Math.round(centre(geometry.row))})`,
+        )
+        // Whatever the title does — it truncates at both widths above — the actions hold the corner.
+        assert.ok(
+          Math.abs(geometry.actions.right - geometry.row.right) <= 2,
+          `the actions end on the row's right edge at ${look} (${Math.round(geometry.actions.right)} against ${Math.round(geometry.row.right)})`,
+        )
 
         await page.goto(app)
         await send("hello")
