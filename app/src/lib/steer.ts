@@ -32,3 +32,12 @@ export function midReply(
 ): MidReply {
   return steer && running && canSteer(attachments) ? "steer" : "queue"
 }
+
+/** Whether the send asked to steer: its own `/steer` or `/queue`, else the setting, where the reply
+ * takes one. */
+export function steerAsked(
+  chosen: MidReply | undefined,
+  { byDefault, steerable }: { byDefault: boolean; steerable: boolean },
+) {
+  return chosen ? chosen === "steer" : byDefault && steerable
+}

@@ -57,7 +57,7 @@ function composer({ canSteer = true, sent }: { canSteer?: boolean; sent: Sent })
       onStop={() => {}}
       onCommand={() => {}}
       connection={bot}
-      files="yes"
+      filesFeature="yes"
       imagesAvailable
     />
   )

@@ -5,7 +5,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { canSteer, midReply } from "../src/lib/steer.ts"
+import { canSteer, midReply, steerAsked } from "../src/lib/steer.ts"
 
 const note = { id: "f1", name: "notes.txt", type: "text/plain", size: 12, image: false }
 const photo = { id: "f2", name: "cat.png", type: "image/png", size: 12, image: true }
@@ -38,4 +38,14 @@ test("a send that didn't ask to steer queues, whatever it carries", () => {
 test("a reply nothing is running for queues, whatever it carries", () => {
   assert.equal(midReply([], { steer: true, running: false }), "queue")
   assert.equal(midReply([note], { steer: true, running: false }), "queue")
+})
+
+test("a send's own command outranks the setting, and an unsteerable reply only defers a setting", () => {
+  const setting = { byDefault: true, steerable: true }
+  assert.equal(steerAsked("steer", setting), true)
+  assert.equal(steerAsked("steer", { byDefault: false, steerable: false }), true)
+  assert.equal(steerAsked("queue", setting), false)
+  assert.equal(steerAsked(undefined, setting), true)
+  assert.equal(steerAsked(undefined, { byDefault: true, steerable: false }), false)
+  assert.equal(steerAsked(undefined, { byDefault: false, steerable: true }), false)
 })

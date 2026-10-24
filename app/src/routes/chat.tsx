@@ -331,9 +331,7 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
 
   const resolved = { ...DEFAULT_SETTINGS, ...settings }
   const configured = Boolean(profile?.baseUrl.trim())
-  // Files ride the plugin's upload route, so the `+` menu offers them where the host advertises it,
-  // and refuses them there with the reason where it doesn't (or hasn't answered yet).
-  const files = usePluginFeature(profile, "attachments")
+  const filesFeature = usePluginFeature(profile, "attachments")
   const streaming = messages?.find((m) => m.status === "streaming")
   const busy = Boolean(streaming)
   // Queued messages sit faded at the end of the thread until their turn, whichever clock stamped
@@ -1189,7 +1187,7 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
                   : steerText(id, text, attachments)
                 : send(text, attachments)
             }
-            files={files}
+            filesFeature={filesFeature}
             imagesAvailable={profile?.imageInput !== false}
             onStop={() => id && stopMessage(id)}
             main={Boolean(botThreads && isMain)}

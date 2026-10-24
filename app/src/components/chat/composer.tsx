@@ -59,7 +59,7 @@ import {
 } from "@/lib/slash"
 import { isDoubleEscape, isInterrupt } from "@/lib/keys"
 import { useSkills } from "@/lib/skills"
-import { midReply } from "@/lib/steer"
+import { midReply, steerAsked } from "@/lib/steer"
 import { cn, randomId } from "@/lib/utils"
 
 const HOLD_MS = 400
@@ -78,7 +78,7 @@ export function Composer({
   dictationWords,
   model,
   session,
-  files,
+  filesFeature,
   imagesAvailable,
   draftKey,
   onDraft,
@@ -109,8 +109,7 @@ export function Composer({
   model?: ReactNode
   /** A project session: its permission mode, picked in the `+` menu. */
   session?: ModeSettings
-  /** What the bot's host answered about the plugin's `attachments` feature (photos also go inline). */
-  files: PluginFeatureAnswer
+  filesFeature: PluginFeatureAnswer
   /** False when the model doesn't take images. */
   imagesAvailable: boolean
   disabled?: boolean
@@ -198,29 +197,19 @@ export function Composer({
   const dictationSends = useRef(false)
   // A press held past HOLD_MS is push-to-talk: letting go finishes, sliding away cancels.
   const press = useRef<{ x: number; y: number } | null>(null)
-  // `/steer` or `/queue` picks how a message sent mid-reply goes; the setting is the default. A
-  // steer is text, so a message carrying files can be one — their markers are text — and one
-  // carrying a photo can't. An explicit `/steer` asks the host even when the reply looks
-  // unsteerable, and falls back to the queue with a toast. This is the one decision: the button,
-  // the field's placeholder and the line under it all read it.
-  const steerWanted = (text: string) => {
-    const chosen = sendMode(text)
-    const mode = chosen?.mode ?? (steerByDefault ? "steer" : "queue")
-    return mode === "steer" && (Boolean(chosen) || canSteer)
-  }
-  const midRoute = (text: string, carrying: Attachment[]) =>
-    midReply(carrying, { steer: steerWanted(text), running: busy })
-  const steersNow = (text: string, carrying: Attachment[]) =>
-    Boolean(onSteer) && midRoute(text, carrying) === "steer"
+  const midRoute = (raw: string, carrying: Attachment[]) =>
+    midReply(carrying, {
+      steer: steerAsked(sendMode(raw)?.mode, { byDefault: steerByDefault, steerable: canSteer }),
+      running: busy,
+    })
+  const steersNow = (raw: string, carrying: Attachment[]) =>
+    Boolean(onSteer) && midRoute(raw, carrying) === "steer"
 
   const canSend =
     (value.trim().length > 0 || attachments.length > 0) && !disabled && preparing.length === 0
   // What Enter does now, so the button says so.
   const steering = steersNow(value, attachments)
-  // A message that would steer but for a photo says where it goes instead, since the field's
-  // placeholder is gone once it has words in it.
-  const waitsForPhoto =
-    Boolean(onSteer) && busy && steerWanted(value) && midRoute(value, attachments) === "queue"
+  const waitsForPhoto = !steering && steersNow(value, [])
 
   // The menu follows the caret: a `/` that begins a word opens it, wherever in the message it is.
   const token = slashToken(value, caret)
@@ -353,7 +342,7 @@ export function Composer({
   const attach = (
     <AttachMenu
       disabled={disabled}
-      files={files}
+      filesFeature={filesFeature}
       imagesAvailable={imagesAvailable}
       onAdd={(files) => void addFiles(files)}
       session={session}

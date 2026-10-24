@@ -21,7 +21,7 @@ const SOURCES: { id: Source; label: string; icon: LucideIcon }[] = [
 /** The composer's `+` button: photos, clips and files to add to the message, and a session's mode. */
 export function AttachMenu({
   disabled,
-  files,
+  filesFeature,
   imagesAvailable,
   onAdd,
   session,
@@ -29,12 +29,7 @@ export function AttachMenu({
   disabled?: boolean
   /** A project session's permission mode, picked in the same sheet. */
   session?: ModeSettings
-  /**
-   * What the bot's host answered about the plugin's `attachments` feature: Files reach Hermes only
-   * through the plugin's upload route, so they are offered where the host advertises it. An answer
-   * the host never gave is not a no, so it gets the reason that names the plugin itself.
-   */
-  files: PluginFeatureAnswer
+  filesFeature: PluginFeatureAnswer
   /** Camera and Photos send images the model has to read itself. */
   imagesAvailable: boolean
   onAdd: (files: File[]) => void
@@ -67,7 +62,7 @@ export function AttachMenu({
 
   // The mode isn't on screen any more, so one that changes what the agent may do marks the button.
   const flagged = session && session.mode !== "accept_edits"
-  const filesAvailable = files === "yes"
+  const filesAvailable = filesFeature === "yes"
 
   return (
     <>
@@ -123,7 +118,7 @@ export function AttachMenu({
           {!filesAvailable && (
             <div className="px-4 pb-4 sm:px-6">
               <Banner>
-                {files === "no"
+                {filesFeature === "no"
                   ? "File uploads need a newer Gots plugin."
                   : "File uploads need the Gots plugin."}
               </Banner>

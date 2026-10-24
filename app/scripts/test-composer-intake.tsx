@@ -27,7 +27,7 @@ function composer(sent: { text: string; attachments: Attachment[] }[]) {
       onStop={() => {}}
       onCommand={() => {}}
       connection={bot}
-      filesAvailable
+      filesFeature="yes"
       imagesAvailable
     />
   )
