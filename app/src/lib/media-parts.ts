@@ -2,20 +2,23 @@ export type MediaPart =
   { kind: "text"; at: number; text: string } | { kind: "media"; at: number; paths: string[] }
 
 // Every type the plugin's media route answers with a type of its own (its `media.py` content-type
-// map: images, video, audio, text, code and data, the SVG included), then a shorter tail of what the
-// same route still hands over as a generic binary — a tag names a file the host can serve whatever
-// the host calls it. The tag still needs its `MEDIA:` prefix and an absolute or quoted path, so a
-// list this wide can't swallow prose. Where one extension starts another, the longer comes first.
-const MEDIA_EXTS = [
+// map: images, video, audio, text, code and data, the SVG included), so a tag naming one of these
+// is a file the host can serve and the thread can draw. The tag still needs its `MEDIA:` prefix and
+// an absolute or quoted path, so a list this wide can't swallow prose (and where one extension
+// starts another, the longer comes first).
+export const SERVED_EXTS = [
   "jpeg png jpg gif webp bmp svg",
   "mp4 m4v mov webm ogv",
   "mp3 m4a aac wav ogg oga opus flac",
   "markdown md txt log csv tsv html htm css xml json pdf yaml yml toml ini",
   "py rb go rs cc cpp hpp cs java kt swift tsx ts jsx js mjs cjs sh bash zsh sql php lua pl r scala exs ex erl hs clj vue svelte dart zig c h",
-  "zip tar gz docx xlsx pptx epub apk wasm ics vcf srt vtt",
-]
-  .flatMap((group) => group.split(" "))
-  .join("|")
+].flatMap((group) => group.split(" "))
+// The tail the same route still hands over as a generic binary — a tag names a file the host can
+// serve whatever the host calls it — so the grammar takes these as it takes the types above.
+export const BINARY_EXTS = ["zip tar gz docx xlsx pptx epub apk wasm ics vcf srt vtt"].flatMap(
+  (group) => group.split(" "),
+)
+const MEDIA_EXTS = [...SERVED_EXTS, ...BINARY_EXTS].join("|")
 const CJK_TERMINATORS = "（）〈〉《》：，。；！？、“”‘’【】"
 /**
  * The `MEDIA:<path>` tag shape Hermes's own `MEDIA_TAG_CLEANUP_RE` strips for messaging adapters,

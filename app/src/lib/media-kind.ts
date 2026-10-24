@@ -17,8 +17,10 @@ const CELLS: Record<MediaKind, MediaCell> = {
 }
 
 // For a type that names no family — a generic binary, or nothing at all — the extension says it.
-// The image and audio lists mirror the plugin's own served types, so what the host serves by name
-// draws here as the same thing.
+// The image, video and audio lists carry the plugin's own served types, so what the host serves by
+// name draws here as the same thing, plus what a phone or a camera hands over while the route calls
+// it a binary (a HEIC, a TIFF, an ICO): the route serves any suffix, so the thread draws what the
+// device can show and saves the rest.
 const IMAGE_EXTS = new Set([
   "png",
   "jpg",
