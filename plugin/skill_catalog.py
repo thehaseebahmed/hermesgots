@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
@@ -149,13 +150,25 @@ def _load_error(row: Dict[str, Any], name: str, loads: Set[str]) -> Optional[str
     return None
 
 
+@dataclass(frozen=True)
+class Scan:
+    """What every row of one scan is built from beyond its own naming.
+
+    The provenance reader, the profile's disabled names and the host's essential set travel together
+    through the row builders, and each may be missing on a host that answers less: None is that host,
+    and the field it would have filled is left out of the row rather than guessed.
+    """
+
+    origin: Optional[Callable[[str], str]]
+    disabled: Optional[Set[str]]
+    essential: Optional[Any]
+
+
 def _row(
     scanned: Dict[str, Any],
     name: str,
-    origin: Optional[Callable[[str], str]],
+    scan: "Scan",
     load_error: Optional[str],
-    disabled: Optional[Set[str]],
-    essential: Optional[Any],
 ) -> Dict[str, Any]:
     """One row in the shape the app reads, leaving out a field whose host reader is missing.
 
@@ -166,13 +179,13 @@ def _row(
         "name": name,
         "description": scanned.get("description", ""),
         "category": scanned.get("category"),
-        "origin": origin(name) if origin is not None else "yours",
+        "origin": scan.origin(name) if scan.origin is not None else "yours",
     }
-    if disabled is not None:
-        row["enabled"] = not _is_disabled(scanned, name, disabled)
+    if scan.disabled is not None:
+        row["enabled"] = not _is_disabled(scanned, name, scan.disabled)
     row["loadError"] = load_error
-    if essential is not None:
-        row["switchable"] = name not in essential
+    if scan.essential is not None:
+        row["switchable"] = name not in scan.essential
     return row
 
 
@@ -183,9 +196,7 @@ def _is_disabled(scanned: Dict[str, Any], name: str, disabled: Set[str]) -> bool
 def _rows_from_catalog(
     scanned: List[Dict[str, Any]],
     loads: Set[str],
-    origin: Optional[Callable[[str], str]],
-    disabled: Optional[Set[str]],
-    essential: Optional[Any],
+    scan: Scan,
     project: Optional[Any],
 ) -> List[Dict[str, Any]]:
     rows = []
@@ -197,21 +208,16 @@ def _rows_from_catalog(
         name = str(entry.get("load_name") or entry.get("name") or "")
         if not name:
             continue
-        rows.append(_row(entry, name, origin, _load_error(entry, name, loads), disabled, essential))
+        rows.append(_row(entry, name, scan, _load_error(entry, name, loads)))
     return rows
 
 
-def _rows_from_listing(
-    listed: List[Dict[str, Any]],
-    origin: Optional[Callable[[str], str]],
-    disabled: Optional[Set[str]],
-    essential: Optional[Any],
-) -> List[Dict[str, Any]]:
+def _rows_from_listing(listed: List[Dict[str, Any]], scan: Scan) -> List[Dict[str, Any]]:
     rows = []
     for entry in listed:
         name = str(entry.get("name") or "")
         if name:
-            rows.append(_row(entry, name, origin, None, disabled, essential))
+            rows.append(_row(entry, name, scan, None))
     return rows
 
 
@@ -252,9 +258,7 @@ def _plugin_rows(seen: Set[str], disabled: Optional[Set[str]]) -> List[Dict[str,
 def _catalog_rows(
     catalog: Optional[Callable[..., Any]],
     listed: List[Dict[str, Any]],
-    origin: Optional[Callable[[str], str]],
-    disabled: Optional[Set[str]],
-    essential: Optional[Any],
+    scan: Scan,
     project: Optional[Any],
 ) -> Optional[List[Dict[str, Any]]]:
     if catalog is None:
@@ -263,9 +267,7 @@ def _catalog_rows(
         return _rows_from_catalog(
             catalog(skip_disabled=True, include_hidden=True),
             {str(entry.get("name") or "") for entry in listed},
-            origin,
-            disabled,
-            essential,
+            scan,
             project,
         )
     except Exception:
@@ -275,16 +277,18 @@ def _catalog_rows(
 def _scan(
     find: Callable[..., Any], sort: Callable[..., Any], *, single: bool = False
 ) -> List[Dict[str, Any]]:
-    essential = _helper("agent.skill_utils", "ESSENTIAL_SKILLS")
-    project = _helper("agent.skill_utils", "TIER_PROJECT")
     catalog = _helper("tools.skills_tool", "_skill_catalog")
-    disabled = _disabled()
-    origin = _origins()
+    scan = Scan(
+        origin=_origins(),
+        disabled=_disabled(),
+        essential=_helper("agent.skill_utils", "ESSENTIAL_SKILLS"),
+    )
+    project = _helper("agent.skill_utils", "TIER_PROJECT")
     listed = _all(find)
-    rows = _catalog_rows(catalog, listed, origin, disabled, essential, project)
+    rows = _catalog_rows(catalog, listed, scan, project)
     if rows is None:
-        rows = _rows_from_listing(listed, origin, disabled, essential)
-    rows.extend(_plugin_rows({row["name"] for row in rows}, disabled))
+        rows = _rows_from_listing(listed, scan)
+    rows.extend(_plugin_rows({row["name"] for row in rows}, scan.disabled))
     return rows if single else sort(rows)
 
 
@@ -369,7 +373,8 @@ def row_of(rows: List[Dict[str, Any]], name: str) -> Optional[Dict[str, Any]]:
     return next((row for row in rows if row.get("name") == name), None)
 
 
-def _one(profile: Optional[str], name: str) -> Optional[Dict[str, Any]]:
+def row_for(profile: Optional[str], name: str) -> Optional[Dict[str, Any]]:
+    """One skill's row as ``profile``'s own scan shapes it, or None when it hasn't got that skill."""
     from hermes_cli.web_server_profiles import _profile_scope
 
     find, sort = _listing()
@@ -391,7 +396,7 @@ def set_enabled(profile: Optional[str], name: str, enabled: bool) -> Dict[str, A
     before the write already found, so no second scan is made to read back one field.
     """
     hermes = _load(_WRITE, UNAVAILABLE_WRITE)
-    row = _one(profile, name)
+    row = row_for(profile, name)
     if row is None:
         raise SkillError(NOT_FOUND % name, 400)
     if row.get("switchable") is False:
@@ -574,7 +579,7 @@ def remove(profile: Optional[str], name: str) -> List[Dict[str, Any]]:
     delete and another scan — so call it from a worker thread, never the event loop.
     """
     hermes = _load(_REMOVE, UNAVAILABLE_REMOVE)
-    row = _one(profile, name)
+    row = row_for(profile, name)
     if row is None:
         raise SkillError(NOT_FOUND % name, 404)
     origin = row.get("origin")
