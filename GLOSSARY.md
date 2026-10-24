@@ -443,3 +443,25 @@ _Avoid_: fence, code block, snippet
 **Patch**:
 A block that names an earlier interface's id and redraws that interface in its place; it draws nothing of its own.
 _Avoid_: update, diff, override
+
+## Notifications
+
+**Push**:
+A notification a device is sent for something that happened while the app was closed — a session waiting on the user, or news about one.
+_Avoid_: alert, ping, message, notification
+
+**Kind**:
+What a push is about: a question waiting, a pull request merged, a mission ready. It says what happened, never whether the device hears about it.
+_Avoid_: event, event type, reason
+
+**Category**:
+The thing a device switches: one or more kinds that arrive together. It is the only unit a device decides with, and each platform decides where it is switched.
+_Avoid_: notification type, group, topic, preference
+
+**Channel**:
+A category as a phone holds it — one record per category in Android's notification settings, which is where a phone switches that category.
+_Avoid_: topic, group, notification class
+
+**Notification settings**:
+The screen that decides what a device is told about: the app's own list of categories on the web, and the phone's own list of channels in the Android app.
+_Avoid_: notification types, notification preferences, alert settings
