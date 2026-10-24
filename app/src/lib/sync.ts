@@ -27,6 +27,7 @@ import {
   deleteConversation,
   deleteProfile,
   getSettings,
+  promptTombstones,
   saveSettings,
   type Appearance,
   type Conversation,
@@ -467,8 +468,8 @@ async function localPrompts(): Promise<Doc<PromptValue>> {
     const { name, tags, body } = entry
     doc[entry.id] = { at: entry.updatedAt, value: { name, tags, body } }
   }
-  for (const tombstone of await db.tombstones.where("id").startsWith("prompt:").toArray()) {
-    doc[tombstone.id.slice("prompt:".length)] = { at: tombstone.deletedAt, deleted: true }
+  for (const tombstone of await promptTombstones()) {
+    doc[tombstone.entryId] = { at: tombstone.deletedAt, deleted: true }
   }
   return doc
 }
@@ -493,8 +494,8 @@ async function syncPrompts(key: CryptoKey) {
       }
     })
     // A deletion this device pushed lives on in the document; the row itself needn't be named again.
-    for (const tombstone of await db.tombstones.where("id").startsWith("prompt:").toArray()) {
-      if (merged[tombstone.id.slice("prompt:".length)]?.at === tombstone.deletedAt)
+    for (const tombstone of await promptTombstones()) {
+      if (merged[tombstone.entryId]?.at === tombstone.deletedAt)
         await db.tombstones.delete(tombstone.id)
     }
   } catch (error) {
@@ -635,10 +636,6 @@ async function fingerprint() {
   ])
   const bots = profiles.map((p) => `${p.id}@${p.updatedAt}`).join(",")
   const appearance = APPEARANCE_FIELDS.map((field) => `${settings[field] ? 1 : 0}`).join("")
-  // The library is a document of its own, and its own clock says when it moved: an entry saved,
-  // renamed or deleted here bumps `promptsAt`, which is what asks for a sync. Reading the entries —
-  // every body, on every pass this key re-runs for any other device's write — was the cost of
-  // knowing that, and `syncPrompts` reads them anyway when a pass runs.
   return `${bots}|${count}@${newest?.changedAt ?? 0}|${tombstones}|${settings.onboarded}|${appearance}@${settings.appearanceAt ?? 0}|prompts@${settings.promptsAt ?? 0}`
 }
 

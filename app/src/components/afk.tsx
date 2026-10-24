@@ -283,36 +283,28 @@ export function AfkPopup({
   usePoll(readAfk, afk?.on ? AFK_MS : false, [key, projectId], {
     active:
       open &&
-      (switchable === "yes" ||
-        withSkills === "yes" ||
-        libraryOffered ||
-        promptOffered ||
-        picks),
+      (switchable === "yes" || withSkills === "yes" || libraryOffered || promptOffered || picks),
     onShow: false,
   })
 
-  // Taking a task moves it out of the frontier, so the list is read again when AFK's answer names a
-  // hold it didn't hold before — and when it lets one go, which puts it back. Every hold is compared,
-  // since a sweep can fill several places between two reads; not when the frontier already has them
-  // all claimed: that read is the same list, only fresher.
   const holds = afk?.holds ?? (afk?.task ? [afk.task] : [])
-  const held = holds.map((one) => `${one.repo}#${one.number}`).join(",")
-  const listed =
+  const heldKey = holds.map((one) => `${one.repo}#${one.number}`).join(",")
+  const everyHoldAlreadyClaimed =
     holds.length > 0 &&
     holds.every((one) =>
       Boolean(
         tasks?.claimed.some((row) => `${row.repo}#${row.number}` === `${one.repo}#${one.number}`),
       ),
     )
-  const seen = useRef(held)
+  const seen = useRef(heldKey)
   useEffect(() => {
-    if (seen.current === held) return
-    seen.current = held
-    if (listed) return
+    if (seen.current === heldKey) return
+    seen.current = heldKey
+    if (everyHoldAlreadyClaimed) return
     const controller = new AbortController()
     read(controller.signal)
     return () => controller.abort()
-  }, [held, listed, read])
+  }, [heldKey, everyHoldAlreadyClaimed, read])
 
   // Every write shows the host's answer: a write it refused never reads back as done.
   const save = async (write: () => Promise<ProjectAfk>) => {
@@ -326,8 +318,6 @@ export function AfkPopup({
     }
   }
   const turn = (on: boolean) => save(() => setProjectAfk(config, projectId, on))
-  // The count the rows read: the one a write is carrying until its answer lands, then the host's
-  // own. A write that fails or is refused drops the draft, so the count it had is what stays.
   const pickCount = pickDraft ?? afk?.pickCount ?? null
   const choosePicks = async (count: number) => {
     if (count === pickCount || savingPicks) return
@@ -423,11 +413,7 @@ export function AfkPopup({
             {promptOffered && afk && !afkError && (
               <PromptRow
                 prompt={afk.prompt}
-                // Only a copy whose entry now says other words is marked: an original, a deleted
-                // entry and words the user typed are all silent.
-                changed={
-                  promptSourceState(afk.promptId, afk.prompt, promptEntry) === "changed"
-                }
+                changed={promptSourceState(afk.promptId, afk.prompt, promptEntry) === "changed"}
                 pulling={pulling}
                 onPull={() => void pullPrompt()}
                 onOpen={() => setPromptOpen(true)}
@@ -724,7 +710,7 @@ function PromptRow({
           data-afk-prompt-changed
           disabled={pulling}
           onClick={onPull}
-          className="min-h-9 self-start rounded-full px-1 text-left text-sm text-muted-foreground underline underline-offset-4 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+          className="min-h-11 self-start rounded-full px-1 text-left text-sm text-muted-foreground underline underline-offset-4 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
         >
           changed in library
         </button>
@@ -916,17 +902,14 @@ function Working({
   refusal: string | null | undefined
   manyRepos: boolean
 }) {
-  // One list of what it holds, however much the host named: its own rows where it answers a list,
-  // and the one task it answers otherwise, wearing the stage the read carries for it. A row is a
-  // hold only in the first case — that is what `data-hold` marks, and what the count row counts.
   const held = holds && holds.length > 0 ? holds : null
-  const rows: { hold: AfkHold; holdRow: boolean }[] = held
-    ? held.map((hold) => ({ hold, holdRow: true }))
+  const rows: ({ hold: AfkHold; kind: "hold" } | { hold: AfkHold; kind: "task" })[] = held
+    ? held.map((hold) => ({ hold, kind: "hold" as const }))
     : task
       ? [
           {
             hold: { ...task, stage: stage ?? null, stageName: stageName ?? null, stalled: null },
-            holdRow: false,
+            kind: "task" as const,
           },
         ]
       : []
@@ -943,7 +926,7 @@ function Working({
           <h3 className="px-1 pb-1 text-sm text-muted-foreground">Working</h3>
           {/* Only a host that answered a list is counted: one task against a count of one is a
               sentence about nothing. */}
-          {held && pickCount !== null && (
+          {held && typeof pickCount === "number" && (
             <p
               data-holds={held.length}
               data-pick-count={pickCount}
@@ -953,11 +936,11 @@ function Working({
             </p>
           )}
           <ul>
-            {rows.map(({ hold, holdRow }) => (
+            {rows.map(({ hold, kind }) => (
               <li
                 key={`${hold.repo}#${hold.number}`}
-                data-hold={holdRow ? hold.number : undefined}
-                data-stage={holdRow ? (hold.stage ?? undefined) : undefined}
+                data-hold={kind === "hold" ? hold.number : undefined}
+                data-stage={kind === "hold" ? (hold.stage ?? undefined) : undefined}
               >
                 <TaskLink
                   task={hold}

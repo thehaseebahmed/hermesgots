@@ -95,7 +95,7 @@ const run = async ({ page, profileId, shot, until }) => {
   assert.equal(
     await picks.getByRole("radio", { name: "3" }).getAttribute("aria-checked"),
     "true",
-    "the stepper reads the count it wrote",
+    "the pills read the count they wrote",
   )
   const numbers = await working
     .locator("a[data-task]")
@@ -118,9 +118,9 @@ const run = async ({ page, profileId, shot, until }) => {
   )
   await shot("three-holds")
 
-  // What the stepper wrote is the host's own number, and the host holds a task per place.
+  // What the pills wrote is the host's own number, and the host holds a task per place.
   const held = await afkRead(projectId)
-  assert.equal(held.pick_count, 3, "the count the stepper wrote is the host's")
+  assert.equal(held.pick_count, 3, "the count the pills wrote is the host's")
   assert.deepEqual(
     held.holds.map((hold) => hold.number),
     [HELD, SECOND, THIRD],

@@ -3015,8 +3015,6 @@ function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
     on: body.on,
     reason: str(body.reason) || null,
     task: parseIssue(body.task),
-    // A plugin from before the pick count answers no list: the sheet draws the one Working row it
-    // always drew, from `task`.
     holds: parseHolds(body.holds),
     pickCount: parseWhole(body.pick_count),
     // And the bot's own numbers, which a project's read answers so one read draws the sheet: the same
@@ -3133,7 +3131,6 @@ export function setProjectAfkPrompt(
   projectId: string,
   draft: PromptWrite,
 ): Promise<ProjectAfk> {
-  // The wire body is built here, once: the words always, the source only where there is one.
   return writeAfk(config, projectId, {
     prompt: draft.text,
     ...(draft.source && { prompt_id: draft.source }),

@@ -82,10 +82,7 @@ export async function addPrompt(draft: PromptDraft): Promise<PromptEntry> {
 }
 
 /** Edits one entry, keeping its id; undefined where the entry is gone (deleted on another device). */
-export async function savePrompt(
-  id: string,
-  draft: PromptDraft,
-): Promise<PromptEntry | undefined> {
+export async function savePrompt(id: string, draft: PromptDraft): Promise<PromptEntry | undefined> {
   const existing = await db.prompts.get(id)
   if (!existing) return undefined
   const entry: PromptEntry = {
