@@ -78,7 +78,7 @@ The shell's fade stays, but plays at the swap rather than at the navigation.
 | `app/src/lib/threads.ts` | The thread list's three-state answer and the thread-list half of the ready gate |
 | `app/src/lib/greeting.ts` | The ready line, mounted only where a chat is unstarted and ready |
 | `app/src/components/app-shell.tsx` | The pane keys the hold has to survive, and the transition retimed to the swap |
-| `app/src/components/ui/message-scroller.tsx` | The single first scroll, with the content final around it |
+| `app/src/routes/chat.tsx` (`MessageScrollerProvider key={id}`) | The single first scroll, with the content final around it: a chat's scroller is keyed per chat, so the first content frame it places is already the whole of it |
 | `app/scripts/test-*.tsx` | The component test: the frame sequence across a switch, and the untouched greeting keys |
 | `app/scripts/e2e/bot-threads.mjs`, `app/scripts/e2e/cli.mjs` | The frame-sampling steps folded into the bot-threads flow |
 | `docs/e2e-flow-audit.md` | The flow's row, gaining what the new steps assert |
