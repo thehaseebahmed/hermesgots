@@ -188,3 +188,46 @@ test("a host that holds no list keeps the one Working row from its task", async 
     assert.equal(chosen()?.textContent, "3", "the pick count is still there to set")
   })
 })
+
+test("the pop-up says how full the bot's budget is, beside the project's pick count", async () => {
+  globalThis.fetch = afkHost({
+    features: FEATURES,
+    holds: THREE,
+    pickCount: 3,
+    pickBudget: 5,
+    holdsHeld: 3,
+  }).fetch as unknown as typeof fetch
+  await picksOn(async () => {
+    const line = find("[data-afk-budget]")
+    assert.equal(line?.textContent, "Pick budget 3 of 5", "the bot's usage, against its budget")
+    assert.equal(line?.getAttribute("data-afk-budget"), "5", "the budget it counts against")
+    assert.equal(line?.getAttribute("data-holds-held"), "3", "and what the bot holds now")
+    assert.ok(
+      find("[data-afk-picks]")?.contains(line ?? null),
+      "the usage sits in the pick count's own block",
+    )
+    assert.equal(chosen()?.textContent, "3", "with the project's own count beside it")
+  })
+})
+
+test("a bot holding nothing draws its budget at none used", async () => {
+  globalThis.fetch = afkHost({ features: FEATURES, pickCount: 2, pickBudget: 5 })
+    .fetch as unknown as typeof fetch
+  await picksOn(async () => {
+    assert.equal(
+      find("[data-afk-budget]")?.textContent,
+      "Pick budget 0 of 5",
+      "no holds, all five places free",
+    )
+  })
+})
+
+test("a host that answers no budget draws the count and nothing about the budget", async () => {
+  globalThis.fetch = afkHost({ features: FEATURES, holds: THREE.slice(0, 1), pickCount: 2 })
+    .fetch as unknown as typeof fetch
+  await picksOn(async () => {
+    const line = find("[data-afk-budget]")
+    assert.equal(line, null, "no usage line where the host answers no budget")
+    assert.equal(chosen()?.textContent, "2", "the project's own count is still drawn")
+  })
+})

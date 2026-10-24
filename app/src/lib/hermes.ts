@@ -2932,6 +2932,16 @@ export interface ProjectAfk {
   holds: AfkHold[] | null
   /** How many tasks it may hold at once, 1–5; null where the host answers no pick count. */
   pickCount: number | null
+  /**
+   * How many tasks the bot may hold across all of its projects at once, 1–10 — the pick budget it
+   * was given in the bot editor's Coding tab (ADR 0042). Null where the host answers none.
+   */
+  pickBudget: number | null
+  /**
+   * How many tasks that bot holds right now, every project's holds including the stalled ones; the
+   * usage the sheet reads against `pickBudget`. Null where the host answers no count.
+   */
+  holdsHeld: number | null
   /** Why GitHub last refused the sweep. The switch stays on, so this is not `reason`. */
   refusal: string | null
   /** The bot's skill the project picked to build by, when it picked one. */
@@ -2971,9 +2981,9 @@ function parseHolds(value: unknown): AfkHold[] | null {
   return value.map(parseHold).filter((hold): hold is AfkHold => hold !== null)
 }
 
-function parsePickCount(value: unknown): number | null {
-  // Absent where the plugin predates it; a whole number 1–5 is the host's own rule, so a shape this
-  // app can't read is nothing chosen rather than a reason to fail the whole read.
+function parseWhole(value: unknown): number | null {
+  // Absent where the plugin predates the field; a whole number is the host's own rule, so a shape
+  // this app can't read is nothing answered rather than a reason to fail the whole read.
   return typeof value === "number" && Number.isInteger(value) ? value : null
 }
 
@@ -2992,7 +3002,11 @@ function parseAfk(body: Record<string, unknown> | null): ProjectAfk {
     // A plugin from before the pick count answers no list: the sheet draws the one Working row it
     // always drew, from `task`.
     holds: parseHolds(body.holds),
-    pickCount: parsePickCount(body.pick_count),
+    pickCount: parseWhole(body.pick_count),
+    // And the bot's own numbers: answered on the project's read so one read draws the sheet, and
+    // absent from a host that predates the budget.
+    pickBudget: parseWhole(body.pick_budget),
+    holdsHeld: parseWhole(body.holds_held),
     refusal: str(body.refusal) || null,
     buildSkill: str(body.build_skill) || null,
     critiqueSkills: skillNames(body.critique_skills),
@@ -3099,6 +3113,54 @@ export function setProjectAfkPickCount(
   pickCount: number,
 ): Promise<ProjectAfk> {
   return writeAfk(config, projectId, { pick_count: pickCount })
+}
+
+/**
+ * A bot's own AFK numbers — the ones that span its projects rather than sitting on one of them. Its
+ * pick budget is how many tasks it may hold across all of them at once (ADR 0042). Both are read
+ * tolerantly: a host from before the route answers none, which is nothing known rather than a
+ * failure to read.
+ */
+export interface BotAfk {
+  /** How many tasks it may hold across its projects, 1–10; null where the host answers none. */
+  pickBudget: number | null
+  /** How many it holds now, stalled holds included; null where the host answers no count. */
+  holdsHeld: number | null
+}
+
+function botAfkPath(config: HermesConfig) {
+  return `${pluginRoot(config.baseUrl)}/afk`
+}
+
+function parseBotAfk(body: Record<string, unknown> | null): BotAfk {
+  return {
+    pickBudget: parseWhole(body?.pick_budget),
+    holdsHeld: parseWhole(body?.holds_held),
+  }
+}
+
+/** A bot's own AFK numbers, read from its host: its pick budget and how many tasks it holds now. */
+export async function getBotAfk(config: HermesConfig, signal?: AbortSignal): Promise<BotAfk> {
+  const response = await request(botAfkPath(config), { headers: headers(config), signal })
+  return parseBotAfk((await response.json()) as Record<string, unknown> | null)
+}
+
+/**
+ * How many tasks a bot may hold across its projects at once, 1–10, on its host: one write of its own
+ * through the bot-level route, since a bot has no project to name. A count out of range is refused
+ * there and nothing is written, so the answer is the budget the bot still holds.
+ */
+export async function setBotAfkPickBudget(
+  config: HermesConfig,
+  pickBudget: number,
+): Promise<BotAfk> {
+  const response = await request(botAfkPath(config), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ pick_budget: pickBudget }),
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+  return parseBotAfk((await response.json()) as Record<string, unknown> | null)
 }
 
 function workflowPath(config: HermesConfig, rest = ""): string {

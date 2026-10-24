@@ -94,9 +94,10 @@ export const AFK_PROMPT_FEATURE = "afk_prompt"
 
 /**
  * And the one it advertises when a project may hold several tasks at once and a project's Prompt can
- * draw on the account's library of them: its pick count, the list of what it holds, and the library
- * behind the Prompt row. A plugin from before it holds one task, answers no count and has no
- * library, so nothing of this is drawn there and the pop-up is the one it always was.
+ * draw on the account's library of them: its pick count, the list of what it holds, the bot's usage
+ * against its pick budget, and the library behind the Prompt row. A plugin from before it holds one
+ * task, answers no count and has no library, so nothing of this is drawn there and the pop-up is the
+ * one it always was.
  */
 export const AFK_PICKS_FEATURE = "afk_picks"
 
@@ -398,10 +399,13 @@ export function AfkPopup({
               <PromptRow prompt={afk.prompt} onOpen={() => setPromptOpen(true)} />
             )}
             {/* Under the switch, and at the foot of its list where a Prompt row takes the place
-                right under it: how many tasks this project may hold at once. */}
-            {picksDrawn && afk && !afkError && pickCount !== null && (
+                right under it: how many tasks this project may hold at once, and how full its
+                bot's own budget is beside it. */}
+            {picksDrawn && afk && !afkError && (pickCount !== null || afk.pickBudget !== null) && (
               <PickCountRow
                 count={pickCount}
+                budget={afk.pickBudget}
+                used={afk.holdsHeld ?? 0}
                 saving={savingPicks}
                 onChange={(count) => void choosePicks(count)}
               />
@@ -588,30 +592,57 @@ function WorkflowRow({ workflow, onOpen }: { workflow: WorkflowEntry | null; onO
 
 /**
  * How many tasks this project's switch may hold at once — its pick count, one to five — kept on the
- * project's host. The pills are the app's control for a short choice, which is exactly a count of
- * one to five; nothing is written for the count the row already holds, and the row keeps what it has
- * until the host's answer lands, so a write the host refused leaves the count it had on screen.
+ * project's host, and beside it how full its bot's pick budget is: the same number's ceiling over
+ * every project the bot serves (ADR 0042), used against what it holds now. The pills are the app's
+ * control for a short choice, which is exactly a count of one to five; nothing is written for the
+ * count the row already holds, and the row keeps what it has until the host's answer lands, so a
+ * write the host refused leaves the count it had on screen. The budget line is the host's answer
+ * only: a project on a host from before it draws the count and nothing else.
  */
 function PickCountRow({
   count,
+  budget,
+  used,
   saving,
   onChange,
 }: {
-  count: number
+  /** The project's own count; null where the host answers no count, leaving the budget line alone. */
+  count: number | null
+  /** The bot's pick budget, 1–10; null where the host answers none. */
+  budget: number | null
+  /** How many tasks the bot holds now, across its projects. */
+  used: number
   /** A write is on its way: the pills are out of reach until its answer lands. */
   saving: boolean
   onChange: (count: number) => void
 }) {
   return (
-    <div className="flex flex-col gap-2 px-1 pt-2" data-afk-picks data-pick-count={count}>
-      <h3 className="pb-1 text-sm text-muted-foreground">Pick count</h3>
-      <Segmented
-        label="Pick count"
-        options={PICK_COUNTS.map((each) => ({ id: each, label: String(each) }))}
-        value={count}
-        onChange={onChange}
-        disabled={saving}
-      />
+    <div
+      className="flex flex-col gap-2 px-1 pt-2"
+      data-afk-picks
+      data-pick-count={count ?? undefined}
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+        <h3 className="pb-1 text-sm text-muted-foreground">Pick count</h3>
+        {budget !== null && (
+          <p
+            data-afk-budget={budget}
+            data-holds-held={used}
+            className="pb-1 text-sm text-muted-foreground"
+          >
+            {`Pick budget ${used} of ${budget}`}
+          </p>
+        )}
+      </div>
+      {count !== null && (
+        <Segmented
+          label="Pick count"
+          options={PICK_COUNTS.map((each) => ({ id: each, label: String(each) }))}
+          value={count}
+          onChange={onChange}
+          disabled={saving}
+        />
+      )}
     </div>
   )
 }
