@@ -9,7 +9,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { db } from "@/lib/db"
-import { loadMediaImage } from "@/lib/media-tags"
+import { loadMediaFile } from "@/lib/media-tags"
 
 import { botProfile, json } from "./component-kit.tsx"
 
@@ -52,26 +52,30 @@ async function seed(name: string) {
 test("an image draws where the host advertises media", async () => {
   await seed("media-advertised")
   const asked = host("media-advertised", ["attachments", "media"])
-  assert.ok(await loadMediaImage(CHAT, "a.png"), "the image is read")
+  assert.ok(await loadMediaFile(CHAT, "a.png"), "the image is read")
   assert.equal(askedFor(asked, "/media?path="), 1, "from the plugin's media route")
 })
 
 test("a host that was away is asked again, not remembered as a no", async () => {
   await seed("media-away")
   const asked = host("media-away", "away")
-  assert.equal(await loadMediaImage(CHAT, "a.png"), null, "a host that didn't answer draws nothing")
+  assert.equal(
+    await loadMediaFile(CHAT, "a.png"),
+    null,
+    "a host that didn't answer draws nothing",
+  )
   const askedWhileAway = askedFor(asked, "/plugins/memento/info")
   assert.ok(askedWhileAway > 0, "it was asked")
   host("media-away", ["media"], asked)
-  assert.ok(await loadMediaImage(CHAT, "a.png"), "the real answer draws the image")
+  assert.ok(await loadMediaFile(CHAT, "a.png"), "the real answer draws the image")
   assert.ok(askedFor(asked, "/plugins/memento/info") > askedWhileAway, "which took a second ask")
 })
 
 test("a plugin that answered without the media route is left alone", async () => {
   await seed("media-none")
   const asked = host("media-none", ["attachments"])
-  assert.equal(await loadMediaImage(CHAT, "a.png"), null, "nothing draws")
-  assert.equal(await loadMediaImage(CHAT, "b.png"), null, "still nothing draws")
+  assert.equal(await loadMediaFile(CHAT, "a.png"), null, "nothing draws")
+  assert.equal(await loadMediaFile(CHAT, "b.png"), null, "still nothing draws")
   assert.equal(askedFor(asked, "/plugins/memento/info"), 1, "the answer is remembered")
   assert.equal(askedFor(asked, "/media?path="), 0, "and the route it lacks isn't asked")
 })

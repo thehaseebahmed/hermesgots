@@ -1,40 +1,28 @@
 import { useEffect, useState } from "react"
 import { PlayIcon } from "lucide-react"
 
+import { AttachmentTile, MediaName } from "@/components/chat/attachments"
 import { Skeleton } from "@/components/ui/skeleton"
-import type { MediaKind } from "@/lib/media-kind"
-import { formatBytes } from "@/lib/attachment-caps"
+import type { MediaCell, MediaKind } from "@/lib/media-kind"
 import { useImageReady } from "@/lib/image"
 import { openMediaViewer } from "@/lib/native"
 import { cn } from "@/lib/utils"
 
 // Every cell in the Gallery takes this box — a photo, and a clip's first frame — so nothing moves
 // as media arrives. A reply's single image has always taken it, and still does.
-export const CELL = "h-24 w-full rounded-xl border md:h-32 xl:h-40"
+const CELL = "h-24 w-full rounded-xl border md:h-32 xl:h-40"
 
 /**
- * A file's name over its size, drawn once: a thread's row and a staged tile read alike, and a
- * restored message keeps its size, so its row reads as the one that sent it did.
- */
-export function MediaName({ name, size }: { name: string; size?: number }) {
-  return (
-    <span className="flex min-w-0 flex-col">
-      <span className="line-clamp-1 break-all">{name}</span>
-      {size ? (
-        <span className="text-xs text-muted-foreground tabular-nums">{formatBytes(size)}</span>
-      ) : null}
-    </span>
-  )
-}
-
-/**
- * One piece of media in a thread, as a Gallery cell or a row of its own: what it is, and where the
- * bytes are if they're in. A tap hands it to the platform's viewer or player — nothing plays here.
+ * One piece of media in a thread, as a Gallery cell, a row of its own, or a row that saves it: what
+ * it is, where it draws, and where the bytes are if they're in. A tap, for a cell or a row of its
+ * own, hands it to the platform's viewer or player — nothing plays here.
  */
 export interface MediaItem {
-  /** Stable where the item came from: an attachment's id, or a tag's path. */
+  /** Stable where the item came from: an attachment's id, or the index a tag was written at. */
   key: string
   kind: MediaKind
+  /** Where it draws — worked out once, where the item is made, from what it is. */
+  cell: MediaCell
   name: string
   /** The file's own type, which is what the platform is asked to open. */
   type: string
@@ -123,7 +111,9 @@ function useFirstFrame(src: string | undefined, type: string) {
 }
 
 function open(item: MediaItem) {
-  if (item.src) void openMediaViewer(item.src, { type: item.type, name: item.name })
+  // A markdown image has no name of its own, and the platform's viewer names the file it is handed
+  // itself when there is none.
+  if (item.src) void openMediaViewer(item.src, { type: item.type, name: item.name || undefined })
 }
 
 /** A photo in its cell, holding the box with a skeleton until its bytes are drawn. */
@@ -149,7 +139,7 @@ function Picture({ src, alt }: { src?: string; alt: string }) {
 }
 
 /** One cell: a photo, or the first frame of a clip with the mark that it is one. */
-function Cell({ item }: { item: MediaItem }) {
+export function Cell({ item }: { item: MediaItem }) {
   const clip = item.kind === "video"
   const { frame, settled } = useFirstFrame(clip ? item.src : undefined, item.type ?? "")
   return (
@@ -190,7 +180,7 @@ function Cell({ item }: { item: MediaItem }) {
  * The Gallery: a message's images and clips side by side, one cell each, whatever device the
  * message is read on. Nothing is embedded — a cell is a picture and a tap.
  */
-export function MediaGallery({
+function MediaGallery({
   items,
   align = "start",
 }: {
@@ -225,7 +215,7 @@ export function MediaGallery({
  * A recording in the thread: a row of its own, never a cell in the Gallery, and a tap hands it to
  * the platform's player.
  */
-export function AudioRow({ item }: { item: MediaItem }) {
+function AudioRow({ item }: { item: MediaItem }) {
   return (
     <button
       type="button"
@@ -240,5 +230,59 @@ export function AudioRow({ item }: { item: MediaItem }) {
       </span>
       <MediaName name={item.name} size={item.size} />
     </button>
+  )
+}
+
+/**
+ * A thread's media drawn in one place, wherever it came from: the images and clips in one Gallery,
+ * each recording a row of its own, and every other file a row that saves it. What the user sent and
+ * what an agent returned read alike, and a reply's tags read the same way.
+ */
+export function MediaItems({
+  items,
+  align = "start",
+  onDownload,
+}: {
+  items: MediaItem[]
+  /** Which edge the cells and rows hug, as the Gallery takes it. */
+  align?: "start" | "end"
+  /** Saves a file's row under its own name. */
+  onDownload: (item: MediaItem) => void
+}) {
+  const cells = items.filter((item) => item.cell === "gallery")
+  const recordings = items.filter((item) => item.cell === "audio")
+  const files = items.filter((item) => item.cell === "file")
+  return (
+    <>
+      <MediaGallery items={cells} align={align} />
+      {recordings.map((item) => (
+        <AudioRow key={item.key} item={item} />
+      ))}
+      {files.length > 0 && (
+        <div
+          className={cn(
+            "flex max-w-full flex-wrap gap-2",
+            align === "end" ? "justify-end" : "justify-start",
+          )}
+        >
+          {files.map((item) => (
+            <AttachmentTile
+              key={item.key}
+              // A file's row is named and sized from what the message kept; its bytes, if this
+              // device holds them, are the tap's own business.
+              attachment={{
+                id: item.key,
+                name: item.name,
+                type: item.type,
+                size: item.size ?? 0,
+                image: false,
+              }}
+              action="download"
+              onOpen={() => onDownload(item)}
+            />
+          ))}
+        </div>
+      )}
+    </>
   )
 }

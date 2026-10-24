@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import type { Attachment } from "@/lib/db"
-import { loadMediaImage } from "@/lib/media-tags"
+import { loadMediaFile } from "@/lib/media-tags"
 
 /**
  * One piece of media the thread draws: where its bytes are, and — once they are in — where the
@@ -17,17 +17,33 @@ export interface MediaSource {
   local?: string
 }
 
+/** What the host answered for a path: where the thread reads it, and what it is. */
+export interface MediaRead {
+  url: string
+  /** The type the route served; a tag asks what its file is, and a path alone can't say. */
+  type?: string
+  /** Its size, where the route said — a message that sent the file keeps its own. */
+  size?: number
+}
+
 /**
  * What each source draws from: this device's own copy, else what the host answered — null where it
  * can't be read at all, undefined while the read is still out. A source that starts with nothing to
  * read answers null at once, so a caller can draw it some other way rather than waiting.
  */
-export type MediaSources = ReadonlyMap<string, string | null | undefined>
+export type MediaSources = ReadonlyMap<string, MediaRead | null | undefined>
 
 export function useMediaSources(conversationId: string, sources: MediaSource[]): MediaSources {
-  const [host, setHost] = useState<MediaSources>(new Map())
-  // The list is rebuilt on every render, so the read is keyed by what it would ask for — the paths,
-  // which a filesystem path never holds a line break in.
+  const [host, setHost] = useState<ReadonlyMap<string, MediaRead | null>>(new Map())
+  // A reply streams a chunk at a time, so this list is rebuilt on every render. What has already
+  // been answered stays answered, and only what arrived since is asked for: otherwise a tag's cell
+  // would go back to the route for every token the reply lands.
+  const answered = useRef<{ chat: string; paths: Set<string> }>({
+    chat: conversationId,
+    paths: new Set(),
+  })
+  // Keyed by what the read would ask for — the paths, which a filesystem path never holds a line
+  // break in.
   const joined = [
     ...new Set(
       sources
@@ -36,12 +52,17 @@ export function useMediaSources(conversationId: string, sources: MediaSource[]):
     ),
   ].join("\n")
   useEffect(() => {
-    const paths = joined ? joined.split("\n") : []
+    if (answered.current.chat !== conversationId)
+      answered.current = { chat: conversationId, paths: new Set() }
+    const asked = answered.current.paths
+    const paths = (joined ? joined.split("\n") : []).filter((path) => !asked.has(path))
     if (!paths.length) return
     let stale = false
-    // One read per file, shared across the thread: a reply streaming in re-renders constantly.
-    void Promise.all(paths.map((path) => loadMediaImage(conversationId, path))).then((read) => {
+    // One read per file, shared across the thread: the route's own cache has the bytes of a path it
+    // has already served, so a group of tags costs one read each however often the thread redraws.
+    void Promise.all(paths.map((path) => loadMediaFile(conversationId, path))).then((read) => {
       if (stale) return
+      for (const path of paths) asked.add(path)
       setHost((current) => {
         const next = new Map(current)
         paths.forEach((path, i) => next.set(path, read[i]))
@@ -53,9 +74,12 @@ export function useMediaSources(conversationId: string, sources: MediaSource[]):
     }
   }, [conversationId, joined])
 
-  const resolved = new Map<string, string | null | undefined>()
+  const resolved = new Map<string, MediaRead | null | undefined>()
   for (const source of sources)
-    resolved.set(source.key, source.local ?? (source.path ? host.get(source.path) : null))
+    resolved.set(
+      source.key,
+      source.local ? { url: source.local } : source.path ? host.get(source.path) : null,
+    )
   return resolved
 }
 

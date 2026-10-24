@@ -72,8 +72,3 @@ export async function loadMediaFile(
   unsupported.clear(key)
   return getMediaFile(profile, path)
 }
-
-/** The image behind a chat's tag, as an object URL, or null when its bot can't serve it. */
-export async function loadMediaImage(conversationId: string, path: string): Promise<string | null> {
-  return (await loadMediaFile(conversationId, path))?.url ?? null
-}

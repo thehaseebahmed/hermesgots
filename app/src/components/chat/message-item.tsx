@@ -10,8 +10,7 @@ import {
 import { toast } from "sonner"
 
 import { ApprovalCard } from "@/components/chat/approval-card"
-import { AttachmentTile } from "@/components/chat/attachments"
-import { AudioRow, MediaGallery, type MediaItem } from "@/components/chat/media-gallery"
+import { MediaItems, type MediaItem } from "@/components/chat/media-gallery"
 import { Markdown } from "@/components/chat/markdown"
 import { AgentCards, SubagentResultCard } from "@/components/chat/agent-card"
 import { MediaTag } from "@/components/chat/media-image"
@@ -30,7 +29,7 @@ import { removeQueued, sendQueued } from "@/lib/chat"
 import type { Attachment, Message, ToolEvent } from "@/lib/db"
 import { describeActivity, formatDuration } from "@/lib/format"
 import { COLUMN } from "@/lib/layout"
-import { mediaCell, mediaKind } from "@/lib/media-kind"
+import { mediaCell, mediaKind, type MediaCell } from "@/lib/media-kind"
 import { attachmentSources, useMediaSources } from "@/lib/media-source"
 import { mediaImages } from "@/lib/media-tags"
 import { openuiParts, REPLY_INSET } from "@/lib/openui-block.ts"
@@ -246,43 +245,40 @@ function SentAttachments({
   )
   const sources = useMediaSources(conversationId, attachmentSources(media, attachmentUrl))
   const source = (attachment: Attachment) => sources.get(attachment.id)
-  const cell = (attachment: Attachment) => mediaCell(attachment.type, attachment.name)
-  const item = (attachment: Attachment): MediaItem => ({
-    key: attachment.id,
-    kind: mediaKind(attachment.type, attachment.name),
-    name: attachment.name,
-    type: attachment.type,
-    size: attachment.size,
-    src: source(attachment) ?? undefined,
-  })
   // A media file whose bytes can't be read anywhere is drawn as the file it is, so a tap still
   // saves it.
   const files = [
-    ...attachments.filter((attachment) => cell(attachment) === "file"),
+    ...attachments.filter((attachment) => mediaCell(attachment.type, attachment.name) === "file"),
     ...media.filter((attachment) => source(attachment) === null),
   ]
   const drawn = media.filter((attachment) => source(attachment) !== null)
-  const download = (attachment: Attachment) => void downloadAttachment(conversationId, attachment)
+  const item = (attachment: Attachment, cell: MediaCell): MediaItem => ({
+    key: attachment.id,
+    kind: mediaKind(attachment.type, attachment.name),
+    cell,
+    name: attachment.name,
+    type: attachment.type,
+    size: attachment.size,
+    src: source(attachment)?.url,
+  })
+  // A row's tap saves the file the message carries, wherever its bytes are: this device's own copy
+  // first, else the host's.
+  const download = (one: MediaItem) => {
+    const attachment = attachments.find((it) => it.id === one.key)
+    if (attachment) void downloadAttachment(conversationId, attachment)
+  }
   return (
     <div className={cn("flex w-full max-w-full flex-col items-end gap-2", dim && "opacity-60")}>
-      <MediaGallery items={drawn.filter((a) => cell(a) === "gallery").map(item)} align="end" />
-      {drawn
-        .filter((attachment) => cell(attachment) === "audio")
-        .map((attachment) => (
-          <AudioRow key={attachment.id} item={item(attachment)} />
-        ))}
-      {files.length > 0 && (
-        <div className="flex max-w-full flex-wrap justify-end gap-2">
-          {files.map((attachment) => (
-            <AttachmentTile
-              key={attachment.id}
-              attachment={attachment}
-              action="download"
-              onOpen={() => download(attachment)}
-            />
-          ))}
-        </div>
-      )}
+      <MediaItems
+        items={[
+          ...drawn.map((attachment) =>
+            item(attachment, mediaCell(attachment.type, attachment.name)),
+          ),
+          ...files.map((attachment) => item(attachment, "file")),
+        ]}
+        align="end"
+        onDownload={download}
+      />
     </div>
   )
 }

@@ -10,7 +10,6 @@ import {
   XIcon,
 } from "lucide-react"
 
-import { MediaName } from "@/components/chat/media-gallery"
 import { FullscreenPopup, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -27,10 +26,24 @@ import { cn } from "@/lib/utils"
 const VIEWABLE = /^(image\/|text\/|application\/(pdf|json)$)/
 
 /**
- * A photo as a thumbnail, or a file (and a photo another device sent, which Hermes doesn't give
- * back) as its name and size. With `onRemove`, a button takes it off the message; with `onOpen`,
- * tapping it opens it — or, for a file this device doesn't hold, downloads it. `preparing` is a
- * photo still being scaled down.
+ * A file's name over its size, drawn once: a staged tile, a thread's row that saves it, and the
+ * Gallery's recording row all read alike, so a message reads the same wherever it draws.
+ */
+export function MediaName({ name, size }: { name: string; size?: number }) {
+  return (
+    <span className="flex min-w-0 flex-col">
+      <span className="line-clamp-1 break-all">{name}</span>
+      {size ? (
+        <span className="text-xs text-muted-foreground tabular-nums">{formatBytes(size)}</span>
+      ) : null}
+    </span>
+  )
+}
+
+/**
+ * A photo as a thumbnail, or a file as its name and size. With `onRemove`, a button takes it off the
+ * message; with `onOpen`, a tap opens it here, or saves it under its own name where `action` says a
+ * tap saves. `preparing` is a photo still being scaled down.
  */
 export function AttachmentTile({
   attachment,

@@ -1,39 +1,24 @@
-import { useEffect, useState } from "react"
-
-import { AttachmentTile } from "@/components/chat/attachments"
-import { AudioRow, CELL, MediaGallery, type MediaItem } from "@/components/chat/media-gallery"
-import { Skeleton } from "@/components/ui/skeleton"
+import { Cell, MediaItems, type MediaItem } from "@/components/chat/media-gallery"
 import { downloadAttachment } from "@/lib/attachments"
-import type { Attachment } from "@/lib/db"
-import { useImageReady } from "@/lib/image"
-import { fileNameOf, mediaCell, mediaKind, type MediaCell } from "@/lib/media-kind"
-import { loadMediaFile, type MediaFile } from "@/lib/media-tags"
-import { openImageViewer } from "@/lib/native"
-import { cn } from "@/lib/utils"
+import { fileNameOf, mediaCell, mediaKind } from "@/lib/media-kind"
+import { useMediaSources } from "@/lib/media-source"
 
-/** An image in a reply; tapping it opens the larger view. */
+/**
+ * An image in a reply: the Gallery's own cell, so a reply's image and a message's read alike, and a
+ * tap opens the larger view.
+ */
 export function MediaImage({ src, alt }: { src: string; alt?: string }) {
-  // The image reserves its place through the skeleton, and the real one loads behind it: `src` is
-  // already set, so an <img> that isn't displayed yet still fetches, decodes and fires `load`.
-  const { ready, onLoad, onError } = useImageReady(src)
   return (
-    <button
-      type="button"
-      onClick={() => void openImageViewer(src)}
-      aria-label={alt || "Open image"}
-      aria-busy={!ready || undefined}
-      className={cn(CELL, "relative block cursor-pointer overflow-hidden bg-muted/40")}
-    >
-      {!ready && <Skeleton className="absolute inset-0 rounded-xl" />}
-      <img
-        src={src}
-        alt={alt ?? ""}
-        onLoad={onLoad}
-        onError={onError}
-        className={cn("h-full w-full object-cover", !ready && "invisible")}
-        draggable={false}
-      />
-    </button>
+    <Cell
+      item={{
+        key: src,
+        kind: "image",
+        cell: "gallery",
+        name: alt || "image",
+        type: "image/*",
+        src,
+      }}
+    />
   )
 }
 
@@ -46,97 +31,61 @@ function Tag({ path }: { path: string }) {
   )
 }
 
-/** One tag, once the host has answered for it — or not yet, or not at all. */
-interface Tagged {
-  /** This tag's place in its part: the same path may be named twice. */
-  key: string
-  path: string
-  name: string
-  /** The file the host answered with: `undefined` while it is still being read, `null` if it can't. */
-  file?: MediaFile | null
-  cell: MediaCell
-  item: MediaItem
-}
-
 /**
  * The media behind a reply's `MEDIA:<path>` tags, drawn through the thread's own cells: the images
  * and clips take one Gallery — a group of tags sent together is one Gallery, its cells in the order
- * they were written — each recording a row of its own, and every other file a row that downloads it,
+ * they were written — each recording a row of its own, and every other file a row that saves it,
  * drawn in that order, and any tag the host can't answer last, as the text it came from. What each
- * file is comes from what the host answered, read through `mediaCell`, so a reply reads exactly like
- * a message the user sent. A tag still being read holds its place — a cell where its extension says
- * media, a row for the rest.
+ * file is comes from what the host answered, so a reply reads exactly like a message the user sent.
+ * A tag still being read holds its place — a cell where its extension says media, a row for the rest
+ * — and a row's tap saves the file as soon as the shared read has it.
  */
 export function MediaTag({ conversationId, paths }: { conversationId: string; paths: string[] }) {
-  // The list's identity moves on every render (it comes from splitting a streaming reply), so the
-  // join keys the read below.
-  const joined = paths.join("\n")
-  const list = joined.split("\n")
-  // By path, so a reply that grows while it streams keeps the files it has; `null` is one the host
-  // couldn't answer, and no entry at all is one still being read.
-  const [read, setRead] = useState<Map<string, MediaFile | null>>(new Map())
-  useEffect(() => {
-    let stale = false
-    const asked = joined.split("\n")
-    void Promise.all(asked.map((path) => loadMediaFile(conversationId, path))).then((answers) => {
-      if (!stale) setRead(new Map(asked.map((path, i) => [path, answers[i]])))
-    })
-    return () => {
-      stale = true
-    }
-  }, [conversationId, joined])
-
-  const tagged: Tagged[] = list.map((path, at) => {
-    const file = read.get(path)
-    const name = fileNameOf(path)
+  // The same path may be named twice, so a tag is keyed by where it was written; the read behind it
+  // is by path, shared across the thread.
+  const tagged = paths.map((path, at) => ({ key: `${at}:${path}`, path, name: fileNameOf(path) }))
+  const sources = useMediaSources(
+    conversationId,
+    tagged.map((tag) => ({ key: tag.key, path: tag.path })),
+  )
+  const items = tagged.map((tag) => {
+    const read = sources.get(tag.key)
     return {
-      key: `${at}:${path}`,
-      path,
-      name,
-      file,
-      cell: mediaCell(file?.type ?? "", path),
+      tag,
+      read,
       item: {
-        key: `${at}:${path}`,
-        kind: mediaKind(file?.type, path),
-        name,
-        type: file?.type ?? "",
-        size: file?.size,
-        src: file?.url,
-      },
+        key: tag.key,
+        kind: mediaKind(read?.type, tag.path),
+        cell: mediaCell(read?.type, tag.path),
+        name: tag.name,
+        type: read?.type ?? "",
+        size: read?.size,
+        src: read?.url,
+      } satisfies MediaItem,
     }
   })
-  // The file as the row that downloads it draws it: saved under the name the tag gave.
-  const asAttachment = (tag: Tagged): Attachment => ({
-    id: tag.path,
-    name: tag.name,
-    type: tag.file?.type ?? "",
-    size: tag.file?.size ?? 0,
-    image: false,
-    path: tag.path,
-  })
-  const download = (tag: Tagged) => void downloadAttachment(conversationId, asAttachment(tag))
-  const drawn = tagged.filter((tag) => tag.file !== null)
-  const unread = tagged.filter((tag) => tag.file === null)
+  const byKey = new Map(tagged.map((tag) => [tag.key, tag]))
+  // The file as the row that saves it draws it: saved under the name the tag gave, from the path
+  // the host holds it at.
+  const download = (item: MediaItem) => {
+    const tag = byKey.get(item.key)
+    if (!tag) return
+    void downloadAttachment(conversationId, {
+      id: tag.path,
+      name: tag.name,
+      type: item.type,
+      size: item.size ?? 0,
+      image: false,
+      path: tag.path,
+    })
+  }
+  const drawn = items.filter((one) => one.read !== null)
+  const unread = items.filter((one) => one.read === null)
   return (
     <div className="flex w-full max-w-[min(100%,42rem)] flex-col items-start gap-2">
-      <MediaGallery items={drawn.filter((tag) => tag.cell === "gallery").map((tag) => tag.item)} />
-      {drawn
-        .filter((tag) => tag.cell === "audio")
-        .map((tag) => (
-          <AudioRow key={tag.key} item={tag.item} />
-        ))}
-      {drawn
-        .filter((tag) => tag.cell === "file")
-        .map((tag) => (
-          <AttachmentTile
-            key={tag.key}
-            attachment={asAttachment(tag)}
-            action="download"
-            onOpen={tag.file ? () => download(tag) : undefined}
-          />
-        ))}
-      {unread.map((tag) => (
-        <Tag key={tag.key} path={tag.path} />
+      <MediaItems items={drawn.map((one) => one.item)} align="start" onDownload={download} />
+      {unread.map((one) => (
+        <Tag key={one.item.key} path={one.tag.path} />
       ))}
     </div>
   )
