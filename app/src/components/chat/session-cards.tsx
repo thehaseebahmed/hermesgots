@@ -22,7 +22,7 @@ import { COLUMN_BOX } from "@/lib/layout"
  * The width rule every card the app draws inside a chat shares: the reading column's own
  * COLUMN_BOX — full width of its container until that box arrives, then centred inside it — so a
  * card fills a narrow chat and stops at the measure the text sits in on a wide one, never passing
- * it (ADR 0046). The ring stays off: every one of them was drawn without one.
+ * it (ADR 0047). The ring stays off: every one of them was drawn without one.
  */
 export const CARD_BASE = `${COLUMN_BOX} rounded-3xl border ring-0`
 

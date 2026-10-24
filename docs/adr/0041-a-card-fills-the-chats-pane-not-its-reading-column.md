@@ -1,9 +1,9 @@
 # A card fills the chat's pane, not its reading column
 
-**Superseded in its width rule by [ADR 0046](0046-a-card-stops-at-the-chats-reading-column-not-its-pane.md)
+**Superseded in its width rule by [ADR 0047](0047-a-card-stops-at-the-chats-reading-column-not-its-pane.md)
 (2026-10-24):** a card never passes the reading column's 768px box and centres inside it on a wide
 pane. Everything else this ADR decided — the pane as the container, the column as the box's own
-736px of text, the gutter on the container — stands; 0046 reverses only the width a card takes.
+736px of text, the gutter on the container — stands; 0047 reverses only the width a card takes.
 
 Gots draws a chat in a centred 768px reading column, and its own cards were drawn inside that column — the subagent's card and the answered question card capped narrower still at 448px — so on a tablet or a desktop the panels the app asks a user to read and answer sat small in a wide pane, and one thread could show three card widths at once. We decided that every card the app draws inside a chat fills the chat's pane, keeping the thread's own 16px gutter, while message text and the composer keep the reading column: prose keeps its measure, the panels around it use the screen. It is a no-op below about 800px, where the pane and the column coincide, so a phone is untouched.
 

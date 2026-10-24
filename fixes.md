@@ -1832,7 +1832,7 @@ introduced is applied on it: the 768px box shared as `COLUMN_BOX` beside the col
 `CARD_BASE` behind every card's surface (the approval's ring included), the footer's lines as the
 list that decides whether the footer is drawn, the slot's dead wrappers gone and the slot named for
 the slot, the flow's three widths in one walk — 1440px now asserting the card stops dead at the
-768px cap the reading column's box carries (ADR 0046) — the comment cuts, the e2e skill's pane
+768px cap the reading column's box carries (ADR 0047) — the comment cuts, the e2e skill's pane
 arithmetic corrected against what the flow
 measures, the `FLAT_CARD` rename the `ThreadCard` collision needed, `layout.ts`'s row in AGENTS.md's
 map, and the ADR, spec and audit worded to what was built. The entry below is what remains; the

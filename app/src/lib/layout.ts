@@ -2,7 +2,7 @@
  * The reading column a chat's non-card parts carry: the 768px box's own 736px of text, centred
  * in the pane whose 16px gutters sit outside it, so text lands on the same pixels at every width.
  * A card the app draws inside a chat takes COLUMN_BOX instead — it fills its container up to that
- * box and never past it (ADR 0046, superseding ADR 0041).
+ * box and never past it (ADR 0047, superseding ADR 0041).
  */
 export const COLUMN = "mx-auto w-full max-w-[736px]"
 

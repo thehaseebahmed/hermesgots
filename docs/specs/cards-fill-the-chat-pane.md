@@ -6,7 +6,7 @@ implementation starts. #493 is blocked by the gate issue that the docs PR carryi
 implementation starts. The spec carries `ready-for-agent` and the tickets stay bare, so the agent
 claims the spec and works the graph in order.
 
-**Revised 2026-10-24 — the width rule inverts.** ADR 0046 supersedes this spec's Solution in its
+**Revised 2026-10-24 — the width rule inverts.** ADR 0047 supersedes this spec's Solution in its
 width alone: a card never passes the reading column's 768px box (`CARD_BASE` is `COLUMN_BOX` plus
 the surface), and centres inside it on a wide pane, where this spec's pane-fill would have taken it
 to the pane's edges. The goal — one rule every in-chat card follows, with the split widths gone —

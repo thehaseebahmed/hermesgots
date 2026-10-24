@@ -1,4 +1,4 @@
-// The rule is ADR 0046 — a card never passes the reading column's box — measured here because width
+// The rule is ADR 0047 — a card never passes the reading column's box — measured here because width
 // is layout that no DOM without a layout engine has (ADR 0019).
 import { app, assert, flow, pass, runId, settled } from "./lib.mjs"
 
