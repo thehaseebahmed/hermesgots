@@ -110,10 +110,8 @@ export interface PreparedIntake {
 
 /**
  * What `files` becomes on a message already holding `held` attachments — the one intake a pick, a
- * paste, a drop and a share all land through. The count and per-file limits are asked before a read
- * (`intake`), then every file is read at once, in the order it arrived, and a photo that leaves the
- * message's inline room, or a file that can't be read, is refused instead of landing. `onTake` is
- * how a surface holds the place of the files it is now reading.
+ * paste, a drop and a share land through. `onTake` is how a surface holds the place of the files it
+ * is now reading.
  */
 export async function prepareIntake(
   files: File[],
@@ -168,10 +166,9 @@ export async function prepareIntake(
 }
 
 /**
- * Saves an attachment under the file's own name: the bytes this device holds, else the host's own
- * copy, read the way the thread reads it (`loadMediaFile` — its cache, feature gate and cooldown),
- * so a file already on screen is never fetched twice. A save that fails is noted at the console's
- * verbose level and said to the user here, so a caller only says which file to save.
+ * Saves an attachment under the file's own name: the bytes this device holds, else the host's copy,
+ * read the way the thread reads it (`loadMediaFile`), so a file on screen is never fetched twice.
+ * A failed save is said to the user here, so a caller only says which file to save.
  */
 export async function downloadAttachment(conversationId: string, attachment: Attachment) {
   try {

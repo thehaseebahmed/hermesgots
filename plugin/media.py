@@ -14,9 +14,7 @@ from pathlib import Path
 from typing import Dict
 from urllib.parse import quote
 
-# The raster the route serves as an image: what a browser shows in place, and what `media-kind.ts`
-# draws as a picture in the thread. What a `MEDIA:` tag may name is `SERVED_TYPES` below — the whole
-# of what this route answers with a type of its own (an SVG included, from `TEXT_TYPES`).
+# The raster the route serves as an image: what a browser shows in place.
 MEDIA_TYPES: Dict[str, str] = {
     ".png": "image/png",
     ".jpg": "image/jpeg",

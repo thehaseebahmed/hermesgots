@@ -265,8 +265,8 @@ const MOCK_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAHgAAABLCAIAAAA06NSGAAAAuklEQVR42u3aQQmAABBE0anhxQYW8mIDz0Y0jhFsIII4iDz4Cd5xZzNMiwoFAWjQAg0aNAXQoAX6dsc+Xwf6deI3uEO5Yx3KHetQ7liHcsc6lDvWoEF/T/mJNWjQoEGDBg0aNGjQoEGDBu3W4dYB2j0atIXFZmgFt4L76/CpBNrvHWiBBi3QoEEL9H+gx21VIdCgQQs0aNAIQIMWaNCgKYAGLdCgQVMADVqgQYMWaNACDRq0QIMW6E92AjwFRtd/9tVBAAAAAElFTkSuQmCC",
   "base64",
 )
-// A file a message carries, as the media route answers for it: the type the plugin's own map gives
-// it, and whether a browser shows that type in place or saves it.
+// A file a message carries, as the media route answers for it: the type its extension gives it, and
+// whether a browser shows that type in place or saves it.
 const MOCK_MEDIA_TYPES = {
   ".png": "image/png",
   ".jpg": "image/jpeg",

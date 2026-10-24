@@ -751,10 +751,7 @@ function dropUnread(draft: Draft, pending: string) {
   }
 }
 
-/**
- * Puts a steer the agent never read at the front of the queue, to go as the next turn. What comes
- * back is the text the model was given, so its markers read back as the files the message carried.
- */
+/** Puts a steer the agent never read at the front of the queue, to go as the next turn. */
 export async function requeueSteer(conversationId: string, text: string) {
   const { text: content, attachments } = splitAttachments(text.trim())
   const queued = (await getMessages(conversationId)).find((m) => m.status === "queued")
@@ -1506,18 +1503,16 @@ async function syncQueue(conversationId: string) {
     }
     for (const item of items) {
       const mine = byId.get(item.id)
-      // A steer the run handed back is queued as the text the model read: the thread gets back the
-      // message it was, its files named as attachments again.
       const files = mine?.attachments ?? attachmentsOf(item)
-      const said = files?.length
+      const carried = files?.length
         ? { text: item.text, attachments: files }
         : splitAttachments(item.text)
       const next: Message = {
         id: item.id,
         conversationId,
         role: "user",
-        content: said.text,
-        attachments: said.attachments,
+        content: carried.text,
+        attachments: carried.attachments,
         status: "queued",
         statusText: item.error,
         queuePaused: paused || Boolean(item.error),
@@ -1650,10 +1645,6 @@ export async function removeQueued(message: Message) {
 /**
  * Hands a queued message to the reply that's running, which reads it after its current tool calls
  * instead of after it finishes. It then sits in the reply where it was sent.
- *
- * A steer is text, so a message carrying files steers as its markers: the same lines and sentence
- * the message would have sent, composed here for the turn that is already going. A message carrying
- * an image can't — its content would have to ride in the message — so it waits in the queue.
  */
 export async function steerQueued(message: Message) {
   const said = attachmentsText(message.content, message.attachments ?? [])
@@ -1677,8 +1668,8 @@ export async function steerQueued(message: Message) {
   await db.messages.delete(message.id)
   if (!turn || turn.draft.runId !== runId) return
   const { draft, touch } = turn
-  // What the model read is what Hermes hands back if it never read it, so that is what the reply
-  // keeps: an unread steer's markers come back to the queue as the files they name.
+  // Hermes hands an unread steer back as the text the model read, so the markers are what the reply
+  // keeps for `requeueSteer` to read back as the files they name.
   draft.steers = [
     ...(draft.steers ?? []),
     { id: message.id, text: said, contentOffset: draft.content.length, at: Date.now() },

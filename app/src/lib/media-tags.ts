@@ -7,10 +7,7 @@ import { getPluginFeatureList, getPluginMedia, type HermesConfig } from "@/lib/h
 
 export { mediaImages, type MediaPart } from "@/lib/media-parts"
 
-/**
- * A file an agent named with a `MEDIA:<path>` tag, once the host has answered: where this page reads
- * it, and what the host said it is — which is what the thread draws it by.
- */
+/** A file a `MEDIA:<path>` tag named, once the host answered: where the page reads it, and what it is. */
 export interface MediaFile {
   /** This page's handle on the bytes. */
   url: string
@@ -26,8 +23,7 @@ const MEDIA_LIMIT = 128
 /** The files read already, so a redraw of a tag costs nothing. */
 const files = boundedStore<MediaFile>({
   limit: MEDIA_LIMIT,
-  // Letting go of a file's URL lets go of the bytes pinned behind it; a cell that comes back for
-  // the file reads it again.
+  // Letting go of the URL lets go of the bytes pinned behind it.
   dispose: (file) => URL.revokeObjectURL(file.url),
 })
 /** Reads under way, so a group of tags asks the route once each; each leaves on its own settle. */
@@ -55,7 +51,6 @@ export function getMediaFile(config: HermesConfig, path: string): Promise<MediaF
         return file
       })
       .catch(() => null)
-      // Shared only while the read is: after it, the store or a fresh read answers.
       .finally(() => {
         reading.delete(key)
       })
@@ -68,9 +63,8 @@ export function getMediaFile(config: HermesConfig, path: string): Promise<MediaF
 const unsupported = cooldown()
 
 /**
- * The file behind a chat's `MEDIA:<path>` tag, or null when its bot can't serve it: no plugin, or
- * one from before the media route. Every kind is read the same way — the route serves a clip, a
- * recording and a document as it serves an image — and one read serves the whole thread.
+ * The file behind a chat's `MEDIA:<path>` tag, or null when its bot can't serve it: no plugin, or one
+ * from before the media route. Every kind is read the same way, and one read serves the whole thread.
  */
 export async function loadMediaFile(
   conversationId: string,

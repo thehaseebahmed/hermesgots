@@ -461,8 +461,7 @@ def _files(raw: Any) -> List[Dict[str, Any]]:
 
 
 def _body_text(body: Any) -> Optional[str]:
-    """The text a run body carries, its parts in the order the model reads them — or None when the
-    body holds more than text, which a steer, being text, can't carry."""
+    """The text a run body carries, or None when the body holds more than text."""
     try:
         run = json.loads(body) if isinstance(body, str) else body
     except (TypeError, ValueError):
@@ -488,12 +487,7 @@ def _body_text(body: Any) -> Optional[str]:
 
 
 def steer_text(row: Any) -> Optional[str]:
-    """What a waiting item says when it steers the run that's going, or None when it can't steer.
-
-    A steer is text, so a message carrying files steers as the text its own body holds — the
-    marker line per file, with the path the app saved it at, and the sentence about them. A
-    message carrying a photo the body puts inside it can't: a steer has nowhere to put the bytes.
-    """
+    """What a waiting item says when it steers the run that's going, or None when it can't steer."""
     item = _item(row)
     said = _body_text(row["body"]) if item["attachments"] else (row["text"] or "")
     return (said or "").strip() or None

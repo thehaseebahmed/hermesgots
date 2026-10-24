@@ -25,10 +25,7 @@ import { cn } from "@/lib/utils"
 // Types a browser tab shows rather than downloads.
 const VIEWABLE = /^(image\/|text\/|application\/(pdf|json)$)/
 
-/**
- * A file's name over its size, drawn once: a staged tile, a thread's row that saves it, and the
- * Gallery's recording row all read alike, so a message reads the same wherever it draws.
- */
+/** A file's name over its size: a staged tile, a thread's row that saves it, and a recording's row. */
 export function MediaName({ name, size }: { name: string; size?: number }) {
   return (
     <span className="flex min-w-0 flex-col">
@@ -42,8 +39,7 @@ export function MediaName({ name, size }: { name: string; size?: number }) {
 
 /**
  * A photo as a thumbnail, or a file as its name and size. With `onRemove`, a button takes it off the
- * message; with `onOpen`, a tap opens it here, or saves it under its own name where `action` says a
- * tap saves. `preparing` is a photo still being scaled down.
+ * message; with `onOpen`, a tap opens it, or saves it where `action` says a tap saves.
  */
 export function AttachmentTile({
   attachment,
