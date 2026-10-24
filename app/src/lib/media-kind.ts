@@ -51,8 +51,13 @@ const DRAWN_IMAGES = new Set([
 
 const FAMILY = /^(image|video|audio)\//
 
+/** The name a path ends in, which is how a thread names the file a message carries. */
+export function fileNameOf(path: string) {
+  return path.split(/[\\/]/).pop() || path
+}
+
 function extension(name?: string) {
-  const base = (name ?? "").split(/[\\/]/).pop() ?? ""
+  const base = fileNameOf(name ?? "")
   const dot = base.lastIndexOf(".")
   return dot < 0 ? "" : base.slice(dot + 1).toLowerCase()
 }

@@ -67,11 +67,10 @@ def wake() -> None:
 
 
 def _item(row: Any) -> Dict[str, Any]:
-    attachments = json.loads(row["attachments"]) if row["attachments"] else []
     return {
         "id": row["id"],
         "text": row["text"],
-        "attachments": attachments,
+        "attachments": _files(row["attachments"]),
         "created_at": row["created_at"],
         "run_id": row["run_id"],
         "sent_at": row["sent_at"],
@@ -98,8 +97,7 @@ def clean_files(files: Any) -> List[Dict[str, Any]]:
     """The attachment fields a queued item keeps, for at most 20 files."""
     return [
         {key: file[key] for key in ("name", "type", "size", "path") if key in file}
-        for file in (files or [])[:20]
-        if isinstance(file, dict)
+        for file in _objects(files)[:20]
     ]
 
 
@@ -447,14 +445,19 @@ async def post(adapter: Any, profile: Optional[str], path: str, body: Dict[str, 
         raise StartError(f"Couldn't reach the API server: {error}", False) from error
 
 
+def _objects(raw: Any) -> List[Dict[str, Any]]:
+    """The file objects a list holds; anything else in it is not a file."""
+    return [file for file in raw if isinstance(file, dict)] if isinstance(raw, list) else []
+
+
 def _files(raw: Any) -> List[Dict[str, Any]]:
-    """The files a waiting row carries, as its own row keeps them (a JSON column, or a list)."""
+    """The files a row carries, as its own JSON column keeps them (or a list, already decoded)."""
     if isinstance(raw, str):
         try:
             raw = json.loads(raw) if raw else []
         except ValueError:
             return []
-    return [file for file in raw if isinstance(file, dict)] if isinstance(raw, list) else []
+    return _objects(raw)
 
 
 def _body_text(body: Any) -> Optional[str]:
@@ -491,9 +494,8 @@ def steer_text(row: Any) -> Optional[str]:
     marker line per file, with the path the app saved it at, and the sentence about them. A
     message carrying a photo the body puts inside it can't: a steer has nowhere to put the bytes.
     """
-    row = dict(row)
-    files = _files(row.get("attachments"))
-    said = _body_text(row.get("body")) if files else (row.get("text") or "")
+    item = _item(row)
+    said = _body_text(row["body"]) if item["attachments"] else (row["text"] or "")
     return (said or "").strip() or None
 
 

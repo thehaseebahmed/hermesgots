@@ -21,7 +21,7 @@ import {
   type HermesConfig,
   type SessionMessage,
 } from "@/lib/hermes"
-import { splitAttachments } from "@/lib/attachments"
+import { splitAttachments } from "@/lib/attachment-text"
 import { appendThinking, carrySpans } from "@/lib/thinking"
 import { readLiveRuns } from "@/lib/waiting"
 import { failureReason, TODO_TOOLS } from "@/lib/tools"

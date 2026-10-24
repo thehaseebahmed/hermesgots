@@ -1,24 +1,13 @@
 import { useSyncExternalStore } from "react"
 
-import { attachmentParts, attachmentsText, splitAttachments } from "@/lib/attachment-text"
-import {
-  formatBytes,
-  isPhoto,
-  keptImage,
-  MAX_FILE_BYTES,
-  MAX_ATTACHMENTS,
-  MAX_INLINE_BYTES,
-} from "@/lib/attachment-caps"
+import { isPhoto, keptImage, MAX_FILE_BYTES, sizeRefusal } from "@/lib/attachment-caps"
+import { attachmentParts } from "@/lib/attachment-text"
 import { db, type Attachment } from "@/lib/db"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
 import { getPluginMedia, type ContentPart } from "@/lib/hermes"
 import { createSignal } from "@/lib/store"
 import { randomId } from "@/lib/utils"
 
-export { attachmentsText, splitAttachments }
-
-// The caps every intake surface is held to are one rule; these are the ones a message is sent under.
-export { formatBytes, MAX_ATTACHMENTS, MAX_FILE_BYTES, MAX_INLINE_BYTES }
 /** Long edge models are given; bigger images are scaled down before they go, to keep the body small. */
 const MAX_EDGE = 1600
 const KEEP_AS_IS_BYTES = 1024 * 1024
@@ -83,8 +72,7 @@ export async function prepareAttachment(file: File, inline = true): Promise<Atta
       }
     }
   }
-  if (file.size > MAX_FILE_BYTES)
-    throw new Error(`${name} is over the ${formatBytes(MAX_FILE_BYTES)} limit.`)
+  if (file.size > MAX_FILE_BYTES) throw new Error(sizeRefusal(name).message)
   return {
     id: randomId(),
     name,

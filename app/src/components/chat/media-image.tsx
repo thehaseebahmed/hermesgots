@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { downloadAttachment } from "@/lib/attachments"
 import type { Attachment } from "@/lib/db"
 import { useImageReady } from "@/lib/image"
-import { mediaCell, mediaKind, type MediaCell } from "@/lib/media-kind"
+import { fileNameOf, mediaCell, mediaKind, type MediaCell } from "@/lib/media-kind"
 import { loadMediaFile, type MediaFile } from "@/lib/media-tags"
 import { openImageViewer } from "@/lib/native"
 import { cn } from "@/lib/utils"
@@ -46,11 +46,6 @@ function Tag({ path }: { path: string }) {
       MEDIA:{path}
     </code>
   )
-}
-
-/** The name a tag's path ends in, which is how the thread names the file. */
-function nameOf(path: string) {
-  return path.split(/[\\/]/).pop() || path
 }
 
 /** One tag, once the host has answered for it — or not yet, or not at all. */
@@ -95,7 +90,7 @@ export function MediaTag({ conversationId, paths }: { conversationId: string; pa
 
   const tagged: Tagged[] = list.map((path, at) => {
     const file = read.get(path)
-    const name = nameOf(path)
+    const name = fileNameOf(path)
     return {
       key: `${at}:${path}`,
       path,

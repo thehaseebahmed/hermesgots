@@ -47,7 +47,8 @@ import {
   type StreamHandlers,
   type TurnUsage,
 } from "@/lib/hermes"
-import { attachmentsText, setUploading, splitAttachments, wireContent } from "@/lib/attachments"
+import { attachmentsText, splitAttachments } from "@/lib/attachment-text"
+import { setUploading, wireContent } from "@/lib/attachments"
 import { refreshContext } from "@/lib/context"
 import { refreshChatProviderUsage } from "@/lib/provider-usage"
 import { liveTurn, noteFollowUps, patchStats, reconcileHistory } from "@/lib/history"

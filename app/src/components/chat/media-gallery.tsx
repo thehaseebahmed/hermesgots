@@ -13,6 +13,21 @@ import { cn } from "@/lib/utils"
 export const CELL = "h-24 w-full rounded-xl border md:h-32 xl:h-40"
 
 /**
+ * A file's name over its size, drawn once: a thread's row and a staged tile read alike, and a
+ * restored message keeps its size, so its row reads as the one that sent it did.
+ */
+export function MediaName({ name, size }: { name: string; size?: number }) {
+  return (
+    <span className="flex min-w-0 flex-col">
+      <span className="line-clamp-1 break-all">{name}</span>
+      {size ? (
+        <span className="text-xs text-muted-foreground tabular-nums">{formatBytes(size)}</span>
+      ) : null}
+    </span>
+  )
+}
+
+/**
  * One piece of media in a thread, as a Gallery cell or a row of its own: what it is, and where the
  * bytes are if they're in. A tap hands it to the platform's viewer or player — nothing plays here.
  */
@@ -223,14 +238,7 @@ export function AudioRow({ item }: { item: MediaItem }) {
       <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-foreground text-background">
         <PlayIcon className="size-4" />
       </span>
-      <span className="flex min-w-0 flex-col">
-        <span className="line-clamp-1 break-all">{item.name}</span>
-        {item.size ? (
-          <span className="text-xs text-muted-foreground tabular-nums">
-            {formatBytes(item.size)}
-          </span>
-        ) : null}
-      </span>
+      <MediaName name={item.name} size={item.size} />
     </button>
   )
 }

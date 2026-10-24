@@ -10,12 +10,14 @@ import {
   XIcon,
 } from "lucide-react"
 
+import { MediaName } from "@/components/chat/media-gallery"
 import { FullscreenPopup, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { attachmentUrl } from "@/lib/attachment-url"
-import { formatBytes, useUploading } from "@/lib/attachments"
+import { formatBytes } from "@/lib/attachment-caps"
+import { useUploading } from "@/lib/attachments"
 import type { Attachment } from "@/lib/db"
 import { useImageReady } from "@/lib/image"
 import { isNative } from "@/lib/native"
@@ -72,15 +74,7 @@ export function AttachmentTile({
       ) : (
         <Icon className="size-5 shrink-0 text-muted-foreground" />
       )}
-      <span className="flex min-w-0 flex-col">
-        <span className="line-clamp-1 break-all">{attachment.name}</span>
-        {/* A restored message keeps its size, so its row reads as the one that sent it did. */}
-        {attachment.size ? (
-          <span className="text-xs text-muted-foreground tabular-nums">
-            {formatBytes(attachment.size)}
-          </span>
-        ) : null}
-      </span>
+      <MediaName name={attachment.name} size={attachment.size} />
     </div>
   )
   return (
