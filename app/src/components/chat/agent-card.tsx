@@ -86,7 +86,6 @@ function CardShell({
       data-slot={slot}
       className={cn(FLAT_CARD, "flex flex-col")}
     >
-    >
       {onClick ? (
         <button
           type="button"

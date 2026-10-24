@@ -367,7 +367,7 @@ const FLOWS = {
   "card-widths": {
     script: "e2e/card-widths.mjs",
     about:
-      "A chat's subagent card and waiting Question span the pane with its gutter at 390 and 1024px, and both at 1440px too, while message text keeps the 768px reading column there",
+      "A chat's subagent card and waiting Question fill their pane with its gutter at 390 and 1024px and stop dead at the reading column's 768px box when the pane is wider, centred inside it, while message text keeps the 736px column the card then frames",
   },
   submission: {
     script: "regression-submission.mjs",

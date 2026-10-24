@@ -1,9 +1,10 @@
-// The rule is ADR 0041, measured here because width is layout that no DOM without a layout engine
-// has (ADR 0019).
+// The rule is ADR 0046 — a card never passes the reading column's box — measured here because width
+// is layout that no DOM without a layout engine has (ADR 0019).
 import { app, assert, flow, pass, runId, settled } from "./lib.mjs"
 
 const GUTTER = 16
 const COLUMN_PX = 736
+const BOX_PX = 768
 const TOLERANCE = 1
 
 const VIEWPORT = "[data-slot=message-scroller-viewport]"
@@ -79,29 +80,41 @@ await flow(
       const fill = seen.thread - 2 * GUTTER
       const waiting = seen.pane - 2 * slot
       const column = seen.thread > COLUMN_PX
+      // The rule: a card fills the box it is given, and stops at the reading column's box above
+      // that, centred in both cases.
+      const cardWidth = Math.min(fill, BOX_PX)
+      const questionWidth = Math.min(waiting, BOX_PX)
 
       assert.ok(seen.card, `the subagent's card is on the page at ${where}`)
+      assert.ok(
+        seen.card.width <= BOX_PX + TOLERANCE,
+        `the subagent's card never passes the reading column's box at ${where} (${seen.card.width}px in a ${seen.pane}px pane)`,
+      )
       near(
         seen.card.width,
-        fill,
-        `the subagent's card fills the thread's pane at ${where}, a ${seen.pane}px pane less the scrollbar's ${seen.pane - seen.thread}px and the ${GUTTER}px gutter each side`,
+        cardWidth,
+        `the subagent's card fills the thread's box up to the ${BOX_PX}px cap at ${where}, a ${seen.pane}px pane less the scrollbar's ${seen.pane - seen.thread}px and the ${GUTTER}px gutter each side`,
       )
       near(
         seen.card.left,
-        GUTTER,
-        `and its left edge sits on the thread's gutter at ${where}, in a ${seen.pane}px pane`,
+        GUTTER + Math.round((fill - cardWidth) / 2),
+        `and its left edge sits on that gutter — or centres inside the cap on a wide pane — at ${where}, in a ${seen.pane}px pane`,
       )
 
       assert.ok(seen.question, `the waiting Question is on the page at ${where}`)
+      assert.ok(
+        seen.question.width <= BOX_PX + TOLERANCE,
+        `the waiting Question never passes the reading column's box at ${where} (${seen.question.width}px in a ${seen.pane}px pane)`,
+      )
       near(
         seen.question.width,
-        waiting,
-        `the waiting Question spans the composer slot at ${where}, ${slot}px gutter each side in a ${seen.pane}px pane`,
+        questionWidth,
+        `the waiting Question fills the composer slot up to the ${BOX_PX}px cap at ${where}, ${slot}px gutter each side in a ${seen.pane}px pane`,
       )
       near(
         seen.question.left,
-        slot,
-        `and its left edge sits on that slot's gutter at ${where}, in a ${seen.pane}px pane`,
+        slot + Math.round((waiting - questionWidth) / 2),
+        `and its left edge sits on that slot's gutter — or centres inside the cap on a wide pane — at ${where}, in a ${seen.pane}px pane`,
       )
 
       assert.ok(seen.text, `a reply's text is on the page at ${where}`)
@@ -116,10 +129,20 @@ await flow(
           Math.round((seen.thread - COLUMN_PX) / 2),
           `and the column is centred in the pane at ${where}, in a ${seen.pane}px pane`,
         )
-        assert.ok(
-          seen.card.width > seen.text.width,
-          `the card uses the screen the text keeps its column in at ${where} (${seen.card.width}px against ${seen.text.width}px, in a ${seen.pane}px pane)`,
-        )
+        if (cardWidth === BOX_PX) {
+          // Where the cap binds, the card is the column's own box: the text's measure framed by the
+          // 16px gutter the box carries on either side of it.
+          near(
+            seen.card.width,
+            seen.text.width + 2 * GUTTER,
+            `the capped card is exactly the text column's box at ${where}, framed ${GUTTER}px each side of the text (${seen.card.width}px around ${seen.text.width}px, in a ${seen.pane}px pane)`,
+          )
+          near(
+            seen.card.left + GUTTER,
+            seen.text.left,
+            `so the card's edge lines up with the box the text sits in at ${where} (${seen.card.left}px + ${GUTTER}px against the text's ${seen.text.left}px, in a ${seen.pane}px pane)`,
+          )
+        }
       } else {
         near(
           seen.text.width,
@@ -130,7 +153,7 @@ await flow(
 
       const path = await shot(`at-${width}`)
       pass(
-        `${where}: card ${seen.card.width}px at ${seen.card.left}px, question ${seen.question.width}px at ${seen.question.left}px, text ${seen.text.width}px at ${seen.text.left}px${column ? ` of the ${COLUMN_PX}px column` : ""}, in a ${seen.pane}px pane${path ? ` (${path})` : ""}`,
+        `${where}: card ${seen.card.width}px at ${seen.card.left}px${seen.card.width === BOX_PX ? ` (at the ${BOX_PX}px cap)` : ""}, question ${seen.question.width}px at ${seen.question.left}px, text ${seen.text.width}px at ${seen.text.left}px${column ? ` of the ${COLUMN_PX}px column` : ""}, in a ${seen.pane}px pane${path ? ` (${path})` : ""}`,
       )
     }
   },

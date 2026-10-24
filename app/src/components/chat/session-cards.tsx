@@ -16,12 +16,15 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/componen
 import { Spinner } from "@/components/ui/spinner"
 import { sendMessage } from "@/lib/chat"
 import type { ToolEvent } from "@/lib/db"
+import { COLUMN_BOX } from "@/lib/layout"
 
 /**
- * The width rule every card the app draws inside a chat shares: full width of its container with no
- * cap, and the ring off — every one of them was drawn without one (ADR 0041).
+ * The width rule every card the app draws inside a chat shares: the reading column's own
+ * COLUMN_BOX — full width of its container until that box arrives, then centred inside it — so a
+ * card fills a narrow chat and stops at the measure the text sits in on a wide one, never passing
+ * it (ADR 0046). The ring stays off: every one of them was drawn without one.
  */
-export const CARD_BASE = "w-full rounded-3xl border ring-0"
+export const CARD_BASE = `${COLUMN_BOX} rounded-3xl border ring-0`
 
 /** A card floating in the composer slot, shadowed over the thread behind it. */
 export const CARD = `${CARD_BASE} shadow-xl shadow-black/10 dark:shadow-black/40`
