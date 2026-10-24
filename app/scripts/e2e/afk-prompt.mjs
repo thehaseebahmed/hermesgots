@@ -11,13 +11,14 @@
 // words in, which is a pick again.
 import {
   accountUser,
+  afkRead,
   app,
   assert,
   flow,
   makeProject,
-  mock,
   openAfk,
   pass,
+  seedVault,
   settled,
 } from "./lib.mjs"
 
@@ -28,9 +29,6 @@ const ENTRY = "House rules"
 /** The width the app's pop-ups become side drawers at, which the editor takes from the same rule. */
 const LAPTOP = 1024
 
-const afkRead = async (projectId) =>
-  (await fetch(`${mock}/api/plugins/memento/projects/${projectId}/afk`)).json()
-
 /**
  * The account's library is sealed with the vault's key, so a device that never opened the vault
  * isn't offered it. This is that device: a key seeded the way the recovery-code flows seed one, and
@@ -39,11 +37,7 @@ const afkRead = async (projectId) =>
  * error the flow can't tell from the app's own.
  */
 const openVault = async (page, profileId) => {
-  await page.evaluate(async (userId) => {
-    const vault = await import("/src/lib/vault.ts")
-    const { db } = await import("/src/lib/db.ts")
-    await db.vault.put({ id: "key", userId, key: await vault.lockDown(await vault.generateDataKey()) })
-  }, accountUser.id)
+  await seedVault(page, accountUser.id)
   const docs = ["bots", "prompts", "settings", `chats/${profileId}`]
   const sealed = await page.evaluate(
     async ({ userId, docs }) => {

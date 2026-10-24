@@ -1163,31 +1163,35 @@ const projectLibrary = (projectId) => {
     .map(([name, files]) => ({ name, files: files.sort((a, b) => b.at - a.at) }))
     .sort((a, b) => a.name.localeCompare(b.name))
 }
-// A project's ready tasks as the plugin's read reports them: two ready (oldest first), one claimed
-// by Gots' own mark, and one blocked by the task it waits on. The numbers and titles never change,
-// so a flow can assert them on whatever project it made. A project left to work has had its oldest
-// ready task claimed by AFK — the mock's own sweep — so it is claimed here and gone from the ready
-// group, as the plugin's read would report it.
+// A project's frontier as the plugin's read reports it: five ready tasks, oldest first, plus one
+// claimed by Gots' own mark and one blocked by the task it waits on. The numbers and titles never
+// change, so a flow can assert them on whatever project it made. A project left to work has had its
+// oldest ready tasks claimed by AFK — the mock's own sweep — one per pick count place.
 const AFK_TASK = 265
 const AFK_TITLE = "The frontier is read from GitHub and listed"
 const AFK_SWITCH_TASK = "The switch: AFK is a project's own setting on the host"
 const AFK_THIRD_TASK = "A hold is a row, not a column on the project"
+const AFK_FOURTH_TASK = "A pick count fills every place, in order"
+const AFK_FIFTH_TASK = "The bot's budget counts across its projects"
 /** How many tasks a project may hold at once: its own count, one where it never set one. */
 const afkPickCount = (project) => afkPickCounts.get(project.id) ?? 1
 /**
- * The tasks a sweep can claim for a project, oldest first: the frontier's first ready pair, and a
- * third the repository opens once the project is set to hold three — so the Working list and the
- * frontier agree about what is out there at every count.
+ * The tasks a project's frontier offers, oldest first: five, whatever its pick count. The count
+ * decides how many of them are HELD, never how many exist — the plugin's `_plan` slices the holds it
+ * fills out of the frontier rather than growing it. A pool that grew with the count would make a
+ * raise look like the repository opening tasks (nothing does), and leave the top of the host's own
+ * range of five with nothing to claim.
  */
-const afkPool = (project) =>
-  [
-    [AFK_TASK, AFK_TITLE],
-    [266, AFK_SWITCH_TASK],
-    [269, AFK_THIRD_TASK],
-  ].slice(0, afkPickCount(project) >= 3 ? 3 : 2)
+const afkPool = () => [
+  [AFK_TASK, AFK_TITLE],
+  [266, AFK_SWITCH_TASK],
+  [269, AFK_THIRD_TASK],
+  [270, AFK_FOURTH_TASK],
+  [271, AFK_FIFTH_TASK],
+]
 /** The tasks a project holds, oldest first: a sweep fills every place its pick count gives it. */
 const afkHolds = (project) =>
-  afkSwept.has(project.id) ? afkPool(project).slice(0, afkPickCount(project)) : []
+  afkSwept.has(project.id) ? afkPool().slice(0, afkPickCount(project)) : []
 /** Every task this bot holds, across all of its projects: what its budget is counted against. */
 const afkHeldCount = () =>
   mockProjects().reduce((total, project) => total + afkHolds(project).length, 0)
@@ -1240,7 +1244,7 @@ const projectTasks = (project) => {
     project_id: project.id,
     repos: [repo],
     // What AFK's sweep claimed has left the frontier — every task it holds, not only the oldest.
-    ready: afkPool(project)
+    ready: afkPool()
       .filter(([number]) => !held.has(number))
       .map(([number, title]) => task(number, title)),
     claimed: [
