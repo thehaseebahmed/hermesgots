@@ -21,6 +21,8 @@ import {
   DEFAULT_PROFILE,
   DEFAULT_SETTINGS,
   adoptAppearance,
+  botTombstones,
+  chatTombstones,
   db,
   deleteConversation,
   deleteProfile,
@@ -387,8 +389,8 @@ async function localBots(): Promise<Doc<BotValue>> {
   for (const profile of await db.profiles.toArray()) {
     doc[profile.id] = { at: profile.updatedAt, value: botValue(profile) }
   }
-  for (const tombstone of await db.tombstones.where("id").startsWith("bot:").toArray()) {
-    if (tombstone.profileId) doc[tombstone.profileId] = { at: tombstone.deletedAt, deleted: true }
+  for (const tombstone of await botTombstones()) {
+    doc[tombstone.profileId] = { at: tombstone.deletedAt, deleted: true }
   }
   return doc
 }
@@ -442,8 +444,7 @@ async function syncBots(key: CryptoKey) {
     },
   )
   // Pushed deletions live on in the merged document; their chat lists can go.
-  for (const tombstone of await db.tombstones.where("id").startsWith("bot:").toArray()) {
-    if (!tombstone.profileId) continue
+  for (const tombstone of await botTombstones()) {
     if (merged[tombstone.profileId]?.at !== tombstone.deletedAt) continue
     await deleteDoc(`chats/${tombstone.profileId}`).catch(() => undefined)
     await db.tombstones.delete(tombstone.id)
@@ -556,8 +557,8 @@ async function localChats(profileId: string, drafts: boolean): Promise<Doc<ChatV
       delete value.draftText
     doc[c.id] = { at: c.changedAt, value }
   }
-  const tombstones = await db.tombstones.where("id").startsWith("chat:").toArray()
-  for (const tombstone of tombstones.filter((t) => t.profileId === profileId)) {
+  for (const tombstone of await chatTombstones()) {
+    if (tombstone.profileId !== profileId) continue
     doc[tombstone.id.slice("chat:".length)] = { at: tombstone.deletedAt, deleted: true }
   }
   return doc
@@ -594,8 +595,8 @@ async function applyChats(profileId: string, pull: [string, Entry<ChatValue>][])
 
 /** Drops tombstones the merged list now carries. */
 async function settleChatTombstones(profileId: string, merged: Doc<ChatValue>) {
-  const tombstones = await db.tombstones.where("id").startsWith("chat:").toArray()
-  for (const tombstone of tombstones.filter((t) => t.profileId === profileId)) {
+  for (const tombstone of await chatTombstones()) {
+    if (tombstone.profileId !== profileId) continue
     const id = tombstone.id.slice("chat:".length)
     if (merged[id]?.at === tombstone.deletedAt) await db.tombstones.delete(tombstone.id)
   }
