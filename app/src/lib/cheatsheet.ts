@@ -21,40 +21,37 @@ export interface CheatsheetGroup {
  * the next opening.
  */
 export function cheatsheetGroups(navShortcuts: boolean): CheatsheetGroup[] {
-  const groups: CheatsheetGroup[] = [
-    {
-      name: "Composer",
-      rows: [
-        { keys: ["Enter"], description: "Send the message" },
-        { keys: ["Shift+Enter"], description: "Start a new line" },
-        { keys: ["Escape", "Escape"], description: "Clear the message, keeping attachments" },
-      ],
-    },
-    {
-      name: "Slash menu",
-      rows: [
-        { keys: ["ArrowUp", "ArrowDown"], description: "Move through the menu" },
-        { keys: ["Enter", "Tab"], description: "Pick the highlighted row" },
-        { keys: ["Escape"], description: "Close the menu" },
-      ],
-    },
-    {
-      name: "Chat",
-      rows: [{ keys: ["Ctrl+C"], description: "Stop a running reply" }],
-    },
-  ]
-  if (navShortcuts) {
-    groups.push({
-      name: "Navigation",
-      rows: [{ keys: ["Alt+1…9"], description: "Switch to another bot" }],
-    })
+  const composer: CheatsheetGroup = {
+    name: "Composer",
+    rows: [
+      { keys: ["Enter"], description: "Send the message" },
+      { keys: ["Shift+Enter"], description: "Start a new line" },
+      { keys: ["Escape", "Escape"], description: "Clear the message, keeping attachments" },
+    ],
   }
-  groups.push({
+  const slashMenu: CheatsheetGroup = {
+    name: "Slash menu",
+    rows: [
+      { keys: ["ArrowUp", "ArrowDown"], description: "Move through the menu" },
+      { keys: ["Enter", "Tab"], description: "Pick the highlighted row" },
+      { keys: ["Escape"], description: "Close the menu" },
+    ],
+  }
+  const chat: CheatsheetGroup = {
+    name: "Chat",
+    rows: [{ keys: ["Ctrl+C"], description: "Stop a running reply" }],
+  }
+  const navigation: CheatsheetGroup = {
+    name: "Navigation",
+    rows: [{ keys: ["Alt+1…9"], description: "Switch to another bot" }],
+  }
+  const openSurface: CheatsheetGroup = {
     name: "While something's open",
     rows: [
       { keys: ["ArrowLeft", "ArrowRight"], description: "Step through the attachments" },
       { keys: ["Escape"], description: "Cancel the recording" },
     ],
-  })
-  return groups
+  }
+
+  return [composer, slashMenu, chat, ...(navShortcuts ? [navigation] : []), openSurface]
 }
