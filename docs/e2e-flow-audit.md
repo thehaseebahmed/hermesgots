@@ -17,20 +17,20 @@ ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
 
-The registry in `app/scripts/e2e/cli.mjs` holds **69 keys**, and every one of them has a row
-below. `pnpm e2e list` prints the same 69 keys, and the rows here are grouped by the ticket that
+The registry in `app/scripts/e2e/cli.mjs` holds **70 keys**, and every one of them has a row
+below. `pnpm e2e list` prints the same 70 keys, and the rows here are grouped by the ticket that
 takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
 | --- | --- |
-| stay | 12 |
+| stay | 13 |
 | component | 53 |
 | plugin | 2 |
 | delete | 2 |
-| **total** | **69** |
+| **total** | **70** |
 
-Of those 69, 63 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
-reuses `todos.mjs`, so 62 distinct files there) and 6 point at the older
+Of those 70, 64 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
+reuses `todos.mjs`, so 63 distinct files there) and 6 point at the older
 `app/scripts/regression-*.mjs`.
 
 #297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**.
@@ -62,6 +62,13 @@ the key it counted twice, plus those six: **53**, and the stays are the plan's 7
 **12**.
 #299's own criterion still says 48; the 53 above
 supersedes it for the reason just given, and nothing else in the ticket's split moves.
+A twelfth key has arrived since, with #478's media drawing: `file-message`, a stay, because the
+browser's own download — the file saved under the name the message kept — is a mechanism no DOM
+stands in for (the component test fakes the anchor the browser clicks); and `image-viewer`, a delete,
+left with #480, when a sent message's media began opening in the platform's own viewer rather than a
+pop-up of the app's. So the registry holds 59 + 12 = **71** keys, less `image-viewer`'s own: **70**.
+The component verdicts are still **53**, the stays are the plan's 7 plus six: **13**, and the deletes
+are **3** less one: **2**.
 
 `app/scripts/test-e2e-registry.mjs`, a unit test, holds the registry and this page to each other:
 a key with no row here, a row with no key, a verdict outside the four, a count in the table above
@@ -71,12 +78,12 @@ an argument this page has to carry, never a default (ADR 0019).
 Check any of it in one line:
 
 ```bash
-grep -c '^| `' docs/e2e-flow-audit.md                           # 69 rows, one per registry key
-grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 12
+grep -c '^| `' docs/e2e-flow-audit.md                           # 70 rows, one per registry key
+grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 13
 grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 53
 grep -c '^| `[a-z0-9-]*` | delete |' docs/e2e-flow-audit.md    # 2
 grep -c '^| `[a-z0-9-]*` | plugin |' docs/e2e-flow-audit.md    # 2
-cd app && pnpm -s e2e list | wc -l                             # 69 keys in the registry
+cd app && pnpm -s e2e list | wc -l                             # 70 keys in the registry
 git show 8a4e842^:app/scripts/e2e/cli.mjs |
   sed -n '/^const FLOWS = {/,/^}$/p' | grep -c '^  [a-z"-]*: {'  # 61, before goal mode left
 ```
@@ -237,10 +244,10 @@ One key, the only one that walks the whole feature: #417–#421 each brought the
 | --- | --- | --- | --- | --- |
 | `bot-threads` | component | A bot opens its Main from home; its threads are cards at their start times, the first between the messages written either side of it and the last closing the flow; a card opens its thread and back returns to Main; `/thread` with text opens a thread holding that message, whose card is back on Main at its start and drawn without a marker. Then, on a mock answering `MOCK_TRIAGE=new`, the message leaves Main as its new thread's card carrying Undo and no marker; on one answering `MOCK_TRIAGE=thread` it keeps the Moved marker, linking the older thread it went to, with no card carrying the move. Last, at tablet width with the dark theme, a card, Main's day heading and the Moved line still draw, and the move's Undo is still there. | Every rule it walks is a component test's — a card's place in Main (#417), the marker and the triage-opened card's Undo (#419), `/thread` and the name the switch picks (#420) — and none of them needs a browser's layout. What the flow adds is that they compose: a real route change, a real reload onto the mock's chat list, and the mock's own triage and moves answering a send. | `app/scripts/test-main-cards.tsx`, `test-card-undo.tsx`, `test-main-triage.tsx` and `test-slash.mjs` carry the rules, and #417–#421 landed them green. The flow stays in the registry as the one proof the path holds end to end, which no component test mounts. |
 
-## The ten that stay, and why only a browser can assert each
+## The eleven that stay, and why only a browser can assert each
 
 Every one of these earns its browser by a mechanism no lower tier reproduces, and a stay is
-replaced by itself. They are what the end-to-end registry holds once the other 58 keys leave
+replaced by itself. They are what the end-to-end registry holds once the other 57 keys leave
 (#314).
 
 | Key | Verdict | What it asserts today | Why only a browser can assert it |
@@ -253,6 +260,7 @@ replaced by itself. They are what the end-to-end registry holds once the other 5
 | `compressed-run` | stay | A chat another device started and Hermes compressed before this device loaded it lands its transcript and follows its run to its end — whether the rotation came before the run or mid-run. | A test host rotating the session id mid-run, the mechanism the plugin's run keying broke on. A faked HTTP boundary would answer the shape the code expects rather than the one the host sends. |
 | `screens` | stay | Projects, a project, Code, Routines, a chat and a started project session load their data at 390 and 1024px, in light and dark, with no console error; the session's header has no bot picture, says `Test bot · memento +3` on a phone, `Test bot · memento, gots-app +2` at exactly 768px and `Test bot · memento, gots-app, docs +1` at a laptop's width, without the whole line truncating, leaves its branch out, and its title truncates and stays centred in the room the controls leave — the row's own centre on a phone, where the back control and the actions are both 44px. | Real layout at two widths: a DOM without layout has no sizes. The line is also the only place each width's cap is seen coming out of the real media queries, and the truncation is a rendered width, not a string. It is also where the sweep's visual snapshots live. |
 | `stream-writes` | stay | A streaming reply is written to IndexedDB in batches: at most 6 writes a second, where main wrote 7.5. | A write rate measured over a real stream's wall-clock. |
+| `file-message` | stay | A file and a photo picked through the composer's own `+` and sent together: the photo takes a cell of the Gallery and paints, the file a row naming it and its size with nothing beside it in a cell, and the mock's reply reads back both markers the model was given. Then the same message, opened by a chat that holds none of its bytes — the transcript read back from the host, as a chat synced from another device is — draws the same cells from the host's media route, and a tap on the file's row fetches it through that route and hands it to the browser, which saves it under the file's own name with bytes in it. | The browser's own download. `test-attachment-row.tsx` proves the row, the route's call and the name the anchor is given, but it stands in for `URL.createObjectURL` and `anchor.click`, so it passes whether or not a browser saves anything; only Chromium's download pipeline turns the click into a file, and `suggestedFilename` is the name the user finds in their downloads. The other-device leg is also the one place the read-back of a message carrying both a file and a photo is drawn: the host keeps the photo's `[screenshot]` line after the markers, which a hand-built fixture would have to guess at. |
 | `openui` | stay | A reply carrying an `openui-lang` block draws its interface from Gots's own components at 390px and at 768px, in light and dark — a card, a table, a callout and two bar charts, the interface taking the thread's own column, its box's left and right edges on the reply text's own (the glyphs measured by a `Range`, ±1px) with the block's undrawn code form in the same place, the gap above and below it the thread's paragraph gap (12px either side, measured box to box against two paragraphs of that text), no chart's five-digit Y tick label outside the chart's own box, and no sideways scroll of the page or the table inside it — and the patched card is what draws at both widths; a block naming a component the library doesn't have draws as the code the model sent, under the `openui-lang` label, with the reply still reaching its last sentence; and a patch that lands while the thread is scrolled up leaves `[data-slot=message-scroller-viewport]`'s scrollTop exactly where it was, and the interface at the same offset of the screen, while the thread grows under the reader. | Geometry and a scroll offset: a DOM without layout has no sizes and no scrollTop, so a component test can assert the card's text but not its box, nor where a reader's viewport sits when a patch re-renders the interface they are reading. The patch also has to arrive on a real stream inside the one reply — a second user message jumps the thread to the end (`FollowOnSend`) — which is a host's own wiring, not a faked boundary's. |
 | `openui-map` | stay | A reply's block is a `Map` of four labelled places. It draws a map at 390px and at 768px, in light and dark, fitted to its own points — every label's box wholly inside the map's box at both widths — its required summary the accessible name, each point's detail on its marker; the basemap follows the theme (tiles asked for from `World_Street_Map` in light and `World_Dark_Gray_Base` in dark) with `Esri` and `OpenStreetMap` attributed in the chrome, inside the map's box, and the map takes the thread's own column with no sideways scroll. Then the gesture contract: over an untouched map a wheel and a real one-finger swipe both change the thread's scrollTop while the map's view holds to the pixel and `data-active` stays false; a tap makes it active and shows a 44px button; a wheel zooms and a drag pans the active map while the thread's scrollTop holds; the button hands the gestures back, the thread scrolling over the map again at the view the pan left. | Geometry and a gesture contract. A DOM without layout has no sizes, so a component test can prove the labels, the summary and the required props (`test-openui.tsx`) but not that the view is fitted, that a label lands inside the frame, or that the tiles asked for are the theme's. And which element takes one finger — the thread scrolling or the map panning — is decided by `touch-action` and Leaflet's handlers inside the browser's own input pipeline; nothing below a browser has a touchscreen, a scroll offset to move or a frame to pan within. |
 | `question-during-delegation` | stay | A bot delegates and asks in the same turn: the subagent's card reads its child still running; the question card takes the composer's place while the agents route still reports that child running; the answer brings the turn's reply, and then the subagent's result lands as the bot's own message at the thread's end, named above the result it carries, with no bubble and never as the user's; the wake prompt the plugin posts for it draws no message at all, no header, no footer and no user row; and the wake turn that answers it acts on the result and draws as a message of its own, below the delivery, arriving while its run is still going, a piece at a time; and the words the reply said before the question are drawn once, live and again after a reload, never once for each half of the turn. | Composer-replacement timing across a live stream. The question card has to take the composer's place at the instant the host raises it while a child is still working, and the result and the wake turn have to land in the thread as the host writes them, in wall-clock order, under the fold that draws a wake prompt as nothing. A component test over a faked host answers every shape in one step: it asserts the card, the delivery and the wake answer, but not that the card replaced the composer while `runs/live` and the agents route both still said the child was running, nor that the result and the wake turn landed after the reply that answered the question rather than inside it. |

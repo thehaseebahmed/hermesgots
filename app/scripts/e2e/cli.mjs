@@ -137,6 +137,11 @@ const FLOWS = {
     about:
       "An agent's images hold their place with a skeleton while they load, in a chat and a project session",
   },
+  "file-message": {
+    script: "e2e/file-message.mjs",
+    about:
+      "A message sent with a file and a photo draws the photo in the Gallery and the file as a row, and a tap on that row downloads the file under its own name",
+  },
   todos: {
     script: "e2e/todos.mjs",
     about: "The todo list shows while the reply that wrote it runs, from events or the transcript",
