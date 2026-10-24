@@ -2,23 +2,28 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { act, useState } from "react"
 import { createRoot } from "react-dom/client"
+import { MemoryRouter, Route, Routes } from "react-router"
 
 import { BOTS } from "@/components/bots"
+import { AppShell } from "@/components/app-shell"
 import { db, ensureMainThread, mainThreadId } from "@/lib/db"
 import { GREETINGS } from "@/lib/greeting"
 import { forgetHeldChats } from "@/lib/chat-hold"
 import { lastThreadKey, useThreads } from "@/lib/threads"
-import { SETUP_COPY } from "@/routes/chat"
+import { ChatPage, SETUP_COPY } from "@/routes/chat"
 import {
   botProfile,
   click,
   find,
+  findAll,
   laptop,
   mount,
+  Path,
   path,
   phone,
   seedChats,
   settle,
+  SwitchTo,
   until,
 } from "./component-kit.tsx"
 
@@ -221,7 +226,15 @@ test("a cold start paints a spinner under an empty header, never the setup copy"
   }
 })
 
-test("a chat answered gone lands as its own empty state, in the place it was asked for", async () => {
+/**
+ * Switches from a chat to one that answers gone, and checks what the pane does with it: it lands in
+ * the place it was asked for, as its own empty state under `title` — the title its bot's thread
+ * list still carries for it, or nothing at all — drawing no greeting and burning no line turn.
+ *
+ * `carried` leaves the bot's list holding the thread's row while the chat's own read answers gone,
+ * which is the device still knowing what the thread was called when opening it says it is gone.
+ */
+async function switchToGone(title: string, { carried }: { carried: boolean }) {
   localStorage.clear()
   forgetHeldChats()
   await seedChats(
@@ -231,41 +244,188 @@ test("a chat answered gone lands as its own empty state, in the place it was ask
     ],
     { bots: [bot, other], active: bot.id },
   )
-  await mount(phone("/c/c-a", "/c/c-b"), async () => {
-    await until(async () => paneText().includes("alpha one"), "the chat on screen")
-    const greeting = greetingKeys()
-    await db.conversations.delete("c-b")
-    await db.messages.where("conversationId").equals("c-b").delete()
-    await settle()
+  const read = db.conversations.get.bind(db.conversations)
+  // The chat's own conversation answers gone; the list is read by its own query.
+  db.conversations.get = (async (key: string) =>
+    carried && key === "c-b" ? undefined : read(key)) as typeof db.conversations.get
+  try {
+    await mount(phone("/c/c-a", "/c/c-b"), async () => {
+      await until(async () => paneText().includes("alpha one"), "the chat on screen")
+      const greeting = greetingKeys()
+      // The transcript is not this device's any more; whether the row outlives it is the question.
+      await db.messages.where("conversationId").equals("c-b").delete()
+      if (!carried) await db.conversations.delete("c-b")
+      await settle()
 
-    await click(find("[data-switch]"))
-    await until(
-      async () => !paneFrame("route").holding && !paneText().includes("alpha one"),
-      "the chat that answered gone to land",
-    )
-    await settle()
+      await click(find("[data-switch]"))
+      await until(
+        async () => !paneFrame("route").holding && !paneText().includes("alpha one"),
+        "the chat that answered gone to land",
+      )
+      await settle()
 
-    assert.equal(path(), "/c/c-b", "the chat keeps the place it was asked for")
-    assert.ok(!paneText().includes("beta one"), "nothing of the chat this device no longer has")
-    assert.ok(!paneText().includes(SETUP_COPY), "and never the setup copy")
-    assert.equal(paneTitle(), "", "the header stands empty, as the row it read is gone")
-    assert.ok(!paneText().includes("New chat"), "and a gone chat is never drawn as a new one")
-    assert.deepEqual(
-      PROVISIONAL.filter((copy) => paneText().includes(copy)),
-      [],
-      "its empty state draws no greeting and no bot line: the ready line mounts on no gone chat",
-    )
-    assert.equal(
-      find('[data-pane="route"] [data-slot="spinner"]'),
-      null,
-      "and it is ready: the pane answers the reader rather than spinning",
-    )
-    assert.deepEqual(
-      greetingKeys(),
-      greeting,
-      "a chat that answered gone consumes no line turn and swallows no greeting",
-    )
+      assert.equal(path(), "/c/c-b", "the chat keeps the place it was asked for")
+      assert.ok(!paneText().includes("beta one"), "nothing of the chat this device no longer has")
+      assert.ok(!paneText().includes(SETUP_COPY), "and never the setup copy")
+      await until(async () => paneTitle() === title, `the header to read "${title}"`)
+      assert.ok(!paneText().includes("New chat"), "and a gone chat is never drawn as a new one")
+      assert.deepEqual(
+        PROVISIONAL.filter((copy) => paneText().includes(copy)),
+        [],
+        "its empty state draws no greeting and no bot line: the ready line mounts on no gone chat",
+      )
+      assert.equal(
+        find('[data-pane="route"] [data-slot="spinner"]'),
+        null,
+        "and it is ready: the pane answers the reader rather than spinning",
+      )
+      assert.deepEqual(
+        greetingKeys(),
+        greeting,
+        "a chat that answered gone consumes no line turn and swallows no greeting",
+      )
+    })
+  } finally {
+    db.conversations.get = read
+  }
+}
+
+test("a gone thread keeps the title its bot's thread list still carries for it", () =>
+  switchToGone("Beta", { carried: true }))
+
+test('a gone thread nothing carries draws an empty header, never "New chat"', () =>
+  switchToGone("", { carried: false }))
+
+/**
+ * A device read of one chat, held open, so a test can look at a pane while that chat's answers are
+ * still on their way: `release()` answers every read from then on. The rest of the table is answered
+ * as it always was, so only the chat the test names is slow.
+ */
+function holdRead(id: string) {
+  const get = db.conversations.get.bind(db.conversations)
+  let release = () => {}
+  const held = new Promise<void>((done) => {
+    release = done
   })
+  db.conversations.get = (async (key: string) => {
+    if (key !== id) return get(key)
+    await held
+    return get(key)
+  }) as typeof db.conversations.get
+  return {
+    release,
+    restore() {
+      db.conversations.get = get
+    },
+  }
+}
+
+/** The shell with a button per chat it can be sent to, so a test can switch twice in a row. */
+const switchable = (entry: string, ...to: string[]) => (
+  <MemoryRouter initialEntries={[entry]}>
+    <Path />
+    {to.map((one) => (
+      <SwitchTo key={one} to={one} />
+    ))}
+    <Routes>
+      <Route element={<AppShell />}>
+        <Route path="/" element={<ChatPage slot="route" />} />
+        <Route path="c/:id" element={<ChatPage slot="route" />} />
+      </Route>
+    </Routes>
+  </MemoryRouter>
+)
+
+test("a switch away from a reply still streaming holds the frame it had, not the words after it", async () => {
+  localStorage.clear()
+  forgetHeldChats()
+  await seedChats(
+    [
+      { id: "c-a", title: "Alpha", messages: [{ role: "assistant", content: "alpha one" }] },
+      { id: "c-b", title: "Beta", messages: ["beta one"] },
+    ],
+    { bots: [bot, other], active: bot.id },
+  )
+  // The turn is still being written when the user leaves the chat.
+  await db.messages.update("c-a-0", { status: "streaming" })
+  const read = holdRead("c-b")
+  try {
+    await mount(phone("/c/c-a", "/c/c-b"), async () => {
+      await until(async () => paneText().includes("alpha one"), "the chat on screen")
+      const greeting = greetingKeys()
+      const before = paneText()
+
+      await click(find("[data-switch]"))
+      await until(async () => paneFrame("route").holding, "the chat left to be held")
+      // The turn keeps writing to the chat the pane has left.
+      await db.messages.update("c-a-0", { content: "alpha one, and then some" })
+      await settle()
+
+      assert.equal(
+        paneText(),
+        before,
+        "the held frame is the one it had: a stream runs no further in it",
+      )
+      assert.ok(!paneText().includes("and then some"), "and none of the words that came after it")
+      assert.deepEqual(greetingKeys(), greeting, "the hold wrote nothing of the greeting")
+
+      read.release()
+      await until(async () => paneText().includes("beta one"), "the chat asked for")
+      await settle()
+      assert.equal(
+        paneFrame("route").holding,
+        false,
+        "and it lands in one commit once its answers are in",
+      )
+      assert.deepEqual(greetingKeys(), greeting, "with the greeting untouched either way")
+    })
+  } finally {
+    read.restore()
+  }
+})
+
+test("two switches in a row draw the chat that was ready and the one asked for, never the one skipped", async () => {
+  localStorage.clear()
+  forgetHeldChats()
+  await seedChats(
+    [
+      { id: "c-a", title: "Alpha", messages: ["alpha one"] },
+      { id: "c-b", title: "Beta", messages: ["beta one"] },
+      { id: "c-c", title: "Gamma", messages: ["gamma one"] },
+    ],
+    { bots: [bot, other], active: bot.id },
+  )
+  // The chat the user passes through never answers, so it can never be ready to draw.
+  const read = holdRead("c-b")
+  try {
+    await mount(switchable("/c/c-a", "/c/c-b", "/c/c-c"), async () => {
+      await until(async () => paneText().includes("alpha one"), "the chat on screen")
+      const greeting = greetingKeys()
+      const before = paneText()
+      const seen = recordFrames(frameNow)
+      const [through, asked] = findAll("[data-switch]")
+
+      await click(through)
+      await click(asked)
+      await until(async () => paneText().includes("gamma one"), "the chat asked for second")
+      await settle()
+
+      onlyReadyFrames(seen, before, paneText())
+      assert.deepEqual(
+        seen.frames.filter((frame) => frame.text.includes("beta one")).map((frame) => frame.text),
+        [],
+        "the chat the second switch skipped was never drawn",
+      )
+      assert.ok(
+        seen.frames.some((frame) => frame.holding && frame.text === before),
+        "the chat it left was the one held, both switches long",
+      )
+      assert.deepEqual(greetingKeys(), greeting, "and neither switch touched the greeting")
+    })
+  } finally {
+    read.release()
+    read.restore()
+  }
 })
 
 const answers: string[] = []
