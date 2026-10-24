@@ -94,12 +94,18 @@ INTERRUPTED_RUN = "The run was interrupted."
 # sweep: a gate must move on as soon as the tree it reads has stopped being written.
 HOLD_SECONDS = 5.0
 
+
+class StageHold(NamedTuple):
+    """A stage whose run ended while the subagents it started still work: its home, and its outcome."""
+
+    home: Path
+    outcome: sessions.Outcome
+
+
 _loop: Optional[asyncio.AbstractEventLoop] = None
 _event: Optional["asyncio.Event"] = None
-# The stages whose run has ended while the subagents it started still work: the home holding each
-# one, and how its run ended. In memory, like ``_loop``: a restart leaves the task where the stall
-# clock finds it, and a subagent a dead host left open reads stopped rather than holding anything.
-_held: Dict[str, Tuple[Path, sessions.Outcome]] = {}
+# In memory, like ``_loop``: a restart leaves the task where the stall clock finds it.
+_held: Dict[str, StageHold] = {}
 
 
 class Refused(Exception):
@@ -425,8 +431,7 @@ def staged_session(hermes_home: Path, session_id: str) -> bool:
     ``after_run`` decides a stage by). A task with no workflow snapshots none and is an ordinary
     conversation here.
 
-    A store this can't read answers True: a wake is a turn nobody asked for, and the next look —
-    five seconds away — asks the same question again.
+    A store this can't read answers True: a wake is a turn nobody asked for.
     """
     path = db_path(hermes_home)
     if not session_id or not path.exists():
@@ -807,13 +812,7 @@ async def sweep_homes(adapter: Any) -> None:
 
 
 async def run(adapter: Any) -> None:
-    """Sweeps the projects left on every ``SWEEP_SECONDS``, and at once when woken, while Hermes runs.
-
-    A stage held for the subagents its run started is looked at on a shorter clock
-    (``HOLD_SECONDS``): settling a hold is a read of the plugin's own store, while a sweep reads
-    GitHub, so the hold is settled between sweeps and the stage moves on as soon as the last of its
-    subagents ends.
-    """
+    """Sweeps the projects left on every ``SWEEP_SECONDS``, and at once when woken, while Hermes runs."""
     global _loop, _event
     _loop = asyncio.get_running_loop()
     _event = asyncio.Event()
@@ -970,7 +969,7 @@ def _held_for_subagents(
     if not working:
         _held.pop(session_id, None)
         return False
-    _held[session_id] = (Path(hermes_home), stopped)
+    _held[session_id] = StageHold(home=Path(hermes_home), outcome=stopped)
     return True
 
 
@@ -998,8 +997,8 @@ def _settle_home(hermes_home: Path) -> List[str]:
     moved: List[str] = []
     path = db_path(hermes_home)
     for session_id in list(_held):
-        home, stopped = _held[session_id]
-        if Path(home) != Path(hermes_home):
+        held = _held[session_id]
+        if Path(held.home) != Path(hermes_home):
             continue
         record = sessions.record_for(path, hermes_home, session_id)
         project_id = holding_project(hermes_home, session_id)
@@ -1008,7 +1007,7 @@ def _settle_home(hermes_home: Path) -> List[str]:
             # The task moved on, or its session is gone: nothing is waiting on this stage.
             _held.pop(session_id, None)
             continue
-        _stage_end(hermes_home, path, project_id, record, staged, stopped)
+        _stage_end(hermes_home, path, project_id, record, staged, held.outcome)
         if session_id not in _held:
             moved.append(session_id)
     return moved

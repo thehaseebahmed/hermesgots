@@ -68,7 +68,6 @@ async function latestLine(conversationId: string) {
  */
 export function useThreads(profileId: string | undefined): Thread[] | undefined {
   const live = useWaiting()
-  // A thread whose turn ended reads working while a subagent it dispatched still works.
   const subagents = useLiveSubagents()
   const rows = useLiveQuery(async () => {
     if (!profileId) return []

@@ -73,8 +73,6 @@ class DelegationTest(unittest.TestCase):
         tools = ModuleType("tools")
         tools.delegate_tool = delegate_tool
 
-        # ``_wire_api_server`` imports aiohttp and probes ``tools.delegate_tool`` when it runs, and
-        # neither is on a test machine's path: plant both, as the suite's harness trap says.
         aiohttp = ModuleType("aiohttp")
         aiohttp.web = FakeWeb()
         planted = {

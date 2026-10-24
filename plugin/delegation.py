@@ -29,13 +29,14 @@ stage's subagent — the stage's own gate waits for them instead (``afk.staged_s
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import sqlite3
 import time
 from contextlib import closing
 from pathlib import Path
-from typing import Any, Collection, Dict, Iterable, List, Optional
+from typing import Any, Collection, Dict, Iterable, List, NamedTuple, Optional
 
 from . import events, link, outbox, sessions
 from .store import db_path, get_setting, put_setting
@@ -78,15 +79,19 @@ ERROR_FINISHES = frozenset({"error", "agent_error", "content_filter"})
 
 _event: Optional[asyncio.Event] = None
 _loop: Optional[asyncio.AbstractEventLoop] = None
-# Each store's wake watermark, once read: it is stamped once and never moves (``watch_since``).
-_watch_marks: Dict[Path, int] = {}
 # A stopped run's stop, handed to its subagents: core sets the run `stopping` as it interrupts it,
 # then whichever terminal status its unwind reaches. The watch reads those every second.
 STOPPED_STATES = ("stopping", "cancelled", "interrupted")
 STOP_REASON = "run_stop"
 STOP_SECONDS = 1.0
-# How many stopped runs the watch remembers handing over, so a lingering status is done once.
-FORGET_RUNS = 500
+HANDED_RUNS_CAP = 500
+
+
+class LiveSubagent(NamedTuple):
+    """A subagent this process still runs: core's id for it, and the conversation that dispatched it."""
+
+    agent: str
+    parent: str
 
 
 def children(hermes_home: Path, session_id: str, live: Collection[str]) -> List[Dict[str, Any]]:
@@ -210,20 +215,11 @@ def _child(row: sqlite3.Row, tip: Dict[str, Any], parent_live: bool, child_live:
     }
 
 
-def _live_subagents() -> Dict[str, Dict[str, str]]:
+def _live_subagents() -> Dict[str, LiveSubagent]:
     """Each subagent this process still runs, by the child session its work is written under.
 
-    Core's registry of live children (``tools.delegate_tool_registry._active_subagents``,
-    tools/delegate_tool_registry.py:20) keeps one record per running child for the lifetime of its
-    run, and the live agent in it carries the child's own session id
-    (``child_session_ref["session_id"]``, tools/delegate_tool.py:306) — the id the child's row in
-    ``state.db`` is keyed by, and the one the app's card holds. The record's
-    ``owner_agent_session_id`` is the conversation that dispatched it (tools/delegate_tool_child_run.py:374).
-
-    In memory, which is exactly what makes it the right signal: it is the only report of a child
-    being *worked on*, and a child a restart lost has no record (nor a ``_run_statuses`` entry, since
-    a child runs inside its parent's process, not as an API run). Imported here, not at module load:
-    the plugin has to import on a host that is missing core's tools.
+    Core's registry is the only report of a child being *worked on* (tools.delegate_tool_registry.py:20),
+    and it is imported here so the plugin still imports on a host missing core's tools.
     """
     try:
         from tools import delegate_tool_registry as registry
@@ -232,7 +228,7 @@ def _live_subagents() -> Dict[str, Dict[str, str]]:
     records = getattr(registry, "_active_subagents", None)
     if not isinstance(records, dict):
         return {}
-    found: Dict[str, Dict[str, str]] = {}
+    found: Dict[str, LiveSubagent] = {}
     for agent_id, record in list(records.items()):
         if not isinstance(record, dict):
             continue
@@ -243,7 +239,7 @@ def _live_subagents() -> Dict[str, Dict[str, str]]:
         owner = str(record.get("owner_agent_session_id") or "") or str(
             getattr(agent, "_parent_session_id", "") or ""
         )
-        found[session_id] = {"agent": str(agent_id), "parent": owner}
+        found[session_id] = LiveSubagent(agent=str(agent_id), parent=owner)
     return found
 
 
@@ -257,7 +253,7 @@ def live_sessions(hermes_home: Path) -> Dict[str, int]:
     """
     found: Dict[str, int] = {}
     for live in _live_subagents().values():
-        parent = live["parent"]
+        parent = live.parent
         if not parent:
             continue
         root = sessions.chat_session(hermes_home, parent)
@@ -326,8 +322,7 @@ async def sweep(adapter: Any, home: Path) -> int:
 
     Nothing is kept in memory: the store's mark is the only record of what has been posted, so a
     plugin that restarts resumes exactly where the last one left off, and a wake that failed to post
-    is simply still unmarked on the next look. What is kept is the watermark ``watch_since`` stamps:
-    a home's history is not a backlog of wakes to fire.
+    is simply still unmarked on the next look.
     """
     path = db_path(home)
     # Stamped before the read, so a child that ends between the two is one of the watcher's own.
@@ -355,9 +350,7 @@ async def sweep(adapter: Any, home: Path) -> int:
 async def wake_one(adapter: Any, home: Path, child: Dict[str, Any]) -> bool:
     """Wakes a conversation for one finished subagent, or declines to (``True`` when it posted).
 
-    The one decision point of the whole feature — check, post, mark — so a rule that keeps a kind of
-    session from being woken is added here and nowhere else: a workflow stage keeps its one run
-    (#469), whatever else would let a wake through.
+    Wakes are posted only here, so #469's rule that a stage keeps its one run is applied at this seam.
     """
     parent = child["parent_id"]
     # The session the chat started as — the id the app posts its own runs with — so Hermes resolves
@@ -399,26 +392,18 @@ async def wake_one(adapter: Any, home: Path, child: Dict[str, Any]) -> bool:
     return True
 
 
+@functools.cache
 def watch_since(path: Path) -> int:
     """The moment this store started watching for wakes, in epoch ms, stamped on its first look.
 
-    A home's ``state.db`` carries every subagent it ever ran, and each wake is a real turn of a real
-    conversation: the first sweep after an upgrade must not start one for each of a hundred results
-    the user read weeks ago. So only a child that ends after the watcher began is woken — and the
-    stamp is written once, which is why a restart keeps it: a child that ended while the plugin was
-    down is still woken. Nothing is dropped for downtime, only for predating the feature.
-
-    Held in memory once read, since the stamp never moves: a sweep runs every few seconds and has no
-    reason to open the store for a value it already has.
+    Only a child that ends after the watcher began is woken, which is what the stored stamp says: a
+    home's history is not a backlog of turns to fire, and a child that ended while the plugin was
+    down still is. The stamp never moves, so it is read once per process.
     """
-    known = _watch_marks.get(path)
-    if known:
-        return known
     since = get_setting(path, WAKE_SINCE_KEY)
     if not (isinstance(since, int) and since > 0):
         since = int(time.time() * 1000)
         put_setting(path, WAKE_SINCE_KEY, since)
-    _watch_marks[path] = since
     return since
 
 
@@ -681,7 +666,7 @@ def _live_agent(subagent_id: str) -> Optional[str]:
     card is given anyway.
     """
     live = _live_subagents().get(subagent_id)
-    return live["agent"] if live else None
+    return live.agent if live else None
 
 
 def _home() -> Path:
@@ -704,7 +689,7 @@ def sweep_stops(
     (``tools.async_delegation.interrupt_for_session``).
 
     ``handed`` is the watch's memory of the runs it has already done, kept across ticks so a status
-    that lingers is not handed over again and again; it is bounded at ``FORGET_RUNS``.
+    that lingers is not handed over again and again; it is bounded at ``HANDED_RUNS_CAP``.
     """
     handed = {} if handed is None else handed
     statuses = getattr(adapter, "_run_statuses", None)
@@ -713,7 +698,7 @@ def sweep_stops(
         if not isinstance(run_id, str) or not _stopped(status) or run_id in handed:
             continue
         handed[run_id] = None
-        while len(handed) > FORGET_RUNS:
+        while len(handed) > HANDED_RUNS_CAP:
             handed.pop(next(iter(handed)))
         for home in homes:
             named += stop_run(Path(home), status)
@@ -726,11 +711,8 @@ def stop_run(home: Path, run: Dict[str, Any]) -> List[str]:
     A child of the run is one begun after the run did (``started_at`` against the run's own
     ``created_at``): a turn that has ended leaves its subagents working, and those belong to their
     own cards, not to a later turn's stop (ADR 0038). Only live children are named — a child that has
-    ended is left alone, its card and its result already where they belong.
-
-    A run whose start time is unknown names every live child of its session, since there is nothing
-    to tell its own from an older turn's; core's stop is per session anyway, so a session stop that
-    names any child interrupts the session's records, an older turn's included.
+    ended is left alone, its card and its result already where they belong. A run with no start time
+    to compare names every live child of its session, as core's own per-session stop would.
     """
     session_id = run.get("session_id")
     if not isinstance(session_id, str) or not session_id:
@@ -772,9 +754,7 @@ def _stopped(status: Any) -> bool:
 
 
 def _since(started: Any, began: Any) -> bool:
-    """Whether a child began while the run was live. A run or a child with no time to compare is
-    taken as the run's: stopping a child that should have run on is a stop from its own card away,
-    while leaving one of the run's own running is the stop the user asked for failing."""
+    """Whether a child began while the run was live; a missing time is taken as the run's."""
     if not isinstance(began, (int, float)) or not isinstance(started, (int, float)):
         return True
     return started >= began

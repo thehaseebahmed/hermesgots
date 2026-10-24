@@ -1705,9 +1705,7 @@ async function playTurn(req, body, last, out) {
     return { spoken, prompt_tokens: 6000, completion_tokens: pieces }
   }
 
-  // "delegate and ask": a delegation that outlives the turn. Its subagent keeps working while the
-  // agent asks the user something, and once they answer the subagent's result is delivered into the
-  // thread and the wake run the plugin posts answers it (#467, #471).
+  // "delegate and ask": a delegation that outlives the turn (#467, #471).
   if (/delegate and ask/i.test(last) && sessionOf(req, body)) {
     const parent = sessionOf(req, body)
     const goal = "Find what fills /var/log on this host and say which setting would cap it."
@@ -1764,8 +1762,7 @@ async function playTurn(req, body, last, out) {
       display_metadata: { delegation_id: child.agent.id },
     })
     // Then the wake prompt the plugin posts for it, with core's footer: a turn of this chat, which
-    // the mock runs as the wake run once this one has ended (see `startRun`). Its idempotency key
-    // is the plugin's own (`wake_<child session id>`), so a retried sweep never starts a second.
+    // the mock runs as the wake run once this one has ended (see `startRun`).
     return {
       spoken,
       prompt_tokens: 5400,

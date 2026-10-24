@@ -61,15 +61,19 @@ class ChildrenTest(unittest.TestCase):
         plugin imports core lazily so it loads on a host without it.
         """
         registry = ModuleType("tools.delegate_tool_registry")
-        registry._active_subagents = {  # type: ignore[attr-defined]
-            f"sa-{child}": {
-                "agent": SimpleNamespace(session_id=child),
-                "owner_agent_session_id": owner,
-            }
-            for child, owner in (live or {}).items()
-        }
+        setattr(
+            registry,
+            "_active_subagents",
+            {
+                f"sa-{child}": {
+                    "agent": SimpleNamespace(session_id=child),
+                    "owner_agent_session_id": owner,
+                }
+                for child, owner in (live or {}).items()
+            },
+        )
         tools = ModuleType("tools")
-        tools.delegate_tool_registry = registry  # type: ignore[attr-defined]
+        setattr(tools, "delegate_tool_registry", registry)
         patching = mock.patch.dict(
             sys.modules, {"tools": tools, "tools.delegate_tool_registry": registry}
         )

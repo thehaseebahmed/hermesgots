@@ -84,9 +84,9 @@ class StopTest(unittest.TestCase):
 
     def plant(self, interrupt: Any) -> None:
         async_delegation = ModuleType("tools.async_delegation")
-        async_delegation.interrupt_for_session = interrupt  # type: ignore[attr-defined]
+        setattr(async_delegation, "interrupt_for_session", interrupt)
         tools = ModuleType("tools")
-        tools.async_delegation = async_delegation  # type: ignore[attr-defined]
+        setattr(tools, "async_delegation", async_delegation)
         patching = mock.patch.dict(
             sys.modules, {"tools": tools, "tools.async_delegation": async_delegation}
         )
@@ -264,7 +264,7 @@ class StopTest(unittest.TestCase):
         self.session("c1", "s", delegate_from="s")
         self.adapter.run("run-1", "stopping", "s")
         constants = ModuleType("hermes_constants")
-        constants.get_hermes_home = lambda: str(self.home)  # type: ignore[attr-defined]
+        setattr(constants, "get_hermes_home", lambda: str(self.home))
 
         def one_tick(_seconds: float) -> None:
             raise RuntimeError("one tick is enough")

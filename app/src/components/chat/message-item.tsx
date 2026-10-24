@@ -443,7 +443,6 @@ export const MessageItem = memo(function MessageItem({
     statusLine || failed || (message.status === "stopped" && !message.content) || statsShown
   return (
     <div className="flex flex-col gap-3">
-      {/* A subagent's result is the bot's message: the line naming it rides above what it left. */}
       {message.subagent && <SubagentResultCard subagent={message.subagent} />}
       {reasoning && (
         <ThinkingLine
@@ -467,7 +466,7 @@ export const MessageItem = memo(function MessageItem({
               <AssistantRow
                 conversationId={message.conversationId}
                 busy={busy}
-                streaming={streaming}
+                ended={!streaming}
                 parts={parts}
               >
                 {last && footer}
@@ -501,15 +500,15 @@ function sameMessage(a: MessageItemProps, b: MessageItemProps) {
 function AssistantRow({
   conversationId,
   busy,
-  streaming,
+  ended,
   parts,
   children,
 }: {
   conversationId: string
   /** A reply is streaming in this chat, so a card that sends (a missed question) waits. */
   busy?: boolean
-  /** This reply is still being written: the turn it belongs to has not ended. */
-  streaming: boolean
+  /** The reply has been written: the turn it belongs to has ended. */
+  ended: boolean
   parts: Part[]
   children?: ReactNode
 }) {
@@ -525,7 +524,7 @@ function AssistantRow({
               busy={busy}
             />
           ) : part.kind === "agent" ? (
-            <AgentCards key={part.tool.toolCallId} tool={part.tool} live={streaming} />
+            <AgentCards key={part.tool.toolCallId} tool={part.tool} ended={ended} />
           ) : part.kind === "tools" ? (
             <div key={part.tools[0].toolCallId} className="w-full max-w-xl">
               <ToolGroup tools={part.tools} />

@@ -3105,8 +3105,7 @@ export interface LiveRuns {
   runIds: Record<string, string>
   /** Why a session waits on the user, with its project's name for a project session (0.16). */
   waiting: Record<string, WaitingReason & { project?: string }>
-  /** How many subagents each session still runs (0.79): a chat whose turn has ended is still at
-   * work while one is, and no read per session is needed to say so. */
+  /** How many subagents each session still runs (0.79). */
   subagents: Record<string, number>
 }
 

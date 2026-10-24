@@ -69,11 +69,11 @@ const card = (
   delegated: ReturnType<typeof agent>,
   call: ToolEvent,
   body: () => Promise<void>,
-  { live = false, target = server }: { live?: boolean; target?: HermesConfig } = {},
+  { ended = true, target = server }: { ended?: boolean; target?: HermesConfig } = {},
 ) =>
   mount(
     <AgentsContext.Provider value={{ agents: [delegated], server: target, sessionId: SESSION }}>
-      <AgentCards tool={call} live={live} />
+      <AgentCards tool={call} ended={ended} />
     </AgentsContext.Provider>,
     body,
   )
@@ -113,7 +113,7 @@ test("a turn still running leaves stopping to the composer", async () => {
     async () => {
       assert.equal(stopButton(), undefined, "no Stop while the turn that started it runs")
     },
-    { live: true },
+    { ended: false },
   )
 })
 

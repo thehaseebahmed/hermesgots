@@ -13,7 +13,7 @@ const RESULT_END = "frees the most for one line"
 const WAKE_OPEN = "The subagent is back."
 const WAKE_END = "the cap holds across a reboot"
 
-await flow("delegation-question", async ({ page, seed, send, lastReply, until, shot }) => {
+await flow("question-during-delegation", async ({ page, seed, send, lastReply, until, shot }) => {
   const chat = `e2e-delegation-${runId()}`
   await seed([{ id: chat, title: "Delegation and a question" }])
   await page.goto(`${app}/c/${chat}`)
@@ -58,7 +58,6 @@ await flow("delegation-question", async ({ page, seed, send, lastReply, until, s
 
   await send(ASK)
 
-  // (a) The call's card names the subagent and reads it at work, from the plugin's own answer.
   const working = page.getByText("Working for", { exact: false })
   await page.getByText(/Sub-Agent: /).first().waitFor({ timeout: 20_000 })
   await working.first().waitFor({ timeout: 20_000 })
@@ -74,8 +73,6 @@ await flow("delegation-question", async ({ page, seed, send, lastReply, until, s
   await shot("subagent-working")
   pass("the delegation's card shows its subagent running")
 
-  // (b) The question takes the composer's place while that subagent is still working, and the
-  // host is still saying so at that moment.
   await page.getByText(QUESTION).waitFor({ timeout: 20_000 })
   assert.equal(
     await page.getByLabel("Message", { exact: true }).count(),
@@ -91,7 +88,6 @@ await flow("delegation-question", async ({ page, seed, send, lastReply, until, s
   await shot("question")
   pass("the question replaces the composer while the subagent still runs")
 
-  // The answer lets the turn carry on; the composer comes back to the user.
   await page.getByRole("button", { name: "Yes, cap everything" }).click()
   await page.getByRole("button", { name: "Send" }).click()
   await until(
@@ -100,7 +96,6 @@ await flow("delegation-question", async ({ page, seed, send, lastReply, until, s
     "the composer to come back once the answer is sent",
   )
 
-  // (c) The delivery lands as the bot's own message at the thread's end — never a user bubble.
   let tailWhenLanded = null
   const delivered = await until(
     async () => {
@@ -119,7 +114,6 @@ await flow("delegation-question", async ({ page, seed, send, lastReply, until, s
     !delivered.content.includes("ASYNC DELEGATION COMPLETE"),
     "and not the notification's header",
   )
-  // What follows it is only the wake turn it woke, never another of the user's messages.
   assert.ok(
     tailWhenLanded.every((message) => message.role === "assistant" && !message.subagent),
     "it landed at the thread's end",
@@ -138,7 +132,6 @@ await flow("delegation-question", async ({ page, seed, send, lastReply, until, s
     0,
     "with no bubble, as a reply has none",
   )
-  // The line naming the subagent it came from rides above the result, in the same message.
   const resultCard = page.locator("[data-slot=subagent-result]").first()
   await resultCard.waitFor({ timeout: 15_000 })
   assert.match(await resultCard.innerText(), /Sub-Agent: /, "the result names its subagent")
@@ -146,9 +139,6 @@ await flow("delegation-question", async ({ page, seed, send, lastReply, until, s
   await shot("result-delivered")
   pass("the result landed as the bot's own message at the thread's end")
 
-  // (d) The wake prompt is the model's input alone: no message of the thread is the user's but
-  // their own, and nothing drawn on the bot's side carries the notification's header or footer —
-  // the delivery drew the result itself.
   assert.deepEqual(
     all.filter((message) => message.role === "user").map((message) => message.content),
     [ASK],
@@ -171,8 +161,6 @@ await flow("delegation-question", async ({ page, seed, send, lastReply, until, s
   )
   pass("the wake prompt drew nothing of the thread")
 
-  // (e) The wake turn is drawn as a message of its own, its answer arriving while its run is still
-  // going: each row Hermes writes lands in the thread, so the screen's thread grows in steps.
   const drawn = () =>
     page.evaluate(
       () => document.querySelector("[data-slot=message-scroller]")?.textContent?.length ?? 0,
@@ -202,8 +190,6 @@ await flow("delegation-question", async ({ page, seed, send, lastReply, until, s
     lengths.size > 2,
     `the thread grew a piece at a time as the wake turn ran (saw ${lengths.size} lengths)`,
   )
-  // The screen catches up with what the app stored: the whole answer, under the result, on the
-  // bot's side, with the tool call the wake turn ran on the way.
   await page.getByText(WAKE_END).first().waitFor({ timeout: 15_000 })
   const wakeRow = page.locator("[data-slot=message]", { hasText: WAKE_END }).last()
   assert.equal(await wakeRow.getAttribute("data-align"), "start", "the bot's own side")
@@ -213,8 +199,6 @@ await flow("delegation-question", async ({ page, seed, send, lastReply, until, s
     "with no bubble",
   )
   await row.getByText(RESULT_END).waitFor()
-  // It acted on the result before answering, as a wake turn does: its own tool row, below the
-  // result — nothing the earlier turn drew.
   const wokeTool = page.getByText("Ran a command", { exact: false }).last()
   await wokeTool.waitFor({ timeout: 15_000 })
   assert.ok(

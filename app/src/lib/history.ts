@@ -240,7 +240,6 @@ export function toMessages(
   // Where the reply's text since its last tool call starts, and the notice that text was cut by.
   let segment = 0
   let notice: string | undefined
-  // A subagent's result, and the subagent each one finished for.
   const results = subagentResults(rows)
   const newReply = (id: string, createdAt: number) => {
     segment = 0
@@ -774,9 +773,6 @@ async function reconcile(conversationId: string) {
       writes.push(message)
       floor = message.createdAt + 1
     }
-    // A subagent's result lands at the thread's end, in the order it arrived: after the turn it came
-    // in with, and never as a turn of its own.
-    const addResults = (results: Message[]) => results.forEach(put)
     for (const { user, reply, results, wake, rows: range } of turns) {
       if (!user) {
         // The turn a wake run opened: the prompt draws nothing, and the answer it brought is the
@@ -784,12 +780,12 @@ async function reconcile(conversationId: string) {
         if (wake && reply) {
           parts.push(...partsOf(current, sessionId, range, reply.id))
           put(reply)
-          addResults(results)
+          results.forEach(put)
           continue
         }
         // A turn longer than every page fetchTail reads: only an empty chat shows its tail.
         if (!current.length && reply) writes.push(reply)
-        if (!current.length) addResults(results)
+        if (!current.length) results.forEach(put)
         continue
       }
       parts.push(...partsOf(current, sessionId, range, reply?.id))
@@ -802,7 +798,7 @@ async function reconcile(conversationId: string) {
           writes.push({ ...reply, createdAt })
           floor = createdAt + 1
         }
-        addResults(results)
+        results.forEach(put)
         continue
       }
       const at = user.hermesRowId !== undefined ? hostAt.get(user.hermesRowId) : undefined
@@ -834,7 +830,7 @@ async function reconcile(conversationId: string) {
           const merged = withReplyDetails(local, reply)
           if (merged) writes.push(merged)
         }
-        addResults(results)
+        results.forEach(put)
         continue
       }
       // Hermes's compaction carries the newest turns forward under fresh row ids with their text and
@@ -863,14 +859,14 @@ async function reconcile(conversationId: string) {
           const merged = withReplyDetails(local, reply)
           if (merged) writes.push(merged)
         }
-        addResults(results)
+        results.forEach(put)
         continue
       }
       user.createdAt = Math.max(user.createdAt, floor)
       writes.push(user)
       floor = user.createdAt + 1
       if (reply) put(reply)
-      addResults(results)
+      results.forEach(put)
     }
     await db.messages.bulkDelete(parts)
     await db.messages.bulkPut(writes)

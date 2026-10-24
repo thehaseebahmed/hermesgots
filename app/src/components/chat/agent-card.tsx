@@ -31,19 +31,10 @@ const NO_ROWS: Message[] = []
 
 const agentTitle = (goal: string) => `Sub-Agent: ${agentName(goal)}`
 
-/**
- * A `delegate_task` call: a card per agent it started, with the last few things that agent did,
- * opening everything it did. Without the plugin to name the agent, the call's goal and state.
- *
- * `live` is whether the reply this call sits in is still streaming — a turn still going. Stopping a
- * subagent is the user's to do only once that turn has ended: a background delegation's handle lands
- * mid-turn, so the call reading `completed` says nothing about the turn, and its own Stop would
- * compete with the composer's while that is still there to take the subagent down with the turn.
- */
-export function AgentCards({ tool, live }: { tool: ToolEvent; live: boolean }) {
+/** A `delegate_task` call: a card per agent it started, each offering Stop once its turn has ended. */
+export function AgentCards({ tool, ended }: { tool: ToolEvent; ended: boolean }) {
   const source = useAgentsSource()
   const agents = source ? agentsOf(tool, source.agents) : []
-  const ended = !live
   if (!source || agents.length === 0) return <PendingCard tool={tool} />
   return (
     <>

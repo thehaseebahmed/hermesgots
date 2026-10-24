@@ -1153,8 +1153,7 @@ def marked_wakes(path: Path, subagent_ids: Iterable[str]) -> Set[str]:
     """The subagents among ``subagent_ids`` whose result has already woken their bot.
 
     One read for a whole sweep: the watcher asks this about every ended subagent it found, so a
-    per-child lookup would open the store once per child. A bound with no rows is a store that has
-    never posted one, which is every store before this feature (``delegation.py``).
+    per-child lookup would open the store once per child.
     """
     ids = [one for one in subagent_ids if one]
     if not ids or not path.exists():
@@ -1174,8 +1173,7 @@ def mark_wake(path: Path, subagent_id: str, parent_id: str, run_id: Optional[str
     """Records that a subagent's result has been posted to its conversation, and the run it started.
 
     Written after the post answered, never before: a post that failed must be retried, and the
-    ``Idempotency-Key`` it carries is what makes that retry safe. It is the restart-proof half of the
-    dedupe — the watcher keeps nothing in memory — so a plugin that restarts resumes where this says.
+    ``Idempotency-Key`` it carries is what makes that retry safe.
     """
     conn = connect(path)
     try:

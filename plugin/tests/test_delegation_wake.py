@@ -12,8 +12,7 @@ child still running), the mark that keeps a restart from posting twice, and the 
 including that a stop really asks core to interrupt the child, rather than only marking its row.
 
 Everything about the child's transcript is read from a real ``state.db`` the harness writes; core's
-live-subagent registry, which a stop goes through, is planted in ``sys.modules`` (the suite's second
-harness trap), since a test machine has no /opt/data/hermes-agent.
+live-subagent registry, which a stop goes through, is planted in ``sys.modules``.
 
 Run: python3 -m unittest plugin.tests.test_delegation_wake -v
 """

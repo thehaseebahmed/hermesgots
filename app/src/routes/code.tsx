@@ -107,7 +107,6 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
   const { root } = useNav()
   const listed = useProjectSessions()
   const live = useAllLiveRuns()
-  // A session whose turn ended but whose subagents still work reads as working, from the same poll.
   const subagents = useLiveSubagents()
   const waits = useWaiting()
   const lists = useAllProjects()

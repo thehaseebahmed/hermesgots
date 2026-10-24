@@ -186,8 +186,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     findings.wire(adapter)
     # The agent files its generated files in the project's library; see library.py.
     library.wire(adapter)
-    # Delegation is core's: a keyed /v1/runs turn dispatches it in the background and the turn
-    # carries on, so a question raised in that turn reaches the user while the subagents work.
     # Research missions' researchers record their claims; see research.py.
     research.wire(adapter)
     meetings.wire(adapter)
@@ -327,9 +325,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "clarify",
                     "todo_tool",
                     "agents",
-                    # Stopping one subagent from its card, after the turn that started it ended
-                    # (delegation.stop). Advertised apart, so an app that draws the card's Stop only
-                    # where the host takes it (delegation.py).
                     "subagent_stop",
                     "attachments",
                     "media",
@@ -824,8 +819,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         # On the loop thread, like store_path: the profile scope isn't visible inside to_thread.
         home = hermes_home()
         found = await asyncio.to_thread(delegation.stop, home, session_id, agent_id)
-        # Never a 404 for an unknown session, nor for a subagent that already finished: the app reads
-        # a 404 as a missing plugin, and a card whose Stop found nothing live still says so.
         return web.json_response(
             {"object": "memento.agent_stop", "session_id": session_id, "agent_id": agent_id, **found}
         )
@@ -1457,8 +1450,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             host_side = {}
         for session_id, reason in host_side.items():
             waiting.setdefault(session_id, reason)
-        # The subagents each session still runs: a chat whose turn has ended is still at work while
-        # one is, so every screen's session state reads it from the poll it already makes.
         try:
             subagents = await asyncio.to_thread(delegation.live_sessions, home)
         except Exception:
