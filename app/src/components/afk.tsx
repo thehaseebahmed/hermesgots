@@ -916,9 +916,21 @@ function Working({
   refusal: string | null | undefined
   manyRepos: boolean
 }) {
+  // One list of what it holds, however much the host named: its own rows where it answers a list,
+  // and the one task it answers otherwise, wearing the stage the read carries for it. A row is a
+  // hold only in the first case — that is what `data-hold` marks, and what the count row counts.
   const held = holds && holds.length > 0 ? holds : null
-  if (!task && !refusal && !held) return null
-  const label = stageName ?? (stage ? STAGE_LABELS[stage] : null)
+  const rows: { hold: AfkHold; holdRow: boolean }[] = held
+    ? held.map((hold) => ({ hold, holdRow: true }))
+    : task
+      ? [
+          {
+            hold: { ...task, stage: stage ?? null, stageName: stageName ?? null, stalled: null },
+            holdRow: false,
+          },
+        ]
+      : []
+  if (!refusal && !rows.length) return null
   return (
     <div className="flex flex-col gap-3">
       {refusal && (
@@ -926,10 +938,12 @@ function Working({
           {refusal}
         </p>
       )}
-      {held ? (
+      {rows.length > 0 && (
         <section aria-label="Working" data-working data-stage={stage ?? undefined}>
           <h3 className="px-1 pb-1 text-sm text-muted-foreground">Working</h3>
-          {pickCount !== null && (
+          {/* Only a host that answered a list is counted: one task against a count of one is a
+              sentence about nothing. */}
+          {held && pickCount !== null && (
             <p
               data-holds={held.length}
               data-pick-count={pickCount}
@@ -939,11 +953,11 @@ function Working({
             </p>
           )}
           <ul>
-            {held.map((hold) => (
+            {rows.map(({ hold, holdRow }) => (
               <li
                 key={`${hold.repo}#${hold.number}`}
-                data-hold={hold.number}
-                data-stage={hold.stage ?? undefined}
+                data-hold={holdRow ? hold.number : undefined}
+                data-stage={holdRow ? (hold.stage ?? undefined) : undefined}
               >
                 <TaskLink
                   task={hold}
@@ -954,13 +968,6 @@ function Working({
             ))}
           </ul>
         </section>
-      ) : (
-        task && (
-          <section aria-label="Working" data-working data-stage={stage ?? undefined}>
-            <h3 className="px-1 pb-1 text-sm text-muted-foreground">Working</h3>
-            <TaskLink task={task} label={label} note={manyRepos ? task.repo : undefined} />
-          </section>
-        )
       )}
     </div>
   )
