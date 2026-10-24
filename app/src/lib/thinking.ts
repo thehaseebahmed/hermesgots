@@ -2,7 +2,7 @@
  * A reply's thinking, kept in runs: one per contiguous stretch of thinking between tool calls, each
  * anchored to the call that broke it. The rules here are pure and reach nothing, so
  * `scripts/test-thinking.mjs` drives them without a screen; the ingest that fills them in is
- * `chat.ts`, and the thread that draws them is `message-item.tsx`. See ADR 0039.
+ * `chat.ts`, and the thread that draws them is `message-item.tsx`. See ADR 0038.
  */
 
 /** One stretch of a reply's thinking, and the tool call it followed. */
