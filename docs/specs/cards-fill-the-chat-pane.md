@@ -82,8 +82,10 @@ case.
 
 - **A chat opened beside a list** — the card fills that pane, not the window: the gutter is measured
   from the pane the thread is drawn in.
-- **A question answered** — the card that records it is the same width as the card that asked, so
-  nothing resizes at the moment of answering.
+- **A question answered** — both cards are full width of the container they stand in: the waiting
+  one in the composer slot, the record in the thread. The thread reserves a scrollbar's gutter the
+  slot keeps none of, so the record lands that reservation (10px with `scrollbar-thin`) narrower at
+  the swap — each container's own gutters deciding, never a cap, as ADR 0041 records it.
 - **An approval swapping with the Question** — both take the composer's slot at the same width, so
   the swap is not a jump.
 - **A card arriving mid-stream** — it fills the pane from its first frame; a card never arrives
