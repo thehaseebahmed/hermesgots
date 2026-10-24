@@ -411,15 +411,12 @@ export async function setSkillEnabled(
   enabled: boolean,
   signal?: AbortSignal,
 ): Promise<Skill> {
-  const response = await request(
-    `${pluginRoot(config.baseUrl)}/skills/${encodeURIComponent(name)}/enabled`,
-    {
-      method: "POST",
-      headers: headers(config),
-      body: JSON.stringify({ enabled }),
-      signal,
-    },
-  )
+  const response = await request(skillPath(config, name, "enabled"), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ enabled }),
+    signal: signal ?? AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
   const data = (await response.json())?.data as Skill | undefined
   if (!data || typeof data.name !== "string" || !data.name) {
     throw new HermesError("The host answered without the skill.")
@@ -442,7 +439,7 @@ export async function removeSkill(
   const response = await request(skillPath(config, name), {
     method: "DELETE",
     headers: headers(config),
-    signal,
+    signal: signal ?? AbortSignal.timeout(WRITE_TIMEOUT_MS),
   })
   // The Host's own answer is what the list becomes, so a row that went and one that moved with it
   // cannot disagree with what the bot now holds.
@@ -461,8 +458,6 @@ export interface SkillView extends Skill {
   linkedFiles: Record<string, string[]> | null
   /** `available`, `setup_needed` or `unsupported`, where the Host says. */
   readiness_status?: string | null
-  /** Whether the Host needs something of a skill's own before it can run it. */
-  setup_needed?: boolean
   /** What to do about it, in the Host's own prose. */
   setup_help?: string
   gateway_setup_hint?: string
