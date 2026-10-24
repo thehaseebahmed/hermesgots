@@ -1953,9 +1953,9 @@ inline — already drifted between them, a `<= 2` two-sided tolerance in one and
 `+1` in the other — is one `headerBoxes` in `lib.mjs`, asserted so a header without a title or an
 action fails by name instead of as a null; the actions div joined the row's `data-slot` contract
 instead of being walked as `lastElementChild`; the thread flow's gate matches the session's; and
-the component's comment no longer names a width it cannot promise (the old "exactly 768px" case was
-wrong — full-pane 768 leaves each flank 178px — so the comment now states the rule and the squeeze
-in general terms).
+the `/no-comments` pass then cut the component's comment back to its prop contract — its old
+"exactly 768px" case was wrong (full-pane 768 leaves each flank 178px), and the geometry that prose
+described is carried by the flows' assertions now, not by sentences nothing checked.
 
 ## Risky, pre-existing
 

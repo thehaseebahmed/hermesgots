@@ -102,8 +102,6 @@ for (const width of [390, 1024]) {
         await assertOneLine(title, `the session's title at ${look}`)
         await assertOneLine(subtitle.first(), `the session's line at ${look}`)
 
-        // Both flanks are a fr share of the row, so the block sits on the row's centre at every
-        // width, and the actions — pinned to their track's end — hold its right edge.
         const boxes = await headerBoxes(page)
         const geometry = await header.evaluate((el) => {
           const rect = (slot) => {
@@ -146,7 +144,6 @@ for (const width of [390, 1024]) {
           Math.abs(centre(boxes.title) - centre(boxes.row)) <= 2,
           `the title is centred on the row at ${look} (${Math.round(centre(boxes.title))} against ${Math.round(centre(boxes.row))})`,
         )
-        // Whatever the title does — it truncates at both widths above — the actions hold the corner.
         assert.ok(
           Math.abs(boxes.actions.right - boxes.row.right) <= 2,
           `the actions end on the row's right edge at ${look} (${Math.round(boxes.actions.right)} against ${Math.round(boxes.row.right)})`,

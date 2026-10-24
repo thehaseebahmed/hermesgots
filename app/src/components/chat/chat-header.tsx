@@ -13,17 +13,10 @@ import { cn } from "@/lib/utils"
  * right.
  * `centered` gives the arrangement of a place rather than a conversation with a bot — a coding
  * session, or a bot's thread open beside its Main: the same leading control, then the title centred
- * over its subtitle. The row is three tracks with both flanks the same share, so the flanks divide
- * the row by construction rather than by whatever the middle leaves after taking what it wants: a
- * title wider than its track cuts with an ellipsis instead of squeezing the flanks, and a flank never
- * falls below the width its controls need. While a flank's share covers that width the block sits on
- * the row's exact centre; when it doesn't — a muted mark beside the ring in a pane narrower than the
- * cluster — one flank holds its content and the centre drifts by half the difference, the least a
- * grid can do without measuring the controls. The actions align to the end of their track, so they
- * hold the row's right edge whatever the title does. The muted mark moves into the actions, so it
- * cannot pull the title off centre. A session is a place in a project and a thread open beside Main
- * is already somewhere, so both pass `showBot={false}`: the picture stays a caller's decision, and
- * the arrangement doesn't second-guess it.
+ * over its subtitle. The muted mark moves into the actions, so it cannot pull the title off centre.
+ * A session is a place in a project and a thread open beside Main is already somewhere, so both pass
+ * `showBot={false}`: the picture stays a caller's decision, and the arrangement doesn't second-guess
+ * it.
  * `className` can pin it in the page's flow instead.
  */
 export function ChatHeader({
