@@ -41,12 +41,15 @@ export const ThinkingLine = memo(function ThinkingLine({
   reasoning,
   thinking,
   spanMs,
+  className,
 }: {
   reasoning: string
   /** The model is still thinking, so the line streams open. */
   thinking: boolean
   /** How long this device watched the turn think, when it watched it at all. */
   spanMs?: number
+  /** The margin that hugs the row it sits beside, when the thread's parts hand one over. */
+  className?: string
 }) {
   const [override, setOverride] = useState<boolean | null>(null)
   const [read, setRead] = useState<Read>("whole")
@@ -163,7 +166,7 @@ export const ThinkingLine = memo(function ThinkingLine({
   }, [open])
 
   return (
-    <div ref={root} className="flex flex-col" data-slot="thinking-line">
+    <div ref={root} className={cn("flex flex-col", className)} data-slot="thinking-line">
       <button
         type="button"
         className="flex min-h-11 w-full items-center gap-2 text-left text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"

@@ -139,6 +139,19 @@ function placeThinking(parts: Part[], runs: RunPart[]): Part[] {
 }
 
 /**
+ * The margin that pulls a thinking row toward the tool row it sits beside: the two lines are one
+ * unit of the thread's account of the work, so only the tool-adjacent side closes up — the gap to
+ * the reply's text on the other side stays as it is.
+ */
+function huggingTools(parts: Part[], index: number) {
+  const beside = (part: Part | undefined) => part?.kind === "tools"
+  const top = beside(parts[index - 1])
+  const bottom = beside(parts[index + 1])
+  if (top && bottom) return "-my-2"
+  return top ? "-mt-2" : bottom ? "-mb-2" : undefined
+}
+
+/**
  * Interleaves a slice of the reply (starting at `start`) with the tools run during it. A clarify
  * call is a card of its own (its question and the answer) rather than a tool row, so is a
  * delegation (the agent it started), and the images a reply sends together — only whitespace
@@ -596,7 +609,7 @@ function AssistantRow({
   return (
     <MessageRow align="start">
       <MessageContent className="gap-3">
-        {parts.map((part) =>
+        {parts.map((part, index) =>
           part.kind === "clarify" ? (
             <ClarifyCard
               key={part.tool.toolCallId}
@@ -616,6 +629,7 @@ function AssistantRow({
               reasoning={part.run.text}
               thinking={part.thinking}
               spanMs={part.run.spanMs}
+              className={huggingTools(parts, index)}
             />
           ) : part.kind === "media" ? (
             <MediaTag key={part.at} conversationId={conversationId} paths={part.paths} />
