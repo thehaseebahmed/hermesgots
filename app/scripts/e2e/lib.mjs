@@ -326,10 +326,6 @@ function helpers(page) {
       await composer.fill(text)
       await composer.press("Enter")
     },
-    /**
-     * The chat's newest message when it's a reply: what the app has written for it so far, and how
-     * long its text is.
-     */
     lastReply(chatId) {
       return page.evaluate(async (id) => {
         const { db } = await import("/src/lib/db.ts")

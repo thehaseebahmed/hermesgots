@@ -1,19 +1,17 @@
 // One turn on the mock, told to stall so its reasoning is the only thing on the wire for a while: the
-// only way a poll can look at a thread mid-thought. The mock breaks that reasoning with a tool call
-// between its second and third pieces, so the turn is two runs — one drawn above the call, one below.
-// A second turn is asked to think at length: one long run, taller than a row is drawn, so the thread
-// has to cap it behind a fade and a Show more and keep its reader on the newest words.
+// only way a poll can look at a thread mid-thought.
 import { assert, app, flow, pass, settled } from "./lib.mjs"
 
 /** One reply's own row in the thread: the header and the toaster say plenty this flow must not read. */
 const ITEM = "[data-slot=message-scroller-item]"
 const WORKING = '[aria-live="polite"]'
-const LINE = /^(Thought|Thinking…)/
+const THINKING = /^(Thinking…|Thought it through|Thought for \d+[sm])/
+const LINE = THINKING
 const SPAN = /^Thought for \d+s$/
+const CAP_SHARE = 0.3
 const FIRST = "working-out, not just the answer"
 const ROTATIONS = "gzipped rotations are the bulk of it"
 const LAST = "leaves the delete to them"
-// A second turn, asked to think at length: one run of eight paragraphs, taller than a row is drawn.
 const LONG_FIRST = "the reasoning itself, so here is the whole of it"
 const LONG_LAST = "The deleting is theirs"
 
@@ -30,29 +28,27 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
       const found = document.getElementById(id)
       return { text: found?.textContent ?? "", hidden: found?.getAttribute("aria-hidden") ?? null }
     }, controls)
-  // What the reply's own turn draws, top to bottom: its thinking rows and the calls between them.
   const order = () =>
     page.evaluate(
-      ({ item }) => {
+      ({ item, label }) => {
+        const names = new RegExp(label)
         const own = [...document.querySelectorAll(item)].at(-1)
         return [...(own?.querySelectorAll("button") ?? [])].map((one) => {
           const text = one.textContent?.trim() ?? ""
-          const thinking = text === "Thinking…" || /^Thought (it through|for \d)/.test(text)
-          return thinking ? { kind: "thinking", text } : { kind: "tool", text }
+          return names.test(text) ? { kind: "thinking", text } : { kind: "tool", text }
         })
       },
-      { item: ITEM },
+      { item: ITEM, label: THINKING.source },
     )
 
   // Everything a row draws that only layout can tell: the box its words are capped to against the
   // screen, the fade at that edge, the control under it, and where the row's end sits in the thread.
   const row = () =>
-    page.evaluate(() => {
+    page.evaluate((label) => {
+      const names = new RegExp(label)
       const own = [...document.querySelectorAll("[data-slot=message-scroller-item]")].at(-1)
       const buttons = [...(own?.querySelectorAll("button") ?? [])]
-      const line = buttons.find((one) =>
-        /^(Thinking…|Thought it through|Thought for )/.test(one.textContent?.trim() ?? ""),
-      )
+      const line = buttons.find((one) => names.test(one.textContent?.trim() ?? ""))
       const more = buttons.find((one) => one.textContent?.trim() === "Show more")
       const body = own?.querySelector("[data-slot=thinking-body]")
       const cap = own?.querySelector("[data-slot=thinking-cap]")
@@ -92,7 +88,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
         screen: { width: window.innerWidth, height: window.innerHeight },
         background,
       }
-    })
+    }, THINKING.source)
 
   // A smooth scroll into place is not an animation `settled` waits for, so a reading taken straight
   // after a row opens can catch the thread mid-move: wait for its scroll to come to rest first.
@@ -180,8 +176,6 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   await shot("thinking")
   pass("mid-thought the row stands open reading Thinking…, the working line gone from the reply")
 
-  // The call lands between the pieces: the run before it is measured and drawn above it, and the
-  // thinking that follows opens a second row below it — one row per stretch of thinking, in place.
   await until(
     async () => {
       const row = await lastReply(chatId)
@@ -220,7 +214,6 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   await shot("two-runs")
   pass("a call mid-thought draws the thinking before it above the call and the thinking after below")
 
-  // The mock's last piece, then its hold: the second row still open over all of it, nothing begun.
   await until(
     async () => {
       const row = await lastReply(chatId)
@@ -233,7 +226,6 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   await settled(page)
   pass("the row streams open through the turn's last piece and its hold, with no answer yet")
 
-  // The first answer token folds both: each run measured its own span as it ended.
   await until(
     async () => ((await lastReply(chatId))?.content ? true : null),
     30_000,
@@ -271,8 +263,6 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   await shot("folded")
   pass(`the answer folds both rows, each reading its own span: "${labels.join('", "')}"`)
 
-  // A reload keeps the spans this device measured, on the reply's own runs: the numbers stay, and the
-  // rows stay where they were.
   await page.reload()
   await until(
     async () => ((await line.count()) === 2 ? true : null),
@@ -324,8 +314,6 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   assert.equal(opening.expanded, "true", "the row is open, as its run streams")
   assert.equal(opening.more, null, "and short enough so far to read whole")
 
-  // The words keep coming into an open row: what it has just said stays in view, at the foot of the
-  // thread, until the reader goes somewhere else.
   const foot = (state) =>
     state.scroll ? state.scroll.total - state.scroll.top - state.scroll.height : Infinity
   const followed = await until(
@@ -398,8 +386,6 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   )
   pass("a scroll up stops the follow: the thread holds still while the run keeps talking")
 
-  // Past the cap the thread draws a screenful, a fade at that edge and a Show more under it, with the
-  // rest of the run still on the row for whoever asks.
   const capped = await until(
     async () => {
       const state = await row()
@@ -408,7 +394,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     20_000,
     "a run taller than its cap, with a Show more on it",
   )
-  const capshare = Math.ceil(capped.screen.height * 0.3)
+  const capshare = Math.ceil(capped.screen.height * CAP_SHARE)
   assert.ok(
     capped.cap.height <= capshare + 1,
     `the cap holds a screen's 30% (${capped.cap.height}px of ${capped.screen.height}px)`,
@@ -432,7 +418,6 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     `a run past its cap draws ${capped.cap.height}px of itself, a fade and a ${capped.more.height}px Show more`,
   )
 
-  // The answer folds it; then opening it from the top of the thread lands on its newest words.
   await until(
     async () => ((await lastReply(chatId))?.content ? true : null),
     30_000,
@@ -474,7 +459,6 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   await shot("opened")
   pass(`opening the folded run landed the thread on its end (scrollTop ${read.scroll.top}px)`)
 
-  // Show more reads the rest inline: nothing left hidden, and the control and the fade go with it.
   await page.getByRole("button", { name: "Show more" }).click()
   await settled(page)
   const whole = await row()
@@ -514,7 +498,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     )
     await rested()
     const at = await row()
-    const share = Math.ceil(height * 0.3)
+    const share = Math.ceil(height * CAP_SHARE)
     assert.ok(
       at.cap.height <= share + 1,
       `at ${width}px the cap holds a screen's 30% (${at.cap.height}px of ${height}px)`,

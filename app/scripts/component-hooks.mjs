@@ -104,7 +104,6 @@ class ResizeObserver {
   disconnect() {
     this.watching = []
   }
-  /** Reports a resize to the component watching these boxes, as a browser would. */
   report() {
     if (this.watching.length) this.callback([], this)
   }
