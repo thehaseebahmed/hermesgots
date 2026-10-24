@@ -265,17 +265,17 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
     </li>
   )
 
-  // The scroll container carries the header's height for the group headings to tuck under (its
-  // row over its padding over any safe-area top — the header spells the same `max(0.75rem, …)`
-  // for its own padding below): one value, read by `ItemGroup`'s sticky headings.
-  const headerHeight =
-    "calc(max(0.75rem, env(safe-area-inset-top)) + 3.5rem)"
   return (
     <div
       className="flex min-h-0 flex-1 flex-col overflow-y-auto"
-      style={{ "--list-header-h": headerHeight } as CSSProperties}
+      style={
+        {
+          "--list-header-pt": "max(0.75rem, env(safe-area-inset-top))",
+          "--list-header-h": "calc(var(--list-header-pt) + 3.5rem)",
+        } as CSSProperties
+      }
     >
-      <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
+      <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[var(--list-header-pt)] pb-3 backdrop-blur">
         <div className="mx-auto flex max-w-2xl items-center gap-3">
           <Button
             variant="outline"
