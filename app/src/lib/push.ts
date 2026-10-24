@@ -21,6 +21,7 @@ import {
   PUSH_CATEGORIES,
   PUSH_FEATURES,
   allowedCategories,
+  categoriesChanged,
   categoryOn,
   channelName,
   pushPath,
@@ -327,7 +328,7 @@ async function syncCategories() {
   if (!fcm?.on) return
   const { push } = await plugin()
   const categories = await allowedHere(push)
-  if (categories.join() === sentCategories) return
+  if (!categoriesChanged(sentCategories, categories)) return
   const response = await callFunction(
     "PATCH",
     functionUrl("registry", { route: "devices", id: fcm.device }),

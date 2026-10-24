@@ -154,6 +154,16 @@ export function allowedCategories(report: PhoneChannels): PushCategory[] {
 }
 
 /**
+ * Whether the registry has to hear a list: one never told always does, and one that reads the same
+ * as what was last sent there is a change already told. The comparison is the wire's — the joined
+ * ids — so a device carrying an older list is told the live one exactly once, and a resume that
+ * changed nothing costs no call.
+ */
+export function categoriesChanged(sent: string | undefined, next: PushCategory[]) {
+  return next.join() !== sent
+}
+
+/**
  * The categories this device can reach, and so the channels it gets: Meetings' two exist only once
  * that experiment is on, the other fourteen always.
  */
