@@ -2,9 +2,10 @@
 
 Status: grilled 2026-10-24, every decision settled and recorded in ADR 0049, which supersedes the
 row-count, fold and cap clauses of ADR 0038. Published as #547 with tickets #548, #549, #550, #551
-and #552; the build order at the end is the tickets' shape when implementation starts. #547 carries
-`ready-for-agent` once its gate is wired and the tickets stay bare, so the agent claims the spec and
-works the graph in order.
+and #552; the build order at the end is the tickets' shape when implementation starts. #547 is
+blocked by the gate issue #554 that the docs pull request #553 carrying this file closes —
+implementation starts once it merges. The spec carries `ready-for-agent` and the tickets stay bare,
+so the agent claims the spec and works the graph in order.
 
 ## Goal
 
