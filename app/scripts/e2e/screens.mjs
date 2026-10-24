@@ -5,10 +5,10 @@ import {
   app,
   assert,
   assertOneLine,
-  centre,
+  centred,
   flow,
-  headerBoxes,
   pass,
+  readHeader,
   runId,
   settled,
 } from "./lib.mjs"
@@ -102,52 +102,17 @@ for (const width of [390, 1024]) {
         await assertOneLine(title, `the session's title at ${look}`)
         await assertOneLine(subtitle.first(), `the session's line at ${look}`)
 
-        const boxes = await headerBoxes(page)
-        const geometry = await header.evaluate((el) => {
-          const rect = (slot) => {
-            const r = el.querySelector(`[data-slot="${slot}"]`).getBoundingClientRect()
-            return { x: r.x, width: r.width, right: r.right }
-          }
-          const title = el.querySelector('[data-slot="header-title"]')
-          const line = el.querySelector('[data-slot="header-line"]')
-          return {
-            scroll: title.scrollWidth,
-            client: title.clientWidth,
-            lineScroll: line.scrollWidth,
-            lineClient: line.clientWidth,
-            line: rect("header-line"),
-            middle: rect("header-middle"),
-          }
-        })
+        const boxes = await readHeader(header.locator('[data-slot="header-row"]'))
         assert.ok(
-          geometry.scroll > geometry.client,
-          `the session's title truncates at ${look} (${geometry.scroll}px of ${geometry.client}px)`,
+          boxes.scroll > boxes.client,
+          `the session's title truncates at ${look} (${boxes.scroll}px of ${boxes.client}px)`,
         )
         // The count is decided before the line is drawn, so the whole line — its +N with it — fits.
         assert.ok(
-          geometry.lineScroll <= geometry.lineClient + 1,
-          `the session's line fits at ${look} (${geometry.lineScroll}px of ${geometry.lineClient}px)`,
+          boxes.lineScroll <= boxes.lineClient + 1,
+          `the session's line fits at ${look} (${boxes.lineScroll}px of ${boxes.lineClient}px)`,
         )
-        assert.ok(
-          boxes.title.x >= geometry.middle.x - 2 && boxes.title.right <= geometry.middle.right + 2,
-          `the title stays in the room the controls leave at ${look}`,
-        )
-        assert.ok(
-          Math.abs(centre(boxes.title) - centre(geometry.middle)) <= 2,
-          `the title is centred in that room at ${look}`,
-        )
-        assert.ok(
-          Math.abs(centre(geometry.line) - centre(boxes.title)) <= 2,
-          `the session's line is centred under the title at ${look}`,
-        )
-        assert.ok(
-          Math.abs(centre(boxes.title) - centre(boxes.row)) <= 2,
-          `the title is centred on the row at ${look} (${Math.round(centre(boxes.title))} against ${Math.round(centre(boxes.row))})`,
-        )
-        assert.ok(
-          Math.abs(boxes.actions.right - boxes.row.right) <= 2,
-          `the actions end on the row's right edge at ${look} (${Math.round(boxes.actions.right)} against ${Math.round(boxes.row.right)})`,
-        )
+        centred(boxes, look)
 
         await page.goto(app)
         await send("hello")
@@ -161,7 +126,7 @@ for (const width of [390, 1024]) {
         await shot("chat")
         // The width's own boundaries: exactly 768 draws a tablet's two names, and a laptop's width
         // draws three. The session then sits beside Code's list, so its room is not the one measured
-        // above and only the line is asserted.
+        // above — and the same centring gates hold in it.
         if (width === 1024) {
           for (const [at, expected] of [
             [768, "Test bot · memento, gots-app +2"],
@@ -177,6 +142,8 @@ for (const width of [390, 1024]) {
               expected,
               `the session's line names what a ${at}px screen has room for (${look})`,
             )
+            const boxes = await readHeader(laptop.locator('[data-slot="header-row"]'))
+            centred(boxes, `${at}px in ${look}`)
           }
         }
         pass(

@@ -1,4 +1,4 @@
-import { app, assert, centre, flow, headerBoxes, mockAuth, pass } from "./lib.mjs"
+import { app, assert, centred, flow, mockAuth, pass, readHeader } from "./lib.mjs"
 
 const NEW_MOCK = process.env.TRIAGE_NEW_MOCK_URL
 const THREAD_MOCK = process.env.TRIAGE_THREAD_MOCK_URL
@@ -420,7 +420,7 @@ await flow(
       })),
     )
     assert.equal(heads.length, 2, "both panes draw a header")
-    assert.equal(heads[0].title, "Test bot", 'Main reads as the bot, not as "Main"')
+    assert.equal(heads[0].title, "Test bot", "Main reads as the bot, not as \"Main\"")
     assert.notEqual(heads[1].title, "", "the thread beside it reads with its own title")
     assert.notEqual(heads[1].title, "Test bot", "which is the thread's, not the bot's")
     assert.equal(
@@ -433,15 +433,8 @@ await flow(
       [1, 0],
       "Main keeps the bot's picture, and the thread beside it carries none",
     )
-    const boxes = await headerBoxes(page, 1)
-    assert.ok(
-      Math.abs(centre(boxes.title) - centre(boxes.row)) <= 2,
-      `the thread's title sits on its pane's centre (title at ${Math.round(centre(boxes.title))}, row at ${Math.round(centre(boxes.row))})`,
-    )
-    assert.ok(
-      Math.abs(boxes.actions.right - boxes.row.right) <= 2,
-      `the thread's actions end on the row's right edge (${Math.round(boxes.actions.right)} against ${Math.round(boxes.row.right)})`,
-    )
+    const boxes = await readHeader(page.locator('[data-slot="header-row"]').nth(1))
+    centred(boxes, "the thread beside Main")
     await shot("laptop")
     pass(
       "on a laptop the thread beside Main carries no control of its own, and naming it changes nothing",
