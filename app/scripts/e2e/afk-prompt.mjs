@@ -265,7 +265,7 @@ const run = async ({ page, profileId, shot, until }) => {
   assert.equal(
     (await marker.innerText()).trim(),
     "Update",
-    "the badge in front of the title offers the entry's words",
+    "the badge right after the title offers the entry's words",
   )
   assert.match(
     await page.locator("[data-afk-prompt]").innerText(),

@@ -138,30 +138,28 @@ export function PromptEditor({
             onChange={(event) => setText(event.target.value)}
           />
           {library ? (
-            <div className="flex items-center justify-between gap-2" data-prompt-library-actions>
-              <div className="flex min-w-0 flex-1 flex-wrap gap-2">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className="h-11 rounded-full px-4"
-                  disabled={saving}
-                  onClick={() => setChoosing(true)}
-                >
-                  Choose from library
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  className="h-11 rounded-full px-4"
-                  disabled={saving}
-                  onClick={() => setWriting("new")}
-                >
-                  Save to library
-                </Button>
-              </div>
+            <div className="flex items-center gap-1.5" data-prompt-library-actions>
               <Button
                 type="button"
-                className="h-11 shrink-0 rounded-full px-5"
+                variant="secondary"
+                className="h-11 rounded-full px-3"
+                disabled={saving}
+                onClick={() => setChoosing(true)}
+              >
+                Choose from library
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                className="h-11 rounded-full px-3"
+                disabled={saving}
+                onClick={() => setWriting("new")}
+              >
+                Save to library
+              </Button>
+              <Button
+                type="button"
+                className="ml-auto h-11 rounded-full px-4"
                 disabled={saving}
                 onClick={() => void submit()}
               >

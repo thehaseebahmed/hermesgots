@@ -16,7 +16,7 @@
  * project's pick count, and a pick count of one to five sits under the switch, one write of its own.
  * A host that advertises none of that keeps the sheet it had: one Working row, drawn from the task
  * the read names. And where the Prompt was copied from the account's library, the row tells a copy
- * from an original: an entry rewritten since its pick shows an **Update** badge in front of the row's
+ * from an original: an entry rewritten since its pick shows an **Update** badge right after the row's
  * title, and tapping it asks before pulling the new words in — the rule is `prompt-source.ts`'s,
  * the write is the Prompt's own (ADR 0043).
  */
@@ -659,10 +659,12 @@ function PickCountRow({
  * untouched project says what its next run will be told rather than reading as empty.
  *
  * Where the words were copied from the account's library and that entry has been rewritten since, an
- * **Update** badge stands in front of the row's title: asking in a dialog before it pulls the
- * entry's new words in (`onPull`), which is a pick again. Nothing else carries the badge — an
- * original, a copy whose entry was deleted, and words the user typed are all silent, because none of
- * them is stale (ADR 0043).
+ * **Update** badge sits right after the row's title, on the title's own line: asking in a dialog
+ * before it pulls the entry's new words in (`onPull`), which is a pick again. Nothing else carries
+ * the badge — an original, a copy whose entry was deleted, and words the user typed are all silent,
+ * because none of them is stale (ADR 0043). The row's own tap is the transparent button laid over
+ * the whole row, so the badge beside the title keeps a target of its own without nesting one button
+ * in another.
  */
 function PromptRow({
   prompt,
@@ -680,51 +682,62 @@ function PromptRow({
   onOpen: () => void
 }) {
   return (
-    <div className="flex min-h-11 items-center gap-2 px-1" data-afk-prompt>
-      {changed && (
-        <AlertDialog>
-          <AlertDialogTrigger
-            render={
-              <Badge
-                data-afk-prompt-changed
-                className="min-h-6"
-                render={<button type="button" disabled={pulling} />}
-              />
-            }
-          >
-            Update
-          </AlertDialogTrigger>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Update this Prompt?</AlertDialogTitle>
-              <AlertDialogDescription>
-                The library's latest version replaces what this project holds.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel render={<Button type="button" variant="ghost" />}>
-                Cancel
-              </AlertDialogCancel>
-              <AlertDialogAction
-                render={<Button type="button" />}
-                disabled={pulling}
-                onClick={onPull}
-              >
-                Update
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      )}
+    <div
+      className="relative flex min-h-11 items-center rounded-2xl px-1 hover:bg-muted"
+      data-afk-prompt
+    >
+      <span className="flex min-w-0 flex-1 items-center gap-3 px-1">
+        <RowText
+          title={
+            <span className="flex items-center gap-1.5">
+              Prompt
+              {changed && (
+                <AlertDialog>
+                  <AlertDialogTrigger
+                    render={
+                      <Badge
+                        data-afk-prompt-changed
+                        className="relative z-10 min-h-6"
+                        render={<button type="button" disabled={pulling} />}
+                      />
+                    }
+                  >
+                    Update
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Update this Prompt?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        The library's latest version replaces what this project holds.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel render={<Button type="button" variant="ghost" />}>
+                        Cancel
+                      </AlertDialogCancel>
+                      <AlertDialogAction
+                        render={<Button type="button" />}
+                        disabled={pulling}
+                        onClick={onPull}
+                      >
+                        Update
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              )}
+            </span>
+          }
+          subtitle={promptLine(prompt)}
+        />
+        <ChevronRightIcon className="shrink-0 text-muted-foreground" />
+      </span>
       <button
         type="button"
         aria-label="Prompt"
         onClick={onOpen}
-        className="flex min-h-11 flex-1 items-center gap-3 rounded-2xl px-1 text-left outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <RowText title="Prompt" subtitle={promptLine(prompt)} />
-        <ChevronRightIcon className="shrink-0 text-muted-foreground" />
-      </button>
+        className="absolute inset-0 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      />
     </div>
   )
 }
