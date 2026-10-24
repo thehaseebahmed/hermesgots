@@ -151,12 +151,7 @@ const run = async ({ page, profileId, shot, until }) => {
     assert.equal(await plan.getAttribute("aria-checked"), "true", "plan starts on")
     await plan.click()
     await until(
-      () =>
-        page
-          .locator('[data-skill="plan"]')
-          .getByText("Off", { exact: true })
-          .isVisible()
-          .then((visible) => visible),
+      () => page.locator('[data-skill="plan"]').getByText("Off", { exact: true }).isVisible(),
       15_000,
       "the switched-off row to read Off",
     )
@@ -196,12 +191,7 @@ const run = async ({ page, profileId, shot, until }) => {
     )
     await back.click()
     await until(
-      () =>
-        page
-          .locator('[data-skill="plan"]')
-          .getByText("Ready", { exact: true })
-          .isVisible()
-          .then((visible) => visible),
+      () => page.locator('[data-skill="plan"]').getByText("Ready", { exact: true }).isVisible(),
       15_000,
       "the row to read Ready again",
     )
