@@ -1770,3 +1770,54 @@ including one that names no skill (#336 asks for exactly that), and the guard's 
 brief follows from ADR 0020 making the brief the stage's behaviour contract rather than a place for
 AFK's invariant.
 
+---
+
+# Deferred fixes from the review passes on a reply's thinking in runs
+
+`feat(chat): draw thinking in a coding session's thread` (#477, on the branch that carries #474's runs)
+went through a four-agent `/simplify-code`, a comment pass and a two-axis `/code-review`. Everything
+but this entry is applied on the branch: the order two runs land in after back-to-back calls, the open
+gate over a run whose span says it ended, the watcher's shape and lifetime, a folded row's tab order,
+the follow's arming and its writes, and each test's tier (ADR 0019).
+
+## Risky
+
+### 1. The thinking row follows its own end with a scroll engine of its own
+
+`thinking-line.tsx` scrolls the thread itself while a run is open: it lands the row's end on open
+(`scrollIntoView`, smooth unless motion is asked against), arms a `ResizeObserver` on the row, and
+takes a wheel, key or touch move up as the reader leaving — then keeps writing `scrollIntoView` as the
+run's words arrive. `MessageScrollerProvider` (`message-scroller.tsx`) runs its own `autoScroll` over
+the same box, from measured anchoring, with its own notion of whether the reader is at the end.
+
+- Cost: two writers on one scroll box, each reasoning about the same state without seeing the other.
+  The row's engine only hears the reader through input events, so a scrollbar drag, a momentum stop
+  after a fling, or a keyboard scroll on another element leaves the follow armed and fighting the
+  provider's anchoring; and every new way the thread moves itself is another thing the two can
+  disagree about.
+- Suggested fix: give the provider the one answer to "is the reader at the end" and have the row ask
+  it — the follow becomes "keep this row's end in view while the provider says the reader is at the
+  end, and the row's own `aria-expanded` says it is open" — with the agent pop-up's transcript wired
+  through the same scroller primitive so a sub-thread's rows behave as a chat's do.
+- Why it is risky: it is a rewrite of the thread's scroll ownership. The blast radius is outside this
+  diff — `message-scroller.tsx`, `popup.tsx` (`PopupContent` wraps its children in a plain
+  `overflow-y-auto` `Scroll` box) and `agent-card.tsx`'s `AgentView` — and a wrong answer there moves
+  every thread in the app, not one row's follow.
+- Why it is not applied here: the row-scoped follow is the shape #476 specifies, and the flow proves
+  it end to end (the tail stays in view while the run streams; a wheel up stops it; a tap re-arms it).
+  Detecting the reader's own scrolling from `scrollTop` was tried and measured against the provider's
+  own anchor scrolls, which move the box without the reader touching it: it fired on them and stopped
+  the follow the moment the thread anchored itself. The input listeners are what survived that test.
+
+The safe half of the same finding is filed rather than applied: `scroller()` walks ancestors asking
+`getComputedStyle` for an `overflow-y` that scrolls, which is a layout read per ancestor per open. A
+shared attribute — the thread already has `data-slot=message-scroller-viewport`, and a pop-up's
+scrolling box is `Scroll` in `popup.tsx` — would let it match attributes only. It is not applied here
+because the pop-up's box is shared UI's, so marking it is a change to every pop-up in the app for one
+row's sake, and nothing in this diff can prove the agent sub-thread's follow still lands without a
+browser.
+
+---
+
+Found by the `/simplify-code` and `/code-review` passes on this branch. Both flagged the second scroll
+writer; the simplify pass found the attribute walk as a cheaper subject for it.
