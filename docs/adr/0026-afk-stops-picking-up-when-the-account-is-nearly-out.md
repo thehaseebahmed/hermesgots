@@ -72,4 +72,5 @@ The rules:
   name the deciding window at its percent instead of stating a bare threshold: a hold-back that the
   user can't see the cause of reads as a bug.
 - A bot whose plugin is older keeps the pop-up it has: both this and the pick count are advertised as
-  `afk_parallel`.
+  `afk_picks` (the name this ADR reserved as `afk_parallel` — amended, since the glossary bans
+  *parallelism* for a pick count).
