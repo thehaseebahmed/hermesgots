@@ -1492,6 +1492,8 @@ export function ChatPage({
   return (
     <div
       data-slot="chat-pane"
+      // The pane's own name, for the fade its swap plays and for a test that reads one pane of two.
+      data-pane={slot}
       className="relative flex min-h-0 flex-1 flex-col"
       // Every tap, key and send below belongs to the chat that is drawn, never to the one asked for.
       inert={!ready}

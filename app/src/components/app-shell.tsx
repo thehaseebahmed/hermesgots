@@ -22,7 +22,7 @@ import { useCodePane, useMeetingsPane, useProjectsPane, useResearchPane } from "
 import { useSidebarCollapsed } from "@/lib/sidebar"
 import { useBotPane, useBotThreads } from "@/lib/threads"
 import { cn } from "@/lib/utils"
-import { onChatSwap } from "@/lib/chat-hold"
+import { onChatSwap, type HoldSlot } from "@/lib/chat-hold"
 import { ChatPage } from "@/routes/chat"
 
 /**
@@ -80,6 +80,10 @@ function isChatSwitch(from: string, to: string) {
 }
 
 const EASE = "cubic-bezier(0.2, 0, 0, 1)"
+/** The same curve, for Tailwind's own transitions, which take a class rather than a number. */
+const EASE_CLASS = "ease-[cubic-bezier(0.2,0,0,1)]"
+/** The fade the shell has always played, at the pace it has always had. */
+const FADE_MS = 200
 const FADE: Keyframe[] = [{ opacity: 0 }, { opacity: 1 }]
 
 /**
@@ -93,9 +97,9 @@ function usePageTransition(ref: RefObject<HTMLElement | null>, pane: ListPane | 
   const large = useLarge()
   const screen = screenOf(location.pathname, large, pane)
   const last = useRef({ screen, idx: depth(), key: location.key })
-  // A pane lands its chat when its own answers are in, so two panes of a switch can land commits
-  // apart: the address fades once, not once per pane.
-  const fadedFor = useRef<string | undefined>(undefined)
+  // The pane that has already faded for the address on screen: two panes of one switch land commits
+  // apart, and each fades its own, once.
+  const faded = useRef(new Map<HoldSlot, string>())
 
   useLayoutEffect(() => {
     const previous = last.current
@@ -115,21 +119,25 @@ function usePageTransition(ref: RefObject<HTMLElement | null>, pane: ListPane | 
             { opacity: 1, transform: "none" },
           ]
         : FADE,
-      { duration: step ? 260 : 200, easing: EASE },
+      { duration: step ? 260 : FADE_MS, easing: EASE },
     )
   }, [location, type, screen, ref])
 
   // A switch's transition belongs to the swap: the commit the pane stops holding the chat the
-  // reader left and draws the one they asked for.
+  // reader left and draws the one they asked for. It fades that pane alone, since the other one may
+  // be unchanged (Main's cards, on a thread opened beside it) or still held a commit behind.
   useLayoutEffect(
     () =>
-      onChatSwap(() => {
-        if (fadedFor.current === location.key) return
-        fadedFor.current = location.key
+      onChatSwap((slot) => {
+        if (faded.current.get(slot) === location.key) return
+        faded.current.set(slot, location.key)
         if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return
-        ref.current?.animate(FADE, { duration: 200, easing: EASE })
+        document.querySelector<HTMLElement>(`[data-pane="${slot}"]`)?.animate(FADE, {
+          duration: FADE_MS,
+          easing: EASE,
+        })
       }),
-    [location.key, ref],
+    [location.key],
   )
 }
 
@@ -162,7 +170,7 @@ function Panes({ pane, children }: { pane: ListPane | undefined; children: React
         { opacity: 0, transform: "translateX(48px)" },
         { opacity: 1, transform: "none" },
       ],
-      { duration: 300, easing: "cubic-bezier(0.2, 0, 0, 1)" },
+      { duration: 300, easing: EASE },
     )
   }, [open])
 
@@ -171,7 +179,7 @@ function Panes({ pane, children }: { pane: ListPane | undefined; children: React
       {pane && (
         <div
           className={cn(
-            "flex min-h-0 flex-none flex-col transition-[width] duration-300 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none",
+            `flex min-h-0 flex-none flex-col transition-[width] duration-300 ${EASE_CLASS} motion-reduce:transition-none`,
             // Material 3's list pane width, as in Settings.
             open ? "w-103 border-r" : "w-full",
           )}
@@ -246,7 +254,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
           {wide && (
             <aside
               className={cn(
-                "shrink-0 border-r bg-sidebar text-sidebar-foreground transition-[width] duration-300 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none",
+                `shrink-0 border-r bg-sidebar text-sidebar-foreground transition-[width] duration-300 ${EASE_CLASS} motion-reduce:transition-none`,
                 collapsed ? "w-20" : "w-72 lg:w-80",
               )}
             >
