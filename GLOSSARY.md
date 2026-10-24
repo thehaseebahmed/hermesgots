@@ -77,7 +77,7 @@ What a model worked out before it answered, drawn in a thread as one row per run
 _Avoid_: chain of thought, scratchpad, reasoning trace
 
 **Command**:
-Something Gots itself does from the composer: opening a thread (a chat, where threads are off), settings, or how a message sent mid-reply goes. A command never reaches the agent as a message.
+Something Gots itself does from the composer: opening a thread (a chat, where threads are off), settings, the Cheatsheet, or how a message sent mid-reply goes. A command never reaches the agent as a message.
 _Avoid_: slash command, action, app skill
 
 **Skill**:
@@ -87,6 +87,10 @@ _Avoid_: command, tool, plugin
 **Slash menu**:
 The list over the composer that a slash opens: the commands and the bot's skills.
 _Avoid_: autocomplete, command palette, picker
+
+**Cheatsheet**:
+The sheet `/cheatsheet` opens from the composer: the keys a hardware keyboard can send in Gots and what each does, by group — and only the shortcuts whose switch is on.
+_Avoid_: hotkey list, keyboard help, command palette, cheat sheet
 **Usage window**:
 One thing a provider account can run out of, as that provider measures it: a period, which resets, or a balance, which doesn't.
 _Avoid_: quota, plan limit, usage bar
