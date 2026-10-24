@@ -7,7 +7,6 @@ import { toast } from "sonner"
 import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { BOTS } from "@/components/bots"
-import { AFK_PICKS_FEATURE } from "@/components/afk"
 import { CodingTab } from "@/components/bot-coding-tab"
 import { DictationTab } from "@/components/bot-dictation-tab"
 import {
@@ -46,6 +45,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { AFK_PICKS_FEATURE } from "@/lib/afk-picks"
 import {
   db,
   deleteProfile,

@@ -48,6 +48,7 @@ import {
 import { Separator } from "@/components/ui/separator"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
+import { AFK_PICKS_FEATURE, PICK_COUNTS } from "@/lib/afk-picks"
 import { connectionKey } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { useAfkWorkflowsOn } from "@/lib/afk-workflows"
@@ -96,23 +97,11 @@ export const AFK_WORKFLOWS_FEATURE = "afk_workflows"
 export const AFK_PROMPT_FEATURE = "afk_prompt"
 
 /**
- * And the one it advertises when a project may hold several tasks at once and a project's Prompt can
- * draw on the account's library of them: its pick count, the list of what it holds, the bot's usage
- * against its pick budget, and the library behind the Prompt row. A plugin from before it holds one
- * task, answers no count and has no library, so nothing of this is drawn there and the pop-up is the
- * one it always was.
- */
-export const AFK_PICKS_FEATURE = "afk_picks"
-
-/**
  * What a staged task's stage reads as in the Working row: the stage itself is the host's, and a
  * project with no critique skill has none to name. `done` has no word here — nothing is held by
  * then, so this row never says it.
  */
 const STAGE_LABELS: Record<AfkStage, string | null> = { ...STAGE_WORDS, done: null }
-
-/** How many tasks a project may hold at once, one to five: the host's own range for its pick count. */
-const PICK_COUNTS = [1, 2, 3, 4, 5] as const
 
 /** A Bot whose plugin answers without the route is left alone for a while, like every other read. */
 const unsupported = cooldown()
@@ -171,16 +160,16 @@ export function AfkPopup({
   const withSkills = usePluginFeature(config, AFK_SKILLS_FEATURE)
   const libraryOffered = useLibraryOffered(config)
   const withPrompt = usePluginFeature(config, AFK_PROMPT_FEATURE)
-  const withPicks = usePluginFeature(config, AFK_PICKS_FEATURE)
-  // The count row, the stepper and the Working list are one answer: a host that advertises none of
-  // them holds the one task it always did, and the sheet stays the one it always was.
-  const picksDrawn = withPicks === "yes"
+  // One answer for the whole change: the count row, the stepper, the Working list, the budget line
+  // and the library behind the Prompt row are drawn where the host advertises it, and the sheet is
+  // the one it always was where it doesn't. Read once — two reads of one feature is two answers
+  // that can disagree for a frame.
+  const picks = usePluginFeatureOn(config, AFK_PICKS_FEATURE)
   // One row or the other: the library offered is a project running stages, and the Prompt is the
   // words a project running one run is told instead.
   const promptOffered = withPrompt === "yes" && !libraryOffered
   // The account's own prompt library: the host has to advertise the change, and the account has to
   // be signed in with its vault open here — the library lives in that store, not on a host.
-  const picks = usePluginFeatureOn(config, AFK_PICKS_FEATURE)
   const deviceLibrary = usePromptLibraryReady()
   const promptLibrary = library ?? deviceLibrary
   // Where the project's Prompt was copied from the account's library, the row needs the entry to
@@ -296,7 +285,7 @@ export function AfkPopup({
         withSkills === "yes" ||
         libraryOffered ||
         promptOffered ||
-        picksDrawn),
+        picks),
     onShow: false,
   })
 
@@ -448,7 +437,7 @@ export function AfkPopup({
             {/* Under the switch, and at the foot of its list where a Prompt row takes the place
                 right under it: how many tasks this project may hold at once, and how full its
                 bot's own budget is beside it. */}
-            {picksDrawn && afk && !afkError && (pickCount !== null || afk.pickBudget !== null) && (
+            {picks && afk && !afkError && (pickCount !== null || afk.pickBudget !== null) && (
               <PickCountRow
                 count={pickCount}
                 budget={afk.pickBudget}
@@ -474,8 +463,8 @@ export function AfkPopup({
           {afk?.on && (
             <Working
               task={afk.task}
-              holds={picksDrawn ? afk.holds : null}
-              pickCount={picksDrawn ? pickCount : null}
+              holds={picks ? afk.holds : null}
+              pickCount={picks ? pickCount : null}
               stage={afk.stage}
               stageName={afk.stageName}
               refusal={afk.refusal}
