@@ -7,9 +7,10 @@
 import assert from "node:assert/strict"
 import { act } from "react"
 import { createRoot } from "react-dom/client"
-import { MemoryRouter, Route, Routes, useLocation } from "react-router"
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router"
 
 import { AfkPopup } from "@/components/afk"
+import { AppShell } from "@/components/app-shell"
 import { DEFAULT_SETTINGS, db, type Message, type Profile, type Settings } from "@/lib/db"
 import { ChatPage } from "@/routes/chat"
 
@@ -74,10 +75,191 @@ export async function mount(element: React.ReactNode, body: () => Promise<void>)
 export const chatScreen = (id: string) => (
   <MemoryRouter initialEntries={[`/c/${id}`]}>
     <Routes>
-      <Route path="/c/:id" element={<ChatPage />} />
+      <Route path="/c/:id" element={<ChatPage slot="route" />} />
     </Routes>
   </MemoryRouter>
 )
+
+/** A laptop's width: the bot's third pane, the bots list and a thread beside Main are `xl`'s. */
+export const laptop = (body: () => Promise<void>) => async () => {
+  const width = window.innerWidth
+  window.innerWidth = 1440
+  try {
+    await body()
+  } finally {
+    window.innerWidth = width
+  }
+}
+
+/** The control a screen leaves one chat for another with, and how that leaves. */
+export function SwitchTo({
+  to,
+  replace,
+  quiet,
+}: {
+  to: string
+  /** The address changes without a new entry, as a chat taking its id does. */
+  replace?: boolean
+  /** The shell plays nothing for it. */
+  quiet?: boolean
+}) {
+  const navigate = useNavigate()
+  return (
+    <button
+      type="button"
+      data-switch
+      onClick={() => navigate(to, { replace, state: quiet ? { quiet: true } : undefined })}
+    >
+      switch
+    </button>
+  )
+}
+
+/**
+ * A phone's route: the chat on screen, the control that goes to `to`, and whatever `routes` puts
+ * beside them — another screen, for a shell test that has to navigate into one. A switch a chat
+ * makes for itself, like the one its first send takes the id with, comes with `replace` and `quiet`.
+ */
+export const phone = (
+  entry: string,
+  to: string,
+  { routes, replace, quiet }: { routes?: React.ReactNode; replace?: boolean; quiet?: boolean } = {},
+) => (
+  <MemoryRouter initialEntries={[entry]}>
+    <Path />
+    <SwitchTo to={to} replace={replace} quiet={quiet} />
+    <Routes>
+      <Route element={<AppShell />}>
+        <Route path="/" element={<ChatPage slot="route" />} />
+        <Route path="c/:id" element={<ChatPage slot="route" />} />
+        {routes}
+      </Route>
+    </Routes>
+  </MemoryRouter>
+)
+
+/** A chat a test seeds: the bot it belongs to, when it started, and what it says. */
+export interface SeededChat {
+  id: string
+  /** The bot it belongs to; the active one unless this says otherwise. */
+  profileId?: string
+  title?: string
+  /** A bot's Main thread, which is the bot's face rather than a chat of its own. */
+  main?: boolean
+  /** When it started, and when it last moved: its place in the bot's list. */
+  at?: number
+  /** What it holds, oldest first. A bare string is a message the user wrote. */
+  messages?: (string | { id?: string; content: string; at?: number; role?: "user" | "assistant" })[]
+}
+
+/**
+ * The chats a seeded device holds, and the bots they belong to. Every test of a switch seeds the
+ * same way: the bots on the device, the settings that turn bot threads on or off, and the chats with
+ * the messages that make them non-empty — Main's own row written as Main, so its cards and its flow
+ * are the ones the app draws.
+ */
+export async function seedChats(
+  chats: SeededChat[],
+  {
+    bots = [],
+    botThreads = false,
+    active = bots[0]?.id,
+    settings = {},
+  }: {
+    bots?: Profile[]
+    botThreads?: boolean
+    /** The bot a chat with no `profileId` belongs to, and the one the device has selected. */
+    active?: string
+    settings?: Partial<Omit<Settings, "id">>
+  } = {},
+) {
+  await seedSettings({ developer: true, botThreads, activeProfileId: active, ...settings })
+  await db.profiles.clear()
+  await db.profiles.bulkPut(bots)
+  await db.conversations.clear()
+  await db.messages.clear()
+  const at = (chat: SeededChat, place: number) => chat.at ?? 10 + place
+  await db.conversations.bulkPut(
+    chats.map((chat, place) => ({
+      id: chat.id,
+      profileId: chat.profileId ?? active ?? "",
+      title: chat.title ?? "A chat",
+      main: chat.main,
+      titleEdited: true,
+      hermesSessionId: `memento-${chat.id}`,
+      createdAt: at(chat, place),
+      updatedAt: at(chat, place),
+      changedAt: 10,
+    })),
+  )
+  await db.messages.bulkPut(
+    chats.flatMap((chat, place) =>
+      (chat.messages ?? []).map((one, said) => {
+        const message = typeof one === "string" ? { content: one } : one
+        return {
+          id: message.id ?? `${chat.id}-${said}`,
+          conversationId: chat.id,
+          role: message.role ?? ("user" as const),
+          content: message.content,
+          status: "done" as const,
+          createdAt: message.at ?? at(chat, place) + 1 + said,
+        }
+      }),
+    ),
+  )
+  globalThis.fetch = async () => json({})
+}
+
+/** One animation a screen asked for, and what the panes said when it asked. */
+export interface Animated {
+  /** The chat pane it played on, by the pane's own name; nothing for the screen's own element. */
+  pane: string | null
+  element: string
+  keyframes: Keyframe[]
+  options: KeyframeAnimationOptions
+  /** The chat a switch left, still on screen on hold. */
+  held: string
+  /** The chat the pane drew as its own. */
+  shown: string
+  /** Every word on the screen, for a transition played by a screen that isn't a chat. */
+  body: string
+}
+
+/** Records every animation asked for, so a test can read when it played and over what. */
+export function spyAnimate() {
+  const asked: Animated[] = []
+  const animate = HTMLElement.prototype.animate
+  HTMLElement.prototype.animate = function (keyframes, options) {
+    const panes = [...document.querySelectorAll('[data-slot="chat-pane"]')]
+    const words = (held: boolean) =>
+      panes
+        .filter((pane) => pane.hasAttribute("inert") === held)
+        .map((pane) => pane.textContent ?? "")
+        .join("|")
+    asked.push({
+      pane: this.getAttribute("data-pane"),
+      element: this.tagName.toLowerCase(),
+      keyframes: Array.isArray(keyframes) ? (keyframes as Keyframe[]) : [],
+      options: typeof options === "number" ? { duration: options } : (options ?? {}),
+      held: words(true),
+      shown: words(false),
+      body: document.body.textContent ?? "",
+    })
+    return animate.call(this, keyframes, options)
+  }
+  return {
+    asked,
+    /** The fades a swap played, each on the pane that swapped. */
+    onPanes: () => asked.filter((one) => one.pane !== null),
+    /** What the shell animated on the screen's own element, which a switch never is. */
+    onScreen: () => asked.filter((one) => one.element === "main"),
+    /** A fade played while a switch's held chat was still the chat on screen. */
+    overHeld: () => asked.filter((one) => one.pane !== null && one.held !== ""),
+    restore() {
+      HTMLElement.prototype.animate = animate
+    },
+  }
+}
 
 export async function seedChat({
   id,
@@ -131,7 +313,7 @@ export async function click(element: Element | null) {
 }
 
 export async function until(check: () => Promise<boolean>, what: string, ms = 5000) {
-  for (const end = Date.now() + ms; Date.now() < end; ) {
+  for (const end = Date.now() + ms; Date.now() < end;) {
     if (await check()) return
     await new Promise((resolve) => setTimeout(resolve, 10))
   }
@@ -149,8 +331,7 @@ export async function resized(near?: string) {
   ).__resizeObservers
   assert.ok(observers, "the harness records the observers a screen makes")
   const box = near ? document.querySelector(near) : null
-  const watching = (one: Element) =>
-    !box || one === box || box.contains(one) || one.contains(box)
+  const watching = (one: Element) => !box || one === box || box.contains(one) || one.contains(box)
   await act(async () => {
     for (const observer of observers) {
       if (!observer.watching.length) continue
@@ -341,7 +522,9 @@ export function mediaHost({
         return json({ error: "No such file." }, failure)
       const served = type?.(path) ?? SERVED[path.slice(path.lastIndexOf(".")).toLowerCase()]
       const kind = served ?? "application/octet-stream"
-      return new Response(new Blob(["bytes"], { type: kind }), { headers: { "content-type": kind } })
+      return new Response(new Blob(["bytes"], { type: kind }), {
+        headers: { "content-type": kind },
+      })
     }
     return json({})
   }) as typeof fetch

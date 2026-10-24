@@ -11,19 +11,17 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { act } from "react"
-import { MemoryRouter, Route, Routes, useNavigate } from "react-router"
 
-import { db, ensureMainThread, mainThreadId, type Conversation, type Message } from "@/lib/db"
-import { ChatPage, forgetHeldChats } from "@/routes/chat"
+import { mainThreadId } from "@/lib/db"
+import { forgetHeldChats } from "@/lib/chat-hold"
 import {
   botProfile,
   click,
   find,
-  json,
   mount,
-  Path,
   path,
-  seedSettings,
+  phone,
+  seedChats,
   settle,
   text,
   until,
@@ -41,48 +39,53 @@ const HOUR = 3_600_000
 const MIDNIGHT = new Date().setHours(0, 0, 0, 0)
 const at = (hours: number) => MIDNIGHT + hours * HOUR
 
-const msg = (id: string, conversationId: string, said: string, createdAt: number): Message => ({
-  id,
-  conversationId,
-  role: "user",
-  content: said,
-  status: "done",
-  createdAt,
-})
-
-const thread = (id: string, profileId: string, createdAt: number): Conversation => ({
-  id,
-  profileId,
-  title: id,
-  hermesSessionId: `memento-${id}`,
-  createdAt,
-  updatedAt: createdAt,
-  changedAt: 0,
-})
-
 /** Two bots' Main threads, each with its own messages and its own threads drawn as cards. */
-async function seed() {
-  await seedSettings({ developer: true, botThreads: true, activeProfileId: first.id })
-  await db.profiles.clear()
-  await db.profiles.bulkPut([first, second])
-  await db.conversations.clear()
-  await db.messages.clear()
-  await ensureMainThread(first.id)
-  await ensureMainThread(second.id)
-  await db.conversations.bulkPut([
-    thread("t-a1", first.id, at(1)),
-    thread("t-a2", first.id, at(2)),
-    thread("t-b1", second.id, at(3)),
-  ])
-  await db.messages.bulkPut([
-    ...SAID_A.map((said, index) => msg(`a-${index}`, MAIN_A, said, at(9 + index))),
-    ...SAID_B.map((said, index) => msg(`b-${index}`, MAIN_B, said, at(9 + index))),
-    msg("ta-1", "t-a1", "the first thread's opener", at(1)),
-    msg("ta-2", "t-a2", "the second thread's opener", at(2)),
-    msg("tb-1", "t-b1", "the other bot's thread", at(3)),
-  ])
-  globalThis.fetch = async () => json({})
-}
+const seed = () =>
+  seedChats(
+    [
+      {
+        id: MAIN_A,
+        profileId: first.id,
+        title: "Main",
+        main: true,
+        messages: SAID_A.map((content, index) => ({
+          id: `a-${index}`,
+          content,
+          at: at(9 + index),
+        })),
+      },
+      {
+        id: MAIN_B,
+        profileId: second.id,
+        title: "Main",
+        main: true,
+        messages: SAID_B.map((content, index) => ({
+          id: `b-${index}`,
+          content,
+          at: at(9 + index),
+        })),
+      },
+      {
+        id: "t-a1",
+        profileId: first.id,
+        at: at(1),
+        messages: [{ id: "ta-1", content: "the first thread's opener", at: at(1) }],
+      },
+      {
+        id: "t-a2",
+        profileId: first.id,
+        at: at(2),
+        messages: [{ id: "ta-2", content: "the second thread's opener", at: at(2) }],
+      },
+      {
+        id: "t-b1",
+        profileId: second.id,
+        at: at(3),
+        messages: [{ id: "tb-1", content: "the other bot's thread", at: at(3) }],
+      },
+    ],
+    { bots: [first, second], active: first.id, botThreads: true },
+  )
 
 /** The box a browser would report: a viewport, and a row for each thing the content holds. */
 const VIEWPORT = 720
@@ -95,12 +98,15 @@ const contentIn = (element: Element) =>
     ? element
     : element.querySelector('[data-slot="message-scroller-content"]')
 
+/**
+ * How many rows the content is worth. Every block the app draws into it stamps its own slot — a
+ * message row, a thread card, a day heading — and the primitive's own filler stamps none, so reading
+ * the app's contract counts the content without reaching into the vendor's.
+ */
 const rowsIn = (element: Element) => {
   const content = contentIn(element)
   if (!content) return 0
-  return [...content.children].filter(
-    (child) => !child.hasAttribute("data-message-scroller-spacer"),
-  ).length
+  return [...content.children].filter((child) => child.hasAttribute("data-slot")).length
 }
 
 interface Move {
@@ -213,50 +219,23 @@ const viewport = () => find('[data-slot="message-scroller-viewport"]')
 /** Lets the frames the scroller schedules run, so a move it makes later is not read as none. */
 const frames = (count: number) =>
   act(async () => {
-    for (let at = 0; at < count; at += 1)
+    for (let frame = 0; frame < count; frame += 1)
       await new Promise((resolve) => requestAnimationFrame(() => resolve(null)))
   })
 
-/** A record that brought the chat's own words into the document, as a row or as the block holding them. */
-const brought = (record: MutationRecord, said: string[]) => {
-  if (record.type !== "childList") return false
-  return [...record.addedNodes].some(
-    (node) =>
-      node instanceof Element &&
-      Boolean(node.matches("[data-message-id]") || node.querySelector("[data-message-id]")) &&
-      said.some((words) => node.textContent?.includes(words)),
-  )
-}
+/** Whether a record brought an element matching `of` into the document. */
+const added = (record: MutationRecord, of: (node: Element) => boolean) =>
+  record.type === "childList" &&
+  [...record.addedNodes].some((node) => node instanceof Element && of(node))
 
-/** The same arrival, read for whether the cards were already part of it. */
-const broughtCards = (record: MutationRecord) =>
-  [...record.addedNodes].some(
-    (node) =>
-      node instanceof Element &&
-      (slot(node) === "thread-card" || Boolean(node.querySelector('[data-slot="thread-card"]'))),
-  )
+/** A node that is a message row, or the block holding them, carrying one of the chat's words. */
+const bringsWords = (node: Element, said: string[]) =>
+  (node.matches("[data-message-id]") || Boolean(node.querySelector("[data-message-id]"))) &&
+  said.some((words) => node.textContent?.includes(words))
 
-/** The routed chat, as a phone draws it: the id under the pane changes and nothing remounts. */
-function SwitchTo({ to }: { to: string }) {
-  const navigate = useNavigate()
-  return (
-    <button type="button" data-switch onClick={() => navigate(to)}>
-      switch
-    </button>
-  )
-}
-
-const phone = (entry: string, to: string) => (
-  <MemoryRouter initialEntries={[entry]}>
-    <Path />
-    <SwitchTo to={to} />
-    <div data-chat>
-      <Routes>
-        <Route path="/c/:id" element={<ChatPage />} />
-      </Routes>
-    </div>
-  </MemoryRouter>
-)
+/** A node that is a thread card, or the block holding one. */
+const bringsCards = (node: Element) =>
+  slot(node) === "thread-card" || Boolean(node.querySelector('[data-slot="thread-card"]'))
 
 test("a chat switched to in place is drawn by its own scroller, and placed once at its end", async () => {
   localStorage.clear()
@@ -316,12 +295,14 @@ test("a chat switched to in place is drawn by its own scroller, and placed once 
       )
 
       const arrivals = records
-        .map((record, at) => (brought(record, SAID_B) ? at : -1))
-        .filter((at) => at >= 0)
+        .map((record, place) => (added(record, (node) => bringsWords(node, SAID_B)) ? place : -1))
+        .filter((place) => place >= 0)
       assert.ok(arrivals.length > 0, "the chat's content landed")
-      const carrying = batches.find((batch) => batch.some((record) => brought(record, SAID_B)))
+      const carrying = batches.find((batch) =>
+        batch.some((record) => added(record, (node) => bringsWords(node, SAID_B))),
+      )
       assert.ok(
-        carrying?.some(broughtCards),
+        carrying?.some((record) => added(record, bringsCards)),
         "the frame that first carries the chat's content already carries its cards",
       )
 
@@ -336,13 +317,13 @@ test("a chat switched to in place is drawn by its own scroller, and placed once 
         1,
         "the scroller places the chat's content once, not once per thing that arrives",
       )
-      const at = records.indexOf(placed[0])
+      const placedAt = records.indexOf(placed[0])
       assert.ok(
-        arrivals.some((one) => one < at),
+        arrivals.some((one) => one < placedAt),
         "the content is whole before the scroller places it",
       )
       assert.deepEqual(
-        arrivals.filter((one) => one > at),
+        arrivals.filter((one) => one > placedAt),
         [],
         "and nothing lands after the first scroll",
       )

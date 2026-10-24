@@ -3,26 +3,30 @@
  * one the reader left until the next one is ready, so a fade over that moment fades in the chat they
  * already had. These tests read every animation the shell asks for, and what was on screen when it
  * asked, so a transition played over a held chat can't pass for one played as the next chat lands.
+ *
+ * The fade belongs to the pane that swapped, and to it alone: a thread opened beside Main changes
+ * none of Main's cards, and a pane a switch leaves can still be held a commit after the first one
+ * lands, so fading the whole screen would blink content nobody asked to change.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
-import { Link, MemoryRouter, Route, Routes } from "react-router"
+import { Route } from "react-router"
 
-import { AppShell } from "@/components/app-shell"
-import { db, mainThreadId } from "@/lib/db"
+import { mainThreadId } from "@/lib/db"
 import { lastThreadKey } from "@/lib/threads"
-import { ChatPage, forgetHeldChats } from "@/routes/chat"
+import { forgetHeldChats } from "@/lib/chat-hold"
 import {
   botProfile,
   click,
   find,
   findText,
-  json,
+  laptop,
   mount,
-  Path,
   path,
-  seedSettings,
+  phone,
+  seedChats,
   settle,
+  spyAnimate,
   text,
   until,
   withReducedMotion,
@@ -41,129 +45,22 @@ const PUSH = [
   { opacity: 1, transform: "none" },
 ]
 
-interface Chat {
-  id: string
-  profileId: string
-  title: string
-  said: string
-  main?: boolean
-}
-
-async function seed(chats: Chat[], patch: { botThreads?: boolean } = {}) {
-  await seedSettings({ developer: true, botThreads: false, activeProfileId: bot.id, ...patch })
-  await db.profiles.clear()
-  await db.profiles.bulkPut([bot, other])
-  await db.conversations.clear()
-  await db.messages.clear()
-  await db.conversations.bulkPut(
-    chats.map((chat, index) => ({
-      id: chat.id,
-      profileId: chat.profileId,
-      title: chat.title,
-      main: chat.main,
-      titleEdited: true,
-      hermesSessionId: `memento-${chat.id}`,
-      createdAt: 10 + index,
-      updatedAt: 10 + index,
-      changedAt: 10,
-    })),
-  )
-  await db.messages.bulkPut(
-    chats.map((chat, index) => ({
-      id: `${chat.id}-said`,
-      conversationId: chat.id,
-      role: "user" as const,
-      content: chat.said,
-      status: "done" as const,
-      createdAt: 11 + index,
-    })),
-  )
-  globalThis.fetch = async () => json({})
-}
-
-/** One animation a screen asked for, and what the panes said when it asked. */
-interface Asked {
-  element: string
-  keyframes: Keyframe[]
-  options: KeyframeAnimationOptions
-  /** The chat a switch left, still on screen on hold. */
-  held: string
-  /** The chat the pane drew as its own. */
-  shown: string
-  /** Every word on the screen, for a transition played by a screen that isn't a chat. */
-  body: string
-}
-
-/** Records every animation asked for, so a test can read when it played and over what. */
-function spyAnimations() {
-  const asked: Asked[] = []
-  const animate = HTMLElement.prototype.animate
-  HTMLElement.prototype.animate = function (keyframes, options) {
-    const panes = [...document.querySelectorAll('[data-slot="chat-pane"]')]
-    const words = (held: boolean) =>
-      panes
-        .filter((pane) => pane.hasAttribute("inert") === held)
-        .map((pane) => pane.textContent ?? "")
-        .join("|")
-    asked.push({
-      element: this.tagName.toLowerCase(),
-      keyframes: Array.isArray(keyframes) ? (keyframes as Keyframe[]) : [],
-      options: typeof options === "number" ? { duration: options } : (options ?? {}),
-      held: words(true),
-      shown: words(false),
-      body: document.body.textContent ?? "",
-    })
-    return animate.call(this, keyframes, options)
-  }
-  return {
-    asked,
-    /** What the shell played on the pane the screens are drawn into. */
-    onPane: () => asked.filter((one) => one.element === "main"),
-    /** The pane's own animations played while a switch's held chat was still the chat on screen. */
-    overHeld: () => asked.filter((one) => one.element === "main" && one.held !== ""),
-    restore() {
-      HTMLElement.prototype.animate = animate
-    },
-  }
-}
-
-/** A phone's route: the shell around the one chat, and a link back to the list it came from. */
-const phone = (entry: string, to: string) => (
-  <MemoryRouter initialEntries={[entry]}>
-    <Path />
-    <Link to={to} data-switch>
-      switch
-    </Link>
-    <Routes>
-      <Route element={<AppShell />}>
-        <Route path="c/:id" element={<ChatPage />} />
-        <Route path="settings" element={<p data-settings>Settings</p>} />
-      </Route>
-    </Routes>
-  </MemoryRouter>
-)
-
-/** A laptop's width: the bot's third pane, and the bots list, are `xl`'s. */
-const laptop = (body: () => Promise<void>) => async () => {
-  const width = window.innerWidth
-  window.innerWidth = 1440
-  try {
-    await body()
-  } finally {
-    window.innerWidth = width
-  }
-}
+/** A screen beside the chat, so a shell test has somewhere that isn't a chat to go. */
+const settings = <Route path="settings" element={<p data-settings>Settings</p>} />
 
 test("a switch in place fades the chat it lands, never the one it left", async () => {
   localStorage.clear()
   forgetHeldChats()
-  await seed([
-    { id: "c-a", profileId: bot.id, title: "Alpha", said: "alpha one" },
-    { id: "c-b", profileId: bot.id, title: "Beta", said: "beta one" },
-  ])
-  await mount(phone("/c/c-a", "/c/c-b"), async () => {
+  await seedChats(
+    [
+      { id: "c-a", title: "Alpha", messages: ["alpha one"] },
+      { id: "c-b", title: "Beta", messages: ["beta one"] },
+    ],
+    { bots: [bot, other], active: bot.id },
+  )
+  await mount(phone("/c/c-a", "/c/c-b", { routes: settings }), async () => {
     await until(async () => text().includes("alpha one"), "the chat on screen")
-    const spy = spyAnimations()
+    const spy = spyAnimate()
     try {
       await click(find("[data-switch]"))
       await until(async () => text().includes("beta one"), "the chat asked for")
@@ -173,12 +70,18 @@ test("a switch in place fades the chat it lands, never the one it left", async (
     }
 
     assert.deepEqual(
-      spy.overHeld().map((one) => one.element),
+      spy.overHeld().map((one) => one.pane),
       [],
       "no transition plays over the chat the switch left",
     )
-    const played = spy.onPane()
+    assert.deepEqual(
+      spy.onScreen().map((one) => one.element),
+      [],
+      "and the screen's own element is not faded: the fade is the swapped pane's",
+    )
+    const played = spy.onPanes()
     assert.equal(played.length, 1, "the switch plays one transition")
+    assert.equal(played[0].pane, "route", "on the pane the chat asked for was swapped into")
     assert.deepEqual(played[0].keyframes, FADE, "the fade a chat taking another's place plays")
     assert.equal(played[0].options.duration, 200, "at the pace it always had")
     assert.ok(
@@ -194,16 +97,22 @@ test(
   laptop(async () => {
     localStorage.clear()
     forgetHeldChats()
-    await seed(
+    await seedChats(
       [
-        { id: MAIN, profileId: bot.id, title: "Fader", said: "alpha one", main: true },
-        { id: MAIN_OTHER, profileId: other.id, title: "Otherly", said: "beta one", main: true },
+        { id: MAIN, profileId: bot.id, title: "Fader", main: true, messages: ["alpha one"] },
+        {
+          id: MAIN_OTHER,
+          profileId: other.id,
+          title: "Otherly",
+          main: true,
+          messages: ["beta one"],
+        },
       ],
-      { botThreads: true },
+      { bots: [bot, other], active: bot.id, botThreads: true },
     )
     await mount(phone(`/c/${MAIN}`, `/c/${MAIN_OTHER}`), async () => {
       await until(async () => text().includes("alpha one"), "the bot on screen")
-      const spy = spyAnimations()
+      const spy = spyAnimate()
       try {
         // The sidebar's own way to another bot, which lands on its Main.
         await click(findText("a", "Otherly"))
@@ -214,12 +123,13 @@ test(
       }
 
       assert.deepEqual(
-        spy.overHeld().map((one) => one.element),
+        spy.overHeld().map((one) => one.pane),
         [],
         "no transition plays over the bot the switch left",
       )
-      const played = spy.onPane()
+      const played = spy.onPanes()
       assert.equal(played.length, 1, "one bot changing into the next is one transition")
+      assert.equal(played[0].pane, "main", "on the bot's own pane, where the chat was swapped")
       assert.deepEqual(played[0].keyframes, FADE)
       assert.equal(played[0].options.duration, 200)
       assert.ok(played[0].shown.includes("beta one"), "played as the bot asked for lands")
@@ -228,22 +138,22 @@ test(
 )
 
 test(
-  "a thread opened beside Main fades the pane as its answers land",
+  "a thread opened beside Main fades its own pane, and animates nothing of Main's",
   laptop(async () => {
     localStorage.clear()
     forgetHeldChats()
-    await seed(
+    await seedChats(
       [
-        { id: MAIN, profileId: bot.id, title: "Fader", said: "main one", main: true },
-        { id: "t-a", profileId: bot.id, title: "Thread t-a", said: "alpha one" },
-        { id: "t-b", profileId: bot.id, title: "Thread t-b", said: "beta one" },
+        { id: MAIN, profileId: bot.id, title: "Fader", main: true, messages: ["main one"] },
+        { id: "t-a", profileId: bot.id, title: "Thread t-a", messages: ["alpha one"] },
+        { id: "t-b", profileId: bot.id, title: "Thread t-b", messages: ["beta one"] },
       ],
-      { botThreads: true },
+      { bots: [bot, other], active: bot.id, botThreads: true },
     )
     localStorage.setItem(lastThreadKey(bot.id), "t-a")
     await mount(phone(`/c/${MAIN}`, "/c/t-b"), async () => {
       await until(async () => text().includes("alpha one"), "the thread beside Main")
-      const spy = spyAnimations()
+      const spy = spyAnimate()
       try {
         await click(find('[data-slot="thread-card"] a[href="/c/t-b"]'))
         await until(async () => text().includes("beta one"), "the thread asked for")
@@ -253,29 +163,78 @@ test(
       }
 
       assert.deepEqual(
-        spy.overHeld().map((one) => one.element),
+        spy.overHeld().map((one) => one.pane),
         [],
         "no transition plays over the thread the switch left",
       )
-      const played = spy.onPane()
+      // Main's cards were on screen before the tap and are the same cards after it: fading them is
+      // the blink that fading one pane rather than the screen exists to remove.
+      assert.deepEqual(
+        spy.asked.filter((one) => one.pane === "main").map((one) => one.element),
+        [],
+        "Main's own pane plays nothing: the thread beside it is the only chat that changed",
+      )
+      assert.deepEqual(
+        spy.onScreen().map((one) => one.element),
+        [],
+        "and the screen's own element is not faded over it",
+      )
+      const played = spy.onPanes()
       assert.equal(played.length, 1, "the thread beside Main fades once, as it lands")
+      assert.equal(played[0].pane, "thread", "on the thread's own pane")
       assert.deepEqual(played[0].keyframes, FADE)
       assert.ok(played[0].shown.includes("beta one"), "played as the thread asked for lands")
     })
   }),
 )
 
+test("a chat's first send gives it an id without fading: nothing was left behind", async () => {
+  localStorage.clear()
+  forgetHeldChats()
+  await seedChats(
+    [
+      { id: "c-a", title: "Alpha", messages: ["alpha one"] },
+      { id: "c-b", title: "Beta", messages: ["beta one"] },
+    ],
+    { bots: [bot, other], active: bot.id },
+  )
+  // The send's own navigate: a replace, and quiet — and the id a chat never had is no chat left.
+  await mount(phone("/", "/c/c-b", { replace: true, quiet: true }), async () => {
+    await until(async () => Boolean(find("[data-pane]")), "the new chat")
+    const spy = spyAnimate()
+    try {
+      await click(find("[data-switch]"))
+      await until(async () => text().includes("beta one"), "the chat the id names")
+      await settle()
+    } finally {
+      spy.restore()
+    }
+
+    assert.deepEqual(
+      spy.asked.map((one) => `${one.pane ?? one.element}:${one.keyframes.length}`),
+      [],
+      "no transition plays as a new chat takes the id its first message made",
+    )
+    assert.equal(path(), "/c/c-b", "and the chat takes the address its id names")
+  })
+})
+
 test(
   "a screen that isn't a chat keeps the transition it has",
   laptop(async () => {
     localStorage.clear()
     forgetHeldChats()
-    await seed([{ id: MAIN, profileId: bot.id, title: "Fader", said: "alpha one", main: true }], {
-      botThreads: true,
-    })
-    await mount(phone(`/c/${MAIN}`, "/settings"), async () => {
+    await seedChats(
+      [{ id: MAIN, profileId: bot.id, title: "Fader", main: true, messages: ["alpha one"] }],
+      {
+        bots: [bot, other],
+        active: bot.id,
+        botThreads: true,
+      },
+    )
+    await mount(phone(`/c/${MAIN}`, "/settings", { routes: settings }), async () => {
       await until(async () => text().includes("alpha one"), "the chat on screen")
-      const spy = spyAnimations()
+      const spy = spyAnimate()
       try {
         // Opened on top of the chat, the way a push into another screen reads to the shell.
         window.history.replaceState({ idx: 1 }, "")
@@ -286,7 +245,7 @@ test(
         spy.restore()
       }
 
-      const played = spy.onPane()
+      const played = spy.onScreen()
       assert.equal(
         played.length,
         1,
@@ -302,14 +261,17 @@ test(
 test("with reduced motion the swap changes the same content and animates nothing", async () => {
   localStorage.clear()
   forgetHeldChats()
-  await seed([
-    { id: "c-a", profileId: bot.id, title: "Alpha", said: "alpha one" },
-    { id: "c-b", profileId: bot.id, title: "Beta", said: "beta one" },
-  ])
+  await seedChats(
+    [
+      { id: "c-a", title: "Alpha", messages: ["alpha one"] },
+      { id: "c-b", title: "Beta", messages: ["beta one"] },
+    ],
+    { bots: [bot, other], active: bot.id },
+  )
   await withReducedMotion(async () => {
     await mount(phone("/c/c-a", "/c/c-b"), async () => {
       await until(async () => text().includes("alpha one"), "the chat on screen")
-      const spy = spyAnimations()
+      const spy = spyAnimate()
       try {
         await click(find("[data-switch]"))
         await until(async () => text().includes("beta one"), "the chat asked for")

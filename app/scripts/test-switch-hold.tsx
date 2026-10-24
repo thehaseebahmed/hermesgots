@@ -8,24 +8,23 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { act, useState } from "react"
 import { createRoot } from "react-dom/client"
-import { MemoryRouter, Route, Routes, useNavigate } from "react-router"
 
-import { AppShell } from "@/components/app-shell"
 import { BOTS } from "@/components/bots"
 import { db, ensureMainThread, mainThreadId } from "@/lib/db"
+import { GREETINGS } from "@/lib/greeting"
+import { forgetHeldChats } from "@/lib/chat-hold"
 import { lastThreadKey, useThreads } from "@/lib/threads"
-import { ChatPage, forgetHeldChats } from "@/routes/chat"
+import { SETUP_COPY } from "@/routes/chat"
 import {
   botProfile,
   click,
   find,
-  json,
+  laptop,
   mount,
-  Path,
   path,
-  seedSettings,
+  phone,
+  seedChats,
   settle,
-  text,
   until,
 } from "./component-kit.tsx"
 
@@ -34,51 +33,7 @@ const other = botProfile("switch-hold-other", { id: "bot-2", name: "Otherly" })
 const MAIN = mainThreadId(bot.id)
 
 /** The words only a chat that is not ready says: the setup copy, an untitled header, the greeting. */
-const PROVISIONAL = [
-  "Point Gots at your Hermes Agent API server to start chatting.",
-  "New chat",
-  "Good morning.",
-  "Good afternoon.",
-  "Good evening.",
-  ...BOTS.flatMap((one) => one.lines),
-]
-
-interface Chat {
-  id: string
-  title: string
-  said: string
-}
-
-async function seed(chats: Chat[], patch: { botThreads?: boolean } = {}) {
-  await seedSettings({ developer: true, botThreads: false, activeProfileId: bot.id, ...patch })
-  await db.profiles.clear()
-  await db.profiles.bulkPut([bot, other])
-  await db.conversations.clear()
-  await db.messages.clear()
-  await db.conversations.bulkPut(
-    chats.map((chat, index) => ({
-      id: chat.id,
-      profileId: bot.id,
-      title: chat.title,
-      titleEdited: true,
-      hermesSessionId: `memento-${chat.id}`,
-      createdAt: 10 + index,
-      updatedAt: 10 + index,
-      changedAt: 10,
-    })),
-  )
-  await db.messages.bulkPut(
-    chats.map((chat, index) => ({
-      id: `${chat.id}-said`,
-      conversationId: chat.id,
-      role: "user" as const,
-      content: chat.said,
-      status: "done" as const,
-      createdAt: 11 + index,
-    })),
-  )
-  globalThis.fetch = async () => json({})
-}
+const PROVISIONAL = [SETUP_COPY, "New chat", ...GREETINGS, ...BOTS.flatMap((one) => one.lines)]
 
 /** What a pane reads as right now: its own words, and whether it is the outgoing chat on hold. */
 interface Frame {
@@ -89,16 +44,24 @@ interface Frame {
   composer: boolean
 }
 
-const frameOf = (root: Element | null | undefined): Frame => {
-  const panes = [...(root?.querySelectorAll('[data-slot="chat-pane"]') ?? [])]
-  // A pane that names itself is the pane whose words count; one that doesn't is read where it sits,
-  // so a frame painted without a hold is still a frame this test can catch.
-  const boxes = panes.length > 0 ? panes : root ? [root] : []
+/** Every chat pane on screen right now, as one frame: its words, and which of them is held. */
+const frameNow = (): Frame => {
+  const panes = [...document.querySelectorAll('[data-slot="chat-pane"]')]
   const holding = panes.filter((pane) => pane.hasAttribute("inert"))
   return {
-    text: boxes.map((pane) => pane.textContent ?? "").join("|"),
+    text: panes.map((pane) => pane.textContent ?? "").join("|"),
     holding: holding.length > 0,
     composer: holding.some((pane) => pane.querySelector('textarea[aria-label="Message"]')),
+  }
+}
+
+/** One pane as it reads right now, by the name the shell gives it. */
+const paneFrame = (name: string): Frame => {
+  const root = find(`[data-pane="${name}"]`)
+  return {
+    text: root?.textContent ?? "",
+    holding: Boolean(root?.hasAttribute("inert")),
+    composer: Boolean(root?.querySelector('textarea[aria-label="Message"]')),
   }
 }
 
@@ -151,51 +114,9 @@ const greetingKeys = () =>
     .sort()
     .map((key) => `${key}=${localStorage.getItem(key)}`)
 
-/** The routed chat, as a phone draws it: the id under the pane changes and nothing remounts. */
-function SwitchTo({ to }: { to: string }) {
-  const navigate = useNavigate()
-  return (
-    <button type="button" data-switch onClick={() => navigate(to)}>
-      switch
-    </button>
-  )
-}
-
-const phone = (entry: string, to: string) => (
-  <MemoryRouter initialEntries={[entry]}>
-    <Path />
-    <SwitchTo to={to} />
-    <div data-chat>
-      <Routes>
-        <Route path="/c/:id" element={<ChatPage />} />
-      </Routes>
-    </div>
-  </MemoryRouter>
-)
-
-const shell = (entry: string) => (
-  <MemoryRouter initialEntries={[entry]}>
-    <Routes>
-      <Route element={<AppShell />}>
-        <Route path="c/:id" element={<ChatPage />} />
-      </Route>
-    </Routes>
-  </MemoryRouter>
-)
-
-/** A laptop's width: the bot's third pane is `xl`'s, so a test has to say the screen is one. */
-const laptop = (body: () => Promise<void>) => async () => {
-  const width = window.innerWidth
-  window.innerWidth = 1440
-  try {
-    await body()
-  } finally {
-    window.innerWidth = width
-  }
-}
-
-const paneText = () => find("[data-chat]")?.textContent ?? ""
-const phoneFrame = () => frameOf(find("[data-chat]"))
+const paneText = (name = "route") => find(`[data-pane="${name}"]`)?.textContent ?? ""
+const paneTitle = () =>
+  find('[data-pane="route"] [data-slot="header-title"]')?.textContent?.trim() ?? ""
 
 /** The card Main draws for a thread, which opens it in the pane beside it. */
 const card = (id: string) => find(`[data-slot="thread-card"] a[href="/c/${id}"]`)
@@ -203,15 +124,18 @@ const card = (id: string) => find(`[data-slot="thread-card"] a[href="/c/${id}"]`
 test("a chat switched to in place holds the one it left until its own answers are in", async () => {
   localStorage.clear()
   forgetHeldChats()
-  await seed([
-    { id: "c-a", title: "Alpha", said: "alpha one" },
-    { id: "c-b", title: "Beta", said: "beta one" },
-  ])
+  await seedChats(
+    [
+      { id: "c-a", title: "Alpha", messages: ["alpha one"] },
+      { id: "c-b", title: "Beta", messages: ["beta one"] },
+    ],
+    { bots: [bot, other], active: bot.id },
+  )
   await mount(phone("/c/c-a", "/c/c-b"), async () => {
     await until(async () => paneText().includes("alpha one"), "the chat on screen")
     const before = paneText()
     const greeting = greetingKeys()
-    const seen = recordFrames(phoneFrame)
+    const seen = recordFrames(frameNow)
 
     await click(find("[data-switch]"))
     await until(async () => paneText().includes("beta one"), "the chat asked for")
@@ -247,28 +171,27 @@ test(
   laptop(async () => {
     localStorage.clear()
     forgetHeldChats()
-    await seed(
+    await seedChats(
       [
-        { id: "t-a", title: "Thread t-a", said: "alpha one" },
-        { id: "t-b", title: "Thread t-b", said: "beta one" },
+        { id: "t-a", title: "Thread t-a", messages: ["alpha one"] },
+        { id: "t-b", title: "Thread t-b", messages: ["beta one"] },
       ],
-      { botThreads: true },
+      { bots: [bot, other], active: bot.id, botThreads: true },
     )
     await ensureMainThread(bot.id)
     localStorage.setItem(lastThreadKey(bot.id), "t-a")
-    await mount(shell(`/c/${MAIN}`), async () => {
-      await until(async () => text().includes("alpha one"), "the thread beside Main")
+    await mount(phone(`/c/${MAIN}`, "/c/t-b"), async () => {
+      await until(async () => paneText("thread").includes("alpha one"), "the thread beside Main")
       await until(async () => Boolean(card("t-b")), "the other thread's card")
-      const pane = () => frameOf(find("main"))
-      const before = pane().text
+      const before = paneFrame("thread").text
       const greeting = greetingKeys()
-      const seen = recordFrames(pane)
+      const seen = recordFrames(() => paneFrame("thread"))
 
       await click(card("t-b"))
-      await until(async () => pane().text.includes("beta one"), "the thread asked for")
+      await until(async () => paneFrame("thread").text.includes("beta one"), "the thread asked for")
       await settle()
 
-      onlyReadyFrames(seen, before, pane().text)
+      onlyReadyFrames(seen, before, paneFrame("thread").text)
       assert.ok(
         seen.frames.some((frame) => frame.holding && frame.text === before),
         "the thread replaced is the one drawn while the next one answers",
@@ -281,11 +204,14 @@ test(
 test("a cold start paints a spinner under an empty header, never the setup copy", async () => {
   localStorage.clear()
   forgetHeldChats()
-  await seed([{ id: "c-a", title: "Alpha", said: "alpha one" }])
+  await seedChats([{ id: "c-a", title: "Alpha", messages: ["alpha one"] }], {
+    bots: [bot, other],
+    active: bot.id,
+  })
   const container = document.createElement("div")
   document.body.append(container)
   const seen = recordFrames(() => {
-    const chat = find("[data-chat]")
+    const chat = find('[data-pane="route"]')
     if (!chat) return { text: "nothing", holding: false, composer: false }
     const spinner = chat.querySelector('[data-slot="spinner"]') ? "spinner" : "no-spinner"
     const title = [...chat.querySelectorAll('[data-slot="header-title"]')]
@@ -293,7 +219,7 @@ test("a cold start paints a spinner under an empty header, never the setup copy"
       .join("|")
     return {
       text: `${spinner}|${title}|${chat.textContent ?? ""}`,
-      holding: false,
+      holding: chat.hasAttribute("inert"),
       composer: false,
     }
   })
@@ -305,7 +231,7 @@ test("a cold start paints a spinner under an empty header, never the setup copy"
     const painted = seen.frames.map((frame) => frame.text).filter((one) => one !== "nothing")
     assert.ok(painted.length > 0, "the pane painted something")
     assert.ok(painted[0].startsWith("spinner||"), `the first frame is a spinner: ${painted[0]}`)
-    assert.ok(!painted[0].includes("Point Gots"), "the setup copy is never a loading state")
+    assert.ok(!painted[0].includes(SETUP_COPY), "the setup copy is never a loading state")
     const last = painted.at(-1) ?? ""
     assert.equal(last.includes("alpha one"), true, "and the first ready frame is the chat itself")
   } finally {
@@ -317,27 +243,50 @@ test("a cold start paints a spinner under an empty header, never the setup copy"
 test("a chat answered gone lands as its own empty state, in the place it was asked for", async () => {
   localStorage.clear()
   forgetHeldChats()
-  await seed([
-    { id: "c-a", title: "Alpha", said: "alpha one" },
-    { id: "c-b", title: "Beta", said: "beta one" },
-  ])
+  await seedChats(
+    [
+      { id: "c-a", title: "Alpha", messages: ["alpha one"] },
+      { id: "c-b", title: "Beta", messages: ["beta one"] },
+    ],
+    { bots: [bot, other], active: bot.id },
+  )
   await mount(phone("/c/c-a", "/c/c-b"), async () => {
     await until(async () => paneText().includes("alpha one"), "the chat on screen")
+    const greeting = greetingKeys()
     // Deleted on another board, then opened here: the row is gone, and that is an answer too.
     await db.conversations.delete("c-b")
     await db.messages.where("conversationId").equals("c-b").delete()
     await settle()
 
     await click(find("[data-switch]"))
-    await until(async () => !find("[data-chat] [inert]"), "the chat that answered gone to land")
+    // Landed: the pane answers the reader, and it is no longer the chat that was on screen.
+    await until(
+      async () => !paneFrame("route").holding && !paneText().includes("alpha one"),
+      "the chat that answered gone to land",
+    )
     await settle()
 
     assert.equal(path(), "/c/c-b", "the chat keeps the place it was asked for")
     assert.ok(!paneText().includes("beta one"), "nothing of the chat this device no longer has")
-    assert.ok(!paneText().includes("Point Gots"), "and never the setup copy")
-    assert.ok(
-      BOTS.some((one) => one.lines.some((line) => paneText().includes(line))),
-      "its own empty state, as any empty chat draws one",
+    assert.ok(!paneText().includes(SETUP_COPY), "and never the setup copy")
+    // Its own empty state, and its own header: a chat that is gone is never a chat that is new, so
+    // it says no title rather than "New chat" — no row is left here to read the title it had from.
+    assert.equal(paneTitle(), "", "the header stands empty, as the row it read is gone")
+    assert.ok(!paneText().includes("New chat"), "and a gone chat is never drawn as a new one")
+    assert.deepEqual(
+      PROVISIONAL.filter((copy) => paneText().includes(copy)),
+      [],
+      "its empty state draws no greeting and no bot line: the ready line mounts on no gone chat",
+    )
+    assert.equal(
+      find('[data-pane="route"] [data-slot="spinner"]'),
+      null,
+      "and it is ready: the pane answers the reader rather than spinning",
+    )
+    assert.deepEqual(
+      greetingKeys(),
+      greeting,
+      "a chat that answered gone consumes no line turn and swallows no greeting",
     )
   })
 })
@@ -364,7 +313,11 @@ function Asked({ first, then }: { first?: string; then?: string }) {
 }
 
 test("a thread list asked for another bot is unknown, never no threads", async () => {
-  await seed([{ id: "t-a", title: "Thread t-a", said: "alpha one" }], { botThreads: true })
+  await seedChats([{ id: "t-a", title: "Thread t-a", messages: ["alpha one"] }], {
+    bots: [bot, other],
+    active: bot.id,
+    botThreads: true,
+  })
   await mount(<Asked first={other.id} then={bot.id} />, async () => {
     await until(async () => find("[data-answer]")?.textContent === "0", "a bot with no threads")
     answers.length = 0
