@@ -99,7 +99,13 @@
 // adds one, POST to its id rewrites one of the account's own — forking a preset into a copy — and DELETE takes
 // one away; each answers the whole list. A project names the workflow its work runs under through
 // POST projects/{id}/afk { workflow_id }, and its answer carries that workflow and the name of the
-// stage its task is in; `{ prompt }` writes the Prompt its runs are told instead. `pipeline?` below
+// stage its task is in; `{ prompt }` writes the Prompt its runs are told instead, and
+// `{ prompt, prompt_id }` writes it as a copy of a library entry — the plain shape clears that
+// source, as the entry a project picked goes when the user types over it. `{ pick_count }` is how
+// many tasks its AFK holds at once, and the answer names all of them (oldest first, each with the
+// stage of the session working it) over the bot's own numbers: `pick_budget` and `holds_held`.
+// GET/POST /api/plugins/memento/afk is the bot's own row, naming no project: `{ pick_budget }` is
+// how many tasks its projects hold together, from one to ten. `pipeline?` below
 // takes the new snapshot shape too — one entry per stage, each with its rounds — which is how a flow
 // puts a staged task on a second round.
 // POST /__mock/afk { project_id, stage?, reason?, pipeline?, pr?, reset? } is the dev handle on AFK's
@@ -194,7 +200,16 @@ const afkWorkflow = new Map()
 // serves it as the default where a project wrote none (`prompt_builder.DEFAULT_PROMPT`, shortened
 // here: the app draws what it answers, in the row and in its editor).
 const afkPrompts = new Map()
+// The library entry each project's Prompt was copied from, written beside its words by a pick
+// (`afk.set_prompt`'s `prompt_id`) and cleared by a plain write, so a flow can watch a copy keep or
+// lose its source.
+const afkPromptIds = new Map()
 const MOCK_DEFAULT_PROMPT = "Work in checkpoints: small slices of the issue, one at a time."
+// How many tasks each project may hold at once (`project_afk.pick_count`, one when unset) and how
+// many this bot may hold across its projects (`host_settings`' `afk_pick_budget`, five when unset).
+// Both are the host's own numbers: a write is read back on the next read, like the switch.
+const afkPickCounts = new Map()
+let afkPickBudget = 5
 // The library, seeded from the plugin's presets on first read (`workflows.PRESETS`): presets are
 // read-only, and a write through the routes adds or rewrites one of the account's own rows.
 let workflowRows = []
@@ -1022,6 +1037,27 @@ const projectLibrary = (projectId) => {
 // group, as the plugin's read would report it.
 const AFK_TASK = 265
 const AFK_TITLE = "The frontier is read from GitHub and listed"
+const AFK_SWITCH_TASK = "The switch: AFK is a project's own setting on the host"
+const AFK_THIRD_TASK = "A hold is a row, not a column on the project"
+/** How many tasks a project may hold at once: its own count, one where it never set one. */
+const afkPickCount = (project) => afkPickCounts.get(project.id) ?? 1
+/**
+ * The tasks a sweep can claim for a project, oldest first: the frontier's first ready pair, and a
+ * third the repository opens once the project is set to hold three — so the Working list and the
+ * frontier agree about what is out there at every count.
+ */
+const afkPool = (project) =>
+  [
+    [AFK_TASK, AFK_TITLE],
+    [266, AFK_SWITCH_TASK],
+    [269, AFK_THIRD_TASK],
+  ].slice(0, afkPickCount(project) >= 3 ? 3 : 2)
+/** The tasks a project holds, oldest first: a sweep fills every place its pick count gives it. */
+const afkHolds = (project) =>
+  afkSwept.has(project.id) ? afkPool(project).slice(0, afkPickCount(project)) : []
+/** Every task this bot holds, across all of its projects: what its budget is counted against. */
+const afkHeldCount = () =>
+  mockProjects().reduce((total, project) => total + afkHolds(project).length, 0)
 const repoOf = (project) =>
   project.folders.find((folder) => folder.repo)?.repo ?? "mock-user/memento"
 /** A task row as the plugin's frontier read answers it. */
@@ -1064,17 +1100,18 @@ const workspaceRecord = (project, { sessionId, slug, mode }) => {
 const projectTasks = (project) => {
   const repo = repoOf(project)
   const task = (number, title, extra = {}) => mockTask(repo, number, title, extra)
-  const afk = afkSwept.has(project.id)
-  const oldest = task(AFK_TASK, AFK_TITLE)
+  const holds = afkHolds(project)
+  const held = new Set(holds.map(([number]) => number))
   return {
     object: "memento.tasks",
     project_id: project.id,
     repos: [repo],
-    ready: afk
-      ? [task(266, "The switch: AFK is a project's own setting on the host")]
-      : [oldest, task(266, "The switch: AFK is a project's own setting on the host")],
+    // What AFK's sweep claimed has left the frontier — every task it holds, not only the oldest.
+    ready: afkPool(project)
+      .filter(([number]) => !held.has(number))
+      .map(([number, title]) => task(number, title)),
     claimed: [
-      ...(afk ? [{ ...oldest, assignees: ["mock-user"] }] : []),
+      ...holds.map(([number, title]) => task(number, title, { assignees: ["mock-user"] })),
       task(267, "AFK claims the next ready task", { assignees: ["mock-user"] }),
     ],
     blocked: [
@@ -1201,30 +1238,59 @@ function afkStageName(record) {
   return { build: "Build", gate: "Test", critique: "Review" }[record.stage] ?? null
 }
 
-/** AFK's answer for a project: its switch, the task it holds, and its last refusal (none mocked). */
+/** AFK's answer for a project: its switch, the tasks it holds, and its last refusal (none mocked). */
 function afkAnswer(project, reason) {
   const on = afkProjects.has(project.id)
   const skills = afkSkills.get(project.id) ?? { build_skill: null, critique_skills: [] }
   const record = afkSwept.has(project.id)
     ? (projectSessions.get(afkSessionId(project.id))?.pipeline ?? null)
     : null
+  // Every task it holds, oldest first, with what the sheet reads off each: its stage and its stall
+  // belong to the session working that hold, and the mock keeps one session — the oldest hold's —
+  // so the ones behind it have neither.
+  const holds = afkHolds(project).map(([number, title], index) => {
+    const task = mockTask(repoOf(project), number, title)
+    return {
+      repo: task.repo,
+      number: task.number,
+      title: task.title,
+      url: task.url,
+      created_at: task.created_at,
+      // The stage its session's record holds, null for a task claimed with no critique skill: one
+      // run, which ships, and no stage to name.
+      stage: index === 0 ? (afkStages.get(project.id) ?? null) : null,
+      stage_name: index === 0 ? afkStageName(record) : null,
+      stalled: index === 0 ? (afkStalled.get(project.id) ?? null) : null,
+    }
+  })
+  const oldest = holds[0] ?? { stage: null, stage_name: null }
   return {
     object: "memento.afk",
     project_id: project.id,
     on,
     reason,
     // The sweep that claims it runs after the switch's own answer, so the task lands on the next
-    // read rather than in the POST's answer.
+    // read rather than in the POST's answer. It stays the OLDEST hold, which is the one row a
+    // shipped app draws.
     task: afkSwept.has(project.id) ? afkTask(project) : null,
+    holds,
+    pick_count: afkPickCount(project),
+    prompt_id: afkPromptIds.get(project.id) ?? null,
     refusal: null,
-    // The stage its session's record holds, null for a task claimed with no critique skill: one
-    // run, which ships, and no stage to name.
-    stage: afkSwept.has(project.id) ? (afkStages.get(project.id) ?? null) : null,
-    stage_name: afkStageName(record),
+    stage: oldest.stage,
+    stage_name: oldest.stage_name,
     workflow: workflowOf(project.id),
     prompt: afkPrompts.get(project.id) ?? MOCK_DEFAULT_PROMPT,
+    // The bot's own two numbers, answered here so one read draws the sheet's budget line.
+    pick_budget: afkPickBudget,
+    holds_held: afkHeldCount(),
     ...skills,
   }
+}
+
+/** The bot's own AFK row: the pick budget it works within, and the holds counted against it. */
+function botAfkAnswer() {
+  return { object: "memento.afk.bot", pick_budget: afkPickBudget, holds_held: afkHeldCount() }
 }
 
 /** Why a project can't be left to work, as the plugin's `afk.reason` answers it, or null. */
@@ -2986,6 +3052,7 @@ http
           "afk_skills",
           "afk_workflows",
           "afk_prompt",
+          "afk_picks",
           "afk_pipeline",
           ...(TRIAGE !== "off" ? ["triage", "moves"] : []),
           ...(RESEARCH
@@ -3584,6 +3651,20 @@ http
       if (!GITHUB) return json(res, 409, { error: { message: "No GitHub account on the server." } })
       return json(res, 200, { object: "memento.github.repos", repos: githubRepos })
     }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/afk") {
+      // The bot's own AFK row, beside the projects and naming none of them: the budget this bot
+      // works within and the holds counted against it (`afk.bot_read`, ADR 0042). A write names the
+      // budget alone, and anything else is refused the way the plugin refuses it.
+      if (req.method !== "POST") return json(res, 200, botAfkAnswer())
+      const body = await readBody(req)
+      const budget = body.pick_budget
+      if (!Number.isInteger(budget) || budget < 1 || budget > 10)
+        return json(res, 400, {
+          error: { message: "pick_budget must be a whole number from 1 to 10." },
+        })
+      afkPickBudget = budget
+      return json(res, 200, botAfkAnswer())
+    }
     if (
       PLUGIN &&
       !profile &&
@@ -3680,22 +3761,37 @@ http
         const choosing = "build_skill" in body || "critique_skills" in body
         const picking = "workflow_id" in body
         const prompting = "prompt" in body
-        if (!switching && !choosing && !picking && !prompting)
+        const counting = "pick_count" in body
+        // A source is no shape of its own: an id without words names nothing to write
+        // (`afk.write_from`).
+        if ("prompt_id" in body && !prompting)
+          return json(res, 400, { error: { message: "prompt_id needs a prompt beside it." } })
+        if (!switching && !choosing && !picking && !prompting && !counting)
           return json(res, 400, {
             error: {
-              message: "on, workflow_id, prompt, build_skill or critique_skills is needed.",
+              message: "on, workflow_id, prompt or pick_count is needed.",
             },
           })
         // One write, one shape: the switch wakes the sweep, so a body naming two could write one and
         // be refused, leaving half of it written (`afk.write_from`).
-        if ([switching, choosing, picking, prompting].filter(Boolean).length > 1)
+        if ([switching, choosing, picking, prompting, counting].filter(Boolean).length > 1)
           return json(res, 400, {
             error: {
-              message: "A write names either on or the skills, or a workflow, or a prompt.",
+              message: "A write names one of on, workflow_id, prompt or pick_count.",
             },
           })
         if (switching && typeof body.on !== "boolean")
           return json(res, 400, { error: { message: "on must be true or false." } })
+        if (counting) {
+          const count = body.pick_count
+          if (!Number.isInteger(count) || count < 1 || count > 5)
+            return json(res, 400, {
+              error: { message: "pick_count must be a whole number from 1 to 5." },
+            })
+          // No hold is abandoned by a count going down (`afk.set_pick_count`); the next sweep fills
+          // to whatever it now is, which is why this only writes the number.
+          afkPickCounts.set(found.id, count)
+        }
         if (choosing) {
           if (!("build_skill" in body) || !("critique_skills" in body))
             return json(res, 400, {
@@ -3720,9 +3816,22 @@ http
         if (prompting) {
           if (body.prompt !== null && typeof body.prompt !== "string")
             return json(res, 400, { error: { message: "prompt must be text." } })
+          // The entry the words were copied from rides the same write as the words, and a write
+          // that names no entry clears the source the row held (`afk.prompt_source`): a copy only
+          // ever says where it came from while the user hasn't typed over it.
+          let source = null
+          if ("prompt_id" in body) {
+            if (typeof body.prompt_id !== "string" || !body.prompt_id.trim())
+              return json(res, 400, {
+                error: { message: "prompt_id must be a library entry's id." },
+              })
+            source = body.prompt_id.trim()
+          }
           const text = typeof body.prompt === "string" ? body.prompt.trim() : ""
           if (text) afkPrompts.set(found.id, text)
           else afkPrompts.delete(found.id)
+          if (text && source) afkPromptIds.set(found.id, source)
+          else afkPromptIds.delete(found.id)
           // A Prompt and a pick are one choice between them (`afk.set_prompt`).
           afkWorkflow.delete(found.id)
         }
@@ -3735,8 +3844,10 @@ http
               error: { message: `There is no workflow "${id}" in this bot's library.` },
             })
           afkWorkflow.set(found.id, id)
-          // ...and the other way round (`afk.set_workflow`).
+          // ...and the other way round, its source going with the words it describes
+          // (`afk.set_workflow`).
           afkPrompts.delete(found.id)
+          afkPromptIds.delete(found.id)
         }
         if (switching) {
           if (body.on && reason) return json(res, 409, { error: { message: reason } })
@@ -3871,6 +3982,10 @@ http
         // The retry makes the project again under a new id, so the old one's switch is forgotten.
         afkProjects.delete(found.id)
         afkSkills.delete(found.id)
+        afkSwept.delete(found.id)
+        afkPrompts.delete(found.id)
+        afkPromptIds.delete(found.id)
+        afkPickCounts.delete(found.id)
         for (const folder of found.folders) folder.status = "queued"
         found.status = "cloning"
         found.error = null
@@ -3881,9 +3996,13 @@ http
         clearTimeout(cloning.get(found.id))
         cloning.delete(found.id)
         // Deleting a project forgets its switch, as the plugin's `projects.remove` does — and the
-        // skills its work followed, since they live on the same row.
+        // skills its work followed, its Prompt and its holds, since they live on the same row.
         afkProjects.delete(found.id)
         afkSkills.delete(found.id)
+        afkSwept.delete(found.id)
+        afkPrompts.delete(found.id)
+        afkPromptIds.delete(found.id)
+        afkPickCounts.delete(found.id)
         all.splice(all.indexOf(found), 1)
         return json(res, 200, { object: "memento.project", removed: true })
       }

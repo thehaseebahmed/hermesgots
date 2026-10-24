@@ -149,8 +149,14 @@ export async function settleNav(page) {
  * Opens the app with the bot set up, runs `body`, and closes the browser. A failure saves
  * `failed.png` (with SHOTS_DIR set) before it is thrown. `touch` gives the page a touchscreen, for a
  * flow that has to send a real finger — off by default, so every other flow keeps a mouse-only page.
+ * `account` signs the browser in (see `signIn`) before the app loads, for a flow whose screen needs
+ * the account — a bot pointed at the mock either way.
  */
-export async function flow(name, body, { viewport = { width: 1440, height: 900 }, dark, touch } = {}) {
+export async function flow(
+  name,
+  body,
+  { viewport = { width: 1440, height: 900 }, dark, touch, account } = {},
+) {
   const browser = await launch(chromium, !headed)
   const page = await settleNav(
     await browser.newPage({
@@ -159,6 +165,9 @@ export async function flow(name, body, { viewport = { width: 1440, height: 900 }
       ...(touch ? { hasTouch: true } : {}),
     }),
   )
+  // The account has to be in place before the document that reads it: the init script lands on the
+  // next navigation, which is the flow's own `goto`.
+  if (account) await signIn(page.context())
   const shot = async (step) => {
     if (!shots) return
     mkdirSync(shots, { recursive: true })
@@ -194,30 +203,26 @@ export async function setUpBot(page) {
   }, mock)
 }
 
-/** The signed-in account the wizard flows start from. */
-const user = { id: "11111111-2222-4333-8444-555555555555", email: "tester@example.com" }
+/** The signed-in account the wizard flows start from, and the one `flow`'s `account` seeds. */
+export const accountUser = { id: "11111111-2222-4333-8444-555555555555", email: "tester@example.com" }
 
 /**
- * A browser signed in to Identity with the sync, community and Identity routes stubbed, for a flow
- * that has to start before the wizard: `vault` is "missing" for a first run, "exists" for an account
- * that already has one, or a holder `{ data }` the flow seeds — that stub then behaves like the sync
- * function, serving what it holds and taking writes with etags, so a flow can watch a vault change
- * over several writes. `vaults` collects every vault PUT and `joins` every leaderboard join, and
- * `shot(name)` saves a screenshot. The caller closes `browser`.
+ * Signs a browser context in to Identity and stubs the site's functions an account reads: the sync
+ * document endpoint, the community leaderboard and Identity's settings. `vault` is "missing" for a
+ * first run, "exists" for an account that already has one, or a holder `{ data }` the flow seeds —
+ * that stub then behaves like the sync function, serving what it holds and taking writes with etags,
+ * so a flow can watch a vault change over several writes. Answers `session`, the `vaults` every
+ * vault PUT carried, the `held` holder itself and the `joins` the leaderboard took. The caller
+ * supplies the page (and closes the browser).
  */
-export async function signedIn({ width = 1440, dark = false, vault = "exists" } = {}) {
-  const browser = await launch(chromium, !headed)
-  const context = await browser.newContext({
-    viewport: { width, height: width < 768 ? 844 : 768 },
-    colorScheme: dark ? "dark" : "light",
-  })
+export async function signIn(context, { vault = "exists" } = {}) {
   const now = Math.floor(Date.now() / 1000)
   const expires = now + 3600
-  const jwtPayload = Buffer.from(JSON.stringify({ sub: user.id, exp: expires })).toString(
+  const jwtPayload = Buffer.from(JSON.stringify({ sub: accountUser.id, exp: expires })).toString(
     "base64url",
   )
   const session = {
-    ...user,
+    ...accountUser,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     url: `${app}/.netlify/identity`,
@@ -278,6 +283,21 @@ export async function signedIn({ width = 1440, dark = false, vault = "exists" } 
         })
       : route.fulfill({ status: 500, body: "" }),
   )
+  return { session, vaults, held, joins }
+}
+
+/**
+ * A browser signed in to Identity with the sync, community and Identity routes stubbed, for a flow
+ * that has to start before the wizard — see `signIn` for what `vault` means. `shot(name)` saves a
+ * screenshot. The caller closes `browser`.
+ */
+export async function signedIn({ width = 1440, dark = false, vault = "exists" } = {}) {
+  const browser = await launch(chromium, !headed)
+  const context = await browser.newContext({
+    viewport: { width, height: width < 768 ? 844 : 768 },
+    colorScheme: dark ? "dark" : "light",
+  })
+  const { session, vaults, joins } = await signIn(context, { vault })
 
   const page = await settleNav(await context.newPage())
   const errors = []

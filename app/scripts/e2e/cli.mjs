@@ -183,7 +183,7 @@ const FLOWS = {
   "afk-claim": {
     script: "e2e/afk-claim.mjs",
     about:
-      "AFK claims the oldest ready task when a project is turned on — the pop-up naming what it holds — and a GitHub refusal leaves the switch on with its reason shown",
+      "AFK claims the tasks a project's pick count opens — the pop-up naming every one it holds, over a count row and the bot's budget line — and a GitHub refusal leaves the switch on with its reason shown",
   },
   "afk-session": {
     script: "e2e/afk-session.mjs",
@@ -203,7 +203,7 @@ const FLOWS = {
   "afk-prompt": {
     script: "e2e/afk-prompt.mjs",
     about:
-      "AFK's Prompt row reads the words its runs are told and opens one writing sheet for them — the bottom sheet, or the drawer from a laptop's width — with Done writing them back to the host",
+      "AFK's Prompt row reads the words its runs are told and opens one writing sheet for them — the bottom sheet, or the drawer from a laptop's width — with Done writing them back to the host; the account's library saves those words by name, picks them into another project, and pulls a rewritten entry in when the row says it changed",
   },
   "pipeline-pill": {
     script: "e2e/pipeline-pill.mjs",
