@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/button"
 import { Message as MessageRow, MessageContent } from "@/components/ui/message"
 import { Spinner } from "@/components/ui/spinner"
 import { DELEGATE_TOOL } from "@/lib/agents"
-import { openable } from "@/lib/attachments"
+import { downloadAttachment, openable } from "@/lib/attachments"
 import { removeQueued, sendQueued } from "@/lib/chat"
 import type { Attachment, Message, ToolEvent } from "@/lib/db"
 import { describeActivity, formatDuration } from "@/lib/format"
@@ -220,23 +220,47 @@ function Stats({ message }: { message: Message }) {
   )
 }
 
-/** A sent message's attachments; the ones this device still has open in a viewer. */
-function SentAttachments({ attachments, dim }: { attachments: Attachment[]; dim: boolean }) {
+/**
+ * A sent message's attachments; the ones this device still has open in a viewer, and the ones it
+ * doesn't hold saved from the host when tapped.
+ */
+function SentAttachments({
+  conversationId,
+  attachments,
+  dim,
+}: {
+  conversationId: string
+  attachments: Attachment[]
+  dim: boolean
+}) {
   const [viewing, setViewing] = useState<number | null>(null)
   const viewable = attachments.filter(openable)
+  // A file another device sent, or one a restored message names, is drawn from what the message
+  // keeps — its name and size — and a tap fetches the bytes through the plugin's media route.
+  const download = (attachment: Attachment) =>
+    void downloadAttachment(conversationId, attachment).catch(() =>
+      toast.error(`Couldn't download ${attachment.name}.`),
+    )
   return (
     <div className={cn("flex max-w-full flex-wrap justify-end gap-2", dim && "opacity-60")}>
-      {attachments.map((attachment) => (
-        <AttachmentTile
-          key={attachment.id}
-          attachment={attachment}
-          onOpen={
-            openable(attachment)
-              ? () => setViewing(viewable.findIndex((a) => a.id === attachment.id))
-              : undefined
-          }
-        />
-      ))}
+      {attachments.map((attachment) => {
+        const here = openable(attachment)
+        const remote = !here && Boolean(attachment.path)
+        return (
+          <AttachmentTile
+            key={attachment.id}
+            attachment={attachment}
+            action={remote ? "download" : "open"}
+            onOpen={
+              here
+                ? () => setViewing(viewable.findIndex((a) => a.id === attachment.id))
+                : remote
+                  ? () => download(attachment)
+                  : undefined
+            }
+          />
+        )
+      })}
       <AttachmentViewer attachments={viewable} index={viewing} onIndex={setViewing} />
     </div>
   )
@@ -420,7 +444,11 @@ export const MessageItem = memo(function MessageItem({
       <MessageRow align="end" className={COLUMN}>
         <MessageContent className="items-end gap-1">
           {message.attachments?.length ? (
-            <SentAttachments attachments={message.attachments} dim={dim} />
+            <SentAttachments
+              conversationId={message.conversationId}
+              attachments={message.attachments}
+              dim={dim}
+            />
           ) : null}
           {(message.content || failed) && (
             <div className="flex w-full min-w-0 items-center justify-end gap-1.5">

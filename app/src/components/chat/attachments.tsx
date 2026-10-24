@@ -2,6 +2,7 @@ import { useState } from "react"
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
+  DownloadIcon,
   ExternalLinkIcon,
   FileIcon,
   ImageIcon,
@@ -37,25 +38,29 @@ const VIEWABLE = /^(image\/|text\/|application\/(pdf|json)$)/
 
 /**
  * A photo as a thumbnail, or a file (and a photo another device sent, which Hermes doesn't give
- * back) as its name. With `onRemove`, a button takes it off the message; with `onOpen`, tapping it
- * opens it. `preparing` is a photo still being scaled down.
+ * back) as its name and size. With `onRemove`, a button takes it off the message; with `onOpen`,
+ * tapping it opens it — or, for a file this device doesn't hold, downloads it. `preparing` is a
+ * photo still being scaled down.
  */
 export function AttachmentTile({
   attachment,
   preparing,
+  action = "open",
   onOpen,
   onRemove,
   className,
 }: {
   attachment: Attachment
   preparing?: boolean
+  /** What a tap does: open it here, or save it from the host. */
+  action?: "open" | "download"
   onOpen?: () => void
   onRemove?: () => void
   className?: string
 }) {
   const uploading = useUploading(attachment.id)
   const url = attachment.image ? objectUrl(attachment) : undefined
-  const Icon = attachment.image ? ImageIcon : FileIcon
+  const Icon = attachment.image ? ImageIcon : action === "download" ? DownloadIcon : FileIcon
   const busy = preparing || uploading
   const tile = url ? (
     <img
@@ -79,7 +84,15 @@ export function AttachmentTile({
       ) : (
         <Icon className="size-5 shrink-0 text-muted-foreground" />
       )}
-      <span className="line-clamp-2 break-all">{attachment.name}</span>
+      <span className="flex min-w-0 flex-col">
+        <span className="line-clamp-1 break-all">{attachment.name}</span>
+        {/* A restored message keeps its size, so its row reads as the one that sent it did. */}
+        {attachment.size ? (
+          <span className="text-xs text-muted-foreground tabular-nums">
+            {formatBytes(attachment.size)}
+          </span>
+        ) : null}
+      </span>
     </div>
   )
   return (
@@ -88,7 +101,7 @@ export function AttachmentTile({
         <button
           type="button"
           onClick={onOpen}
-          aria-label={`Open ${attachment.name}`}
+          aria-label={`${action === "download" ? "Download" : "Open"} ${attachment.name}`}
           className="block rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
         >
           {tile}
