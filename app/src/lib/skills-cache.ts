@@ -29,6 +29,17 @@ export function skillsState({
 }
 
 /**
+ * Why a skill doesn't load, in the Host's own words, or null when it does.
+ *
+ * The one definition of that question, because two screens ask it: the tab's health line and what the
+ * `/` menu offers. A reason that is only whitespace says nothing — an older plugin, or a device row
+ * written before the field — so it is no reason either, and a row it came on stays on offer.
+ */
+export function loadFailure(skill: Skill): string | null {
+  return skill.loadError?.trim() || null
+}
+
+/**
  * The skills the bot can run right now: what the composer's `/` menu and every picker offer.
  *
  * One rule over the one list, so a skill switched off or broken leaves all of them at once — the
@@ -37,5 +48,5 @@ export function skillsState({
  * away. This is not `useSkills`' filter: the Skills tab reads the whole list from the same hook.
  */
 export function runnableSkills(skills: Skill[]): Skill[] {
-  return skills.filter((skill) => skill.enabled !== false && !skill.loadError)
+  return skills.filter((skill) => skill.enabled !== false && loadFailure(skill) === null)
 }

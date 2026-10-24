@@ -1,9 +1,11 @@
 /**
  * What the Skills tab draws from the one skills list: how a row says it is doing, and the sections
- * and category groups it sits in. Kept import-free but for types, so `scripts/test-skills-tab.mjs`
- * can drive it without a browser (as `mcp-server.ts` is for the MCP rows).
+ * and category groups it sits in. Kept import-free but for types and the one rule it shares with
+ * `skills-cache.ts` (what "doesn't load" means), so `scripts/test-skills-tab.mjs` can drive it
+ * without a browser (as `mcp-server.ts` is for the MCP rows).
  */
 import type { Skill, SkillView } from "@/lib/hermes"
+import { loadFailure } from "./skills-cache.ts"
 
 /** A row's prose line, and whether it is a failure to read — which is what colours it. */
 export interface SkillHealth {
@@ -20,7 +22,7 @@ export interface SkillHealth {
  * older plugin, or a device row cached before those fields, must never make a skill look broken.
  */
 export function skillHealth(skill: Skill): SkillHealth {
-  const reason = skill.loadError?.trim()
+  const reason = loadFailure(skill)
   if (reason) return { text: `Doesn't load: ${reason}`, failed: true }
   if (skill.enabled === false) return { text: "Off", failed: false }
   return { text: "Ready", failed: false }
@@ -58,9 +60,9 @@ function categoryOf(skill: Skill): string | null {
 
 /**
  * One section's rows grouped by category, ordered the way the tab draws them: the categories
- * alphabetically as the reader's own language sorts them, the rows without one last, and the rows
- * of each group by name. Hermes's own sort puts the uncategorised first and does no grouping, so
- * this order is the app's own rule rather than the Host's.
+ * alphabetically, the rows without one last, and the rows of each group by name. Hermes's own sort
+ * puts the uncategorised first and does no grouping, so this order is the app's own rule rather than
+ * the Host's — and it is the picker's collation, so a skill sits in the same place in both.
  */
 function groupsOf(skills: Skill[]): SkillGroup[] {
   const held = new Map<string | null, Skill[]>()
@@ -71,13 +73,19 @@ function groupsOf(skills: Skill[]): SkillGroup[] {
     else held.set(category, [skill])
   }
   return [...held]
-    .sort(([left], [right]) =>
-      left === null ? 1 : right === null ? -1 : left.localeCompare(right),
-    )
+    .sort(([left], [right]) => {
+      if (left === null) return 1
+      return right === null ? -1 : collated(left, right)
+    })
     .map(([category, rows]) => ({
       category,
-      skills: rows.sort((left, right) => left.name.localeCompare(right.name)),
+      skills: rows.sort((left, right) => collated(left.name, right.name)),
     }))
+}
+
+/** The picker's own collation (`skill-sheet.tsx`), so the tab and a picker order identically. */
+function collated(left: string, right: string): number {
+  return left.localeCompare(right, "en", { sensitivity: "base" })
 }
 
 /**
