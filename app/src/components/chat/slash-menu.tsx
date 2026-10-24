@@ -1,8 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import {
-  MessageSquarePlusIcon,
   CornerDownRightIcon,
+  KeyboardIcon,
   ListPlusIcon,
+  MessageSquarePlusIcon,
   PlusIcon,
   SettingsIcon,
   SparklesIcon,
@@ -17,6 +18,7 @@ const COMMAND_ICONS = {
   new: PlusIcon,
   thread: MessageSquarePlusIcon,
   settings: SettingsIcon,
+  cheatsheet: KeyboardIcon,
   steer: CornerDownRightIcon,
   queue: ListPlusIcon,
 }
