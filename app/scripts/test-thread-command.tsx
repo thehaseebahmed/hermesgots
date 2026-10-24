@@ -7,12 +7,15 @@ import { ChatPage } from "@/routes/chat"
 import { db, mainThreadId, type Conversation } from "@/lib/db"
 import {
   botProfile,
+  composerField,
   findAll,
-  find,
   json,
   mount,
+  offersCommand,
+  pressEnter,
   seedSettings,
   settle,
+  slashOptions,
   type,
   until,
 } from "./component-kit.tsx"
@@ -106,19 +109,6 @@ const screen = (id: string) => (
   </MemoryRouter>
 )
 
-const field = () => find('textarea[aria-label="Message"]')
-const options = () => findAll('[role="option"]').map((row) => row.textContent ?? "")
-const offered = (name: string) => options().some((row) => row.startsWith(name))
-
-async function enter() {
-  await act(async () => {
-    field()?.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
-    )
-  })
-  await settle()
-}
-
 const chats = () => db.conversations.toArray()
 const messagesOf = (id: string) => db.messages.where("conversationId").equals(id).toArray()
 const triaged = (seen: { path: string }[]) => seen.filter((r) => r.path.endsWith("/triage"))
@@ -134,12 +124,12 @@ test("Main's menu offers /thread and never /new", async () => {
   await seed()
   host("bot-thread")
   await mount(screen(MAIN), async () => {
-    await until(async () => Boolean(field()), "Main's composer")
-    await type(field(), "/")
-    await until(async () => options().length > 0, "the command menu")
-    assert.ok(offered("/thread"), "the command is on offer")
-    assert.ok(!offered("/new"), "and it is the only name the command wears")
-    await type(field(), "")
+    await until(async () => Boolean(composerField()), "Main's composer")
+    await type(composerField(), "/")
+    await until(async () => slashOptions().length > 0, "the command menu")
+    assert.ok(offersCommand("/thread"), "the command is on offer")
+    assert.ok(!offersCommand("/new"), "and it is the only name the command wears")
+    await type(composerField(), "")
   })
 })
 
@@ -147,17 +137,17 @@ test("/thread alone starts an empty thread and opens it", async () => {
   await seed()
   const seen = host("bot-thread")
   await mount(screen(MAIN), async () => {
-    await until(async () => Boolean(field()), "Main's composer")
-    await type(field(), "/thread")
-    await until(async () => offered("/thread"), "the command in the menu")
-    await enter()
+    await until(async () => Boolean(composerField()), "Main's composer")
+    await type(composerField(), "/thread")
+    await until(async () => offersCommand("/thread"), "the command in the menu")
+    await pressEnter()
     await until(async () => where() !== `/c/${MAIN}`, "the thread to open")
     const [thread] = await started()
     assert.equal(where(), `/c/${thread.id}`, "the new thread is what's on screen")
     assert.deepEqual(await messagesOf(thread.id), [], "an empty thread, as the command alone says")
     assert.deepEqual(triaged(seen), [], "the host was never asked where it goes")
     assert.deepEqual(runs(seen), [], "and nothing was sent from it")
-    assert.equal((field() as HTMLTextAreaElement | null)?.value, "", "the command left the field")
+    assert.equal(composerField()?.value, "", "the command left the field")
   })
 })
 
@@ -165,9 +155,9 @@ test("/thread with text starts the thread with that message, on the composer's m
   await seed()
   const seen = host("bot-thread")
   await mount(screen(MAIN), async () => {
-    await until(async () => Boolean(field()), "Main's composer")
-    await type(field(), "/thread plan my move")
-    await enter()
+    await until(async () => Boolean(composerField()), "Main's composer")
+    await type(composerField(), "/thread plan my move")
+    await pressEnter()
     await until(async () => where() !== `/c/${MAIN}`, "the thread to open")
     const [thread] = await started()
     assert.equal(where(), `/c/${thread.id}`, "the new thread is what's on screen")
@@ -185,7 +175,7 @@ test("/thread with a file carries the attachment with the message", async () => 
   await seed()
   const seen = host("bot-thread")
   await mount(screen(MAIN), async () => {
-    await until(async () => Boolean(field()), "Main's composer")
+    await until(async () => Boolean(composerField()), "Main's composer")
     const files = findAll('input[type="file"]').find((one) => !one.getAttribute("accept"))
     assert.ok(files, "the composer's file input")
     await act(async () => {
@@ -196,8 +186,8 @@ test("/thread with a file carries the attachment with the message", async () => 
       files.dispatchEvent(new Event("change", { bubbles: true }))
     })
     await settle()
-    await type(field(), "/thread read this")
-    await enter()
+    await type(composerField(), "/thread read this")
+    await pressEnter()
     await until(async () => where() !== `/c/${MAIN}`, "the thread to open")
     const [thread] = await started()
     const first = async () =>
@@ -221,11 +211,11 @@ test("inside an open thread /thread is not offered", async () => {
   await seed()
   host("bot-thread")
   await mount(screen(THREAD), async () => {
-    await until(async () => Boolean(field()), "the thread's composer")
-    await type(field(), "/")
-    await until(async () => options().length > 0, "the command menu")
-    assert.ok(!offered("/thread"), "a thread can't start one")
-    assert.ok(offered("/new"), "and `/new` is still the command there")
+    await until(async () => Boolean(composerField()), "the thread's composer")
+    await type(composerField(), "/")
+    await until(async () => slashOptions().length > 0, "the command menu")
+    assert.ok(!offersCommand("/thread"), "a thread can't start one")
+    assert.ok(offersCommand("/new"), "and `/new` is still the command there")
   })
 })
 
@@ -233,13 +223,13 @@ test("with the switch off the command is /new, as it was, and /thread is absent"
   await seed({ botThreads: false })
   host("bot-thread")
   await mount(screen(MAIN), async () => {
-    await until(async () => Boolean(field()), "Main's composer")
-    await type(field(), "/")
-    await until(async () => options().length > 0, "the command menu")
-    assert.ok(offered("/new"), "the name threads off wear")
-    assert.ok(!offered("/thread"), "and never the other")
-    await type(field(), "/new")
-    await enter()
+    await until(async () => Boolean(composerField()), "Main's composer")
+    await type(composerField(), "/")
+    await until(async () => slashOptions().length > 0, "the command menu")
+    assert.ok(offersCommand("/new"), "the name threads off wear")
+    assert.ok(!offersCommand("/thread"), "and never the other")
+    await type(composerField(), "/new")
+    await pressEnter()
     await until(async () => where() === "/", "the new chat's screen")
     assert.equal((await started()).length, 0, "a new chat, not a thread")
   })
@@ -249,9 +239,9 @@ test("with the switch off a message typed with /thread goes to the bot as text",
   await seed({ botThreads: false })
   const seen = host("bot-thread")
   await mount(screen(MAIN), async () => {
-    await until(async () => Boolean(field()), "Main's composer")
-    await type(field(), "/thread plan my move")
-    await enter()
+    await until(async () => Boolean(composerField()), "Main's composer")
+    await type(composerField(), "/thread plan my move")
+    await pressEnter()
     await until(async () => triaged(seen).length > 0, "the host to be asked")
     assert.equal(
       triaged(seen)[0].body.text,
