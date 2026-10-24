@@ -8,6 +8,7 @@ import {
   closeRun,
   formatThoughtSpan,
   forgetRuns,
+  mergeThoughtRows,
   noteRunThinking,
   runsOf,
   thinkingLabel,
@@ -108,6 +109,75 @@ test("a run with no span measured reads that it thought it through", () => {
   assert.equal(label, "Thought it through", "no number, and no bare Thought")
   assert.doesNotMatch(label, /\d/, "no figure at all")
   assert.doesNotMatch(label, / for$/, 'no stray "for"')
+})
+
+test("two thought rows drawn with nothing between them are one row", () => {
+  const rows = mergeThoughtRows([
+    { text: "Read the parser first.", thinking: false },
+    { text: "Its blocks are what matter.", thinking: false },
+  ])
+  assert.equal(rows.length, 1, "rows that touch are drawn once")
+  assert.equal(
+    rows[0].text,
+    "Read the parser first.\n\nIts blocks are what matter.",
+    "their words joined as paragraphs",
+  )
+  assert.equal(rows[0].thinking, false, "and nothing of it is still thinking")
+})
+
+test("something else drawn between two rows keeps them apart", () => {
+  const rows = mergeThoughtRows([
+    { text: "Before the call.", thinking: false },
+    null,
+    { text: "After the call.", thinking: false },
+  ])
+  assert.equal(rows.length, 2, "a tool group between them splits the row")
+  assert.equal(rows[0].text, "Before the call.", "each keeps its own words")
+  assert.equal(rows[1].text, "After the call.", "in the order they arrived")
+})
+
+test("three touching rows join into one, in the order they arrived", () => {
+  const rows = mergeThoughtRows([
+    { text: "One.", thinking: false },
+    { text: "Two.", thinking: false },
+    { text: "Three.", thinking: false },
+  ])
+  assert.equal(rows.length, 1, "a run of touching rows is one row")
+  assert.equal(rows[0].text, "One.\n\nTwo.\n\nThree.", "none lost, none reordered")
+})
+
+test("a merged row adds up the spans this device measured for every stretch", () => {
+  const rows = mergeThoughtRows([
+    { text: "Weighing it.", thinking: false, spanMs: 5_000 },
+    { text: "Then listing it.", thinking: false, spanMs: 7_000 },
+  ])
+  assert.equal(rows[0].spanMs, 12_000, "the spans added")
+  assert.equal(thinkingLabel(rows[0]), "Thought for 12s", "and read as the row's own label")
+})
+
+test("one unmeasured stretch leaves a merged row with no number at all", () => {
+  const rows = mergeThoughtRows([
+    { text: "Weighing it.", thinking: false, spanMs: 5_000 },
+    { text: "Then listing it.", thinking: false },
+  ])
+  assert.equal(rows[0].spanMs, undefined, "a stretch nobody watched disqualifies the sum")
+  const label = thinkingLabel(rows[0])
+  assert.equal(label, "Thought it through", "so the row claims no time")
+  assert.doesNotMatch(label, /\d/, "not even the half of it this device measured")
+})
+
+test("a merged row still thinking reads as thinking", () => {
+  const rows = mergeThoughtRows([
+    { text: "Weighing it.", thinking: false, spanMs: 5_000 },
+    { text: "Then listing it.", thinking: true },
+  ])
+  assert.equal(rows[0].thinking, true, "any stretch still going holds the row open")
+  assert.equal(thinkingLabel(rows[0]), "Thinking…", "and the row says so over any number")
+})
+
+test("nothing drawn, or nothing but other things, draws no thought row", () => {
+  assert.deepEqual(mergeThoughtRows([]), [], "an empty list draws nothing")
+  assert.deepEqual(mergeThoughtRows([null, null]), [], "and other things alone draw no thought row")
 })
 
 test("the span formatter is whole seconds, rounded", () => {

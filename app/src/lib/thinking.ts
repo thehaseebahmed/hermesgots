@@ -1,8 +1,9 @@
 /**
  * A reply's thinking, kept in runs: one per contiguous stretch of thinking between tool calls, each
- * anchored to the call that broke it. The rules here are pure and reach nothing, so
+ * anchored to the call that broke it, and drawn as the rows it touches: `mergeThoughtRows` is the one
+ * rule for when two of them are one. The rules here are pure and reach nothing, so
  * `scripts/test-thinking.mjs` drives them without a screen; the ingest that fills them in is
- * `chat.ts`, and the thread that draws them is `message-item.tsx`. See ADR 0038.
+ * `chat.ts`, and the thread that draws them is `message-item.tsx`. See ADR 0038 and ADR 0049.
  */
 
 /** One stretch of a reply's thinking, and the tool call it followed. */
@@ -37,6 +38,40 @@ export function thinkingLabel({ thinking, spanMs }: { thinking: boolean; spanMs?
   if (thinking) return "Thinking…"
   if (typeof spanMs === "number") return `Thought for ${formatThoughtSpan(spanMs)}`
   return "Thought it through"
+}
+
+/** One stretch of a reply's thinking as a row draws it: its words, and what its label reads from. */
+export type ThoughtStretch = { text: string; thinking: boolean; spanMs?: number }
+
+/**
+ * The rows a reply's thinking is drawn as, from the stretches a segment placed in order — a `null`
+ * standing for anything else drawn at that place (a tool group, a card, text, a block), which is what
+ * keeps two rows apart. Consecutive stretches become one row: their words joined as paragraphs, in
+ * the order they arrived and none dropped; thinking while any of them still is; and carrying a span
+ * only where every one of them has one, since a sum over a stretch nobody watched would claim less
+ * time than the thinking took. Two replies' lists never meet, so rows in different replies never
+ * merge.
+ */
+export function mergeThoughtRows(drawn: (ThoughtStretch | null)[]): ThoughtStretch[] {
+  const rows: ThoughtStretch[] = []
+  let group: ThoughtStretch[] = []
+  const flush = () => {
+    if (!group.length) return
+    const row: ThoughtStretch = {
+      text: group.map((one) => one.text).join("\n\n"),
+      thinking: group.some((one) => one.thinking),
+    }
+    if (group.every((one) => typeof one.spanMs === "number"))
+      row.spanMs = group.reduce((sum, one) => sum + (one.spanMs ?? 0), 0)
+    rows.push(row)
+    group = []
+  }
+  for (const stretch of drawn) {
+    if (stretch) group.push(stretch)
+    else flush()
+  }
+  flush()
+  return rows
 }
 
 /**

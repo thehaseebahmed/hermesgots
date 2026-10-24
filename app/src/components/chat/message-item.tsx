@@ -34,7 +34,7 @@ import { attachmentSources, mediaRead, useMediaSources } from "@/lib/media-sourc
 import { mediaImages } from "@/lib/media-tags"
 import { openuiParts, REPLY_INSET } from "@/lib/openui-block.ts"
 import type { InterfaceDraw, ThreadBlock } from "@/lib/openui-thread.ts"
-import { runsOf, type ReasoningRun } from "@/lib/thinking"
+import { mergeThoughtRows, runsOf, type ReasoningRun } from "@/lib/thinking"
 import { cn } from "@/lib/utils"
 import { useReveal } from "@/lib/reveal"
 import { isPlanApproval } from "@/lib/workspace"
@@ -157,6 +157,46 @@ function huggingTools(parts: Part[], index: number) {
 }
 
 /**
+ * Joins the rows a segment placed with nothing between them: consecutive thought rows are drawn as
+ * one, where the first of them was, keeping its key and taking the joined words and the label truth
+ * from `mergeThoughtRows`. Anything else drawn at a place in the segment — a tool group, a card,
+ * text, media, an interface block — is a part of its own, which is what keeps two rows apart, and
+ * each segment merges alone, so the steer or approval that split the reply splits its rows too.
+ */
+function mergeThinking(parts: Part[]): Part[] {
+  const drawn = parts.map((part) =>
+    part.kind === "thinking"
+      ? { text: part.run.text, thinking: part.thinking, spanMs: part.run.spanMs }
+      : null,
+  )
+  const rows = mergeThoughtRows(drawn)
+  // Rows that all touched something are drawn as they were placed, so nothing is rebuilt.
+  if (rows.length === drawn.filter((one) => one !== null).length) return parts
+  const merged: Part[] = []
+  let next = 0
+  for (let at = 0; at < parts.length; at++) {
+    const part = parts[at]
+    if (part.kind !== "thinking") {
+      merged.push(part)
+      continue
+    }
+    const row = rows[next++]
+    let end = at
+    while (end + 1 < parts.length && parts[end + 1].kind === "thinking") end++
+    if (end === at) merged.push(part)
+    else
+      merged.push({
+        kind: "thinking",
+        key: part.key,
+        thinking: row.thinking,
+        run: row.spanMs === undefined ? { text: row.text } : { text: row.text, spanMs: row.spanMs },
+      })
+    at = end
+  }
+  return merged
+}
+
+/**
  * Interleaves a slice of the reply (starting at `start`) with the tools run during it. A clarify
  * call is a card of its own (its question and the answer) rather than a tool row, so is a
  * delegation (the agent it started), and the media a reply sends together — only whitespace between
@@ -207,7 +247,7 @@ function toParts(
     else parts.push({ kind: "tools", tools: [tool] })
   }
   if (cursor < end) pushText(end)
-  return placeThinking(parts, runs)
+  return mergeThinking(placeThinking(parts, runs))
 }
 
 function Stats({ message }: { message: Message }) {

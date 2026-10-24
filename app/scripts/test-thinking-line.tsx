@@ -451,7 +451,7 @@ test("a reply whose thinking is broken by tool calls draws a row above them and 
   })
 })
 
-test("two calls back to back keep each run after its own call, in the order they arrived", async () => {
+test("two calls back to back draw one row below them, holding both stretches", async () => {
   host()
   const messages = turn({
     id: "arrival-order",
@@ -466,16 +466,71 @@ test("two calls back to back keep each run after its own call, in the order they
   })
   await screen(undefined, messages, async () => {
     const rows = thinkingLines()
-    assert.equal(rows.length, 3, "one row per stretch of thinking")
-    const calls = toolRow(item(rows[0]))
+    assert.equal(rows.length, 2, "the run before any call, and one row for the two that touched")
+    const box = item(rows[0])
+    assert.equal(item(rows[1]), box, "both rows belong to the one reply")
+    const calls = toolRow(box)
     assert.ok(follows(rows[0], calls), "the run before any call is drawn above the group")
-    assert.ok(follows(calls, rows[1]), "the run after the first call follows the group")
-    assert.ok(
-      follows(rows[1], rows[2]),
-      "and the run after the second call follows it, rather than the other way round",
-    )
-    assert.match(reasoned(rows[1]).textContent ?? "", /first call printed/, "each row its own stretch")
-    assert.match(reasoned(rows[2]).textContent ?? "", /blocks are what matter/)
+    assert.ok(follows(calls, rows[1]), "and the stretches that touched are drawn below it, as one row")
+    const body = reasoned(rows[1]).textContent ?? ""
+    const first = body.indexOf("first call printed")
+    const second = body.indexOf("blocks are what matter")
+    assert.ok(first >= 0, "the row holds the stretch the first call broke")
+    assert.ok(second >= 0, "and the one the second call broke")
+    assert.ok(first < second, "in the order they arrived")
+    assert.equal(body.match(/first call printed/g)?.length, 1, "each stretch once, not once a row")
+    assert.equal(lineLabel(rows[1]), "Thought it through", "and one label for the two of them")
+  })
+})
+
+test("a merged row adds up the spans it holds, and claims none where a stretch went unwatched", async () => {
+  host()
+  const reply = (id: string, watches: (number | undefined)[]) => ({
+    id,
+    content: ANSWER,
+    tools: [call("call-1"), call("call-2", "read_file", "parse.ts")],
+    reasoningRuns: [
+      run(REASONING),
+      run("What the first call printed.", { afterToolId: "call-1", spanMs: watches[0] }),
+      run(SECOND, { afterToolId: "call-2", spanMs: watches[1] }),
+    ],
+  })
+  await screen(undefined, turn(reply("merged-watched", [5_000, 7_000])), async () => {
+    const rows = thinkingLines()
+    assert.equal(rows.length, 2, "the two stretches that touched are one row")
+    assert.equal(lineLabel(rows[0]), "Thought it through", "the run above the group measured nothing")
+    assert.equal(lineLabel(rows[1]), "Thought for 12s", "the merged row adds the spans it watched")
+  })
+  // A transcript rebuilt on another device carried a span onto one stretch only.
+  await screen(undefined, turn(reply("merged-unwatched", [5_000, undefined])), async () => {
+    const rows = thinkingLines()
+    assert.equal(rows.length, 2, "still one row for the stretches that touched")
+    const label = lineLabel(rows[1])
+    assert.equal(label, "Thought it through", "one unmeasured stretch disqualifies the sum")
+    assert.doesNotMatch(label, /\d/, "never the part of it this device measured")
+  })
+})
+
+test("a merged row whose last stretch still streams reads Thinking…", async () => {
+  host()
+  const id = "merged-streaming"
+  const messages = turn({
+    id,
+    tools: [call("call-1"), call("call-2", "read_file", "parse.ts")],
+    reasoningRuns: [
+      run(REASONING),
+      run("What the first call printed.", { afterToolId: "call-1", spanMs: 5_000 }),
+      run(SECOND, { afterToolId: "call-2" }),
+    ],
+  })
+  await screen(undefined, messages, async () => {
+    await stream(id)
+    const rows = thinkingLines()
+    assert.equal(rows.length, 2, "one row for the stretches that touched")
+    assert.equal(lineLabel(rows[1]), "Thinking…", "a stretch still thinking holds the whole row there")
+    assert.equal(expanded(rows[1]), "true", "and the row stands open over both of them")
+    assert.match(reasoned(rows[1]).textContent ?? "", /first call printed/, "holding the one that ended")
+    assert.match(reasoned(rows[1]).textContent ?? "", /blocks are what matter/, "and the one still going")
   })
 })
 
@@ -758,24 +813,30 @@ test("a run that opens on its own leaves a reader who has scrolled away where th
   const id = "auto-open"
   const spy = spyScrollIntoView()
   try {
-    await screen(undefined, turn({ id, reasoningRuns: [run(REASONING)], content: ANSWER }), async () => {
-      // The reader is reading higher up the thread when the turn's next run starts.
-      const view = viewport()
-      sized(view, { client: 400, scroll: 1_600 })
-      view.scrollTop = 0
-      spy.into.length = 0
-      await db.messages.put({
-        ...(await db.messages.get(id))!,
-        status: "streaming",
-        content: "",
-        reasoningRuns: [run(REASONING), run(SECOND, { afterToolId: "call-1" })],
-      })
-      await settle()
-      const rows = thinkingLines()
-      assert.equal(rows.length, 2, "the turn's two runs, one row each")
-      assert.equal(expanded(rows[1]), "true", "the new run opens as it streams")
-      assert.equal(spy.into.length, 0, "and the reader is not pulled down to it")
-    })
+    await screen(
+      undefined,
+      // The call its second run follows is drawn between the two stretches, so they are two rows:
+      // one above the group, one below it.
+      turn({ id, tools: [call("call-1")], reasoningRuns: [run(REASONING)], content: ANSWER }),
+      async () => {
+        // The reader is reading higher up the thread when the turn's next run starts.
+        const view = viewport()
+        sized(view, { client: 400, scroll: 1_600 })
+        view.scrollTop = 0
+        spy.into.length = 0
+        await db.messages.put({
+          ...(await db.messages.get(id))!,
+          status: "streaming",
+          content: "",
+          reasoningRuns: [run(REASONING), run(SECOND, { afterToolId: "call-1" })],
+        })
+        await settle()
+        const rows = thinkingLines()
+        assert.equal(rows.length, 2, "the turn's two runs, one row each")
+        assert.equal(expanded(rows[1]), "true", "the new run opens as it streams")
+        assert.equal(spy.into.length, 0, "and the reader is not pulled down to it")
+      },
+    )
   } finally {
     spy.restore()
   }
