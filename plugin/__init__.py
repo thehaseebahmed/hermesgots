@@ -1153,6 +1153,37 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             )
         return web.json_response({"object": "memento.afk", "project_id": project_id, **found})
 
+    async def bot_afk(request: "web.Request") -> "web.Response":
+        """The bot's own AFK numbers: the pick budget it works within, and how much of it is held.
+
+        Bot-level, so there is no project to resolve and no project id to answer: the budget is one
+        number on this bot's own store, and the holds it is counted against are every project's
+        (ADR 0042). A usage threshold has no field here yet — ADR 0026's is its own change — and the
+        shape leaves room for one beside these.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        return await bot_afk_answer()
+
+    async def post_bot_afk(request: "web.Request") -> "web.Response":
+        """Writes the bot's pick budget, answering the same dict the read does."""
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request) or {}
+        try:
+            budget = afk.budget_from(body)
+        except ValueError as why:
+            return _error(web, str(why), 400)
+        await asyncio.to_thread(afk.set_pick_budget, hermes_home(), budget)
+        return await bot_afk_answer()
+
+    async def bot_afk_answer() -> "web.Response":
+        """The one answer both of the bot's writes and its read carry."""
+        found = await asyncio.to_thread(afk.bot_read, hermes_home())
+        return web.json_response({"object": "memento.afk.bot", **found})
+
     async def workflows_response() -> "web.Response":
         """The library as it stands: what every write to it answers."""
         found = await asyncio.to_thread(workflows.library, hermes_home())
@@ -1521,6 +1552,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/projects/{{project_id}}/tasks", project_tasks)
     app.router.add_get(f"{PREFIX}/projects/{{project_id}}/afk", project_afk)
     app.router.add_post(f"{PREFIX}/projects/{{project_id}}/afk", post_project_afk)
+    # The bot's own AFK numbers, beside the project's: a pick budget is one number over every
+    # project, so it has no project segment, and the profile mirror below serves it per bot with
+    # the rest (ADR 0042).
+    app.router.add_get(f"{PREFIX}/afk", bot_afk)
+    app.router.add_post(f"{PREFIX}/afk", post_bot_afk)
     app.router.add_get(f"{PREFIX}/workflows", list_workflows)
     app.router.add_post(f"{PREFIX}/workflows", create_workflow)
     app.router.add_get(f"{PREFIX}/workflows/{{workflow_id}}", read_workflow)
