@@ -3054,22 +3054,37 @@ export function setProjectAfkWorkflow(
 }
 
 /**
+ * A Prompt as it is written: its words, and where they were copied from where they were a library
+ * entry's. One shape through the editor, the sheet and the route, so a pick and a hand edit differ
+ * in a field rather than in an argument's place — and there is one spelling of "no source", which is
+ * the field absent.
+ */
+export interface PromptWrite {
+  text: string
+  /**
+   * The account library's entry the words were copied from, where they were one: a pick writes the
+   * text and its source together, so the row can tell a copy whose entry has moved on. Absent on a
+   * hand edit, which the host reads as a plain write and answers by clearing the source the project
+   * held — how a hand edit detaches the copy (ADR 0043).
+   */
+  source?: string
+}
+
+/**
  * Writes how a project's AFK work is carried out — its Prompt — on its host, answering the setting
  * it now holds. An empty one is the bot's default again, and the answer carries those words, since
  * that is what the project's next run is told.
- *
- * `promptId` is the account library's entry the words were copied from, where they were one: a pick
- * writes the text and its source together, so the row can tell a copy whose entry has moved on. A
- * write naming none is a plain one — the host clears whatever source the project held, which is how
- * a hand edit detaches the copy (ADR 0043).
  */
 export function setProjectAfkPrompt(
   config: HermesConfig,
   projectId: string,
-  prompt: string,
-  promptId: string | null = null,
+  draft: PromptWrite,
 ): Promise<ProjectAfk> {
-  return writeAfk(config, projectId, promptId ? { prompt, prompt_id: promptId } : { prompt })
+  // The wire body is built here, once: the words always, the source only where there is one.
+  return writeAfk(config, projectId, {
+    prompt: draft.text,
+    ...(draft.source && { prompt_id: draft.source }),
+  })
 }
 
 /**

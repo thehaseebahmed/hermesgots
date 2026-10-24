@@ -7,6 +7,9 @@
  * An entry is plain text: a name, tags it is found by, and the body a pick copies into a project's
  * Prompt. Nothing here substitutes anything into the body — a Prompt is sent as it is written.
  */
+import type { Account } from "@/lib/account"
+import type { SyncState } from "@/lib/sync"
+
 export interface PromptEntry {
   id: string
   name: string
@@ -64,24 +67,39 @@ export function sortedPrompts<T extends { id: string; name: string }>(entries: r
 }
 
 /**
- * A body on one line, for a list row: markdown's block marks off it, its runs of whitespace folded,
- * cut at `max` characters with an ellipsis where it ran on — the words the pick copies are the body
- * itself, never this.
+ * A Prompt on one line: markdown's block marks off it and its lines run together, since a row names
+ * the instruction rather than drawing it — the editor is where it reads as written. The library's
+ * list previews a body with the same rule (`bodyPreview`), so a heading reads the same in the
+ * project's row and in the entry it was copied from.
  */
-export function bodyPreview(body: string, max = 96): string {
-  const line = body
+export function promptLine(prompt: string): string {
+  return prompt
     .split("\n")
-    .map((one) => one.replace(/^\s*(#{1,6}|[-*+]|\d+\.)\s*/, "").trim())
+    .map((line) => line.replace(/^\s*(#{1,6}|[-*+]|\d+\.)\s+/, "").trim())
     .filter(Boolean)
     .join(" · ")
+}
+
+/**
+ * A body on one line, for a list row: markdown's block marks off it, its lines run together, cut at
+ * `max` characters with an ellipsis where it ran on — the words a pick copies are the body itself,
+ * never this.
+ */
+export function bodyPreview(body: string, max = 96): string {
+  const line = promptLine(body)
   return line.length > max ? `${line.slice(0, Math.max(0, max - 1)).trimEnd()}…` : line
 }
 
 /**
  * Whether the library is offered at all: it lives in the account's encrypted store, so it needs a
  * signed-in account and a vault open on this device. Anything else — signed out, a vault still
- * locked, a first run — draws today's editor and nothing more.
+ * locked, a first run — draws today's editor and nothing more. Both answers are typed from the state
+ * they come out of (`account.ts`'s Account, `sync.ts`'s vault), so a status this device gains or
+ * loses is a compile error here rather than a library offered where it can't be read.
+ *
+ * The imports are types alone, which is why this module is still import-free at run time:
+ * `scripts/test-prompt-library.mjs` runs it as a pure rule.
  */
-export function libraryReady(account: string, vault: string): boolean {
+export function libraryReady(account: Account["status"], vault: SyncState["vault"]): boolean {
   return account === "signed-in" && vault === "unlocked"
 }

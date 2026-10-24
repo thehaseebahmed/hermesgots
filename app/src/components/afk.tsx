@@ -70,12 +70,14 @@ import {
   type HermesConfig,
   type ProjectAfk,
   type ProjectIssue,
-  type ProjectTasks,
   type ProjectTask,
+  type ProjectTasks,
+  type PromptWrite,
   type Skill,
 } from "@/lib/hermes"
 import { STAGE_WORDS, type AfkStage } from "@/lib/pipeline"
 import { usePoll } from "@/lib/poll"
+import { promptLine } from "@/lib/prompt-library"
 import { usePromptEntry, usePromptLibraryReady } from "@/lib/prompt-library-store"
 import { promptSourceState } from "@/lib/prompt-source"
 import { noteFailure } from "@/lib/report"
@@ -345,12 +347,9 @@ export function AfkPopup({
   // A refusal is the host's, said here the way the other writes are, and answered to the editor so it
   // keeps the words typed rather than closing on a fail. A source rides with the words it describes:
   // a pick writes both, and a hand edit writes the words alone, which clears the copy on the host.
-  const writePrompt = async (
-    prompt: string,
-    promptId: string | null = null,
-  ): Promise<"saved" | "refused"> => {
+  const writePrompt = async (draft: PromptWrite): Promise<"saved" | "refused"> => {
     try {
-      setAfk(await setProjectAfkPrompt(config, projectId, prompt, promptId))
+      setAfk(await setProjectAfkPrompt(config, projectId, draft))
       return "saved"
     } catch (failure) {
       toast.error(failure instanceof Error ? failure.message : "Couldn't save that Prompt.")
@@ -365,7 +364,7 @@ export function AfkPopup({
     if (pulling || !source || !promptEntry) return
     setPulling(true)
     try {
-      setAfk(await setProjectAfkPrompt(config, projectId, promptEntry.body, source))
+      setAfk(await setProjectAfkPrompt(config, projectId, { text: promptEntry.body, source }))
     } catch (failure) {
       toast.error(failure instanceof Error ? failure.message : "Couldn't pull that Prompt in.")
     } finally {
@@ -732,18 +731,6 @@ function PromptRow({
       )}
     </div>
   )
-}
-
-/**
- * The row's own line for a Prompt: markdown's block marks taken off and its lines run together, since
- * the row names the instruction rather than drawing it — the editor is where it reads as written.
- */
-function promptLine(prompt: string) {
-  return prompt
-    .split("\n")
-    .map((line) => line.replace(/^\s*(#{1,6}|[-*+]|\d+\.)\s+/, "").trim())
-    .filter(Boolean)
-    .join(" · ")
 }
 
 /**
