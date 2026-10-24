@@ -356,23 +356,41 @@ const SUMMARY = "Sales rose from 10 in Q1 to 25 in Q2."
 const surfaceOf = (row: Element | undefined) => row?.querySelector("[role=img]")
 
 /**
- * jsdom has no layout, so Recharts measures a box of nothing and draws nothing. The elements
- * `mine` picks report the width the screen under test gives them; every other element keeps
- * jsdom's empty rect.
+ * jsdom has no layout, so every box is a nothing: Recharts measures a box of nothing and draws
+ * nothing, and Leaflet fits no view in a container of no size. The elements `mine` picks report
+ * `width` × `height` — as the rect they are measured by, and as the client size they are laid out
+ * from — while every other element keeps jsdom's empty box.
  */
-const insideChart = (element: Element) => Boolean(element.closest("[data-slot=chart]"))
-
-function chartBox(width: number, mine = insideChart) {
+function fakeBox(width: number, height: number, mine: (element: Element) => boolean) {
   const original = Element.prototype.getBoundingClientRect
+  const own = (name: "clientWidth" | "clientHeight") =>
+    Object.getOwnPropertyDescriptor(HTMLElement.prototype, name)
+  const saved = { clientWidth: own("clientWidth"), clientHeight: own("clientHeight") }
   Element.prototype.getBoundingClientRect = function (this: Element) {
     const box = original.call(this)
     if (!mine(this)) return box
-    return { ...box, width, height: 224, right: width, bottom: 224, x: 0, y: 0 } as DOMRect
+    return { ...box, width, height, right: width, bottom: height, x: 0, y: 0 } as DOMRect
   }
+  const client = { clientWidth: width, clientHeight: height }
+  for (const name of ["clientWidth", "clientHeight"] as const)
+    Object.defineProperty(HTMLElement.prototype, name, {
+      configurable: true,
+      get(this: HTMLElement) {
+        return mine(this) ? client[name] : 0
+      },
+    })
   return () => {
     Element.prototype.getBoundingClientRect = original
+    for (const [name, descriptor] of Object.entries(saved))
+      if (descriptor)
+        Object.defineProperty(HTMLElement.prototype, name, descriptor as PropertyDescriptor)
+      else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name]
   }
 }
+
+const insideChart = (element: Element) => Boolean(element.closest("[data-slot=chart]"))
+
+const chartBox = (width: number, mine = insideChart) => fakeBox(width, 224, mine)
 
 /**
  * A box for the two elements that size the chart and for nothing else: were the legend's height
@@ -381,6 +399,9 @@ function chartBox(width: number, mine = insideChart) {
  */
 const measuredChart = (width: number) =>
   chartBox(width, (element) => element.matches("[data-slot=chart], .recharts-responsive-container"))
+
+const mapBox = (width: number, height = 224) =>
+  fakeBox(width, height, (element) => Boolean(element.closest("[data-slot=map]")))
 
 const SCROLLER = /overflow-(x-|y-)?(auto|scroll)/
 
@@ -433,6 +454,79 @@ test("a chart draws at phone and tablet widths, its summary the text alternative
     } finally {
       restore()
     }
+  }
+})
+
+const SMALL = "Sales ran 10 to 25 across the two quarters."
+const FIVE_DIGITS = "Revenue ran 12,400 to 18,300 across the two quarters."
+
+test("the y axis is as wide as the widest tick label it carries", async () => {
+  const source = [
+    "# id: both",
+    "root = Stack([a, b])",
+    `a = ${chartCall(
+      "bar",
+      series("Sales", [
+        ["Q1", 10],
+        ["Q2", 25],
+      ]),
+      "",
+      "",
+      SMALL,
+    )}`,
+    `b = ${chartCall(
+      "bar",
+      series("Revenue", [
+        ["Q1", 12400],
+        ["Q2", 18300],
+      ]),
+      "",
+      "",
+      FIVE_DIGITS,
+    )}`,
+  ].join("\n")
+  const restore = measuredChart(390)
+  try {
+    await screen(
+      [ask("Chart both."), reply("reply", `Two scales:\n\n${block(source)}`)],
+      async () => {
+        const row = () => replyRow("Two scales:")
+        await drawn(
+          () => (row()?.querySelectorAll(".recharts-yAxis-tick-labels").length ?? 0) === 2,
+          "both axes",
+        )
+        const yTicks = (summary: string) => [
+          ...(row()?.querySelectorAll(
+            `[role=img][aria-label="${summary}"] .recharts-yAxis-tick-labels .recharts-cartesian-axis-tick-value`,
+          ) ?? []),
+        ]
+        const small = yTicks(SMALL)
+        const large = yTicks(FIVE_DIGITS)
+        assert.ok(small.length >= 2 && large.length >= 2, "both axes label their own values")
+        assert.deepEqual(
+          large.map((tick) => tick.textContent),
+          ["0", "5000", "10000", "15000", "20000"],
+          "the five-digit axis labels round values a reader can hold",
+        )
+        // Recharts hands each tick label the axis' own width: it is the box the label is drawn in.
+        const band = (ticks: Element[]) => Number(ticks[0]?.getAttribute("width"))
+        assert.ok(
+          band(large) >= 40,
+          `the five-digit axis is wide enough for its label (${band(large)}px)`,
+        )
+        assert.ok(
+          band(small) <= 34,
+          `and a two-digit axis doesn't take room it has no use for (${band(small)}px)`,
+        )
+        assert.ok(
+          band(large) > band(small),
+          `the axis grows with the label it carries (${band(small)}px to ${band(large)}px)`,
+        )
+        await settle()
+      },
+    )
+  } finally {
+    restore()
   }
 })
 
@@ -634,5 +728,140 @@ test("a bar is drawn with rounded corners, a line as a curve, an area with a fai
     assert.equal(seen.fallbacks(), 0, "all three drew: nothing was noted")
   } finally {
     restore()
+  }
+})
+
+const WALK = "Four stops along the north waterfront."
+
+const stop = (label: string, lat: number, lng: number, detail: string) =>
+  `{ lat: ${lat}, lng: ${lng}, label: "${label}", detail: "${detail}" }`
+
+const mapSource = (points: string[], summary?: string) =>
+  [
+    "# id: walk",
+    "root = Stack([m])",
+    `m = Map([${points.join(", ")}]${summary === undefined ? "" : `, "${summary}"`})`,
+  ].join("\n")
+
+const mapOf = (row: Element | undefined) => row?.querySelector("[data-slot=map]")
+const mapLabels = (row: Element | undefined) => [
+  ...(row?.querySelectorAll("[data-slot=map] .openui-map-label") ?? []),
+]
+
+const STOPS = [
+  stop("Ferry Building", 37.7955, -122.3937, "Market Street at the Embarcadero"),
+  stop("Coit Tower", 37.8024, -122.4058, "Telegraph Hill"),
+  stop("Pier 39", 37.8107, -122.4103, "The Embarcadero"),
+]
+
+test("a map draws its labelled points, its summary the text alternative", async () => {
+  const restore = mapBox(390)
+  try {
+    const seen = await screen(
+      [ask("Map the walk."), reply("reply", `The walk:\n\n${block(mapSource(STOPS, WALK))}`)],
+      async () => {
+        const row = () => replyRow("The walk:")
+        await drawn(() => mapLabels(row()).length === 3, "the map's labels")
+        const reply = row()
+        assert.ok(reply, "the reply is a row of the thread")
+        assert.ok(mapOf(reply), "the block drew a map")
+        assert.equal(reply.querySelectorAll("pre").length, 0, "no <pre> left behind")
+        assert.equal(reply.querySelectorAll("[data-md-code]").length, 0, "and no code block")
+        const surface = mapOf(reply)?.querySelector("[role=img]")
+        assert.ok(surface, "the map is one image to a reader")
+        assert.equal(surface.getAttribute("aria-label"), WALK, "with its summary as the label")
+        assert.deepEqual(
+          mapLabels(reply).map((label) => label.textContent?.trim()),
+          ["Ferry Building", "Coit Tower", "Pier 39"],
+          "one label on the map for every point, as the model wrote it",
+        )
+        assert.deepEqual(
+          mapLabels(reply).map((label) => label.getAttribute("title")),
+          ["Market Street at the Embarcadero", "Telegraph Hill", "The Embarcadero"],
+          "and the detail a point carries riding with its label's marker",
+        )
+        const attribution = mapOf(reply)?.querySelector(".leaflet-control-attribution")?.textContent
+        assert.match(
+          attribution ?? "",
+          /OpenStreetMap/,
+          "the basemap's attribution is in its chrome",
+        )
+        assert.match(attribution ?? "", /Esri/, "naming the tiles' provider")
+        assert.match(reply.textContent ?? "", /The walk:/, "the text before the block draws")
+        assert.doesNotMatch(reply.textContent ?? "", /openui-lang/, "the fence draws nothing")
+      },
+    )
+    assert.equal(seen.fallbacks(), 0, "the map drew: nothing was noted")
+  } finally {
+    restore()
+  }
+})
+
+test("a map with one point draws it, the single point no bounds to break", async () => {
+  const restore = mapBox(390)
+  try {
+    const seen = await screen(
+      [
+        ask("Map the one stop."),
+        reply("reply", `One stop:\n\n${block(mapSource([STOPS[1] as string], WALK))}`),
+      ],
+      async () => {
+        const row = () => replyRow("One stop:")
+        await drawn(() => mapLabels(row()).length === 1, "the map's one label")
+        assert.equal(
+          mapLabels(row())[0]?.textContent?.trim(),
+          "Coit Tower",
+          "a one-point map still names its point",
+        )
+        assert.equal(
+          mapOf(row())?.querySelector("[role=img]")?.getAttribute("aria-label"),
+          WALK,
+          "and keeps its summary",
+        )
+      },
+    )
+    assert.equal(seen.fallbacks(), 0, "the one-point map drew: nothing was noted")
+  } finally {
+    restore()
+  }
+})
+
+test("a map with no summary draws as the fenced source, never as a map", async () => {
+  const seen = await screen(
+    [ask("Map it."), reply("reply", `The map:\n\n${block(mapSource(STOPS))}`)],
+    async () => {
+      await drawn(() => Boolean(codeOf(replyRow("The map:"))), "the fallback")
+      const row = replyRow("The map:")
+      assert.ok(row, "the reply is a row of the thread")
+      const code = codeOf(row)
+      assert.ok(code, "a map no one could hear draws as code")
+      assert.equal(labelOf(code), "openui-lang", "with the fence's language label")
+      assert.match(code.textContent ?? "", /Map\(\[/, "as the model wrote it")
+      assert.equal(row.querySelectorAll(".leaflet-container").length, 0, "and no map")
+      assert.equal(mapOf(row), null, "nothing of the map's frame")
+      await settle()
+    },
+  )
+  assert.equal(seen.fallbacks(), 1, "noted once at the console's verbose level")
+})
+
+test("a map missing its points, or a point its numbers, draws as the fenced source", async () => {
+  const broken = [
+    ["# id: walk", "root = Stack([m])", 'm = Map("Ferry Building")'].join("\n"),
+    mapSource([`{ lat: 37.7955, label: "Ferry Building" }`], WALK),
+    mapSource([`{ lat: "37.7955", lng: -122.3937, label: "Ferry Building" }`], WALK),
+  ]
+  for (const [index, source] of broken.entries()) {
+    const seen = await screen(
+      [ask("Map it."), reply("reply", `Broken ${index}:\n\n${block(source)}`)],
+      async () => {
+        const row = () => replyRow(`Broken ${index}:`)
+        await drawn(() => Boolean(codeOf(row())), `fallback ${index}`)
+        assert.ok(codeOf(row()), `map ${index} draws as the source the model sent`)
+        assert.equal(labelOf(codeOf(row()) ?? (row() as Element)), "openui-lang", "under its fence")
+        assert.equal(mapOf(row()), null, `and no map at all (${index})`)
+      },
+    )
+    assert.equal(seen.fallbacks(), 1, `map ${index} was noted once`)
   }
 })

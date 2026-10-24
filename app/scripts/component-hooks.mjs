@@ -107,4 +107,18 @@ dom.window.HTMLElement.prototype.animate = () => ({
   pause() {},
 })
 
+const canvas2d = {
+  measureText: (text) => ({ width: Math.ceil(String(text).length * 8) }),
+}
+const canvas = dom.window.HTMLCanvasElement.prototype
+// The stub is installed once per realm: a second pass would wrap the stub in itself, so the flag
+// lives here rather than on the method the stub replaces.
+let canvasStubbed = false
+function stubCanvas() {
+  if (canvasStubbed) return
+  canvasStubbed = true
+  canvas.getContext = () => canvas2d
+}
+stubCanvas()
+
 register("./component-loader.mjs", import.meta.url)

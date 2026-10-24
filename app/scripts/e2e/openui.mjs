@@ -1,6 +1,3 @@
-// An interface in a real thread: the reply's block draws from the library at a phone's width and a
-// tablet's, in both themes; the block no component answers for draws as the code the model sent;
-// and a patch that lands while the reader is scrolled up leaves their place where it was.
 import { app, assert, flow, pass, settled } from "./lib.mjs"
 
 const VIEWPORT = "[data-slot=message-scroller-viewport]"
@@ -41,6 +38,62 @@ const facts = (page, place = false) =>
       dark: document.documentElement.classList.contains("dark"),
     }
   }, place)
+
+const geometry = (page) =>
+  page.evaluate(() => {
+    const reply = document.querySelector("[data-slot=card]").closest("[data-slot=message]")
+    const round = (value) => Math.round(value * 10) / 10
+    const boxOf = (element) => element.getBoundingClientRect()
+    const paragraph = (start) =>
+      [...reply.querySelectorAll("p")].find((p) => (p.textContent ?? "").startsWith(start))
+
+    const card = reply.querySelector("[data-slot=card]")
+    const code = reply.querySelector("div[data-md-code]")
+    const intro = paragraph("Here's the quarter")
+    const first = paragraph("What's in the number")
+    const above = paragraph("The North figure")
+    const below = paragraph("South is near flat")
+
+    // The text's own edge is the glyphs', not the line box's: a Range over a text node reports the
+    // box the letters draw in.
+    const glyphs = (node) => {
+      const range = document.createRange()
+      range.selectNodeContents(node)
+      return range.getBoundingClientRect()
+    }
+
+    const charts = [...reply.querySelectorAll("[data-slot=chart]")].map((chart) => {
+      const box = boxOf(chart)
+      const ticks = [
+        ...chart.querySelectorAll(
+          ".recharts-yAxis-tick-labels .recharts-cartesian-axis-tick-value",
+        ),
+      ]
+      const rects = ticks.map((tick) => tick.getBoundingClientRect())
+      return {
+        ticks: ticks.length,
+        labels: ticks.map((tick) => tick.textContent),
+        widest: round(Math.max(0, ...rects.map((rect) => rect.width))),
+        outside: rects.filter((rect) => rect.left < box.left - 0.5 || rect.right > box.right + 0.5)
+          .length,
+        // Recharts hands each tick label the axis' own width: the box the label is drawn in.
+        axisWidth: ticks.length ? Number(ticks[0].getAttribute("width")) : null,
+      }
+    })
+
+    return {
+      glyphLeft: round(glyphs(intro).left),
+      textRight: round(boxOf(intro).right),
+      cardLeft: round(boxOf(card).left),
+      cardRight: round(boxOf(card).right),
+      codeLeft: code ? round(boxOf(code).left) : null,
+      codeRight: code ? round(boxOf(code).right) : null,
+      gapAbove: round(boxOf(card).top - boxOf(intro).bottom),
+      gapBelow: round(boxOf(first).top - boxOf(card.parentElement).bottom),
+      paragraphGap: round(boxOf(below).top - boxOf(above).bottom),
+      charts,
+    }
+  })
 
 await flow(
   "openui",
@@ -143,6 +196,16 @@ await flow(
     pass("a block no component answers for drew as code, and the reply still reached its end")
 
     const widths = new Map()
+    const geometrySeen = new Map()
+    await until(
+      () =>
+        reply
+          .locator(".recharts-yAxis-tick-labels .recharts-cartesian-axis-tick-value")
+          .count()
+          .then((count) => count >= 6),
+      20_000,
+      "the charts' tick labels",
+    )
     for (const width of [390, 768]) {
       await page.setViewportSize({ width, height: width < 768 ? 844 : 768 })
       for (const dark of [false, true]) {
@@ -162,6 +225,49 @@ await flow(
         assert.ok(seen.aside, `and its callout draws at ${at}`)
         assert.equal(seen.sideways, 0, `the table keeps its columns inside the interface at ${at}`)
         assert.match(await card.textContent(), /Up 18%/, `the patched card draws at ${at}`)
+
+        const shape = await geometry(page)
+        assert.ok(
+          Math.abs(shape.cardLeft - shape.glyphLeft) <= 1,
+          `the interface's box starts on the text's own edge at ${at} (${shape.cardLeft}px against the glyphs at ${shape.glyphLeft}px)`,
+        )
+        assert.ok(
+          Math.abs(shape.cardRight - shape.textRight) <= 1,
+          `and ends on the text's right edge at ${at} (${shape.cardRight}px against ${shape.textRight}px)`,
+        )
+        assert.ok(
+          Math.abs(shape.codeLeft - shape.cardLeft) <= 1 &&
+            Math.abs(shape.codeRight - shape.cardRight) <= 1,
+          `the undrawn code form sits in the same place at ${at} (${shape.codeLeft}px to ${shape.codeRight}px)`,
+        )
+        assert.ok(
+          Math.abs(shape.gapAbove - shape.paragraphGap) <= 1 &&
+            Math.abs(shape.gapBelow - shape.paragraphGap) <= 1,
+          `the gap around the interface is the paragraph gap at ${at} (${shape.gapAbove}px and ${shape.gapBelow}px against ${shape.paragraphGap}px)`,
+        )
+        assert.ok(shape.charts.length >= 1, `the reply's chart draws at ${at}`)
+        for (const [index, chart] of shape.charts.entries()) {
+          const which = `chart ${index + 1} at ${at}`
+          assert.ok(chart.ticks >= 3, `the chart labels its axis (${chart.ticks} ticks, ${which})`)
+          assert.ok(
+            chart.labels.some((label) => /^\d{5}$/.test(label ?? "")),
+            `a five-digit tick is one of them (${chart.labels.join(", ")}; ${which})`,
+          )
+          assert.equal(
+            chart.outside,
+            0,
+            `every y tick label lies inside the chart's box — none clips (${chart.labels.join(", ")}; ${which})`,
+          )
+          assert.ok(
+            (chart.axisWidth ?? 0) >= chart.widest + 11,
+            `the axis keeps its room beside the widest label (${chart.widest}px label in ${chart.axisWidth}px; ${which})`,
+          )
+        }
+        geometrySeen.set(
+          `${width}-${dark ? "dark" : "light"}`,
+          `${shape.cardLeft}/${shape.glyphLeft}/${shape.cardRight} · gaps ${shape.gapAbove}/${shape.gapBelow}/${shape.paragraphGap} · axes ${shape.charts.map((chart) => chart.axisWidth).join(", ")}`,
+        )
+
         widths.set(`${width}-${dark ? "dark" : "light"}`, `${seen.width}×${seen.height}`)
         const path = await shot(`interface-${width}-${dark ? "dark" : "light"}`)
         pass(
@@ -171,6 +277,9 @@ await flow(
     }
     pass(
       `the interface takes the width it is given: ${widths.get("390-light")} at 390, ${widths.get("768-light")} at 768`,
+    )
+    pass(
+      `it lines up with the text at both widths — the box, the glyphs and the code form at ${geometrySeen.get("390-light")} at 390, ${geometrySeen.get("768-light")} at 768 (left/glyph-left/right · gaps above/below/paragraph · axis width in px)`,
     )
   },
   { viewport: { width: 390, height: 844 } },

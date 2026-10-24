@@ -269,6 +269,11 @@ const FLOWS = {
     about:
       "A reply's interface draws at 390 and 768px, light and dark; a block that can't draw stays code; a patch landing while the thread is scrolled up doesn't move the reader",
   },
+  "openui-map": {
+    script: "e2e/openui-map.mjs",
+    about:
+      "A reply's places draw as a map fitted to its points at 390 and 768px, light and dark, with its basemap following the theme and its attribution in the chrome; an untouched map lets one finger scroll the thread, a tap takes pan and zoom, and the button hands them back",
+  },
   screens: {
     script: "e2e/screens.mjs",
     about:

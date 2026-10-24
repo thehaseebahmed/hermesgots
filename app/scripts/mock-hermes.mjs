@@ -60,10 +60,14 @@
 // paced, as a run's `reasoning.available` events or a completion's `reasoning_content` deltas. Say
 // "stall" as well and the turn then holds 2.5s with nothing else on the wire.
 // Say "draw the interface" for a reply that carries one: an `openui-lang` block naming itself with
-// `# id: sales`, the receipt under it long enough to scroll a phone's thread, then a patch block
-// reusing that id (it changes the card and table in place, and draws nothing where it sits), then a
-// block naming a component the library doesn't have — which draws as the code the model sent — and
-// a closing line.
+// `# id: sales` — a card, a table, a callout and two bar charts whose five-digit ticks have to fit
+// the axes they label, one with both axis labels and one with none — the receipt under it long
+// enough to scroll a phone's thread, then a patch block reusing that id (it changes the card and
+// table in place, and draws nothing where it sits), then a block naming a component the library
+// doesn't have — which draws as the code the model sent — and a closing line.
+// Say "draw the map" for a reply whose block is a map: one `Map` of four labelled places on the
+// north waterfront, each with its detail, and a summary — the receipt under it long enough to
+// scroll a phone's thread past the map, so a scroll gesture has somewhere to go.
 // Project sessions get a worktree in each of the project's repos on
 // POST /api/plugins/memento/sessions/{id}/workspace (GET reads it back, POST …/mode changes the
 // permission mode, POST …/workspace/remove removes the trees unless a turn mentioned "commit"). In
@@ -1319,10 +1323,12 @@ const OPENUI_INTRO = "Here's the quarter as a card, and the receipt behind it.\n
 const OPENUI_INTERFACE = [
   "```openui-lang",
   "# id: sales",
-  "root = Stack([c, t, n])",
+  "root = Stack([c, t, n, g, h])",
   'c = Card("Quarterly sales", "Up 12% on the quarter.")',
   't = Table(["Region", "Revenue"], [["North", "$18.4k"], ["South", "$11.9k"], ["West", "$9.2k"]], "Revenue by region")',
   'n = Callout("good", "Ahead of plan for a third quarter running.")',
+  'g = Chart("bar", [{ name: "Revenue", points: [{ x: "Q1", y: 12400 }, { x: "Q2", y: 18300 }, { x: "Q3", y: 15900 }] }], "Quarter", "Revenue", "Revenue peaked at 18,300 in the second quarter.")',
+  'h = Chart("bar", [{ name: "Sessions", points: [{ x: "Q1", y: 21000 }, { x: "Q2", y: 47000 }] }], "", "", "Sessions ran from 21,000 in the first quarter to 47,000 in the second.")',
   "```",
 ].join("\n")
 const OPENUI_RECEIPT = [
@@ -1356,6 +1362,24 @@ const OPENUI_FALLBACK = [
   "```openui-lang",
   "root = Stack([c])",
   'c = Sparkline("Revenue by month", [18, 19, 21])',
+  "```",
+].join("\n")
+
+const MAP_SUMMARY = "Four stops on the north waterfront walk."
+
+const MAP_POINTS = [
+  '{ lat: 37.7955, lng: -122.3937, label: "Ferry Building", detail: "Market Street at the Embarcadero" }',
+  '{ lat: 37.8024, lng: -122.4058, label: "Coit Tower", detail: "Telegraph Hill, up the steps" }',
+  '{ lat: 37.8107, lng: -122.4103, label: "Pier 39", detail: "The Embarcadero at Beach Street" }',
+  '{ lat: 37.8058, lng: -122.4229, label: "Ghirardelli Square", detail: "Larkin and Beach" }',
+]
+
+const OPENUI_MAP_INTRO = "Here's the walk as a map, with the receipt under it.\n\n"
+const OPENUI_MAP = [
+  "```openui-lang",
+  "# id: walk",
+  "root = Stack([m])",
+  `m = Map([${MAP_POINTS.join(", ")}], "${MAP_SUMMARY}")`,
   "```",
 ].join("\n")
 
@@ -1457,6 +1481,15 @@ async function playTurn(req, body, last, out) {
     await say("That's the quarter, from the first read to this one.", 30)
     record(req, { role: "assistant", content: spoken, finish_reason: "stop" })
     return { spoken, prompt_tokens: 9000, completion_tokens: pieces }
+  }
+
+  if (/\bdraw the map\b/i.test(last)) {
+    await say(OPENUI_MAP_INTRO, 30)
+    await say(`${OPENUI_MAP}\n\n`, 30)
+    await say(OPENUI_RECEIPT, 45)
+    await say("\n\nThat is the walk, stop by stop, from the map down.", 30)
+    record(req, { role: "assistant", content: spoken, finish_reason: "stop" })
+    return { spoken, prompt_tokens: 7000, completion_tokens: pieces }
   }
 
   // In plan mode the plugin blocks every tool that changes anything, so the agent reads and plans.

@@ -7,15 +7,21 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 
-import { ARTIFACT, MAX_CHARS, render } from "./build-openui-prompt.mjs"
+import { ARTIFACT, MAX_CHARS, generated, render, rewrite, version } from "./build-openui-prompt.mjs"
 
 const checkedIn = readFileSync(ARTIFACT, "utf8")
-const generated = render()
+const generatedText = generated()
+const rewritten = render()
 
 const HEADER = /^# (@openuidev\/react-lang) (\S+)$/
 
-const pinned = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"))
-  .dependencies["@openuidev/react-lang"]
+/** What the model is told stays text, and what it draws, as the product settled it (spec #487). */
+const DRAWS_DATA =
+  "- An answer shaped like data — numbers, a series, a comparison, locations, structured facts — " +
+  "draws an interface; conversation, opinions and one-liners stay text."
+const ASKS_THROUGH_CLARIFY =
+  "- The agent's own question for the user goes through the clarify tool where the host offers one " +
+  "— the thread draws it as a question card — else text; a question is never drawn as an interface."
 
 function fences(text: string) {
   return text
@@ -26,10 +32,17 @@ function fences(text: string) {
     .filter((info) => info !== "")
 }
 
-test("the checked-in artifact is the library's own words", () => {
+function section(text: string, heading: string): string {
+  const start = text.indexOf(heading)
+  assert.ok(start >= 0, `the artifact says no ${heading}`)
+  const next = text.indexOf("\n## ", start + heading.length)
+  return text.slice(start, next === -1 ? undefined : next + 1)
+}
+
+test("the script owns the checked-in artifact: it is its own render, byte for byte", () => {
   assert.equal(
     checkedIn,
-    generated,
+    rewritten,
     "plugin/openui/prompt.txt and library.tsx disagree: run `pnpm build:openui-prompt`",
   )
 })
@@ -50,14 +63,17 @@ test("it fits the host's section limit instead of being dropped whole", () => {
     checkedIn.length <= MAX_CHARS,
     `${checkedIn.length} characters, over the host's ${MAX_CHARS}`,
   )
-  assert.ok(generated.length <= MAX_CHARS, `the library generates ${generated.length} characters`)
+  assert.ok(
+    rewritten.length < generatedText.length,
+    `the rewrite shrinks the library's ${generatedText.length} characters, not grows them`,
+  )
 })
 
 test("the header names the pinned renderer the words were generated for", () => {
   const [first] = checkedIn.split("\n")
   const named = HEADER.exec(first ?? "")
   assert.ok(named, `the first line names no @openuidev/react-lang version: ${String(first)}`)
-  assert.equal(named[2], pinned.replace(/^[\^~]/, ""), `${String(pinned)} is pinned in package.json`)
+  assert.equal(named[2], version(), "the pinned @openuidev/react-lang in package.json")
 })
 
 test("the rules this app adds are in it", () => {
@@ -67,4 +83,50 @@ test("the rules this app adds are in it", () => {
   assert.match(checkedIn, /A new interface's first line is a fresh `# id: <slug>`\./)
   assert.match(checkedIn, /A change to it is a second block with the same `# id:`\./)
   assert.match(checkedIn, /A table's cells are plain text: no markdown, no links\./)
+})
+
+test("a data answer draws and a question asks through clarify", () => {
+  assert.ok(checkedIn.includes(DRAWS_DATA), `the artifact never says: ${DRAWS_DATA}`)
+  assert.ok(
+    checkedIn.includes(ASKS_THROUGH_CLARIFY),
+    `the artifact never says: ${ASKS_THROUGH_CLARIFY}`,
+  )
+  assert.ok(
+    !generatedText.includes(DRAWS_DATA),
+    "the library grew this rule itself: take the rewrite pair back out",
+  )
+})
+
+test("nothing the library said about questions or forms survives", () => {
+  for (const stale of [
+    "### 2. Text-only response (when the user asks a QUESTION)",
+    "When the user asks a question, respond with text only",
+    "The existing dashboard stays unchanged.",
+    "forms for input",
+  ]) {
+    assert.ok(!checkedIn.includes(stale), `the artifact still says: ${stale}`)
+  }
+})
+
+test("the compression never touches the schema the model codes against", () => {
+  for (const heading of ["## Syntax Rules", "## Component Signatures"]) {
+    assert.equal(
+      section(checkedIn, heading),
+      section(generatedText, heading),
+      `${heading} was rewritten, and only prose may be`,
+    )
+  }
+  assert.match(
+    section(checkedIn, "## Component Signatures"),
+    /Callout\(tone: "info" \| "warn" \| "good"/,
+  )
+})
+
+test("a body the library moved fails the build instead of shipping stale words", () => {
+  assert.throws(() => rewrite("## Inline Mode\n\nnothing the table knows\n"), /moved it upstream/)
+  assert.throws(
+    () => rewrite(`${generatedText}${generatedText}`),
+    /moved it upstream/,
+    "a needle that occurs twice is ambiguous, not a rewrite",
+  )
 })

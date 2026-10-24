@@ -1,0 +1,29 @@
+/* The map's chrome, in the app's tokens. Leaflet ships a white attribution bar and a white marker
+ * bubble, which are the two places its own stylesheet hard-codes a colour. */
+
+.openui-map-frame.leaflet-container {
+  background: var(--muted);
+}
+
+/* The icon box is a point of no size, so the pill grows either way from the place it names. */
+.openui-map-label span {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.openui-map-frame .leaflet-control-attribution {
+  background: var(--background);
+  color: var(--muted-foreground);
+}
+
+.openui-map-frame .leaflet-control-attribution a {
+  color: var(--foreground);
+}
