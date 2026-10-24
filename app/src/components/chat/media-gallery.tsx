@@ -175,7 +175,7 @@ export function Cell({ item }: { item: MediaItem }) {
             <Skeleton className="absolute -inset-px rounded-xl" />
           )}
           <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <span className="flex size-9 items-center justify-center rounded-full bg-black/55 text-white">
+            <span className="flex size-9 items-center justify-center rounded-full bg-foreground/55 text-background">
               <PlayIcon className="size-4" />
             </span>
           </span>
