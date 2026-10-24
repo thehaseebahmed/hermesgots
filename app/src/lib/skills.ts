@@ -57,6 +57,25 @@ async function readStored(key: string) {
   return (await db.skills.get(key))?.skills
 }
 
+/**
+ * Keeps one list of skills as the one every consumer reads: this page's `memory`, and the device's
+ * row with it, so a write reaches the composer's `/` menu and the pickers at once (ADR 0044).
+ *
+ * Keeping the row is a favour to the next page load, not part of an answer: a Dexie failure here (a
+ * blocked upgrade, a full quota) must not throw away what the Host just sent. And what didn't change
+ * isn't written, because a fresh row would wake anything reading this one.
+ */
+async function keepSkills(key: string, skills: Skill[]) {
+  memory.set(key, skills)
+  try {
+    if (JSON.stringify(await readStored(key)) !== JSON.stringify(skills)) {
+      await db.skills.put({ id: key, skills })
+    }
+  } catch (error) {
+    noteFailure("Saving the bot's skills", error)
+  }
+}
+
 /** Reads the profile's skills for this server and keeps them, unless the bot can't list them. */
 function readSkills(config: HermesConfig, key: string): Promise<Skill[]> {
   const pending = inFlight.get(key)
@@ -79,17 +98,7 @@ function readSkills(config: HermesConfig, key: string): Promise<Skill[]> {
       throw error
     }
     unsupported.clear(key)
-    memory.set(key, skills)
-    try {
-      // Keeping the row is a favour to the next page load, not part of the answer: a Dexie failure
-      // here (a blocked upgrade, a full quota) must not throw away what the host just sent.
-      // Don't write what didn't change: a fresh row would wake anything reading this one.
-      if (JSON.stringify(await readStored(key)) !== JSON.stringify(skills)) {
-        await db.skills.put({ id: key, skills })
-      }
-    } catch (error) {
-      noteFailure("Saving the bot's skills", error)
-    }
+    await keepSkills(key, skills)
     return skills
   })().finally(() => inFlight.delete(key))
   inFlight.set(key, request)
@@ -110,17 +119,11 @@ async function switchSkill(config: HermesConfig, key: string, name: string, enab
   // The list this page holds, or the device's where the page hasn't read one yet: a list nobody has
   // read is no list to patch, and the next read fills it in from the Host.
   const held = memory.get(key) ?? (await readStored(key))
-  if (!held) return row
-  const skills = held.map((skill) => (skill.name === name ? { ...skill, ...row } : skill))
-  memory.set(key, skills)
-  try {
-    // Keeping the row is a favour to the next page load, as a read's is: a Dexie failure must not
-    // throw away an answer the Host just gave.
-    await db.skills.put({ id: key, skills })
-  } catch (error) {
-    noteFailure("Saving the bot's skills", error)
-  }
-  return row
+  if (!held) return
+  await keepSkills(
+    key,
+    held.map((skill) => (skill.name === name ? { ...skill, ...row } : skill)),
+  )
 }
 
 /**
@@ -132,16 +135,7 @@ async function switchSkill(config: HermesConfig, key: string, name: string, enab
  * screen shows the Host's own sentence.
  */
 async function removeFromBot(config: HermesConfig, key: string, name: string) {
-  const left = await removeFromHost(config, name, AbortSignal.timeout(WRITE_TIMEOUT_MS))
-  memory.set(key, left)
-  try {
-    // Keeping the row is a favour to the next page load, as a read's is: a Dexie failure must not
-    // throw away the list the Host just answered.
-    await db.skills.put({ id: key, skills: left })
-  } catch (error) {
-    noteFailure("Saving the bot's skills", error)
-  }
-  return left
+  await keepSkills(key, await removeFromHost(config, name, AbortSignal.timeout(WRITE_TIMEOUT_MS)))
 }
 
 /** The bot's skills as this page knows them, and the writes the tab makes over them. */
