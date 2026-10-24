@@ -7,6 +7,8 @@ import { app, assert, flow, mock, pass, runId } from "./lib.mjs"
 
 const ASK = "delegate and ask"
 const QUESTION = "Should the cap cover the archived journals too?"
+/** The turn's words before the question, which the reply must draw once and not once per half. */
+const LEADIN = "I'll have a subagent dig into the logs"
 /** The result's own last words, which only the delivery carries. */
 const RESULT_END = "frees the most for one line"
 /** The wake turn's answer, in its own words — never the delivery's. */
@@ -55,6 +57,13 @@ await flow("question-during-delegation", async ({ page, seed, send, lastReply, u
         }),
       )
     }, chat)
+  // How many times the thread draws a phrase: the reply settles again when the run that a question
+  // paused ends, and the words before the question must not be drawn a second time by it.
+  const drawnTimes = (phrase) =>
+    page.evaluate((phrase) => {
+      const thread = document.querySelector("[data-slot=message-scroller]")?.textContent ?? ""
+      return thread.split(phrase).length - 1
+    }, phrase)
 
   await send(ASK)
 
@@ -142,6 +151,13 @@ await flow("question-during-delegation", async ({ page, seed, send, lastReply, u
   await shot("result-delivered")
   pass("the result landed as the bot's own message at the thread's end")
 
+  assert.equal(
+    await drawnTimes(LEADIN),
+    1,
+    "the turn's words before the question are drawn once, not once for each half of its reply",
+  )
+  pass("the reply says what it said before the question exactly once")
+
   assert.deepEqual(
     all.filter((message) => message.role === "user").map((message) => message.content),
     [ASK],
@@ -200,4 +216,11 @@ await flow("question-during-delegation", async ({ page, seed, send, lastReply, u
   pass("the wake turn ran a tool and drew it")
   await shot("wake-turn")
   pass("the wake turn streamed in as a message of its own")
+
+  // Read again from the transcript: a reload folds the turn afresh, and the reply's lead-in still
+  // belongs to it once.
+  await page.reload()
+  await page.getByText(WAKE_END).first().waitFor({ timeout: 20_000 })
+  assert.equal(await drawnTimes(LEADIN), 1, "and a reload draws those words once too")
+  pass("the thread keeps the words before the question once, live and after a reload")
 })

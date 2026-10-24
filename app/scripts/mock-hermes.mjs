@@ -1746,6 +1746,10 @@ async function playTurn(req, body, last, out) {
     out.tool({ tool: "delegate_task", toolCallId: id, status: "completed", result: handle })
     record(req, { role: "tool", tool_call_id: id, tool_name: "delegate_task", content: handle })
     await say("While it works: ", 12)
+    // The turn's first segment is its own row before the question splits it, so the transcript
+    // and the streamed thread agree — the shape every other clarify path records (see below).
+    record(req, { role: "assistant", content: spoken })
+    const segment = spoken
     const { answers } = await ask([
       {
         question: "Should the cap cover the archived journals too?",
@@ -1760,7 +1764,7 @@ async function playTurn(req, body, last, out) {
     )
     const report = await child.done
     await say("The subagent is back with the numbers; I'll pick it up from here.", 12)
-    record(req, { role: "assistant", content: spoken, finish_reason: "stop" })
+    record(req, { role: "assistant", content: spoken.slice(segment.length), finish_reason: "stop" })
     // Core's delivery of the finished delegation on the api_server surface: a row of this chat's
     // transcript, no turn of its own (gateway/run_notifications.py's `persist_delegation_delivery`).
     record(req, {
