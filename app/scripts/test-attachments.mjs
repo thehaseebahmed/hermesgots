@@ -9,11 +9,11 @@ import test from "node:test"
 import {
   attachmentsText,
   attachmentParts,
-  formatBytes,
   marker,
   NOT_INLINED,
   splitAttachments,
 } from "../src/lib/attachment-text.ts"
+import { formatBytes } from "../src/lib/attachment-caps.ts"
 
 const HOST = "/home/h/.hermes/memento/attachments/session-1"
 

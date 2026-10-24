@@ -118,9 +118,3 @@ export function splitAttachments(content: string): { text: string; attachments: 
     ? { text: lines.slice(0, end).join("\n"), attachments }
     : { text: content, attachments }
 }
-
-export function formatBytes(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
-  return `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`
-}
