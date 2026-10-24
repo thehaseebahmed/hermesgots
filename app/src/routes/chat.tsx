@@ -192,10 +192,6 @@ function ReadyLine({ botId, id }: { botId?: string; id?: string }) {
   )
 }
 
-/**
- * What a device with no bot pointed at anything says. The one state that is not a chat, and the copy
- * the tests read to prove it was never painted as one.
- */
 export const SETUP_COPY = "Point Gots at your Hermes Agent API server to start chatting."
 
 function EmptyState({
@@ -211,10 +207,6 @@ function EmptyState({
   session?: { repos: RepoRef[] }
   /** The chat or session on screen, none for a new chat. */
   id?: string
-  /**
-   * Whether the ready line belongs here. It does only on a chat that never started: a chat this
-   * device no longer has draws the same empty state, but a line would count a turn it never took.
-   */
   line?: boolean
 }) {
   return (
@@ -268,7 +260,6 @@ function MainEmptyState({
   )
 }
 
-/** A pane with nothing to hold yet: the header stands empty, and the body says the chat is coming. */
 function PendingChat() {
   return (
     <>
@@ -309,7 +300,6 @@ export function ChatPage({
 }: {
   chatId?: string
   paneThread?: string
-  /** The pane this chat is drawn in. Named by the shell, so a frame held is its own. */
   slot: HoldSlot
 }) {
   const params = useParams()
@@ -336,8 +326,6 @@ export function ChatPage({
   // so a session swapped in place beside Code's list can still hand back the one before it: nothing
   // of that session may render or be acted on here — its plan card's Approve would send its plan.
   const conversation = found && found.id !== id ? undefined : found
-  // The conversation answered "gone" — this device has no such chat. That is an answer, not a gap:
-  // the chat is ready, and draws the empty state it honestly has, under the title it had.
   const gone = id !== undefined && conversation === null
   // A chat talks to its own bot; a new chat goes to the selected one. Same rule as the row above:
   // the query answers with the id it ran for, so a stale answer can't pass for this route's.
@@ -367,7 +355,6 @@ export function ChatPage({
   const [outputsOpen, setOutputsOpen] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const [historyMissing, setHistoryMissing] = useState<string>()
-  // The id this pane last drew whole, so an answer that dips for a moment can't put it back on hold.
   const readyRef = useRef<{ id?: string }>(undefined)
 
   const resolved = { ...DEFAULT_SETTINGS, ...settings }
@@ -396,11 +383,6 @@ export function ChatPage({
     [botThreads, conversation?.main, thread, threadList],
   )
   const threadsDrawnAsCards = useMemo(() => drawnThreadIds(cards), [cards])
-  // Ready is every answer for the id on screen having come back. An answer naming another id is no
-  // answer — the guards above make it one — so a chat is never drawn out of a state it may not be in:
-  // an unanswered profile is not "not configured", nor an unanswered thread list "no threads".
-  // The conversation's own answer is the id-filtered one, `null` included: a chat this device no
-  // longer has answered "gone", and counts as ready rather than as a gap.
   const answered =
     settings !== undefined &&
     botThreads !== undefined &&
@@ -410,8 +392,6 @@ export function ChatPage({
     (!(botThreads && conversation?.main) || threadList !== undefined)
   const keptReady = readyRef.current !== undefined && readyRef.current.id === id
   const ready = answered || keptReady
-  // Remembered after the commit that drew it, not during a render: the pane is ready for this id
-  // from then on, so a query that dips for a moment never puts it back on hold.
   useLayoutEffect(() => {
     if (answered) readyRef.current = { id }
   })
@@ -714,8 +694,6 @@ export function ChatPage({
     if (mainOf) void setActiveProfile(mainOf)
   }, [mainOf])
 
-  // A conversation this device no longer has is an answer, not a gap: the chat counts as ready and
-  // draws its own empty state. A bot's Main is the one row re-made, since Main is the bot's face.
   const mainOwner = id ? mainThreadProfile(id) : undefined
   useEffect(() => {
     if (!id || conversation !== null || !mainOwner || !botThreads) return
@@ -1009,9 +987,7 @@ export function ChatPage({
   const centered = Boolean(session) || besideMain
   // Nothing started has no title yet, and its bot is the big one in the middle. Main is the bot's
   // face, so its title is the bot's name rather than the `Main` its record is stored under: the
-  // name Bot settings edits, so a rename shows here at once. A chat this device no longer has keeps
-  // the title it was read under — Main's name, or the one its card drew — and stands empty where no
-  // row is left to read, never "New chat", which would say a chat had been started here.
+  // name Bot settings edits, so a rename shows here at once.
   const goneTitle = mainOwner
     ? (profile?.name ?? "")
     : (threadList?.find((one) => one.chat.id === id)?.chat.title ?? "")
@@ -1035,9 +1011,6 @@ export function ChatPage({
         })
       : activity || mainLine || repliesLine
 
-  // The pane's own children, as they stand. Kept as one element so the next switch can draw exactly
-  // this, unchanged, while its chat answers — a switch lands the new frame in one commit. Built only
-  // once the chat is ready: a frame not ready to be drawn is one nobody would ever see.
   const frame = ready ? (
     <>
       <ChatHeader
@@ -1082,9 +1055,6 @@ export function ChatPage({
       />
 
       {hasMessages || hasCards || (thread && moved.trailing.length) ? (
-        // A chat's scroller is its own. Keyed on the chat, a switch mounts one that has placed
-        // nothing yet, so its single move lands the new chat's whole content at its end instead of
-        // the old chat's position being inherited and corrected afterwards.
         <MessageScrollerProvider key={id ?? "new"} autoScroll defaultScrollPosition="end">
           <MessageScroller className="flex-1">
             <MessageScrollerViewport aria-label="Messages">
@@ -1167,8 +1137,6 @@ export function ChatPage({
           configured={configured}
           session={session && { repos: sessionRepos }}
           id={conversation?.id}
-          // A chat that is gone was never started here, so it draws no line: one would count a turn
-          // this device never had, and swallow the greeting of a chat that was genuinely new.
           line={!gone}
         />
       )}
@@ -1478,24 +1446,18 @@ export function ChatPage({
     </>
   ) : null
 
-  // Written after the commit that landed it, so the next switch has the frame to hold: an effect
-  // rather than a render-time write, since only a committed frame is the one on screen.
   useLayoutEffect(() => {
     if (ready) hold(slot, id, frame)
   })
 
-  // A frame naming the chat this pane is already for is nothing held: drawing it would mount the
-  // same chat twice, once stale, for a chat that is about to be drawn from its own answers.
   const heldBefore = heldFrame(slot)
   const holding = heldBefore && heldBefore.id !== id ? heldBefore.frame : undefined
 
   return (
     <div
       data-slot="chat-pane"
-      // The pane's own name, for the fade its swap plays and for a test that reads one pane of two.
       data-pane={slot}
       className="relative flex min-h-0 flex-1 flex-col"
-      // Every tap, key and send below belongs to the chat that is drawn, never to the one asked for.
       inert={!ready}
     >
       {ready ? frame : (holding ?? <PendingChat />)}

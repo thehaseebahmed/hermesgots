@@ -6,7 +6,6 @@ const SEEN = "memento:last-greeted"
 const TURN = "memento:line-turn:"
 const ABSENCE_MS = 60 * 60 * 1000
 
-/** The three things the hour can say, in the order the day says them. */
 export const GREETINGS = ["Good morning.", "Good afternoon.", "Good evening."]
 
 /** The time of day's greeting, in the user's own clock. */

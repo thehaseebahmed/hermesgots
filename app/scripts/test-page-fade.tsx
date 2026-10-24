@@ -1,13 +1,3 @@
-/**
- * A switch's transition belongs to the swap, not to the address: moving between two chats shows the
- * one the reader left until the next one is ready, so a fade over that moment fades in the chat they
- * already had. These tests read every animation the shell asks for, and what was on screen when it
- * asked, so a transition played over a held chat can't pass for one played as the next chat lands.
- *
- * The fade belongs to the pane that swapped, and to it alone: a thread opened beside Main changes
- * none of Main's cards, and a pane a switch leaves can still be held a commit after the first one
- * lands, so fading the whole screen would blink content nobody asked to change.
- */
 import assert from "node:assert/strict"
 import test from "node:test"
 import { Route } from "react-router"
@@ -37,15 +27,12 @@ const other = botProfile("fade-other", { id: "bot-2", name: "Otherly" })
 const MAIN = mainThreadId(bot.id)
 const MAIN_OTHER = mainThreadId(other.id)
 
-/** The transition a chat taking another's place has always played. */
 const FADE = [{ opacity: 0 }, { opacity: 1 }]
-/** The one a screen opened on top of another plays. */
 const PUSH = [
   { opacity: 0, transform: "translateX(24px)" },
   { opacity: 1, transform: "none" },
 ]
 
-/** A screen beside the chat, so a shell test has somewhere that isn't a chat to go. */
 const settings = <Route path="settings" element={<p data-settings>Settings</p>} />
 
 test("a switch in place fades the chat it lands, never the one it left", async () => {
@@ -114,7 +101,6 @@ test(
       await until(async () => text().includes("alpha one"), "the bot on screen")
       const spy = spyAnimate()
       try {
-        // The sidebar's own way to another bot, which lands on its Main.
         await click(findText("a", "Otherly"))
         await until(async () => text().includes("beta one"), "the bot asked for")
         await settle()
@@ -167,8 +153,6 @@ test(
         [],
         "no transition plays over the thread the switch left",
       )
-      // Main's cards were on screen before the tap and are the same cards after it: fading them is
-      // the blink that fading one pane rather than the screen exists to remove.
       assert.deepEqual(
         spy.asked.filter((one) => one.pane === "main").map((one) => one.element),
         [],
@@ -198,7 +182,6 @@ test("a chat's first send gives it an id without fading: nothing was left behind
     ],
     { bots: [bot, other], active: bot.id },
   )
-  // The send's own navigate: a replace, and quiet — and the id a chat never had is no chat left.
   await mount(phone("/", "/c/c-b", { replace: true, quiet: true }), async () => {
     await until(async () => Boolean(find("[data-pane]")), "the new chat")
     const spy = spyAnimate()
@@ -236,7 +219,6 @@ test(
       await until(async () => text().includes("alpha one"), "the chat on screen")
       const spy = spyAnimate()
       try {
-        // Opened on top of the chat, the way a push into another screen reads to the shell.
         window.history.replaceState({ idx: 1 }, "")
         await click(find("[data-switch]"))
         await until(async () => Boolean(find("[data-settings]")), "the screen asked for")

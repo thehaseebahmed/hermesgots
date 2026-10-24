@@ -11,14 +11,10 @@ const THREADS = [
   { id: "e2e-card-b", title: "Garden plan", opener: "Plan the beds for spring" },
 ]
 const MESSAGES = ["Plan the sprint", "Notes from Tuesday", "Today's catch-up"]
-// A thread long enough that its scroller has somewhere to be: a switch's first content frame is its
-// final position only where there is a position to place.
 const LONG_NOTE = "A note only the weather thread holds"
 const LONG_MESSAGES = 24
 
 const SECOND_BOT = "Second bot"
-// Three lines, so the sidebar's bot switch is measured over a chat that fits its pane at every
-// width: the long thread below is where a scroller's own placement is put under strain.
 const SECOND_MESSAGES = ["Stack the firewood", "Twenty logs by the shed", "The axe is put away"]
 
 const STARTED = "Rotate the greenhouse logs"
@@ -36,8 +32,6 @@ function sequence(page) {
     ([messages, threads]) => {
       const content = document.querySelector('[data-slot="message-scroller-content"]')
       if (!content) return []
-      // Every block the app draws into the content stamps its own slot; the primitive's own filler
-      // stamps none, so the app's contract is what says which children are rows.
       return [...content.children]
         .filter((child) => child.hasAttribute("data-slot"))
         .flatMap((child) => {
@@ -55,10 +49,6 @@ function sequence(page) {
   )
 }
 
-/**
- * Seeds the bot's Main: its own messages, its threads drawn as cards, and one thread long enough to
- * have scrolled somewhere when it opens. Times are hours and days back from now.
- */
 function seed(
   page,
   {
@@ -110,7 +100,6 @@ function seed(
           createdAt: (index === 0 ? now - 2.5 * day : now - hour) + 1,
         })),
       )
-      // The first thread's own flow, long enough to have scrolled somewhere when it opens.
       const began = now - 2.5 * day + 2
       await db.messages.bulkPut(
         Array.from({ length: long }, (_, index) => ({
@@ -129,18 +118,6 @@ function seed(
   )
 }
 
-/**
- * Records what the browser paints from now on, one sample a frame, for the pane the shell names
- * `pane` — `main` and `thread` on a laptop, `route` everywhere else. A pane that isn't there is this
- * sample's own failure, never a measurement of the container around it. Each sample carries the
- * pane's header title, whether the frame is one of `chats` whole, the wrong states a switch must
- * never paint, and its scroller's place and content. `chats` is read as [the chat being left, the one
- * asked for], each `{ title, says }` with a line only that chat draws.
- *
- * A frame is read as cheaply as a painted frame allows: the app's own slot says which children are
- * rows, the one style read is the hold, and where the last row sits is read only once the chat asked
- * for is on screen — nothing before that is final, and the read costs a layout.
- */
 function watchFrames(page, { chats, pane }) {
   return page.evaluate(
     async ({ chats, pane }) => {
@@ -148,7 +125,6 @@ function watchFrames(page, { chats, pane }) {
       const { GREETINGS } = await import("/src/lib/greeting.ts")
       const { SETUP_COPY } = await import("/src/routes/chat.tsx")
       const hero = [...BOTS.flatMap((bot) => bot.lines), ...GREETINGS]
-      // The rows the app drew: every block it adds stamps a slot, and the primitive's filler does not.
       const rowsIn = (content) =>
         content ? [...content.children].filter((child) => child.hasAttribute("data-slot")) : []
       const sample = () => {
@@ -199,7 +175,6 @@ function watchFrames(page, { chats, pane }) {
           count: mine.length,
         }
       }
-      /** Two frames the same: nothing arrived, no fade moved the box, and nothing was placed. */
       const same = (one, other) =>
         Boolean(one && other) &&
         one.title === other.title &&
@@ -217,9 +192,6 @@ function watchFrames(page, { chats, pane }) {
       const tick = () => {
         if (!window.__watching) return
         const frame = sample()
-        // The switch is over when frames stop changing: the chat asked for is on screen, the fade
-        // has run out and the scroller has nothing left to place. The caller waits on this, so no
-        // sleep bounds what the assertions read.
         window.__quiet = same(before, frame) ? window.__quiet + 1 : 0
         before = frame
         window.__frames.push(frame)
@@ -231,7 +203,6 @@ function watchFrames(page, { chats, pane }) {
   )
 }
 
-/** Stops the frame recording and answers what it saw, with the frame it is on now. */
 function stopFrames(page) {
   return page.evaluate(
     () =>
@@ -242,11 +213,6 @@ function stopFrames(page) {
   )
 }
 
-/**
- * Asserts the pane named `pane` is drawing a chat ready — its own title and its content — and
- * answers what it saw. A pane that isn't there fails here: the shell names its panes, and measuring
- * whatever else is on the screen is not a reading of a chat.
- */
 async function ready(page, what, pane = "route") {
   const seen = await page.evaluate(async (pane) => {
     const { SETUP_COPY } = await import("/src/routes/chat.tsx")
@@ -272,16 +238,6 @@ async function ready(page, what, pane = "route") {
   return seen
 }
 
-/**
- * Every frame a switch painted is one of its two chats whole — never a loading state, and never the
- * one it left with the one it asked for's title — and the chat it lands on keeps the reader where
- * the first frame that showed it put them: at the end, and still.
- *
- * "The first content frame" is the first one the browser paints with the incoming chat's content:
- * the scroller's own hold (`data-pending-scroll`, which is `visibility: hidden`) covers the frame
- * it mounts on, where its items are still at their `content-visibility` estimate. That frame is
- * excluded — nowhere else is one: a chat that held itself again after being shown fails here.
- */
 function assertSwitchFrames(frames, { what }) {
   assert.ok(frames.length > 4, `${what}: frames were sampled (${frames.length})`)
   assert.deepEqual(
@@ -322,19 +278,10 @@ function assertSwitchFrames(frames, { what }) {
   return { scrollTop: after[0].scrollTop, frames: frames.length }
 }
 
-/** How many frames running the same say the switch is over: the tail is still sampled after them. */
 const SETTLED_FRAMES = 3
 
-/**
- * Samples a switch: records frames of the pane `pane`, runs `act`, waits for the chat asked for to be
- * on screen, then for the pane to stop changing — animations settled, and the same frame several
- * frames running — and asserts what was painted and where its scroller stood. Nothing is bounded by
- * a sleep: the pane's own last change is the end signal, and the tail behind it is what a frame that
- * lands late has to show up in.
- */
 async function sampleSwitch(page, { chats, pane = "route", act, what }) {
   await watchFrames(page, { chats, pane })
-  // Two frames first, so the recording opens on the chat being left rather than the click's own.
   await page.evaluate(
     () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))),
   )
@@ -348,8 +295,6 @@ async function sampleSwitch(page, { chats, pane = "route", act, what }) {
     { pane, title: chats[1].title },
     { timeout: 15_000 },
   )
-  // The header lands before the fade and the scroller's placement finish; the sampler's own quiet
-  // frames are what says they have, with `settled` covering the animations it always has.
   await settled(page)
   await page.waitForFunction((tail) => window.__quiet >= tail, SETTLED_FRAMES, {
     timeout: 15_000,
@@ -468,8 +413,6 @@ await flow(
     await shot("main-cards")
     pass("Main draws its bot's threads as cards at their start times")
 
-    // A card's thread opens as one change: what the browser paints between the two chats is only
-    // ever one of them, and the thread's scroller makes no move after its first content frame.
     await sampleSwitch(page, {
       chats: [
         { title: "Test bot", says: MESSAGES[2] },
@@ -483,7 +426,6 @@ await flow(
     await shot("thread-open")
     pass("a card opens its thread with no frame between the two chats but the two chats")
 
-    // Back is the same switch the other way, over the same two chats.
     await sampleSwitch(page, {
       chats: [
         { title: THREADS[0].title, says: LONG_NOTE },
@@ -642,8 +584,6 @@ await flow(
     await shot("triage-thread")
     pass("a message moved into an older thread keeps its Moved marker with its link")
 
-    // The same phone, read as it stands and then in the other theme: the chat is on screen whole,
-    // not a loading state, at 390px either way.
     await ready(page, "the phone in light mode")
     await shot("phone-light")
     pass("the phone in light mode draws the chat ready")
@@ -706,8 +646,6 @@ await flow(
     const startedCard = cardWith(page, STARTED)
     await startedCard.getByRole("link", { name: /View thread/ }).click()
     await page.waitForURL(`**/c/${threadId}`, { timeout: 15_000 })
-    // The thread's own pane, drawn and still: a card named again while the first naming is still
-    // settling is two namings, not the same one twice.
     await until(
       async () => (await count(page, '[data-pane="thread"] [data-slot="header-title"]')) === 1,
       15_000,
@@ -763,8 +701,6 @@ await flow(
       "on a laptop the thread beside Main carries no control of its own, and naming it changes nothing",
     )
 
-    // A bot switch is the same change over two bots' Main threads: the sidebar's row is the tap, and
-    // every frame it paints is one of the two Mains, whole.
     const secondBot = await addBot(page, { name: SECOND_BOT, messages: SECOND_MESSAGES })
     const secondMain = `/c/main-${secondBot}`
     const secondRow = page.locator(`aside a[href="${secondMain}"]`).first()

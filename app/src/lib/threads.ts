@@ -133,8 +133,6 @@ export function useThreads(profileId: string | undefined): Thread[] | undefined 
     }
   }, [profileId])
 
-  // One list per answer: a fresh array each render would invalidate every memo a chat composes over
-  // these threads (its cards, its flow, what moved), for a list that didn't change.
   return useMemo(() => {
     if (!answer || answer.profileId !== profileId) return undefined
     return answer.rows.map(({ chat, opener, last, replies, streaming, failed, local }) => {

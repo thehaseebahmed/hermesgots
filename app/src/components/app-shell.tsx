@@ -58,21 +58,12 @@ const ProjectsPane = lazy(() =>
   import("@/routes/projects").then((m) => ({ default: m.ProjectsPane })),
 )
 
-/**
- * The chat a screen draws, if it draws one: `/c/<id>` names its chat, and Home (`/`) is a chat with
- * no id of its own — it draws one, or sends the reader on to the last bot's Main.
- */
 function chatOf(screen: string) {
   const chat = matchPath("/c/:id", screen)?.params.id
   if (chat) return chat
   return screen === "/" ? "" : undefined
 }
 
-/**
- * Both screens are a chat and the chat changed: a switch, which the pane lands by holding the chat
- * the reader left until the next one is ready. Fading that moment in is the flash the hold exists
- * to remove, so the transition plays as the held chat is replaced instead (below).
- */
 function isChatSwitch(from: string, to: string) {
   const before = chatOf(from)
   const after = chatOf(to)
@@ -80,16 +71,13 @@ function isChatSwitch(from: string, to: string) {
 }
 
 const EASE = "cubic-bezier(0.2, 0, 0, 1)"
-/** The same curve, for Tailwind's own transitions, which take a class rather than a number. */
 const EASE_CLASS = "ease-[cubic-bezier(0.2,0,0,1)]"
-/** The fade the shell has always played, at the pace it has always had. */
 const FADE_MS = 200
 const FADE: Keyframe[] = [{ opacity: 0 }, { opacity: 1 }]
 
 /**
  * Animates the main pane in when the screen changes: from the right when it was opened on top of
  * the last one, from the left when going back to it, and a fade when it took the last one's place.
- * A chat switch is the exception — it fades when its swap lands, not here.
  */
 function usePageTransition(ref: RefObject<HTMLElement | null>, pane: ListPane | undefined) {
   const location = useLocation()
@@ -97,8 +85,6 @@ function usePageTransition(ref: RefObject<HTMLElement | null>, pane: ListPane | 
   const large = useLarge()
   const screen = screenOf(location.pathname, large, pane)
   const last = useRef({ screen, idx: depth(), key: location.key })
-  // The pane that has already faded for the address on screen: two panes of one switch land commits
-  // apart, and each fades its own, once.
   const faded = useRef(new Map<HoldSlot, string>())
 
   useLayoutEffect(() => {
@@ -123,9 +109,6 @@ function usePageTransition(ref: RefObject<HTMLElement | null>, pane: ListPane | 
     )
   }, [location, type, screen, ref])
 
-  // A switch's transition belongs to the swap: the commit the pane stops holding the chat the
-  // reader left and draws the one they asked for. It fades that pane alone, since the other one may
-  // be unchanged (Main's cards, on a thread opened beside it) or still held a commit behind.
   useLayoutEffect(
     () =>
       onChatSwap((slot) => {
@@ -220,8 +203,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
     ? {
         screen: `/c/${mainThreadId(bot.profileId)}`,
         open: Boolean(bot.thread || bot.last || !bot.threads),
-        // Main is told what the third pane holds, so its own flow can mark that thread open. Each
-        // pane names itself, so the frame it holds across a remount is its own.
+        // Main is told what the third pane holds, so its own flow can mark that thread open.
         node: (
           <ChatPage
             key={bot.profileId}

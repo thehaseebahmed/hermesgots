@@ -1,9 +1,4 @@
 /**
- * A chat switched into the pane lands with its final content in place. The scroller that draws it is
- * the chat's own, it has placed nothing before that chat's content is whole — Main's thread cards
- * included — and the one move it makes goes to the end of that content. Nothing lands after it, so a
- * switch never scrolls the reader and never scrolls under their thumb.
- *
  * A DOM has no layout (ADR 0019), so this test hands the scroller the box a browser would report and
  * reads the order of the moves it asked for; what a real browser's geometry does is the browser
  * proof's to say.
@@ -39,7 +34,6 @@ const HOUR = 3_600_000
 const MIDNIGHT = new Date().setHours(0, 0, 0, 0)
 const at = (hours: number) => MIDNIGHT + hours * HOUR
 
-/** Two bots' Main threads, each with its own messages and its own threads drawn as cards. */
 const seed = () =>
   seedChats(
     [
@@ -87,7 +81,6 @@ const seed = () =>
     { bots: [first, second], active: first.id, botThreads: true },
   )
 
-/** The box a browser would report: a viewport, and a row for each thing the content holds. */
 const VIEWPORT = 720
 const ROW = 120
 
@@ -98,11 +91,6 @@ const contentIn = (element: Element) =>
     ? element
     : element.querySelector('[data-slot="message-scroller-content"]')
 
-/**
- * How many rows the content is worth. Every block the app draws into it stamps its own slot — a
- * message row, a thread card, a day heading — and the primitive's own filler stamps none, so reading
- * the app's contract counts the content without reaching into the vendor's.
- */
 const rowsIn = (element: Element) => {
   const content = contentIn(element)
   if (!content) return 0
@@ -190,7 +178,6 @@ function spyScroller() {
   })
 
   return {
-    /** Everything from here on is the switch's. */
     arm() {
       observer.takeRecords()
       moves = []
@@ -216,24 +203,20 @@ function spyScroller() {
 
 const viewport = () => find('[data-slot="message-scroller-viewport"]')
 
-/** Lets the frames the scroller schedules run, so a move it makes later is not read as none. */
 const frames = (count: number) =>
   act(async () => {
     for (let frame = 0; frame < count; frame += 1)
       await new Promise((resolve) => requestAnimationFrame(() => resolve(null)))
   })
 
-/** Whether a record brought an element matching `of` into the document. */
 const added = (record: MutationRecord, of: (node: Element) => boolean) =>
   record.type === "childList" &&
   [...record.addedNodes].some((node) => node instanceof Element && of(node))
 
-/** A node that is a message row, or the block holding them, carrying one of the chat's words. */
 const bringsWords = (node: Element, said: string[]) =>
   (node.matches("[data-message-id]") || Boolean(node.querySelector("[data-message-id]"))) &&
   said.some((words) => node.textContent?.includes(words))
 
-/** A node that is a thread card, or the block holding one. */
 const bringsCards = (node: Element) =>
   slot(node) === "thread-card" || Boolean(node.querySelector('[data-slot="thread-card"]'))
 

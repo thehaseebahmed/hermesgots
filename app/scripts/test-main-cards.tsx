@@ -171,7 +171,6 @@ test("tapping a card opens its thread, and back returns to Main", async () => {
     assert.ok(text().includes("Thread b"), "the thread opened")
     assert.ok(text().includes("A reply"), "with its own messages")
     await click(find('[aria-label="Back to Cards"]'))
-    // The pane lands Main when its own answers are in, which is a commit or two after the address.
     await until(async () => text().includes(MAIN_MESSAGES[2]), "back on Main")
     assert.ok(cards().length === THREADS.length, "with its cards in place")
   })

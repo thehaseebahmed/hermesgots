@@ -190,10 +190,6 @@ export async function flow(
   }
 }
 
-/**
- * What pointing a bot's row at the mock holds, in one place: the bot a flow sets up and the second
- * bot it adds can no longer drift from each other (a missing `pluginChats` is a bot with no chats).
- */
 const botPatch = (baseUrl) => ({
   baseUrl: `${baseUrl}/v1`,
   apiKey: "mock-key",
@@ -211,11 +207,6 @@ export async function setUpBot(page) {
   }, botPatch(mock))
 }
 
-/**
- * A second bot, pointed at the same mock, so a flow has two chats to land between: no message is
- * ever sent to it, so nothing else is needed. `messages` become its Main thread's, oldest first.
- * Answers the bot's id.
- */
 export async function addBot(page, { name, messages, hour = 3_600_000 }) {
   return page.evaluate(
     async ({ name, messages, patch, hour }) => {

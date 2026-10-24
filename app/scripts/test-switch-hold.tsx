@@ -1,9 +1,3 @@
-/**
- * A bot or thread switch is one change: the pane keeps the chat it showed until every answer for the
- * chat asked for has come in, then lands that chat's header and body together. These tests drive the
- * switch the way the app does — in place on a phone's route, and by remount beside Main on a laptop —
- * and read every frame painted in between, so a state that exists only for a commit can't hide.
- */
 import assert from "node:assert/strict"
 import test from "node:test"
 import { act, useState } from "react"
@@ -32,19 +26,14 @@ const bot = botProfile("switch-hold", { id: "bot-1", name: "Switcher" })
 const other = botProfile("switch-hold-other", { id: "bot-2", name: "Otherly" })
 const MAIN = mainThreadId(bot.id)
 
-/** The words only a chat that is not ready says: the setup copy, an untitled header, the greeting. */
 const PROVISIONAL = [SETUP_COPY, "New chat", ...GREETINGS, ...BOTS.flatMap((one) => one.lines)]
 
-/** What a pane reads as right now: its own words, and whether it is the outgoing chat on hold. */
 interface Frame {
   text: string
-  /** The pane is inert: it draws the chat the switch left, and nothing can act on it. */
   holding: boolean
-  /** The composer is part of what is held, so a tap on send can reach no chat at all. */
   composer: boolean
 }
 
-/** Every chat pane on screen right now, as one frame: its words, and which of them is held. */
 const frameNow = (): Frame => {
   const panes = [...document.querySelectorAll('[data-slot="chat-pane"]')]
   const holding = panes.filter((pane) => pane.hasAttribute("inert"))
@@ -55,7 +44,6 @@ const frameNow = (): Frame => {
   }
 }
 
-/** One pane as it reads right now, by the name the shell gives it. */
 const paneFrame = (name: string): Frame => {
   const root = find(`[data-pane="${name}"]`)
   return {
@@ -65,7 +53,6 @@ const paneFrame = (name: string): Frame => {
   }
 }
 
-/** Every frame the chat painted from the moment it was armed, and every word a change wrote. */
 function recordFrames(read: () => Frame) {
   const frames: Frame[] = []
   const written: string[] = []
@@ -88,10 +75,6 @@ function recordFrames(read: () => Frame) {
   }
 }
 
-/**
- * Asserts the pane painted the chat it held until the chat asked for, and never a word of the states
- * in between: not the setup copy, not an untitled header, not the line a new chat greets with.
- */
 function onlyReadyFrames(seen: ReturnType<typeof recordFrames>, before: string, after: string) {
   seen.stop()
   assert.ok(seen.frames.length > 0, "the switch painted something")
@@ -107,7 +90,6 @@ function onlyReadyFrames(seen: ReturnType<typeof recordFrames>, before: string, 
   )
 }
 
-/** What a switch wrote of the greeting, so a test can prove it wrote nothing. */
 const greetingKeys = () =>
   Array.from({ length: localStorage.length }, (_, at) => localStorage.key(at) ?? "")
     .filter((key) => key === "memento:last-greeted" || key.startsWith("memento:line-turn:"))
@@ -118,7 +100,6 @@ const paneText = (name = "route") => find(`[data-pane="${name}"]`)?.textContent 
 const paneTitle = () =>
   find('[data-pane="route"] [data-slot="header-title"]')?.textContent?.trim() ?? ""
 
-/** The card Main draws for a thread, which opens it in the pane beside it. */
 const card = (id: string) => find(`[data-slot="thread-card"] a[href="/c/${id}"]`)
 
 test("a chat switched to in place holds the one it left until its own answers are in", async () => {
@@ -253,13 +234,11 @@ test("a chat answered gone lands as its own empty state, in the place it was ask
   await mount(phone("/c/c-a", "/c/c-b"), async () => {
     await until(async () => paneText().includes("alpha one"), "the chat on screen")
     const greeting = greetingKeys()
-    // Deleted on another board, then opened here: the row is gone, and that is an answer too.
     await db.conversations.delete("c-b")
     await db.messages.where("conversationId").equals("c-b").delete()
     await settle()
 
     await click(find("[data-switch]"))
-    // Landed: the pane answers the reader, and it is no longer the chat that was on screen.
     await until(
       async () => !paneFrame("route").holding && !paneText().includes("alpha one"),
       "the chat that answered gone to land",
@@ -269,8 +248,6 @@ test("a chat answered gone lands as its own empty state, in the place it was ask
     assert.equal(path(), "/c/c-b", "the chat keeps the place it was asked for")
     assert.ok(!paneText().includes("beta one"), "nothing of the chat this device no longer has")
     assert.ok(!paneText().includes(SETUP_COPY), "and never the setup copy")
-    // Its own empty state, and its own header: a chat that is gone is never a chat that is new, so
-    // it says no title rather than "New chat" — no row is left here to read the title it had from.
     assert.equal(paneTitle(), "", "the header stands empty, as the row it read is gone")
     assert.ok(!paneText().includes("New chat"), "and a gone chat is never drawn as a new one")
     assert.deepEqual(
