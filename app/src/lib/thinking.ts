@@ -17,10 +17,15 @@ export type ReasoningRun = {
 /** A run being watched: its first delta and its last, so its span is the thinking and nothing else. */
 type Watching = { firstAt: number; lastAt: number; span?: number }
 
+/**
+ * How many replies' spans are kept. A reply keeps a handful of runs, so counting replies rather than
+ * entries is what a long session actually needs, and evicting a whole reply at once never leaves a
+ * span closing against another run's first delta.
+ */
 const KEEP_SPANS = 2_000
-const watching = new Map<string, Watching>()
 
-const watchedKey = (id: string, index: number) => `${id}\u0000${index}`
+/** The replies being watched, in the order they started, each with its runs by index. */
+const watching = new Map<string, Map<number, Watching>>()
 
 export function formatThoughtSpan(ms: number) {
   const seconds = Math.max(1, Math.round(ms / 1000))
@@ -51,36 +56,46 @@ export function appendThinking(
   const last = kept.at(-1)
   if (last && last.afterToolId === afterToolId) {
     const grown = wholeBlock ? `${last.text}\n\n${text}` : last.text + text
-    return [...kept.slice(0, -1), { ...last, text: grown }]
+    const next = kept.slice()
+    next[next.length - 1] = { ...last, text: grown }
+    return next
   }
   return [...kept, afterToolId === undefined ? { text } : { text, afterToolId }]
 }
 
+/** Whether a run has no words to draw: a blank delta or a block of whitespace is not a run. */
+const blank = (run: ReasoningRun) => !/\S/.test(run.text)
+
 /**
  * The runs a stored reply carries. A row from before runs kept its thinking in one string: it folds
- * into a single run at the top, so nothing written earlier has to be migrated to be drawn.
+ * into a single run at the top, so nothing written earlier has to be migrated to be drawn. A run with
+ * no words is dropped here rather than by each reader, so what counts runs and what draws them agree.
  */
 export function runsOf(message: {
   reasoningRuns?: ReasoningRun[]
   reasoning?: string
 }): ReasoningRun[] {
-  if (message.reasoningRuns) return message.reasoningRuns
-  return message.reasoning ? [{ text: message.reasoning }] : []
+  const runs = message.reasoningRuns ?? (message.reasoning ? [{ text: message.reasoning }] : [])
+  return runs.some(blank) ? runs.filter((run) => !blank(run)) : runs
 }
 
 /** A delta or a block of this run arrived: the span starts at the first one and ends at the last. */
 export function noteRunThinking(id: string, index: number, at = Date.now()) {
-  const key = watchedKey(id, index)
-  const entry = watching.get(key)
+  let runs = watching.get(id)
+  if (!runs) {
+    if (watching.size >= KEEP_SPANS) {
+      const oldest = watching.keys().next().value
+      if (oldest !== undefined) watching.delete(oldest)
+    }
+    runs = new Map()
+    watching.set(id, runs)
+  }
+  const entry = runs.get(index)
   if (entry) {
     if (entry.span === undefined) entry.lastAt = at
     return
   }
-  if (watching.size >= KEEP_SPANS) {
-    const oldest = watching.keys().next().value
-    if (oldest !== undefined) watching.delete(oldest)
-  }
-  watching.set(key, { firstAt: at, lastAt: at })
+  runs.set(index, { firstAt: at, lastAt: at })
 }
 
 /**
@@ -88,7 +103,7 @@ export function noteRunThinking(id: string, index: number, at = Date.now()) {
  * the span once, and never counts the wait after the last delta as thinking.
  */
 export function closeRun(id: string, index: number): number | undefined {
-  const entry = watching.get(watchedKey(id, index))
+  const entry = watching.get(id)?.get(index)
   if (!entry || entry.span !== undefined) return undefined
   entry.span = Math.max(0, entry.lastAt - entry.firstAt)
   return entry.span
@@ -96,22 +111,27 @@ export function closeRun(id: string, index: number): number | undefined {
 
 /** Drops what was measured for a reply whose runs are replaced wholesale and start again. */
 export function forgetRuns(id: string) {
-  const prefix = `${id}\u0000`
-  for (const key of [...watching.keys()]) if (key.startsWith(prefix)) watching.delete(key)
+  watching.delete(id)
 }
 
 /**
- * A transcript's runs, each keeping the span this device measured for the same run in the same place
- * — the same text at the same index. The transcript has no timings, so a run whose text moved keeps
- * none rather than wearing a number measured for another stretch.
+ * A transcript's runs, each keeping the span this device measured for the same run — the same words
+ * after the same call. The transcript has no timings, so a run whose text moved keeps none rather
+ * than wearing a number measured for another stretch. Two runs with no call between them are told
+ * apart by their place among the unanchored ones, since nothing else tells them apart.
  */
 export function carrySpans(
   runs: ReasoningRun[] | undefined,
   local: ReasoningRun[] | undefined,
 ): ReasoningRun[] | undefined {
   if (!runs) return undefined
-  return runs.map((run, index) => {
-    const kept = local?.[index]
+  if (!local?.length) return runs
+  const top = local.filter((run) => !run.afterToolId)
+  let among = 0
+  return runs.map((run) => {
+    const kept = run.afterToolId
+      ? local.find((one) => one.afterToolId === run.afterToolId && one.text === run.text)
+      : top[among++]
     if (!kept || kept.text !== run.text || typeof kept.spanMs !== "number") return run
     return { ...run, spanMs: kept.spanMs }
   })

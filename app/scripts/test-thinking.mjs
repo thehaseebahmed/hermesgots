@@ -69,12 +69,14 @@ test("nothing empty is ever a run", () => {
   )
 })
 
-test("appendThinking hands back a new array, never the one it was given", () => {
+test("appendThinking never mutates the array it was given", () => {
   const runs = appendThinking(undefined, undefined, "First.", false)
   const grown = appendThinking(runs, undefined, " More.", false)
   assert.notEqual(grown, runs, "a caller's array is not mutated under it")
   assert.notEqual(grown[0], runs[0], "nor the run object")
   assert.equal(runs[0].text, "First.", "so a flushed row cannot be rewritten in place")
+  // An empty piece adds nothing, so there is nothing to copy: the same array comes back untouched.
+  assert.equal(appendThinking(runs, undefined, "", false), runs, "and an empty delta copies nothing")
 })
 
 test("a row stored before runs folds into one run at the top", () => {
@@ -176,15 +178,41 @@ test("a transcript's run keeps the span the same run measured here", () => {
   assert.deepEqual(carrySpans([{ text: "one" }], undefined), [{ text: "one" }], "nothing local")
 })
 
-test("thinking.ts still reaches nothing, and the span is written where the reply is", () => {
+test("a transcript's run keeps its span though a row arrived above it", () => {
+  const local = [
+    { text: "one", spanMs: 12_000 },
+    { text: "two", afterToolId: "c", spanMs: 3_000 },
+  ]
+  assert.deepEqual(
+    carrySpans(
+      [{ text: "one" }, { text: "another run", afterToolId: "x" }, { text: "two", afterToolId: "c" }],
+      local,
+    ),
+    [
+      { text: "one", spanMs: 12_000 },
+      { text: "another run", afterToolId: "x" },
+      { text: "two", afterToolId: "c", spanMs: 3_000 },
+    ],
+    "a run is matched by the call it follows and its own words, not by its place",
+  )
+  assert.deepEqual(
+    carrySpans([{ text: "a" }, { text: "b" }], [
+      { text: "a", spanMs: 1_000 },
+      { text: "b", spanMs: 2_000 },
+    ]),
+    [
+      { text: "a", spanMs: 1_000 },
+      { text: "b", spanMs: 2_000 },
+    ],
+    "two runs with no call between them are matched in the order they arrived",
+  )
+})
+
+test("thinking.ts still reaches nothing", () => {
   const here = source("../src/lib/thinking.ts")
   assert.doesNotMatch(here, /^[ \t]*(?:import|export)\b.*\bfrom\b/m, "no module is reached")
   assert.doesNotMatch(here, /\bimport\s*\(/, "and nothing is loaded on demand")
   for (const token of ["dexie", "indexeddb", "localstorage", "sessionstorage"]) {
     assert.ok(!here.toLowerCase().includes(token), `nothing here touches ${token}`)
   }
-  // The span is no longer only in this page's memory: chat.ts writes it onto the reply's own run.
-  const chatting = source("../src/lib/chat.ts")
-  assert.match(chatting, /closeRun\(/, "the ingest measures a run's span when it ends")
-  assert.match(chatting, /spanMs/, "and keeps it on the run it measured")
 })

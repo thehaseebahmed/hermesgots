@@ -247,7 +247,9 @@ function closeThinkingRun(turn: Turn) {
   if (turn.resumed || !runs?.length) return
   const span = closeRun(turn.draft.id, runs.length - 1)
   if (span === undefined) return
-  turn.draft.reasoningRuns = [...runs.slice(0, -1), { ...runs[runs.length - 1], spanMs: span }]
+  const next = runs.slice()
+  next[next.length - 1] = { ...next[next.length - 1], spanMs: span }
+  turn.draft.reasoningRuns = next
 }
 
 /** What Hermes's clarify tool returns for the answers given, so a question reads the same live and from the transcript. */
@@ -311,8 +313,9 @@ function streamHandlers(turn: Turn): StreamHandlers {
   // completion, a steer, an approval or a question never moves it — only a call breaks a run.
   let anchor: string | undefined = draft.reasoningRuns?.at(-1)?.afterToolId
   const addThinking = (text: string, wholeBlock: boolean) => {
+    // A silent delta or block has nothing to draw, and nothing to time either.
+    if (!text) return
     const next = appendThinking(draft.reasoningRuns, anchor, text, wholeBlock)
-    if (next === draft.reasoningRuns) return
     draft.reasoningRuns = next
     if (watchedHere) noteRunThinking(draft.id, next.length - 1)
   }
@@ -708,6 +711,9 @@ async function finishTurn(turn: Turn, usage: TurnUsage | undefined, sendFailed =
   draft.runId = undefined
   draft.runSeq = undefined
   await turn.close()
+  // The turn's runs are final: nothing can add to them now, and anything that resumes later notes
+  // its run afresh. Freeing the watcher here keeps a long session's entries to its live turns.
+  forgetRuns(draft.id)
   if (!sendFailed) {
     noteFollowUps(conversationId)
     void refreshContext(conversationId).catch(quietly("Reading a chat's context"))
@@ -1210,6 +1216,9 @@ async function adoptRun(conversation: Conversation, profile: Profile) {
     runSeq: undefined,
   }
   await db.messages.put(adopted)
+  // The reply's runs are rebuilt from the replay, so whatever this device measured for the old ones
+  // goes with them.
+  forgetRuns(adopted.id)
   await resumeReply(adopted)
 }
 
