@@ -1,8 +1,9 @@
 /**
  * A reply's thinking, kept in runs: one per contiguous stretch of thinking between tool calls, each
- * anchored to the call that broke it. The rules here are pure and reach nothing, so
+ * anchored to the call that broke it, and drawn as the rows it touches: `mergeThoughtRows` is the one
+ * rule for when two of them are one. The rules here are pure and reach nothing, so
  * `scripts/test-thinking.mjs` drives them without a screen; the ingest that fills them in is
- * `chat.ts`, and the thread that draws them is `message-item.tsx`. See ADR 0038.
+ * `chat.ts`, and the thread that draws them is `message-item.tsx`. See ADR 0038 and ADR 0049.
  */
 
 /** One stretch of a reply's thinking, and the tool call it followed. */
@@ -37,6 +38,70 @@ export function thinkingLabel({ thinking, spanMs }: { thinking: boolean; spanMs?
   if (thinking) return "Thinking…"
   if (typeof spanMs === "number") return `Thought for ${formatThoughtSpan(spanMs)}`
   return "Thought it through"
+}
+
+/** One stretch of a reply's thinking as a row draws it: its words, and what its label reads from. */
+export type ThoughtStretch = Omit<ReasoningRun, "afterToolId"> & { thinking: boolean }
+
+/** A drawn row and the places it covers in the drawn list, which are the segment's own indices. */
+export type ThoughtRow = {
+  row: ThoughtStretch
+  /** Where the row's first stretch was drawn. */
+  from: number
+  /** Where its last one was, so `from === to` is a stretch nothing merged with. */
+  to: number
+}
+
+/**
+ * The rows a reply's thinking is drawn as, from the stretches a segment placed in order — a `null`
+ * standing for anything else drawn at that place (a tool group, a card, text, a block), which is what
+ * keeps two rows apart. Consecutive stretches become one row: their words joined as paragraphs, in
+ * the order they arrived and none dropped; thinking while any of them still is; and carrying a span
+ * only where every one of them has one, since a sum over a stretch nobody watched would claim less
+ * time than the thinking took. Two replies' lists never meet, so rows in different replies never
+ * merge.
+ *
+ * Each row also answers which places it covers, so this is the only walk that decides where a group
+ * of touching stretches ends: a caller draws a row where `from` was and skips to `to`, rather than
+ * scanning the list again to find the same edges.
+ */
+export function mergeThoughtRows(drawn: readonly (ThoughtStretch | null)[]): ThoughtRow[] {
+  const rows: ThoughtRow[] = []
+  let from = -1
+  const flush = (to: number) => {
+    if (from < 0) return
+    // One stretch nothing touched is the row it was drawn as: nothing to join, so the object the
+    // caller handed over is drawn again rather than rebuilt on every redraw of a common reply.
+    rows.push({
+      row: from === to ? (drawn[from] as ThoughtStretch) : joined(drawn, from, to),
+      from,
+      to,
+    })
+    from = -1
+  }
+  for (let at = 0; at < drawn.length; at++) {
+    if (drawn[at]) {
+      if (from < 0) from = at
+    } else flush(at - 1)
+  }
+  flush(drawn.length - 1)
+  return rows
+}
+
+/** The row a run of touching stretches draws as: their words, their label truth and their span. */
+function joined(
+  drawn: readonly (ThoughtStretch | null)[],
+  from: number,
+  to: number,
+): ThoughtStretch {
+  const group = drawn.slice(from, to + 1).filter((one): one is ThoughtStretch => one !== null)
+  const row: ThoughtStretch = {
+    text: group.map((one) => one.text).join("\n\n"),
+    thinking: group.some((one) => one.thinking),
+  }
+  if (group.every((one) => typeof one.spanMs === "number"))
+    row.spanMs = group.reduce((sum, one) => sum + (one.spanMs ?? 0), 0)
+  return row
 }
 
 /**

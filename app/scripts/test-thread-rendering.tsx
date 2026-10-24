@@ -10,7 +10,7 @@ import { MemoryRouter, Route, Routes } from "react-router"
 
 import { AgentCards } from "@/components/chat/agent-card"
 import { AgentsContext, DELEGATE_TOOL } from "@/lib/agents"
-import { db, type Message, type Profile } from "@/lib/db"
+import { db, type Message, type Profile, type Settings } from "@/lib/db"
 import type { HermesConfig } from "@/lib/hermes"
 import { ChatPage } from "@/routes/chat"
 import {
@@ -83,8 +83,9 @@ async function screen(
   projectId: string | undefined,
   messages: Message[],
   body: () => Promise<void>,
+  settings: Partial<Omit<Settings, "id">> = {},
 ) {
-  await seedSettings()
+  await seedSettings(settings)
   await db.profiles.clear()
   await db.profiles.put(bot)
   await db.messages.clear()
@@ -347,6 +348,90 @@ test("a delegated agent's sub-thread draws its reply's thinking", async () => {
         "read back from the transcript, so no number was measured here",
       )
       assert.equal(expanded(lines[0]), "false", "and folded over its answer, as a chat's row is")
+    },
+  )
+})
+
+test("with the switch on, a sub-thread folds its thinking as a chat's reply does", async () => {
+  const goal = "Review the parser for the reader"
+  const thinking = "Read the scan before its blocks."
+  host([
+    { id: 1, role: "user", content: ASK, timestamp: 1 },
+    { id: 2, role: "assistant", content: REPLY, reasoning: thinking, timestamp: 2 },
+  ])
+  const tool = {
+    toolCallId: "call-1",
+    tool: DELEGATE_TOOL,
+    label: goal,
+    status: "completed" as const,
+    startedAt: 1_000,
+    endedAt: 2_000,
+  }
+  // The chat surface beside it: a reply still thinking, which the switch folds rather than opening.
+  const streaming: Message[] = [
+    { id: "ask", conversationId: "", role: "user", content: ASK, status: "done", createdAt: 1 },
+    {
+      id: "reply",
+      conversationId: "",
+      role: "assistant",
+      content: REPLY,
+      status: "done",
+      createdAt: 2,
+      reasoningRuns: [{ text: thinking }],
+    },
+  ]
+  await screen(
+    undefined,
+    streaming,
+    async () => {
+      // The turn starts thinking: an empty reply with its first stretch in, as the ingest leaves it.
+      await db.messages.put({
+        ...(await db.messages.get("reply"))!,
+        content: "",
+        status: "streaming",
+      })
+      await settle()
+      const [line] = thinkingLines()
+      assert.ok(line, "the chat's reply draws its thinking")
+      assert.equal(lineLabel(line), "Thinking…", "still thinking, so the label says so")
+      assert.equal(expanded(line), "false", "and the switch holds it folded rather than opening it")
+    },
+    { foldThinkingByDefault: true },
+  )
+  await mount(
+    <AgentsContext.Provider
+      value={{
+        agents: [
+          {
+            id: "agent-folded",
+            goal,
+            model: "test/model",
+            startedAt: 1,
+            endedAt: 2,
+            toolCalls: 1,
+            status: "done",
+          },
+        ],
+        server,
+      }}
+    >
+      <AgentCards tool={tool} />
+    </AgentsContext.Provider>,
+    async () => {
+      const card = document.querySelector("button")
+      assert.ok(card, "the delegation is a card in the thread")
+      await click(card)
+      await rendered()
+      const lines = thinkingLines()
+      assert.equal(lines.length, 1, "the sub-thread keeps its reply's thinking as a row")
+      assert.equal(
+        lineLabel(lines[0]),
+        "Thought it through",
+        "read back from a finished transcript, so nothing was measured here",
+      )
+      // A transcript's reply arrives written, so it never streams: the switch reaches this row
+      // through the same setting as a chat's, and the row it draws is folded either way.
+      assert.equal(expanded(lines[0]), "false", "and folded, under the switch the chat beside it read")
     },
   )
 })

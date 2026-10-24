@@ -65,9 +65,9 @@ Send these phrases in a chat message to trigger specific mock behaviors:
 | `plan` | Enters plan mode: agent reads, asks clarify questions, writes structured plan, leaves it pending |
 | `clean` / `delete` | Triggers approval request for `find /var/log -name '*.log.*' -mtime +90 -delete` |
 | `long` / `slow` | 20-step slow reply (1s per step) — tests stream resume after disconnect |
-| `think out loud` | Four paced reasoning pieces before the answer, with a `du -sh /var/log` call between the second and the third (recorded in the transcript with its result): one `reasoning.available` event per piece on a run, one `reasoning_content` delta per piece on a completion — so the thinking either side of the call is a run of its own |
-| `think out loud` + `stall` | The same four pieces and call, then a 2.5s hold after the last with nothing else on the wire, so a client's thinking rows are the only thing on it |
-| `think at length` (+ `stall`) | One long working-out before the answer: eight paragraphs of markdown, taller than a row is drawn, so the opened row reads at its cap with a fade and a Show more over the rest; with `stall`, a hold after the last piece |
+| `think out loud` | Three paced stretches of reasoning before the answer, each of two or three pieces, with a look at the disk after the first two — `du -sh /var/log`, then `journalctl --disk-usage` run back to back with no reply text between them (both recorded in the transcript with their results): one `reasoning.available` event per piece on a run, one `reasoning_content` delta per piece on a completion — so the thinking before the calls is one run and the two stretches that follow them are two runs that touch, drawn as one row under one tool group |
+| `think out loud` + `stall` | The same three stretches and two calls, then a 2.5s hold after the last with nothing else on the wire, so a client's thinking rows are the only thing on it |
+| `think at length` (+ `stall`) | One long working-out before the answer: eight paragraphs of markdown, far taller than any row is held to, so an open row draws all of it and the thread scrolls over it; with `stall`, a hold after the last piece |
 | `draw the interface` | A reply carrying an interface: an `openui-lang` block with `# id: sales`, the receipt under it (long enough to scroll a phone's thread), a pause, then a patch block reusing that id — it changes the card and table in place and draws nothing where it sits — then a block naming a component the library doesn't have (it draws as the code the model sent), then a closing line. One reply, so a patch never arrives as a second message |
 | `fail` | Tool call fails with "Permission denied" |
 | `ask` | Single clarify question: "Which logs should I count as old?" |
@@ -311,18 +311,20 @@ pnpm mock
 ```bash
 pnpm mock
 # In chat: "think out loud, then stall"
-# Watch the reply: the working line up before any reasoning, then gone while the four pieces
-# stream with their rows open and nothing else on the wire
-# The mock runs a `du -sh /var/log` call between the second and third pieces, so the thinking either
-# side of it is a row of its own: two rows, each drawn where it happened, around the call's own row
-# The first answer token folds both, each reading "Thought for 7s"; reload the thread and both keep
-# that number, because the span sits on the reply's own runs, measured on the device that watched
+# Watch the reply: the working line up before any reasoning, then gone while the stretches stream
+# with their rows open and nothing else on the wire
+# The mock runs `du -sh /var/log` and `journalctl --disk-usage` back to back after the first two
+# stretches, so the thinking before them is a row above one tool group and the two stretches that
+# follow are two runs that touch — drawn as ONE row under it, holding every word of both
+# The first answer token folds every row at once: the run above the group reads the span it measured
+# and the merged row the sum of the two it holds; reload the thread and both keep their numbers,
+# because the spans sit on the reply's own runs, measured on the device that watched
 # A run nothing measured — a reply read back from a transcript, or another device's chat — reads
 # "Thought it through", with no figure at all
 
 # In chat: "think at length"
-# The one long run outgrows its cap as it streams: the opened row shows a screenful of it with a fade
-# at that edge and a Show more under it, and Show more reads the rest inline
+# The one long run is drawn whole: the opened row shows all eight paragraphs, past a screen's height,
+# with no cap, no fade and no Show more — the thread simply scrolls over it
 ```
 
 ### 14. Test an Interface in a Thread

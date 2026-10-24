@@ -1,4 +1,4 @@
-import { Fragment, Suspense, lazy, memo, useMemo, type ReactNode } from "react"
+import { Fragment, Suspense, lazy, memo, useMemo, useState, type ReactNode } from "react"
 import {
   AlertCircleIcon,
   ClockIcon,
@@ -34,7 +34,7 @@ import { attachmentSources, mediaRead, useMediaSources } from "@/lib/media-sourc
 import { mediaImages } from "@/lib/media-tags"
 import { openuiParts, REPLY_INSET } from "@/lib/openui-block.ts"
 import type { InterfaceDraw, ThreadBlock } from "@/lib/openui-thread.ts"
-import { runsOf, type ReasoningRun } from "@/lib/thinking"
+import { mergeThoughtRows, runsOf } from "@/lib/thinking"
 import { cn } from "@/lib/utils"
 import { useReveal } from "@/lib/reveal"
 import { isPlanApproval } from "@/lib/workspace"
@@ -60,11 +60,20 @@ type Part =
   | { kind: "agent"; tool: ToolEvent }
   | ({ kind: "thinking" } & RunPart)
 
+/**
+ * One thought row as the thread draws it: what `thinking.ts` merged, and the key the row keeps. The
+ * call a stretch follows is here for placing it and gone from a merged row, since placement has
+ * already happened by the time two rows become one.
+ */
 type RunPart = {
-  run: ReasoningRun
-  /** This run's row streams open: it is the reply's newest run and the reply is still thinking. */
-  thinking: boolean
   key: string
+  text: string
+  /** How long this device watched the stretch think, where it watched all of it. */
+  spanMs?: number
+  /** The row still streams: the reply is thinking and nothing has measured it end yet. */
+  thinking: boolean
+  /** The call this stretch follows; absent on the run at the top of a reply, and on a merged row. */
+  afterToolId?: string
 }
 
 /** A stretch of a reply: the text between breaks, and the calls started inside it. */
@@ -72,6 +81,9 @@ type Segment = { start: number; end: number; tools: ToolEvent[] }
 
 /** A segment with no run of its own, so a reply that never thought allocates nothing. */
 const NO_RUNS: RunPart[] = []
+
+/** No row tapped either way: the state a reply starts in, and the one the fold moment returns to. */
+const NO_TAPS: ReadonlyMap<string, boolean> = new Map()
 
 function rowBlocks(content: string, blocks: ThreadBlock[] | undefined, streaming: boolean) {
   const parts = openuiParts(content)
@@ -99,13 +111,14 @@ function rowBlocks(content: string, blocks: ThreadBlock[] | undefined, streaming
  * The segment a run's row belongs to: the one holding the call it follows — or, for a call this
  * thread doesn't draw as a tool row (a question asked as a form), the one that held it.
  */
-function segmentOf(run: ReasoningRun, segments: Segment[], tools: ToolEvent[]) {
-  if (!run.afterToolId) return 0
+function segmentOf(part: RunPart, segments: Segment[], tools: ToolEvent[]) {
+  const afterToolId = part.afterToolId
+  if (!afterToolId) return 0
   const found = segments.findIndex((segment) =>
-    segment.tools.some((tool) => tool.toolCallId === run.afterToolId),
+    segment.tools.some((tool) => tool.toolCallId === afterToolId),
   )
   if (found >= 0) return found
-  const at = tools.find((tool) => tool.toolCallId === run.afterToolId)?.contentOffset ?? 0
+  const at = tools.find((tool) => tool.toolCallId === afterToolId)?.contentOffset ?? 0
   const held = segments.findLastIndex((segment) => at >= segment.start)
   return Math.max(0, held)
 }
@@ -120,7 +133,7 @@ function segmentOf(run: ReasoningRun, segments: Segment[], tools: ToolEvent[]) {
  */
 function placeThinking(parts: Part[], runs: RunPart[]): Part[] {
   const row = (run: RunPart): Part => ({ kind: "thinking", ...run })
-  const leading = runs.filter((run) => !run.run.afterToolId)
+  const leading = runs.filter((run) => !run.afterToolId)
   const placed: Part[] = [...leading.map(row), ...parts]
   const lastCall = placed.findLastIndex(
     (part) => part.kind === "tools" || part.kind === "clarify" || part.kind === "agent",
@@ -128,7 +141,7 @@ function placeThinking(parts: Part[], runs: RunPart[]): Part[] {
   const top = leading.length - 1
   const inserted = new Map<number, number>()
   for (const part of runs) {
-    const id = part.run.afterToolId
+    const id = part.afterToolId
     if (!id) continue
     const found = placed.findIndex(
       (one) =>
@@ -154,6 +167,34 @@ function huggingTools(parts: Part[], index: number) {
   const bottom = beside(parts[index + 1])
   if (top && bottom) return "-my-2"
   return top ? "-mt-2" : bottom ? "-mb-2" : undefined
+}
+
+/**
+ * Joins the rows a segment placed with nothing between them: consecutive thought rows are drawn as
+ * one, where the first of them was, keeping its key and taking the joined words and the label truth
+ * from `mergeThoughtRows` — the one walk that says where a group ends, so nothing here counts rows
+ * again. Anything else drawn at a place in the segment — a tool group, a card, text, media, an
+ * interface block — is a part of its own, which is what keeps two rows apart, and each segment merges
+ * alone, so the steer or approval that split the reply splits its rows too.
+ */
+function mergeThinking(parts: Part[]): Part[] {
+  // The stretch is the drawn value itself, so a row nothing merged with is the object that was placed.
+  const rows = mergeThoughtRows(parts.map((part) => (part.kind === "thinking" ? part : null)))
+  // Nothing touched anything, which is most replies: drawn as placed, and nothing rebuilt per redraw.
+  if (rows.every((one) => one.from === one.to)) return parts
+  const merged: Part[] = []
+  let at = 0
+  for (const { row, from, to } of rows) {
+    const head = parts[from]
+    // A row is only ever drawn where a thought stretch was placed.
+    if (head.kind !== "thinking") continue
+    for (; at < from; at++) if (parts[at].kind !== "thinking") merged.push(parts[at])
+    // The first stretch's key, so the row survives the merge as the same tree node.
+    merged.push({ ...row, kind: "thinking", key: head.key })
+    at = to + 1
+  }
+  for (; at < parts.length; at++) if (parts[at].kind !== "thinking") merged.push(parts[at])
+  return merged
 }
 
 /**
@@ -207,7 +248,7 @@ function toParts(
     else parts.push({ kind: "tools", tools: [tool] })
   }
   if (cursor < end) pushText(end)
-  return placeThinking(parts, runs)
+  return mergeThinking(placeThinking(parts, runs))
 }
 
 function Stats({ message }: { message: Message }) {
@@ -402,6 +443,8 @@ interface MessageItemProps {
   blocks?: ThreadBlock[]
   /** Whether a reply is streaming in this chat, so queued messages know they'll go on their own. */
   busy?: boolean
+  /** Appearance's Fold thinking by default: no row opens on its own, and the working line speaks. */
+  foldThinking: boolean
 }
 
 /**
@@ -414,6 +457,7 @@ export const MessageItem = memo(function MessageItem({
   showStats,
   blocks,
   busy,
+  foldThinking,
 }: MessageItemProps) {
   // Replies type out a word at a time, however Hermes delivers them.
   const content = useReveal(message.role === "assistant" ? message.content : "")
@@ -426,17 +470,36 @@ export const MessageItem = memo(function MessageItem({
   // revealed, and none of that moves a run or opens one.
   const storedRuns = message.reasoningRuns
   const storedReasoning = message.reasoning
-  const thinkingOpen = message.status === "streaming" && !message.content
+  const working = message.status === "streaming" && !message.content
   const thinking: RunPart[] = useMemo(() => {
     const runs = runsOf({ reasoningRuns: storedRuns, reasoning: storedReasoning })
     return runs.map((run, index) => ({
-      run,
+      ...run,
       key: `run-${index}`,
-      // A span is stamped exactly when its run ends, so a run carrying one is done and stays folded:
-      // re-opening it over the call it broke would throw away the number it measured.
-      thinking: index === runs.length - 1 && thinkingOpen && run.spanMs === undefined,
+      // A span is stamped exactly when its run ends, so a run carrying one has no words still
+      // arriving: the label reads what it measured, whatever the row's openness.
+      thinking: index === runs.length - 1 && working && run.spanMs === undefined,
     }))
-  }, [storedRuns, storedReasoning, thinkingOpen])
+  }, [storedRuns, storedReasoning, working])
+  // Every row's openness is answered here and nowhere else: one place knows whether any row of the
+  // turn lies open, which is what the working line has to ask.
+  //
+  // The latch: the rows that have streamed open on this visit, by key, so a row stays open after its
+  // own stretch ends until the answer begins or the turn ends. It lives with the reply, so it is
+  // dropped on remount, and it is never written down — a row drawn from storage starts closed.
+  const [latched, setLatched] = useState<ReadonlySet<string>>(() => new Set())
+  // The reader's own taps for this visit, by key: an event, so an ordinary write. A tap lasts the
+  // visit and is what a reload forgets.
+  const [tapped, setTapped] = useState<ReadonlyMap<string, boolean>>(NO_TAPS)
+  // The fold moment: the answer beginning or the turn ending folds every row of the turn together,
+  // including one the reader opened, so the taps go with it. Adjusted in the render that sees the
+  // change rather than in an effect, so the fold lands in the same commit as the answer; a reply that
+  // mounts already folded has no tap to drop.
+  const [wasWorking, setWasWorking] = useState(working)
+  if (wasWorking !== working) {
+    setWasWorking(working)
+    if (!working) setTapped(NO_TAPS)
+  }
   // The turn failed: a user message whose send never got there, or a reply that errored instead of
   // answering. The one kept in the thread waits to be sent again; the other says so plainly.
   const failed = message.status === "error"
@@ -549,14 +612,55 @@ export const MessageItem = memo(function MessageItem({
 
   const thinkingBySegment = new Map<number, RunPart[]>()
   for (const part of thinking) {
-    const at = segmentOf(part.run, segments, tools)
+    const at = segmentOf(part, segments, tools)
     const batch = thinkingBySegment.get(at)
     if (batch) batch.push(part)
     else thinkingBySegment.set(at, [part])
   }
-  // With a row open, the working line would say what the row already says.
+  // Each segment's parts as it draws them, before anything is rendered: what a row is open asks of
+  // the rows themselves, and a merged row is one row with one key.
+  const drawn = segments.map((segment, i) =>
+    toParts(
+      content.slice(segment.start, segment.end),
+      segment.tools,
+      segment.start,
+      spans,
+      thinkingBySegment.get(i) ?? NO_RUNS,
+    ),
+  )
+  // A row joins the latch as it streams, adjusted in the render that finds it rather than in an
+  // effect: a reply redraws with every token, and a state written after each of those would cost a
+  // render apiece — this settles in one pass, whatever the token rate.
+  //
+  // Fold thinking by default gates the latch here, not the row's openness: the switch governs what
+  // opens on its own, so a row already open stays open for the visit, the next streaming row never
+  // joins, and rows latch again from the moment the switch goes back off.
+  let fresh: (Part & { kind: "thinking" }) | undefined
+  if (working && !foldThinking)
+    for (const parts of drawn) {
+      fresh = parts.find(
+        (part): part is Part & { kind: "thinking" } =>
+          part.kind === "thinking" && part.thinking && !latched.has(part.key),
+      )
+      if (fresh) break
+    }
+  if (fresh) setLatched(new Set(latched).add(fresh.key))
+  // The reader's tap where there is one, the latch while the turn works, else folded — exactly the
+  // reach the row used to work out for itself, answered once here.
+  const openOf = (part: RunPart) => tapped.get(part.key) ?? (working && latched.has(part.key))
+  // A tap is the reader asking this row open or shut for the visit, recorded against what the row
+  // shows now, so a row the latch holds open folds on one tap rather than two.
+  const toggle = (part: RunPart) => setTapped(new Map(tapped).set(part.key, !openOf(part)))
+  // The working line would say what a row already says, so it stands down only while a row really
+  // lies open reading "Thinking…" — not on a stretch merely thinking (with Fold thinking by default
+  // on nothing is open, so the turn must still say what it is doing), and not on an open row that
+  // reads a span, which says nothing about what the turn is doing now.
   const thinkingProgress =
-    thinking.some((part) => part.thinking) && !awaitingApproval && !awaitingClarify
+    drawn.some((parts) =>
+      parts.some((part) => part.kind === "thinking" && part.thinking && openOf(part)),
+    ) &&
+    !awaitingApproval &&
+    !awaitingClarify
 
   // A reply's stats come only once it is done and fully revealed, so they never count up.
   const statsShown = showStats && !streaming && !revealing && Boolean(message.stats)
@@ -590,15 +694,8 @@ export const MessageItem = memo(function MessageItem({
   return (
     <div className="flex flex-col gap-3">
       {message.subagent && <SubagentResultCard subagent={message.subagent} />}
-      {segments.map((segment, i) => {
-        const last = i === segments.length - 1
-        const parts = toParts(
-          content.slice(segment.start, segment.end),
-          segment.tools,
-          segment.start,
-          spans,
-          thinkingBySegment.get(i) ?? NO_RUNS,
-        )
+      {drawn.map((parts, i) => {
+        const last = i === drawn.length - 1
         return (
           <Fragment key={breaks[i - 1]?.key ?? "start"}>
             {i > 0 && breaks[i - 1].node}
@@ -608,6 +705,9 @@ export const MessageItem = memo(function MessageItem({
                 busy={busy}
                 ended={!streaming}
                 parts={parts}
+                openOf={openOf}
+                tapped={tapped}
+                onToggle={toggle}
               >
                 {last && footer}
               </AssistantRow>
@@ -642,6 +742,9 @@ function AssistantRow({
   busy,
   ended,
   parts,
+  openOf,
+  tapped,
+  onToggle,
   children,
 }: {
   conversationId: string
@@ -650,6 +753,12 @@ function AssistantRow({
   /** The reply has been written: the turn it belongs to has ended. */
   ended: boolean
   parts: Part[]
+  /** Whether a row of this reply lies open, as the thread answers it. */
+  openOf: (part: RunPart) => boolean
+  /** The rows the reader tapped on this visit, by key. */
+  tapped: ReadonlyMap<string, boolean>
+  /** Opens or folds a row for the visit. */
+  onToggle: (part: RunPart) => void
   children?: ReactNode
 }) {
   return (
@@ -674,9 +783,12 @@ function AssistantRow({
           ) : part.kind === "thinking" ? (
             <ThinkingLine
               key={part.key}
-              reasoning={part.run.text}
+              reasoning={part.text}
               thinking={part.thinking}
-              spanMs={part.run.spanMs}
+              spanMs={part.spanMs}
+              open={openOf(part)}
+              asked={tapped.has(part.key)}
+              onToggle={() => onToggle(part)}
               className={huggingTools(parts, index)}
             />
           ) : part.kind === "media" ? (
@@ -695,7 +807,10 @@ function AssistantRow({
               </Suspense>
             </div>
           ) : (
-            <Markdown key={part.at} className={cn(REPLY_INSET, "text-[15px] leading-relaxed", COLUMN)}>
+            <Markdown
+              key={part.at}
+              className={cn(REPLY_INSET, "text-[15px] leading-relaxed", COLUMN)}
+            >
               {part.text}
             </Markdown>
           ),
