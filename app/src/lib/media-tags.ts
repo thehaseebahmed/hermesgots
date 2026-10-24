@@ -2,7 +2,7 @@ import { connectionKey } from "@/lib/connection"
 import { cooldown } from "@/lib/cooldown"
 import { db } from "@/lib/db"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
-import { getPluginMedia, hasPluginFeature, type HermesConfig } from "@/lib/hermes"
+import { getPluginFeatureList, getPluginMedia, type HermesConfig } from "@/lib/hermes"
 
 export { mediaImages, type MediaPart } from "@/lib/media-parts"
 
@@ -38,7 +38,11 @@ export async function loadMediaImage(conversationId: string, path: string): Prom
   if (unsupported.cooling(key)) return null
   // One ask per server, kept for the page's life (and asked again when it fails), not one per
   // image: a gallery's images would otherwise ask about the plugin once each, as a reply streams.
-  if (!(await hasPluginFeature(profile, "media"))) {
+  const features = await getPluginFeatureList(profile)
+  // A Host that was away never answered, which isn't the same as one without the route: it is
+  // asked again rather than sat out for the route's cooldown.
+  if (!features) return null
+  if (!features.includes("media")) {
     unsupported.start(key)
     return null
   }
