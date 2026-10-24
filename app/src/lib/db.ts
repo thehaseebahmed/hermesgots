@@ -378,7 +378,11 @@ export type MessageStatus = "triaging" | "queued" | "streaming" | "done" | "erro
 export interface SubagentRef {
   /** The delegation Hermes dispatched it under, off the notification's own header. */
   delegationId?: string
-  /** Hermes's own ids for the subagents that finished (`sa-<task>-<hex>`), where the rows name them. */
+  /**
+   * Core's own ids for the subagents that finished (`sa-<task>-<hex>`), where the transcript names
+   * them. They never equal a plugin agent's `id` — that is the child's *session* id — so they are
+   * carried as what the call said, never matched on: the goal below is the join.
+   */
   ids: string[]
   /** The goals they were given: how the chat's agent list matches a result to its card. */
   goals: string[]
