@@ -17,20 +17,20 @@ ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
 
-The registry in `app/scripts/e2e/cli.mjs` holds **74 keys**, and every one of them has a row
-below. `pnpm e2e list` prints the same 74 keys, and the rows here are grouped by the ticket that
+The registry in `app/scripts/e2e/cli.mjs` holds **75 keys**, and every one of them has a row
+below. `pnpm e2e list` prints the same 75 keys, and the rows here are grouped by the ticket that
 takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
 | --- | --- |
-| stay | 14 |
+| stay | 15 |
 | component | 56 |
 | plugin | 2 |
 | delete | 2 |
-| **total** | **74** |
+| **total** | **75** |
 
-Of those 74, 68 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
-reuses `todos.mjs`, so 67 distinct files there) and 6 point at the older
+Of those 75, 69 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
+reuses `todos.mjs`, so 68 distinct files there) and 6 point at the older
 `app/scripts/regression-*.mjs`.
 
 #297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**.
@@ -78,21 +78,25 @@ components by the same rule, since the tab's sections, a row's health, the sheet
 removal's refusals are all rules over the plugin's answers, and only the tab's fifth width and the
 sheet's own box are geometry. So the registry holds 71 + 3 = **74** keys, the component verdicts are
 the 53 above plus those three: **56**, and the stays are unchanged at **14**.
+A fifteenth key has arrived with #584: `bot-settings`, a stay, because the settings restructure's
+two claims are geometry and history — the pane a page swaps into beside the list at a laptop's
+width, and the screens a phone pushes and presses back out of. So the registry holds 74 + 1 = **75**
+keys, the component verdicts are still **56**, and the stays are **15**.
 
 `app/scripts/test-e2e-registry.mjs`, a unit test, holds the registry and this page to each other:
 a key with no row here, a row with no key, a verdict outside the four, a count in the table above
-that its rows don't add up to, or a stay beyond the fourteen fails the app's gates. A new flow is then
+that its rows don't add up to, or a stay beyond the fifteen fails the app's gates. A new flow is then
 an argument this page has to carry, never a default (ADR 0019).
 
 Check any of it in one line:
 
 ```bash
-grep -c '^| `' docs/e2e-flow-audit.md                           # 74 rows, one per registry key
-grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 14
+grep -c '^| `' docs/e2e-flow-audit.md                           # 75 rows, one per registry key
+grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 15
 grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 56
 grep -c '^| `[a-z0-9-]*` | delete |' docs/e2e-flow-audit.md    # 2
 grep -c '^| `[a-z0-9-]*` | plugin |' docs/e2e-flow-audit.md    # 2
-cd app && pnpm -s e2e list | wc -l                             # 74 keys in the registry
+cd app && pnpm -s e2e list | wc -l                             # 75 keys in the registry
 git show 8a4e842^:app/scripts/e2e/cli.mjs |
   sed -n '/^const FLOWS = {/,/^}$/p' | grep -c '^  [a-z"-]*: {'  # 61, before goal mode left
 ```
@@ -229,6 +233,18 @@ proofs — the tab and its sheet at a phone's and a tablet's width, light and da
 | `skills-sheet` | component | A row's title opens the skill's sheet as a note: a properties block holding the Host's origin, readiness and setup where it has each beside the SKILL.md's own frontmatter as rows, the file's words drawn as prose, its linked files by group — a markdown one opened into the same sheet and read the same way, a script staying the code it is — and the header's back returning to the skill; a switched-off skill's sheet opens like any other's. It is a bottom sheet on a phone and the side drawer from 1024px, on screen at both. | The sheet's fields are a render over the Host's answer — `skillOrigin` and `skillSetup` are pure rules the unit tests own — while the sheet's own box, its bottom edge and the drawer's right edge are geometry no DOM without layout has. | The sheet's leg of `app/scripts/test-skills-tab.tsx`, which opens it, reads both of the Host's lines, opens a linked file and backs out; the drawer-versus-sheet choice is `usePopupDrawer`, not a width the DOM knows. |
 | `skills-remove` | component | The confirmation a removal asks first with, opened from the skill's sheet: a box no wider than a dialog's, centred across and down the screen and on screen at 390 and 1024px. | A control's presence, what it sends and what the Host's answer says are `canRemove`'s rule and the plugin's own list; the box the question is drawn in at either width is geometry. | The removal's leg of `app/scripts/test-skills-tab.tsx` holds what the flow used to: Remove's absence on a built-in, a plugin's skill and a row naming no origin, a cancel sending nothing, the one DELETE a confirm sends with the row gone, and the Host's refusal verbatim in the toast. |
 
+### Bot settings, its list and its pages — #584
+
+One key, and it is a stay: the settings restructure makes a bot's settings a list of pages, and the
+two things that changes are things no lower tier reaches — the pane a page swaps into beside the
+list at a laptop's width, and the screens a phone pushes over the menu and presses back out of.
+#582's shell and #585–#591's pages bring their own component tests; #584 is the ticket whose job is
+the flow.
+
+| Key | Verdict | What it asserts today | Why it moves | What replaces it |
+| --- | --- | --- | --- | --- |
+| `bot-settings` | stay | A bot's settings as a list of pages, at 1024px and on a 390px phone, light and dark. From the Settings menu's own bot row: at 1024px the menu's pane is gone and the bot's list is drawn wholly in its place, the out-of-date plugin's banner over it in its own words, General on its own and Chat and Coding each with a row under the two ownership headings and Coding's subtitle verbatim, General's page in the pane beside the list; tapping Chat leaves the address `/settings/bots/<id>/chat`, the pane beside the list Chat with General gone, and the same list element still on screen at the same box. On a phone the list pushes over the menu with a back control, a page pushes over the list with one of its own and covers it, `page.goBack()` lands back on the list rather than in Settings, and a second back lands on the menu. | It stays, as one of the fifteen: where a pane sits is layout, and what a back press lands on is the browser's own history stack — a render of the same router has neither, so it would pass whether the list swapped a pane or a page slid over it. | Nothing: a stay is replaced by itself, and `test-bot-settings-list.tsx` holds what the list draws without a browser (ADR 0019). |
+
 ### AFK — #304
 
 Nine keys: seven about the pop-up and the session it names, two about what the plugin itself
@@ -265,10 +281,11 @@ One key, the only one that walks the whole feature: #417–#421 each brought the
 | --- | --- | --- | --- | --- |
 | `bot-threads` | component | A bot opens its Main from home; its threads are cards at their start times, the first between the messages written either side of it and the last closing the flow; a card opens its thread and back returns to Main; `/thread` with text opens a thread holding that message, whose card is back on Main at its start and drawn without a marker. Then, on a mock answering `MOCK_TRIAGE=new`, the message leaves Main as its new thread's card carrying Undo and no marker; on one answering `MOCK_TRIAGE=thread` it keeps the Moved marker, linking the older thread it went to, with no card carrying the move. Last, at tablet width with the dark theme, a card, Main's day heading and the Moved line still draw, and the move's Undo is still there. Then the switch itself is sampled a painted frame at a time, on the pane the shell names, with a second bot added beside the first: a card's thread opened and back on a phone, and a bot's Main switched from the sidebar and back on a laptop, the thread beside it sampled through the same two switches — its lane only ever drawing the thread of the bot being left, the one asked for, or nothing while that one answers, never a lane calling the bot thread-less while its list is still answering. Every painted frame between the two chats is the one left, the one asked for, or the pane waiting on it — inert, untitled and carrying neither chat's words — never the setup copy, a `New chat` header or the new-chat hero, and never the chat left once a frame has left it; a long chat asked for may open on its newest rows, its title over rows of its own, and is drawn whole by the time the switch settles; the frame the arriving scroller holds itself invisible on, while it places the chat and its items still stand at their `content-visibility` estimate, is not a painted one and does not count, and from the first frame it does paint the arriving chat's content the last thing drawn there never moves: the reader is left at the end, and still. The chat is also read and captured ready, at 390, 768 and 1440px, light and dark. | Every rule it walks is a component test's — a card's place in Main (#417), the marker and the triage-opened card's Undo (#419), `/thread` and the name the switch picks (#420) — and none of them needs a browser's layout. What the flow adds is that they compose: a real route change, a real reload onto the mock's chat list, and the mock's own triage and moves answering a send. | `app/scripts/test-main-cards.tsx`, `test-card-undo.tsx`, `test-main-triage.tsx` and `test-slash.mjs` carry the rules, and #417–#421 landed them green. The flow stays in the registry as the one proof the path holds end to end, which no component test mounts. |
 
-## The fourteen that stay, and why only a browser can assert each
+## The fifteen that stay, and why only a browser can assert each
 
 Every one of these earns its browser by a mechanism no lower tier reproduces, and a stay is
-replaced by itself. They are what the end-to-end registry holds once the other 60 keys leave
+replaced by itself. With `bot-settings`, whose row is in its own family above — #584 landed after
+this page counted them — they are what the end-to-end registry holds once the other 60 keys leave
 (#314).
 
 | Key | Verdict | What it asserts today | Why only a browser can assert it |
