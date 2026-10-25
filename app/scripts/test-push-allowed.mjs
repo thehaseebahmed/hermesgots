@@ -177,13 +177,31 @@ test("syncCategories asks the rule first, and patches only what is news", () => 
   assert.ok(patched > asked, "and patches the device only when it is")
   assert.match(
     sync,
-    /if \(wire === undefined\) return/,
+    /if \(wire !== undefined\)/,
     "an empty list is still a list: only one never told is skipped",
   )
   assert.doesNotMatch(
     sync,
     /"POST"/,
     "a PATCH needs only the device id: with notifications off no token arrives",
+  )
+})
+
+test("a pass landing inside a PATCH is told once the call settles, not dropped", () => {
+  const sync = body("syncCategories")
+  assert.ok(sync, "syncCategories is in push.ts")
+  assert.match(sync, /parked = read \?\? parked/, "its read is parked while a call is out")
+  assert.match(sync, /if \(patching\) return patching/, "and no second call is started beside it")
+  const drained = sync.indexOf("while (parked)")
+  const sent = sync.indexOf('"PATCH"')
+  assert.ok(
+    drained >= 0 && drained < sent,
+    "the parked slot is drained in a loop, one PATCH per read",
+  )
+  assert.match(
+    sync,
+    /if \(parked\) void syncCategories\(device\)/,
+    "a read that landed as the last call settled starts a drain of its own",
   )
 })
 
@@ -216,11 +234,29 @@ test("a pass reads the phone once, through one read", () => {
   assert.doesNotMatch(elsewhere, /checkPermissions/, "nothing else asks the phone again")
 })
 
-test("the channels are written once a launch, and only for a phone that may notify", () => {
+test("the channels are written once a launch, and again only when Meetings flips", () => {
   const writes = body("provisionChannels")
   assert.ok(writes, "provisionChannels is in push.ts")
-  assert.match(writes, /provisioned \?\?=/, "the first pass writes them and the rest reuse it")
-  assert.match(writes, /channelPlan\(/, "the importance comes from the phone's own answer")
+  assert.match(
+    writes,
+    /if \(provisionedFor === meetings\) return provisioned/,
+    "a pass under the same flag reuses the launch's write",
+  )
+  assert.match(
+    writes,
+    /provisionedFor = meetings/,
+    "the flag it wrote for is kept, so flipping it is not answered with the old channels",
+  )
+  assert.match(
+    writes,
+    /channelPlan\(reachableCategories\(meetings\), held\)/,
+    "only the categories this launch can reach, at the importance the phone reported",
+  )
+  assert.match(
+    writes,
+    /if \(legacyDeleted\) return/,
+    "and the legacy channel is deleted once a launch, however often the write runs",
+  )
   const pass = body("syncNative")
   assert.ok(pass, "syncNative is in push.ts")
   assert.match(
@@ -229,6 +265,30 @@ test("the channels are written once a launch, and only for a phone that may noti
     "a phone that cannot notify is given none",
   )
   assert.doesNotMatch(body("listen"), /createChannel/, "registering listeners writes no channel")
+})
+
+test("the three-second pass reads the phone when it fires, not when the pass began", () => {
+  const soon = body("soonCategories")
+  assert.ok(soon, "soonCategories is in push.ts")
+  assert.match(
+    soon,
+    /read: \(\) => Promise<PhoneRead>/,
+    "a pass hands over its read, not its answer",
+  )
+  const armed = soon.indexOf("setTimeout")
+  assert.ok(
+    soon.indexOf("clearTimeout") < armed,
+    "one timer: the newest pass replaces the one waiting",
+  )
+  assert.ok(
+    soon.indexOf("read()") > armed,
+    "and the phone is read inside the callback, three seconds after the pass",
+  )
+  assert.match(
+    body("syncNative"),
+    /soonCategories\(fcm\.device, \(\) => readPhone\(push\)\)/,
+    "a pass's own read is what it hands over",
+  )
 })
 
 test("the registration carries the phone's list, not the app's stored preferences", () => {

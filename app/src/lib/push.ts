@@ -335,22 +335,36 @@ async function sendToken(device: string, token: string, read?: PhoneRead) {
 /** The PATCH under way, so a pass landing inside one waits rather than sending the same list twice. */
 let patching: Promise<void> | undefined
 
+/** The newest read that landed inside the PATCH under way: told once it settles, never dropped. */
+let parked: PhoneRead | undefined
+
 /**
  * Tells the registry which categories this phone still allows. A PATCH needs only the device id:
  * with the phone's notifications off no token arrives, and the empty list must still reach the
  * registry. Only a change is sent, so a device carrying an older list is told the live one exactly
- * once and then leaves it alone.
+ * once and then leaves it alone. A pass that lands inside a call is parked rather than dropped: when
+ * the call settles its read is compared against what was sent, and one more PATCH follows if the
+ * phone changed again meanwhile, so a list a later read has already left behind is never sent.
  */
-function syncCategories(device: string, read: PhoneRead) {
-  patching ??= (async () => {
-    const categories = await categoriesToRegister(read)
-    const wire = changedList(sentCategories, categories)
-    if (wire === undefined) return
-    await tellRegistry("PATCH", device, { categories }, wire)
+function syncCategories(device: string, read?: PhoneRead): Promise<void> {
+  parked = read ?? parked
+  if (patching) return patching
+  const call = (async () => {
+    while (parked) {
+      const next = parked
+      parked = undefined
+      const categories = await categoriesToRegister(next)
+      const wire = changedList(sentCategories, categories)
+      // A read that landed while this call was out is the next turn's: it is compared then.
+      if (wire !== undefined) await tellRegistry("PATCH", device, { categories }, wire)
+    }
   })().finally(() => {
     patching = undefined
+    // A read that landed as the last call settled starts the drain it was waiting for.
+    if (parked) void syncCategories(device).catch(() => {})
   })
-  return patching
+  patching = call
+  return call
 }
 
 const openers = new Set<(path: string) => void>()
@@ -389,26 +403,35 @@ async function listen(push: Push) {
   })
 }
 
-/** The channels written this launch: a resume re-reads them instead of writing them again. */
+/** The channels written this launch, and the Meetings flag they were written for. */
 let provisioned: Promise<void> | undefined
+let provisionedFor: boolean | undefined
+
+/** The `sessions` channel an earlier build made for every device, deleted once a launch. */
+let legacyDeleted = false
 
 /**
- * Makes the channel of every category this phone can reach, once a launch: Android lets the user
- * switch each one in its own settings. A channel made again with its own id is renamed in place, at
- * the importance the phone reported for it.
+ * Makes the channel of every category this phone can reach, once a launch and again when the
+ * Meetings experiment flips: its two are reachable only while it is on, so turning it on mid-session
+ * gives them the channels they never got. Android lets the user switch each one in its own settings.
+ * A channel made again with its own id is renamed in place, at the importance the phone reported.
  */
-function provisionChannels(push: Push, held: PhoneChannel[], meetings?: boolean) {
-  provisioned ??= Promise.all(
+function provisionChannels(push: Push, held: PhoneChannel[], meetings = false) {
+  if (provisionedFor === meetings) return provisioned
+  provisionedFor = meetings
+  provisioned = Promise.all(
     channelPlan(reachableCategories(meetings), held).map((channel) =>
       push
         .createChannel({ ...channel, importance: channel.importance as Importance })
         .catch(() => {}),
     ),
-  ).then(() =>
+  ).then(async () => {
+    if (legacyDeleted) return
+    legacyDeleted = true
     // The test notification's channel is made on the tap that sends one, so the one an earlier
     // build made for every device is deleted rather than left to sit in the phone's settings.
-    push.deleteChannel({ id: "sessions" }).catch(() => {}),
-  )
+    await push.deleteChannel({ id: "sessions" }).catch(() => {})
+  })
   return provisioned
 }
 
@@ -472,14 +495,21 @@ let categoriesTimer: number | undefined
 
 /**
  * Registers the list once the registration event has had time to land: that event carries a fresh
- * token and posts the list itself, so this only covers the resume where the token didn't move.
+ * token and posts the list itself, so this only covers the resume where the token didn't move. What
+ * is handed over is the read, not its answer: the phone is read when the timer fires, so a channel
+ * switched off in those three seconds travels with the list, and a list the event's own POST has
+ * just sent is not overwritten with the one this pass began with.
  */
-function soonCategories(device: string, read: PhoneRead) {
+function soonCategories(device: string, read: () => Promise<PhoneRead>) {
   window.clearTimeout(categoriesTimer)
-  categoriesTimer = window.setTimeout(() => void syncCategories(device, read).catch(() => {}), 3000)
+  categoriesTimer = window.setTimeout(() => {
+    void read()
+      .then((phone) => syncCategories(device, phone))
+      .catch(() => {})
+  }, 3000)
 }
 
-/** One pass: the phone is read once, its channels are made once a launch, and its list registered. */
+/** One pass: the phone is read once, its channels made for this launch's features, its list registered. */
 async function syncNative() {
   const { fcm, meetings } = await getSettings()
   if (fcm?.trying) {
@@ -498,7 +528,7 @@ async function syncNative() {
     await provisionChannels(push, read.channels, meetings)
     await guarded(fcm.device, () => push.register())
   }
-  soonCategories(fcm.device, read)
+  soonCategories(fcm.device, () => readPhone(push))
 }
 
 /** On launch and whenever the app returns, a rotated token or a new sign-in is told to the registry. */
