@@ -628,8 +628,11 @@ export const MessageItem = memo(function MessageItem({
     !awaitingClarify &&
     drawn.some((parts) => parts.some((part) => part.kind === "thinking" && part.thinking))
   const statusLine = streaming && !runningTool && !rowSaysThinking
-  // A subagent at work is the chat's news even while a tool card speaks for this reply.
-  const shown = subagents && subagentsInline && onShowSubagents
+  // A subagent at work is the chat's news even while a tool card speaks for this reply. A count is
+  // data rather than a word: `0 && <line/>` is the numeral 0, which React would draw, so the line
+  // is asked for by comparing the count.
+  const subagentCount = subagents ?? 0
+  const shown = subagentCount > 0 && Boolean(subagentsInline) && Boolean(onShowSubagents)
   const activity = statusLine
     ? awaitingApproval
       ? "Waiting for your approval…"
@@ -640,11 +643,11 @@ export const MessageItem = memo(function MessageItem({
   const footerLines = [
     (activity || shown) && (
       <StatusLine key="status" text={activity}>
-        {subagents && subagentsInline && onShowSubagents && (
+        {shown && onShowSubagents && (
           <>
             {activity && <span aria-hidden>·</span>}
             <SubagentLine
-              count={subagents}
+              count={subagentCount}
               onOpen={onShowSubagents}
               spinner={false}
               className="-my-2.5"
