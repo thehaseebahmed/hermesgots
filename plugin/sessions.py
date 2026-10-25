@@ -1161,23 +1161,13 @@ SETTLED_WAKES = (None, "sent", "dropped")
 
 
 def marked_wakes(path: Path, subagent_ids: Iterable[str]) -> Set[str]:
-    """The subagents among ``subagent_ids`` whose result has already woken their bot.
+    """The subagents among ``subagent_ids`` that have a wake mark of any status.
 
-    One read for a whole sweep: the watcher asks this about every ended subagent it found, so a
-    per-child lookup would open the store once per child.
+    Kept as the set-shaped answer older callers reach for; a mark now carries a disposition, so
+    anything that acts on the answer asks ``wake_marks`` and reads what became of each wake. This
+    is its one source of truth rather than a second query to keep in step with the first.
     """
-    ids = [one for one in subagent_ids if one]
-    if not ids or not path.exists():
-        return set()
-    marks = ", ".join("?" for _ in ids)
-    conn = connect(path)
-    try:
-        rows = conn.execute(
-            f"SELECT subagent_id FROM subagent_wakes WHERE subagent_id IN ({marks})", ids
-        ).fetchall()
-    finally:
-        conn.close()
-    return {row[0] for row in rows}
+    return set(wake_marks(path, subagent_ids))
 
 
 def wake_marks(path: Path, subagent_ids: Iterable[str]) -> Dict[str, Dict[str, Any]]:
@@ -1277,10 +1267,31 @@ def _write_marks(
         conn.execute("BEGIN IMMEDIATE")
         for subagent_id in ids:
             row = conn.execute(
-                "SELECT run_id, attempts, next_at FROM subagent_wakes WHERE subagent_id = ?",
+                "SELECT status, reason, attempts, next_at, run_id FROM subagent_wakes"
+                " WHERE subagent_id = ?",
                 (subagent_id,),
             ).fetchone()
-            kept_run, kept_attempts, kept_next = row if row else (None, 0, None)
+            if row:
+                kept_status, kept_reason, kept_attempts, kept_next, kept_run = row
+                target_attempts = attempts if attempts is not None else kept_attempts
+                target_next = next_at if next_at is not None else kept_next
+                if (kept_status, kept_reason, kept_attempts, kept_next) == (
+                    status,
+                    reason,
+                    target_attempts,
+                    target_next,
+                ):
+                    # The disposition hasn't moved: a conversation held for an hour looks every
+                    # 5 seconds, and each look must cost the store nothing to say so again.
+                    continue
+            else:
+                kept_status, kept_reason, kept_attempts, kept_next, kept_run = (
+                    None,
+                    None,
+                    0,
+                    None,
+                    None,
+                )
             conn.execute(
                 """INSERT INTO subagent_wakes
                        (subagent_id, parent_id, run_id, at, status, attempts, next_at, reason)
@@ -1331,7 +1342,9 @@ def open_wake_batch(path: Path, root: str) -> Optional[Dict[str, Any]]:
 
     Newest first, and only while a member is still owed: a batch whose every member is settled
     finished inside a crash window — its post landed, or its children were dropped — so nothing is
-    left to re-post and the next batch starts fresh.
+    left to re-post, the intent is closed by deleting it, and the marks are the only record that
+    outlives it. A finished intent left open would be re-read by every look for as long as the
+    store lives; the marks, not the intent, are what owes a wake.
     """
     if not path.exists():
         return None
@@ -1342,18 +1355,25 @@ def open_wake_batch(path: Path, root: str) -> Optional[Dict[str, Any]]:
                WHERE root = ? AND run_id IS NULL ORDER BY created_at DESC""",
             (root,),
         ).fetchall()
+        for batch_id, batch_root, members, created_at in rows:
+            ids = _batch_members(members)
+            if not ids:
+                continue
+            marks = wake_marks(path, ids)
+            if len(marks) == len(ids) and all(
+                one["status"] in SETTLED_WAKES for one in marks.values()
+            ):
+                conn.execute("DELETE FROM subagent_wake_batches WHERE id = ?", (batch_id,))
+                continue
+            return {
+                "id": batch_id,
+                "root": batch_root,
+                "members": ids,
+                "marks": marks,
+                "created_at": created_at,
+            }
     finally:
         conn.close()
-    for batch_id, batch_root, members, created_at in rows:
-        ids = _batch_members(members)
-        if not ids:
-            continue
-        marks = wake_marks(path, ids)
-        if len(marks) == len(ids) and all(
-            one["status"] in SETTLED_WAKES for one in marks.values()
-        ):
-            continue
-        return {"id": batch_id, "root": batch_root, "members": ids, "created_at": created_at}
     return None
 
 
@@ -1368,11 +1388,10 @@ def finish_wake_batch(path: Path, batch_id: str, run_id: str) -> None:
 
 def _batch_members(raw: Any) -> List[str]:
     """A batch row's members, oldest end first, as the JSON column keeps them."""
-    try:
-        members = json.loads(raw) if raw else []
-    except ValueError:
+    members = _json(raw, [])
+    if not isinstance(members, list):
         return []
-    return [one for one in members if isinstance(one, str) and one] if isinstance(members, list) else []
+    return [one for one in members if isinstance(one, str) and one]
 
 
 def remember_agent(path: Path, subagent_id: str, agent_id: str) -> None:

@@ -679,7 +679,7 @@ def holding_project(hermes_home: Path, session_id: str) -> Optional[str]:
     return hold.project_id if hold is not None else None
 
 
-def staged_session(hermes_home: Path, session_id: str) -> bool:
+def staged_session(hermes_home: Path, session_id: str) -> Optional[bool]:
     """Whether this session is working a stage of a task's workflow, so nothing may wake it.
 
     A stage keeps its one run: the stage it moves to is posted on the same session by the gate that
@@ -690,7 +690,9 @@ def staged_session(hermes_home: Path, session_id: str) -> bool:
     ``after_run`` decides a stage by). A task with no workflow snapshots none and is an ordinary
     conversation here.
 
-    A store this can't read answers True: a wake is a turn nobody asked for.
+    A store this can't read answers None — neither a stage nor an ordinary conversation. The caller
+    is the wake, which must decide a child's fate from a reading that really landed: a failure is
+    not a stage, and dropping every wake of a look on one storage blip is not a bound but a bug.
     """
     path = db_path(hermes_home)
     if not session_id or not path.exists():
@@ -699,7 +701,7 @@ def staged_session(hermes_home: Path, session_id: str) -> bool:
         record = sessions.record_for(path, hermes_home, session_id)
     except (sqlite3.Error, OSError):
         logger.warning("memento: couldn't read %s's workflow", session_id, exc_info=True)
-        return True
+        return None
     return pipeline.read((record or {}).get("pipeline")) is not None
 
 

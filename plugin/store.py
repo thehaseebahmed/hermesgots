@@ -608,4 +608,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    run_id TEXT
                )"""
         )
+        # The watcher asks for a conversation's unconfirmed batch on every look; the partial
+        # index keeps that a handful of rows on a store that has carried years of finished ones.
+        conn.execute(
+            """CREATE INDEX IF NOT EXISTS wake_batch_open
+                   ON subagent_wake_batches (root, created_at) WHERE run_id IS NULL"""
+        )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

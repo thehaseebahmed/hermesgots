@@ -221,15 +221,76 @@ class WakeTest(unittest.TestCase):
         self.assertEqual(self.sweep(), 0)
         self.assertEqual(len(self.posted), 1)
 
-    def test_the_single_child_seam_posts_a_lone_wake(self) -> None:
-        """``wake_one`` is the seam one child goes through: the same batch machinery, one member."""
+    def test_a_stage_check_that_cannot_be_answered_settles_nothing(self) -> None:
+        """A stage reading that fails is not a stage: the child keeps its mark and the next look
+        judges it, so one storage blip can never drop every wake it holds."""
         self.chat("s")
         self.child("c1", "s", said="done")
-        (row,) = delegation.pending(self.home, 0)
-        self.assertTrue(asyncio.run(delegation.wake_one(self.adapter, self.home, row)))
+        with mock.patch.object(delegation, "_stage", return_value=None):
+            self.assertEqual(self.sweep(), 0)
+        self.assertEqual(self.posted, [])
+        self.assertEqual(sessions.marked_wakes(db_path(self.home), ["c1"]), set())
+        self.assertEqual(self.sweep(), 1, "the next look wakes it once the check answers")
         self.assertEqual(self.posted[0]["key"], "wake_c1")
-        self.assertEqual(self.mark("c1")["status"], "sent")
-        self.assertEqual(self.sweep(), 0, "a wake the seam posted is one the sweep leaves alone")
+
+    def test_a_batch_member_that_cannot_be_read_waits_the_retry(self) -> None:
+        """An unreadable row is not a gone row: the whole retry waits, no member is dropped, and
+        the stored set is posted intact once the store reads again."""
+        self.chat("s")
+        self.child("c1", "s", said="the first one's work")
+        self.child("c2", "s", said="the second one's work")
+        self.refuse = True
+        self.assertEqual(self.sweep(), 0)
+        key = self.posted[0]["key"]
+        self.refuse = False
+        self.due()
+        with mock.patch.object(delegation, "_ended_delegation", return_value=delegation._UNREADABLE):
+            self.assertEqual(self.sweep(), 0)
+        self.assertEqual(len(self.posted), 1, "the retry posted nothing")
+        marks = self.marks(["c1", "c2"])
+        self.assertEqual(
+            {one["status"] for one in marks.values()},
+            {"held"},
+            "an unreadable member is neither dropped nor given another attempt",
+        )
+        self.assertEqual({one["attempts"] for one in marks.values()}, {1})
+        self.assertEqual(self.sweep(), 1, "the next look re-posts the batch as it was stored")
+        self.assertEqual(self.posted[-1]["key"], key)
+        self.assertIn("the first one's work", self.text())
+
+    def test_holding_a_wake_again_rewrites_nothing(self) -> None:
+        """A conversation held for an hour is looked at every 5 seconds; each look must cost the
+        store no write, and the mark must not drift."""
+        self.chat("s")
+        self.child("c1", "s", said="done")
+        self.adapter.run(
+            "run-1", "s", "waiting_for_approval",
+            clarify={"clarify_id": "q", "questions": [{"id": "q0", "question": "Which branch?"}]},
+        )
+        self.assertEqual(self.sweep(), 0)
+        (before,) = self.sql("SELECT status, reason, attempts, next_at, at FROM subagent_wakes")
+        self.assertEqual(self.sweep(), 0)
+        self.assertEqual(self.sweep(), 0)
+        (after,) = self.sql("SELECT status, reason, attempts, next_at, at FROM subagent_wakes")
+        self.assertEqual(before, after, "a still-held wake is not rewritten every look")
+        self.assertEqual(self.mark("c1")["attempts"], 0, "holding spends no attempt")
+
+    def test_a_batches_intent_is_closed_once_every_member_settles(self) -> None:
+        """The crash window's own case — marks written, the confirm lost — leaves nothing open to
+        re-read forever: the intent is deleted, and the marks are the record that outlives it."""
+        self.chat("s")
+        self.child("c1", "s", said="the first one's work")
+        self.child("c2", "s", said="the second one's work")
+        self.refuse = True
+        self.assertEqual(self.sweep(), 0)
+        key = self.posted[0]["key"]
+        sessions.mark_wakes(db_path(self.home), "s", ["c1", "c2"], "run-from-before")
+        self.assertIsNone(sessions.open_wake_batch(db_path(self.home), "s"))
+        self.assertEqual(self.sql("SELECT id FROM subagent_wake_batches"), [])
+        self.refuse = False
+        self.assertEqual(self.sweep(), 0, "settled members are never collected again")
+        self.assertEqual(len(self.posted), 1, "and the closed intent is never posted twice")
+        self.assertEqual(self.posted[-1]["key"], key)
 
     def test_a_wake_posted_before_a_restart_is_not_posted_again(self) -> None:
         """What keeps a restart from doubling is the store's mark, not this process's memory."""
