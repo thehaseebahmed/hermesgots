@@ -94,7 +94,7 @@ export function SubagentCard({
           {note ? (
             <span className="min-w-0 truncate">{note}</span>
           ) : (
-            <AgentMeta agent={shown} model="tablet-up" />
+            <AgentMeta agent={shown} modelAt="tablet-up" />
           )}
         </>
       }
@@ -140,20 +140,20 @@ export function SubagentCard({
  */
 function AgentMeta({
   agent,
-  model = "every-width",
+  modelAt = "every-width",
 }: {
   agent: DelegatedAgent
-  model?: "every-width" | "tablet-up"
+  modelAt?: "every-width" | "tablet-up"
 }) {
   return (
-    <>
-      <span className="shrink-0">{agentLine(agent)}</span>
+    <span className="min-w-0 truncate">
+      {agentLine(agent)}
       {agent.model && (
-        <span className={cn("min-w-0 truncate", model === "tablet-up" && "hidden md:inline")}>
+        <span className={modelAt === "tablet-up" ? "hidden md:inline" : undefined}>
           {` · ${shortModel(agent.model)}`}
         </span>
       )}
-    </>
+    </span>
   )
 }
 
