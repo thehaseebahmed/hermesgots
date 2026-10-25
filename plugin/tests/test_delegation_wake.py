@@ -9,7 +9,10 @@ it in a new turn.
 What is pinned here is only what the plugin does to the outside: the run it posts (its path, body and
 idempotency key), when it does not post (a question or an approval pending, a turn still running, a
 child still running), the mark that keeps a restart from posting twice, and the stop route's answers —
-including that a stop really asks core to interrupt the child, rather than only marking its row.
+including that a stop really asks core to interrupt the child, rather than only marking its row. A
+conversation's children that finished together are one run, not one each: the batch is the idempotent
+unit, and what became of a wake — sent, held, dropped — is the plugin's own record, with a bound on
+each (a backoff, a permanent refusal, a stale end, too many attempts).
 
 Everything about the child's transcript is read from a real ``state.db`` the harness writes; core's
 live-subagent registry, which a stop goes through, is planted in ``sys.modules``.
@@ -34,7 +37,7 @@ from unittest import mock
 import plugin
 from plugin import delegation, outbox, sessions
 from plugin.tests._helpers import App, Context, FakeWeb, Router
-from plugin.store import db_path
+from plugin.store import SCHEMA_VERSION, connect, db_path, put_setting
 
 # Core's own machine-provenance footer (gateway/run_notifications.py `INTERNAL_NOTIFICATION_FOOTER`),
 # spelled here so the test disagrees with the plugin if either text moves.
@@ -79,7 +82,11 @@ class WakeTest(unittest.TestCase):
         (self.home / ".env").write_text("API_SERVER_KEY=home-key\n", encoding="utf-8")
         self.adapter = Adapter()
         self.posted: List[Dict[str, Any]] = []
-        self.fail = False
+        self.refuse = False
+        self.permanent = False
+        # Something the post itself does to the world before it answers — a turn that appears
+        # between the gate's check and the post's landing (the race the post-check exists for).
+        self.on_post: Optional[Any] = None
         # What the host answers a post with; None is the ordinary ``{"run_id": …}``.
         self.answer: Optional[Dict[str, Any]] = None
         self.plant_post()
@@ -95,8 +102,10 @@ class WakeTest(unittest.TestCase):
                     "key": idempotency_key,
                 }
             )
-            if self.fail:
-                raise outbox.StartError("the host refused it", False)
+            if self.on_post is not None:
+                self.on_post()
+            if self.refuse:
+                raise outbox.StartError("the host refused it", self.permanent)
             return dict(self.answer) if self.answer is not None else {"run_id": f"run-{len(self.posted)}"}
 
         wiring = mock.patch.object(outbox, "post", new=post)
@@ -149,6 +158,42 @@ class WakeTest(unittest.TestCase):
     def text(self, index: int = 0) -> str:
         return self.posted[index]["body"]["input"][0]["content"]
 
+    def marks(self, ids: List[str]) -> Dict[str, Dict[str, Any]]:
+        return sessions.wake_marks(db_path(self.home), ids)
+
+    def mark(self, subagent_id: str) -> Dict[str, Any]:
+        return self.marks([subagent_id]).get(subagent_id) or {}
+
+    def sql(self, statement: str, params: Any = ()) -> List[Any]:
+        """A direct write to the plugin's own store, committed.
+
+        The plugin's connection is its own, so a row this one leaves open is invisible to the
+        sweep the test is about to run.
+        """
+        path = db_path(self.home)
+        connect(path).close()
+        conn = sqlite3.connect(path)
+        try:
+            rows = conn.execute(statement, params).fetchall()
+            conn.commit()
+        finally:
+            conn.close()
+        return rows
+
+    def due(self) -> None:
+        """The waits a backoff imposed pass: what a sweep seconds later would have seen."""
+        self.sql("UPDATE subagent_wakes SET next_at = ?", (int(time.time() * 1000) - 1,))
+
+    def run_of(self, subagent_id: str) -> Optional[str]:
+        rows = self.sql("SELECT run_id FROM subagent_wakes WHERE subagent_id = ?", (subagent_id,))
+        return rows[0][0] if rows else None
+
+    def batch_of(self, batch_id: str) -> Dict[str, Any]:
+        rows = self.sql(
+            "SELECT root, members, run_id FROM subagent_wake_batches WHERE id = ?", (batch_id,)
+        )
+        return {"root": rows[0][0], "members": json.loads(rows[0][1]), "run_id": rows[0][2]} if rows else {}
+
     def test_a_finished_subagent_wakes_its_bot(self) -> None:
         self.chat("s")
         self.child("c1", "s", goal="review the auth diff", said="The refactor is safe; two nits.",
@@ -167,7 +212,7 @@ class WakeTest(unittest.TestCase):
         self.assertIn("Status: completed", text)
         self.assertTrue(text.endswith(FOOTER))
         # The mark is written after the post, so the next look — or a restarted plugin — sees it.
-        self.assertEqual(sessions.marked_wakes(db_path(self.home), ["c1"]), {"c1"})
+        self.assertEqual(set(sessions.wake_marks(db_path(self.home), ["c1"])), {"c1"})
 
     def test_a_wake_is_posted_once(self) -> None:
         self.chat("s")
@@ -176,11 +221,149 @@ class WakeTest(unittest.TestCase):
         self.assertEqual(self.sweep(), 0)
         self.assertEqual(len(self.posted), 1)
 
+    def test_a_waiting_stages_children_are_dropped_not_held(self) -> None:
+        """A stage keeps its one run however its own session waits: the stage check runs before
+        the gate, so a stage parked on a question or an approval settles its children with why
+        instead of holding them every look forever."""
+        self.chat("stage")
+        self.adapter.run(
+            "run-1", "stage", "waiting_for_approval",
+            clarify={"clarify_id": "q", "questions": [{"id": "q0", "question": "Which branch?"}]},
+        )
+        self.child("c1", "stage", said="a stage's subagent")
+        stages = mock.patch.object(delegation, "_stage", lambda home, session_id: True)
+        stages.start()
+        self.addCleanup(stages.stop)
+        self.assertEqual(self.sweep(), 0)
+        self.assertEqual(self.posted, [])
+        self.assertEqual(self.mark("c1")["status"], "dropped")
+        self.assertEqual(self.mark("c1")["reason"], "stage")
+
+    def test_a_hold_keeps_the_parent_the_wake_hangs_off(self) -> None:
+        """A mark's parent names the child's session; a hold on an already-marked member records
+        the wait without renaming what it hangs off."""
+        self.chat("s")
+        self.child("c1", "s", said="done")
+        sessions.mark_wakes(db_path(self.home), "s", ["c1"], "run-from-before")
+        sessions.hold_wakes(db_path(self.home), "chat-root", ["c1"], "a gate")
+        (row,) = self.sql("SELECT parent_id, status FROM subagent_wakes WHERE subagent_id = 'c1'")
+        self.assertEqual(row, ("s", "held"), "the hold must not rewrite the parent")
+        self.assertEqual(set(sessions.wake_marks(db_path(self.home), ["c1"])), {"c1"})
+
+    def test_a_stage_check_that_cannot_be_answered_settles_nothing(self) -> None:
+        """A stage reading that fails is not a stage: the child keeps its mark and the next look
+        judges it, so one storage blip can never drop every wake it holds."""
+        self.chat("s")
+        self.child("c1", "s", said="done")
+        with mock.patch.object(delegation, "_stage", return_value=None):
+            self.assertEqual(self.sweep(), 0)
+        self.assertEqual(self.posted, [])
+        self.assertEqual(set(sessions.wake_marks(db_path(self.home), ["c1"])), set())
+        self.assertEqual(self.sweep(), 1, "the next look wakes it once the check answers")
+        self.assertEqual(self.posted[0]["key"], "wake_c1")
+
+    def test_a_batches_text_froze_at_its_intent(self) -> None:
+        """The retry re-posts the batch byte-for-byte under its own key, even after a member's row
+        is gone: core answers 409 for the same key over a changed payload, and the outbox treats
+        that as permanent — a retry that shed a vanished member would drop the whole batch."""
+        self.chat("s")
+        self.child("c1", "s", said="the first one's work")
+        self.child("c2", "s", said="the second one's work")
+        self.refuse = True
+        self.assertEqual(self.sweep(), 0)
+        first = self.posted[0]
+        self.refuse = False
+        self.due()
+        self.conn.execute("DELETE FROM sessions WHERE id = 'c2'")
+        self.conn.commit()
+        self.assertEqual(self.sweep(), 1, "the retry re-posts the batch as it was frozen")
+        retry = self.posted[-1]
+        self.assertEqual(retry["key"], first["key"], "the same key carries the same payload")
+        self.assertEqual(retry["body"], first["body"], "byte-identical, so the host replays")
+        self.assertIn("the second one's work", self.text(), "the frozen text keeps its result")
+        self.assertEqual(
+            {one["status"] for one in self.marks(["c1", "c2"]).values()},
+            {"sent"},
+            "a member whose result was in the posted text is settled sent, not dropped",
+        )
+
+    def test_a_deleted_conversations_held_wakes_are_dropped_once(self) -> None:
+        """A chat deleted out of the store never reaches the posting seam — ``_DELEGATIONS``
+        requires the parent row — so a wait left on its children is settled here, with why, once."""
+        self.chat("s")
+        self.child("c1", "s", said="done")
+        self.adapter.run(
+            "run-1", "s", "waiting_for_approval",
+            clarify={"clarify_id": "q", "questions": [{"id": "q0", "question": "Which branch?"}]},
+        )
+        self.assertEqual(self.sweep(), 0)
+        self.assertEqual(self.mark("c1")["status"], "held")
+        self.conn.execute("DELETE FROM sessions WHERE id IN ('s', 'c1')")
+        self.conn.commit()
+        self.assertEqual(self.sweep(), 0)
+        self.assertEqual(self.posted, [], "nothing is posted for a conversation that is gone")
+        self.assertEqual(self.mark("c1")["status"], "dropped")
+        self.assertEqual(self.mark("c1")["reason"], "gone")
+        self.assertEqual(self.sweep(), 0, "and the drop is settled, never said again")
+        self.assertEqual(self.mark("c1")["status"], "dropped")
+
+    def test_a_failed_store_read_never_drops_an_orphan(self) -> None:
+        """The orphan pass is a read too: a store that can't be read answers nothing, so a held
+        wake waits rather than being judged gone."""
+        self.chat("s")
+        self.child("c1", "s", said="done")
+        self.adapter.run(
+            "run-1", "s", "waiting_for_approval",
+            clarify={"clarify_id": "q", "questions": [{"id": "q0", "question": "Which branch?"}]},
+        )
+        self.assertEqual(self.sweep(), 0)
+        self.conn.execute("DELETE FROM sessions WHERE id IN ('s', 'c1')")
+        self.conn.commit()
+        with mock.patch.object(sessions, "_open_state", return_value=None):
+            self.assertEqual(self.sweep(), 0)
+        self.assertEqual(self.mark("c1")["status"], "held", "a failed read settles nothing")
+        self.assertEqual(self.sweep(), 0)
+        self.assertEqual(self.mark("c1")["status"], "dropped")
+
+    def test_holding_a_wake_again_rewrites_nothing(self) -> None:
+        """A conversation held for an hour is looked at every 5 seconds; each look must cost the
+        store no write, and the mark must not drift."""
+        self.chat("s")
+        self.child("c1", "s", said="done")
+        self.adapter.run(
+            "run-1", "s", "waiting_for_approval",
+            clarify={"clarify_id": "q", "questions": [{"id": "q0", "question": "Which branch?"}]},
+        )
+        self.assertEqual(self.sweep(), 0)
+        (before,) = self.sql("SELECT status, reason, attempts, next_at, at FROM subagent_wakes")
+        self.assertEqual(self.sweep(), 0)
+        self.assertEqual(self.sweep(), 0)
+        (after,) = self.sql("SELECT status, reason, attempts, next_at, at FROM subagent_wakes")
+        self.assertEqual(before, after, "a still-held wake is not rewritten every look")
+        self.assertEqual(self.mark("c1")["attempts"], 0, "holding spends no attempt")
+
+    def test_a_batches_intent_is_closed_once_every_member_settles(self) -> None:
+        """The crash window's own case — marks written, the confirm lost — leaves nothing open to
+        re-read forever: the intent is deleted, and the marks are the record that outlives it."""
+        self.chat("s")
+        self.child("c1", "s", said="the first one's work")
+        self.child("c2", "s", said="the second one's work")
+        self.refuse = True
+        self.assertEqual(self.sweep(), 0)
+        key = self.posted[0]["key"]
+        sessions.mark_wakes(db_path(self.home), "s", ["c1", "c2"], "run-from-before")
+        self.assertIsNone(sessions.open_wake_batch(db_path(self.home), "s"))
+        self.assertEqual(self.sql("SELECT id FROM subagent_wake_batches"), [])
+        self.refuse = False
+        self.assertEqual(self.sweep(), 0, "settled members are never collected again")
+        self.assertEqual(len(self.posted), 1, "and the closed intent is never posted twice")
+        self.assertEqual(self.posted[-1]["key"], key)
+
     def test_a_wake_posted_before_a_restart_is_not_posted_again(self) -> None:
         """What keeps a restart from doubling is the store's mark, not this process's memory."""
         self.chat("s")
         self.child("c1", "s", said="done")
-        sessions.mark_wake(db_path(self.home), "c1", "s", "run-from-before")
+        sessions.mark_wakes(db_path(self.home), "s", ["c1"], "run-from-before")
         self.assertEqual(self.sweep(), 0)
         self.assertEqual(self.posted, [])
 
@@ -191,16 +374,15 @@ class WakeTest(unittest.TestCase):
         self.child("c1", "s", said="the post for this one failed")
         for i in range(delegation.WAKE_LIMIT):
             self.child(f"settled-{i}", "s", said="done")
-            sessions.mark_wake(db_path(self.home), f"settled-{i}", "s", f"run-{i}")
+            sessions.mark_wakes(db_path(self.home), "s", [f"settled-{i}"], f"run-{i}")
         # The failed one is the oldest end, and page one is now entirely woken ones.
         self.assertEqual(self.sweep(), 1)
         self.assertEqual([post["key"] for post in self.posted], ["wake_c1"])
-        self.assertEqual(sessions.marked_wakes(db_path(self.home), ["c1"]), {"c1"})
+        self.assertEqual(set(sessions.wake_marks(db_path(self.home), ["c1"])), {"c1"})
 
-    def test_an_end_that_is_never_woken_does_not_hide_an_older_one_either(self) -> None:
-        """A stage's child is never woken by design — the stage keeps its one run — so a page of
-        them stays unmarked among the newest ends. The walk must still reach the failed post behind
-        it, which a page of "candidates found" would have called done."""
+    def test_a_dropped_wake_does_not_occupy_a_page(self) -> None:
+        """A stage's child is dropped the moment it is read, so a page of them costs the walk
+        nothing and can never crowd out a child whose post failed."""
         self.chat("s")
         self.chat("stage")
         self.child("c1", "s", said="the post for this one failed")
@@ -211,6 +393,14 @@ class WakeTest(unittest.TestCase):
         self.addCleanup(stages.stop)
         self.assertEqual(self.sweep(), 1)
         self.assertEqual([post["key"] for post in self.posted], ["wake_c1"])
+        # Dropped once, with why: the next sweep reads them as settled and never re-reads them.
+        staged_ids = [f"staged-{i}" for i in range(delegation.WAKE_LIMIT)]
+        marks = self.marks(staged_ids)
+        self.assertEqual(len(marks), len(staged_ids))
+        self.assertEqual({one["status"] for one in marks.values()}, {"dropped"})
+        self.assertEqual({one["reason"] for one in marks.values()}, {delegation.DROP_STAGE})
+        self.assertEqual(self.sweep(), 0)
+        self.assertEqual(len(self.posted), 1)
 
     def test_no_wake_while_the_user_is_being_asked(self) -> None:
         self.chat("s")
@@ -250,22 +440,101 @@ class WakeTest(unittest.TestCase):
     def test_a_post_that_failed_is_tried_again(self) -> None:
         self.chat("s")
         self.child("c1", "s", said="done")
-        self.fail = True
+        self.refuse = True
         self.assertEqual(self.sweep(), 0)
-        self.assertEqual(sessions.marked_wakes(db_path(self.home), ["c1"]), set())
-        self.fail = False
+        # A failure is a wait, not a retry: the attempt is counted and the next one is scheduled.
+        held = self.mark("c1")
+        self.assertEqual(held["status"], "held")
+        self.assertEqual(held["attempts"], 1)
+        self.assertGreater(held["next_at"], int(time.time() * 1000))
+        self.assertTrue(held["reason"])
+        self.assertEqual(self.sweep(), 0, "a wake still inside its backoff is not due")
+        self.assertEqual(len(self.posted), 1)
+        self.refuse = False
+        self.due()
         self.assertEqual(self.sweep(), 1)
-        self.assertEqual(len(self.posted), 2)
         # The same key both times, so a run the host did start answers itself rather than doubling.
         self.assertEqual([post["key"] for post in self.posted], ["wake_c1", "wake_c1"])
+
+    def test_a_wake_that_keeps_failing_is_dropped_after_its_attempts(self) -> None:
+        self.chat("s")
+        self.child("c1", "s", said="done")
+        self.refuse = True
+        for _ in range(delegation.WAKE_MAX_ATTEMPTS):
+            self.due()
+            self.assertEqual(self.sweep(), 0)
+        self.assertEqual(len(self.posted), delegation.WAKE_MAX_ATTEMPTS)
+        dropped = self.mark("c1")
+        self.assertEqual(dropped["status"], "dropped")
+        self.assertEqual(dropped["reason"], delegation.DROP_EXHAUSTED)
+        # Dropped is settled: it is never posted again, however long the watcher runs.
+        self.refuse = False
+        self.due()
+        self.assertEqual(self.sweep(), 0)
+        self.assertEqual(len(self.posted), delegation.WAKE_MAX_ATTEMPTS)
+
+    def test_a_held_wake_spends_no_attempt(self) -> None:
+        """Being held is free: nothing was posted, so nothing is owed its backoff."""
+        self.chat("s")
+        self.child("c1", "s", said="done")
+        self.adapter.run("run-1", "s", "running")
+        for _ in range(3):
+            self.assertEqual(self.sweep(), 0)
+        held = self.mark("c1")
+        self.assertEqual(held["status"], "held")
+        self.assertEqual(held["attempts"], 0)
+        self.assertIsNone(held["next_at"])
+        self.adapter._run_statuses.clear()
+        self.assertEqual(self.sweep(), 1, "the wait was the gate's, not the wake's")
+
+    def test_a_permanent_post_failure_drops_the_wake_at_once(self) -> None:
+        self.chat("s")
+        self.child("c1", "s", said="done")
+        self.refuse, self.permanent = True, True
+        with self.assertLogs("plugin.delegation", level="WARNING"):
+            self.assertEqual(self.sweep(), 0)
+        gone = self.mark("c1")
+        self.assertEqual(gone["status"], "dropped")
+        self.assertEqual(gone["reason"], delegation.DROP_GONE)
+        self.assertEqual(gone["attempts"], 0, "a permanent refusal is not a backoff to wait out")
+        # The drop is the warning, once: no later sweep says it again.
+        self.refuse = False
+        with self.assertNoLogs("plugin.delegation", level="WARNING"):
+            self.assertEqual(self.sweep(), 0)
+        self.assertEqual(len(self.posted), 1)
+
+    def test_a_child_that_ended_too_long_ago_is_dropped_as_stale(self) -> None:
+        """The replay bound: a wake owed for a day and a half is history, not work to hand over."""
+        put_setting(
+            db_path(self.home),
+            delegation.WAKE_SINCE_KEY,
+            int((time.time() - 60 * 3600) * 1000),
+        )
+        self.chat("s")
+        self.child("c1", "s", said="news from two days ago")
+        self.conn.execute(
+            "UPDATE sessions SET ended_at = ? WHERE id = 'c1'",
+            (time.time() - delegation.WAKE_MAX_AGE_MS / 1000 - 3600,),
+        )
+        self.conn.commit()
+        self.assertEqual(self.sweep(), 0)
+        self.assertEqual(self.posted, [])
+        stale = self.mark("c1")
+        self.assertEqual(stale["status"], "dropped")
+        self.assertEqual(stale["reason"], delegation.DROP_STALE)
+        self.assertEqual(self.sweep(), 0)
+        self.assertEqual(self.posted, [])
 
     def test_a_post_the_host_answered_without_a_run_is_not_a_wake(self) -> None:
         self.chat("s")
         self.child("c1", "s", said="done")
         self.answer = {"error": "not really"}
         self.assertEqual(self.sweep(), 0)
-        self.assertEqual(sessions.marked_wakes(db_path(self.home), ["c1"]), set())
+        # An answer that names no run is a transient failure like any other.
+        self.assertEqual(self.mark("c1")["attempts"], 1)
+        self.assertEqual(self.mark("c1")["status"], "held")
         self.answer = None
+        self.due()
         self.assertEqual(self.sweep(), 1)
 
     def test_a_failed_subagent_still_wakes_with_its_reason(self) -> None:
@@ -280,6 +549,22 @@ class WakeTest(unittest.TestCase):
         self.assertIn("Status: error", text)
         self.assertIn("The subagent did not complete successfully (status=error).", text)
         self.assertIn("End reason: cancelled", text)
+        # Where the evidence is, in Hermes's own recovery words: the status is the last one the
+        # session persisted, and the child's transcript is the sub-thread the app already draws.
+        self.assertIn(
+            "Last persisted unit status: error (recorded when the subagent's session closed; not "
+            "current liveness). Unrecorded outcomes remain unknown; inspect evidence before retrying "
+            "side effects.",
+            text,
+        )
+        self.assertIn(
+            "Sub-thread: c1 — the subagent's own transcript; its last words and tool calls are there.",
+            text,
+        )
+        lines = text.splitlines()
+        self.assertLess(lines.index("End reason: cancelled"), lines.index("Partial output:"))
+        self.assertLess(next(i for i, line in enumerate(lines) if line.startswith("Sub-thread:")),
+                        lines.index("Partial output:"))
         self.assertIn("Partial output:", text)
         self.assertIn("I couldn't reach the sandbox.", text)
         self.assertTrue(text.endswith(FOOTER))
@@ -314,7 +599,7 @@ class WakeTest(unittest.TestCase):
         self.assertIn("The diff has two real changes.", self.text())
         # Marked against the child the app knows, not the continuation it ended on.
         self.assertEqual(self.posted[0]["key"], "wake_c1")
-        self.assertEqual(sessions.marked_wakes(db_path(self.home), ["c1", "c1b"]), {"c1"})
+        self.assertEqual(set(sessions.wake_marks(db_path(self.home), ["c1", "c1b"])), {"c1"})
 
     def test_a_subagent_that_ended_before_the_plugin_watched_is_left_alone(self) -> None:
         """A home carries every subagent it ever ran; the first look must not wake all of them."""
@@ -324,19 +609,187 @@ class WakeTest(unittest.TestCase):
         self.conn.commit()
         self.assertEqual(self.sweep(), 0)
         self.assertEqual(self.posted, [])
-        self.assertEqual(sessions.marked_wakes(db_path(self.home), ["c1"]), set())
+        self.assertEqual(set(sessions.wake_marks(db_path(self.home), ["c1"])), set())
         # One that ends after the watch began is woken.
         self.child("c2", "s", said="from just now")
         self.assertEqual(self.sweep(), 1)
         self.assertEqual([post["key"] for post in self.posted], ["wake_c2"])
 
-    def test_two_subagents_finishing_together_get_one_wake_each(self) -> None:
+    def test_two_subagents_finishing_together_get_one_wake(self) -> None:
+        """A batch, not two wakes: one run carrying both results, joined as core's notice batch is."""
         self.chat("s")
         self.child("c1", "s", said="the first one's work")
         self.child("c2", "s", said="the second one's work")
-        self.assertEqual(self.sweep(), 2)
-        self.assertEqual(sorted(post["key"] for post in self.posted), ["wake_c1", "wake_c2"])
-        self.assertEqual(sessions.marked_wakes(db_path(self.home), ["c1", "c2"]), {"c1", "c2"})
+        self.assertEqual(self.sweep(), 1)
+        (posted,) = self.posted
+        self.assertEqual(posted["body"]["session_id"], "s")
+        # A batch key, not one child's: the batch is the idempotent unit.
+        self.assertTrue(posted["key"].startswith("wakeb_"), posted["key"])
+        text = self.text()
+        self.assertEqual(
+            text.splitlines()[0],
+            "[IMPORTANT: 2 background processes completed. Treat these results as one batch and give "
+            "one consolidated response; preserve failures and actionable results.]",
+        )
+        self.assertEqual(text.count("[ASYNC DELEGATION COMPLETE — "), 2)
+        self.assertIn("the first one's work", text)
+        self.assertIn("the second one's work", text)
+        # One footer, at the end: the whole injected text is one notification.
+        self.assertEqual(text.count(FOOTER), 1)
+        self.assertTrue(text.endswith(FOOTER))
+        marks = self.marks(["c1", "c2"])
+        self.assertEqual({one["status"] for one in marks.values()}, {"sent"})
+        run_id = "run-1"
+        self.assertEqual({self.run_of("c1"), self.run_of("c2")}, {run_id})
+        # The batch the marks name is one row, with both members in it.
+        batch = self.batch_of(posted["key"][len("wakeb_"):])
+        self.assertEqual(batch["members"], ["c1", "c2"])
+        self.assertEqual(batch["run_id"], run_id)
+
+    def test_a_retry_reuses_the_batch_it_stored(self) -> None:
+        """An unconfirmed batch is the batch: the children that ended meanwhile wait for their own."""
+        self.chat("s")
+        self.child("c1", "s", said="the first one's work")
+        self.child("c2", "s", said="the second one's work")
+        self.refuse = True
+        self.assertEqual(self.sweep(), 0)
+        key = self.posted[0]["key"]
+        self.child("c3", "s", said="the third one's work")
+        self.refuse = False
+        self.due()
+        self.assertEqual(self.sweep(), 1)
+        retry = self.posted[-1]
+        self.assertEqual(retry["key"], key, "a retry re-posts its own batch, never a new one")
+        text = retry["body"]["input"][0]["content"]
+        self.assertIn("2 background processes", text)
+        self.assertIn("the first one's work", text)
+        self.assertIn("the second one's work", text)
+        self.assertNotIn("the third one's work", text)
+        # The third child's own batch is the next look's.
+        self.assertEqual(self.sweep(), 1)
+        self.assertEqual(self.posted[-1]["key"], "wake_c3")
+        self.assertIn("the third one's work", self.text(-1))
+
+    def test_a_turn_appearing_between_the_check_and_the_post_holds_the_batch(self) -> None:
+        """The post-check: a turn that started while the post was in flight is never crossed, and
+        the intent kept means the retry re-posts the same key rather than a second run."""
+        self.chat("s")
+        self.child("c1", "s", said="done")
+        raced: List[bool] = []
+
+        def race() -> None:
+            if not raced:
+                raced.append(True)
+                self.adapter.run("run-race", "s", "running")
+
+        self.on_post = race
+        self.assertEqual(self.sweep(), 0)
+        self.assertEqual(len(self.posted), 1)
+        key = self.posted[0]["key"]
+        self.assertTrue(key.startswith("wakeb_") or key.startswith("wake_"))
+        self.assertEqual(self.mark("c1")["status"], "held", "a wake that never landed owes nothing sent")
+        self.assertEqual(self.run_of("c1"), None)
+        # The turn ends; the retry carries the same key, which is what makes the host dedupe.
+        self.adapter._run_statuses.clear()
+        self.assertEqual(self.sweep(), 1)
+        self.assertEqual([post["key"] for post in self.posted], [key, key])
+        sent = self.mark("c1")
+        self.assertEqual(sent["status"], "sent")
+        self.assertEqual(self.run_of("c1"), "run-2")
+
+    def test_a_result_over_its_cap_is_cut_and_says_so(self) -> None:
+        self.chat("s")
+        self.child("c1", "s", said="z" * (delegation.WAKE_RESULT_CHARS + 5_000))
+        self.assertEqual(self.sweep(), 1)
+        text = self.text()
+        self.assertIn(
+            f"[the result was cut to its first {delegation.WAKE_RESULT_CHARS} characters]", text
+        )
+        self.assertLess(text.count("z"), delegation.WAKE_RESULT_CHARS + 5_000)
+
+    def test_a_batch_spends_one_result_budget_and_says_where_it_ran_out(self) -> None:
+        self.chat("s")
+        for i in range(3):
+            self.child(f"c{i}", "s", said=f"{i}" + "w" * 25_000)
+        self.assertEqual(self.sweep(), 1)
+        text = self.text()
+        # Three results, none of which fit, and every one says how it was cut: the first takes
+        # the whole per-result cap, the next whatever the budget had left, the last none of it.
+        cuts = [
+            int(line.rsplit("first ", 1)[1].split(" ")[0])
+            for line in text.splitlines()
+            if line.startswith("[the result was cut to its first ")
+        ]
+        self.assertEqual(len(cuts), 2, text)
+        self.assertEqual(cuts[0], delegation.WAKE_RESULT_CHARS)
+        self.assertGreater(cuts[1], 0)
+        self.assertLess(cuts[1], delegation.WAKE_RESULT_CHARS)
+        self.assertIn(
+            f"[the result was omitted: this batch reached its {delegation.WAKE_BATCH_CHARS}-character limit]",
+            text,
+        )
+        # The budget bounds the results themselves; the notes that say so ride on top of it.
+        self.assertLessEqual(text.count("w"), delegation.WAKE_BATCH_CHARS)
+        self.assertEqual(text.count("[ASYNC DELEGATION COMPLETE — "), 3)
+        self.assertTrue(text.endswith(FOOTER))
+
+    def test_a_subagent_that_hit_its_iteration_cap_says_so(self) -> None:
+        self.chat("s")
+        self.child("c1", "s", goal="build it")
+        # Core hands the child the cap's own nudge, then the child answers it one last time: that
+        # user row is the stable mark compaction recognizers match.
+        self.said("c1", "user", delegation.ITERATION_NUDGE)
+        self.said("c1", "assistant", "half of the work, cut short")
+        self.conn.commit()
+        self.assertEqual(self.sweep(), 1)
+        text = self.text()
+        status = next(line for line in text.splitlines() if line.startswith("Status: "))
+        self.assertTrue(status.endswith(delegation.TRUNCATED_MARK), status)
+        lines = text.splitlines()
+        note = lines.index(delegation.TRUNCATED_NOTE)
+        self.assertEqual(lines[note + 1], "half of the work, cut short", "the note sits on the result")
+
+    def test_a_mark_from_before_the_status_column_still_reads_as_sent(self) -> None:
+        """An upgraded store's older marks are settled: a NULL status is a wake already posted."""
+        self.chat("s")
+        self.child("c1", "s", said="done")
+        self.sql(
+            "INSERT INTO subagent_wakes (subagent_id, parent_id, run_id, at) VALUES (?, ?, ?, ?)",
+            ("c1", "s", "run-from-before", int(time.time() * 1000)),
+        )
+        self.assertEqual(self.sweep(), 0)
+        self.assertEqual(self.posted, [])
+
+    def test_an_older_store_gains_the_wake_columns_and_keeps_its_marks(self) -> None:
+        """The v41 bump is additive: a store a v40 plugin wrote upgrades in place."""
+        path = db_path(self.home)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        old = sqlite3.connect(path)
+        old.execute("PRAGMA user_version = 40")
+        old.execute(
+            "CREATE TABLE subagent_wakes (subagent_id TEXT PRIMARY KEY, parent_id TEXT NOT NULL,"
+            " run_id TEXT, at INTEGER NOT NULL)"
+        )
+        old.execute("CREATE TABLE host_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+        old.execute("INSERT INTO subagent_wakes VALUES ('c1', 's', 'run-old', 1)")
+        old.commit()
+        old.close()
+        conn = connect(path)
+        try:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(subagent_wakes)")}
+            self.assertLessEqual({"status", "attempts", "next_at", "reason"}, columns)
+            row = conn.execute(
+                "SELECT status, attempts FROM subagent_wakes WHERE subagent_id = 'c1'"
+            ).fetchone()
+            self.assertIsNone(row[0], "a pre-upgrade mark stays settled")
+            self.assertEqual(row[1], 0)
+            self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], SCHEMA_VERSION)
+            made = conn.execute(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'subagent_wake_batches'"
+            ).fetchone()[0]
+            self.assertEqual(made, 1)
+        finally:
+            conn.close()
 
     def test_the_wake_goes_on_the_chat_a_compression_moved_on(self) -> None:
         """The child hangs off the live tip; the run has to name the chat the app knows."""

@@ -88,10 +88,20 @@ const screen = (entry: string) => (
   </MemoryRouter>
 )
 
+/**
+ * A pane fades its predecessor out over it (`PaneTransition` marks the copy `inert` and
+ * `aria-hidden`), and the copy leaves with a timer; a query that counts both panes' chrome counts a
+ * header the user no longer sees.
+ */
+const live = (node: Element) => node.closest('[aria-hidden="true"]') === null
 /** Every header on screen, the pane's first and the item beside it second. */
-const titles = () => findAll('[data-slot="header-title"]').map((node) => node.textContent)
+const titles = () =>
+  findAll('[data-slot="header-title"]')
+    .filter(live)
+    .map((node) => node.textContent)
 /** The card of the thread the pane is showing: the only one that says it is here. */
-const openCards = () => findAll('[data-slot="thread-card"] [aria-current="page"]')
+const openCards = () =>
+  findAll('[data-slot="thread-card"] [aria-current="page"]').filter(live)
 const cardLink = (id: string) => find(`[data-slot="thread-card"] a[href="/c/${id}"]`)
 const remembered = (profileId: string) => localStorage.getItem(lastThreadKey(profileId))
 

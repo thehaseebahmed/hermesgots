@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 40
+SCHEMA_VERSION = 41
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -582,5 +582,43 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    agent_id TEXT NOT NULL,
                    at INTEGER NOT NULL
                )"""
+        )
+        # v41: a wake is a batch per conversation, and it can be held, retried with a backoff or
+        # dropped for a reason, so a mark carries what became of it (delegation.py). The columns
+        # are additive: an older plugin reads the old ones and leaves these alone.
+        wake_columns = {row[1] for row in conn.execute("PRAGMA table_info(subagent_wakes)")}
+        for column, kind in (
+            # NULL is a mark a v40 store wrote: a wake already posted, so it stays settled.
+            ("status", "TEXT"),
+            ("attempts", "INTEGER NOT NULL DEFAULT 0"),
+            # Epoch ms the next attempt may go at; NULL when no backoff is pending.
+            ("next_at", "INTEGER"),
+            ("reason", "TEXT"),
+        ):
+            if column not in wake_columns:
+                conn.execute(f"ALTER TABLE subagent_wakes ADD COLUMN {column} {kind}")
+        # A batch's intent, written before its post so a restart mid-post re-posts the same key
+        # instead of a second run. ``run_id`` stays NULL until the post answered.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS subagent_wake_batches (
+                   id TEXT PRIMARY KEY,
+                   root TEXT NOT NULL,
+                   members TEXT NOT NULL,
+                   text TEXT NOT NULL,
+                   created_at INTEGER NOT NULL,
+                   run_id TEXT
+               )"""
+        )
+        # The watcher asks for a conversation's unconfirmed batch on every look; the partial
+        # index keeps that a handful of rows on a store that has carried years of finished ones.
+        conn.execute(
+            """CREATE INDEX IF NOT EXISTS wake_batch_open
+                   ON subagent_wake_batches (root, created_at) WHERE run_id IS NULL"""
+        )
+        # The orphan pass asks for every still-held wake on every look; the partial index keeps
+        # that off the sent rows a store accumulates, one per posted wake.
+        conn.execute(
+            """CREATE INDEX IF NOT EXISTS held_wakes
+                   ON subagent_wakes (parent_id) WHERE status = 'held'"""
         )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

@@ -1,0 +1,71 @@
+name: Hermes internals drift
+
+# The wake text is a copy of Hermes's own completion notice, and the plugin reads three of Hermes's
+# internals by name (the live-subagent registry, the API server's run table, the per-child stop).
+# Hermes moves them on its own schedule; this fails when it does, on the release users install and on
+# main, so the copy is updated before a wake quotes text core no longer writes.
+on:
+  pull_request:
+    paths:
+      - "plugin/delegation.py"
+      - "plugin/sessions.py"
+      - "plugin/outbox.py"
+      - "plugin/store.py"
+      - ".github/scripts/check-hermes-internals.py"
+      - ".github/workflows/hermes-internals-drift.yml"
+  push:
+    branches: [main]
+    paths:
+      - "plugin/delegation.py"
+      - "plugin/sessions.py"
+      - "plugin/outbox.py"
+      - "plugin/store.py"
+      - ".github/scripts/check-hermes-internals.py"
+      - ".github/workflows/hermes-internals-drift.yml"
+  # Weekly, so a Hermes change shows up while no pull request is open.
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: hermes-internals-drift-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  drift:
+    name: Check (Hermes ${{ matrix.hermes }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The latest release is what users run; main is what the next release will write.
+        hermes: [release, main]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pick the Hermes ref
+        id: ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ matrix.hermes }}" = release ]; then
+            ref=$(gh api repos/NousResearch/hermes-agent/releases/latest --jq .tag_name)
+          else
+            ref=main
+          fi
+          echo "Checking against NousResearch/hermes-agent@$ref"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          repository: NousResearch/hermes-agent
+          ref: ${{ steps.ref.outputs.ref }}
+          path: .hermes
+          # The internals span the tools, gateway and agent packages, not just tools.
+          sparse-checkout: |
+            tools
+            gateway
+            agent
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Check the internals
+        run: python3 .github/scripts/check-hermes-internals.py .hermes plugin
