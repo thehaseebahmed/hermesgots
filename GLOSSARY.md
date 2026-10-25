@@ -281,7 +281,7 @@ How many tasks a project's AFK will hold at once, from one to five, set in its A
 _Avoid_: concurrency, parallelism, workers, slots
 
 **Pick budget**:
-How many tasks one bot's AFK may hold at once across all of its projects, from one to ten, set in the bot's Coding tab. Each project is still held to its own **pick count**, so the bot works the lower of the two.
+How many tasks one bot's AFK may hold at once across all of its projects, from one to ten, set in its bot's Coding settings under Away From Keyboard. Each project is still held to its own **pick count**, so the bot works the lower of the two.
 _Avoid_: concurrency, parallelism, cap, quota, limit
 
 **Refusal**:
@@ -390,35 +390,45 @@ _Avoid_: image, file, rich media
 The row of media in a thread: images and video side by side, each opened in the platform's own viewer. Audio is not in it; it sits in the thread as its own row.
 _Avoid_: carousel, thumbnails, media strip, lightbox
 
-## Dictation
+## Speech-to-text
 
-**Dictation**:
+**Speech-to-text**:
 Speaking a message into Gots instead of typing it. Its voice bar holds the composer's place while it runs, and its words land in the composer when it ends.
-_Avoid_: voice input, speech-to-text, transcription, STT, voice typing
+_Avoid_: dictation, voice input, transcription, STT, voice typing, speed-to-text
 
 **Voice bar**:
-The strip that holds the composer's place during a dictation: how long it has been going, how loud the room is, and Stop, Send and Cancel.
+The strip that holds the composer's place during speech-to-text: how long it has been going, how loud the room is, and Stop, Send and Cancel.
 _Avoid_: recorder, overlay, dictation sheet, mic sheet
 
 **Take**:
-One dictation as the app holds it — from the tap that starts it to the write that lands its words — one at a time per bot.
+One speech-to-text run as the app holds it — from the tap that starts it to the write that lands its words — one at a time per bot.
 _Avoid_: session, stream, job, recording
 
 **Piece**:
-The unit a dictation uploads: one stretch of its recording, cut at a pause or at its length cap, transcribed by the host while the rest is still being spoken.
+The unit a take uploads: one stretch of its recording, cut at a pause or at its length cap, transcribed by the host while the rest is still being spoken.
 _Avoid_: chunk, slice, segment, part
 
 **Cleanup**:
-The pass that tidies a dictation's finished words — fillers, punctuation, casing, numbers, a spoken list as a list — without rewording them. It runs once over the whole text when the dictation ends, on the bot's own model, bounded; one that misses its budget, fails or comes back much longer or shorter than the text leaves the words as the host heard them.
+The pass that tidies a take's finished words — fillers, punctuation, casing, numbers, a spoken list as a list — without rewording them. It runs once over the whole text when the take ends, on the bot's own model, bounded; one that misses its budget, fails or comes back much longer or shorter than the text leaves the words as the host heard them.
 _Avoid_: polish, post-processing, formatting, correction
 
 **Vocabulary**:
-The words a bot's dictation leans towards: names, product words, jargon. A short list, the bot's own, edited on its Dictation tab; it biases what the host hears and how the finished text is cleaned up.
+The words a bot's speech-to-text leans towards: names, product words, jargon. A short list, the bot's own, edited in its Speech-to-text settings; it biases what the host hears and how the finished text is cleaned up.
 _Avoid_: dictionary, custom words, hint, keyterms
 
 **Host speech model**:
-The model on a bot's host that hears its dictation. Its size is the trade between waiting and being right.
-_Avoid_: whisper model, STT model, engine, ASR
+The model on a bot's host that hears its speech-to-text. Its size is the trade between waiting and being right.
+_Avoid_: whisper model, fast-whisper, STT model, engine, ASR
+
+## Settings
+
+**Gots setting**:
+A setting that is Gots's own — the app, the device or the Gots plugin's own host values — rather than a knob on the bot's Hermes. Settings are grouped by this split.
+_Avoid_: app setting, local setting, device setting
+
+**Hermes setting**:
+A setting of the bot's Hermes itself: the same knob the Hermes Dashboard shows, named as Hermes names it.
+_Avoid_: bot setting, server setting, config
 
 ## Testing
 
