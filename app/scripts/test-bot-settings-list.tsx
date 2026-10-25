@@ -71,25 +71,25 @@ const words = (element: Element | null) => (element?.textContent ?? "").replace(
 const back = () => find('button[aria-label="Back"]')
 const titles = () => findAll("h1").map((heading) => heading.textContent)
 
-test("the list draws General alone, then the Gots plugin's pages, then the bot's Hermes's", async () => {
+test("the list draws General alone, then every other page in the one card under it", async () => {
   await seed("list-order", ALL)
   await mount(settings("/settings/bots/bot-1"), async () => {
     assert.deepEqual(
       rows(),
-      ["general", "chat", "coding", "speech-to-text", "mcps", "skills"],
+      ["general", "models", "coding", "speech-to-text", "mcps", "skills"],
       "the pages in list order",
     )
     assert.deepEqual(
       cards(),
-      [["general"], ["chat", "coding", "speech-to-text"], ["mcps", "skills"]],
-      "three cards separated by gaps: General on top, then the plugin's pages, then Hermes's",
+      [["general"], ["models", "coding", "speech-to-text", "mcps", "skills"]],
+      "two cards separated by a gap: General on its own, then every other page together",
     )
     assert.deepEqual(headings(), [], "and no headings: a card is separated by the gap, not named")
     assert.deepEqual(
       findAll("[data-bot-page]").map((one) => one.textContent),
       [
         "GeneralEnabled, notifications, profile and your Hermes's address",
-        "ChatModel, default model, triage model and fallback providers",
+        "ModelsModel, default model, triage model and fallback providers",
         "CodingAway From Keyboard and this bot's pick budget",
         "Speech-to-textVocabulary, cleanup model and speech model",
         "MCPThe servers this bot works with",
@@ -144,10 +144,10 @@ test("a host that hasn't answered yet keeps the address, and draws General meanw
 })
 
 test("the segments that named pages before the list land on the pages that took their place", async () => {
-  await seed("old-models", ALL)
-  await mount(settings("/settings/bots/bot-1/models"), async () => {
-    assert.equal(path(), "/settings/bots/bot-1/chat", "models is Chat")
-    assert.deepEqual(titles(), ["Chat"], "and the screen is named for it")
+  await seed("old-chat", ALL)
+  await mount(settings("/settings/bots/bot-1/chat"), async () => {
+    assert.equal(path(), "/settings/bots/bot-1/models", "chat is Models")
+    assert.deepEqual(titles(), ["Models"], "and the screen is named for it")
   })
   await seed("old-dictation", ALL)
   await mount(settings("/settings/bots/bot-1/dictation"), async () => {
@@ -197,9 +197,9 @@ test("on a phone a row pushes its page, and the page's back returns to the list"
   await seed("push", ALL)
   await mount(settings("/settings/bots/bot-1"), async () => {
     assert.deepEqual(titles(), ["A bot"], "the list is a screen of its own")
-    await click(row("chat"))
-    assert.equal(path(), "/settings/bots/bot-1/chat", "the page has an address of its own")
-    assert.deepEqual(titles(), ["Chat"], "named for the page it opened")
+    await click(row("models"))
+    assert.equal(path(), "/settings/bots/bot-1/models", "the page has an address of its own")
+    assert.deepEqual(titles(), ["Models"], "named for the page it opened")
     await click(back())
     assert.equal(path(), "/settings/bots/bot-1", "back returns to the list")
     assert.deepEqual(titles(), ["A bot"], "which is named for the bot")
@@ -215,11 +215,11 @@ test(
       absent('a[href="/settings/appearance"]')
       assert.deepEqual(titles(), ["A bot", "General"], "the bot's list beside General")
 
-      await click(row("chat"))
-      assert.equal(path(), "/settings/bots/bot-1/chat", "the address carries the segment")
+      await click(row("models"))
+      assert.equal(path(), "/settings/bots/bot-1/models", "the address carries the segment")
       assert.ok(find("[data-bot-settings-list]"), "the list stays where it was")
-      assert.deepEqual(titles(), ["A bot", "Chat"], "and the pane beside it swapped")
-      assert.match(text(), /Default model/, "to the Chat page")
+      assert.deepEqual(titles(), ["A bot", "Models"], "and the pane beside it swapped")
+      assert.match(text(), /Default model/, "to the Models page")
       assert.doesNotMatch(text(), /Test connection/, "and nothing of General is left")
     })
   }),
@@ -235,11 +235,11 @@ test("a page still holds what its page held, each setting over its value", async
     assert.ok(find('[data-setting="name"]'), "its Name is a value that opens its edit")
     assert.doesNotMatch(text(), /Subagent model/, "and nothing of the Hermes side is forced on it")
   })
-  await seed("pages-chat", CHAT, { hostId: "host-1" })
-  await mount(settings("/settings/bots/bot-1/chat"), async () => {
-    assert.deepEqual(titles(), ["Chat"], "the Chat page")
+  await seed("pages-models", CHAT, { hostId: "host-1" })
+  await mount(settings("/settings/bots/bot-1/models"), async () => {
+    assert.deepEqual(titles(), ["Models"], "the Models page")
     for (const label of ["Default model", "Triage model", "Fallback providers"])
-      assert.ok(text().includes(label), `Chat still has ${label}`)
+      assert.ok(text().includes(label), `Models still has ${label}`)
     assert.ok(find('[data-setting="fallbacks"]'), "its chain is a value that opens its own screen")
   })
 })

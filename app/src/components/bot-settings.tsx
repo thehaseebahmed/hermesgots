@@ -33,13 +33,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Caption,
   EditCard,
   EditForm,
   Group,
+  NOT_SET,
   PickList,
   PickSurface,
   SwitchRow,
@@ -107,13 +107,13 @@ function gated(page: BotTab): page is GatedPage {
  */
 const PAGE_ANSWERS = { ...PAGE_FEATURES, delegation: "delegation_model" } as const
 
-/** What the Chat page's two rows need: the Gots triage pick, and the chain after the main model. */
+/** What the Models page's two rows need: the Gots triage pick, and the chain after the main model. */
 const CHAT_ANSWERS = { triage: "triage_model", fallbacks: "fallbacks" } as const
 
 /** The icon a page's row, and the screen it opens, wear. */
 const PAGE_ICONS: Record<BotTab, LucideIcon> = {
   general: SlidersHorizontalIcon,
-  chat: MessagesSquareIcon,
+  models: MessagesSquareIcon,
   coding: CodeXmlIcon,
   "speech-to-text": AudioLinesIcon,
   mcps: PlugZapIcon,
@@ -316,8 +316,7 @@ export function BotSettingsList({
         </Banner>
       )}
       <Group>{rows("general")}</Group>
-      <Group>{rows("gots")}</Group>
-      <Group>{rows("hermes")}</Group>
+      <Group>{rows("rest")}</Group>
       <DeleteBotDialog
         profile={profile}
         open={confirming}
@@ -372,7 +371,7 @@ export function BotSettingsPage({
     return <PageSub profile={profile} tab={shown} sub={sub} close={close} />
 
   const page =
-    shown === "chat" ? (
+    shown === "models" ? (
       <ChatPage profile={profile} />
     ) : (
       <GeneralPage
@@ -405,7 +404,7 @@ function PageSub({
   sub: BotSub
   close: () => void
 }) {
-  if (tab === "chat" && sub.id === "fallbacks") return <FallbacksPage profile={profile} />
+  if (tab === "models" && sub.id === "fallbacks") return <FallbacksPage profile={profile} />
   if (tab !== "general") return null
   return (
     <EditForm
@@ -443,8 +442,7 @@ function editPatch(id: string, value: string): Partial<Omit<Profile, "id">> {
   return { apiKey: value.trim() }
 }
 
-const TRIAGE_PURPOSE =
-  "Decides whether a message sent from Main stays there, continues a thread or starts a new one. It only makes that call, so a small, fast model is enough. Default model uses the bot's own."
+const TRIAGE_PURPOSE = "Whether a message from Main starts a new thread or continues one"
 
 /**
  * General, by ownership: the bot's own switches, then what it looks like and how it connects, then
@@ -505,29 +503,49 @@ function GeneralPage({
           onClick={() => onOpen("name")}
           data-setting="name"
         />
-        <ValueRow
-          title="Image"
-          value={character?.name}
+        <button
+          type="button"
           onClick={() => setPick("image")}
+          className={cn(linkRowClass, "items-center gap-3")}
           data-setting="image"
-        />
-        <div className={cn(rowClass, "flex-wrap items-center gap-3")} data-setting="test">
-          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="text-base">Test connection</span>
-            <span className="text-sm text-muted-foreground">Ask this bot's server how it is</span>
-          </span>
-          {connection.state === "ok" && (
-            <span className="flex flex-wrap gap-2">
-              <Badge className="bg-primary/15 text-primary dark:bg-primary/30 dark:text-sidebar-primary">
-                Connected
-              </Badge>
-              {connection.plugin ? (
-                <Badge variant="secondary">Plugin {connection.plugin}</Badge>
-              ) : (
-                <Badge variant="outline">No plugin</Badge>
+        >
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5 py-0.5">
+            <span className="truncate text-base">Image</span>
+            <span
+              className={cn(
+                "truncate text-sm",
+                character ? "text-primary" : "text-muted-foreground",
               )}
+            >
+              {character?.name ?? NOT_SET}
             </span>
-          )}
+          </span>
+          <Bot id={profile.botId} className="size-10" />
+        </button>
+        <div className={cn(rowClass, "flex-wrap items-center gap-3")} data-setting="test">
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5 py-0.5">
+            <span className="truncate text-base">Test connection</span>
+            <span className="line-clamp-2 text-sm text-muted-foreground">
+              Ask this bot's server how it is
+            </span>
+            {/* The answer takes the row's value place, under the purpose: green where it connected,
+                the host's own sentence in red where it didn't. */}
+            {(connection.state === "ok" || connection.state === "error") && (
+              <span
+                role={connection.state === "error" ? "alert" : undefined}
+                className={cn(
+                  "line-clamp-2 text-sm",
+                  connection.state === "ok" ? "text-primary" : "text-destructive",
+                )}
+              >
+                {connection.state === "ok"
+                  ? connection.plugin
+                    ? `Connected · Plugin ${connection.plugin}`
+                    : "Connected · No plugin"
+                  : connection.message}
+              </span>
+            )}
+          </span>
           <Button
             onClick={test}
             disabled={connection.state === "testing" || profile.disabled}
@@ -537,11 +555,6 @@ function GeneralPage({
             {connection.state === "testing" ? "Testing…" : "Test"}
           </Button>
         </div>
-        {connection.state === "error" && (
-          <p className={cn(rowClass, "text-sm text-destructive")} role="alert">
-            {connection.message}
-          </p>
-        )}
       </Group>
 
       {(delegation || !linked) && (
@@ -625,7 +638,7 @@ function GeneralPage({
   )
 }
 
-/** The Chat page: Gots's triage model over the bot's Hermes models, each a value that opens its pick. */
+/** The Models page: Gots's triage model over the bot's Hermes models, each a value that opens its pick. */
 function ChatPage({ profile }: { profile: Profile }) {
   const answers = usePluginFeatureAnswers(profile, CHAT_ANSWERS)
   const triage = answers.triage === "yes"
@@ -686,7 +699,7 @@ function ChatPage({ profile }: { profile: Profile }) {
             title="Fallback providers"
             purpose="The chain Hermes tries after the main model"
             value={chains ? `${chains} ${chains === 1 ? "provider" : "providers"}` : "None"}
-            onClick={() => navigate(botSubPath(profile.id, "chat", "fallbacks"))}
+            onClick={() => navigate(botSubPath(profile.id, "models", "fallbacks"))}
             data-setting="fallbacks"
           />
         )}

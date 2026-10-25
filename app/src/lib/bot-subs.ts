@@ -21,7 +21,7 @@ const FIXED: Partial<Record<BotTab, BotSub[]>> = {
     { id: "base-url", kind: "edit", title: "API base URL" },
     { id: "server-key", kind: "edit", title: "Server key" },
   ],
-  chat: [{ id: "fallbacks", kind: "detail", title: "Fallback providers" }],
+  models: [{ id: "fallbacks", kind: "detail", title: "Fallback providers" }],
   "speech-to-text": [{ id: "vocabulary", kind: "detail", title: "Vocabulary" }],
 }
 

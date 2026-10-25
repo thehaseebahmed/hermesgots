@@ -12,7 +12,7 @@ const BANNER = "This bot's plugin is out of date! Update it to 0.80.0 or newer."
 const CODING = "Away From Keyboard and this bot's pick budget"
 const PACES = [
   ["general", "General"],
-  ["chat", "Chat"],
+  ["models", "Models"],
   ["coding", "Coding"],
 ]
 
@@ -126,11 +126,11 @@ const wide = async ({ page, profileId, shot }) => {
   await shot("general")
 
   await list.locator('[data-bot-page="chat"]').click()
-  await page.waitForURL((url) => url.pathname === `/settings/bots/${profileId}/chat`, {
+  await page.waitForURL((url) => url.pathname === `/settings/bots/${profileId}/models`, {
     timeout: 15_000,
   })
   await settled(page)
-  await page.getByRole("heading", { level: 1, name: "Chat", exact: true }).waitFor({
+  await page.getByRole("heading", { level: 1, name: "Models", exact: true }).waitFor({
     timeout: 15_000,
   })
   assert.equal(
@@ -173,11 +173,11 @@ const phone = async ({ page, profileId, shot }) => {
   await shot("list")
 
   await list.locator('[data-bot-page="chat"]').click()
-  await page.waitForURL((url) => url.pathname === `/settings/bots/${profileId}/chat`, {
+  await page.waitForURL((url) => url.pathname === `/settings/bots/${profileId}/models`, {
     timeout: 15_000,
   })
   await settled(page)
-  await page.getByRole("heading", { level: 1, name: "Chat", exact: true }).waitFor({
+  await page.getByRole("heading", { level: 1, name: "Models", exact: true }).waitFor({
     timeout: 15_000,
   })
   assert.ok(await back.isVisible(), "the page pushes with a back control of its own")

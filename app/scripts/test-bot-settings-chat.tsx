@@ -1,5 +1,5 @@
 /**
- * A bot's Chat page, over a seeded device database and a faked host (ADR 0055): the muted captions
+ * A bot's Models page, over a seeded device database and a faked host (ADR 0055): the muted captions
  * "Gots" and "Hermes" over the cards that follow them, every setting a title over the line saying
  * what it is for and the value it holds in the accent colour, each value opening its pick as a bottom
  * sheet, and Fallback providers drilling into the chain's own screen — the rows it holds, the chain a
@@ -29,8 +29,7 @@ import {
 } from "./component-kit.tsx"
 
 /** The triage explanation, which was the info icon's tooltip and is now the row's own line. */
-const TRIAGE =
-  "Decides whether a message sent from Main stays there, continues a thread or starts a new one. It only makes that call, so a small, fast model is enough. Default model uses the bot's own."
+const TRIAGE = "Whether a message from Main starts a new thread or continues one"
 
 type Choice = { provider: string; model: string }
 type Sent = { method: string; path: string; body: Record<string, unknown> | null }
@@ -165,9 +164,9 @@ const remove = (place: number) => find(`[aria-label="Remove fallback ${place}"]`
 const addFallback = () =>
   findAll("[data-fallbacks] button").find((one) => words(one) === "Add fallback") ?? null
 
-test("the Chat page is the Gots triage row, then the model, the default and the fallback chain", async () => {
+test("the Models page is the Gots triage row, then the model, the default and the fallback chain", async () => {
   await seed("chat-groups")
-  await mount(page("/settings/bots/bot-1/chat"), async () => {
+  await mount(page("/settings/bots/bot-1/models"), async () => {
     assert.deepEqual(headings(), [], "no headings: the captions name the cards")
     assert.equal(
       caption("Gots")?.textContent?.trim(),
@@ -198,7 +197,7 @@ test("the Chat page is the Gots triage row, then the model, the default and the 
 
 test("the triage row says what the model decides, and no pop-up explains it", async () => {
   await seed("chat-triage-copy")
-  await mount(page("/settings/bots/bot-1/chat"), async () => {
+  await mount(page("/settings/bots/bot-1/models"), async () => {
     assert.equal(
       rowText("triage-model"),
       `Triage model${TRIAGE}Default model`,
@@ -211,7 +210,7 @@ test("the triage row says what the model decides, and no pop-up explains it", as
 
 test("the fallback row is Fallback providers, saying what the chain is for", async () => {
   await seed("chat-fallbacks", { fallbacks: [{ provider: "openrouter", model: "cheap-model" }] })
-  await mount(page("/settings/bots/bot-1/chat"), async () => {
+  await mount(page("/settings/bots/bot-1/models"), async () => {
     assert.equal(
       rowText("fallbacks"),
       "Fallback providersThe chain Hermes tries after the main model1 provider",
@@ -223,7 +222,7 @@ test("the fallback row is Fallback providers, saying what the chain is for", asy
 
 test("the chain's length is what the row says, and None when it holds nothing", async () => {
   await seed("chat-chain-none")
-  await mount(page("/settings/bots/bot-1/chat"), async () => {
+  await mount(page("/settings/bots/bot-1/models"), async () => {
     assert.equal(accent("fallbacks"), "None", "an empty chain says None")
   })
 
@@ -233,14 +232,14 @@ test("the chain's length is what the row says, and None when it holds nothing", 
       { provider: "openrouter", model: "own-model" },
     ],
   })
-  await mount(page("/settings/bots/bot-1/chat"), async () => {
+  await mount(page("/settings/bots/bot-1/models"), async () => {
     assert.equal(accent("fallbacks"), "2 providers", "and two of them say 2 providers")
   })
 })
 
 test("the model and default model rows say what each is for, and the value it holds", async () => {
   await seed("chat-subtitles")
-  await mount(page("/settings/bots/bot-1/chat"), async () => {
+  await mount(page("/settings/bots/bot-1/models"), async () => {
     assert.equal(
       rowText("model"),
       "ModelThe model a chat runs when it has no pick of its owntest/model",
@@ -256,7 +255,7 @@ test("the model and default model rows say what each is for, and the value it ho
 
 test("a host that withholds the model keeps the triage row and its words", async () => {
   await seed("chat-withheld", { writers: false })
-  await mount(page("/settings/bots/bot-1/chat"), async () => {
+  await mount(page("/settings/bots/bot-1/models"), async () => {
     assert.ok(row("triage-model"), "the triage row is still there")
     assert.ok(rowText("triage-model").includes(TRIAGE), "and its line is unchanged")
     assert.equal(accent("triage-model"), "Default model", "over the value it holds")
@@ -265,7 +264,7 @@ test("a host that withholds the model keeps the triage row and its words", async
 
 test("a host without the triage route draws no Gots caption, and its Hermes card alone", async () => {
   await seed("chat-no-triage", { features: ["fallbacks", "host_model"] })
-  await mount(page("/settings/bots/bot-1/chat"), async () => {
+  await mount(page("/settings/bots/bot-1/models"), async () => {
     assert.ok(headings().length === 0, "no heading over an empty card either")
     assert.ok(!caption("Gots"), "no caption over a card with no row in it")
     assert.ok(caption("Hermes"), "the Hermes card is the page's own")
@@ -276,7 +275,7 @@ test("a host without the triage route draws no Gots caption, and its Hermes card
 
 test("a host without the fallback route leaves the chain's row off the page", async () => {
   await seed("chat-no-fallbacks", { features: ["triage_model", "host_model"] })
-  await mount(page("/settings/bots/bot-1/chat"), async () => {
+  await mount(page("/settings/bots/bot-1/models"), async () => {
     absent('[data-setting="fallbacks"]', "no fallback row from a host that records no chain")
     assert.deepEqual(rows(), ["triage-model", "model", "default-model"], "and the rest stay")
   })
@@ -286,11 +285,11 @@ test("tapping Fallback providers opens the chain's own screen", async () => {
   await seed("chat-fallbacks-drill", {
     fallbacks: [{ provider: "openrouter", model: "cheap-model" }],
   })
-  await mount(page("/settings/bots/bot-1/chat"), async () => {
+  await mount(page("/settings/bots/bot-1/models"), async () => {
     await click(row("fallbacks"))
     assert.equal(
       path(),
-      "/settings/bots/bot-1/chat/fallbacks",
+      "/settings/bots/bot-1/models/fallbacks",
       "the chain has an address of its own",
     )
     assert.ok(chain(), "and a screen of its own")
@@ -305,7 +304,7 @@ test("the chain's screen lists what the host holds, each with a way to remove it
       { provider: "openrouter", model: "own-model" },
     ],
   })
-  await mount(page("/settings/bots/bot-1/chat/fallbacks"), async () => {
+  await mount(page("/settings/bots/bot-1/models/fallbacks"), async () => {
     assert.deepEqual(chainRows(), ["1", "2"], "one row per fallback, in the order it is tried")
     assert.equal(words(chainRow(1)), "Fallback 1openrouter/cheap-model", "the first by its place")
     assert.equal(chainValue(1), "openrouter/cheap-model", "with its model in the accent colour")
@@ -318,7 +317,7 @@ test("the chain's screen lists what the host holds, each with a way to remove it
 
 test("an empty chain offers the row that adds one", async () => {
   await seed("chat-chain-add")
-  await mount(page("/settings/bots/bot-1/chat/fallbacks"), async () => {
+  await mount(page("/settings/bots/bot-1/models/fallbacks"), async () => {
     assert.deepEqual(chainRows(), [], "no fallbacks yet")
     assert.ok(addFallback(), "with the way to add the first")
   })
@@ -326,7 +325,7 @@ test("an empty chain offers the row that adds one", async () => {
 
 test("picking a model for a new fallback writes the chain", async () => {
   const calls = await seed("chat-chain-pick")
-  await mount(page("/settings/bots/bot-1/chat/fallbacks"), async () => {
+  await mount(page("/settings/bots/bot-1/models/fallbacks"), async () => {
     await click(addFallback())
     await until(async () => Boolean(find("[aria-pressed]")), "the model pick")
     assert.ok(modelOption("cheap-model"), "the host's models, in a sheet")
@@ -349,7 +348,7 @@ test("removing a fallback writes the chain without it", async () => {
       { provider: "openrouter", model: "own-model" },
     ],
   })
-  await mount(page("/settings/bots/bot-1/chat/fallbacks"), async () => {
+  await mount(page("/settings/bots/bot-1/models/fallbacks"), async () => {
     await click(remove(1))
     const write = calls.find((one) => one.method === "POST" && one.path.endsWith("/fallbacks"))
     assert.deepEqual(
@@ -367,7 +366,7 @@ test("removing a fallback writes the chain without it", async () => {
 
 test("picking a model on the Chat page writes it to the bot", async () => {
   await seed("chat-model-pick")
-  await mount(page("/settings/bots/bot-1/chat"), async () => {
+  await mount(page("/settings/bots/bot-1/models"), async () => {
     assert.equal(accent("model"), "test/model", "the model the bot runs now")
 
     await openPick("model")
@@ -386,7 +385,7 @@ test("picking a model on the Chat page writes it to the bot", async () => {
 
 test("picking a triage model writes it to the host", async () => {
   const calls = await seed("chat-triage-pick")
-  await mount(page("/settings/bots/bot-1/chat"), async () => {
+  await mount(page("/settings/bots/bot-1/models"), async () => {
     await openPick("triage-model")
     await click(modelOption("cheap-model"))
 
@@ -404,7 +403,7 @@ test("picking a triage model writes it to the host", async () => {
 
 test("picking a Default model makes it the host's main model", async () => {
   const calls = await seed("chat-default-pick")
-  await mount(page("/settings/bots/bot-1/chat"), async () => {
+  await mount(page("/settings/bots/bot-1/models"), async () => {
     await openPick("default-model")
     await click(modelOption("cheap-model"))
 

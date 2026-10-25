@@ -443,15 +443,23 @@ test("Test connection answers Connected, with the plugin version the host runs",
   await mount(general(), async () => {
     await click(testButton())
     await until(async () => words(page()).includes("Connected"), "the test's answer")
-    assert.match(words(row("test")), /Connected/, "the row wears the Connected badge")
-    assert.match(words(row("test")), /Plugin 0\.81\.0/, "and names the plugin the host runs")
+    assert.match(
+      words(row("test")),
+      /Connected · Plugin 0\.81\.0/,
+      "the row's value says it connected and names the plugin the host runs",
+    )
+    assert.equal(find('[data-setting="test"] [role="alert"]'), null, "and nothing is raised")
   })
 
   await seed("general-test-bare", {}, FEATURES, { version: null })
   await mount(general(), async () => {
     await click(testButton())
     await until(async () => words(page()).includes("Connected"), "the test's answer")
-    assert.match(words(row("test")), /No plugin/, "a host without the plugin says so instead")
+    assert.match(
+      words(row("test")),
+      /Connected · No plugin/,
+      "a host without the plugin says so in the same place",
+    )
   })
 })
 
@@ -463,8 +471,8 @@ test("a test the host refuses shows its own sentence in the row's alert", async 
     assert.equal(words(find('[role="alert"]')), "Hermes is restarting.", "in the host's own words")
     assert.equal(
       words(row("test")).match(/Hermes is restarting\./g)?.length ?? 0,
-      0,
-      "the row keeps its purpose, so the sentence is said once",
+      1,
+      "the row's value carries the sentence, once",
     )
     assert.doesNotMatch(words(row("test")), /Connected/, "and nothing claims it connected")
   })

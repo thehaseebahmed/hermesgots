@@ -36,7 +36,7 @@ await flow("fallback-models", async ({ page, profileId, until, shot, held }) => 
   })
   assert.deepEqual(await hosted(), [])
 
-  await page.goto(`${app}/settings/bots/${profileId}/chat`)
+  await page.goto(`${app}/settings/bots/${profileId}/models`)
   await page.locator('[data-setting="fallbacks"]').waitFor({ timeout: 15_000 })
   await page.locator('[data-setting="fallbacks"]').click()
   await page.waitForURL((url) => url.pathname === `/settings/bots/${profileId}/chat/fallbacks`, {

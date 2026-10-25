@@ -1,15 +1,14 @@
 /**
  * A bot's settings pages, in list order: the URL's third segment is one of these, and every page —
- * General's included — carries its own. General leads and stands alone; then the Gots plugin's own
- * settings, with Coding (how the bot works when it is left alone) after the chat it serves; then the
- * ones on the bot's Hermes, Skills last.
+ * General's included — carries its own. General leads and stands alone in the first card; every
+ * other page follows in one card after it, since only the grouping is structural, not a heading.
  */
-export const BOT_TABS = ["general", "chat", "coding", "speech-to-text", "mcps", "skills"] as const
+export const BOT_TABS = ["general", "models", "coding", "speech-to-text", "mcps", "skills"] as const
 
 export type BotTab = (typeof BOT_TABS)[number]
 
-/** Where a page's row sits: alone on top, or under one of the two ownership headings. */
-export type BotPageGroup = "general" | "gots" | "hermes"
+/** Where a page's row sits: General alone in the first card, everything else in the card below. */
+export type BotPageGroup = "general" | "rest"
 
 /** One page: the segment naming it, what its row and its screen are called, and its group. */
 export type BotPage = {
@@ -28,40 +27,40 @@ export const BOT_PAGES: BotPage[] = [
     group: "general",
   },
   {
-    segment: "chat",
-    title: "Chat",
+    segment: "models",
+    title: "Models",
     subtitle: "Model, default model, triage model and fallback providers",
-    group: "gots",
+    group: "rest",
   },
   {
     segment: "coding",
     title: "Coding",
     subtitle: "Away From Keyboard and this bot's pick budget",
-    group: "gots",
+    group: "rest",
   },
   {
     segment: "speech-to-text",
     title: "Speech-to-text",
     subtitle: "Vocabulary, cleanup model and speech model",
-    group: "gots",
+    group: "rest",
   },
   {
     segment: "mcps",
     title: "MCP",
     subtitle: "The servers this bot works with",
-    group: "hermes",
+    group: "rest",
   },
   {
     segment: "skills",
     title: "Skills",
     subtitle: "The skills this bot can use",
-    group: "hermes",
+    group: "rest",
   },
 ]
 
 /** The segments that named a page before the list, and the page that took each one's place. */
 const OLD_TABS: Record<string, BotTab> = {
-  models: "chat",
+  chat: "models",
   dictation: "speech-to-text",
 }
 

@@ -91,7 +91,7 @@ test("a host that advertises afk_picks has a Coding tab, holding the bot's pick 
     assert.ok(codingTab(), "the Coding page is on the list")
     assert.deepEqual(
       tabNames(),
-      ["General", "Chat", "Coding"],
+      ["General", "Models", "Coding"],
       "in page order, after the pages before it",
     )
     assert.equal(here(), "/settings/bots/bot-1/coding", "the address is the tab's own")
