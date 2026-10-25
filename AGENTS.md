@@ -351,6 +351,14 @@ Bots register themselves instead of being typed in (design: https://claude.ai/co
 - **iOS has nothing yet**: there is no iOS app, and receiving shares there needs one with a Share Extension and an App Group, so a paid Apple Developer Program account.
 - `window.mementoShare({ title, text, url, files })` opens the screen in development.
 
+## Settings UX
+
+- **A settings group that holds only toggle settings always has a parent that switches them all together** — a Notification types feature header, a Skills category header.
+- **A toggle setting whose row also has a tap action is two columns:** the left column (icon, title, subtitle) is fully clickable and does the tap action; the right column (the switch) is fully clickable and toggles.
+- **Settings rows are a title over a subtitle, and the subtitle says what the setting is for.** This is the one exception to **No explanatory copy**.
+- **Input labels on settings are styled the same everywhere**; the Name label in Settings > Bot > General is the baseline.
+- **Settings are grouped into Gots Specific Settings and Hermes Settings by ownership** (the glossary's **Gots setting** and **Hermes setting**). A Hermes setting is named as the Hermes Dashboard names it.
+
 ## Conventions
 
 - **The UI renders from Dexie live queries.** Streaming writes into IndexedDB (throttled), and components never hold stream state.
@@ -377,5 +385,5 @@ Bots register themselves instead of being typed in (design: https://claude.ai/co
 - **Bots:** they are still by default. Only the header (and the empty-state hero) passes `animate`. Animations must respect `prefers-reduced-motion`.
 - **Assets must be original or properly licensed.** Never copy third-party characters, mascots or brand assets, even as "inspiration" copies.
 - **Never commit secrets.** API keys live only in the user's browser.
-- **No explanatory copy.** Don't add UI text that explains how the app works or where its data comes from (footnotes, "from X" captions) unless asked. If it seems needed, ask first.
+- **No explanatory copy.** Don't add UI text that explains how the app works or where its data comes from (footnotes, "from X" captions) unless asked — a setting's subtitle is the one exception (see **Settings UX**). If it seems needed, ask first.
 - Match the surrounding code: Prettier style (no semicolons, 100 columns) and few comments. Comments explain *why*.
