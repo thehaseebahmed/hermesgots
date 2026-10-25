@@ -136,6 +136,24 @@ export function controlAction(call: AgentCall): ControlAction | undefined {
 }
 
 /**
+ * Whether an envelope label — a row whose arguments fell back as its label — proves a spawn: the
+ * `tasks` a batch was given, or the `goal` a single spawn was. Where it names an `action` instead,
+ * the action decides: `spawn` started work, and every other action (`list`, `steer` and `stop`
+ * included) ran none, so the row stays a row. A call this rule cannot prove started anything draws
+ * a row, never a card.
+ */
+function spawnedByEnvelope(words: string): boolean {
+  const fields = readEnvelope(words)?.fields
+  if (!fields) return false
+  const action = actionOf(fields)
+  if (action !== undefined) return action === SPAWN
+  const tasks = fields.tasks
+  if (Array.isArray(tasks) && tasks.length > 0) return true
+  const goal = fields.goal
+  return typeof goal === "string" && goal.trim().length > 0
+}
+
+/**
  * Whether a call set a subagent to work — the one question the thread's part splitting, the chat's
  * agents-poll gate and the row's phrase table all ask.
  */
@@ -143,11 +161,12 @@ export function spawnedAgent(call: AgentCall): boolean {
   if (call.tool !== DELEGATE_TOOL) return false
   // Its arguments said, at ingest: only `spawn` set anything to work.
   if (call.action !== undefined) return call.action === SPAWN
-  // No stamp, so the label is all there is. A control preview proves the call ran no agent, and so
-  // does a label that is an envelope rather than words: that row's arguments fell back as its label,
-  // and they say what the call was given, never that it started anything. Neither draws a card.
+  // No stamp, so the label is all there is. A control preview proves the call ran no agent, and an
+  // envelope is read for the arguments it carries: a batch's `tasks` or a spawn's `goal` started
+  // work, while an `action` says what the call did.
   const words = (call.label ?? "").trim()
-  if (!words || words === DELEGATE_TOOL || words.startsWith("{")) return false
+  if (!words || words === DELEGATE_TOOL) return false
+  if (words.startsWith("{")) return spawnedByEnvelope(words)
   return controlAction(call) === undefined
 }
 

@@ -11,7 +11,8 @@ import { MessageItem } from "@/components/chat/message-item"
 import { AgentsContext, CARD_WINDOW_S } from "@/lib/agents"
 import type { Message, ToolEvent } from "@/lib/db"
 import type { DelegatedAgent, HermesConfig, SessionMessage } from "@/lib/hermes"
-import { DELEGATE_TOOL } from "@/lib/spawn"
+import { toMessages } from "@/lib/history"
+import { controlAction, DELEGATE_TOOL, spawnedAgent } from "@/lib/spawn"
 import { click, connection, findAll, find, json, mount, settle, text } from "./component-kit.tsx"
 
 const server: HermesConfig = connection("card-classification")
@@ -122,9 +123,11 @@ test("proof of the control action outranks a label that would match a subagent",
   })
 })
 
-test("a label that is an envelope never draws a card, whatever action it names", async () => {
-  // A stored row whose arguments fell back as its label says what the call was given, never that it
-  // started anything — even where the action it names is one the rule has no words for.
+test("an envelope label proves a spawn where its arguments did, and is a row where they didn't", async () => {
+  // A stored row whose arguments fell back as its label still carries them: a batch's `tasks` and a
+  // spawn's `goal` are what a spawn was given, so each draws a card — a reloaded chat keeps the work
+  // it showed while it streamed. An `action` the rule has no words for — `archive` — ran nothing, so
+  // that call stays a tool row.
   await drawn(
     [
       call("c-archive", '{"action":"archive","subagent_id":"sub-9"}'),
@@ -132,9 +135,16 @@ test("a label that is an envelope never draws a card, whatever action it names",
       call("c-tasks", '{"tasks":[{"goal":"read the parser"}]}'),
     ],
     async () => {
-      assert.equal(cards().length, 0, "no card: an envelope is not proof of a spawn")
-      assert.ok(toolRow(), "they are one group of tool rows")
-      assert.match(toolRow()?.getAttribute("aria-label") ?? "", /Used 3 tools/)
+      assert.equal(cards().length, 2, "the goal and the batch are the calls that set work")
+      for (const card of cards()) assert.equal(card.getAttribute("data-agent"), AGENT)
+      const row = toolRow()
+      assert.ok(row, "the archive call is a tool row, not a card")
+      assert.equal(
+        row.getAttribute("aria-label"),
+        "Used a tool",
+        "one call, and an action the table has no words for",
+      )
+      assert.doesNotMatch(row.textContent ?? "", /Sub-Agent/, "and nothing in it claims an agent")
     },
   )
 })
@@ -152,6 +162,61 @@ test("a goal that opens on a control word keeps its card", async () => {
       assert.equal(row.getAttribute("aria-label"), "Steered subagent")
     },
   )
+})
+
+test("the transcript stamps what each call did, and words a control call as it streamed", () => {
+  // The derivation the thread reads: a control call's arguments, parsed where they are in hand, give
+  // it the action it did and the words Hermes previewed it with — never `{"action":"list"}`. A
+  // spawn's arguments are its own, so a batch keeps the envelope its label fell back to, and the one
+  // rule still reads it as the spawn it was.
+  const [reply] = toMessages("c-1", "s-1", [
+    {
+      id: 1,
+      role: "assistant",
+      content: null,
+      timestamp: 1,
+      tool_calls: [
+        { id: "c-list", function: { name: DELEGATE_TOOL, arguments: '{"action":"list"}' } },
+        {
+          id: "c-steer",
+          function: {
+            name: DELEGATE_TOOL,
+            arguments: '{"action":"steer","subagent_id":"sub-1"}',
+          },
+        },
+        {
+          id: "c-spawn",
+          function: { name: DELEGATE_TOOL, arguments: JSON.stringify({ goal: GOAL }) },
+        },
+        {
+          id: "c-tasks",
+          function: {
+            name: DELEGATE_TOOL,
+            arguments: '{"tasks":[{"goal":"read the parser"}]}',
+          },
+        },
+      ],
+    },
+  ])
+  const tools = reply.tools ?? []
+  assert.deepEqual(
+    tools.map((tool) => [tool.label, tool.action]),
+    [
+      ["list", "list"],
+      ["steer sub-1", "steer"],
+      [GOAL, undefined],
+      ['{"tasks":[{"goal":"read the parser"}]}', undefined],
+    ],
+    "each call's words and its stamped action",
+  )
+  assert.deepEqual(
+    tools.map((tool) => spawnedAgent(tool)),
+    [false, false, true, true],
+    "and the one rule reads them as a row, a row, a card and a card",
+  )
+  // A control row stored before the stamp reads the same action from its label alone.
+  assert.equal(controlAction({ ...tools[0], action: undefined }), "list")
+  assert.equal(controlAction({ ...tools[1], action: undefined }), "steer")
 })
 
 /** A row of the child session's own transcript, as Hermes wrote it. */

@@ -26,6 +26,7 @@ import { usePopupDrawer, usePopupForm } from "@/lib/popup-form"
 import { Spinner } from "@/components/ui/spinner"
 import type { ToolEvent } from "@/lib/db"
 import { formatDuration } from "@/lib/format"
+import { readEnvelope } from "@/lib/json-envelope"
 import {
   failureReason,
   kindOf,
@@ -137,13 +138,14 @@ const FILE_TOOLS = new Set(["read_file", "write_file", "patch"])
  * What a call ran on, for its row: a todo call's count, a file's short name, else the label it
  * carried — and nothing where that label carries no words worth showing. A pull request call's
  * transcript label is its arguments as JSON, and a cron call's label is the action word its own verb
- * already says, so neither is put in the row's mouth.
+ * already says, so neither is put in the row's mouth. Only a label that reads as an envelope is
+ * suppressed: a command that happens to open on `{` is the words it is.
  */
 function targetOf(tool: ToolEvent, kind: Kind) {
   if (TODO_TOOLS.has(tool.tool)) return todoTarget(tool)
   if (kind.id === "cron") return ""
   const label = (tool.label ?? "").trim()
-  if (!label || label === tool.tool || label.startsWith("{")) return ""
+  if (!label || label === tool.tool || readEnvelope(label)) return ""
   return FILE_TOOLS.has(tool.tool) ? shortName(label) : label
 }
 

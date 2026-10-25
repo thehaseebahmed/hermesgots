@@ -48,16 +48,36 @@ test("a call whose arguments named no action is a spawn, unless its label names 
   assert.equal(spawnedAgent(call(undefined)), false)
 })
 
-test("a label that is an envelope is never a card, whatever action it names", () => {
-  // The arguments fell back as the label, so they say what the call was given — never that it set
-  // anything to work. An action the rule doesn't know is still an action.
+test("an envelope label proves a spawn where its arguments do, and is a row where they don't", () => {
+  // A transcript row whose arguments fell back as its label: a batch's `tasks` and a spawn's `goal`
+  // are what a spawn was given, so the card survives a reload. An `action` says what the call did —
+  // `spawn` set work going, and every other action ran none.
+  assert.equal(spawnedAgent(call('{"tasks":[{"goal":"one"}]}')), true, "a batch is a spawn")
+  assert.equal(
+    spawnedAgent(call('{"tasks":[{"goal":"one"},{"goal":"two"}],"model":"test/model"}')),
+    true,
+    "however many tasks it names",
+  )
+  assert.equal(spawnedAgent(call('{"goal":"Fix it"}')), true, "a goal alone is a spawn, however short")
+  assert.equal(spawnedAgent(call('{"action":"spawn","goal":"read the parser"}')), true)
   for (const label of [
+    '{"action":"list","subagent_id":null}',
+    '{"action":"steer","subagent_id":"sub-1"}',
     '{"action":"archive"}',
     '{"action":"frobnicate","subagent_id":"sub-1"}',
-    '{"goal":"You are the Reviewer for CP3: read the parser end to end"}',
-    '{"tasks":[{"goal":"one"}]}',
+    '{"goal":""}',
+    '{"tasks":[]}',
+    '{"subagent_id":"sub-2"}',
   ])
     assert.equal(spawnedAgent(call(label)), false, `${label} draws a tool row`)
+  // A label that opens on a brace but isn't an envelope proves nothing, so it stays a row.
+  for (const label of ["{ not json", "{ cat package.json; }", "{}"])
+    assert.equal(spawnedAgent(call(label)), false, `${label} draws a tool row`)
+})
+
+test("an envelope label still names the control actions it did run none of", () => {
+  assert.equal(controlAction(call('{"action":"steer","subagent_id":"sub-1"}')), "steer")
+  assert.equal(controlAction(call('{"action":"list"}')), "list")
 })
 
 test("no other tool is ever a spawn, whatever it is called", () => {
@@ -153,6 +173,16 @@ test("a chat with no spawn in flight does not enable the agents poll", () => {
   // And the poll does run where a subagent was set to work and hasn't finished.
   assert.equal(spawnInFlight([{ tools: [running(GOAL)] }]), true)
   assert.equal(spawnInFlight([{ tools: [running(GOAL, "spawn")] }]), true)
+  assert.equal(
+    spawnInFlight([{ tools: [running('{"tasks":[{"goal":"one"},{"goal":"two"}]}')] }]),
+    true,
+    "a batch stored as its arguments is a spawn in flight too",
+  )
+  assert.equal(
+    spawnInFlight([{ tools: [running('{"action":"stop","subagent_id":"sub-2"}')] }]),
+    false,
+    "while a stop still asks for nothing",
+  )
   assert.equal(spawnInFlight([{ tools: [done(GOAL)] }]), false, "a finished spawn waits on nothing")
   assert.equal(spawnInFlight([]), false)
   assert.equal(spawnInFlight(undefined), false)
