@@ -181,6 +181,15 @@ test("a question asked in a wake run reaches the user as a form", async () => {
       } finally {
         // An assertion that fails would otherwise leave this loop following into the next case.
         over = true
+        try {
+          await until(
+            async () => !(await db.messages.toArray()).some((m) => m.status === "streaming"),
+            "the run to end",
+            10_000,
+          )
+        } catch {
+          // The original failure is what the case throws; a drain that also hangs adds nothing.
+        }
       }
     },
   )
@@ -247,6 +256,15 @@ test("a delivery ahead of that wake run draws nothing, and its question still re
       } finally {
         // An assertion that fails would otherwise leave this loop following into the next case.
         over = true
+        try {
+          await until(
+            async () => !(await db.messages.toArray()).some((m) => m.status === "streaming"),
+            "the run to end",
+            10_000,
+          )
+        } catch {
+          // The original failure is what the case throws; a drain that also hangs adds nothing.
+        }
       }
     },
   )
