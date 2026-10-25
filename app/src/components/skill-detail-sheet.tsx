@@ -1,24 +1,18 @@
-import { ArrowLeftIcon, ChevronRightIcon } from "lucide-react"
-import { useEffect, useRef, useState, type ReactNode } from "react"
+import { ArrowLeftIcon, ChevronRightIcon, Trash2Icon } from "lucide-react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { useNavigate } from "react-router"
 import { toast } from "sonner"
 
 import { Markdown } from "@/components/chat/markdown"
-import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Group, linkRowClass, RowText } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { botTabPath } from "@/lib/bot-tabs"
+import type { Profile } from "@/lib/db"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
-import {
-  getSkillFile,
-  getSkillView,
-  type HermesConfig,
-  type SkillFile,
-  type SkillView,
-} from "@/lib/hermes"
+import { getSkillFile, getSkillView, type SkillFile, type SkillView } from "@/lib/hermes"
 import { skillDocument } from "@/lib/skill-frontmatter"
 import { skillOrigin, skillSetup } from "@/lib/skills-tab"
-
-const SHEET_HEIGHT = "h-[min(34rem,85dvh)]"
 
 type Reading = { status: "reading" } | { status: "ok"; view: SkillView }
 
@@ -26,18 +20,28 @@ type OpenFile = { status: "reading"; path: string } | { status: "ok"; file: Skil
 
 type PropertyRow = { key: string; value: string; origin?: boolean; setup?: string }
 
-export function SkillDetailSheet({
-  config,
+/**
+ * A skill's own note, in the page's place: its name at the head, its frontmatter facts, its prose
+ * and the files it links to, with Remove where the Host offers one. It is a detail the route draws
+ * rather than a sheet (ADR 0055), so the screen's back button is the way out.
+ */
+export function SkillDetail({
+  profile,
   name,
-  onClose,
-  footer,
+  onRemove,
 }: {
-  config: Pick<HermesConfig, "baseUrl" | "apiKey">
+  profile: Profile
   name: string
-  onClose: () => void
-  footer?: ReactNode
+  /** Remove's offer, where the Host offers a removal and this skill's origin has one behind it. */
+  onRemove?: () => void
 }) {
-  const { baseUrl, apiKey } = config
+  const { baseUrl, apiKey } = profile
+  const navigate = useNavigate()
+  // Nothing the note could say about a skill the Host won't open: the tab takes the screen back.
+  const leave = useCallback(
+    () => navigate(botTabPath(profile.id, "skills"), { replace: true }),
+    [navigate, profile.id],
+  )
   const [reading, setReading] = useState<Reading>({ status: "reading" })
   const [file, setFile] = useState<OpenFile | null>(null)
   const fileRead = useRef<AbortController | null>(null)
@@ -54,13 +58,13 @@ export function SkillDetailSheet({
       (error: unknown) => {
         if (controller.signal.aborted) return
         toast.error(error instanceof Error ? error.message : "Couldn't open that skill.")
-        onClose()
+        leave()
       },
     )
     return () => controller.abort()
-  }, [baseUrl, apiKey, name, onClose])
+  }, [baseUrl, apiKey, name, leave])
 
-  // A file still being read when the sheet closes stops on the host too.
+  // A file still being read when the note leaves the screen stops on the host too.
   useEffect(() => () => fileRead.current?.abort(), [])
 
   const back = () => {
@@ -85,31 +89,45 @@ export function SkillDetailSheet({
   }
 
   return (
-    <Popup open onOpenChange={(next) => !next && onClose()}>
-      <PopupContent initialFocus={false} fixedHeight={SHEET_HEIGHT}>
-        <PopupHeader className="relative">
-          {file && (
-            <Button
-              variant="ghost"
-              size="icon-lg"
-              className="absolute top-0 left-3 z-20 size-11"
-              aria-label="Back to the skill"
-              onClick={back}
-            >
-              <ArrowLeftIcon />
-            </Button>
-          )}
-          <PopupTitle>{name}</PopupTitle>
-        </PopupHeader>
-        {file ? (
-          <SkillFileBody file={file} />
-        ) : reading.status === "reading" ? (
-          <Pending />
-        ) : (
-          <SkillBody view={reading.view} onOpenFile={openFile} footer={footer} />
-        )}
-      </PopupContent>
-    </Popup>
+    <div className="flex flex-col gap-4" data-skill-sheet={name}>
+      {/* The screen's title is the header's, so only a file's own way back is drawn here. */}
+      {file && (
+        <div className="flex items-center px-5">
+          <Button
+            variant="ghost"
+            size="icon-lg"
+            className="-ml-3 size-11 shrink-0"
+            aria-label="Back to the skill"
+            onClick={back}
+          >
+            <ArrowLeftIcon />
+          </Button>
+        </div>
+      )}
+      {file ? (
+        <SkillFileBody file={file} />
+      ) : reading.status === "reading" ? (
+        <Pending />
+      ) : (
+        <SkillBody view={reading.view} onOpenFile={openFile} />
+      )}
+      {!file && reading.status === "ok" && onRemove && <RemoveSkill onRemove={onRemove} />}
+    </div>
+  )
+}
+
+/** The note's one destructive action, where the Host and the skill's origin both offer it. */
+function RemoveSkill({ onRemove }: { onRemove: () => void }) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      className="h-11 self-start rounded-full text-destructive"
+      onClick={onRemove}
+    >
+      <Trash2Icon data-icon="inline-start" />
+      Remove
+    </Button>
   )
 }
 
@@ -121,15 +139,7 @@ function Pending() {
   )
 }
 
-function SkillBody({
-  view,
-  onOpenFile,
-  footer,
-}: {
-  view: SkillView
-  onOpenFile: (path: string) => void
-  footer?: ReactNode
-}) {
+function SkillBody({ view, onOpenFile }: { view: SkillView; onOpenFile: (path: string) => void }) {
   const origin = skillOrigin(view)
   const setup = skillSetup(view)
   const note = skillDocument(view.content)
@@ -145,22 +155,21 @@ function SkillBody({
   ]
   const groups = Object.entries(view.linkedFiles ?? {}).filter(([, paths]) => paths.length > 0)
   return (
-    <div className="flex flex-col gap-4 px-4 pb-6" data-skill-sheet={view.name}>
+    <div className="flex flex-col gap-4">
       <PropertiesBlock rows={properties} />
       <Markdown>{note.body}</Markdown>
       {groups.length > 0 && (
         <div className="flex flex-col gap-3">
-          <h3 className="px-2 text-xs font-medium text-muted-foreground">Linked files</h3>
+          <h3 className="px-5 text-xs font-medium text-muted-foreground">Linked files</h3>
           {groups.map(([group, paths]) => (
             <div key={group} className="flex flex-col gap-1" data-skill-files={group}>
-              <h4 className="px-2 text-xs font-medium text-muted-foreground">{group}</h4>
+              <h4 className="px-5 text-xs font-medium text-muted-foreground">{group}</h4>
               <Group>
                 {paths.map((path) => (
                   <button
                     key={path}
                     type="button"
                     className={linkRowClass}
-                    aria-haspopup="dialog"
                     onClick={() => onOpenFile(path)}
                   >
                     <RowText title={path} />
@@ -172,7 +181,6 @@ function SkillBody({
           ))}
         </div>
       )}
-      {footer}
     </div>
   )
 }
@@ -184,8 +192,8 @@ function SkillFileBody({ file }: { file: OpenFile }) {
   // words as prose. Anything else stays the code it is.
   const note = markdown ? skillDocument(file.file.content) : null
   return (
-    <div className="flex flex-col gap-3 px-4 pb-6" data-skill-file={file.file.path}>
-      <h3 className="px-2 text-xs font-medium text-muted-foreground">{file.file.path}</h3>
+    <div className="flex flex-col gap-3" data-skill-file={file.file.path}>
+      <h3 className="px-5 text-xs font-medium text-muted-foreground">{file.file.path}</h3>
       {note ? (
         <>
           <PropertiesBlock rows={note.rows} />

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { useNavigate } from "react-router"
 import {
   ArrowLeftIcon,
   CheckIcon,
@@ -13,6 +14,7 @@ import { toast } from "sonner"
 import { ItemSearch } from "@/components/item-list"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import {
+  Caption,
   Group,
   linkRowClass,
   rowClass,
@@ -71,11 +73,13 @@ import type {
   McpServerValue,
 } from "@/lib/hermes"
 import { cn } from "@/lib/utils"
+import { botSubPath, type BotSub } from "@/lib/bot-subs"
+import { botTabPath } from "@/lib/bot-tabs"
 
 /** How tall the sheet holding the Catalogue is, so it holds its two views the way the picker does. */
 const CATALOGUE_HEIGHT = "h-[min(32rem,85dvh)]"
 
-/** How tall a server's own sheet is, so its two tabs hold their place between switches. */
+/** How tall the custom form's sheet is, so its fields hold their place as values are added to it. */
 const SERVER_HEIGHT = "h-[min(34rem,85dvh)]"
 
 /**
@@ -86,24 +90,27 @@ const SET_PLACEHOLDER = "Set — type to replace"
 
 /**
  * A bot's MCP servers, as a page of its Settings: a + in the screen's header adds one, then the
- * servers the bot's own configuration holds, then the ones a Hermes plugin provides.
+ * servers the bot's own configuration holds, then the ones a Hermes plugin provides — each list
+ * captioned rather than headed (ADR 0055).
  *
  * Every row is its name over its health — *Healthy: 78 tools* where Hermes reports a count, the
  * Host's own sentence where it failed, *Click here to authenticate* where
  * Server access is what stands in the way — and that health line is the button starting the flow, so
- * the waiting row and the way out of it are one line. Tapping the name opens the server's own sheet:
- * Config, where its block is shown and saved, and Tools, where what it offers is listed (ADR 0014).
+ * the waiting row and the way out of it are one line. Tapping the name drills into the server's own
+ * page: Config, where its block is shown and saved, and Tools, where what it offers is listed
+ * (ADR 0014), at the address `botSubPath(profile.id, "mcps", server.name)`.
  *
- * A heading with nothing under it is left out, so a bot with no servers shows its lists alone and the
+ * A caption with nothing under it is left out, so a bot with no servers shows its lists alone and the
  * + over them. Each way in is offered under its own feature: the Catalogue where the Host can browse
  * it, the custom form where it can land a block at all — a Host may have one and not the other, and a
  * Host with neither gets no +.
  */
-export function McpsTab({ profile }: { profile: Profile }) {
+export function McpsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) {
   const answers = useMcpFeatureAnswers(profile)
-  // Which sheet is open. They exclude each other — the Catalogue replaces the Add choice, a server's
-  // sheet replaces the list, its removal replaces the sheet — so one state says what the screen is
-  // showing rather than six booleans that have to be kept in agreement.
+  const navigate = useNavigate()
+  // Which sheet is open. They exclude each other — the Catalogue replaces the Add choice, its removal
+  // stands over the page it was offered from — so one state says what the screen is showing rather
+  // than six booleans that have to be kept in agreement.
   const [sheet, setSheet] = useState<Sheet | null>(null)
   const granting = sheet?.kind === "access" ? sheet.name : null
   // While the access sheet waits, the screen keeps reading, so the wait sees the access land on a
@@ -111,22 +118,25 @@ export function McpsTab({ profile }: { profile: Profile }) {
   const { servers, setEnabled, remove, saveConfig, addCustom, install, grant, deliver, reload } =
     useMcpServers(profile, answers.list === "yes", granting !== null)
   const [busy, setBusy] = useState(false)
-  const openedServer =
-    sheet?.kind === "server" ? servers?.find((server) => server.name === sheet.name) : undefined
+  // The server this address drills into. Its name is the segment's, so a server the Host has stopped
+  // listing still opens as the address it was given, saying the bot no longer has it.
+  const detail = sub?.kind === "detail" ? sub : undefined
   const grantingServer =
     sheet?.kind === "access" ? servers?.find((server) => server.name === sheet.name) : undefined
   const mine = servers?.filter((server) => server.source === "config") ?? []
   const theirs = servers?.filter((server) => server.source === "plugin") ?? []
-  // A sheet only exists where the Host advertises a tab for it, so a row whose name could open
+  // A server only opens where the Host advertises a tab behind it, so a row whose name could show
   // nothing keeps its name plain.
-  const sheetOpenable = answers.config === "yes" || answers.tools === "yes"
+  const openable = answers.config === "yes" || answers.tools === "yes"
   // The way in is the screen header's +, which exists only while this page is the one on screen.
   // Its handler is the sheet's state setter — stable across renders — so the header drawing it from
   // a ref never has to follow the page's own renders. The gate is the Add row's own: a Host without
-  // `mcps_add` has nothing to offer behind it.
+  // `mcps_add` has nothing to offer behind it, and a server's own page offers nothing either.
   useHeaderAction(
-    "mcp-add",
-    answers.add === "yes" ? (
+    // A server's own page carries no +. The key changes with it, because the header reads the slot
+    // once per key: the page it replaced would otherwise keep the node it published a moment before.
+    detail ? "mcp-add-detail" : "mcp-add",
+    answers.add === "yes" && !detail ? (
       <Button
         variant="outline"
         size="icon-lg"
@@ -146,6 +156,9 @@ export function McpsTab({ profile }: { profile: Profile }) {
     try {
       await remove(name)
       setSheet(null)
+      // Removed from its own page, the address names a server the Host no longer lists: the screen
+      // goes back to the page it was opened from rather than reporting it gone.
+      if (detail) navigate(botTabPath(profile.id, "mcps"), { replace: true })
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't remove that.")
     } finally {
@@ -157,13 +170,37 @@ export function McpsTab({ profile }: { profile: Profile }) {
   // Host that does, so a blank frame here is the tab arriving rather than a bot without one.
   if (answers.list !== "yes") return null
 
+  // A detail takes the page's place at every width: below 1024px the route pushed it, and from
+  // 1024px it is the pane the page would have drawn in.
+  if (detail)
+    return (
+      <div className="flex flex-col gap-4" data-mcp-tab data-mcp-detail={detail.title}>
+        <ServerDetail
+          profile={profile}
+          name={detail.title}
+          servers={servers}
+          config={answers.config === "yes"}
+          tools={answers.tools === "yes"}
+          removable={answers.removable === "yes"}
+          saveConfig={saveConfig}
+          onRemove={() => setSheet({ kind: "remove", name: detail.title })}
+        />
+        <RemoveDialog
+          name={sheet?.kind === "remove" ? sheet.name : undefined}
+          busy={busy}
+          onCancel={() => setSheet(null)}
+          onConfirm={(name) => void confirmRemove(name)}
+        />
+      </div>
+    )
+
   return (
     <div className="flex flex-col gap-4" data-mcp-tab>
       <ServerSection
         title="Your servers"
         section="config"
         servers={mine}
-        onOpen={sheetOpenable ? (name) => setSheet({ kind: "server", name }) : undefined}
+        onOpen={openable ? (name) => navigate(botSubPath(profile.id, "mcps", name)) : undefined}
         controls={{
           writable: answers.write === "yes",
           access: answers.access === "yes",
@@ -176,7 +213,7 @@ export function McpsTab({ profile }: { profile: Profile }) {
         title="From plugins"
         section="plugin"
         servers={theirs}
-        onOpen={sheetOpenable ? (name) => setSheet({ kind: "server", name }) : undefined}
+        onOpen={openable ? (name) => navigate(botSubPath(profile.id, "mcps", name)) : undefined}
       />
 
       <AddServerSheet
@@ -201,20 +238,6 @@ export function McpsTab({ profile }: { profile: Profile }) {
         add={addCustom}
       />
 
-      {openedServer && (
-        <ServerSheet
-          profile={profile}
-          server={openedServer}
-          open
-          onOpenChange={(next) => !next && setSheet(null)}
-          config={answers.config === "yes"}
-          tools={answers.tools === "yes"}
-          removable={answers.removable === "yes"}
-          saveConfig={saveConfig}
-          onRemove={() => setSheet({ kind: "remove", name: openedServer.name })}
-        />
-      )}
-
       {/* The flow is the Host's: the sheet starts it, shows the URL to open in a browser, and takes
           the address that browser ended on when it ran on this phone instead. */}
       {grantingServer && (
@@ -228,36 +251,12 @@ export function McpsTab({ profile }: { profile: Profile }) {
         />
       )}
 
-      <AlertDialog
-        open={sheet?.kind === "remove"}
-        onOpenChange={(open) => {
-          if (open || busy) return
-          // Cancelling goes back to the server's own sheet, the one the removal was offered from.
-          setSheet(sheet?.kind === "remove" ? { kind: "server", name: sheet.name } : null)
-        }}
-      >
-        <AlertDialogContent size="sm">
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              Remove {sheet?.kind === "remove" ? sheet.name : ""}?
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              The bot stops having it, and its stored access goes with it. The values you gave it
-              stay on the host, so adding it again doesn't mean finding them twice.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              disabled={busy}
-              onClick={() => sheet?.kind === "remove" && void confirmRemove(sheet.name)}
-            >
-              Remove
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <RemoveDialog
+        name={sheet?.kind === "remove" ? sheet.name : undefined}
+        busy={busy}
+        onCancel={() => setSheet(null)}
+        onConfirm={(name) => void confirmRemove(name)}
+      />
     </div>
   )
 }
@@ -267,9 +266,54 @@ type Sheet =
   | { kind: "add" }
   | { kind: "catalogue" }
   | { kind: "custom" }
-  | { kind: "server"; name: string }
   | { kind: "access"; name: string }
   | { kind: "remove"; name: string }
+
+/**
+ * Taking a server away, asked over whatever offered it — the page or the server's own page — and
+ * dismissed back to it. Cancelling writes nothing, and the removal is the page's own write.
+ */
+function RemoveDialog({
+  name,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  /** The server being removed, or nothing where the question isn't up. */
+  name?: string
+  busy: boolean
+  onCancel: () => void
+  onConfirm: (name: string) => void
+}) {
+  return (
+    <AlertDialog
+      open={Boolean(name)}
+      onOpenChange={(open) => {
+        if (!open && !busy) onCancel()
+      }}
+    >
+      <AlertDialogContent size="sm">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Remove {name ?? ""}?</AlertDialogTitle>
+          <AlertDialogDescription>
+            The bot stops having it, and its stored access goes with it. The values you gave it stay
+            on the host, so adding it again doesn't mean finding them twice.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            variant="destructive"
+            disabled={busy}
+            onClick={() => name && onConfirm(name)}
+          >
+            Remove
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
 
 /**
  * What a row of *Your servers* can do: the switch, the sheet and the access flow. A plugin's rows get
@@ -285,8 +329,8 @@ type RowControls = {
 }
 
 /**
- * One of the screen's two lists: a heading and the rows under it, with nothing at all when the list
- * is empty — a heading over no rows says there are none, and the screen drops it instead.
+ * One of the screen's two lists: a caption over the card holding it, with nothing at all when the
+ * list is empty — a caption over no rows says there are none, and the screen drops it instead.
  */
 function ServerSection({
   title,
@@ -298,14 +342,14 @@ function ServerSection({
   title: string
   section: string
   servers: McpServer[]
-  /** Opening a server's sheet, where the Host can show one: every row of both lists has this. */
+  /** Drilling into a server's own page, where the Host can show one: every row of both lists has it. */
   onOpen?: (name: string) => void
   controls?: RowControls
 }) {
   if (servers.length === 0) return null
   return (
     <section className="flex flex-col gap-2" data-mcp-section={section}>
-      <h2 className="px-2 text-sm font-medium text-muted-foreground">{title}</h2>
+      <Caption>{title}</Caption>
       <Group>
         {servers.map((server) => (
           <ServerRow key={server.name} server={server} onOpen={onOpen} controls={controls} />
@@ -318,11 +362,11 @@ function ServerSection({
 /**
  * One server: its name, its health, and the switch its Host advertises.
  *
- * The name is the button opening the server's sheet, and the health line sits under it — a button of
- * its own where it is the way to start Server access, plain text everywhere else. The switch follows
- * the server's own on/off flag rather than its state word, which folds several of the Host's states
- * into "on", and it is the only control a row carries: removing a server lives in its Config tab
- * with the rest of what changes it.
+ * The name is the button drilling into the server's own page, and the health line sits under it — a
+ * button of its own where it is the way to start Server access, plain text everywhere else. The
+ * switch follows the server's own on/off flag rather than its state word, which folds several of the
+ * Host's states into "on", and it is the only control a row carries: removing a server lives in its
+ * Config tab with the rest of what changes it.
  */
 function ServerRow({
   server,
@@ -350,7 +394,6 @@ function ServerRow({
             <button
               type="button"
               className="max-w-full truncate rounded-lg text-left outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-              aria-haspopup="dialog"
               onClick={() => onOpen(server.name)}
             >
               {server.name}
@@ -402,15 +445,19 @@ function ServerRow({
 }
 
 /**
- * One server's own sheet: Config, where its block is shown and saved, and Tools, where what it offers
- * is listed. Each tab exists only where the Host advertises the read behind it, so a Host that can't
- * describe a block offers no Config tab rather than an empty one.
+ * One server's own page: Config, where its block is shown and saved, and Tools, where what it offers
+ * is listed, under the server's name. Each tab exists only where the Host advertises the read behind
+ * it, so a Host that can't describe a block offers no Config tab rather than an empty one. It is a
+ * drill-in, not a sheet: the route's screen draws the header and the way back, so nothing here wears
+ * a title bar or a drag handle.
+ *
+ * A server the Host no longer lists — an address opened after it was removed elsewhere — says so,
+ * and the screen's own back is the way out.
  */
-function ServerSheet({
+function ServerDetail({
   profile,
-  server,
-  open,
-  onOpenChange,
+  name,
+  servers,
   config,
   tools,
   removable,
@@ -418,55 +465,57 @@ function ServerSheet({
   onRemove,
 }: {
   profile: McpServerConfig
-  server: McpServer
-  open: boolean
-  onOpenChange: (open: boolean) => void
+  /** The server the address names: its name, whatever the Host lists. */
+  name: string
+  /** What the Host lists, or nothing while it is still reading it. */
+  servers: McpServer[] | undefined
   config: boolean
   tools: boolean
   removable: boolean
   saveConfig: (name: string, edit: McpServerEdit) => Promise<McpServerDetail | undefined>
   onRemove: () => void
 }) {
+  // Still reading the bot's servers: nothing to say either way yet.
+  if (servers === undefined) return null
+  const server = servers.find((one) => one.name === name)
+  if (!server)
+    return (
+      <p className="text-sm text-muted-foreground" data-mcp-gone={name}>
+        This bot doesn't have this server any more.
+      </p>
+    )
   return (
-    <Popup open={open} onOpenChange={onOpenChange}>
-      <PopupContent initialFocus={false} fixedHeight={SERVER_HEIGHT}>
-        <PopupHeader>
-          <PopupTitle>{server.name}</PopupTitle>
-        </PopupHeader>
-        <Tabs defaultValue={config ? "config" : "tools"} className="min-h-0 flex-1">
-          <TabsList>
-            {config && <TabsTrigger value="config">Config</TabsTrigger>}
-            {tools && <TabsTrigger value="tools">Tools</TabsTrigger>}
-          </TabsList>
-          {config && (
-            // Both panels stay mounted: a switch between them must not throw away a half-typed value
-            // or read the Host again for a block it already has.
-            <TabsContent value="config" keepMounted className="flex-1 overflow-y-auto">
-              <ConfigTab
-                profile={profile}
-                server={server}
-                saveConfig={saveConfig}
-                removable={removable}
-                onRemove={onRemove}
-              />
-            </TabsContent>
-          )}
-          {tools && (
-            <TabsContent value="tools" keepMounted className="flex-1 overflow-y-auto">
-              <ToolsTab profile={profile} server={server} />
-            </TabsContent>
-          )}
-        </Tabs>
-        {/* Removal is advertised on its own gate, so a Host that can remove a server without being
-            able to describe one still gets the way to do it — the Config tab is where it sits when
-            there is one, since that is the tab a removal belongs to. */}
-        {!config && removable && server.source !== "plugin" && (
-          <div className="px-4 pb-4">
-            <RemoveServer onRemove={onRemove} />
-          </div>
+    <div className="flex flex-col gap-4" data-mcp-server={server.name}>
+      {/* The screen's title lives in the header above the pane; the content leads with the tabs. */}
+      <Tabs defaultValue={config ? "config" : "tools"} className="gap-2">
+        <TabsList>
+          {config && <TabsTrigger value="config">Config</TabsTrigger>}
+          {tools && <TabsTrigger value="tools">Tools</TabsTrigger>}
+        </TabsList>
+        {config && (
+          // Both panels stay mounted: a switch between them must not throw away a half-typed value
+          // or read the Host again for a block it already has.
+          <TabsContent value="config" keepMounted>
+            <ConfigTab
+              profile={profile}
+              server={server}
+              saveConfig={saveConfig}
+              removable={removable}
+              onRemove={onRemove}
+            />
+          </TabsContent>
         )}
-      </PopupContent>
-    </Popup>
+        {tools && (
+          <TabsContent value="tools" keepMounted>
+            <ToolsTab profile={profile} server={server} />
+          </TabsContent>
+        )}
+      </Tabs>
+      {/* Removal is advertised on its own gate, so a Host that can remove a server without being
+          able to describe one still gets the way to do it — the Config tab is where it sits when
+          there is one, since that is the tab a removal belongs to. */}
+      {!config && removable && server.source !== "plugin" && <RemoveServer onRemove={onRemove} />}
+    </div>
   )
 }
 
@@ -710,7 +759,7 @@ function ConfigTab({
 
   if (failed && !block) {
     return (
-      <div className="flex flex-col gap-4 px-4 py-4">
+      <div className="flex flex-col gap-4">
         <p className="text-sm text-muted-foreground">Couldn't load this server's configuration.</p>
         <Button variant="outline" className="h-11 rounded-full" onClick={reload}>
           Try again
@@ -788,7 +837,7 @@ function ConfigFields({
   }
 
   return (
-    <div className="flex flex-col gap-4 px-4 py-4">
+    <div className="flex flex-col gap-4 pt-2">
       <ServerFields
         id="mcp-config"
         draft={draft}
@@ -826,7 +875,7 @@ function ConfigFields({
   )
 }
 
-/** Taking a server away: the Config tab's last button, and the sheet's own when there is no tab. */
+/** Taking a server away: the Config tab's last button, and its own where there is no tab. */
 function RemoveServer({ onRemove }: { onRemove: () => void }) {
   return (
     <Button
@@ -850,7 +899,7 @@ function RemoveServer({ onRemove }: { onRemove: () => void }) {
 function ToolsTab({ profile, server }: { profile: McpServerConfig; server: McpServer }) {
   const { tools, probing, failed, probe } = useMcpServerTools(profile, server.name, true)
   return (
-    <div className="flex flex-col gap-4 px-4 py-4">
+    <div className="flex flex-col gap-4 pt-2">
       {tools !== undefined && tools.tools.length > 0 && (
         <Group>
           {tools.tools.map((tool) => (

@@ -2,22 +2,23 @@ import { MinusIcon, PlusIcon } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 
-import { GroupHeading } from "@/components/settings-chrome"
+import { Group, rowClass } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { PICK_BUDGET } from "@/lib/afk-picks"
 import type { Profile } from "@/lib/db"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
 import { getBotAfk, setBotAfkPickBudget } from "@/lib/hermes"
+import { cn } from "@/lib/utils"
 
 /**
- * The Coding tab: how a bot works when it is left alone, over every project it serves rather than
+ * The Coding page: how a bot works when it is left alone, over every project it serves rather than
  * one of them. Its first control is the bot's pick budget (ADR 0042) — how many tasks it may hold at
  * once across its projects, one to ten, kept on its host through the bot-level `afk` route.
  *
  * The number shows what the host answered, never what was asked for: a write the host refuses
  * leaves the budget the tab already had, and a host that answers none reads as the default the host
- * would itself use.
+ * would itself use. The one setting is a row: its title, what it counts, its value — with the
+ * stepper beside it, since a stepper stays where it is rather than drilling in (ADR 0055).
  */
 export function CodingTab({ profile }: { profile: Profile }) {
   // The profile is the host these numbers live on, so its own connection says which host answered:
@@ -75,50 +76,48 @@ export function CodingTab({ profile }: { profile: Profile }) {
 
   return (
     <div className="flex flex-col gap-4" data-bot-coding>
-      <GroupHeading title="Gots Specific Settings" />
-      <div className="flex flex-col gap-2">
-        <GroupHeading title="Away From Keyboard" />
-        <FieldGroup>
-          <Field aria-labelledby="pick-budget-label" aria-busy={saving || undefined}>
-            <FieldLabel id="pick-budget-label">Pick budget</FieldLabel>
-            <FieldDescription>
+      <Group>
+        <div className={cn(rowClass, "items-start gap-3")} aria-busy={saving || undefined}>
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5 py-0.5">
+            <span id="pick-budget-label" className="text-base">
+              Pick budget
+            </span>
+            <span className="text-sm text-muted-foreground">
               How many tasks one bot's AFK may hold at once across all of its projects
-            </FieldDescription>
-            <div className="flex items-center gap-3">
-              <Button
-                type="button"
-                variant="outline"
-                className="size-11"
-                aria-label="Decrease pick budget"
-                disabled={saving || failed || shown <= PICK_BUDGET.least}
-                onClick={() => void choose(shown - 1)}
-              >
-                <MinusIcon />
-              </Button>
-              <span
-                aria-live="polite"
-                data-pick-budget={shown}
-                className="min-w-8 text-center text-lg font-medium tabular-nums"
-              >
-                {shown}
-              </span>
-              <Button
-                type="button"
-                variant="outline"
-                className="size-11"
-                aria-label="Increase pick budget"
-                disabled={saving || failed || shown >= PICK_BUDGET.most}
-                onClick={() => void choose(shown + 1)}
-              >
-                <PlusIcon />
-              </Button>
-            </div>
-            {failed && (
-              <p className="text-sm text-muted-foreground">Couldn't read this bot's pick budget.</p>
-            )}
-          </Field>
-        </FieldGroup>
-      </div>
+            </span>
+            <span aria-live="polite" data-pick-budget={shown} className="text-sm text-primary">
+              {shown} {shown === 1 ? "task" : "tasks"}
+            </span>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="size-11"
+              aria-label="Decrease pick budget"
+              disabled={saving || failed || shown <= PICK_BUDGET.least}
+              onClick={() => void choose(shown - 1)}
+            >
+              <MinusIcon />
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="size-11"
+              aria-label="Increase pick budget"
+              disabled={saving || failed || shown >= PICK_BUDGET.most}
+              onClick={() => void choose(shown + 1)}
+            >
+              <PlusIcon />
+            </Button>
+          </div>
+        </div>
+        {failed && (
+          <p className={cn(rowClass, "text-sm text-muted-foreground")}>
+            Couldn't read this bot's pick budget.
+          </p>
+        )}
+      </Group>
     </div>
   )
 }

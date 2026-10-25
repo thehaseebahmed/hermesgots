@@ -1,9 +1,10 @@
-import { Trash2Icon } from "lucide-react"
-import { useCallback, useState } from "react"
+import { useState } from "react"
+import { useNavigate } from "react-router"
 import { toast } from "sonner"
 
-import { SkillDetailSheet } from "@/components/skill-detail-sheet"
+import { SkillDetail } from "@/components/skill-detail-sheet"
 import {
+  Caption,
   Group,
   linkRowClass,
   rowClass,
@@ -21,7 +22,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Button } from "@/components/ui/button"
 import type { Profile } from "@/lib/db"
 import type { Skill } from "@/lib/hermes"
 import { useSkillFeatureAnswers, useSkills } from "@/lib/skills"
@@ -38,18 +38,19 @@ import {
   type SkillSection,
 } from "@/lib/skills-tab"
 import { cn } from "@/lib/utils"
+import { botSubPath, type BotSub } from "@/lib/bot-subs"
+import { botTabPath } from "@/lib/bot-tabs"
 
-type Sheet = { kind: "skill"; name: string } | { kind: "remove"; name: string }
-
-export function SkillsTab({ profile }: { profile: Profile }) {
+export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) {
   const answers = useSkillFeatureAnswers(profile)
   const answer = answers.list
   const state = useSkills(profile, answer === "yes")
+  const navigate = useNavigate()
   const [saving, setSaving] = useState<string | null>(null)
   const [flipping, setFlipping] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
-  const [sheet, setSheet] = useState<Sheet | null>(null)
-  const close = useCallback(() => setSheet(null), [])
+  /** The skill whose removal is being confirmed, until the Host answers it. */
+  const [removing, setRemoving] = useState<string | null>(null)
   if (answer !== "yes") return null
   if (state.status === "loading") return null
 
@@ -87,22 +88,72 @@ export function SkillsTab({ profile }: { profile: Profile }) {
     setPending(true)
     try {
       await state.remove(name)
-      setSheet(null)
+      // The skill's own note has nothing left to say, so the tab takes the screen back.
+      navigate(botTabPath(profile.id, "skills"), { replace: true })
+      setRemoving(null)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't remove that skill.")
-      setSheet({ kind: "skill", name })
+      setRemoving(null)
     } finally {
       setPending(false)
     }
   }
 
+  /** Remove's question: a destructive confirmation, which stays a dialog wherever the note is. */
+  const confirmation = () =>
+    removing !== null && (
+      <AlertDialog
+        open
+        onOpenChange={(next) => {
+          if (!next && !pending) setRemoving(null)
+        }}
+      >
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove {removing}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The bot stops having it, and its files go with it. A Hub skill is uninstalled, and one
+              written on the profile is deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={pending}
+              onClick={() => void confirmRemove(removing)}
+            >
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    )
+
   const controls = answers.write === "yes" ? { onToggle: toggle, saving } : undefined
+  // A row's own tap is its note's address: the note is a detail the route draws, not a sheet.
   const open =
-    answers.view === "yes" ? (name: string) => setSheet({ kind: "skill", name }) : undefined
-  const opened =
-    sheet?.kind === "skill" ? state.skills.find((one) => one.name === sheet.name) : undefined
-  const offersRemove = opened !== undefined && answers.remove === "yes" && canRemove(opened)
-  const removing = sheet?.kind === "remove" ? sheet.name : null
+    answers.view === "yes"
+      ? (name: string) => navigate(botSubPath(profile.id, "skills", name))
+      : undefined
+
+  // A detail takes the page's place at either width: below 1024px the route pushed it, and from
+  // 1024px it is the pane the list would have drawn in. Remove is still a confirmation, not a page.
+  if (sub?.kind === "detail") {
+    const opened = state.skills.find((one) => one.name === sub.title)
+    const offersRemove = opened !== undefined && answers.remove === "yes" && canRemove(opened)
+    return (
+      <>
+        <SkillDetail
+          profile={profile}
+          name={sub.title}
+          onRemove={offersRemove ? () => setRemoving(sub.title) : undefined}
+        />
+        {confirmation()}
+      </>
+    )
+  }
+
   return (
     <div className="flex flex-col gap-4" data-skills-tab>
       {skillSections(state.skills).map((section) => (
@@ -115,61 +166,8 @@ export function SkillsTab({ profile }: { profile: Profile }) {
           flipping={flipping}
         />
       ))}
-      {sheet?.kind === "skill" && (
-        <SkillDetailSheet
-          config={profile}
-          name={sheet.name}
-          onClose={close}
-          footer={
-            offersRemove ? (
-              <RemoveSkill onRemove={() => setSheet({ kind: "remove", name: sheet.name })} />
-            ) : undefined
-          }
-        />
-      )}
-      {removing !== null && (
-        <AlertDialog
-          open
-          onOpenChange={(next) => {
-            if (!next && !pending) setSheet({ kind: "skill", name: removing })
-          }}
-        >
-          <AlertDialogContent size="sm">
-            <AlertDialogHeader>
-              <AlertDialogTitle>Remove {removing}?</AlertDialogTitle>
-              <AlertDialogDescription>
-                The bot stops having it, and its files go with it. A Hub skill is uninstalled, and
-                one written on the profile is deleted.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                variant="destructive"
-                disabled={pending}
-                onClick={() => void confirmRemove(removing)}
-              >
-                Remove
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      )}
+      {confirmation()}
     </div>
-  )
-}
-
-function RemoveSkill({ onRemove }: { onRemove: () => void }) {
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      className="h-11 self-start rounded-full text-destructive"
-      onClick={onRemove}
-    >
-      <Trash2Icon data-icon="inline-start" />
-      Remove
-    </Button>
   )
 }
 
@@ -190,7 +188,7 @@ function Section({
   if (section.groups.length === 0) return null
   return (
     <section className="flex flex-col gap-2" data-skill-section={section.id}>
-      {section.heading && <h2 className="px-2 text-base font-semibold">{section.heading}</h2>}
+      {section.heading && <Caption>{section.heading}</Caption>}
       <div className="flex flex-col gap-3">
         {section.groups.map((group, index) => {
           const key = `${section.id}:${group.category ?? ""}`
@@ -315,7 +313,6 @@ function SkillItem({
         type="button"
         className={linkRowClass}
         data-skill={skill.name}
-        aria-haspopup="dialog"
         onClick={() => onOpen(skill.name)}
       >
         <span className="flex min-w-0 flex-1 flex-col">

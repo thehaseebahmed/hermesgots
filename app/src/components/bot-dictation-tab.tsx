@@ -1,13 +1,14 @@
-import { CheckIcon, ChevronDownIcon, XIcon } from "lucide-react"
-import { useRef, useState } from "react"
+import { useState } from "react"
+import { PlusIcon, XIcon } from "lucide-react"
+import { useNavigate } from "react-router"
 
 import { Banner } from "@/components/banner"
 import { ModelPicker } from "@/components/chat/model-picker"
-import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
-import { Group, GroupHeading } from "@/components/settings-chrome"
+import { Caption, Group, PickList, PickSurface, ValueRow } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
-import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { botSubPath, type BotSub } from "@/lib/bot-subs"
+import { botTabPath } from "@/lib/bot-tabs"
 import { updateProfile, type Profile } from "@/lib/db"
 import { useSpeech } from "@/lib/host-speech"
 import { botModel, fullModel, useModelInfo } from "@/lib/model-info"
@@ -25,21 +26,21 @@ import { MAX_WORD, addWord, cleanWord, readVocabulary, removeWord } from "@/lib/
 /**
  * The Speech-to-text page: the words this bot's speech leans towards and the model that tidies a
  * take, both Gots's own, over the model on the bot's host that hears it — the one setting here the
- * bot's Hermes owns, so the page wears both ownership headings.
+ * bot's Hermes owns, so the page wears both ownership captions. Every row is a value that opens its
+ * pick or drills into its list (ADR 0055).
  */
-export function DictationTab({ profile }: { profile: Profile }) {
-  const [draft, setDraft] = useState("")
-  const words = readVocabulary(profile.vocabulary)
-  const save = (next: string[]) => void updateProfile(profile.id, { vocabulary: next })
-  const ready = Boolean(cleanWord(draft))
+export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub }) {
   const speech = useSpeech(profile)
   const settings = speech.supported ? speech.settings : undefined
+  const navigate = useNavigate()
+  const words = readVocabulary(profile.vocabulary)
+  const [pick, setPick] = useState<"speech" | "cleanup">()
 
-  const add = () => {
-    if (!ready) return
-    save(addWord(words, draft))
-    setDraft("")
-  }
+  // A detail takes the page's place at either width: below 1024px the route pushed it, and from
+  // 1024px it is the pane the page would have drawn in.
+  if (sub?.kind === "detail" && sub.id === "vocabulary")
+    return <VocabularyPage profile={profile} words={words} />
+  if (sub) return null
 
   return (
     <div className="flex flex-col gap-4" data-bot-dictation>
@@ -49,78 +50,218 @@ export function DictationTab({ profile }: { profile: Profile }) {
           <span role="alert">{speech.problem}</span>
         </Banner>
       )}
-      <section className="flex flex-col gap-4" data-bot-group="gots">
-        <GroupHeading title="Gots Specific Settings" />
-        <Group>
-          <Field className="bg-card px-5 py-4">
-            <FieldLabel htmlFor="vocabulary-word">Vocabulary</FieldLabel>
-            <FieldDescription>The words this bot's speech leans towards</FieldDescription>
-            <form
-              className="flex gap-2"
-              onSubmit={(event) => {
-                event.preventDefault()
-                add()
-              }}
-            >
-              <Input
-                id="vocabulary-word"
-                className="h-11"
-                autoComplete="off"
-                autoCapitalize="off"
-                spellCheck={false}
-                enterKeyHint="done"
-                maxLength={MAX_WORD}
-                placeholder="A name or a word"
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-              />
-              <Button type="submit" variant="outline" className="h-11" disabled={!ready}>
-                Add
-              </Button>
-            </form>
-            {words.length > 0 && (
-              <ul className="flex flex-wrap gap-2" aria-label="Words">
-                {words.map((word) => (
-                  <li key={word}>
-                    <span className="flex h-9 items-center gap-1 rounded-full bg-muted pr-0.5 pl-3 text-sm">
-                      <span className="max-w-56 truncate">{word}</span>
-                      {/* The inset widens the 36px button's hit area to the 44px the floor asks for. */}
-                      <button
-                        type="button"
-                        onClick={() => save(removeWord(words, word))}
-                        aria-label={`Remove ${word}`}
-                        className="relative flex size-9 items-center justify-center rounded-full text-muted-foreground outline-none after:absolute after:-inset-1 hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                      >
-                        <XIcon className="size-4" />
-                      </button>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Field>
-          {settings && (
-            <CleanupModelField
-              profile={profile}
-              settings={settings}
-              saving={speech.saving}
-              onChoose={speech.chooseCleanup}
-            />
-          )}
-        </Group>
-      </section>
+
+      <Caption>Gots</Caption>
+      <Group>
+        <ValueRow
+          title="Vocabulary"
+          purpose="The words this bot's speech leans towards"
+          value={words.length ? `${words.length} ${words.length === 1 ? "word" : "words"}` : ""}
+          onClick={() => navigate(botSubPath(profile.id, "speech-to-text", "vocabulary"))}
+          data-setting="vocabulary"
+        />
+        {settings && (
+          <CleanupRow
+            settings={settings}
+            saving={speech.saving}
+            onClick={() => setPick("cleanup")}
+          />
+        )}
+      </Group>
+
       {settings && (
-        <section className="flex flex-col gap-4" data-bot-group="hermes">
-          <GroupHeading title="Hermes Settings" />
+        <>
+          <Caption>Hermes</Caption>
           <Group>
-            <SpeechModelField
-              settings={settings}
-              saving={speech.saving}
-              onChoose={speech.choose}
+            <ValueRow
+              title="Speech model"
+              purpose="The model that hears this bot's speech-to-text"
+              value={settings.model}
+              disabled={!settings.models.length}
+              onClick={() => setPick("speech")}
+              data-setting="speech-model"
             />
           </Group>
-        </section>
+        </>
       )}
+
+      {settings && (
+        <PickSurface
+          open={pick === "speech"}
+          onOpenChange={(open) => !open && setPick(undefined)}
+          title="Speech model"
+        >
+          <PickList
+            label="Speech models"
+            searchable={false}
+            selected={settings.model}
+            options={settings.models.map((row) => ({
+              id: row.name,
+              label: row.name,
+              detail: modelNotes(row),
+            }))}
+            onPick={(name) => {
+              if (name !== settings.model) void speech.choose(name)
+              setPick(undefined)
+            }}
+          />
+        </PickSurface>
+      )}
+
+      {settings && (
+        <PickSurface
+          open={pick === "cleanup"}
+          onOpenChange={(open) => !open && setPick(undefined)}
+          title="Cleanup model"
+        >
+          <CleanupPicker
+            profile={profile}
+            settings={settings}
+            saving={speech.saving}
+            onChoose={speech.chooseCleanup}
+            onDone={() => setPick(undefined)}
+          />
+        </PickSurface>
+      )}
+    </div>
+  )
+}
+
+/** The cleanup model's row: its value, or why this host won't let Gots pick it. */
+function CleanupRow({
+  settings,
+  saving,
+  onClick,
+}: {
+  settings: SpeechSettings
+  saving: boolean
+  onClick: () => void
+}) {
+  const pick = settings.cleanup.model
+  if (!settings.cleanup.allowed)
+    return (
+      <ValueRow
+        title="Cleanup model"
+        purpose={settings.cleanup.reason ?? "This host doesn't let Gots pick the model."}
+        value="Default"
+        disabled
+        data-setting="cleanup-model"
+      />
+    )
+  return (
+    <ValueRow
+      title="Cleanup model"
+      purpose="The model that tidies a take's finished words"
+      value={pick ? fullModel(pick) : "Default"}
+      disabled={saving}
+      onClick={onClick}
+      data-setting="cleanup-model"
+    />
+  )
+}
+
+/** The host's models, in the same picker the composer uses, with "Default" at its head. */
+function CleanupPicker({
+  profile,
+  settings,
+  saving,
+  onChoose,
+  onDone,
+}: {
+  profile: Profile
+  settings: SpeechSettings
+  saving: boolean
+  onChoose: (model: SpeechPick | null) => Promise<boolean>
+  onDone: () => void
+}) {
+  const info = useModelInfo(profile)
+  const providers = info?.providers ?? []
+  const own = botModel(profile, info)
+  if (!providers.length)
+    return (
+      <p className="px-1 py-2 text-sm text-muted-foreground">Couldn't read this bot's models.</p>
+    )
+  return (
+    <ModelPicker
+      header={false}
+      providers={providers}
+      fallback={{ label: "Default", model: own?.model }}
+      choice={settings.cleanup.model ?? undefined}
+      onChoose={(next) => {
+        if (saving) return
+        void onChoose(next ?? null)
+        onDone()
+      }}
+    />
+  )
+}
+
+/** The words this bot's speech leans towards: the list, with removing and adding in it. */
+function VocabularyPage({ profile, words }: { profile: Profile; words: string[] }) {
+  const [draft, setDraft] = useState("")
+  const navigate = useNavigate()
+  const save = (next: string[]) => void updateProfile(profile.id, { vocabulary: next })
+  const ready = Boolean(cleanWord(draft))
+
+  return (
+    <div className="flex flex-col gap-4" data-vocabulary>
+      <Group>
+        {words.map((word) => (
+          <div key={word} className="flex items-center gap-1 bg-card">
+            <span className="min-w-0 flex-1 truncate px-5 py-3.5 text-base">{word}</span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-lg"
+              className="mr-3 size-11 shrink-0"
+              aria-label={`Remove ${word}`}
+              onClick={() => save(removeWord(words, word))}
+            >
+              <XIcon />
+            </Button>
+          </div>
+        ))}
+        {!words.length && (
+          <p className="px-5 py-3.5 text-sm text-muted-foreground">No words yet.</p>
+        )}
+      </Group>
+
+      {/* Adding is the one field here, and it lives on the screen itself, not inside a card. */}
+      <form
+        className="flex gap-2"
+        onSubmit={(event) => {
+          event.preventDefault()
+          if (!ready) return
+          save(addWord(words, draft))
+          setDraft("")
+        }}
+      >
+        <Input
+          id="vocabulary-word"
+          className="h-11"
+          aria-label="Add a word"
+          autoComplete="off"
+          autoCapitalize="off"
+          spellCheck={false}
+          enterKeyHint="done"
+          maxLength={MAX_WORD}
+          placeholder="A name or a word"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+        />
+        <Button type="submit" variant="outline" className="h-11" disabled={!ready}>
+          <PlusIcon data-icon="inline-start" />
+          Add
+        </Button>
+      </form>
+
+      <Button
+        variant="ghost"
+        className={cn("self-start text-muted-foreground")}
+        onClick={() => navigate(botTabPath(profile.id, "speech-to-text"))}
+      >
+        Done
+      </Button>
     </div>
   )
 }
@@ -131,156 +272,4 @@ function modelNotes(row: SpeechModel): string {
   return [modelSize(row.sizeMb), modelSpeed(row.speed), marked(row), download]
     .filter(Boolean)
     .join(" · ")
-}
-
-/**
- * The host's own speech models, picked as the composer picks a chat's model: one field naming the
- * model in play, opening the list. A bot always has one hearing it, so there is no clear entry, no
- * search over a list this short, and no recents.
- */
-function SpeechModelField({
-  settings,
-  saving,
-  onChoose,
-}: {
-  settings: SpeechSettings
-  saving: boolean
-  onChoose: (model: string) => Promise<boolean>
-}) {
-  const [open, setOpen] = useState(false)
-  const field = useRef<HTMLButtonElement>(null)
-  const current = settings.models.find((row) => row.name === settings.model)
-  const name = settings.model || current?.name || ""
-
-  return (
-    <Field
-      aria-labelledby="speech-model-label"
-      aria-busy={saving || undefined}
-      className="bg-card px-5 py-4"
-    >
-      <FieldLabel id="speech-model-label">Speech model</FieldLabel>
-      <FieldDescription>The model that hears this bot's speech-to-text</FieldDescription>
-      <Button
-        ref={field}
-        id="speech-model"
-        type="button"
-        variant="outline"
-        aria-label={`Speech model: ${name || "none"}`}
-        className="h-11 w-full justify-between gap-2 font-normal"
-        disabled={saving || !settings.models.length}
-        onClick={() => setOpen(true)}
-      >
-        <span className="truncate">{name || "Not set"}</span>
-        <span className="flex shrink-0 items-center gap-2">
-          {current && (
-            <span className="hidden truncate text-sm text-muted-foreground sm:inline">
-              {modelNotes(current)}
-            </span>
-          )}
-          <ChevronDownIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-        </span>
-      </Button>
-      <Popup open={open} onOpenChange={setOpen} anchor={field}>
-        <PopupContent initialFocus={false}>
-          <PopupHeader>
-            <PopupTitle>Speech model</PopupTitle>
-          </PopupHeader>
-          <ul aria-label="Speech models" className="flex flex-col rounded-2xl bg-muted/60 p-1">
-            {settings.models.map((row) => {
-              const chosen = row.name === settings.model
-              return (
-                <li key={row.name}>
-                  <button
-                    type="button"
-                    aria-pressed={chosen}
-                    disabled={saving}
-                    onClick={() => {
-                      // The model already hearing it is no write, only a pick already made.
-                      if (!chosen) void onChoose(row.name)
-                      setOpen(false)
-                    }}
-                    className={cn(
-                      "flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-background/60 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none disabled:opacity-60",
-                      chosen && "bg-background",
-                    )}
-                  >
-                    <span className="flex min-w-0 flex-1 flex-col">
-                      <span className="break-all">{row.name}</span>
-                      <span className="truncate text-sm text-muted-foreground">
-                        {modelNotes(row)}
-                      </span>
-                    </span>
-                    {chosen && <CheckIcon className="size-4 shrink-0 text-primary" aria-hidden />}
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
-        </PopupContent>
-      </Popup>
-    </Field>
-  )
-}
-
-function CleanupModelField({
-  profile,
-  settings,
-  saving,
-  onChoose,
-}: {
-  profile: Profile
-  settings: SpeechSettings
-  saving: boolean
-  onChoose: (model: SpeechPick | null) => Promise<boolean>
-}) {
-  const [open, setOpen] = useState(false)
-  const field = useRef<HTMLButtonElement>(null)
-  const info = useModelInfo(profile)
-  const providers = info?.providers ?? []
-  const own = botModel(profile, info)
-  const pick = settings.cleanup.model
-
-  return (
-    <Field
-      aria-labelledby="cleanup-model-label"
-      aria-busy={saving || undefined}
-      className="bg-card px-5 py-4"
-    >
-      <FieldLabel id="cleanup-model-label">Cleanup model</FieldLabel>
-      <FieldDescription>The model that tidies a take's finished words</FieldDescription>
-      {!settings.cleanup.allowed ? (
-        <Banner tone="warning">
-          {settings.cleanup.reason ?? "This host doesn't let Gots pick the model."}
-        </Banner>
-      ) : (
-        <>
-          <Button
-            ref={field}
-            id="cleanup-model"
-            type="button"
-            variant="outline"
-            aria-label={`Cleanup model: ${pick ? fullModel(pick) : "Default"}`}
-            className="h-11 w-full justify-between gap-2 font-normal"
-            disabled={!providers.length || saving}
-            onClick={() => setOpen(true)}
-          >
-            <span className="truncate">{pick ? fullModel(pick) : "Default"}</span>
-          </Button>
-          <Popup open={open} onOpenChange={setOpen} anchor={field}>
-            <PopupContent initialFocus={false}>
-              <ModelPicker
-                providers={providers}
-                fallback={{ label: "Default", model: own?.model }}
-                choice={pick ?? undefined}
-                onChoose={(next) => {
-                  void onChoose(next ?? null)
-                  setOpen(false)
-                }}
-              />
-            </PopupContent>
-          </Popup>
-        </>
-      )}
-    </Field>
-  )
 }
