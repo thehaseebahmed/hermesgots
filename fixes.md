@@ -2179,3 +2179,69 @@ The test for "a call is running" has no home. It is written out at `app/src/lib/
 - Why it is risky: low, but `lib/tools.ts` and `lib/format.ts` are read by every card that draws a
   call, so each consumer's call is checked rather than bulk-swapped.
 
+---
+
+# Deferred fixes from the reviews on the notification settings
+
+Four review passes over the branch that gives every notification type a name and puts its Android
+switches in Android's own screen — `/simplify-code`'s four lenses (reuse, quality, efficiency,
+altitude), `/no-comments`, `/code-review`'s two axes (the house standards and the spec), and a
+second pass over the fixes those raised — turned up one change too wide for this branch's pass,
+filed below. Everything else they raised is applied on the branch: the registration universe
+intersects what the device can reach, so a phone without Meetings is never registered for its two;
+the phone is read once per pass and the result feeds the registration and the deferred PATCH alike;
+each channel is written once a launch from `channelPlan`, a held channel keeping the importance the
+phone reported and only an unheld one taking the row's default; channel provisioning is keyed on the
+Meetings flag so a flip mid-session provisions what it just made reachable; the three-second pass
+reads the phone when it fires and queues behind an in-flight PATCH instead of dropping its read;
+`tellRegistry` is the one copy of call/throw/record; `setCategories` writes its preference where
+something still reads it (the web); the settings row's tap checks the plugin is there before
+calling and toasts what a real refusal says; the row chrome is one `ActionRow` shared with
+`LinkBotRow`; the tautological constant test renders the row and the screen instead; and the test
+harness, the source-read helpers and the sixteen-row table each stopped carrying two copies of
+what one owns.
+
+Declined rather than filed, with their reasons: gating `/settings/notifications`'s list on Android
+— the spec chose "the route is not linked from anywhere", so a deep link is the accepted hole;
+moving the manifest's default channel id back to `sessions` — the spec deletes that channel, so
+the id had to follow the new test channel or go stale, which is recorded as a deviation in the pull
+request instead; converting the wiring's text-pinned tests into injected seams — text-pinning is the
+repo's parity pattern (`plugin/tests/test_push_kinds.py`), and the `changedList`/`tellRegistry`
+extraction already gave the rules a seam their own tier can drive; and `enableNative` reading the
+permission twice — its prompt/timeout steps are named deliberately, so the "one read a pass"
+invariant is scoped to the sync paths and the test says so.
+
+## Risky
+
+### 1. The platform and Firebase flags freeze at module load, so every native test is an import-order dance
+
+`isNative` (`app/src/lib/native.ts:11`) and `pushAvailable`/`nativeConfigured`
+(`app/src/lib/push.ts`) read `Capacitor` and `VITE_FIREBASE` once when their module is first
+imported, and nothing can re-read them. This branch's component tests had to work around that:
+`scripts/android-bridge.ts` installs the platform fake and plugin headers *before* the app's modules
+load, each test sets `__HERMES_ENV__.VITE_FIREBASE` itself ahead of a dynamic import, and the
+stale-APK case needs a whole file of its own (`test-notification-settings-row-stale-apk.tsx`)
+because a header removed after load changes nothing. `/no-comments` flagged the freezes outright
+(`MUST KILL` on `androidBridge` and `pushAvailable`).
+
+- Cost: an invisible ordering contract no lint knows — the next native test must import the fake
+  first, set the flag second, and load the app third, or it silently tests the web build; and a
+  page that boots before Firebase is configured can never see push become available without a
+  reload.
+- Suggested fix: make both flags call-time reads (a function, or a getter over the Capacitor
+  handle), so `isNative()` and `pushAvailable()` answer for the state the page is in now and the
+  harness configures a variant instead of racing the import.
+- Why it is not applied here: both freezes predate this branch (`git blame` lands on the share
+  target and the original push wiring), and every web/native branch in the app reads them —
+  chat's sharing, the routes' guards, `startPush` — so converting them is a shared-infra change
+  whose blast radius is a screen-by-screen sweep, not a settings cleanup. The harness now
+  parameterizes the dance rather than undoing it, which removes the trap without touching the
+  product.
+
+---
+
+Found by the `/simplify-code`, `/no-comments` and `/code-review` passes on this branch. They were
+cleanup and conformance reviews, not a bug hunt — the two defects they did turn up (the registration
+universe ignoring reachability, and importance being re-written on every resume) are fixed above
+rather than deferred, and neither the entry nor the deviations block the pull request.
+
