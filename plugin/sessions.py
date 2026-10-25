@@ -1175,7 +1175,9 @@ def wake_marks(path: Path, subagent_ids: Iterable[str]) -> Dict[str, Dict[str, A
 
     One read, like ``marked_wakes``: the watcher asks it about a whole page of ends, then again for
     one batch, and a per-child lookup would open the store once per child. A mark with no status is
-    one a store older than v41 wrote — a wake that was posted, so it reads as sent.
+    one a store older than v41 wrote — a wake that was posted, so it reads as sent. A reason a drop
+    carries is one of ``delegation``'s DROP_* words; a held or backing-off wake's is the sentence
+    that says why it waits — read by an operator, not by a rule.
     """
     ids = [one for one in subagent_ids if one]
     if not ids or not path.exists():
@@ -1265,14 +1267,19 @@ def _write_marks(
     conn = connect(path)
     try:
         conn.execute("BEGIN IMMEDIATE")
+        marks = ", ".join("?" for _ in ids)
+        existing = {
+            row[0]: row
+            for row in conn.execute(
+                f"""SELECT subagent_id, status, reason, attempts, next_at, run_id
+                    FROM subagent_wakes WHERE subagent_id IN ({marks})""",
+                ids,
+            ).fetchall()
+        }
         for subagent_id in ids:
-            row = conn.execute(
-                "SELECT status, reason, attempts, next_at, run_id FROM subagent_wakes"
-                " WHERE subagent_id = ?",
-                (subagent_id,),
-            ).fetchone()
+            row = existing.get(subagent_id)
             if row:
-                kept_status, kept_reason, kept_attempts, kept_next, kept_run = row
+                _, kept_status, kept_reason, kept_attempts, kept_next, kept_run = row
                 target_attempts = attempts if attempts is not None else kept_attempts
                 target_next = next_at if next_at is not None else kept_next
                 if (kept_status, kept_reason, kept_attempts, kept_next) == (
@@ -1285,13 +1292,7 @@ def _write_marks(
                     # 5 seconds, and each look must cost the store nothing to say so again.
                     continue
             else:
-                kept_status, kept_reason, kept_attempts, kept_next, kept_run = (
-                    None,
-                    None,
-                    0,
-                    None,
-                    None,
-                )
+                kept_attempts, kept_next, kept_run = 0, None, None
             conn.execute(
                 """INSERT INTO subagent_wakes
                        (subagent_id, parent_id, run_id, at, status, attempts, next_at, reason)

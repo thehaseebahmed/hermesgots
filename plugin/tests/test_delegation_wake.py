@@ -646,15 +646,23 @@ class WakeTest(unittest.TestCase):
             self.child(f"c{i}", "s", said=f"{i}" + "w" * 25_000)
         self.assertEqual(self.sweep(), 1)
         text = self.text()
-        # Every cut says so, and the two that fit the budget were cut to the per-result cap.
-        self.assertEqual(
-            text.count(f"[the result was cut to its first {delegation.WAKE_RESULT_CHARS} characters]"),
-            2,
-        )
+        # Three results, none of which fit, and every one says how it was cut: the first takes
+        # the whole per-result cap, the next whatever the budget had left, the last none of it.
+        cuts = [
+            int(line.rsplit("first ", 1)[1].split(" ")[0])
+            for line in text.splitlines()
+            if line.startswith("[the result was cut to its first ")
+        ]
+        self.assertEqual(len(cuts), 2, text)
+        self.assertEqual(cuts[0], delegation.WAKE_RESULT_CHARS)
+        self.assertGreater(cuts[1], 0)
+        self.assertLess(cuts[1], delegation.WAKE_RESULT_CHARS)
         self.assertIn(
             f"[the result was omitted: this batch reached its {delegation.WAKE_BATCH_CHARS}-character limit]",
             text,
         )
+        # The budget bounds the results themselves; the notes that say so ride on top of it.
+        self.assertLessEqual(text.count("w"), delegation.WAKE_BATCH_CHARS)
         self.assertEqual(text.count("[ASYNC DELEGATION COMPLETE — "), 3)
         self.assertTrue(text.endswith(FOOTER))
 

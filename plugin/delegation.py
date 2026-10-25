@@ -578,7 +578,9 @@ async def _wake_root(adapter: Any, home: Path, root: str, children: List[Dict[st
         # The intent before the post: a restart between the two re-posts this batch, not a new one.
         await asyncio.to_thread(sessions.put_wake_batch, path, batch_id, root, members)
     # A batch is its own idempotent unit; a lone child keeps the key it always had, so an upgrade
-    # mid-flight can never post the same result twice.
+    # mid-flight can never post the same result twice. ``members`` is the batch's stored membership
+    # — a vanished member doesn't change the set the host may already be running — while the marks
+    # go to the children this post actually carried.
     key = f"wakeb_{batch_id}" if len(members) >= 2 else f"wake_{members[0]}"
     body = outbox.clean_body(root, {"input": [{"role": "user", "content": text}]})
     try:
@@ -936,7 +938,9 @@ def _notice(child: Dict[str, Any], ending: Dict[str, Any], cap: int = WAKE_RESUL
 
 
 def _result(raw: str, cap: int) -> Tuple[str, int]:
-    """A result cut to the budget, saying so when it was cut or left out altogether.
+    """A result cut to the budget, saying so when it was cut or left out altogether — and the true
+    length of what it emitted, note included, so a batch's budget counts every character the message
+    really carries.
 
     A wake is never refused for size — it is the only thing the model reads about this child — so a
     result that doesn't fit is cut, or left out once the batch's budget is spent, and says which.
@@ -945,21 +949,14 @@ def _result(raw: str, cap: int) -> Tuple[str, int]:
     if not text:
         return "", 0
     if cap <= 0:
-        return (
-            f"[the result was omitted: this batch reached its {WAKE_BATCH_CHARS}-character limit]",
-            0,
+        omitted = (
+            f"[the result was omitted: this batch reached its {WAKE_BATCH_CHARS}-character limit]"
         )
+        return omitted, len(omitted)
     if len(text) <= cap:
         return text, len(text)
-    return _cut(text, cap), cap
-
-
-def _cut(text: str, cap: int = WAKE_RESULT_CHARS) -> str:
-    """A result as long as the budget allows, saying so when it was cut."""
-    text = text.strip()
-    if len(text) <= cap:
-        return text
-    return text[:cap].rstrip() + f"\n[the result was cut to its first {cap} characters]"
+    cut = text[:cap].rstrip() + f"\n[the result was cut to its first {cap} characters]"
+    return cut, len(cut)
 
 
 def _duration(started: Any, ended: Any) -> str:

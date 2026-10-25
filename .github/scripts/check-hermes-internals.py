@@ -193,18 +193,16 @@ def _status_mark(src: str) -> Optional[str]:
     return match.group(1) if match else None
 
 
-def _canonical(constant: str, text: str) -> str:
+def _canonical(text: str) -> str:
     """The comparison form of a copy that carries a placeholder.
 
     The two sides name their interpolation differently (``{n}`` here, ``{len(messages)}`` there;
     ``{subagent_id}`` here, ``{deleg_id}`` there), so each side's braces fold to one token: what has
-    to match is the sentence around them. Every other constant is compared exactly.
+    to match is the sentence around them. Folded by shape rather than by the constant's name, so a
+    rename can never silently drop the folding and compare raw against folded. Every other constant
+    is compared exactly.
     """
-    if constant == "WAKE_HEADER":
-        return re.sub(r"\{[^{}]*\}", "{id}", text)
-    if constant == "BATCH_HEADER":
-        return re.sub(r"\{[^{}]*\}", "{n}", text)
-    return text
+    return re.sub(r"\{[^{}]*\}", "{placeholder}", text) if "{" in text else text
 
 
 def _head(root: Path) -> str:
@@ -280,8 +278,16 @@ def main(argv: List[str]) -> int:
     derive("intro", NOTICE_REL, notice,
            lambda src: _joined(src, '"A background subagent you dispatched earlier has finished.'),
            "the completion notice's intro")
-    derive("batch", NOTICE_REL, notice, lambda src: _joined(src, '"[IMPORTANT: '),
-           "the batch header")
+    def _batch_header(src: str) -> Optional[str]:
+        """The batch header, identified by its sentence rather than its first 13 characters: the
+        module writes other ``[IMPORTANT:`` lines, and one arriving earlier must not rebind this
+        comparison to the wrong one."""
+        joined = _joined(src, '"[IMPORTANT: ')
+        if joined is not None and "background processes completed" not in joined:
+            return None
+        return joined
+
+    derive("batch", NOTICE_REL, notice, _batch_header, "the batch header")
     derive("mark", NOTICE_REL, notice, _status_mark, "the Status line's truncation mark")
     for rel, name, key, what in CONSTANTS:
         derive(key, rel, sourced(rel), lambda src, name=name: _constant(src, name), what)
@@ -301,9 +307,14 @@ def main(argv: List[str]) -> int:
                 failures.append(f"plugin:delegation.py: missing constant {constant} ({what})")
                 continue
             if key not in derived:
+                # Never a skip: a key that names no check is this script drifting from itself, and
+                # a silently skipped comparison is the one failure it exists to catch.
+                failures.append(
+                    f"plugin:delegation.py: {constant} ({what}) compares against unknown check {key!r}"
+                )
                 continue
             expected, rel = derived[key]
-            if _canonical(constant, value) != _canonical(constant, expected):
+            if _canonical(value) != _canonical(expected):
                 failures.append(
                     f"plugin:delegation.py: {constant} ({what}) is not what hermes:{rel} writes — "
                     f"hermes {expected!r} plugin {value!r}"
@@ -311,7 +322,7 @@ def main(argv: List[str]) -> int:
 
     if failures:
         print("\n".join(failures))
-        print(f"hermes-internals: {len(failures)} missing or moved of {TOTAL} checks")
+        print(f"hermes-internals: {len(failures)} findings")
         return 1
     print(f"hermes-internals: {TOTAL} checks hold against {hermes}{_head(hermes)}")
     return 0

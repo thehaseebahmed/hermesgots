@@ -20,6 +20,8 @@ on:
       - "plugin/sessions.py"
       - "plugin/outbox.py"
       - "plugin/store.py"
+      - ".github/scripts/check-hermes-internals.py"
+      - ".github/workflows/hermes-internals-drift.yml"
   # Weekly, so a Hermes change shows up while no pull request is open.
   schedule:
     - cron: "0 6 * * 1"
