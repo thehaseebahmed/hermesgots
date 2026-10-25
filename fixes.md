@@ -2283,3 +2283,30 @@ briefly hidden, never work that didn't.
 
 Found by the design session for the agent-card classification change (ADR 0053). It does not block
 the pull request.
+
+# Deferred: two route-switch settle races that flake the component suite under load
+
+`scripts/test-bot-pane.tsx`'s "the thread that was open is the one beside Main when the user comes
+back to it" and `scripts/test-thread-command.tsx`'s "/thread alone starts an empty thread and opens
+it" assert exact UI state right after an address change — the pane's thread list by
+`deepStrictEqual` behind an `includes` wait, the composer's field in one read — and both flake when
+the suite runs under contention: twice in five full local runs on the tool-row placement branch, and
+once in GitHub's runner (Tests run 747), while each file passes 3/3 in isolation on that branch, a
+full suite on pure `origin/main` passed, and that branch's last full run was 389/389.
+
+## Careful
+
+### 1. The waits bind on presence, the assertions on equality
+- Cost: a red App gates run that means nothing and a re-run to clear it, paid by whichever branch
+  loads the machine when it runs.
+- Suggested fix: wait for the exact value rather than its presence — the pane's list equal to what
+  the test expects instead of merely containing the new thread, the composer's field read through
+  `until` its value is `''` rather than once after the route moves.
+- Why it is deferred here: both tests belong to the chat-switch work (#569, #572) and neither can
+  execute the code this branch changes — `test-thread-command` seeds no messages at all and
+  `test-bot-pane` seeds only user-role messages, while the placement change sits in the
+  assistant-reply path — so the fix belongs with the tests' owner, not a placement PR.
+
+---
+
+Found by gating the tool-row placement change; it does not block that pull request.
