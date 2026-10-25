@@ -1,7 +1,9 @@
 /**
  * The MCP page's way in to adding a server: a + in the screen header rather than a row above the
- * lists. The real route is mounted at /settings/bots/<botId>/mcps over a seeded device database and a
- * faked HTTP boundary, so the header the page renders under is the one the app gives it.
+ * lists, each list captioned instead of headed, and a server's name drilling into its own page at
+ * /settings/bots/<botId>/mcps/<name> (ADR 0055). The real route is mounted at
+ * /settings/bots/<botId>/mcps over a seeded device database and a faked HTTP boundary, so the header
+ * the page renders under is the one the app gives it.
  *
  * The + is there only where the Host answers `mcps_add` — the gate the Add row had — and its tap
  * opens the same Add sheet (Catalogue where the Host reads one, Custom server where it can land a
@@ -16,6 +18,7 @@ import { SettingsPage } from "@/routes/settings"
 import { botPageOf } from "@/lib/bot-tabs"
 import { db } from "@/lib/db"
 import {
+  Path,
   botProfile,
   click,
   find,
@@ -23,17 +26,19 @@ import {
   json,
   mediaHost,
   mount,
+  path,
   seedSettings,
   settle,
   until,
   type HostAsk,
 } from "./component-kit.tsx"
 
-/** The MCP page, at the address the bot's settings list gives it. */
-const settings = () => (
-  <MemoryRouter initialEntries={["/settings/bots/bot-1/mcps"]}>
+/** The MCP page, at the address the bot's settings list gives it, with the address on screen. */
+const settings = (entry = "/settings/bots/bot-1/mcps") => (
+  <MemoryRouter initialEntries={[entry]}>
+    <Path />
     <Routes>
-      <Route path="/settings/:section?/:botId?/:tab?" element={<SettingsPage />} />
+      <Route path="/settings/:section?/:botId?/:tab?/:sub?" element={<SettingsPage />} />
     </Routes>
   </MemoryRouter>
 )
@@ -68,8 +73,8 @@ const namedAdd = () =>
       button.getAttribute("aria-label") === "Add a server" ||
       button.getAttribute("title") === "Add a server",
   )
-const sectionHeading = (section: string) =>
-  find(`[data-mcp-section="${section}"] h2`)?.textContent ?? null
+const sectionCaption = (section: string) =>
+  find(`[data-mcp-section="${section}"] p`)?.textContent ?? null
 
 /**
  * A bot of this test's own — its connection names a host, so no other test's feature answers are
@@ -90,6 +95,23 @@ async function seed(name: string, features: string[], servers: unknown[] = SERVE
       asked.push({ host: url.host, path: url.pathname, search: url.search, authorization: null })
       return json({ object: { servers } })
     }
+    // One server's own block, as its page reads it: what the Config tab is built from.
+    const detail = url.pathname.match(/\/plugins\/memento\/mcp\/([^/]+)$/)
+    if (detail)
+      return json({
+        object: {
+          server: {
+            name: decodeURIComponent(detail[1]),
+            source: "config",
+            transport: "stdio",
+            command: "npx",
+            args: ["-y", "@modelcontextprotocol/server-github"],
+            auth: "none",
+            editable: true,
+            values: [{ name: "GITHUB_TOKEN", set: true }],
+          },
+        },
+      })
     return host(input as RequestInfo, init)
   }) as typeof fetch
   return asked
@@ -142,8 +164,8 @@ test("a Host without mcps_add has no + anywhere, and still lists its servers", a
       1,
       "the page still read the bot's servers",
     )
-    assert.equal(sectionHeading("config"), "Your servers", "its own servers are there")
-    assert.equal(sectionHeading("plugin"), "From plugins", "and the plugin's")
+    assert.equal(sectionCaption("config"), "Your servers", "its own servers are there")
+    assert.equal(sectionCaption("plugin"), "From plugins", "and the plugin's")
     assert.ok(find('[data-mcp="github"]'), "each with its row")
     assert.ok(find('[data-mcp="filesystem"]'))
   })
@@ -169,25 +191,89 @@ test("the lists are what they were, with the + over them", async () => {
   await mount(settings(), async () => {
     await settle()
     assert.ok(addButton(), "the + is on the screen")
-    assert.equal(sectionHeading("config"), "Your servers", "its own servers keep their heading")
-    assert.equal(sectionHeading("plugin"), "From plugins", "and the plugin's keeps its own")
+    assert.equal(sectionCaption("config"), "Your servers", "its own servers keep their caption")
+    assert.equal(sectionCaption("plugin"), "From plugins", "and the plugin's keeps its own")
     assert.equal(
-      findAll("[data-mcp]").map((row) => row.getAttribute("data-mcp")).join(","),
+      findAll("[data-mcp]")
+        .map((row) => row.getAttribute("data-mcp"))
+        .join(","),
       "github,filesystem",
       "every server keeps its row",
     )
-    const headings = findAll("[data-mcp-tab] h2").map((one) => one.textContent).join(",")
-    assert.equal(headings, "Your servers,From plugins", "and the page holds the lists alone")
+    const captions = findAll("[data-mcp-tab] p")
+      .map((one) => one.textContent)
+      .join(",")
+    assert.equal(captions, "Your servers,From plugins", "and the page holds the lists alone")
   })
 })
 
-test("an empty list is the + and no heading at all", async () => {
+test("an empty list is the + and no caption at all", async () => {
   await seed("mcp-add-empty", ["mcps", "mcps_add", "mcps_catalogue"], [])
   await mount(settings(), async () => {
     await settle()
     assert.ok(addButton(), "with nothing to list the + is still the way in")
     assert.equal(findAll("[data-mcp]").length, 0, "no server is listed")
-    assert.equal(findAll("[data-mcp-tab] h2").length, 0, "and an empty list has no heading")
+    assert.equal(findAll("[data-mcp-tab] p").length, 0, "and an empty list has no caption")
+  })
+})
+
+test("a server's name drills into its own page, under its own address", async () => {
+  await seed("mcp-drill", ["mcps", "mcps_add", "mcps_catalogue", "mcps_config", "mcps_tools"])
+  await mount(settings(), async () => {
+    await settle()
+    await click(find('[data-mcp="github"] button'))
+    await until(
+      async () => path() === "/settings/bots/bot-1/mcps/github",
+      "the drill-in to open at the server's own address",
+    )
+    // No sheet around it: the page is the content, the screen's header its title, its back the way out.
+    assert.equal(Boolean(find('[role="dialog"]')), false, "nothing opened as a sheet")
+    assert.equal(
+      find("[data-mcp-detail]")?.getAttribute("data-mcp-detail"),
+      "github",
+      "the server's own page is what the address drew",
+    )
+    assert.equal(find("h1")?.textContent, "github", "the screen is titled with the server")
+    assert.equal(
+      find('[data-mcp-server="github"] h2')?.textContent === "github",
+      false,
+      "and the content doesn't repeat that title",
+    )
+    assert.equal(findAll("[data-mcp]").length, 0, "the lists are not drawn beside it")
+    assert.equal(Boolean(addButton()), false, "and a server's own page offers no +")
+    const command = find("#mcp-config-command") as HTMLInputElement | null
+    assert.equal(command?.value, "npx", "the Config tab is the content, read from the Host")
+
+    // The back address is the page the server was opened from.
+    await click(find('button[aria-label="Back"]'))
+    await until(
+      async () => path() === "/settings/bots/bot-1/mcps",
+      "the back control to land on the page",
+    )
+    assert.ok(find('[data-mcp="github"]'), "and its rows with it")
+  })
+})
+
+test("an address naming a server the Host no longer lists says so, and nothing more", async () => {
+  await seed("mcp-stale", ["mcps", "mcps_add", "mcps_catalogue", "mcps_config", "mcps_tools"])
+  await mount(settings("/settings/bots/bot-1/mcps/gone"), async () => {
+    await settle()
+    assert.equal(
+      find("[data-mcp-gone]")?.textContent,
+      "This bot doesn't have this server any more.",
+      "the page says the server isn't there",
+    )
+    assert.equal(
+      findAll("[data-mcp-tab] button").length,
+      0,
+      "and offers nothing of its own: the screen's back is the way out",
+    )
+    assert.ok(find('button[aria-label="Back"]'), "which the screen still wears")
+    assert.equal(
+      find("h1")?.textContent,
+      "gone",
+      "the screen is still titled with the address's name",
+    )
   })
 })
 

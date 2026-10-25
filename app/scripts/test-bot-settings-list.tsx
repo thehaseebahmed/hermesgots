@@ -1,10 +1,11 @@
 /**
- * A bot's settings as a multi-step screen: the list's rows in the order they are drawn and the copy
- * each carries, the rows a host's features leave out and the addresses that land on General instead,
- * the segments that named pages before the list landing on the pages that took their place, the
- * out-of-date banner leading the list, a row pushing its page on a phone and swapping the pane
- * beside the list on a laptop, the header's trash named for the bot it deletes, and each page still
- * holding what its tab held.
+ * A bot's settings as a multi-step screen (ADR 0055): three cards with no headings and no captions —
+ * General alone, the Gots plugin's pages, then the bot's Hermes's — the rows in the order they are
+ * drawn and the copy each carries, an icon a row and no chevron, the rows a host's features leave out
+ * and the addresses that land on General instead, the segments that named pages before the list
+ * landing on the pages that took their place, the out-of-date banner leading the list, a row pushing
+ * its page on a phone and swapping the pane beside the list on a laptop, the header's trash named for
+ * the bot it deletes, and each page still holding what its tab held — values that open their edits.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -34,7 +35,7 @@ const settings = (entry: string) => (
   <MemoryRouter initialEntries={[entry]}>
     <Path />
     <Routes>
-      <Route path="/settings/:section?/:botId?/:tab?" element={<SettingsPage />} />
+      <Route path="/settings/:section?/:botId?/:tab?/:sub?" element={<SettingsPage />} />
     </Routes>
   </MemoryRouter>
 )
@@ -52,11 +53,25 @@ async function seed(name: string, features: string[] | "away", patch = {}) {
 
 const rows = () => findAll("[data-bot-page]").map((row) => row.getAttribute("data-bot-page"))
 const row = (segment: string) => find(`[data-bot-page="${segment}"]`)
-const headings = () => findAll("[data-bot-settings-list] h2").map((heading) => heading.textContent)
+/** Any heading the list still draws: ADR 0055 took them all out. */
+const headings = () =>
+  findAll(
+    "[data-bot-settings-list] h1, [data-bot-settings-list] h2, [data-bot-settings-list] h3",
+  ).map((heading) => heading.textContent)
+/** The cards the list draws, each with the pages it holds — General's alone, then Gots's, Hermes's. */
+const cards = () =>
+  findAll("[data-bot-settings-list] > div").map((card) =>
+    [...card.querySelectorAll("[data-bot-page]")].map((one) => one.getAttribute("data-bot-page")),
+  )
+/** The icons a row wears: its page's own, and no chevron beside it. */
+const iconsPerRow = () =>
+  findAll("[data-bot-page]").map((one) => one.querySelectorAll("svg").length)
+/** What a user reads on an element, with its spacing flattened. */
+const words = (element: Element | null) => (element?.textContent ?? "").replace(/\s+/g, " ").trim()
 const back = () => find('button[aria-label="Back"]')
 const titles = () => findAll("h1").map((heading) => heading.textContent)
 
-test("the list draws General, then the Gots plugin's pages, then the bot's Hermes's", async () => {
+test("the list draws General alone, then the Gots plugin's pages, then the bot's Hermes's", async () => {
   await seed("list-order", ALL)
   await mount(settings("/settings/bots/bot-1"), async () => {
     assert.deepEqual(
@@ -65,10 +80,11 @@ test("the list draws General, then the Gots plugin's pages, then the bot's Herme
       "the pages in list order",
     )
     assert.deepEqual(
-      headings(),
-      ["Gots Specific Settings", "Hermes Settings"],
-      "one heading per ownership, over the pages it holds",
+      cards(),
+      [["general"], ["chat", "coding", "speech-to-text"], ["mcps", "skills"]],
+      "three cards separated by gaps: General on top, then the plugin's pages, then Hermes's",
     )
+    assert.deepEqual(headings(), [], "and no headings: a card is separated by the gap, not named")
     assert.deepEqual(
       findAll("[data-bot-page]").map((one) => one.textContent),
       [
@@ -80,6 +96,14 @@ test("the list draws General, then the Gots plugin's pages, then the bot's Herme
         "SkillsThe skills this bot can use",
       ],
       "every row is its name over the line saying what it holds",
+    )
+    assert.deepEqual(iconsPerRow(), [1, 1, 1, 1, 1, 1], "one icon a row, and no chevron beside it")
+    assert.deepEqual(
+      words(find("[data-bot-settings-list]")),
+      findAll("[data-bot-page]")
+        .map((one) => words(one))
+        .join(""),
+      "and nothing else is written on the list: no captions over these cards",
     )
     assert.deepEqual(titles(), ["A bot"], "the list screen is named after the bot")
     assert.ok(
@@ -201,18 +225,37 @@ test(
   }),
 )
 
-test("a page still holds what its page held: General its own fields, Chat its models", async () => {
+test("a page still holds what its page held, each setting over its value", async () => {
   const CHAT = [...ALL, "delegation_model", "triage_model", "fallbacks"]
   await seed("pages", ALL, { hostId: "host-1" })
   await mount(settings("/settings/bots/bot-1/general"), async () => {
     assert.deepEqual(titles(), ["General"], "the General page")
     for (const label of ["Enabled", "Name", "Image", "Test connection"])
       assert.ok(text().includes(label), `General still has ${label}`)
+    assert.ok(find('[data-setting="name"]'), "its Name is a value that opens its edit")
+    assert.doesNotMatch(text(), /Subagent model/, "and nothing of the Hermes side is forced on it")
   })
   await seed("pages-chat", CHAT, { hostId: "host-1" })
   await mount(settings("/settings/bots/bot-1/chat"), async () => {
     assert.deepEqual(titles(), ["Chat"], "the Chat page")
     for (const label of ["Default model", "Triage model", "Fallback providers"])
       assert.ok(text().includes(label), `Chat still has ${label}`)
+    assert.ok(find('[data-setting="fallbacks"]'), "its chain is a value that opens its own screen")
+  })
+})
+
+test("a page's own edit is a screen the list's page pushes, with the list under it", async () => {
+  await seed("pages-edit", ALL)
+  await mount(settings("/settings/bots/bot-1/general/name"), async () => {
+    assert.deepEqual(titles(), ["Name"], "the edit is a screen named for what it edits")
+    assert.ok(find("#edit-name"), "holding the bot's name in a field")
+    assert.equal(path(), "/settings/bots/bot-1/general/name", "at an address of its own")
+    await click(back())
+    assert.equal(
+      path(),
+      "/settings/bots/bot-1/general",
+      "and Back returns to the page it came from",
+    )
+    assert.deepEqual(titles(), ["General"], "which is named for the page")
   })
 })

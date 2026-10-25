@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-route
 import { toast } from "sonner"
 
 import { BotSettingsList, BotSettingsPage } from "@/components/bot-settings"
+import { botSubOf } from "@/lib/bot-subs"
 import { botPageOf, botTabOf, type BotTab } from "@/lib/bot-tabs"
 import { db } from "@/lib/db"
 import {
@@ -149,13 +150,14 @@ function host(
 }
 
 function LiveEditor() {
-  const { tab } = useParams()
+  const { tab, sub } = useParams()
   const profile = useLiveQuery(() => db.profiles.get("bot-1"), [])
   if (!profile) return null
+  const page = botTabOf(tab) ?? "general"
   return (
     <>
       <BotSettingsList profile={profile} />
-      <BotSettingsPage key={profile.id} profile={profile} tab={botTabOf(tab) ?? "general"} />
+      <BotSettingsPage key={profile.id} profile={profile} tab={page} sub={botSubOf(page, sub)} />
     </>
   )
 }
@@ -169,7 +171,7 @@ const editor = (path: string) => (
   <MemoryRouter initialEntries={[path]}>
     <Where />
     <Routes>
-      <Route path="/settings/bots/:botId/:tab?" element={<LiveEditor />} />
+      <Route path="/settings/bots/:botId/:tab?/:sub?" element={<LiveEditor />} />
     </Routes>
   </MemoryRouter>
 )
@@ -181,7 +183,7 @@ const tabNamed = (name: string) =>
   ) ?? null
 const sections = () =>
   findAll("[data-skill-section]").map((one) => one.getAttribute("data-skill-section"))
-const headings = () => findAll("[data-skill-section] h2").map((one) => one.textContent)
+const captions = () => findAll("[data-skill-section] > p").map((one) => one.textContent)
 const groups = (section: string) =>
   findAll(`[data-skill-section="${section}"] [data-skill-category]`).map(
     (one) => one.getAttribute("data-skill-category") ?? "",
@@ -229,15 +231,15 @@ test("the Skills tab opens from the editor, and the address follows it", async (
   })
 })
 
-test("the tab lists the profile's skills under one heading and the plugin's under the other", async () => {
+test("the tab lists the profile's skills under one caption and the plugin's under the other", async () => {
   await seed("skills-sections", ["skills"])
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
     await drawn()
     assert.deepEqual(sections(), ["yours", "plugins"], "the two sections, in that order")
-    assert.deepEqual(headings(), ["Your skills", "From plugins"])
+    assert.deepEqual(captions(), ["Your skills", "From plugins"])
     assert.ok(rowNames("yours").includes("stray"), "a row with no origin is the profile's own")
     assert.deepEqual(rowNames("plugins"), ["gots:notes"], "a plugin's skill is only in its section")
-    assert.equal(headings().length, 2, "a heading sits over rows")
+    assert.equal(captions().length, 2, "a caption sits over each section's cards")
   })
 })
 
@@ -291,12 +293,12 @@ test("a row that is off or doesn't load is still listed, with its description", 
   })
 })
 
-test("a bot whose skills all come from one source has no headings at all", async () => {
+test("a bot whose skills all come from one source has no caption at all", async () => {
   await seed("skills-plugin-only", ["skills"], [ROWS[7]])
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
     await drawn()
     assert.deepEqual(sections(), ["plugins"], "the empty section is gone")
-    assert.deepEqual(headings(), [], "one kind of skill, and the categories say it alone")
+    assert.deepEqual(captions(), [], "one kind of skill, and the categories say it alone")
     assert.deepEqual(rowNames("plugins"), ["gots:notes"])
   })
 })
@@ -401,25 +403,28 @@ test("a write the Host refuses is its own sentence, with the row as it was", asy
   }
 })
 
-// The tap that opens a skill's sheet: the row's own column where the Host can't switch it, and the
+// The tap that opens a skill's note: the row's own column where the Host can't switch it, and the
 // left column of two where it can.
 const title = (name: string) =>
-  find(`[data-skill="${name}"] button[aria-haspopup="dialog"]`) ??
-  find(`[data-skill="${name}"][aria-haspopup="dialog"]`)
-const sheetBody = () => find("[data-skill-sheet]")
-const sheetTitle = () => find('[role="dialog"] [data-slot="sheet-title"]')?.textContent?.trim()
-const openSheet = async (name: string) => {
+  find(`[data-skill="${name}"] button`) ?? find(`[data-skill="${name}"]`)
+const noteBody = () => find("[data-skill-sheet]")
+// The screen's words are in the header the real route draws (asserted once in test-mcps-add-action
+// and in e2e); this harness mounts the pages, so identity comes from the detail's own attribute.
+const noteTitle = () => find("[data-skill-sheet]")?.getAttribute("data-skill-sheet")
+const openNote = async (name: string) => {
   await click(title(name))
-  await until(async () => sheetBody() !== null, `the sheet of ${name}`)
+  await until(async () => noteBody() !== null, `the note of ${name}`)
 }
 
-test("a row's title opens the skill's own sheet: properties from its frontmatter, then its prose", async () => {
+test("a row's title opens the skill's own note, at the note's own address", async () => {
   await seed("skills-sheet", ["skills", "skills_view"])
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
     await drawn()
     await click(title("pr-review"))
-    await until(async () => sheetBody() !== null, "the skill's sheet")
-    assert.equal(sheetTitle(), "pr-review", "the sheet is titled by the skill")
+    await until(async () => noteBody() !== null, "the skill's note")
+    assert.equal(here(), "/settings/bots/bot-1/skills/pr-review", "the note is the route's own")
+    assert.equal(noteTitle(), "pr-review", "the note is headed by the skill")
+    assert.equal(find("[data-skills-tab]"), null, "and it takes the page's place")
     assert.equal(find("[data-skill-origin]")?.textContent, "Yours", "where it came from, first")
     assert.equal(
       find('[data-skill-prop="name"]')?.textContent,
@@ -441,11 +446,11 @@ test("a row's title opens the skill's own sheet: properties from its frontmatter
   })
 })
 
-test("a linked file opens in the same sheet, and the way back returns to the skill", async () => {
+test("a linked file opens in the same note, and the way back returns to the skill", async () => {
   await seed("skills-sheet-file", ["skills", "skills_view"])
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
     await drawn()
-    await openSheet("pr-review")
+    await openNote("pr-review")
     const linked = find('[data-skill-files="references"] button')
     assert.match(linked?.textContent ?? "", /references\/checklist\.md/, "the file is listed")
     await click(linked)
@@ -469,14 +474,15 @@ test("a linked file opens in the same sheet, and the way back returns to the ski
       /title: The checklist/,
       "its yaml is drawn as properties, never as raw text",
     )
-    assert.equal(find("[data-skill-sheet]"), null, "one sheet, showing one thing")
+    assert.equal(find("[data-skill-files]"), null, "one note, showing one thing")
     await click(find('button[aria-label="Back to the skill"]'))
-    await until(async () => sheetBody() !== null, "the skill again")
-    assert.match(row("pr-review")?.textContent ?? "", /Ready/, "the list behind is untouched")
+    await until(async () => find("[data-skill-files]") !== null, "the skill's own note again")
+    assert.equal(find("[data-skill-file]"), null, "the file's text went with the tap back")
+    assert.equal(noteTitle(), "pr-review", "the note is still the skill's")
   })
 })
 
-test("the sheet says where each skill came from, in the four origins' own words", async () => {
+test("the note says where each skill came from, in the four origins' own words", async () => {
   const origins: [string, string][] = [
     ["lint", "Built in"],
     ["pr-land", "Installed from the Hub"],
@@ -487,17 +493,17 @@ test("the sheet says where each skill came from, in the four origins' own words"
     await seed("skills-origin", ["skills", "skills_view"])
     await mount(editor("/settings/bots/bot-1/skills"), async () => {
       await drawn()
-      await openSheet(name)
+      await openNote(name)
       assert.equal(find("[data-skill-origin]")?.textContent, words, `${name} came from ${words}`)
     })
   }
 })
 
-test("the Host's readiness and setup are the sheet's next lines, both where it has both", async () => {
+test("the Host's readiness and setup are the note's next lines, both where it has both", async () => {
   await seed("skills-setup", ["skills", "skills_view"])
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
     await drawn()
-    await openSheet("deploy")
+    await openNote("deploy")
     assert.deepEqual(
       findAll("[data-skill-setup]").map((one) => [
         one.getAttribute("data-skill-setup"),
@@ -514,7 +520,7 @@ test("the Host's readiness and setup are the sheet's next lines, both where it h
   await seed("skills-setup-none", ["skills", "skills_view"])
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
     await drawn()
-    await openSheet("pr-land")
+    await openNote("pr-land")
     assert.deepEqual(
       findAll("[data-skill-setup]"),
       [],
@@ -527,29 +533,25 @@ test("a Host that can't open a skill leaves the rows plain, and nothing opens", 
   await seed("skills-noview", ["skills", "skills_write"], SWITCHABLE)
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
     await drawn()
-    assert.deepEqual(
-      findAll('[data-skill] button[aria-haspopup="dialog"]'),
-      [],
-      "no row offers a sheet",
-    )
     await click(row("pr-review"))
     await settle()
+    assert.equal(here(), "/settings/bots/bot-1/skills", "the row has no address to open")
     assert.equal(find("[data-skill-sheet]"), null, "and a row opens nothing")
   })
 })
 
-test("opening a sheet reads the Host and keeps nothing on the device", async () => {
+test("opening a note reads the Host and keeps nothing on the device", async () => {
   await seed("skills-sheet-cache", ["skills", "skills_view"])
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
     await drawn()
     const before = JSON.stringify(await db.skills.toArray())
-    await openSheet("pr-review")
+    await openNote("pr-review")
     await settle()
     assert.equal(JSON.stringify(await db.skills.toArray()), before, "the device's row is as it was")
   })
 })
 
-test("a sheet the Host refuses closes on its own sentence", async () => {
+test("a note the Host refuses goes back on its own sentence", async () => {
   await seed("skills-sheet-refused", ["skills", "skills_view"], ROWS, undefined, {})
   const errors: string[] = []
   const original = toast.error
@@ -562,6 +564,7 @@ test("a sheet the Host refuses closes on its own sentence", async () => {
       assert.deepEqual(errors, ["Skill 'pr-review' isn't on this bot."])
       await settle()
       assert.equal(find("[data-skill-sheet]"), null, "nothing is left half-drawn")
+      assert.equal(here(), "/settings/bots/bot-1/skills", "and the tab has the address back")
     })
   } finally {
     toast.error = original
@@ -576,18 +579,18 @@ const ORIGINS: Row[] = [
 ]
 
 const removeButton = () =>
-  findAll('[role="dialog"] button').find((one) => one.textContent?.trim() === "Remove") ?? null
+  findAll("[data-skill-sheet] button").find((one) => one.textContent?.trim() === "Remove") ?? null
 const alert = () => find('[role="alertdialog"]')
 const alertButton = (label: string) =>
   findAll('[role="alertdialog"] button').find((one) => one.textContent?.trim() === label) ?? null
 
-test("a skill's origin decides whether its sheet offers Remove, where the Host can remove", async () => {
+test("a skill's origin decides whether its note offers Remove, where the Host can remove", async () => {
   for (const name of ["pr-land", "pr-review"]) {
     await seed("skills-remove-offered", ["skills", "skills_view", "skills_remove"], ORIGINS)
     await mount(editor("/settings/bots/bot-1/skills"), async () => {
       await drawn()
-      await openSheet(name)
-      assert.ok(removeButton(), `${name}'s sheet offers Remove`)
+      await openNote(name)
+      assert.ok(removeButton(), `${name}'s note offers Remove`)
     })
   }
 })
@@ -597,18 +600,18 @@ test("a built-in and a plugin's skill offer no Remove at all", async () => {
     await seed("skills-remove-origins", ["skills", "skills_view", "skills_remove"], ORIGINS)
     await mount(editor("/settings/bots/bot-1/skills"), async () => {
       await drawn()
-      await openSheet(name)
-      assert.equal(removeButton(), null, `${name}'s sheet offers no Remove`)
+      await openNote(name)
+      assert.equal(removeButton(), null, `${name}'s note offers no Remove`)
     })
   }
 })
 
-test("a Host that advertises no removal puts no Remove on any sheet", async () => {
+test("a Host that advertises no removal puts no Remove on any note", async () => {
   await seed("skills-remove-absent", ["skills", "skills_view"], ORIGINS)
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
     await drawn()
-    await openSheet("pr-review")
-    assert.equal(removeButton(), null, "the sheet is the skill and nothing it can't do")
+    await openNote("pr-review")
+    assert.equal(removeButton(), null, "the note is the skill and nothing it can't do")
   })
 })
 
@@ -623,8 +626,8 @@ test("a skill whose row says no origin offers no Remove, and no guess at one", a
   )
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
     await drawn()
-    await openSheet("stray")
-    assert.equal(find("[data-skill-origin]"), null, "the sheet says nothing it wasn't told")
+    await openNote("stray")
+    assert.equal(find("[data-skill-origin]"), null, "the note says nothing it wasn't told")
     assert.equal(
       find("[data-skill-properties]"),
       null,
@@ -634,17 +637,17 @@ test("a skill whose row says no origin offers no Remove, and no guess at one", a
   })
 })
 
-test("Remove asks first, and cancelling goes back to the skill's sheet", async () => {
+test("Remove asks first, and cancelling leaves the skill's note where it was", async () => {
   await seed("skills-remove-cancel", ["skills", "skills_view", "skills_remove"], ORIGINS)
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
     await drawn()
-    await openSheet("pr-review")
+    await openNote("pr-review")
     await click(removeButton())
     assert.ok(alert(), "the confirmation is up")
     assert.match(alert()?.textContent ?? "", /Remove pr-review\?/, "it names the skill")
     await click(alertButton("Cancel"))
     assert.equal(alert(), null, "cancelling closes the confirmation")
-    assert.ok(sheetBody(), "and leaves the skill's own sheet where it was")
+    assert.ok(noteBody(), "and leaves the skill's own note where it was")
   })
 })
 
@@ -656,18 +659,18 @@ test("confirming removes the skill, and the row leaves every list at once", asyn
   )
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
     await drawn()
-    await openSheet("pr-review")
+    await openNote("pr-review")
     await click(removeButton())
     await click(alertButton("Remove"))
     await until(async () => calls.some((call) => call.method === "DELETE"), "the removal")
     assert.deepEqual(
       calls.filter((call) => call.method === "DELETE").map((call) => call.path),
       ["/api/plugins/memento/skills/pr-review"],
-      "one removal, of the skill the sheet was opened on",
+      "one removal, of the skill the note was opened on",
     )
     await until(async () => row("pr-review") === null, "the row to leave the tab")
     assert.equal(alert(), null, "both dialogs are closed")
-    assert.equal(sheetBody(), null, "the sheet went with the skill")
+    assert.equal(noteBody(), null, "the note went with the skill")
     const stored = (await db.skills.toArray()).flatMap((cached) => cached.skills)
     assert.deepEqual(
       stored.map((skill) => skill.name),
@@ -688,16 +691,16 @@ test("a removal the Host refuses is its own sentence, with the row as it was", a
   try {
     await mount(editor("/settings/bots/bot-1/skills"), async () => {
       await drawn()
-      await openSheet("pr-review")
+      await openNote("pr-review")
       await click(removeButton())
       await click(alertButton("Remove"))
       await until(async () => errors.length === 1, "the toast")
       assert.deepEqual(errors, [refusal], "the Host's own words, nothing added")
       await settle()
       assert.equal(alert(), null, "the confirmation closes with the refusal")
-      assert.ok(sheetBody(), "back on the skill's own sheet")
-      assert.ok(row("pr-review"), "the skill is still the bot's")
-      assert.match(row("pr-review")?.textContent ?? "", /Ready/, "and its row is as it was")
+      assert.ok(noteBody(), "back on the skill's own note")
+      assert.equal(noteTitle(), "pr-review", "still the skill's")
+      assert.ok(removeButton(), "and it still offers the removal the Host refused")
       const stored = (await db.skills.toArray()).flatMap((cached) => cached.skills)
       assert.ok(
         stored.some((skill) => skill.name === "pr-review"),
@@ -894,7 +897,7 @@ test("a tap on a category never writes the skill the Host can't switch", async (
   })
 })
 
-test("a skill row with both targets: the left opens its sheet, the switch toggles alone", async () => {
+test("a skill row with both targets: the left opens its note, the switch toggles alone", async () => {
   const calls = await seed(
     "skills-split",
     ["skills", "skills_write", "skills_view"],
@@ -913,8 +916,8 @@ test("a skill row with both targets: the left opens its sheet, the switch toggle
     await until(async () => posts(calls).length === 1, "the row's write")
     assert.equal(find("[data-skill-sheet]"), null, "the switch opens nothing")
     await click(find('[data-skill="ops-one"] button'))
-    await until(async () => sheetBody() !== null, "the skill's sheet")
-    assert.equal(sheetTitle(), "ops-one", "the left column opened it")
+    await until(async () => noteBody() !== null, "the skill's sheet")
+    assert.equal(noteTitle(), "ops-one", "the left column opened it")
   })
 })
 
@@ -962,8 +965,8 @@ test("a Host with no write: a plain category title, and the rows still open", as
       "the category still says how much of it is on",
     )
     await click(row("ops-two"))
-    await until(async () => sheetBody() !== null, "the skill's sheet")
-    assert.equal(sheetTitle(), "ops-two", "the whole row is the tap")
+    await until(async () => noteBody() !== null, "the skill's sheet")
+    assert.equal(noteTitle(), "ops-two", "the whole row is the tap")
     assert.equal(posts(calls).length, 0, "nothing was written")
   })
 })
@@ -972,14 +975,10 @@ test("a Host with no view: the category and its rows toggle without opening anyt
   await seed("skills-category-noview", ["skills", "skills_write"], CATEGORY)
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
     await drawn()
-    assert.deepEqual(
-      findAll('[data-skill] button[aria-haspopup="dialog"]'),
-      [],
-      "no row offers a sheet",
-    )
     assert.ok(categorySwitch("ops"), "the category keeps its switch")
     await click(switchIn("ops-one"))
     await until(async () => /Off/.test(row("ops-one")?.textContent ?? ""), "the row to say Off")
     assert.equal(find("[data-skill-sheet]"), null, "and nothing opened")
+    assert.equal(here(), "/settings/bots/bot-1/skills", "the tab keeps its address")
   })
 })
