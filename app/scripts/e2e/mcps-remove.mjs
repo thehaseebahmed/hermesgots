@@ -1,9 +1,10 @@
-// A Bot's MCP servers can be taken away from their own sheet: the Config tab of a server the bot's
-// own config holds carries a Remove server, and the one a Hermes plugin provides carries none,
+// A Bot's MCP servers can be taken away from their own drill-in page: the Config tab of a server the
+// bot's own config holds carries a Remove server, and the one a Hermes plugin provides carries none,
 // because Hermes refuses to modify that one. A removal asks for confirmation first — a cancel sends
-// nothing and leaves the server exactly where it was — and a confirmed one takes the server away and
-// leaves the page showing what is left, without a manual refresh: the page's own re-read of the bot's
-// servers is what the list follows, so the row stays gone. Phone and tablet, light and dark.
+// nothing and leaves the server exactly where it was — and a confirmed one takes the server away,
+// returns to the list and leaves it showing what is left, without a manual refresh: the page's own
+// re-read of the bot's servers is what the list follows, so the row stays gone. Phone and tablet,
+// light and dark.
 import { app, assert, flow, mock, pass } from "./lib.mjs"
 
 const run = async ({ page, profileId, shot, until }) => {
@@ -23,14 +24,23 @@ const run = async ({ page, profileId, shot, until }) => {
     if (request.method() === "DELETE" && path.startsWith("/api/plugins/memento/mcp/"))
       removals.push(decodeURIComponent(path.split("/").pop()))
   })
-  // One server's own sheet, opened by tapping its name, on its Config tab.
+  // One server's own page, opened by tapping its name, on its Config tab.
   const openConfig = async (name) => {
     await page.locator(`[data-mcp="${name}"] button`).first().click()
+    await page.waitForURL((url) => url.pathname === `${screen}/${name}`, { timeout: 15_000 })
     await page.getByRole("button", { name: "Remove server" }).waitFor({ timeout: 15_000 })
   }
-  const closeSheet = async () => {
-    await page.keyboard.press("Escape")
-    await page.getByRole("button", { name: "Remove server" }).waitFor({ state: "hidden" })
+  const closeDetail = async () => {
+    // Two headers can carry a Back — the app's own and the pane's: take the pane's, the one under
+    // the title this screen was pushed with.
+    const title = decodeURIComponent(new URL(page.url()).pathname.split("/").pop() ?? "")
+    await page
+      .locator("header")
+      .filter({ has: page.getByRole("heading", { level: 1, name: title, exact: true }) })
+      .getByRole("button", { name: "Back" })
+      .click()
+    await page.waitForURL((url) => url.pathname === screen, { timeout: 15_000 })
+    await page.locator("[data-mcp]").first().waitFor({ timeout: 15_000 })
   }
 
   try {
@@ -44,15 +54,18 @@ const run = async ({ page, profileId, shot, until }) => {
     await shot("rows")
 
     // Row removal is gone from the list itself: each server's own Config carries it, and the one a
-    // Hermes plugin provides is read-only so its sheet has none.
+    // Hermes plugin provides is read-only so its page has none.
     assert.equal(
-      await page.locator("[data-mcp-tab]").getByRole("button", { name: /^Remove / }).count(),
+      await page
+        .locator("[data-mcp-tab]")
+        .getByRole("button", { name: /^Remove / })
+        .count(),
       0,
       "no row offers a removal beside its name any more",
     )
     await openConfig("postgres")
     await shot("config")
-    await closeSheet()
+    await closeDetail()
     await page.locator('[data-mcp="filesystem"] button').first().click()
     await page.getByRole("tab", { name: "Config" }).waitFor({ timeout: 15_000 })
     assert.equal(
@@ -60,7 +73,7 @@ const run = async ({ page, profileId, shot, until }) => {
       0,
       "a server a Hermes plugin provides offers no removal",
     )
-    await closeSheet()
+    await closeDetail()
 
     // The removal asks first, and a cancel sends nothing to the bot and leaves the server where it is.
     await openConfig("postgres")
@@ -71,12 +84,14 @@ const run = async ({ page, profileId, shot, until }) => {
     await dialog.getByRole("button", { name: "Cancel" }).click()
     await dialog.waitFor({ state: "hidden", timeout: 15_000 })
     assert.deepEqual(removals, [], "a cancelled removal sends nothing to the bot")
+    await closeDetail()
     assert.ok(
       await page.locator('[data-mcp="postgres"]').isVisible(),
       "the server a cancel was asked about is still listed",
     )
 
-    // Confirming takes the server away for this bot, and the page shows what is left.
+    // Confirming takes the server away for this bot and returns to the list showing what is left.
+    await openConfig("postgres")
     await page.getByRole("button", { name: "Remove server" }).click()
     await dialog.getByText("Remove postgres?", { exact: true }).waitFor({ timeout: 15_000 })
     await dialog.getByRole("button", { name: "Remove", exact: true }).click()
@@ -94,7 +109,13 @@ const run = async ({ page, profileId, shot, until }) => {
       ["postgres"],
       "the removal named the server on the plugin's own route",
     )
-    assert.equal(await page.locator("[data-mcp]").count(), 5, "the page shows what is left")
+    await until(
+      async () =>
+        (await page.locator("[data-mcp-detail]").count()) === 0 &&
+        (await page.locator("[data-mcp]").count()) === 5,
+      15_000,
+      "the list back on screen showing the five that are left",
+    )
     await shot("removed")
 
     // The page keeps reading while a server is still connecting, and the row stays gone: the list
@@ -125,5 +146,5 @@ for (const width of [390, 1024]) {
   }
 }
 pass(
-  "a removal lives on each of a Bot's own MCP servers' Config tab and on none a Hermes plugin provides, a cancel sends nothing and leaves the server, and a confirmed removal takes it away with the page showing what is left, at 390 and 1024px, light and dark",
+  "a removal lives on each of a Bot's own MCP servers' Config tab — reached by drilling in at the server's own address — and on none a Hermes plugin provides, a cancel sends nothing and leaves the server listed, and a confirmed removal takes it away, returns to the list and leaves it showing what is left, at 390 and 1024px, light and dark",
 )

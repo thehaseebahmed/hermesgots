@@ -12,9 +12,9 @@ await flow("delegation-model", async ({ page, profileId, until, shot, held }) =>
     await picker.getByRole("textbox", { name: "Search models" }).fill(query)
     await picker.getByRole("button", { name: label }).first().click()
   }
-  // The whole field, so the heading's saving icon and the field are read where they render.
-  const field = page.getByRole("group", { name: "Subagent model" })
-  const opener = page.locator("#delegation-model")
+  // The value row: its value, and the aria-busy it wears while the pick is on its way (ADR 0055).
+  const field = page.locator('[data-setting="subagent-model"]')
+  const opener = field
   // Every delegation write the page sends, so the greying out is checked against what goes to the
   // host and not only against how the field looks.
   const writes = []
@@ -42,7 +42,7 @@ await flow("delegation-model", async ({ page, profileId, until, shot, held }) =>
   await opener.click()
   await pick("gpt-5-mini", "openai/gpt-5-mini")
   assert.ok(await opener.isDisabled(), "the field is greyed out while saving")
-  assert.equal(await field.getByRole("status").count(), 1, "the heading shows a save is happening")
+  assert.equal(await field.getAttribute("aria-busy"), "true", "the row says a save is happening")
   await page.waitForTimeout(300)
   assert.equal(writes.length, 1, "and only the one write went out")
   await shot("saving")
@@ -54,7 +54,7 @@ await flow("delegation-model", async ({ page, profileId, until, shot, held }) =>
   )
   assert.deepEqual(await hosted(), { provider: "openrouter", model: "openai/gpt-5-mini" })
   await opener.getByText("openrouter/openai/gpt-5-mini").waitFor()
-  assert.equal(await field.getByRole("status").count(), 0, "the heading is quiet once it landed")
+  assert.equal(await field.getAttribute("aria-busy"), null, "the row is quiet once it landed")
   assert.ok(!(await opener.isDisabled()), "and the field is usable again")
   await shot("picked")
   // Read back from the host, not from what this page remembers: a reload shows its record.
@@ -77,8 +77,8 @@ await flow("delegation-model", async ({ page, profileId, until, shot, held }) =>
   await page.reload()
   await page.getByRole("button", { name: "Test connection" }).waitFor({ timeout: 15_000 })
   assert.equal(await opener.count(), 0, "no picker without the feature")
-  assert.equal(await field.count(), 0, "and no field around it")
+  assert.equal(await field.count(), 0, "and no row around it")
   await shot("no-picker")
 
-  pass("the host recorded the subagent model, cleared it, and offered no field without it")
+  pass("the host recorded the subagent model, cleared it, and offered no row without it")
 })

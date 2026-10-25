@@ -66,12 +66,26 @@ const assertList = async (page, viewport) => {
     1,
     "Coding's row says what it holds, verbatim",
   )
-  for (const heading of ["Gots Specific Settings", "Hermes Settings"]) {
-    assert.equal(
-      await list.getByRole("heading", { name: heading, exact: true }).count(),
-      1,
-      `${heading} heads its rows`,
-    )
+  // The list has no headings at all now: its pages sit in cards separated by gaps (ADR 0055).
+  assert.equal(
+    await list.getByRole("heading").count(),
+    0,
+    "the list carries no headings — its groups are cards, not headings",
+  )
+  const cards = list.locator("[data-settings-group]")
+  const count = await cards.count()
+  assert.ok(count >= 3, `General, the plugin's pages and the bot's Hermes's are cards (${count})`)
+  let previous = null
+  for (let i = 0; i < count; i++) {
+    const box = await cards.nth(i).boundingBox()
+    assert.ok(box, `card ${i + 1} has a box`)
+    if (previous) {
+      assert.ok(
+        box.y >= previous.y + previous.height + 4,
+        `card ${i + 1} is separated from the one above by a gap (${Math.round(box.y)} over ${Math.round(previous.y + previous.height)})`,
+      )
+    }
+    previous = box
   }
   return list
 }
@@ -124,7 +138,10 @@ const wide = async ({ page, profileId, shot }) => {
     0,
     "the pane beside the list swapped from General to Chat",
   )
-  assert.ok(await kept.evaluate((element) => element.isConnected), "the list is the same element it was")
+  assert.ok(
+    await kept.evaluate((element) => element.isConnected),
+    "the list is the same element it was",
+  )
   assert.ok(await list.isVisible(), "the list is still on screen beside the page")
   const after = await list.boundingBox()
   assert.ok(after, "the list still has a box")
@@ -164,14 +181,24 @@ const phone = async ({ page, profileId, shot }) => {
     timeout: 15_000,
   })
   assert.ok(await back.isVisible(), "the page pushes with a back control of its own")
-  assert.equal(await list.isVisible(), false, "the page covers the list rather than sitting beside it")
+  assert.equal(
+    await list.isVisible(),
+    false,
+    "the page covers the list rather than sitting beside it",
+  )
   await shot("page")
 
   await page.goBack()
-  await page.waitForURL((url) => url.pathname === `/settings/bots/${profileId}`, { timeout: 15_000 })
+  await page.waitForURL((url) => url.pathname === `/settings/bots/${profileId}`, {
+    timeout: 15_000,
+  })
   await settled(page)
   assert.ok(await list.isVisible(), "back from the page returns to the list")
-  assert.equal(await menuRow(page).count(), 0, "back from the page does not skip the list for Settings")
+  assert.equal(
+    await menuRow(page).count(),
+    0,
+    "back from the page does not skip the list for Settings",
+  )
   await shot("back-to-list")
 
   await page.goBack()
@@ -196,5 +223,5 @@ for (const dark of [false, true]) {
   })
 }
 pass(
-  "a bot's settings is a list of pages: at 1024px it takes the Settings menu's pane, General open in the pane beside it under the out-of-date plugin's banner, and tap Chat swaps that pane while the same list element stays put at the same box; on a 390px phone the list pushes over the menu and a page over the list, both with a back control, and back returns to the list and then to the menu — light and dark at both widths",
+  "a bot's settings is a list of pages with no headings anywhere: three caption-free cards separated by gaps under the out-of-date plugin's banner; at 1024px it takes the Settings menu's pane, General open in the pane beside it, and tap Chat swaps that pane while the same list element stays put at the same box; on a 390px phone the list pushes over the menu and a page over the list, both with a back control, and back returns to the list and then to the menu — light and dark at both widths",
 )

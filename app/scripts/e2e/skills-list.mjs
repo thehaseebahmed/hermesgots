@@ -1,7 +1,8 @@
 // The Skills page's geometry: the page its bot's list opens, drawn on a screen of its own at a
-// phone's and a tablet's width, light and dark — the list's Skills row, two sections under heading
-// boxes of their own, and a card per category whose first row is the category's title over its
-// "N of M on" line, with a row per skill under it. Which sections, categories and rows a list
+// phone's and a tablet's width, light and dark — the list's Skills row, two sections each under its
+// own muted caption (a <p>, never a heading: a card's groups are named, not headed), and a card per
+// category whose first row is the category's title over its "N of M on" line, with a row per skill
+// under it. Which sections, categories and rows a list
 // draws, what a switch writes and what a category's header flips are `test-skills-tab.tsx`'s (and
 // `scripts/test-skills-tab.mjs`'s); what only a laid-out page proves is where the boxes fall at the
 // widths the spec names.
@@ -48,19 +49,23 @@ const run = async ({ page, profileId, shot }) => {
     await settled(page)
     assert.equal(await panel().count(), 1, "the list's row is what the address opened")
 
-    const headings = []
+    const captions = []
     for (const [id, title] of SECTIONS) {
-      const heading = panel()
-        .locator(`[data-skill-section="${id}"]`)
-        .getByRole("heading", { name: title, exact: true })
-      await heading.scrollIntoViewIfNeeded()
+      const caption = panel().locator(`[data-skill-section="${id}"] > p`)
+      await caption.scrollIntoViewIfNeeded()
       await settled(page)
-      const box = await heading.boundingBox()
-      onScreen(box, viewport, `${title}'s heading`)
-      headings.push(box)
+      assert.equal((await caption.innerText()).trim(), title, `${title} names its own section`)
+      assert.equal(
+        await caption.evaluate((node) => node.tagName),
+        "P",
+        `${title} is a caption, not a heading`,
+      )
+      const box = await caption.boundingBox()
+      onScreen(box, viewport, `${title}'s caption`)
+      captions.push(box)
     }
-    assert.ok(headings[0].y < headings[1].y, "Your skills sits above From plugins")
-    await shot("headings")
+    assert.ok(captions[0].y < captions[1].y, "Your skills sits above From plugins")
+    await shot("captions")
 
     const categories = panel().locator("[data-skill-group]")
     const count = await categories.count()
@@ -134,5 +139,5 @@ for (const width of [390, 1024]) {
   }
 }
 pass(
-  "the Bot's Skills page is reached from its settings list's own Skills row and draws both sections under heading boxes of their own, Your skills above From plugins, every category titled by the first row of its own card over its N of M on line with the skill rows under it, and a row per skill whose name is drawn inside the row's box — the list's row, the headings, the categories and the rows on screen at 390 and 1024px, light and dark",
+  "the Bot's Skills page is reached from its settings list's own Skills row and draws both sections under muted captions of their own, Your skills above From plugins, every category titled by the first row of its own card over its N of M on line with the skill rows under it, and a row per skill whose name is drawn inside the row's box — the list's row, the captions, the categories and the rows on screen at 390 and 1024px, light and dark",
 )
