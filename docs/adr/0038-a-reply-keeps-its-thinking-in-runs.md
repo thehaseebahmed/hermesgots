@@ -7,7 +7,7 @@ decided — runs in arrival order, each anchored to the call that broke it, the 
 device that watched, and the honesty of the three labels — stands; 0049 changes how rows are drawn
 and when they open, not what a run is.
 
-**Superseded in its placement clause by [ADR 0052](0052-a-tool-row-never-lands-between-two-thought-rows.md)
+**Superseded in its placement clause by [ADR 0054](0054-a-tool-row-never-lands-between-two-thought-rows.md)
 (2026-10-25):** the title's "each drawn after the tool call that broke it" no longer holds — a stretch
 draws above the tool row whose call it follows, so a tool row never lands between two thought rows.
 Runs, their anchoring to the call they follow and the spans measured here stay as this ADR set them;
