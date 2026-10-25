@@ -213,8 +213,12 @@ An agent a bot's turn sets to work on part of it, with its own session and its o
 _Avoid_: child, delegate, worker, sub-agent
 
 **Subagent result**:
-What a finishing subagent leaves in its bot's thread: its own message at the thread's end when it arrives, opening the sub-thread behind it.
+What a finishing subagent found, read in its **Sub-thread** from its card or the **Subagent sheet**. It is never a message in the bot's thread: the host's delivery row for it is bookkeeping the thread does not draw.
 _Avoid_: completion, delivery, summary message
+
+**Wake turn**:
+The turn the host starts on a chat when a subagent finishes, so the bot reads the result and carries on. Its prompt is the model's input and draws nothing; its reply, tools and questions draw as any turn's do, and it is the main run continuing the work, not a side effect to hide.
+_Avoid_: wake run, notification turn, callback turn
 
 **Sub-thread**:
 The thread a subagent's own work draws — its thinking, what it ran and what it found — drawn as a chat's thread is.
