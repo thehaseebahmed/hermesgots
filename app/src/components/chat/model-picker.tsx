@@ -51,6 +51,7 @@ export function ModelPicker({
   recent = [],
   choice,
   onChoose,
+  header = true,
 }: {
   providers: ModelProvider[]
   /** The row that clears the choice: its label and the model it runs. */
@@ -59,6 +60,8 @@ export function ModelPicker({
   recent?: ModelChoice[]
   choice?: ModelChoice
   onChoose: (choice: ModelChoice | undefined) => void
+  /** Whether the picker draws its own sheet header; a card or a dialog already says the title. */
+  header?: boolean
 }) {
   const [query, setQuery] = useState("")
   const [openSlug, setOpenSlug] = useState<string>()
@@ -121,9 +124,11 @@ export function ModelPicker({
 
   return (
     <>
-      <PopupHeader>
-        <PopupTitle>{drilled ? drilled.name : "Select Model"}</PopupTitle>
-      </PopupHeader>
+      {header && (
+        <PopupHeader>
+          <PopupTitle>{drilled ? drilled.name : "Select Model"}</PopupTitle>
+        </PopupHeader>
+      )}
       <div className="flex flex-col gap-5 px-6 pt-2 text-[15px]">
         {(total > 8 || flat) && (
           <div className="flex items-center gap-2">
