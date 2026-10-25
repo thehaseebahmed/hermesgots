@@ -53,7 +53,6 @@ await flow("question-during-delegation", async ({ page, seed, send, lastReply, u
         (message) => ({
           role: message.role,
           content: message.content,
-          subagent: message.subagent ?? null,
         }),
       )
     }, chat)

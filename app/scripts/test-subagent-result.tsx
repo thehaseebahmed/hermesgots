@@ -1,8 +1,8 @@
 /**
- * A subagent's result, drawn by the chat: the delivery Hermes records draws as the bot's own message
- * at the thread's end — never the user's bubble — and a tap on it opens that subagent's sub-thread,
- * the same pop-up its card opens. The chat reads it off the transcript, so a synced or reloaded one
- * draws it identically.
+ * A subagent's delivery, drawn by the chat: the row Hermes records draws nothing in the thread — the
+ * turn's reply stays the last thing there — and the subagent's finding is read one tap away, in the
+ * sub-thread its card opens. The chat reads the transcript, so a synced or reloaded one draws the
+ * same thread.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -141,44 +141,48 @@ async function screen(
 
 const rows = () => findAll("[data-slot=message]")
 const bubble = (row: Element) => row.querySelector("[data-slot=bubble]")
+/** A thread row carrying the subagent's finding, if one is drawn at all. */
 const resultRow = () => rows().find((row) => row.textContent?.includes("The fixture is in place"))
-const card = () => document.querySelector("[data-slot=subagent-result]")
+const agentCard = () => document.querySelector("[data-slot=agent-card]")
 
-/** The thread as it lands: the catch-up reads Hermes, then the rows draw. */
-async function drawn() {
-  await until(async () => Boolean(resultRow()), "the thread to draw")
+/** The thread as it lands: the catch-up reads Hermes, then the turn's rows draw. */
+async function landed() {
+  await until(
+    async () => rows().some((row) => row.textContent?.includes("Sent it off.")),
+    "the thread to draw",
+  )
   await import("@/components/chat/markdown-renderer")
   await settle()
-  return resultRow()
 }
 
-test("a delivery draws as the bot's message at the thread's end", async () => {
+test("a delivery draws nothing at the thread's end", async () => {
   await screen(async () => {
-    const row = await drawn()
-    assert.ok(row, "the result is a row of the thread")
-    assert.equal(row.getAttribute("data-align"), "start", "the bot's own side, not the user's")
-    assert.equal(bubble(row), null, "with no bubble, as a reply has none")
-    assert.equal(rows().at(-1), row, "and last, where it arrived")
-    assert.match(
-      row.textContent ?? "",
-      /The fixture is in place/,
-      "carrying what the subagent left",
+    await landed()
+    assert.equal(resultRow(), undefined, "the subagent's finding is not a message of the thread")
+    assert.equal(
+      document.querySelector("[data-slot=subagent-result]"),
+      null,
+      "and no line of its own either",
     )
-    assert.doesNotMatch(
-      row.textContent ?? "",
-      /ASYNC DELEGATION|Original goal:|API calls/,
-      "not the notification the model was sent",
+    const last = rows().at(-1)
+    assert.match(last?.textContent ?? "", /Sent it off/, "the reply it arrived after is still last")
+    assert.equal(last?.getAttribute("data-align"), "start", "the bot's own side")
+    assert.equal(bubble(last!), null, "with no bubble, as a reply has none")
+    assert.ok(
+      !rows().some((row) =>
+        /ASYNC DELEGATION|Original goal:|API calls/.test(row.textContent ?? ""),
+      ),
+      "and nothing of the notification the model was sent",
     )
   })
 })
 
-test("a tap on a result opens its subagent's sub-thread", async () => {
+test("the subagent's work is one tap away, on its card", async () => {
   await screen(async () => {
-    const row = await drawn()
-    const tap = card()?.querySelector("button")
-    assert.ok(tap, "the result opens its subagent")
-    assert.match(tap.textContent ?? "", /Sub-Agent: Builder/, "naming the subagent it came from")
-    assert.equal(row?.nextElementSibling, null, "the card rides with the message it belongs to")
+    await landed()
+    const tap = agentCard()?.querySelector("button")
+    assert.ok(tap, "the card opens its subagent")
+    assert.match(tap.textContent ?? "", /Sub-Agent: Builder/, "naming the subagent that finished")
     await click(tap)
     await settle()
     assert.ok(
@@ -196,7 +200,7 @@ test("the count of what runs is drawn once, by the thread's last row", async () 
   const hostRows = [...transcript, { id: 6, role: "assistant", content: "", timestamp: 30 }]
   await screen(
     async () => {
-      await drawn()
+      await landed()
       const count = () =>
         findAll("button").filter((one) => /subagent[s]? running/.test(one.textContent ?? ""))
       /** The row the count is drawn in, or null where it is the thread's own foot. */
@@ -247,18 +251,6 @@ test("the count of what runs is drawn once, by the thread's last row", async () 
   )
 })
 
-test("a result the chat cannot name still draws as the bot's message", async () => {
-  await screen(
-    async () => {
-      const row = await drawn()
-      assert.ok(row, "still the bot's message")
-      assert.equal(bubble(row), null, "never the user's")
-      assert.equal(card()?.querySelector("button"), null, "with nothing to open")
-    },
-    { agents: [] },
-  )
-})
-
 test("a chat from before deliveries draws as it did", async () => {
   await screen(
     async () => {
@@ -273,7 +265,7 @@ test("a chat from before deliveries draws as it did", async () => {
   )
 })
 
-test("two results arriving together keep their order, and a catch-up draws each once", async () => {
+test("two deliveries draw nothing, and a catch-up adds nothing", async () => {
   const delivery = (goal, result) =>
     [
       `[ASYNC DELEGATION COMPLETE — d-${goal}]`,
@@ -301,15 +293,24 @@ test("two results arriving together keep their order, and a catch-up draws each 
       timestamp: 21,
     },
   ]
-  const resultsDrawn = () =>
+  /** The thread's rows, with the turn this pass sent left out. */
+  const drawnTexts = () =>
     rows()
-      .filter((row) => /The (parser|docs) (?:is|are) fine[.]/.test(row.textContent ?? ""))
-      .map((row) => (row.textContent?.includes("parser") ? "parser" : "docs"))
+      .map((row) => row.textContent ?? "")
+      .filter((text) => !text.includes("Anything else?"))
   await screen(
     async () => {
-      await until(async () => resultsDrawn().length === 2, "both results")
-      assert.deepEqual(resultsDrawn(), ["parser", "docs"], "in the order they arrived")
-      // The chat catches up again, with a turn sent since: the results survive it, once each.
+      await until(
+        async () => rows().some((row) => row.textContent?.includes("Sent it off.")),
+        "the turn that delegated",
+      )
+      await settle()
+      assert.ok(
+        !rows().some((row) => /The (parser|docs) (?:is|are) fine[.]/.test(row.textContent ?? "")),
+        "neither delivery is a row of the thread",
+      )
+      const before = drawnTexts()
+      // The chat catches up again, with a turn sent since: the deliveries stay out of it.
       lines.push({ id: 7, role: "user", content: "Anything else?", timestamp: 22 })
       // A catch-up already in flight is shared, and may have read the transcript before this turn
       // joined it, so ask again until one that began after it has landed.
@@ -318,7 +319,11 @@ test("two results arriving together keep their order, and a catch-up draws each 
         await settle()
         return rows().some((row) => row.textContent?.includes("Anything else?"))
       }, "the turn sent since")
-      assert.deepEqual(resultsDrawn(), ["parser", "docs"], "and still one row each, in order")
+      assert.deepEqual(
+        drawnTexts(),
+        before,
+        "and the catch-up adds nothing, nor takes anything away",
+      )
     },
     { rows: lines },
   )

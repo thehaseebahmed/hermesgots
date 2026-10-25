@@ -4,7 +4,7 @@ import { AGENT_WORK_MS } from "@/lib/freshness"
 import { connectionKey } from "@/lib/connection"
 import { quietly } from "@/lib/report"
 import { createSignal } from "@/lib/store"
-import type { Conversation, Profile, SubagentRef, ToolEvent } from "@/lib/db"
+import type { Conversation, Profile, ToolEvent } from "@/lib/db"
 import {
   getSessionAgents,
   listSessionMessages,
@@ -245,26 +245,6 @@ export function agentsOf(tool: ToolEvent, agents: DelegatedAgent[]) {
   return agents.filter(
     (agent) => agent.startedAt !== null && agent.startedAt >= from && agent.startedAt <= to,
   )
-}
-
-/**
- * The agent a result message stands for: the one whose goal it carries — a child's first message is
- * its goal, as a card's call is matched. Two agents sharing a goal make the newest it, since that is
- * the one that just finished.
- *
- * The message's `ids` cannot name it: those are core's own `sa-<task>-<hex>` ids, off the
- * `delegate_task` result row, while a plugin agent's `id` is the child's *session* id
- * (`delegation._child`), so the two id spaces never meet (#465). The goal is the real join, and
- * the ids travel on the message as what the transcript called the work, for a reader that wants
- * them.
- */
-export function agentOfResult(result: Pick<SubagentRef, "goals">, agents: DelegatedAgent[]) {
-  for (const goal of result.goals) {
-    // A result's goal can be the shortened one, so either opening may be the longer.
-    const matched = goalMatch(goal, agents, { either: true })
-    if (matched) return matched
-  }
-  return undefined
 }
 
 const ROLES: [RegExp, string][] = [

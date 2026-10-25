@@ -102,9 +102,10 @@
 // Say "delegate and ask" for a background delegation that outlives the turn: the `delegate_task`
 // handle, the subagent it dispatched listed on GET /api/plugins/memento/sessions/{id}/agents as
 // still running, and a question raised in its place in the composer while it works. One the user
-// answers, the subagent's result is delivered into the thread as core delivers it
-// (`display_kind: "async_delegation_complete"`, a `user` row the app draws as the bot's message)
-// and the plugin's wake run answers the notification as a turn of its own (#467, #471).
+// answers, the subagent's result is delivered into the transcript as core delivers it
+// (`display_kind: "async_delegation_complete"`, a `user` row the app draws no thread message for —
+// the finding is read in the subagent's sub-thread) and the plugin's wake run answers the
+// notification as a turn of its own (#467, #471).
 // POST /api/plugins/memento/sessions/{id}/attachments saves an attached file under the temp dir, and a
 // message that carries attachments (inline images, `<attachment>` lines) gets a reply naming them.
 // GET /api/plugins/memento/workflows lists the workflow library (presets first, read-only), POST

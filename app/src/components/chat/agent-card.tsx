@@ -11,7 +11,6 @@ import { Spinner } from "@/components/ui/spinner"
 import {
   agentLine,
   agentName,
-  agentOfResult,
   agentsOf,
   agentTranscript,
   applyAnswers,
@@ -19,7 +18,7 @@ import {
   useAgentsSource,
   type AgentsSource,
 } from "@/lib/agents"
-import { type Message, type SubagentRef, type ToolEvent } from "@/lib/db"
+import { type Message, type ToolEvent } from "@/lib/db"
 import { usePluginFeatureOn } from "@/lib/features"
 import type { AgentStopRow, DelegatedAgent, HermesConfig } from "@/lib/hermes"
 import { toMessages } from "@/lib/history"
@@ -245,26 +244,8 @@ function useTranscript(server: HermesConfig, agent: DelegatedAgent, limit: numbe
 }
 
 /**
- * A subagent's result, as the thread draws it: a line naming the subagent whose work it is, opening
- * the same sub-thread its card does. A chat that can't name the subagent still draws the line — the
- * result itself is the message — with nothing to open.
- */
-export function SubagentResultCard({ subagent }: { subagent: SubagentRef }) {
-  const source = useAgentsSource()
-  const agent = source ? agentOfResult(subagent, source.agents) : undefined
-  if (agent && source) return <SubagentCard agent={agent} source={source} slot="subagent-result" />
-  const goal = subagent.goals[0]
-  return (
-    <div data-slot="subagent-result" className={cn(FLAT_CARD, "flex items-center gap-3 px-4 py-3")}>
-      <CardBody className="min-h-11 justify-center" title={goal ? agentTitle(goal) : "Sub-Agent"} />
-    </div>
-  )
-}
-
-/**
- * The sub-thread pop-up an agent's card, its result's line and the subagent sheet all open. The
- * screen draws it rather than the card, so a press inside the sheet can close the sheet and open
- * this.
+ * The sub-thread pop-up an agent's card and the subagent sheet all open. The screen draws it rather
+ * than the card, so a press inside the sheet can close the sheet and open this.
  */
 export function AgentPopup({
   agent,

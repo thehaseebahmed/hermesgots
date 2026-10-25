@@ -33,9 +33,9 @@ function opensWithHeader(content: string) {
  * type it, and their message must stay theirs — while nothing the gateway folds in ends without the
  * footer.
  *
- * A delivery carries the same header and is the bot's message (checked first, wherever this is
- * asked), so only a row with no display kind at all — the plugin posts none — can be the prompt, and
- * only a `user` row is one.
+ * A delivery carries the same header but a display kind of its own, so it never reaches this — the
+ * fold skips it first and draws nothing for it — and only a row with no display kind at all (the
+ * plugin posts none for the prompt) can be one, and only a `user` row is.
  */
 export const isWakePrompt = (row: Pick<SessionMessage, "role" | "content" | "display_kind">) =>
   row.role === "user" &&

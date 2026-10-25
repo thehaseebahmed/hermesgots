@@ -1,15 +1,15 @@
 /**
  * A wake run's input is the model's, never the user's: the row the plugin posts when a subagent
  * finishes opens with the pinned header, and the thread draws nothing of it — while the delivery
- * Hermes writes for the same finish still draws as the bot's own message, and a transcript from
- * before wakes existed reads exactly as it did. Pure over the rows, so a synced, reloaded or
- * imported chat folds it the same way.
+ * Hermes writes for the same finish is still recognised as a delivery, which draws nothing either,
+ * and a transcript from before wakes existed reads exactly as it did. Pure over the rows, so a
+ * synced, reloaded or imported chat folds it the same way.
  */
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 
-import { isSubagentResult, subagentResults } from "../src/lib/subagent-results.ts"
+import { isSubagentResult } from "../src/lib/subagent-results.ts"
 import { isWakePrompt, WAKE_PROMPT_FOOTER, WAKE_PROMPT_HEADER } from "../src/lib/wake-prompt.ts"
 
 /** A child session id: what the header names, never a compression continuation's. */
@@ -40,7 +40,7 @@ const WAKE = [
 /** The wake run's input row: an ordinary `user` row, with no display kind at all. */
 const wake = (id, content = WAKE) => ({ id, role: "user", content, timestamp: 1_700_000_000 })
 
-/** The visible row core writes for the same finish: the same header, drawn as the bot's message. */
+/** The delivery row core writes for the same finish: the same header, and a display kind. */
 const delivery = (id) => ({
   id,
   role: "user",
@@ -63,11 +63,10 @@ test("the wake run's input is not the user's message", () => {
   assert.equal(isWakePrompt(wake(1)), true, "the row the plugin posts draws nothing of its own")
 })
 
-test("the delivery row of the same finish stays the bot's message", () => {
+test("the delivery row of the same finish is a delivery, and is not the wake prompt", () => {
   const row = delivery(2)
   assert.equal(isWakePrompt(row), false, "a delivery is never the wake prompt")
-  assert.equal(isSubagentResult(row), true, "and it is still drawn as the bot's own message")
-  assert.deepEqual([...subagentResults([row]).keys()], [2], "with the result it carries")
+  assert.equal(isSubagentResult(row), true, "and it is still recognised as a delivery")
 })
 
 test("a user who types the wake's header keeps their own message", () => {
@@ -114,10 +113,9 @@ test("only a user row with no display kind is a wake prompt", () => {
   assert.equal(isWakePrompt({ ...wake(1), content: null }), false, "a row with no text at all")
 })
 
-test("a wake prompt never reaches the subagent results", () => {
+test("a wake prompt is never a delivery", () => {
   const rows = [wake(1), delivery(2)]
-  const found = subagentResults(rows)
-  assert.deepEqual([...found.keys()], [2], "the delivery only: the wake prompt is no result")
+  assert.deepEqual(rows.map(isSubagentResult), [false, true], "the delivery only: the wake is none")
 })
 
 test("a transcript from before wakes existed folds as it did", () => {
