@@ -525,7 +525,8 @@ async def _wake_root(adapter: Any, home: Path, root: str, children: List[Dict[st
     ordinary run of the conversation and may cross neither a confirmation gate nor a live turn.
 
     The gate is asked before anything that costs more than ``memento.db`` — a conversation that
-    waits on its user for hours holds its batch every look, and waiting must cost nothing.
+    waits on its user for hours holds its batch every look, and waiting must cost nothing beyond
+    the stage reads, which are store reads of their own and settle a stage's children outright.
 
     A batch already stored for this conversation re-posts its own intent whole: the same key and
     the same text, so the host replays the run it may already have rather than refusing a changed
@@ -535,6 +536,18 @@ async def _wake_root(adapter: Any, home: Path, root: str, children: List[Dict[st
     now = _now_ms()
     stored = await asyncio.to_thread(sessions.open_wake_batch, path, root)
     parent_id = children[0]["parent_id"] if children else root
+    if not stored:
+        # Stage-ness before the gate: a stage keeps its one run however its own session waits —
+        # usually on the user — so its children settle with why here instead of holding every
+        # look forever. The check reads the store the gate reads; a batch already stored had
+        # every member judged a stage before its intent was written.
+        wakeable, staged = await _wakeable(home, children)
+        for stage_parent, ids in staged.items():
+            await asyncio.to_thread(sessions.drop_wakes, path, stage_parent, ids, DROP_STAGE)
+            logger.debug("memento: %s's completion doesn't wake it: a stage keeps its one run", root)
+        children = wakeable[:WAKE_BATCH_MEMBERS]
+        if not children:
+            return 0
     held = await _deferred(adapter, home, root)
     if held:
         ids = stored["members"] if stored else [child["id"] for child in children]
@@ -556,13 +569,6 @@ async def _wake_root(adapter: Any, home: Path, root: str, children: List[Dict[st
         ):
             return 0
     else:
-        wakeable, staged = await _wakeable(home, children)
-        for stage_parent, ids in staged.items():
-            await asyncio.to_thread(sessions.drop_wakes, path, stage_parent, ids, DROP_STAGE)
-            logger.debug("memento: %s's completion doesn't wake it: a stage keeps its one run", root)
-        children = wakeable[:WAKE_BATCH_MEMBERS]
-        if not children:
-            return 0
         marks = await asyncio.to_thread(
             sessions.wake_marks, path, [child["id"] for child in children]
         )

@@ -1247,8 +1247,8 @@ def _write_marks(
     """Writes one disposition for every subagent of a batch, in one transaction.
 
     A field left out is kept as it was, which is what makes holding free and a retry's count
-    cumulative. A child with no row gets one: the parent it hangs off is all a mark needs to be
-    read back later.
+    cumulative, and an existing row keeps the parent it hangs off however it is written again. A
+    child with no row gets one: the parent it hangs off is all a mark needs to be read back.
     """
     ids = [one for one in subagent_ids if one]
     if not ids:
@@ -1288,8 +1288,7 @@ def _write_marks(
                        (subagent_id, parent_id, run_id, at, status, attempts, next_at, reason)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(subagent_id) DO UPDATE SET
-                       parent_id = excluded.parent_id, run_id = excluded.run_id,
-                       at = excluded.at, status = excluded.status,
+                       run_id = excluded.run_id, at = excluded.at, status = excluded.status,
                        attempts = excluded.attempts, next_at = excluded.next_at,
                        reason = excluded.reason""",
                 (

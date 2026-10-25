@@ -221,6 +221,35 @@ class WakeTest(unittest.TestCase):
         self.assertEqual(self.sweep(), 0)
         self.assertEqual(len(self.posted), 1)
 
+    def test_a_waiting_stages_children_are_dropped_not_held(self) -> None:
+        """A stage keeps its one run however its own session waits: the stage check runs before
+        the gate, so a stage parked on a question or an approval settles its children with why
+        instead of holding them every look forever."""
+        self.chat("stage")
+        self.adapter.run(
+            "run-1", "stage", "waiting_for_approval",
+            clarify={"clarify_id": "q", "questions": [{"id": "q0", "question": "Which branch?"}]},
+        )
+        self.child("c1", "stage", said="a stage's subagent")
+        stages = mock.patch.object(delegation, "_stage", lambda home, session_id: True)
+        stages.start()
+        self.addCleanup(stages.stop)
+        self.assertEqual(self.sweep(), 0)
+        self.assertEqual(self.posted, [])
+        self.assertEqual(self.mark("c1")["status"], "dropped")
+        self.assertEqual(self.mark("c1")["reason"], "stage")
+
+    def test_a_hold_keeps_the_parent_the_wake_hangs_off(self) -> None:
+        """A mark's parent names the child's session; a hold on an already-marked member records
+        the wait without renaming what it hangs off."""
+        self.chat("s")
+        self.child("c1", "s", said="done")
+        sessions.mark_wakes(db_path(self.home), "s", ["c1"], "run-from-before")
+        sessions.hold_wakes(db_path(self.home), "chat-root", ["c1"], "a gate")
+        (row,) = self.sql("SELECT parent_id, status FROM subagent_wakes WHERE subagent_id = 'c1'")
+        self.assertEqual(row, ("s", "held"), "the hold must not rewrite the parent")
+        self.assertEqual(set(sessions.wake_marks(db_path(self.home), ["c1"])), {"c1"})
+
     def test_a_stage_check_that_cannot_be_answered_settles_nothing(self) -> None:
         """A stage reading that fails is not a stage: the child keeps its mark and the next look
         judges it, so one storage blip can never drop every wake it holds."""
