@@ -95,6 +95,46 @@ export function skillSections(skills: Skill[]): SkillSection[] {
   }))
 }
 
+/** What a group with no category of its own is called. */
+export const NO_CATEGORY = "No category"
+
+export interface CategoryHeader {
+  /** The category's name, or `No category` for the group that has none. */
+  title: string
+  /** `N of M on` where the category holds more than one skill; a lone skill's own name; null alone. */
+  subtitle: string | null
+  /** Whether any of the category's skills is on, which is also what a tap on it flips from. */
+  checked: boolean
+}
+
+/**
+ * A category's header row, drawn like a Notification types feature header: the category's name over
+ * a line saying how much of it is on, and a switch that stands for all of it. A category reads on
+ * while any skill in it is on, so a tap that turns it off leaves nothing on, and one on a category
+ * that is all off turns every skill in it on. A one-skill category carries no count — its line is
+ * the skill's own name, the way a feature of one category names it.
+ */
+export function categoryHeader(group: SkillGroup): CategoryHeader {
+  const total = group.skills.length
+  const on = group.skills.filter((skill) => skill.enabled !== false).length
+  return {
+    title: group.category ?? NO_CATEGORY,
+    subtitle: total > 1 ? `${on} of ${total} on` : (group.skills[0]?.name ?? null),
+    checked: on > 0,
+  }
+}
+
+/**
+ * The rows a tap on a category's header writes: the skills whose switch the tap would actually
+ * change, so a skill already where the category is going is left alone, and one the Host says it
+ * can't switch is never written at all.
+ */
+export function categoryWrites(group: SkillGroup, enabled: boolean): string[] {
+  return group.skills
+    .filter((skill) => skill.switchable !== false && (skill.enabled !== false) !== enabled)
+    .map((skill) => skill.name)
+}
+
 /**
  * What an origin means where both facets of it are read: the sheet's one word for where a skill came
  * from, and whether a skill of that origin can be removed. A row that names no origin (an older

@@ -153,23 +153,27 @@ export function ActionRow({
   )
 }
 
-/** The row every Settings switch wears: an icon, a title over a muted line, and the switch. */
+/** The row every Settings switch wears: an optional icon, a title over a muted line, and the switch. */
 export function SwitchRow({
   id,
   icon: Icon,
   title,
   experimental,
   subtitle,
+  extra,
   checked,
   disabled,
   variant,
   onCheckedChange,
 }: {
   id: string
-  icon: LucideIcon
+  /** A category header is a title alone, so a row without one draws nothing in the icon's place. */
+  icon?: LucideIcon
   title: string
   experimental?: boolean
   subtitle?: string
+  /** Extra lines under the subtitle, inside the row's own column (a skill's health line). */
+  extra?: ReactNode
   checked: boolean
   disabled?: boolean
   /** `header` tops a group of switches it controls; `nested` is one of them. */
@@ -186,7 +190,7 @@ export function SwitchRow({
         variant === "nested" && "pl-9",
       )}
     >
-      <Icon className="size-5 shrink-0 text-muted-foreground" />
+      {Icon && <Icon className="size-5 shrink-0 text-muted-foreground" />}
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="flex min-w-0 items-center gap-2">
           <span className={cn("truncate text-base", variant === "header" && "font-semibold")}>
@@ -195,6 +199,7 @@ export function SwitchRow({
           {experimental && <ExperimentalBadge />}
         </span>
         {subtitle && <span className="line-clamp-2 text-sm text-muted-foreground">{subtitle}</span>}
+        {extra}
       </span>
       <Switch id={id} checked={checked} disabled={disabled} onCheckedChange={onCheckedChange} />
     </label>

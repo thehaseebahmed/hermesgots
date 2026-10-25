@@ -1,8 +1,10 @@
-// The Skills tab's geometry: the tab and its own screen at a phone's and a tablet's width, light and
-// dark — the tab's strip holding the Skills tab, two sections under boxes of their own, and a row per
-// skill whose name is drawn inside the row's box. Which sections, groups and rows a list draws, and
-// what a switch writes, is `test-skills-tab.tsx`'s (and `scripts/test-skills-tab.mjs`'s); what only a
-// laid-out page proves is where the boxes fall at the widths the spec names.
+// The Skills page's geometry: the page its bot's list opens, drawn on a screen of its own at a
+// phone's and a tablet's width, light and dark — the list's Skills row, two sections under heading
+// boxes of their own, and a card per category whose first row is the category's title over its
+// "N of M on" line, with a row per skill under it. Which sections, categories and rows a list
+// draws, what a switch writes and what a category's header flips are `test-skills-tab.tsx`'s (and
+// `scripts/test-skills-tab.mjs`'s); what only a laid-out page proves is where the boxes fall at the
+// widths the spec names.
 import { app, assert, flow, mock, pass, settled } from "./lib.mjs"
 
 const SECTIONS = [
@@ -13,8 +15,8 @@ const SECTIONS = [
 const ROWS = ["code-review", "github-pr-workflow", "pinned-notes", "gots:ship"]
 
 const run = async ({ page, profileId, shot }) => {
-  const editor = `/settings/bots/${profileId}`
-  const screen = `${editor}/skills`
+  const list = `/settings/bots/${profileId}`
+  const screen = `${list}/skills`
   const errors = []
   page.on("pageerror", (error) => errors.push(error.message))
   page.on("console", (message) => {
@@ -31,20 +33,20 @@ const run = async ({ page, profileId, shot }) => {
   }
 
   try {
-    await page.goto(`${app}${editor}`)
-    const tab = page.getByRole("tab", { name: "Skills", exact: true })
-    await tab.waitFor({ timeout: 15_000 })
+    await page.goto(`${app}${list}`)
+    const door = page.locator('[data-bot-page="skills"]')
+    await door.waitFor({ timeout: 15_000 })
     await settled(page)
     const viewport = page.viewportSize()
     assert.ok(viewport, "the page has a viewport")
-    onScreen(await tab.boundingBox(), viewport, "the Skills tab")
-    await shot("tab")
+    onScreen(await door.boundingBox(), viewport, "the Skills row of the bot's list")
+    await shot("list")
 
-    await tab.click()
+    await door.click()
     await page.waitForURL(`**${screen}`, { timeout: 15_000 })
     await page.locator('[data-skill="code-review"]').waitFor({ timeout: 15_000 })
     await settled(page)
-    assert.equal(await panel().count(), 1, "the tab is what the address opened")
+    assert.equal(await panel().count(), 1, "the list's row is what the address opened")
 
     const headings = []
     for (const [id, title] of SECTIONS) {
@@ -60,15 +62,37 @@ const run = async ({ page, profileId, shot }) => {
     assert.ok(headings[0].y < headings[1].y, "Your skills sits above From plugins")
     await shot("headings")
 
-    const titles = panel().locator("[data-skill-group] > h3")
-    const count = await titles.count()
-    assert.ok(count > 0, "the categories title their groups")
+    const categories = panel().locator("[data-skill-group]")
+    const count = await categories.count()
+    assert.ok(count > 0, "the categories head their groups")
     for (let i = 0; i < count; i++) {
-      const title = titles.nth(i)
-      await title.scrollIntoViewIfNeeded()
+      const group = categories.nth(i)
+      const header = group.locator("[data-skill-category]").first()
+      await header.scrollIntoViewIfNeeded()
       await settled(page)
-      const box = await title.boundingBox()
-      onScreen(box, viewport, `category title ${i + 1}`)
+      const box = await header.boundingBox()
+      onScreen(box, viewport, `category ${i + 1}'s title row`)
+
+      const title = await header.getAttribute("data-skill-category")
+      assert.ok(title && title.length > 0, `category ${i + 1} is titled`)
+      const rows = await group.locator("[data-skill]").count()
+      const words = (await header.textContent()) ?? ""
+      assert.ok(words.includes(title), `${title} names its own row`)
+      if (rows > 1) {
+        assert.ok(
+          words.includes(`of ${rows} on`),
+          `${title} counts the ${rows} skills it holds (${words})`,
+        )
+      } else {
+        assert.doesNotMatch(words, / of \d+ on/, `${title} carries no count over one skill`)
+      }
+
+      const first = await group.locator("[data-skill]").first().boundingBox()
+      assert.ok(first, `${title}'s first skill has a box`)
+      assert.ok(
+        first.y >= box.y + box.height - 1,
+        `${title}'s title row sits over its skills (${Math.round(box.y + box.height)}…${Math.round(first.y)})`,
+      )
     }
 
     for (const name of ROWS) {
@@ -110,5 +134,5 @@ for (const width of [390, 1024]) {
   }
 }
 pass(
-  "the Bot's Skills tab is reached from its editor's own tab strip and draws both sections under heading boxes of their own, Your skills above From plugins, every category title with a box of its own, and a row per skill whose name is drawn inside the row's box — the tab, the headings, the categories and the rows on screen at 390 and 1024px, light and dark",
+  "the Bot's Skills page is reached from its settings list's own Skills row and draws both sections under heading boxes of their own, Your skills above From plugins, every category titled by the first row of its own card over its N of M on line with the skill rows under it, and a row per skill whose name is drawn inside the row's box — the list's row, the headings, the categories and the rows on screen at 390 and 1024px, light and dark",
 )

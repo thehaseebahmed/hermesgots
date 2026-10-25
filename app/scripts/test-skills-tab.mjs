@@ -1,7 +1,16 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { canRemove, skillHealth, skillOrigin, skillSections, skillSetup } from "../src/lib/skills-tab.ts"
+import {
+  canRemove,
+  categoryHeader,
+  categoryWrites,
+  NO_CATEGORY,
+  skillHealth,
+  skillOrigin,
+  skillSections,
+  skillSetup,
+} from "../src/lib/skills-tab.ts"
 
 const skill = (patch) => ({
   name: "plan",
@@ -160,4 +169,94 @@ test("only the two origins with a removal behind them can be removed", () => {
   assert.equal(canRemove(skill({ origin: "plugin" })), false, "a plugin's skill is switch-only")
   assert.equal(canRemove(skill()), false)
   assert.equal(canRemove(skill({ origin: null })), false)
+})
+
+const group = (skills, category = "ops") => ({ category, skills })
+
+test("a category's header counts what is on in it, in the Host's rows", () => {
+  assert.deepEqual(
+    categoryHeader(
+      group([
+        skill({ name: "one", enabled: true }),
+        skill({ name: "two", enabled: false }),
+        skill({ name: "three", enabled: false }),
+      ]),
+    ),
+    { title: "ops", subtitle: "1 of 3 on", checked: true },
+    "one of three on",
+  )
+  assert.deepEqual(
+    categoryHeader(
+      group([skill({ name: "one" }), skill({ name: "two" }), skill({ name: "three" })]),
+    ),
+    { title: "ops", subtitle: "3 of 3 on", checked: true },
+    "an answered row with no `enabled` is on, as its switch reads",
+  )
+  assert.deepEqual(
+    categoryHeader(
+      group([skill({ name: "one", enabled: false }), skill({ name: "two", enabled: false })]),
+    ),
+    { title: "ops", subtitle: "0 of 2 on", checked: false },
+    "an all-off category reads as off, and says so",
+  )
+  assert.deepEqual(
+    categoryHeader(
+      group([skill({ name: "one", enabled: null }), skill({ name: "two", enabled: false })]),
+    ),
+    { title: "ops", subtitle: "1 of 2 on", checked: true },
+    "a row an older plugin answered for is on",
+  )
+})
+
+test("a one-skill category carries the skill's name and no count", () => {
+  const header = categoryHeader(group([skill({ name: "deploy", enabled: true })]))
+  assert.deepEqual(header, { title: "ops", subtitle: "deploy", checked: true })
+  assert.doesNotMatch(header.subtitle, / of /, "no count over a category of one")
+  assert.deepEqual(
+    categoryHeader(group([skill({ name: "deploy", enabled: false })])),
+    { title: "ops", subtitle: "deploy", checked: false },
+    "off is the row's own, and the header follows it",
+  )
+})
+
+test("the group with no category of its own is titled, not left blank", () => {
+  assert.deepEqual(categoryHeader(group([skill({ name: "plan" })], null)), {
+    title: NO_CATEGORY,
+    subtitle: "plan",
+    checked: true,
+  })
+  assert.equal(NO_CATEGORY, "No category")
+})
+
+test("a header reads on while any skill in the category is, an essential one included", () => {
+  assert.deepEqual(
+    categoryHeader(
+      group([
+        skill({ name: "deploy", enabled: false }),
+        skill({ name: "hermes-agent", switchable: false }),
+      ]),
+    ),
+    { title: "ops", subtitle: "1 of 2 on", checked: true },
+  )
+})
+
+test("a tap on a category writes only the rows it would change", () => {
+  const held = group([
+    skill({ name: "deploy", enabled: false }),
+    skill({ name: "lint", enabled: true }),
+    skill({ name: "hermes-agent", enabled: true, switchable: false }),
+  ])
+  assert.deepEqual(categoryWrites(held, true), ["deploy"], "turning it on writes the row that is off")
+  assert.deepEqual(categoryWrites(held, false), ["lint"], "turning it off writes the row that is on")
+  assert.deepEqual(categoryWrites(group([]), true), [], "nothing to write, nothing written")
+  assert.deepEqual(
+    categoryWrites(group([skill({ name: "pinned", enabled: false, switchable: false })]), true),
+    [],
+    "a skill the Host won't switch is never written, even to turn it on",
+  )
+  assert.deepEqual(
+    categoryWrites(group([skill({ name: "plan", enabled: null })]), false),
+    ["plan"],
+    "a row an older plugin answered for is on, so turning it off writes it",
+  )
 })
