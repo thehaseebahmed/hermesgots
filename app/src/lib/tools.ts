@@ -15,6 +15,7 @@ export type KindId =
   | "browsed"
   | "plan"
   | "pr"
+  | "cron"
   | "subagent"
   | "listed"
   | "steered"
@@ -57,6 +58,28 @@ const USED: Kind = {
   doing: "Using",
   title: { one: "a tool", many: "tools" },
 }
+
+export const CRON_TOOL = "cronjob_manage"
+
+/**
+ * A `cronjob_manage` call, one kind per action it takes, so a schedule that was listed never reads as
+ * a job that ran. Its preview is the action alone (`_PRIMARY_ARGS` in `agent/display.py` makes
+ * `action` the primary argument), and it carries no count or name — so each action's title is a
+ * fixed phrase, "a cron job" where it touches one and "cron jobs" for the one that lists them all.
+ */
+const CRON: Record<string, Kind> = {
+  create: { id: "cron", verb: "Created", doing: "Creating", title: "a cron job" },
+  list: { id: "cron", verb: "Listed", doing: "Listing", title: "cron jobs" },
+  remove: { id: "cron", verb: "Removed", doing: "Removing", title: "a cron job" },
+  update: { id: "cron", verb: "Updated", doing: "Updating", title: "a cron job" },
+  run: { id: "cron", verb: "Ran", doing: "Running", title: "a cron job" },
+  pause: { id: "cron", verb: "Paused", doing: "Pausing", title: "a cron job" },
+  resume: { id: "cron", verb: "Resumed", doing: "Resuming", title: "a cron job" },
+}
+
+/** The actions this tool takes, which is also the vocabulary its own label is read against. */
+const CRON_ACTIONS = new Set(Object.keys(CRON))
+
 /**
  * A `delegate_task` call that set a subagent to work. It draws as the subagent's own card rather
  * than a row, so these words are read by the line saying what the turn is doing — and they must not
@@ -104,11 +127,52 @@ export function taskCount(tool: ToolEvent) {
   return counted === undefined ? undefined : Number(counted)
 }
 
+/** What a call says about the action it took: the stamp, and the label it arrived with. */
+interface ActionCall {
+  action?: string
+  label?: string
+}
+
+/**
+ * The action a call took, read in the tool's own vocabulary: the stamp made where the arguments were
+ * in hand, else the label. Hermes previews a call by its primary argument (`_PRIMARY_ARGS` in
+ * `agent/display.py`), and for these tools that argument *is* the action, so the preview and the
+ * stamp are the same word read twice rather than two sources of truth. Undefined where neither names
+ * an action the table knows: a call whose action can't be read keeps the generic row rather than
+ * claiming one, and a stamp outranks a label that would say more.
+ */
+function actionIn(call: ActionCall, vocabulary: ReadonlySet<string>) {
+  const named = call.action ?? call.label?.trim().toLowerCase()
+  return named !== undefined && vocabulary.has(named) ? named : undefined
+}
+
+/** The words a cron call's action earns, or undefined where the table doesn't know the action. */
+function cronKind(call: ActionCall) {
+  const action = actionIn(call, CRON_ACTIONS)
+  return action === undefined ? undefined : CRON[action]
+}
+
+/** The tools whose own preview is the action they took, so a live call can be stamped from it. */
+const PREVIEW_ACTIONS: Record<string, ReadonlySet<string>> = { [CRON_TOOL]: CRON_ACTIONS }
+
+/**
+ * The action a live call's preview names, for a tool whose preview is the action itself. The
+ * transcript's stamp stays the authority — the fold corrects this when the turn lands — but the row
+ * needn't say "Used a tool" while the call streams.
+ */
+export function actionOfPreview(tool: string, label?: string) {
+  const vocabulary = PREVIEW_ACTIONS[tool]
+  return vocabulary ? actionIn({ label }, vocabulary) : undefined
+}
+
 export function kindOf(tool: ToolEvent): Kind {
   if (tool.tool === "write_file") return CREATED
   if (tool.tool === "patch") return tool.created ? CREATED : EDITED
   if (tool.tool.startsWith("browser_")) return BROWSED
   if (TODO_TOOLS.has(tool.tool)) return taskCount(tool) === undefined ? CHECKED_PLAN : PLANNED
+  // A call whose row is the action it took: the stamp first, then a label that is one of the tool's
+  // own action words, so a row stored before the stamp still says what it did.
+  if (tool.tool === CRON_TOOL) return cronKind(tool) ?? USED
   // One delegation, three shapes: a spawn is the work it started, a control call says which action
   // it took, and anything else is an ordinary tool row — the same classifier the thread asks (ADR
   // 0053), so the words can't name a card where the thread drew a row, nor an action it didn't take.
@@ -122,6 +186,14 @@ export function kindOf(tool: ToolEvent): Kind {
 
 const plural = (count: number, one: string, many: string) =>
   count === 1 ? `${count} ${one}` : `${count} ${many}`
+
+/**
+ * The fixed noun a kind's row names when it has no label worth showing — "a cron job", whose label
+ * is the action word itself. Undefined where the kind counts its calls instead.
+ */
+export function nounOf(kind: Kind) {
+  return typeof kind.title === "string" ? kind.title : undefined
+}
 
 /** What the call ran on, for its row: "3 tasks" for a todo call, else its label. */
 export function todoTarget(tool: ToolEvent) {

@@ -60,6 +60,7 @@ import { appendThinking, closeRun, forgetRuns, noteRunThinking } from "@/lib/thi
 import { quietly } from "@/lib/report"
 import { canSteer, midReply } from "@/lib/steer"
 import { actionOfLabel, DELEGATE_TOOL } from "@/lib/spawn"
+import { actionOfPreview } from "@/lib/tools"
 import { randomId } from "@/lib/utils"
 import { knownLiveRun, readLiveRuns } from "@/lib/waiting"
 import { onWake } from "@/lib/wake"
@@ -366,8 +367,13 @@ function streamHandlers(turn: Turn): StreamHandlers {
         const toolCallId = event.toolCallId ?? `${event.tool}:${Date.now()}`
         // Hermes previews a delegation's control call as `list`, `steer <id>` or `stop <id>`, and a
         // spawn as its goal: stamped here, the thread can tell them apart before the transcript
-        // lands, which then corrects it from the arguments themselves (ADR 0053).
-        const action = event.tool === DELEGATE_TOOL ? actionOfLabel(event.label) : undefined
+        // lands, which then corrects it from the arguments themselves (ADR 0053). A call whose
+        // preview is the action it took — a cron call — is stamped the same way, so its row says what
+        // it did while it streams rather than waiting for the transcript to fold the action in.
+        const action =
+          event.tool === DELEGATE_TOOL
+            ? actionOfLabel(event.label)
+            : actionOfPreview(event.tool, event.label)
         draft.tools.push({
           toolCallId,
           tool: event.tool,

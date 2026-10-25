@@ -3,6 +3,7 @@ import {
   ArrowLeftIcon,
   BotIcon,
   ChevronRightIcon,
+  ClockIcon,
   EyeIcon,
   FilePlusIcon,
   GitPullRequestArrowIcon,
@@ -25,7 +26,15 @@ import { usePopupDrawer, usePopupForm } from "@/lib/popup-form"
 import { Spinner } from "@/components/ui/spinner"
 import type { ToolEvent } from "@/lib/db"
 import { formatDuration } from "@/lib/format"
-import { failureReason, kindOf, phrases, todoTarget, TODO_TOOLS, type KindId } from "@/lib/tools"
+import {
+  failureReason,
+  kindOf,
+  nounOf,
+  phrases,
+  todoTarget,
+  TODO_TOOLS,
+  type KindId,
+} from "@/lib/tools"
 
 function useElapsed(tool: ToolEvent) {
   const [now, setNow] = useState(() => Date.now())
@@ -47,6 +56,7 @@ const ICONS: Record<KindId, LucideIcon> = {
   browsed: GlobeIcon,
   plan: ListTodoIcon,
   pr: GitPullRequestArrowIcon,
+  cron: ClockIcon,
   subagent: BotIcon,
   listed: BotIcon,
   steered: BotIcon,
@@ -226,6 +236,13 @@ function ToolList({
                         {targetOf(tool) && (
                           <span className="text-muted-foreground">, {targetOf(tool)}</span>
                         )}
+                      </>
+                    ) : kind.id === "cron" ? (
+                      // A cron call's label is the action word itself, so the row's own words are all
+                      // it says: naming the label beside them would read "Created create".
+                      <>
+                        <span>{tool.status === "running" ? kind.doing : kind.verb}</span>{" "}
+                        <span className="text-muted-foreground">{nounOf(kind)}</span>
                       </>
                     ) : (
                       <>
