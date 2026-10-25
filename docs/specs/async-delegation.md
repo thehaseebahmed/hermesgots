@@ -1,14 +1,15 @@
 # Delegation that never blocks a question
 
-Status: grilled 2026-10-23, every decision settled and recorded in ADR 0038. The build order at the
+Status: grilled 2026-10-23, every decision settled and recorded in ADR 0038; the delivery's drawing
+has since changed per ADR 0052 — the thread draws nothing for a delivery row. The build order at the
 end is the tickets' shape when implementation starts.
 
 ## Goal
 
 A bot may ask its user anything while its subagents work. `delegate_task` returns a handle instead of
 parking the turn, so the question — or any approval — is raised and drawn the moment it exists, and
-the subagents carry on beside it. A finishing subagent's work re-enters its bot's thread as its own
-message and wakes the bot to read it.
+the subagents carry on beside it. A finishing subagent's delivery is bookkeeping the thread draws
+nothing for (ADR 0052), and it wakes the bot to read the work in its sub-thread.
 
 That is the whole feature. A turn with no delegation, and a thread with no subagent, change not at
 all.
@@ -31,10 +32,11 @@ all.
    e17f28e). Core already dispatches `delegate_task` in the background for a keyed `/v1/runs` turn
    and hands back a handle; the turn continues, and a `clarify` or approval in that same turn
    executes immediately. No prompt of any kind waits behind running work.
-2. **A subagent's result lands as its own message at the thread's bottom, in arrival order**,
-   attributed to the bot, tapping through to its sub-thread. Core writes the completion as a
-   transcript row (`display_kind: async_delegation_complete`); the app must draw that row as the
-   bot's message — today `history.ts` folds it into a *user* bubble, which is a bug this fixes.
+2. **A subagent's delivery is bookkeeping the thread draws nothing for** (ADR 0052). Core still
+   writes the completion as a transcript row (`display_kind: async_delegation_complete`); the app
+   draws nothing for it — no message, no turn, no bubble, neither the bot's message this spec first
+   decided nor the *user* bubble it fixed. The finding is read on the subagent's card and in its
+   sub-thread.
 3. **A finishing subagent wakes its bot.** The plugin watches the subagent sessions it already reads
    (they carry `parent_session_id` and `ended_at`) and, when one ends, posts a run on the parent
    session through the outbox — the loopback route AFK already posts runs with — carrying the
@@ -99,16 +101,18 @@ Cheapest tier that would fail for the reason the change can fail (ADR 0019):
   is posted once per ended subagent with a stable idempotency key and skipped for a marked one; no
   wake while a question or approval is pending; a stage does not advance while its run's subagents
   run; the stop fan-out names every live subagent of the run.
-- **Unit (app)** — `test-history.mjs`: a delivery row draws as the bot's message with its subagent
-  id, not a user bubble; a row before this change's rows still loads. `test-workspace.mjs` (or
-  wherever `sessionState`'s rule sits): working while a subagent runs with no live turn.
-- **Component** — an agent card whose turn has ended offers Stop and stops its subagent; a subagent
-  result message taps through to the sub-thread.
+- **Unit (app)** — `test-subagent-results.mjs` recognises the delivery row (the rule the fold skips
+  it on), and the component cases in `test-subagent-result.tsx` assert the rule as drawn: "a
+  delivery draws nothing at the thread's end", the two-deliveries fold, and "a chat from before
+  deliveries draws as it did". `test-session-work.mjs` (or wherever `sessionState`'s rule sits):
+  working while a subagent runs with no live turn.
+- **Component** — an agent card whose turn has ended offers Stop and stops its subagent; a finished
+  subagent's card opens its sub-thread in one tap.
 - **End to end** — `scripts/e2e/question-during-delegation.mjs`: the test host's bot delegates, the
   child still running, the bot asks — the question card replaces the composer *now*, not at the
-  child's end; the child finishes, its result lands as the bot's message at the thread's end, and
-  the wake turn streams. The argument for the tier is the composer-replacement timing and the
-  arrival-order landing across a live stream.
+  child's end; the child finishes, its delivery draws nothing of the thread while the wake turn
+  streams. The argument for the tier is the composer-replacement timing and the child's end crossing
+  a live stream.
 - A row and a verdict in `docs/e2e-flow-audit.md`; `scripts/test-e2e-registry.mjs` fails without one.
 
 ## Gates
@@ -120,7 +124,8 @@ root: `python3 -m unittest discover -s plugin/tests -t .`.
 ## Build order
 
 1. `feat(chat): draw a subagent's result as the bot's message` — `history.ts`, its unit test. Edge:
-   none. Lands first so a host already delegating asynchronously can never show a user bubble.
+   none. Lands first so a host already delegating asynchronously can never show a user bubble. ADR
+   0052 later superseded that ticket's drawing: the delivery now draws nothing.
 2. `feat(plugin): let delegations run beside the turn` — the override deleted, the rewritten
    delegation tests, `sync_delegation` unadvertised, README and AGENTS.md. Edge: 1.
 3. `feat(plugin): wake the bot when a subagent finishes` — the watcher, the outbox post, the
