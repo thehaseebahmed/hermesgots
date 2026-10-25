@@ -483,7 +483,9 @@ export function SessionItem({
   const { c: session, state, prTick, project } = row
   const removed = removedRepos(session, project)
   const draft = useDraft(session.id)
-  const wait = waiting ? reasonText(waiting) : undefined
+  // The line says why the row waits only while its claim is a wait: a run the host reports as
+  // working has moved past whatever a poll said before it started.
+  const wait = state === "waiting" && waiting ? reasonText(waiting) : undefined
   const detail = removed.length
     ? `${names.format(removed)} removed`
     : (wait ?? prLine(session) ?? session.worktree?.branch ?? draft)

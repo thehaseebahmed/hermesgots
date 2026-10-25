@@ -4,10 +4,14 @@
  *
  * `live` is what the plugin's `runs/live` reports of the session's own turn, `local` what this
  * device sees of it (exact here and invisible elsewhere), and `subagents` how many of the session's
- * subagents the host says still work. That last one is the whole point: a background delegation
- * outlives the turn that dispatched it, so a chat whose turn has ended is still working while a
- * subagent it started is, and every screen reads it off the poll it already makes rather than a read
- * per session. A question or an approval still comes first, since that is what wants the user.
+ * subagents the host says still work. The session's own run is read first, since it is the primary
+ * fact: while the run runs, the session is working, and no wait mark a moment behind it — a plan the
+ * host hasn't recorded as answered, an approval the run has moved past — reads it as waiting.
+ *
+ * The subagents are the other half of what is at work: a background delegation outlives the turn
+ * that dispatched it, so a chat whose turn has ended is still working while a subagent it started
+ * is, and every screen reads it off the poll it already makes rather than a read per session. A
+ * question or an approval still comes first over those, since that is what wants the user.
  *
  * One facts object and one ladder: a thread's pill is this answer with no session of its own to be
  * resolved or discarded, so the two can't drift.
@@ -61,17 +65,31 @@ export interface ThreadFacts {
 const working = (subagents?: number) => (subagents ?? 0) > 0
 
 /**
- * Where a session stands. A discarded or resolved one says so first, then what wants the user, then
- * anything at work — its own turn, or the subagents it left running.
+ * Where a session stands. The session's own run is the first rung: while it runs the session is
+ * working, and nothing settled or waiting behind it is read. Then a discarded or resolved one says
+ * so, then what wants the user, then the subagents its turn left running (a reply streaming here has
+ * already been read at the top), then nothing at all.
  */
 export function sessionState(facts: SessionFacts): SessionState {
+  if (runInFlight(facts.live, facts.local)) return "working"
   if (facts.discardedAt) return "discarded"
   if (facts.resolvedAt) return "resolved"
   if (facts.local?.waiting || facts.live === "waiting_for_approval" || facts.planPending)
     return "waiting"
-  if (facts.local?.streaming || facts.live === "running" || working(facts.subagents))
-    return "working"
+  if (working(facts.subagents)) return "working"
   return "idle"
+}
+
+/**
+ * Whether the session's own run is in flight — the primary fact every other claim is read against.
+ * The host's status answers first: `running` is the run running, so a wait mark this device or an
+ * earlier poll still holds never outranks it, and `waiting_for_approval` is the run blocked on the
+ * user rather than running. With no answer from the host, this device's own newest reply decides:
+ * still streaming is the run running, unless an approval or a question in it waits.
+ */
+function runInFlight(live?: LiveTurn, local?: LocalTurn): boolean {
+  if (live) return live === "running"
+  return Boolean(local?.streaming) && !local?.waiting
 }
 
 /** The slice of a session `sessionGroup` reads: its closure and wait marks, and its pull requests. */
@@ -87,10 +105,13 @@ export interface SessionClaim {
 }
 
 /**
- * Where a Code row's session stands, with its pull requests claimed in: the highest claim wins.
- * Closed first, then anything waiting on the user — a question, an approval, a plan, a stall, or a
- * live pull request's checks running or failed, which wait on the watcher rather than the agent.
- * A live pull request with nothing wrong still waits for its review and merge, as it always has.
+ * Where a Code row's session stands, with its pull requests claimed in: the highest claim wins, and
+ * a session something runs for claims the row outright — Working first, before a closed mark and
+ * before every wait, so neither a wait mark a run has moved past nor a live pull request's checks
+ * running or failed (which wait on the watcher rather than the agent) move it to Waiting for You
+ * while it works. Among sessions nothing runs for: closed first, then anything waiting on the user —
+ * a question, an approval, a plan or a stall — then a live pull request's checks, then a live pull
+ * request with nothing wrong still waiting for its review and merge, as it always has, then idle.
  */
 export function sessionGroup(
   conversation: SessionPrs,
@@ -99,12 +120,12 @@ export function sessionGroup(
   subagents?: number,
 ): SessionClaim {
   const state = sessionState({ ...conversation, live, local, subagents })
+  if (state === "working") return { state, prTick: false }
   if (state === "resolved" || state === "discarded") return { state, prTick: false }
   // An answer to ask outranks every pull request: the alert glyph is the question, not the arrow.
   if (state === "waiting") return { state, prTick: false }
   const livePrs = (conversation.prs ?? []).filter(prIsLive)
   if (livePrs.some(prChecksWait)) return { state: "waiting", prTick: true }
-  if (state === "working") return { state: "working", prTick: false }
   if (livePrs.length) return { state: "waiting", prTick: true }
   return { state: "idle", prTick: false }
 }

@@ -49,7 +49,7 @@ A derived fact worked out in the app from what a bot's host holds. Gots doesn't 
 _Avoid_: client-side computation
 
 **Session state**:
-What a project session is doing — idle, working, waiting on the user, or closed by the user as resolved or discarded. Waiting is the user's move: an answer, an approval, a plan review, a stall, or a live pull request's checks to watch. A session whose subagents are still at work is working, whether or not a turn is live. Composed from the host's run status, its subagents and this device's own marks, not derived from one source.
+What a project session is doing — idle, working, waiting on the user, or closed by the user as resolved or discarded. A run in flight is read first: while the session's own run runs, it is working, and no wait mark from a moment before it starts counts (it is what puts the row in the Code list's Working). Waiting is the user's move: an answer, an approval, a plan review, a stall, or a live pull request's checks to watch. A session whose subagents are still at work is working, whether or not a turn is live. Composed from the host's run status, its subagents and this device's own marks, not derived from one source.
 _Avoid_: status, state machine
 
 **Last activity**:

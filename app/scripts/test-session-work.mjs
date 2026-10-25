@@ -2,7 +2,9 @@
  * Where a session stands, as every screen reads it: a chat whose turn has ended is still working
  * while a subagent it dispatched is, which is why the app draws it from the poll it already makes
  * (`runs/live`'s `subagents`) rather than from a read per session — and a question or an approval
- * still comes first, on the thread's pill as in a project session's row.
+ * still comes first, on the thread's pill as in a project session's row. For the Code list the
+ * ladder starts one rung higher: a session its own run is running claims Working outright, so no
+ * wait mark and no pull request's checks reach Waiting for You while it works (ADR 0053).
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -15,6 +17,7 @@ import {
   sessionState,
   threadState,
 } from "../src/lib/session-work.ts"
+import { codeGroupOf } from "../src/lib/item-groups.ts"
 import { pr } from "./fixtures/pr.ts"
 
 const session = (facts = {}) => ({
@@ -45,9 +48,14 @@ test("a question or an approval outranks the subagents working beside it", () =>
   assert.equal(sessionState(session({ planPending: true, subagents: 1 })), "waiting")
 })
 
-test("a resolved or discarded session reads as it did", () => {
-  assert.equal(sessionState(session({ resolvedAt: 5, live: "running", subagents: 2 })), "resolved")
+test("a resolved or discarded session reads as it did, unless something of it still runs", () => {
+  assert.equal(sessionState(session({ resolvedAt: 5, subagents: 2 })), "resolved")
   assert.equal(sessionState(session({ discardedAt: 5, subagents: 2 })), "discarded")
+  assert.equal(
+    sessionState(session({ resolvedAt: 5, live: "running" })),
+    "working",
+    "a run in flight outranks the closed marks too: Closed holds sessions nothing runs for",
+  )
 })
 
 test("a thread's pill reads working while its subagents run", () => {
@@ -75,14 +83,12 @@ test("a pull request's checks running or failed wait on the watcher, not the age
     state: "waiting",
     prTick: true,
   })
-  assert.deepEqual(sessionGroup(session({ prs: [pr("open", "pending")] }), "running"), {
+  assert.deepEqual(sessionGroup(session({ prs: [pr("draft", "pending")] })), {
     state: "waiting",
     prTick: true,
   })
-  assert.deepEqual(sessionGroup(session({ prs: [pr("draft", "pending")] }), undefined, undefined, 2), {
-    state: "waiting",
-    prTick: true,
-  })
+  // Beside a run in flight or subagents still working they wait on the watcher beside the agent's
+  // work rather than instead of it: that half is the run-in-flight claim, tested below.
 })
 
 test("checks that have settled stop waiting — unless the pull request still does", () => {
@@ -102,7 +108,7 @@ test("checks that have settled stop waiting — unless the pull request still do
 
 test("an open question outranks the pull request watching beside it", () => {
   const question = session({ prs: [pr("open", "pending")] })
-  assert.deepEqual(sessionGroup(question, "running", { waiting: true }, 1), {
+  assert.deepEqual(sessionGroup(question, "waiting_for_approval", { waiting: true }, 1), {
     state: "waiting",
     prTick: false,
   })
@@ -140,6 +146,60 @@ test("a session nothing runs and no pull request opens is idle", () => {
     state: "idle",
     prTick: false,
   })
+})
+
+
+// The Code list's membership, as the screen wires it: the claim read as the group it lands in.
+const group = (...claim) => codeGroupOf(sessionGroup(...claim).state)
+
+test("a session with a run in flight is Working, so it never reaches Waiting for You", () => {
+  assert.equal(
+    group(session({ prs: [pr("open", "pending")] }), "running"),
+    "working",
+    "a pull request's checks wait on the watcher, not on a session its agent runs",
+  )
+  assert.equal(
+    group(session({ prs: [pr("open", "failure")] }), "running"),
+    "working",
+    "the same for checks that failed while the agent is still at work",
+  )
+  assert.equal(
+    group(session({ planPending: true }), "running"),
+    "working",
+    "a plan the host hasn't yet recorded the answer to",
+  )
+  assert.equal(
+    group(session(), "running", { waiting: true }),
+    "working",
+    "a wait mark from a poll the run has since moved past",
+  )
+  assert.equal(
+    group(session({ prs: [pr("draft", "pending")] }), undefined, undefined, 2),
+    "working",
+    "subagents the host still runs are the session working",
+  )
+  assert.equal(
+    group(session({ resolvedAt: 5 }), "running"),
+    "working",
+    "a run in flight is the row's primary claim, closed included",
+  )
+})
+
+test("a session nothing runs for still waits in Waiting for You, or sits idle or closed", () => {
+  assert.equal(group(session(), "waiting_for_approval"), "waiting", "the run is blocked on the user")
+  assert.equal(
+    group(session(), undefined, { waiting: true }),
+    "waiting",
+    "the host is silent, and this device sees the approval",
+  )
+  assert.equal(group(session({ planPending: true })), "waiting", "a plan waits with nothing running")
+  assert.equal(
+    group(session({ prs: [pr("open", "pending")] })),
+    "waiting",
+    "checks wait on a session at rest",
+  )
+  assert.equal(group(session()), "idle", "nothing at all")
+  assert.equal(group(session({ resolvedAt: 5 })), "closed", "settled and nothing running")
 })
 
 
