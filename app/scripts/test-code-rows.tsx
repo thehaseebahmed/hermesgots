@@ -15,6 +15,7 @@ import type { Conversation } from "@/lib/db"
 import { db } from "@/lib/db"
 import { SessionItem } from "@/routes/code"
 import { sessionGroup, type LiveTurn, type LocalTurn } from "@/lib/session-work"
+import type { WaitingReason } from "@/lib/waiting"
 import { mount, seedSettings } from "./component-kit.tsx"
 import { pr } from "./fixtures/pr.ts"
 
@@ -36,12 +37,15 @@ async function drawRow(
     live,
     local,
     subagents,
+    waiting,
     mark,
     body,
   }: {
     live?: LiveTurn
     local?: LocalTurn
     subagents?: number
+    /** Why the server says the session waits on the user, if it does. */
+    waiting?: WaitingReason
     mark?: number
     body: () => Promise<void>
   },
@@ -56,6 +60,7 @@ async function drawRow(
         row={{ c, state: claim.state, prTick: claim.prTick, key: c.id }}
         showProject={false}
         now={1_000}
+        waiting={waiting}
         mark={mark}
       />
     </MemoryRouter>,
@@ -144,6 +149,31 @@ test("the glyph says why: alert, pull request arrow, spinner, code, check, archi
       },
     })
   }
+})
+
+test("the second line says why the row waits only while the row waits", async () => {
+  const plan: WaitingReason = { kind: "plan" }
+  await drawRow(conversation("wait-plan", { planPending: true }), {
+    waiting: plan,
+    body: async () => {
+      assert.match(
+        document.body.textContent ?? "",
+        /Plan ready for review/,
+        "nothing runs, so the plan is what waits",
+      )
+    },
+  })
+  await drawRow(conversation("runs-plan", { planPending: true }), {
+    live: "running",
+    waiting: plan,
+    body: async () => {
+      assert.doesNotMatch(
+        document.body.textContent ?? "",
+        /Plan ready for review/,
+        "the run the host reports has moved past the plan a poll still carries",
+      )
+    },
+  })
 })
 
 test("a session this device hasn't read wears the dot, and a read mark clears it", async () => {

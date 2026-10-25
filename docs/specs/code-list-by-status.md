@@ -6,6 +6,14 @@ implementation starts. #530 is blocked by the gate issue #537 that this docs pul
 closes — work starts on that merge. The spec carries `ready-for-agent` and the tickets stay bare, so
 the agent claims the spec and works the graph in order.
 
+**Revised 2026-10-25 — the primary claim inverts.** ADR 0053 supersedes decision 2's ordering: a run
+in flight claims the row, so **Working** holds every session something runs for, and **Waiting for
+You**, **Idle** and **Closed** hold only sessions nothing runs for. The waits still win among
+sessions nothing runs for — a question, an approval, a plan review, a host's stall, a pull request's
+checks running or failing — and an approval or a question still reads as a wait while the run is
+blocked on it, since `waiting_for_approval` is the run not running. Everything else this spec
+settled stands.
+
 ## Goal
 
 The Code list arranges itself by session state instead of by when a session was last touched, so the
