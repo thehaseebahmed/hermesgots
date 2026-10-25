@@ -2,7 +2,9 @@
 
 Status: grilled 2026-10-25, every decision settled and recorded in ADR 0052. Published as #581 with
 tickets #582, #584, #585, #586, #587, #588, #589, #590 and #591; the build order at the end is the
-tickets' shape when implementation starts.
+tickets' shape when implementation starts. #581 is blocked by the gate issue #594 that this docs
+pull request (#593) closes — work starts on that merge. The spec carries `ready-for-agent` and the
+tickets stay bare, so the agent claims the spec and works the graph in order.
 
 ## Goal
 
