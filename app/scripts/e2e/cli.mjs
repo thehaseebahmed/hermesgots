@@ -171,7 +171,7 @@ export const FLOWS = {
   mcps: {
     script: "e2e/mcps.mjs",
     about:
-      "A bot's MCP servers are a tab of its settings, with Add a server on top, its own servers and its plugin's under headings, each row a name over its health, at phone and tablet widths",
+      "A bot's MCP servers are a page of its settings, opened from its list's MCP row, with a `+` in the page's header, its own servers and its plugin's under headings, each row a name over its health, at phone and tablet widths",
   },
   afk: {
     script: "e2e/afk.mjs",
@@ -226,7 +226,7 @@ export const FLOWS = {
   "mcps-gate": {
     script: "e2e/mcps-gate.mjs",
     about:
-      "A bot whose plugin answers without `mcps` has no MCP tab, its tab's URL returns to the bot, and the controls each advertises apart are offered apart",
+      "A bot whose plugin answers without `mcps` has no MCP page, its page's URL returns to the bot, and the controls each advertises apart are offered apart",
   },
   "mcps-catalogue": {
     script: "e2e/mcps-catalogue.mjs",
@@ -261,7 +261,7 @@ export const FLOWS = {
   "skills-list": {
     script: "e2e/skills-list.mjs",
     about:
-      "A bot's Skills tab: the editor's own tab strip holding it, both sections under heading boxes with Your skills above From plugins, every category title with a box of its own, and each row's name drawn inside the row's box, at phone and tablet widths, light and dark",
+      "A bot's Skills page: reached from its settings list's own Skills row, both sections under heading boxes with Your skills above From plugins, every category titled by the first row of its own card over its N of M on line, and each row's name drawn inside the row's box, at phone and tablet widths, light and dark",
   },
   "skills-sheet": {
     script: "e2e/skills-sheet.mjs",

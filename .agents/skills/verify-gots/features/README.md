@@ -68,8 +68,8 @@ commands, and observable proof.
   keeps — Main beside the thread last opened for that bot, or the line that says it has none.
 - [Approvals and questions](./approvals.md) covers what waits on the user: approvals in the sidebar
   and Code, allowing them, missed ones, and questions answered across reloads.
-- [MCP servers](./mcp-servers.md) covers a Bot's MCP tab: rows and health, gating, adding from the
-  Catalogue or by hand, one server's Config and Tools, removal and Server access.
+- [MCP servers](./mcp-servers.md) covers a Bot's MCP page: rows and health, gating, adding from the
+  header's `+` — the Catalogue or by hand — one server's Config and Tools, removal and Server access.
 - [AFK](./afk.md) covers a project working its own tasks: the frontier, the switch and its reasons,
   the skill pickers and Prompt, claiming, the AFK session and a stalled one.
 - [Research](./research.md) covers a research mission from question to guide: the brief, the Scope
