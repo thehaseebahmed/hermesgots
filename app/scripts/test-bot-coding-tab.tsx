@@ -1,8 +1,9 @@
 /**
- * The bot editor's Coding tab, over a seeded device database and a faked HTTP boundary: the tab only
- * where the host advertises `afk_picks` (and an address into it landing back on General where it
- * doesn't), the bot's pick budget read from its own bot-level route, the stepper writing one number
- * at a time between one and ten, a write the host refuses leaving the budget the tab had, and a host
+ * The bot editor's Coding page, over a seeded device database and a faked HTTP boundary: the page
+ * only where the host advertises `afk_picks` (and an address into it landing back on General where it
+ * doesn't), its Pick budget under an Away From Keyboard section of its own and saying what a pick
+ * counts, the bot's pick budget read from its own bot-level route, the stepper writing one number at
+ * a time between one and ten, a write the host refuses leaving the budget the page had, and a host
  * holding none reading as the default five.
  */
 import assert from "node:assert/strict"
@@ -59,6 +60,13 @@ const tabNames = () => findAll("[data-bot-page]").map(pageTitle)
 const codingTab = () => find('[data-bot-page="coding"]')
 const budget = () => find("[data-pick-budget]")
 const shown = () => budget()?.textContent
+/** The two headings the page wears, in the order it draws them. */
+const headings = () => findAll("[data-bot-coding] h2").map((heading) => heading.textContent)
+/** The line under Pick budget saying what a pick counts. */
+const budgetSubtitle = () =>
+  find('[data-bot-coding] [data-slot="field-description"]')?.textContent?.trim() ?? null
+/** The field the budget's label, subtitle and stepper all sit in. */
+const budgetField = () => find('[data-bot-coding] [data-slot="field"]')
 const step = (name: "Decrease pick budget" | "Increase pick budget") =>
   findAll("button").find((button) => button.getAttribute("aria-label") === name) ?? null
 const botWrites = (calls: Call[]) =>
@@ -88,6 +96,37 @@ test("a host that advertises afk_picks has a Coding tab, holding the bot's pick 
     assert.equal(here(), "/settings/bots/bot-1/coding", "the address is the tab's own")
     assert.equal(shown(), "3", "the budget the bot's own route answers")
     assert.equal(botReads(calls).length, 1, "read once from the bot-level route")
+  })
+})
+
+test("the Coding page holds Pick budget under Away From Keyboard, saying what a pick counts", async () => {
+  await seed("coding-sections", ["afk", "afk_picks"], { pickBudget: 4 })
+  await mount(editor("/settings/bots/bot-1/coding"), async () => {
+    assert.deepEqual(
+      headings(),
+      ["Gots Specific Settings", "Away From Keyboard"],
+      "the ownership group, then the section of its own under it",
+    )
+    assert.match(
+      find("[data-bot-coding]")?.textContent ?? "",
+      /Gots Specific Settings\s*Away From Keyboard\s*Pick budget\s*How many tasks one bot's AFK may hold at once across all of its projects/,
+      "both headings before the setting, which leads with its subtitle",
+    )
+    assert.equal(find("#pick-budget-label")?.textContent, "Pick budget", "the setting's title")
+    assert.equal(
+      budgetSubtitle(),
+      "How many tasks one bot's AFK may hold at once across all of its projects",
+      "the subtitle, verbatim",
+    )
+    const field = budgetField()
+    assert.ok(field, "the budget has its own field")
+    assert.equal(field.contains(budget()), true, "the stepper sits in that field")
+    assert.equal(
+      field.contains(find("#pick-budget-label")),
+      true,
+      "the subtitle hangs under the title, in the same field",
+    )
+    assert.equal(shown(), "4", "and the stepper still reads the host's number")
   })
 })
 

@@ -1,9 +1,9 @@
 /**
  * The AFK pop-up's pick count, over a seeded device database and a faked HTTP boundary: every task
  * AFK holds as a Working row of its own — its number, title and stage — over the count of them
- * against the project's pick count; the count set on the host from the row under the switch, one
- * write of its own, with a refused one leaving the count it had; and a plugin from before the count
- * drawing exactly the sheet it always drew.
+ * against the project's pick count, the line under its heading saying what a pick counts; the count
+ * set on the host from the row under the switch, one write of its own, with a refused one leaving
+ * the count it had; and a plugin from before the count drawing exactly the sheet it always drew.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -116,6 +116,31 @@ test("the pick count is one write, and the count row reads the host's answer", a
       find("[data-holds]")?.textContent,
       "2 of 3 held",
       "and the count row counts against it",
+    )
+  })
+})
+
+test("the pick count says what it counts, over the control it sets", async () => {
+  globalThis.fetch = afkHost({ features: FEATURES, holds: THREE, pickCount: 3 })
+    .fetch as unknown as typeof fetch
+  await picksOn(async () => {
+    const block = find("[data-afk-picks]")
+    assert.ok(block, "the pick count is drawn")
+    const line = block.querySelector("p")
+    assert.ok(line, "with a line saying what it counts")
+    assert.equal(
+      line.textContent?.trim(),
+      "How many tasks this project's AFK holds at once",
+      "the line under the heading, verbatim",
+    )
+    const group = find('[data-afk-picks] [role="radiogroup"]')
+    assert.ok(group, "the control it sets")
+    assert.equal(group.getAttribute("aria-label"), "Pick count", "the control keeps its name")
+    // Node.DOCUMENT_POSITION_FOLLOWING: the control comes after the line, not over it.
+    assert.equal(
+      (line.compareDocumentPosition(group) & 4) === 4,
+      true,
+      "the line sits above the pills",
     )
   })
 })
