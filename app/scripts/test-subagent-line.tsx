@@ -159,7 +159,7 @@ test("the sheet lists the running subagents first, newest first, then the finish
     assert.deepEqual(cards("running"), ["newer-running", "older-running"], "newest at work first")
     assert.deepEqual(cards("finished"), ["old-done"])
     assert.ok(
-      document.querySelector('[data-group="running"]')?.textContent?.includes("Working for"),
+      document.querySelector('[data-group="running"]')?.textContent?.includes("Running for"),
       "a running card says how long it has been working",
     )
     const stops = findAll("button").filter(
@@ -212,6 +212,15 @@ test("a card in the sheet opens its sub-thread above the sheet", async () => {
     await click(card as HTMLElement)
     await settle()
     assert.match(text(), /Sub-Agent: Builder · CP2/, "its sub-thread drew over the sheet")
+    const meta = [...document.querySelectorAll("p")].find((line) =>
+      line.textContent?.includes("Running for"),
+    )
+    assert.ok(meta, "and its header says how long it worked")
+    assert.match(meta.textContent ?? "", /· model/, "naming the model the card leaves out")
+    const model = [...meta.querySelectorAll("span")].find(
+      (span) => span.textContent === " · model",
+    )
+    assert.doesNotMatch(model!.className, /hidden/, "at every width, not only a tablet's")
   } finally {
     await sheet.close()
   }

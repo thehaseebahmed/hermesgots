@@ -115,7 +115,7 @@ test("a working subagent offers a stop that stops it, beside its own two lines",
   const calls = host()
   await card(agent("running"), tool("completed"), async () => {
     assert.match(text(), /Sub-Agent: Reviewer · CP3/, "the title")
-    assert.match(text(), /Working for 3 min/, "and how it is doing")
+    assert.match(text(), /Running for 3m/, "and how it is doing")
     assert.ok(stopButton(), "the card offers Stop while its agent works")
     await click(stopButton()!)
     const posted = stops(calls)
@@ -132,7 +132,7 @@ test("the card leaves its goal and commands to the sub-thread", async () => {
   await card(agent("running"), tool("completed"), async () => {
     const shown = text()
     assert.match(shown, /Sub-Agent: Reviewer · CP3/)
-    assert.match(shown, /Working for 3 min · 2 tool calls/, "the line counts the work")
+    assert.match(shown, /Running for 3m · 2 tool calls/, "the line counts the work")
     assert.doesNotMatch(shown, /read the parser end to end/, "not the goal as well")
   })
 })
@@ -154,7 +154,7 @@ test("a host row that has finished drops a refusal this device recorded", async 
     assert.match(text(), new RegExp(DECLINED), "the refusal, while the host still reports it running")
     await shown.show(tree(agent("stopped"), tool("completed")))
     assert.doesNotMatch(text(), new RegExp(DECLINED), "the host's own row outranks a stale answer")
-    assert.match(text(), /Stopped after 3 min/, "and the card reads what the host reports")
+    assert.match(text(), /Stopped after 3m/, "and the card reads what the host reports")
   } finally {
     await shown.close()
   }
@@ -186,4 +186,26 @@ test("a host without the stop route shows no Stop", async () => {
     },
     { target: legacyHost },
   )
+})
+
+test("the line names the model, which a card keeps for tablet and up", async () => {
+  host()
+  await card(agent("running"), tool("completed"), async () => {
+    const card = document.querySelector('[data-slot="agent-card"]')
+    assert.ok(card, "the card drew")
+    assert.match(card.textContent ?? "", /Running for 3m · 2 tool calls/, "how long, and what it did")
+    const model = [...card.querySelectorAll("span")].find(
+      (span) => span.textContent === " · model",
+    )
+    assert.ok(model, "and the model it ran on, without its vendor")
+    assert.match(model.className, /hidden md:inline/, "which a phone's card leaves off")
+  })
+})
+
+test("an hour of work reads in hours", async () => {
+  host()
+  const long = { ...agent("running"), startedAt: Math.round(Date.now() / 1000) - 90 * 60 }
+  await card(long, tool("completed"), async () => {
+    assert.match(text(), /Running for 1h 30m/, "ninety minutes, not ninety m's worth of words")
+  })
 })

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react"
-import { BotIcon, CheckIcon, ChevronRightIcon, PauseIcon, SquareIcon } from "lucide-react"
+import { BotIcon, CheckIcon, PauseIcon, SquareIcon } from "lucide-react"
 
 import { AGENT_WORK_MS } from "@/lib/freshness"
 import { Banner } from "@/components/banner"
@@ -25,6 +25,7 @@ import type { AgentStopRow, DelegatedAgent, HermesConfig } from "@/lib/hermes"
 import { toMessages } from "@/lib/history"
 import { useDraws } from "@/lib/openui-draws"
 import { connectionKey } from "@/lib/connection"
+import { shortModel } from "@/lib/model-info"
 import { cn } from "@/lib/utils"
 
 const NO_ROWS: Message[] = []
@@ -90,10 +91,13 @@ export function SubagentCard({
       line={
         <>
           <StatusIcon agent={shown} />
-          <span className="min-w-0 truncate">{note ?? agentLine(shown)}</span>
+          {note ? (
+            <span className="min-w-0 truncate">{note}</span>
+          ) : (
+            <AgentMeta agent={shown} model="tablet-up" />
+          )}
         </>
       }
-      chevron={Boolean(open)}
     />
   )
   return (
@@ -128,15 +132,38 @@ export function SubagentCard({
   )
 }
 
+/**
+ * How long an agent has worked and what it ran on, as the line under its title: the card's second
+ * line and the sub-thread's header read it, so a sheet's row and the card it opens say the same
+ * thing. Its model is the long part of it, so a card keeps that for tablet and up; the pop-up has
+ * the room for it at every width.
+ */
+function AgentMeta({
+  agent,
+  model = "every-width",
+}: {
+  agent: DelegatedAgent
+  model?: "every-width" | "tablet-up"
+}) {
+  return (
+    <>
+      <span className="shrink-0">{agentLine(agent)}</span>
+      {agent.model && (
+        <span className={cn("min-w-0 truncate", model === "tablet-up" && "hidden md:inline")}>
+          {` · ${shortModel(agent.model)}`}
+        </span>
+      )}
+    </>
+  )
+}
+
 function CardBody({
   title,
   line,
-  chevron = false,
   className,
 }: {
   title: ReactNode
   line?: ReactNode
-  chevron?: boolean
   className?: string
 }) {
   return (
@@ -144,7 +171,6 @@ function CardBody({
       <span className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
         <BotIcon className="size-4 shrink-0" />
         <span className="min-w-0 flex-1 truncate">{title}</span>
-        {chevron && <ChevronRightIcon className="size-4 shrink-0" />}
       </span>
       {line && (
         <span className="flex items-center gap-1.5 text-xs text-muted-foreground tabular-nums">
@@ -275,9 +301,7 @@ function AgentView({ agent, server }: { agent: DelegatedAgent; server: HermesCon
         <PopupTitle>{agentTitle(agent.goal)}</PopupTitle>
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <StatusIcon agent={agent} />
-          <span className="truncate">
-            {[agentLine(agent), agent.model].filter(Boolean).join(" · ")}
-          </span>
+          <AgentMeta agent={agent} />
         </p>
       </PopupHeader>
       {failed && !loaded && (

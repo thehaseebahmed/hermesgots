@@ -289,7 +289,15 @@ export function agentName(goal: string) {
   return cp ? `${role} · ${cp}` : role
 }
 
-/** "Done after 12 min · 39 tool calls". */
+/** A run's length in the shortest words that keep it whole: "3m", "1h 30m". */
+function worked(minutes: number) {
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  return rest ? `${hours}h ${rest}m` : `${hours}h`
+}
+
+/** "Done after 12m · 39 tool calls". */
 export function agentLine(agent: DelegatedAgent) {
   const calls = agent.toolCalls
     ? `${agent.toolCalls} tool call${agent.toolCalls === 1 ? "" : "s"}`
@@ -297,10 +305,10 @@ export function agentLine(agent: DelegatedAgent) {
   const minutes =
     agent.startedAt &&
     Math.max(1, Math.round(((agent.endedAt ?? Date.now() / 1000) - agent.startedAt) / 60))
-  const status = { running: "Working for", done: "Done after", stopped: "Stopped after" }[
+  const status = { running: "Running for", done: "Done after", stopped: "Stopped after" }[
     agent.status
   ]
-  return [minutes ? `${status} ${minutes} min` : status.split(" ")[0], calls]
+  return [minutes ? `${status} ${worked(minutes)}` : status.split(" ")[0], calls]
     .filter(Boolean)
     .join(" · ")
 }
