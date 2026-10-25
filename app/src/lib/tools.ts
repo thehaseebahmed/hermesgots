@@ -1,9 +1,22 @@
 /** What a tool call did, in words, and what its JSON result says, whole or cut short. */
 
 import type { ToolEvent } from "@/lib/db"
+// Relative with its extension, so the unit tests that load this rule through `subagent-results.ts`
+// run it as it stands.
+import { DELEGATE_TOOL, spawnedAgent } from "./spawn.ts"
 
 export type KindId =
-  "ran" | "read" | "edited" | "created" | "code" | "web" | "browsed" | "plan" | "pr" | "used"
+  | "ran"
+  | "read"
+  | "edited"
+  | "created"
+  | "code"
+  | "web"
+  | "browsed"
+  | "plan"
+  | "pr"
+  | "subagent"
+  | "used"
 
 export interface Kind {
   id: KindId
@@ -41,6 +54,17 @@ const USED: Kind = {
   doing: "Using",
   title: { one: "a tool", many: "tools" },
 }
+/**
+ * A `delegate_task` call that set a subagent to work. It draws as the subagent's own card rather
+ * than a row, so these words are read by the line saying what the turn is doing — and they must not
+ * borrow a tool row's, which a control call keeps until its own words arrive.
+ */
+const DELEGATED: Kind = {
+  id: "subagent",
+  verb: "Delegated",
+  doing: "Delegating",
+  title: "to a sub-agent",
+}
 
 const KINDS: Record<string, Kind> = {
   terminal: RAN,
@@ -70,6 +94,10 @@ export function kindOf(tool: ToolEvent): Kind {
   if (tool.tool === "patch") return tool.created ? CREATED : EDITED
   if (tool.tool.startsWith("browser_")) return BROWSED
   if (TODO_TOOLS.has(tool.tool)) return taskCount(tool) === undefined ? CHECKED_PLAN : PLANNED
+  // One delegation, two shapes: a spawn is the work it started, and a control call is an ordinary
+  // tool row — the same classifier the thread asks (ADR 0053), so the words can't name a card where
+  // the thread drew a row.
+  if (tool.tool === DELEGATE_TOOL) return spawnedAgent(tool) ? DELEGATED : USED
   return KINDS[tool.tool] ?? USED
 }
 

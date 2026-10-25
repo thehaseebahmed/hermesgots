@@ -22,7 +22,8 @@ import { usePoll } from "@/lib/poll"
  * its own; the Gots plugin lists them, and their transcripts come from Hermes like any chat's.
  */
 
-export const DELEGATE_TOOL = "delegate_task"
+/** The delegation tool's name, kept with the rule that reads a call of it (ADR 0053). */
+export { DELEGATE_TOOL } from "@/lib/spawn"
 
 const lists = new Map<string, DelegatedAgent[]>()
 /** What this device was answered about a stop, by connection and agent: the host's own word, kept

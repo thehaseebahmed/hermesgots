@@ -25,6 +25,7 @@ import { splitAttachments } from "@/lib/attachment-text"
 import { appendThinking, carrySpans } from "@/lib/thinking"
 import { readLiveRuns } from "@/lib/waiting"
 import { failureReason, TODO_TOOLS } from "@/lib/tools"
+import { actionOf, controlWords, DELEGATE_TOOL } from "@/lib/spawn"
 import { isSubagentResult } from "@/lib/subagent-results.ts"
 import { isWakePrompt } from "@/lib/wake-prompt.ts"
 
@@ -92,6 +93,13 @@ function argsLabel(name: string, args: unknown) {
       )
       .filter(Boolean)
     if (asked.length) return asked[0]
+  }
+  // A delegation's control call names no goal, and its arguments as JSON are not words. Hermes's
+  // preview gives it `list`, `steer <id>` or `stop <id>`, derived here the same way so the row reads
+  // while it streams exactly as it does after a reload (`_delegate_action_preview` in display.py).
+  if (name === DELEGATE_TOOL) {
+    const control = controlWords(record)
+    if (control) return control
   }
   const key = PRIMARY_ARGS[name] ?? FALLBACK_ARGS.find((k) => k in record)
   let value = key ? record[key] : undefined
@@ -171,6 +179,9 @@ function toolCalls(row: SessionMessage) {
           id: call?.id ?? `${row.id}-${i}`,
           name,
           label: clip(label) || name,
+          // What the call's arguments said it did, stamped where they are in hand: the one spawn
+          // proof a render can read, and the word a control call's row is phrased by (ADR 0053).
+          action: actionOf(args),
           stats: writeStats(name, args),
         }
       })
@@ -353,6 +364,7 @@ export function toMessages(
         status: "running",
         startedAt: createdAt,
         contentOffset: reply.content.length,
+        ...(call.action ? { action: call.action } : {}),
         ...call.stats,
         ...(call.stats ? { created: true } : {}),
       }
@@ -432,8 +444,9 @@ function withTranscriptToolOffsets(local: Message, transcript: Message) {
 }
 
 /**
- * What streamed calls only learn from the transcript: their edits' size, and the whole result
- * where the stream sent a cut preview. Matched by tool and label, in order.
+ * What streamed calls only learn from the transcript: their edits' size, the whole result where the
+ * stream sent a cut preview, and the action their arguments named — the authority on what the call
+ * did, where the live stream could only read its preview. Matched by tool and label, in order.
  */
 function withTranscriptDetails(local: ToolEvent[], fromHermes: ToolEvent[]) {
   const spare = [...fromHermes]
@@ -448,7 +461,9 @@ function withTranscriptDetails(local: ToolEvent[], fromHermes: ToolEvent[]) {
     const needsStats = tool.added === undefined
     // A question's result is written here when it's answered, whole.
     const needsResult = isPreview(tool) && tool.tool !== "clarify"
-    if (!needsStats && !needsResult) return tool
+    // The transcript read the arguments; a preview that read like a control call was a guess.
+    const needsAction = tool.action !== found.action
+    if (!needsStats && !needsResult && !needsAction) return tool
     const next = { ...tool }
     if (needsStats && found.added !== undefined)
       Object.assign(next, { added: found.added, removed: found.removed, created: found.created })
@@ -456,7 +471,12 @@ function withTranscriptDetails(local: ToolEvent[], fromHermes: ToolEvent[]) {
       next.result = found.result
       if (found.error) next.error = found.error
     }
-    if (next.added === tool.added && next.result === tool.result) return tool
+    if (needsAction) {
+      if (found.action === undefined) delete next.action
+      else next.action = found.action
+    }
+    if (next.added === tool.added && next.result === tool.result && next.action === tool.action)
+      return tool
     changed = true
     return next
   })

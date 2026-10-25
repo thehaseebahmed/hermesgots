@@ -59,6 +59,7 @@ import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { appendThinking, closeRun, forgetRuns, noteRunThinking } from "@/lib/thinking"
 import { quietly } from "@/lib/report"
 import { canSteer, midReply } from "@/lib/steer"
+import { actionOfLabel, DELEGATE_TOOL } from "@/lib/spawn"
 import { randomId } from "@/lib/utils"
 import { knownLiveRun, readLiveRuns } from "@/lib/waiting"
 import { onWake } from "@/lib/wake"
@@ -363,6 +364,10 @@ function streamHandlers(turn: Turn): StreamHandlers {
         // whatever thinking was open, the same way a call that started does.
         closeThinkingRun(turn)
         const toolCallId = event.toolCallId ?? `${event.tool}:${Date.now()}`
+        // Hermes previews a delegation's control call as `list`, `steer <id>` or `stop <id>`, and a
+        // spawn as its goal: stamped here, the thread can tell them apart before the transcript
+        // lands, which then corrects it from the arguments themselves (ADR 0053).
+        const action = event.tool === DELEGATE_TOOL ? actionOfLabel(event.label) : undefined
         draft.tools.push({
           toolCallId,
           tool: event.tool,
@@ -370,6 +375,7 @@ function streamHandlers(turn: Turn): StreamHandlers {
           label: event.label ?? event.tool,
           status: event.status,
           startedAt: Date.now(),
+          ...(action ? { action } : {}),
           ...(event.status !== "running" ? { endedAt: Date.now(), result: event.result } : {}),
           contentOffset: draft.content.length,
         })

@@ -177,13 +177,8 @@ import { SUGGESTIONS } from "@/lib/suggestions"
 import { DEFAULT_BOT_ID } from "@/components/bots"
 import { useBotThreads, useNow, useThreads, type Thread } from "@/lib/threads"
 import { draftKey } from "@/lib/drafts"
-import {
-  AgentsContext,
-  DELEGATE_TOOL,
-  runningAgents,
-  stopSubagents,
-  useSessionAgents,
-} from "@/lib/agents"
+import { AgentsContext, runningAgents, stopSubagents, useSessionAgents } from "@/lib/agents"
+import { spawnInFlight } from "@/lib/spawn"
 import { usePluginFeature, usePluginFeatureOn } from "@/lib/features"
 import { AgentPopup } from "@/components/chat/agent-card"
 import { SubagentLine } from "@/components/chat/subagent-line"
@@ -649,16 +644,9 @@ export function ChatPage({
   const hasMessages = (messages?.length ?? 0) > 0
   const hasCards = Boolean(cards && (cards.before.size || cards.trailing.length))
   const unstarted = !gone && configured && !hasMessages && !hasCards && !loadingHistory
-  // The agents this chat's agent delegated to, for their cards in the thread.
-  const delegations = messages
-    ?.flatMap((m) => m.tools ?? [])
-    .filter((t) => t.tool === DELEGATE_TOOL)
-  const agents = useSessionAgents(
-    conversation ?? undefined,
-    profile,
-    Boolean(delegations?.some((t) => t.status === "running")),
-    busy,
-  )
+  // The agents this chat's agent delegated to, for their cards in the thread. Only a call that set a
+  // subagent to work turns the poll on: a list, steer or stop runs no agent to wait for (ADR 0053).
+  const agents = useSessionAgents(conversation ?? undefined, profile, spawnInFlight(messages), busy)
   const subagentsRunning = useMemo(() => runningAgents(agents).length, [agents])
   // The count is drawn once, by whichever row is last: the reply's own while it streams, else the foot.
   const lastId = thread?.at(-1)?.id

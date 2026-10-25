@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import {
   ArrowLeftIcon,
+  BotIcon,
   ChevronRightIcon,
   EyeIcon,
   FilePlusIcon,
@@ -46,6 +47,7 @@ const ICONS: Record<KindId, LucideIcon> = {
   browsed: GlobeIcon,
   plan: ListTodoIcon,
   pr: GitPullRequestArrowIcon,
+  subagent: BotIcon,
   used: WrenchIcon,
 }
 

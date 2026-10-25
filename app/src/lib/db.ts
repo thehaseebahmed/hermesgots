@@ -298,6 +298,13 @@ export interface ToolEvent {
   contentOffset?: number
   /** What the call returned (a preview while streaming). */
   result?: string
+  /**
+   * The action the call's arguments named, lower-cased ("list", "ship"), stamped where the arguments
+   * were in hand: the transcript parse and the live stream. Absent on a call whose arguments named
+   * none, and on every row stored before it was stamped — a delegation's card-or-row decision and a
+   * pull request's or cron call's words are read from it (ADR 0053).
+   */
+  action?: string
   /** Why it failed, read from the whole result before it was clipped. */
   error?: string
   /** Lines a file edit added and removed, counted from the transcript (the stream's preview is cut short). */
