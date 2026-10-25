@@ -40,7 +40,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import {
@@ -108,6 +108,16 @@ type GatedPage = keyof typeof PAGE_FEATURES
 function gated(page: BotTab): page is GatedPage {
   return page in PAGE_FEATURES
 }
+
+/**
+ * Everything a page asks the plugin about: the pages it can withhold, and the rows it holds only
+ * where the plugin advertises them — a linked bot's Hermes side is left with no row at all when the
+ * delegation model is withheld.
+ */
+const PAGE_ANSWERS = { ...PAGE_FEATURES, delegation: "delegation_model" } as const
+
+/** What the Chat page's two rows need: the Gots triage pick, and the chain after the main model. */
+const CHAT_ANSWERS = { triage: "triage_model", fallbacks: "fallbacks" } as const
 
 /** The icon a page's row, and the screen it opens, wear. */
 const PAGE_ICONS: Record<BotTab, LucideIcon> = {
@@ -317,7 +327,7 @@ export function BotSettingsPage({
   const [models, setModels] = useState<string[]>([])
   const [modelsFailed, setModelsFailed] = useState(false)
   const [connection, setConnection] = useState<Connection>({ state: "idle" })
-  const answers = usePluginFeatureAnswers(profile, PAGE_FEATURES)
+  const answers = usePluginFeatureAnswers(profile, PAGE_ANSWERS)
   const gate = gated(tab) ? answers[tab] : undefined
   const shown: BotTab = gate !== undefined && gate !== "yes" ? "general" : tab
 
@@ -404,6 +414,11 @@ export function BotSettingsPage({
   if (shown === "mcps") return <McpsTab profile={profile} />
   if (shown === "coding") return <CodingTab profile={profile} />
   if (shown === "skills") return <SkillsTab profile={profile} />
+
+  // A heading and its card are drawn only where the card has a row: a linked bot whose host
+  // withholds the delegation model has nothing on its Hermes side at all, its address and key being
+  // its host's.
+  const hermesRows = answers.delegation === "yes" || !linked
 
   // General, by ownership: the Gots plugin's own switches, then what the bot looks like and how it
   // connects, then what sits on the bot's Hermes. A linked bot's address and key come from its host
@@ -522,69 +537,80 @@ export function BotSettingsPage({
         )}
       </Group>
 
-      <GroupHeading title={GROUP_TITLES.hermes} />
-      <Group>
-        <div className={rowSurface}>
-          <DelegationModelSetting profile={profile} subtitle="The model every subagent runs on" />
-        </div>
-
-        {!linked && (
-          <>
-            <Field className={rowSurface}>
-              <FieldLabel htmlFor="base-url">API base URL</FieldLabel>
-              <FieldDescription>Where this bot's Hermes server is</FieldDescription>
-              <Input
-                id="base-url"
-                inputMode="url"
-                autoCapitalize="off"
-                autoCorrect="off"
-                spellCheck={false}
-                placeholder="http://localhost:8642/v1"
-                value={baseUrl}
-                onChange={(e) => {
-                  setBaseUrl(e.target.value)
-                  setConnection({ state: "idle" })
-                  save({ baseUrl: e.target.value.trim() })
-                }}
+      {hermesRows && (
+        <>
+          <GroupHeading title={GROUP_TITLES.hermes} />
+          <Group>
+            <div className={rowSurface}>
+              <DelegationModelSetting
+                profile={profile}
+                subtitle="The model every subagent runs on"
               />
-            </Field>
+            </div>
 
-            <Field className={rowSurface}>
-              <FieldLabel htmlFor="api-key">Server key</FieldLabel>
-              <FieldDescription>The key this app sends to that server</FieldDescription>
-              <InputGroup>
-                <InputGroupInput
-                  id="api-key"
-                  type={showKey ? "text" : "password"}
-                  autoComplete="off"
-                  spellCheck={false}
-                  placeholder="API_SERVER_KEY"
-                  value={apiKey}
-                  onChange={(e) => {
-                    setApiKey(e.target.value)
-                    setConnection({ state: "idle" })
-                    save({ apiKey: e.target.value.trim() })
-                  }}
-                />
-                <InputGroupAddon align="inline-end">
-                  <InputGroupButton
-                    size="icon-xs"
-                    aria-label={showKey ? "Hide key" : "Show key"}
-                    onClick={() => setShowKey((v) => !v)}
-                  >
-                    {showKey ? <EyeOffIcon /> : <EyeIcon />}
-                  </InputGroupButton>
-                </InputGroupAddon>
-              </InputGroup>
-            </Field>
-          </>
-        )}
-      </Group>
+            {!linked && (
+              <>
+                <Field className={rowSurface}>
+                  <FieldLabel htmlFor="base-url">API base URL</FieldLabel>
+                  <FieldDescription>Where this bot's Hermes server is</FieldDescription>
+                  <Input
+                    id="base-url"
+                    inputMode="url"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    placeholder="http://localhost:8642/v1"
+                    value={baseUrl}
+                    onChange={(e) => {
+                      setBaseUrl(e.target.value)
+                      setConnection({ state: "idle" })
+                      save({ baseUrl: e.target.value.trim() })
+                    }}
+                  />
+                </Field>
+
+                <Field className={rowSurface}>
+                  <FieldLabel htmlFor="api-key">Server key</FieldLabel>
+                  <FieldDescription>The key this app sends to that server</FieldDescription>
+                  <InputGroup>
+                    <InputGroupInput
+                      id="api-key"
+                      type={showKey ? "text" : "password"}
+                      autoComplete="off"
+                      spellCheck={false}
+                      placeholder="API_SERVER_KEY"
+                      value={apiKey}
+                      onChange={(e) => {
+                        setApiKey(e.target.value)
+                        setConnection({ state: "idle" })
+                        save({ apiKey: e.target.value.trim() })
+                      }}
+                    />
+                    <InputGroupAddon align="inline-end">
+                      <InputGroupButton
+                        size="icon-xs"
+                        aria-label={showKey ? "Hide key" : "Show key"}
+                        onClick={() => setShowKey((v) => !v)}
+                      >
+                        {showKey ? <EyeOffIcon /> : <EyeIcon />}
+                      </InputGroupButton>
+                    </InputGroupAddon>
+                  </InputGroup>
+                </Field>
+              </>
+            )}
+          </Group>
+        </>
+      )}
     </>
   )
 }
 
-/** The Chat page: which model this bot talks with, its triage model, and its fallbacks. */
+/**
+ * The Chat page: the small model that decides where a message sent from Main goes — the Gots
+ * plugin's own — then the bot's Hermes's three: the model a chat runs, the host's default, and the
+ * chain tried after it. A heading and its card are drawn only where the card has a row.
+ */
 function ChatPage({
   profile,
   models,
@@ -597,43 +623,79 @@ function ChatPage({
   modelsFailed: boolean
   save: (patch: Partial<Omit<Profile, "id">>) => void
 }) {
+  const answers = usePluginFeatureAnswers(profile, CHAT_ANSWERS)
+  const triage = answers.triage === "yes"
+  const fallbacks = answers.fallbacks === "yes"
+  const model = models.length > 1
+  const defaultModel = Boolean(profile.baseUrl.trim())
+  // The line saying the list couldn't be read is a row of the same card, so the card keeps it.
+  const unread = modelsFailed && models.length === 0
   return (
-    <FieldGroup>
-      {models.length > 1 && (
-        <Field>
-          <FieldLabel htmlFor="model">Model</FieldLabel>
-          <Select value={profile.model} onValueChange={(value) => value && save({ model: value })}>
-            <SelectTrigger id="model" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {models.map((id) => (
-                <SelectItem key={id} value={id}>
-                  {id}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
+    <div className="flex flex-col gap-4" data-bot-chat>
+      {triage && (
+        <>
+          <GroupHeading title={GROUP_TITLES.gots} />
+          <Group>
+            <div className={rowSurface}>
+              <TriageModelSetting profile={profile} />
+            </div>
+          </Group>
+        </>
       )}
-      {modelsFailed && models.length === 0 && (
-        <p className="text-sm text-muted-foreground">Couldn't read this bot's models.</p>
+      {(model || unread || defaultModel || fallbacks) && (
+        <>
+          <GroupHeading title={GROUP_TITLES.hermes} />
+          <Group>
+            {model && (
+              <Field className={rowSurface}>
+                <FieldLabel htmlFor="model">Model</FieldLabel>
+                <FieldDescription>
+                  The model a chat runs when it has no pick of its own
+                </FieldDescription>
+                <Select
+                  value={profile.model}
+                  onValueChange={(value) => value && save({ model: value })}
+                >
+                  <SelectTrigger id="model" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {models.map((id) => (
+                      <SelectItem key={id} value={id}>
+                        {id}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            )}
+            {unread && (
+              <p className={cn(rowSurface, "text-sm text-muted-foreground")}>
+                Couldn't read this bot's models.
+              </p>
+            )}
+            {defaultModel && (
+              <Field className={rowSurface}>
+                <FieldLabel htmlFor="default-model">Default model</FieldLabel>
+                <FieldDescription>The host's main model, on every surface</FieldDescription>
+                <DefaultModelSetting
+                  profile={profile}
+                  onChoose={(modelChoice) =>
+                    setDefaultModel(profile, modelChoice).catch((error: unknown) => {
+                      toast.error(error instanceof Error ? error.message : String(error))
+                    })
+                  }
+                />
+              </Field>
+            )}
+            {fallbacks && (
+              <div className={rowSurface}>
+                <FallbackModelsSetting profile={profile} />
+              </div>
+            )}
+          </Group>
+        </>
       )}
-      {profile.baseUrl.trim() && (
-        <Field>
-          <FieldLabel htmlFor="default-model">Default model</FieldLabel>
-          <DefaultModelSetting
-            profile={profile}
-            onChoose={(modelChoice) =>
-              setDefaultModel(profile, modelChoice).catch((error: unknown) => {
-                toast.error(error instanceof Error ? error.message : String(error))
-              })
-            }
-          />
-        </Field>
-      )}
-      <TriageModelSetting profile={profile} />
-      <FallbackModelsSetting profile={profile} />
-    </FieldGroup>
+    </div>
   )
 }

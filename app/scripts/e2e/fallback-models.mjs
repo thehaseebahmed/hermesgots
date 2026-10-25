@@ -16,7 +16,7 @@ await flow("fallback-models", async ({ page, profileId, until, shot, held }) => 
     await picker.getByRole("button", { name: label }).first().click()
   }
   // The whole field, so the heading's saving icon and the rows are read where they render.
-  const field = page.getByRole("group", { name: "Fallback models" })
+  const field = page.getByRole("group", { name: "Fallback providers" })
   // Every fallback write the page sends, so the greying out is checked against what goes to the host
   // and not only against how the rows look.
   const writes = []

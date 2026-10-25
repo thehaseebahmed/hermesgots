@@ -1,5 +1,5 @@
 /**
- * A bot's Triage model in its Models tab: the field a plugin that offers the route shows, a pick
+ * A bot's Triage model on its Chat page: the field a plugin that offers the route shows, a pick
  * the host refuses (its words in a toast, nothing changed), the permission the host withholds, and
  * the plugin that lacks the route and shows nothing.
  */
@@ -138,11 +138,16 @@ test("a host that withholds the override says so", async () => {
   })
 })
 
-test("an info icon names what the model is for", async () => {
+test("the row says what the model is for, with no info icon any more", async () => {
   await seedSettings()
   globalThis.fetch = host().fetch
   await mount(<TriageModelSetting profile={botProfile("triage-hint")} />, async () => {
-    assert.ok(find('[aria-label="About the triage model"]'), "the info icon sits by the label")
+    assert.equal(
+      find('[data-slot="field-description"]')?.textContent,
+      "Decides whether a message sent from Main stays there, continues a thread or starts a new one. It only makes that call, so a small, fast model is enough. Default model uses the bot's own.",
+      "the explanation is the row's subtitle, word for word",
+    )
+    assert.equal(find('[aria-label="About the triage model"]'), null, "the info icon is gone")
   })
 })
 

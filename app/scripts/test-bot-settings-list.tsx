@@ -196,7 +196,7 @@ test(
   }),
 )
 
-test("a page still holds what its tab held: General its own fields, Chat its models", async () => {
+test("a page still holds what its page held: General its own fields, Chat its models", async () => {
   const CHAT = [...ALL, "delegation_model", "triage_model", "fallbacks"]
   await seed("pages", ALL, { hostId: "host-1" })
   await mount(settings("/settings/bots/bot-1/general"), async () => {
@@ -207,7 +207,7 @@ test("a page still holds what its tab held: General its own fields, Chat its mod
   await seed("pages-chat", CHAT, { hostId: "host-1" })
   await mount(settings("/settings/bots/bot-1/chat"), async () => {
     assert.deepEqual(titles(), ["Chat"], "the Chat page")
-    for (const label of ["Default model", "Subagent model", "Triage model", "Fallback models"])
+    for (const label of ["Default model", "Triage model", "Fallback providers"])
       assert.ok(text().includes(label), `Chat still has ${label}`)
   })
 })

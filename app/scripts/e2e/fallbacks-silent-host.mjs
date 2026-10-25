@@ -4,7 +4,7 @@ import { app, assert, flow, mock, pass } from "./lib.mjs"
 
 await flow("fallbacks-silent-host", async ({ page, profileId, until, shot }) => {
   const add = page.getByRole("button", { name: "Add fallback" })
-  const field = page.getByRole("group", { name: "Fallback models" })
+  const field = page.getByRole("group", { name: "Fallback providers" })
   // The host's own record, so an answer it gave can be told from a pick the app made.
   const hosted = async () => {
     const response = await fetch(`${mock}/api/plugins/memento/fallbacks`)

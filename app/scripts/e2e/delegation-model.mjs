@@ -75,7 +75,7 @@ await flow("delegation-model", async ({ page, profileId, until, shot, held }) =>
     })
   })
   await page.reload()
-  await page.getByRole("group", { name: "Fallback models" }).waitFor({ timeout: 15_000 })
+  await page.getByRole("group", { name: "Fallback providers" }).waitFor({ timeout: 15_000 })
   assert.equal(await opener.count(), 0, "no picker without the feature")
   assert.equal(await field.count(), 0, "and no field around it")
   await shot("no-picker")
