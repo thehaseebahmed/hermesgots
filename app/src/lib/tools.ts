@@ -3,7 +3,13 @@
 import type { ToolEvent } from "@/lib/db"
 // Relative with its extension, so the unit tests that load this rule through `subagent-results.ts`
 // run it as it stands.
-import { controlAction, DELEGATE_TOOL, spawnedAgent, type ControlAction } from "./spawn.ts"
+import {
+  actionOfLabel,
+  controlAction,
+  DELEGATE_TOOL,
+  spawnedAgent,
+  type ControlAction,
+} from "./spawn.ts"
 
 export type KindId =
   | "ran"
@@ -52,6 +58,21 @@ const BROWSED: Kind = {
 const PLANNED: Kind = { id: "plan", verb: "Updated", doing: "Updating", title: "todos" }
 const CHECKED_PLAN: Kind = { id: "plan", verb: "Checked", doing: "Checking", title: "todos" }
 const OPENED_PR: Kind = { id: "pr", verb: "Opened", doing: "Opening", title: "a pull request" }
+/** A pull request call that pushed a branch with no pull request of its own: the work, not a request. */
+const PUSHED_BRANCH: Kind = { id: "pr", verb: "Pushed", doing: "Pushing", title: "the branch" }
+const UPDATED_PR: Kind = { id: "pr", verb: "Updated", doing: "Updating", title: "a pull request" }
+const CHECKED_PR: Kind = { id: "pr", verb: "Checked", doing: "Checking", title: "a pull request" }
+/**
+ * What each action Hermes's `pull_request` tool takes reads as. They are told apart by this table and
+ * never by the tool's name: every one of them used to read *Opened*, so a status read claimed an
+ * opening that never happened.
+ */
+const PR_KINDS: Record<string, Kind> = {
+  ship: OPENED_PR,
+  push: PUSHED_BRANCH,
+  update: UPDATED_PR,
+  status: CHECKED_PR,
+}
 const USED: Kind = {
   id: "used",
   verb: "Used",
@@ -112,8 +133,20 @@ const KINDS: Record<string, Kind> = {
   search_files: CODE,
   web_search: WEB,
   web_extract: WEB,
+  // The retired tool only ever opened its pull request, and keeps those words.
   open_pull_request: OPENED_PR,
-  pull_request: OPENED_PR,
+}
+
+/**
+ * The action a pull request call took, from the derivation its row's words are read from: the stamp
+ * its arguments left where they were in hand (the transcript parse, `history.ts`), else the action
+ * its stored label names. Only the transcript's label — the call's arguments as JSON — carries one;
+ * a streamed label is Hermes's preview, which for this tool is nothing at all (so the tool's own
+ * name) or the call's title, and a title is never read as an action.
+ */
+export function prAction(tool: ToolEvent): string | undefined {
+  if (tool.action !== undefined) return tool.action
+  return (tool.label ?? "").trimStart().startsWith("{") ? actionOfLabel(tool.label) : undefined
 }
 
 export const TODO_TOOLS = new Set(["todo_list", "todo"])
@@ -180,6 +213,12 @@ export function kindOf(tool: ToolEvent): Kind {
     if (spawnedAgent(tool)) return DELEGATED
     const control = controlAction(tool)
     return control ? CONTROLLED[control] : USED
+  }
+  // A pull request call says what it took, and a call whose action the table doesn't know draws the
+  // generic row rather than a claim it can't back (merging and closing are refused by the tool).
+  if (tool.tool === "pull_request") {
+    const action = prAction(tool)
+    return (action !== undefined ? PR_KINDS[action] : undefined) ?? USED
   }
   return KINDS[tool.tool] ?? USED
 }

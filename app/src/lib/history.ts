@@ -444,17 +444,29 @@ function withTranscriptToolOffsets(local: Message, transcript: Message) {
 }
 
 /**
+ * Tools Hermes previews with nothing at all: no `_PREVIEW_BUILDERS` entry and no primary argument,
+ * so a streamed call's label is the tool's own name (or, where a host words it, the call's title)
+ * while its transcript row's label is the arguments as JSON. The two never agree, so such a call is
+ * matched to its transcript row by its tool and its place in the run — and its row waits on the
+ * transcript for the words only the arguments carry.
+ */
+export const NO_PREVIEW_TOOLS = new Set(["pull_request"])
+
+/**
  * What streamed calls only learn from the transcript: their edits' size, the whole result where the
  * stream sent a cut preview, and the action their arguments named — the authority on what the call
- * did, where the live stream could only read its preview. Matched by tool and label, in order.
+ * did, where the live stream could only read its preview. Matched by tool and label, in order; a
+ * call whose labels can never agree is matched by its tool and its place instead.
  */
-function withTranscriptDetails(local: ToolEvent[], fromHermes: ToolEvent[]) {
+export function withTranscriptDetails(local: ToolEvent[], fromHermes: ToolEvent[]) {
   const spare = [...fromHermes]
   let changed = false
   const tools = local.map((tool) => {
     // A todo call's streamed label is Hermes's preview, worded unlike the transcript's.
     const i = spare.findIndex(
-      (t) => t.tool === tool.tool && (t.label === tool.label || TODO_TOOLS.has(t.tool)),
+      (t) =>
+        t.tool === tool.tool &&
+        (t.label === tool.label || TODO_TOOLS.has(t.tool) || NO_PREVIEW_TOOLS.has(t.tool)),
     )
     if (i < 0) return tool
     const [found] = spare.splice(i, 1)
@@ -523,6 +535,25 @@ export async function liveTurn(
     if (batch.length < PAGE) return undefined
   }
   return undefined
+}
+
+/**
+ * The details a running reply's calls can't learn from the events stream, read from the turn's
+ * transcript as it stands: the action a call's arguments named, and above all the words of a call
+ * whose label can't carry them (`NO_PREVIEW_TOOLS`). The rows this device drew are kept exactly as
+ * they are — the stream owns the reply being shown — and only the transcript's own details are
+ * folded in. Undefined when the transcript knows nothing more.
+ */
+export async function transcriptDetails(
+  config: HermesConfig,
+  sessionId: string,
+  userContent: string,
+  tools: ToolEvent[],
+  signal?: AbortSignal,
+) {
+  if (!config.apiKey) return undefined
+  const reply = await liveTurn(config, sessionId, userContent, signal).catch(() => undefined)
+  return reply?.tools ? withTranscriptDetails(tools, reply.tools) : undefined
 }
 
 async function connection(conversation: Conversation) {
