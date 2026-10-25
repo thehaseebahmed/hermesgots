@@ -1,7 +1,7 @@
 // One turn on the mock, told to stall so its reasoning is the only thing on the wire for a while:
 // the only way a poll can look at a thread mid-thought. Two calls run back to back in it, so the
 // reply draws every stretch of its thinking as one row above the one tool group those calls made —
-// a tool row never lands between two thought rows (ADR 0051). The merge is layout no lower tier
+// a tool row never lands between two thought rows (ADR 0052). The merge is layout no lower tier
 // reaches, and the row is the only place a reader touches thinking now: it opens the working-out in
 // the same sheet the tool row opens, and the sheet's follow on a live run, the wheel inside it that
 // stops that follow and the whole height of its body are all geometry the browser has and jsdom
