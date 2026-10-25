@@ -47,6 +47,7 @@ import { OnlineDot } from "@/components/bot-card"
 import { LinkSheet } from "@/components/link-bots"
 import { AppearanceSettings } from "@/components/settings/appearance"
 import {
+  ActionRow,
   Group,
   RowText,
   SheetRow,
@@ -325,12 +326,7 @@ function botStatus(profile: Profile, now: number): string | undefined {
 
 /** The row that opens the link sheet, at the end of the bots. */
 function LinkBotRow({ onLink }: { onLink: () => void }) {
-  return (
-    <button type="button" onClick={onLink} className={linkRowClass}>
-      <PlusIcon className="size-5 shrink-0 text-muted-foreground" />
-      <RowText title="Link a bot" />
-    </button>
-  )
+  return <ActionRow icon={PlusIcon} title="Link a bot" onClick={onLink} />
 }
 
 function NotificationsRow() {
@@ -395,12 +391,17 @@ export function NotificationSettingsRow() {
 
 /** Android: the phone's screen for this app, which the app can read but not draw. */
 function SystemNotificationSettingsRow() {
+  const open = async () => {
+    // A build too old to have the screen says nothing; one that refused says why.
+    const refused = await openNotificationSettings()
+    if (refused) toast.error(refused)
+  }
   return (
-    <button type="button" onClick={() => void openNotificationSettings()} className={linkRowClass}>
-      <SlidersHorizontalIcon className="size-5 shrink-0 text-muted-foreground" />
-      <RowText title={NOTIFICATION_SETTINGS} />
-      <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
-    </button>
+    <ActionRow
+      icon={SlidersHorizontalIcon}
+      title={NOTIFICATION_SETTINGS}
+      onClick={() => void open()}
+    />
   )
 }
 

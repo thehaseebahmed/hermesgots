@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react"
 
-import type { LucideIcon } from "lucide-react"
+import { ChevronRightIcon, type LucideIcon } from "lucide-react"
 
 import { ExperimentalBadge } from "@/components/experimental-badge"
 import { Switch } from "@/components/ui/switch"
@@ -76,6 +76,25 @@ export function SheetRow({
       </button>
       {sheet({ open, onOpenChange: setOpen })}
     </>
+  )
+}
+
+/** A row that runs something: the row chrome, its icon, its title, and a chevron like a link's. */
+export function ActionRow({
+  icon: Icon,
+  title,
+  onClick,
+}: {
+  icon: LucideIcon
+  title: string
+  onClick: () => void
+}) {
+  return (
+    <button type="button" onClick={onClick} className={linkRowClass}>
+      <Icon className="size-5 shrink-0 text-muted-foreground" />
+      <RowText title={title} />
+      <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
+    </button>
   )
 }
 

@@ -1,23 +1,23 @@
 /**
- * The Android app's page, as a component test sees it: the bridge Capacitor reads the platform
- * from, the plugin headers that make a call go over it, and the Firebase flag CI sets on an APK
- * built with a `google-services.json`.
- *
- * A test imports this before anything the app owns, because both are read at module load: `isNative`
- * is the Capacitor constant (`@/lib/native`) and `pushAvailable()` reads the Firebase flag
- * (`@/lib/push`). Import it first in the import list, and the modules loaded after it freeze the
- * platform the way an installed APK does.
+ * The Android app as a component test sees it: the bridge Capacitor reads the platform from, and the
+ * plugin headers that make a plugin's methods the native ones. A plugin without a header is an APK
+ * built before it, which `withoutPlugin` fakes before the app is imported.
  */
 
 /** The calls to the notification settings plugin a page made, in the order it made them. */
 export const bridgeCalls: string[] = []
 
-const env = (globalThis as unknown as { __HERMES_ENV__: Record<string, unknown> }).__HERMES_ENV__
-env.VITE_FIREBASE = "1"
+const headers = [
+  {
+    name: "App",
+    methods: [
+      { name: "addListener", rtype: "promise" },
+      { name: "removeListener", rtype: "promise" },
+    ],
+  },
+  { name: "NotificationSettings", methods: [{ name: "open", rtype: "promise" }] },
+]
 
-// Capacitor answers `androidBridge` for the platform, and only a plugin header makes a method the
-// native one: without it a call throws "not implemented" and never reaches the bridge. `App` is
-// there because an installed APK has it and a screen listens for a resume when it loads.
 Object.defineProperty(globalThis, "androidBridge", {
   value: {},
   writable: true,
@@ -25,16 +25,7 @@ Object.defineProperty(globalThis, "androidBridge", {
 })
 Object.defineProperty(globalThis, "Capacitor", {
   value: {
-    PluginHeaders: [
-      {
-        name: "App",
-        methods: [
-          { name: "addListener", rtype: "promise" },
-          { name: "removeListener", rtype: "promise" },
-        ],
-      },
-      { name: "NotificationSettings", methods: [{ name: "open", rtype: "promise" }] },
-    ],
+    PluginHeaders: headers,
     nativePromise: (plugin: string, method: string) => {
       if (plugin === "NotificationSettings") bridgeCalls.push(`${plugin}.${method}`)
       return Promise.resolve()
@@ -43,3 +34,9 @@ Object.defineProperty(globalThis, "Capacitor", {
   writable: true,
   configurable: true,
 })
+
+/** Drops a plugin's header, as an APK that predates it has none: `isPluginAvailable` then says no. */
+export function withoutPlugin(name: string) {
+  const at = headers.findIndex((header) => header.name === name)
+  if (at >= 0) headers.splice(at, 1)
+}
