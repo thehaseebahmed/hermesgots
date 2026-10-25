@@ -98,7 +98,11 @@ test("a control call is a tool row and a spawn is a card, from the one rule", as
 
       const row = toolRow()
       assert.ok(row, "the control calls drew as one group of tool rows")
-      assert.match(row.getAttribute("aria-label") ?? "", /Used 4 tools/, "four calls, as tools")
+      assert.equal(
+        row.getAttribute("aria-label") ?? "",
+        "Listed subagents, steered subagent, stopped subagent",
+        "four calls, each saying the action it took — and the two steer shapes sharing one phrase",
+      )
       assert.doesNotMatch(row.textContent ?? "", /Sub-Agent/, "and no card among them")
 
       // The row's own words, from the sheet it opens: the two shapes of the same steer call read the
@@ -117,7 +121,7 @@ test("proof of the control action outranks a label that would match a subagent",
   await drawn([call("c-list", GOAL, { action: "list" })], async () => {
     assert.equal(cards().length, 0, "a call that only listed draws no card")
     assert.ok(toolRow(), "it is a tool row")
-    assert.match(text(), /Used a tool/, "one call, drawn as the tool it was")
+    assert.match(text(), /Listed subagents/, "one call, saying the action its arguments named")
   })
 })
 

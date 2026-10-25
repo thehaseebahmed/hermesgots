@@ -19,8 +19,18 @@ export const DELEGATE_TOOL = "delegate_task"
 /** The action Hermes's `delegate_task` takes that sets a subagent to work. */
 const SPAWN = "spawn"
 
-/** The actions that read or steer subagents, running none of them. */
-const CONTROL = new Set(["list", "steer", "stop"])
+/**
+ * The actions that read or steer subagents, running none of them — named once here, so the words a
+ * control row reads can only ever be the actions this rule knows.
+ */
+const CONTROLS = ["list", "steer", "stop"] as const
+
+export type ControlAction = (typeof CONTROLS)[number]
+
+const CONTROL: ReadonlySet<string> = new Set(CONTROLS)
+
+const isControl = (action: string | undefined): action is ControlAction =>
+  action !== undefined && CONTROL.has(action)
 
 /** What this rule asks of a call: its name, the action stamped at ingest, and its label. */
 export interface AgentCall {
@@ -49,7 +59,7 @@ export function actionOf(args: unknown): string | undefined {
  */
 export function controlWords(args: unknown): string | undefined {
   const action = actionOf(args)
-  if (!action || !CONTROL.has(action) || !args || typeof args !== "object") return undefined
+  if (!isControl(action) || !args || typeof args !== "object") return undefined
   const id = (args as { subagent_id?: unknown }).subagent_id
   const named = id === undefined || id === null ? "" : String(id).trim()
   return named ? `${action} ${named}` : action
@@ -78,6 +88,16 @@ export function actionOfLabel(label: string | undefined): string | undefined {
 }
 
 /**
+ * The control action a call took — from the stamp written where its arguments were in hand, else
+ * from the label of a row stored before it. The row's words and the classifier's decision both ask
+ * this, so neither can name an action the other doesn't.
+ */
+export function controlAction(call: AgentCall): ControlAction | undefined {
+  const action = call.action ?? actionOfLabel(call.label)
+  return isControl(action) ? action : undefined
+}
+
+/**
  * Whether a call set a subagent to work — the one question the thread's part splitting, the chat's
  * agents-poll gate and the row's phrase table all ask.
  */
@@ -87,8 +107,7 @@ export function spawnedAgent(call: AgentCall): boolean {
   if (call.action !== undefined) return call.action === SPAWN
   // No stamp, so the label is all there is: a control preview proves the call ran no agent, and a
   // label that names nothing (the tool's own name) proves nothing either — both draw a row.
-  const named = actionOfLabel(call.label)
-  if (named !== undefined) return named === SPAWN
+  if (controlAction(call)) return false
   return Boolean(call.label && call.label !== DELEGATE_TOOL)
 }
 

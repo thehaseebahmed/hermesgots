@@ -3,7 +3,7 @@
 import type { ToolEvent } from "@/lib/db"
 // Relative with its extension, so the unit tests that load this rule through `subagent-results.ts`
 // run it as it stands.
-import { DELEGATE_TOOL, spawnedAgent } from "./spawn.ts"
+import { controlAction, DELEGATE_TOOL, spawnedAgent, type ControlAction } from "./spawn.ts"
 
 export type KindId =
   | "ran"
@@ -16,6 +16,9 @@ export type KindId =
   | "plan"
   | "pr"
   | "subagent"
+  | "listed"
+  | "steered"
+  | "stopped"
   | "used"
 
 export interface Kind {
@@ -66,6 +69,18 @@ const DELEGATED: Kind = {
   title: "to a sub-agent",
 }
 
+/**
+ * A delegation's control call, whose row says which action it took: each action its own kind, so a
+ * list, a steer and a stop never read alike. The actions come from the one derivation in `spawn.ts`;
+ * this table only gives each the words Hermes already used for it.
+ */
+const LISTED: Kind = { id: "listed", verb: "Listed", doing: "Listing", title: "subagents" }
+const STEERED: Kind = { id: "steered", verb: "Steered", doing: "Steering", title: "subagent" }
+const STOPPED: Kind = { id: "stopped", verb: "Stopped", doing: "Stopping", title: "subagent" }
+
+/** Every control action there is, so a new one cannot arrive without words of its own. */
+const CONTROLLED: Record<ControlAction, Kind> = { list: LISTED, steer: STEERED, stop: STOPPED }
+
 const KINDS: Record<string, Kind> = {
   terminal: RAN,
   execute_code: RAN,
@@ -94,10 +109,14 @@ export function kindOf(tool: ToolEvent): Kind {
   if (tool.tool === "patch") return tool.created ? CREATED : EDITED
   if (tool.tool.startsWith("browser_")) return BROWSED
   if (TODO_TOOLS.has(tool.tool)) return taskCount(tool) === undefined ? CHECKED_PLAN : PLANNED
-  // One delegation, two shapes: a spawn is the work it started, and a control call is an ordinary
-  // tool row — the same classifier the thread asks (ADR 0053), so the words can't name a card where
-  // the thread drew a row.
-  if (tool.tool === DELEGATE_TOOL) return spawnedAgent(tool) ? DELEGATED : USED
+  // One delegation, three shapes: a spawn is the work it started, a control call says which action
+  // it took, and anything else is an ordinary tool row — the same classifier the thread asks (ADR
+  // 0053), so the words can't name a card where the thread drew a row, nor an action it didn't take.
+  if (tool.tool === DELEGATE_TOOL) {
+    if (spawnedAgent(tool)) return DELEGATED
+    const control = controlAction(tool)
+    return control ? CONTROLLED[control] : USED
+  }
   return KINDS[tool.tool] ?? USED
 }
 

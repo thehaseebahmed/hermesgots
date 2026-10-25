@@ -48,6 +48,9 @@ const ICONS: Record<KindId, LucideIcon> = {
   plan: ListTodoIcon,
   pr: GitPullRequestArrowIcon,
   subagent: BotIcon,
+  listed: BotIcon,
+  steered: BotIcon,
+  stopped: BotIcon,
   used: WrenchIcon,
 }
 
