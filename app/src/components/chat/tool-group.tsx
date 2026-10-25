@@ -29,10 +29,10 @@ import { formatDuration } from "@/lib/format"
 import {
   failureReason,
   kindOf,
-  nounOf,
   phrases,
   todoTarget,
   TODO_TOOLS,
+  type Kind,
   type KindId,
 } from "@/lib/tools"
 
@@ -133,12 +133,23 @@ function shortName(path: string) {
 
 const FILE_TOOLS = new Set(["read_file", "write_file", "patch"])
 
-function targetOf(tool: ToolEvent) {
+/**
+ * What a call ran on, for its row: a todo call's count, a file's short name, else the label it
+ * carried — and nothing where that label carries no words worth showing. A pull request call's
+ * transcript label is its arguments as JSON, and a cron call's label is the action word its own verb
+ * already says, so neither is put in the row's mouth.
+ */
+function targetOf(tool: ToolEvent, kind: Kind) {
   if (TODO_TOOLS.has(tool.tool)) return todoTarget(tool)
-  const label = tool.label && tool.label !== tool.tool ? tool.label : ""
-  if (!label) return tool.tool
+  if (kind.id === "cron") return ""
+  const label = (tool.label ?? "").trim()
+  if (!label || label === tool.tool || label.startsWith("{")) return ""
   return FILE_TOOLS.has(tool.tool) ? shortName(label) : label
 }
+
+/** The words a kind's row names where the call's label has none: "a cron job", "a pull request". */
+const fixedNoun = (kind: Kind, tool: ToolEvent) =>
+  typeof kind.title === "string" ? kind.title : tool.tool
 
 function DiffBadge({ tool }: { tool: ToolEvent }) {
   if (tool.added === undefined) return null
@@ -215,6 +226,7 @@ function ToolList({
       <ol className="flex flex-col px-6 pt-2">
         {tools.map((tool, index) => {
           const kind = kindOf(tool)
+          const target = targetOf(tool, kind)
           const reason = whyFailed(tool)
           return (
             <li key={`${tool.toolCallId}-${index}`} className="flex gap-3">
@@ -233,23 +245,18 @@ function ToolList({
                         {tool.status === "running"
                           ? `${kind.doing} todos`
                           : `Todos ${kind.verb.toLowerCase()}`}
-                        {targetOf(tool) && (
-                          <span className="text-muted-foreground">, {targetOf(tool)}</span>
-                        )}
-                      </>
-                    ) : kind.id === "cron" ? (
-                      // A cron call's label is the action word itself, so the row's own words are all
-                      // it says: naming the label beside them would read "Created create".
-                      <>
-                        <span>{tool.status === "running" ? kind.doing : kind.verb}</span>{" "}
-                        <span className="text-muted-foreground">{nounOf(kind)}</span>
+                        {target && <span className="text-muted-foreground">, {target}</span>}
                       </>
                     ) : (
                       <>
                         <span>{tool.status === "running" ? kind.doing : kind.verb}</span>{" "}
-                        <span className="font-mono text-[13px] text-muted-foreground">
-                          {targetOf(tool)}
-                        </span>
+                        {target ? (
+                          <span className="font-mono text-[13px] text-muted-foreground">
+                            {target}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">{fixedNoun(kind, tool)}</span>
+                        )}
                       </>
                     )}
                   </span>

@@ -22,8 +22,8 @@ import { usePoll } from "@/lib/poll"
  * its own; the Gots plugin lists them, and their transcripts come from Hermes like any chat's.
  */
 
-/** The delegation tool's name, kept with the rule that reads a call of it (ADR 0053). */
-export { DELEGATE_TOOL } from "@/lib/spawn"
+/** How far either side of a call a subagent may have started and still be the one it set going. */
+export const CARD_WINDOW_S = 5
 
 const lists = new Map<string, DelegatedAgent[]>()
 /** What this device was answered about a stop, by connection and agent: the host's own word, kept
@@ -241,8 +241,8 @@ function goalMatch(
 export function agentsOf(tool: ToolEvent, agents: DelegatedAgent[]) {
   const named = goalMatch(tool.label, agents, { tie: "closest", at: tool.startedAt / 1000 })
   if (named) return [named]
-  const from = tool.startedAt / 1000 - 5
-  const to = (tool.endedAt ?? Date.now()) / 1000 + 5
+  const from = tool.startedAt / 1000 - CARD_WINDOW_S
+  const to = (tool.endedAt ?? Date.now()) / 1000 + CARD_WINDOW_S
   return agents.filter(
     (agent) => agent.startedAt !== null && agent.startedAt >= from && agent.startedAt <= to,
   )

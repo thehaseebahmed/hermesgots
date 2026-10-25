@@ -1,6 +1,6 @@
 /** Formatting and syntax highlighting for tool input and output; highlight.js loads on first use. */
 
-import { readEnvelope } from "@/lib/tools"
+import { readEnvelope } from "@/lib/json-envelope"
 
 type Hljs = typeof import("highlight.js").default
 

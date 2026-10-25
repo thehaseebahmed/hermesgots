@@ -3,16 +3,18 @@
  * row's words can never disagree about what a call did (ADR 0053).
  *
  * Nothing at render time sees a call's arguments: the host's run projection sends the tool, its
- * preview and its result, and nothing else. So the spawn proof is stamped where the arguments are
- * in hand — the transcript parse in `history.ts` reads them, and the live stream reads Hermes's own
- * control previews — and a row stored before the stamp is read from its label instead, whose two
- * shapes (a preview's words, a JSON envelope) both parse. Nothing is migrated: an old row classifies
- * on its next render.
+ * preview and its result, and nothing else. So the proof is stamped where the arguments are in hand —
+ * the transcript parse in `history.ts`, and the live stream from Hermes's own control previews — and
+ * a row stored before the stamp is read from its label instead. Nothing is migrated: an old row
+ * classifies on its next render.
  *
  * A card needs positive proof of a spawn; every other shape is an ordinary tool row. A call this
  * rule cannot prove spawned an agent draws as a row, so a thread may hide work until catch-up reads
  * it again, but it can never claim work that never ran.
  */
+
+import type { ToolEvent } from "@/lib/db"
+import { readEnvelope } from "./json-envelope.ts"
 
 export const DELEGATE_TOOL = "delegate_task"
 
@@ -32,6 +34,14 @@ const CONTROL: ReadonlySet<string> = new Set(CONTROLS)
 const isControl = (action: string | undefined): action is ControlAction =>
   action !== undefined && CONTROL.has(action)
 
+/**
+ * What a subagent's id looks like where a preview names one: `_delegate_action_preview` in
+ * `agent/display.py` prints `{action} {subagent_id}` straight from the arguments, so the second word
+ * there is an id — a session-ish token, with a digit, hyphen or underscore in it — where a goal's
+ * second word is only a word.
+ */
+const SUBAGENT_ID = /^(?=[a-z0-9_-]{4,}$)(?=.*[\d_-])[a-z0-9][a-z0-9_-]*$/i
+
 /** What this rule asks of a call: its name, the action stamped at ingest, and its label. */
 export interface AgentCall {
   tool: string
@@ -39,6 +49,9 @@ export interface AgentCall {
   action?: string
   label?: string
 }
+
+/** What a call's action is read from, for the tools whose words are the action they took. */
+export type ActionCall = Pick<AgentCall, "action" | "label">
 
 /**
  * The action a call's arguments name, ready to stamp: trimmed, lower-cased, and undefined where they
@@ -66,35 +79,60 @@ export function controlWords(args: unknown): string | undefined {
 }
 
 /**
- * The control action a stored label names, in either shape a label arrives in: Hermes's preview
- * words, or a JSON envelope's `action` (the label a delegation's control call fell back to before
- * its words were derived). Undefined where the label names none — a goal, or anything else that
- * isn't a control action.
+ * The control action a stored preview's words name — the action, and at most the id it names, which
+ * has to look like an id. Undefined for everything else: a goal that happens to open on a control
+ * word ("stop the parser") is the work it is, not an action, and a JSON envelope is
+ * `actionOfJsonLabel`'s to read.
  */
-export function actionOfLabel(label: string | undefined): string | undefined {
+export function actionOfWords(label: string | undefined): ControlAction | undefined {
   const words = (label ?? "").trim()
-  if (!words) return undefined
-  // A JSON label may be cut short ("…" or "..."), so the field is read as far as it goes.
-  if (words.startsWith("{")) {
-    const named = /"action"\s*:\s*"([^"]*)"/.exec(words)?.[1]?.trim().toLowerCase()
-    return named || undefined
-  }
   const [first, ...rest] = words.split(/\s+/)
   const named = (first ?? "").toLowerCase()
-  // A preview is the action, and at most the id it names: a goal that happens to open on "list"
-  // keeps a token more, and reads as the work it is.
-  if (!CONTROL.has(named) || rest.length > 1) return undefined
+  if (!isControl(named) || rest.length > 1) return undefined
+  if (rest.length === 1 && !SUBAGENT_ID.test(rest[0])) return undefined
   return named
 }
 
 /**
+ * The action a JSON envelope's `action` field names — any tool's action, not only a control one. A
+ * delegation's control call fell back to this label before its words were derived, and a pull
+ * request call's transcript label still is its arguments: both read the action they took from here.
+ * A label cut short still says what it says, since the envelope is read as far as it goes.
+ */
+export function actionOfJsonLabel(label: string | undefined): string | undefined {
+  const words = (label ?? "").trim()
+  if (!words.startsWith("{")) return undefined
+  return actionOf(readEnvelope(words)?.fields)
+}
+
+/**
+ * The action a call took, read in one tool's vocabulary: the stamp made where its arguments were in
+ * hand, else whatever the caller's grammar reads off its label — a preview's words, a JSON
+ * envelope's action and a bare action word are three different grammars, so each tool names its own.
+ * Undefined where neither names an action the vocabulary knows: a call whose action can't be read
+ * keeps the generic row rather than claiming one, and a stamp outranks a label that would say more.
+ */
+export function resolveAction<V extends string>(
+  call: ActionCall,
+  vocabulary: ReadonlySet<string>,
+  readLabel: (label: string | undefined) => string | undefined,
+): V | undefined {
+  const named = call.action ?? readLabel(call.label)
+  return named !== undefined && vocabulary.has(named) ? (named as V) : undefined
+}
+
+/**
  * The control action a call took — from the stamp written where its arguments were in hand, else
- * from the label of a row stored before it. The row's words and the classifier's decision both ask
- * this, so neither can name an action the other doesn't.
+ * from the label of a row stored before it, in either shape a label arrives in: the preview's words,
+ * or the JSON envelope its arguments fell back to. The row's words and the classifier's decision
+ * both ask this, so neither can name an action the other doesn't.
  */
 export function controlAction(call: AgentCall): ControlAction | undefined {
-  const action = call.action ?? actionOfLabel(call.label)
-  return isControl(action) ? action : undefined
+  return resolveAction<ControlAction>(
+    call,
+    CONTROL,
+    (label) => actionOfWords(label) ?? actionOfJsonLabel(label),
+  )
 }
 
 /**
@@ -105,10 +143,12 @@ export function spawnedAgent(call: AgentCall): boolean {
   if (call.tool !== DELEGATE_TOOL) return false
   // Its arguments said, at ingest: only `spawn` set anything to work.
   if (call.action !== undefined) return call.action === SPAWN
-  // No stamp, so the label is all there is: a control preview proves the call ran no agent, and a
-  // label that names nothing (the tool's own name) proves nothing either — both draw a row.
-  if (controlAction(call)) return false
-  return Boolean(call.label && call.label !== DELEGATE_TOOL)
+  // No stamp, so the label is all there is. A control preview proves the call ran no agent, and so
+  // does a label that is an envelope rather than words: that row's arguments fell back as its label,
+  // and they say what the call was given, never that it started anything. Neither draws a card.
+  const words = (call.label ?? "").trim()
+  if (!words || words === DELEGATE_TOOL || words.startsWith("{")) return false
+  return controlAction(call) === undefined
 }
 
 /**
@@ -117,7 +157,7 @@ export function spawnedAgent(call: AgentCall): boolean {
  * stopped subagents makes no request it has no use for.
  */
 export function spawnInFlight(
-  messages: { tools?: (AgentCall & { status?: string })[] }[] | undefined,
+  messages: { tools?: (AgentCall & { status?: ToolEvent["status"] })[] }[] | undefined,
 ): boolean {
   return (messages ?? []).some((message) =>
     (message.tools ?? []).some((call) => call.status === "running" && spawnedAgent(call)),

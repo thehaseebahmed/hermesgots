@@ -2310,3 +2310,30 @@ full suite on pure `origin/main` passed, and that branch's last full run was 389
 ---
 
 Found by gating the tool-row placement change; it does not block that pull request.
+
+---
+
+# Deferred: a pull request row stored before the stamp reads *Used a tool*
+
+## Not entries, but recorded: the wording a pre-change row loses
+
+A `pull_request` call stored before this change carries no `action` stamp, and its streamed label was
+*the call's title* — the words of a pull request, not an action. The word table reads only a stamp or
+an action its own label names, so that row now draws **Used a tool** where it drew *Opened a pull
+request* before. Every such row gains its real words on the run that follows it (catch-up re-reads
+the path from the transcript), and no row is rewritten: the wording drift lasts as long as the old
+rows do, and only for the calls whose label was a title.
+
+- Cost: a past chat's pull request rows read less specifically than they did, until a host rescans
+  them. Nothing claims work that didn't happen — the sanctioned fallback (ADR 0053's
+  fail-toward-the-row default) — so this is a loss of colour, not of truth.
+- Suggested fix: none in the app. A backfill would have to guess an action from a title, which is
+  exactly the claim the decision refuses; the plugin could send `action` on the preview, but that is
+  a host change this branch deliberately doesn't ask for.
+- Why it is not applied here: the alternative — reading *Opened* from the name — is the bug this
+  change removes.
+
+---
+
+Found by the review pass on the agent-card classification change (ADR 0053). It does not block the
+pull request.

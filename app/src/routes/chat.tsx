@@ -646,7 +646,8 @@ export function ChatPage({
   const unstarted = !gone && configured && !hasMessages && !hasCards && !loadingHistory
   // The agents this chat's agent delegated to, for their cards in the thread. Only a call that set a
   // subagent to work turns the poll on: a list, steer or stop runs no agent to wait for (ADR 0053).
-  const agents = useSessionAgents(conversation ?? undefined, profile, spawnInFlight(messages), busy)
+  const spawning = useMemo(() => spawnInFlight(messages), [messages])
+  const agents = useSessionAgents(conversation ?? undefined, profile, spawning, busy)
   const subagentsRunning = useMemo(() => runningAgents(agents).length, [agents])
   // The count is drawn once, by whichever row is last: the reply's own while it streams, else the foot.
   const lastId = thread?.at(-1)?.id

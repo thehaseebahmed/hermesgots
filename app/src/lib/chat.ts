@@ -52,12 +52,11 @@ import { setUploading, wireContent } from "@/lib/attachments"
 import { refreshContext } from "@/lib/context"
 import { refreshChatProviderUsage } from "@/lib/provider-usage"
 import {
+  foldTranscriptDetails,
   liveTurn,
-  NO_PREVIEW_TOOLS,
   noteFollowUps,
   patchStats,
   reconcileHistory,
-  transcriptDetails,
 } from "@/lib/history"
 import { isLive } from "@/lib/live"
 import { unknownLastTurn } from "@/lib/model-changes"
@@ -66,8 +65,8 @@ import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { appendThinking, closeRun, forgetRuns, noteRunThinking } from "@/lib/thinking"
 import { quietly } from "@/lib/report"
 import { canSteer, midReply } from "@/lib/steer"
-import { actionOfLabel, DELEGATE_TOOL } from "@/lib/spawn"
 import { actionOfPreview } from "@/lib/tools"
+import { needsTranscriptWords } from "@/lib/tool-preview"
 import { randomId } from "@/lib/utils"
 import { knownLiveRun, readLiveRuns } from "@/lib/waiting"
 import { onWake } from "@/lib/wake"
@@ -156,6 +155,10 @@ interface Turn {
   resumed: boolean
   /** Stops flushing and saves the draft one last time. */
   close: () => Promise<void>
+  /** The user message and session a transcript read is asked by, resolved once. */
+  source?: Promise<TurnSource | undefined>
+  /** The transcript read out now, and whether a caller asked for another pass while it was. */
+  read?: { pending?: Promise<Message | undefined>; again?: boolean }
 }
 
 const turns = new Map<string, Turn>()
@@ -367,24 +370,25 @@ function streamHandlers(turn: Turn): StreamHandlers {
         // Only a patch whose whole result fit in the preview can be counted here.
         if (existing.tool === "patch" && event.status === "completed" && event.result)
           Object.assign(existing, patchStats(event.result))
-        // A call the stream could only name is worded once its round is in the transcript: the read
-        // as it started may have come before Hermes wrote the call down.
-        if (event.status !== "running" && NO_PREVIEW_TOOLS.has(existing.tool))
+        // A call Hermes previews with nothing says what it did only in its arguments, which the
+        // transcript holds: once its round is written, the words are read for it — and only while
+        // some such row still has none, so a finished round costs no read at all.
+        if (
+          event.status !== "running" &&
+          draft.tools.some((t) => needsTranscriptWords(t.tool) && t.action === undefined)
+        )
           void readTranscriptDetails(turn)
       } else {
         // A completion with no start to match still happened; it gets its own card — and it ends
         // whatever thinking was open, the same way a call that started does.
         closeThinkingRun(turn)
         const toolCallId = event.toolCallId ?? `${event.tool}:${Date.now()}`
-        // Hermes previews a delegation's control call as `list`, `steer <id>` or `stop <id>`, and a
-        // spawn as its goal: stamped here, the thread can tell them apart before the transcript
-        // lands, which then corrects it from the arguments themselves (ADR 0053). A call whose
-        // preview is the action it took — a cron call — is stamped the same way, so its row says what
-        // it did while it streams rather than waiting for the transcript to fold the action in.
-        const action =
-          event.tool === DELEGATE_TOOL
-            ? actionOfLabel(event.label)
-            : actionOfPreview(event.tool, event.label)
+        // What the call's preview names, stamped as the call arrives: Hermes previews a delegation's
+        // control call as `list`, `steer <id>` or `stop <id>`, and a cron call as its action, so the
+        // thread can tell them apart — and word them — before the transcript lands, which then
+        // corrects it from the arguments themselves (ADR 0053). A tool whose preview says nothing
+        // names no action here: the read below is what words it.
+        const action = actionOfPreview(event.tool, event.label)
         draft.tools.push({
           toolCallId,
           tool: event.tool,
@@ -399,7 +403,7 @@ function streamHandlers(turn: Turn): StreamHandlers {
         anchor = toolCallId
         // A call Hermes previews with nothing says what it did only in its arguments, which the
         // transcript holds: it is read as the call starts, so the row is worded while it runs.
-        if (NO_PREVIEW_TOOLS.has(event.tool)) void readTranscriptDetails(turn)
+        if (needsTranscriptWords(event.tool)) void readTranscriptDetails(turn)
       }
       draft.tools = [...draft.tools]
       touch()
@@ -475,16 +479,66 @@ const retryable = (error: unknown) =>
   error.status >= 500 ||
   [408, 429].includes(error.status)
 
+/** The turn's own user message and the chat's session, as the chat holds them. */
+interface TurnSource {
+  conversation: Conversation
+  user: Message
+}
+
 /**
- * The turn's own user message and the chat's session, as the chat holds them: what a read of the
- * transcript is asked by. Undefined for a chat with no session row or a turn whose message is gone.
+ * What a read of the transcript is asked by: the turn's own user message and the chat's session,
+ * read once per turn since neither changes under it. Undefined for a chat with no session row or a
+ * turn whose message is gone — asked again next time, since a chat may gain either.
  */
 async function turnSource(turn: Turn) {
-  const conversation = await db.conversations.get(turn.conversationId)
-  const messages = await getMessages(turn.conversationId)
-  const index = messages.findIndex((m) => m.id === turn.draft.id)
-  const user = messages.slice(0, index < 0 ? undefined : index).findLast((m) => m.role === "user")
-  return conversation && user ? { conversation, user } : undefined
+  turn.source ??= (async () => {
+    const conversation = await db.conversations.get(turn.conversationId)
+    const messages = await getMessages(turn.conversationId)
+    const index = messages.findIndex((m) => m.id === turn.draft.id)
+    let user: Message | undefined
+    for (let at = (index < 0 ? messages.length : index) - 1; at >= 0; at--)
+      if (messages[at].role === "user") {
+        user = messages[at]
+        break
+      }
+    return conversation && user ? { conversation, user } : undefined
+  })()
+  const source = await turn.source
+  if (!source) turn.source = undefined
+  return source
+}
+
+/**
+ * The running turn's reply as its transcript has it, read once at a time and shared: a call that
+ * needs it while a read is out joins that read, and asks for one more pass if its own call landed
+ * after the read began. A turn with several such calls costs one read per round, not one per call —
+ * the transcript is the whole chat, so asking it twice for one question is a read no screen shows.
+ */
+function transcriptOf(turn: Turn, signal: AbortSignal) {
+  turn.read ??= {}
+  const read = turn.read
+  if (read.pending) {
+    read.again = true
+    return read.pending
+  }
+  read.pending = (async () => {
+    let reply: Message | undefined
+    do {
+      read.again = false
+      const source = await turnSource(turn)
+      if (!source) return reply
+      reply = await liveTurn(
+        turn.config,
+        source.conversation.hermesSessionId,
+        source.user.content,
+        signal,
+      )
+    } while (read.again)
+    return reply
+  })().finally(() => {
+    read.pending = undefined
+  })
+  return read.pending
 }
 
 /**
@@ -492,21 +546,21 @@ async function turnSource(turn: Turn) {
  * events stream carries a call's tool, its preview and its result — never its arguments — and Hermes
  * previews a pull request call with nothing at all, so its row would read as a generic tool until
  * the turn ended and catch-up folded the transcript in. The transcript is written after every tool
- * round, so it's read as such a call starts, and only the details it holds are folded in: the reply
- * on screen stays the stream's own.
+ * round, so it's read as such a call starts.
+ *
+ * The fold is applied to the draft as it stands when the read lands, by call id: a call added or
+ * finished while the read was out survives it, where assigning the array the read was asked with
+ * would drop that row until a reload.
  */
 async function readTranscriptDetails(turn: Turn) {
-  const source = await turnSource(turn)
-  if (!source) return
-  const tools = await transcriptDetails(
-    turn.config,
-    source.conversation.hermesSessionId,
-    source.user.content,
-    turn.draft.tools,
-    AbortSignal.timeout(READ_TIMEOUT_MS),
-  ).catch(() => undefined)
+  if (!turn.config.apiKey) return
+  const signal = AbortSignal.any([turn.controller.signal, AbortSignal.timeout(READ_TIMEOUT_MS)])
+  const reply = await transcriptOf(turn, signal).catch(quietly("Reading a call's details"))
+  const transcript = reply?.tools
   // A turn that ended while the read was out keeps what it ended with.
-  if (!tools || !activeDrafts.has(turn.draft.id)) return
+  if (!transcript || !activeDrafts.has(turn.draft.id)) return
+  const tools = foldTranscriptDetails(turn.draft.tools, transcript)
+  if (!tools) return
   turn.draft.tools = tools
   turn.touch()
 }
@@ -519,15 +573,10 @@ async function readTranscriptDetails(turn: Turn) {
 async function transcriptReader(turn: Turn) {
   const { config, draft, touch, conversationId } = turn
   if (!config.apiKey) return undefined
-  const source = await turnSource(turn)
-  if (!source) return undefined
+  if (!(await turnSource(turn))) return undefined
   return async (signal: AbortSignal) => {
-    const reply = await liveTurn(
-      config,
-      source.conversation.hermesSessionId,
-      source.user.content,
-      signal,
-    ).catch(() => undefined)
+    // The same read the calls' details come from: one transcript, one request.
+    const reply = await transcriptOf(turn, signal).catch(() => undefined)
     if (!reply) return
     const done = new Set(
       draft.tools.filter((t) => t.status === "completed").map((t) => t.toolCallId),

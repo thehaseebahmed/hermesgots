@@ -1,29 +1,27 @@
 /**
- * What a pull request call's row says it did. Hermes's `pull_request` tool takes an `action` — ship,
- * push, update, status — and every one of them used to read *Opened a pull request*, so a status read
- * claimed an opening that never happened. The words are keyed off the action the call's arguments
- * named: the stamp the transcript parse leaves at ingest (#577), and for a row stored before the
- * stamp, the label it fell back to — its arguments as JSON.
- *
- * The live path is the one that can break silently. Hermes previews a pull request call with nothing
- * at all (no `_PREVIEW_BUILDERS` entry and no primary argument), so a streamed row's label is the
- * tool's name, while its transcript row's label is the arguments as JSON: the fold that carries what
- * only the transcript knows matches rows by tool and label, and the two never meet. So this file
- * pins more than the phrase table: the running turn read from the transcript (the path the app
- * actually draws a live turn from, since the host's events stream is blocked by CORS in a browser),
- * the streamed row that takes its action from that read, the streamed row that gains its action when
- * catch-up folds the transcript in, and the fact that no shape inherits the *Opened* claim it doesn't
- * own.
+ * A pull request call's row, drawn: what it says, and the sheet under it that names the call. The
+ * live path is the one that breaks silently — Hermes previews the call with nothing, so the stream's
+ * label and the transcript's never agree — so this file pins the running turn read from the
+ * transcript, the fold that carries what only the transcript knows, and the row's own text.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
 
 import { MessageItem } from "@/components/chat/message-item"
 import { db, type Message, type Profile, type ToolEvent } from "@/lib/db"
-import { liveTurn, reconcileHistory, toMessages, transcriptDetails } from "@/lib/history"
-import { kindOf, phrases } from "@/lib/tools"
+import { foldTranscriptDetails, liveTurn, reconcileHistory, toMessages } from "@/lib/history"
+import { PR_TOOL, phrases } from "@/lib/tools"
 import type { HermesConfig, SessionMessage } from "@/lib/hermes"
-import { connection, find, json, mount, seedSettings, settle } from "./component-kit.tsx"
+import {
+  click,
+  connection,
+  findAll,
+  find,
+  json,
+  mount,
+  seedSettings,
+  settle,
+} from "./component-kit.tsx"
 
 const server: HermesConfig = connection("pr-phrase")
 const SESSION = "pr-session"
@@ -43,7 +41,7 @@ const args = (action: string) =>
 function transcriptRow(action: string, extra: Partial<ToolEvent> = {}): ToolEvent {
   return {
     toolCallId: `call_${action}`,
-    tool: "pull_request",
+    tool: PR_TOOL,
     label: args(action),
     action,
     status: "completed",
@@ -57,8 +55,8 @@ function transcriptRow(action: string, extra: Partial<ToolEvent> = {}): ToolEven
 function streamedRow(extra: Partial<ToolEvent> = {}): ToolEvent {
   return {
     toolCallId: "run-1:3",
-    tool: "pull_request",
-    label: "pull_request",
+    tool: PR_TOOL,
+    label: PR_TOOL,
     status: "running",
     startedAt: STARTED * 1000,
     ...extra,
@@ -89,6 +87,8 @@ function drawn(tools: ToolEvent[], body: () => Promise<void>) {
 
 /** The row's own line, exactly as the summary reads. */
 const summary = () => find('[data-slot="tool-group"]')?.getAttribute("aria-label") ?? ""
+/** Each call's own row in the sheet the group opens. */
+const callRows = () => findAll("ol li").map((row) => (row.textContent ?? "").trim())
 
 test("each pull request action reads as what it took, not as an opening", async () => {
   await drawn(
@@ -104,6 +104,20 @@ test("each pull request action reads as what it took, not as an opening", async 
         "Opened a pull request, pushed the branch, updated a pull request, checked a pull request",
         "four actions, four phrases, in the order they ran",
       )
+      // The sheet's own rows, where the arguments-as-JSON label used to be drawn in mono.
+      await click(find('[data-slot="tool-group"]'))
+      const rows = callRows()
+      assert.deepEqual(
+        rows,
+        [
+          "Opened a pull request",
+          "Pushed the branch",
+          "Updated a pull request",
+          "Checked a pull request",
+        ],
+        "each row says what it did, and never the arguments it fell back to",
+      )
+      assert.doesNotMatch(rows.join("\n"), /\{/, "no row carries the JSON beside its words")
     },
   )
 })
@@ -230,12 +244,12 @@ test("a call that is still running takes its action from the transcript the chat
   // The path the app draws a live turn from: Hermes's events stream is blocked by CORS in a browser,
   // so the chat reads the running turn's transcript. The call's result row isn't written yet, so the
   // row is still running — and it must already say what it is doing.
-  serve(sessionRows([{ id: "call_pr", name: "pull_request", args: { action: "status" } }]))
+  serve(sessionRows([{ id: "call_pr", name: PR_TOOL, args: { action: "status" } }]))
   const running = await liveTurn(server, SESSION, "Ship it")
   assert.ok(running, "the running turn's reply, from its transcript")
   assert.deepEqual(
     (running.tools ?? []).map((tool) => [tool.tool, tool.status, tool.action]),
-    [["pull_request", "running", "status"]],
+    [[PR_TOOL, "running", "status"]],
     "the call, still running, carrying the action its arguments named",
   )
   assert.deepEqual(phrases(running.tools ?? []), ["Checking a pull request"])
@@ -244,16 +258,26 @@ test("a call that is still running takes its action from the transcript the chat
 test("a streamed call takes its action from the transcript while it is still running", async () => {
   // What the chat does as such a call starts: it reads the turn's transcript once and folds in only
   // what the stream couldn't know. The row keeps the label and the status this device drew.
-  serve(
-    sessionRows([{ id: "call_pr", name: "pull_request", args: { action: "update" } }], undefined),
-  )
-  const tools = await transcriptDetails(server, SESSION, "Ship it", [streamedRow()])
+  serve(sessionRows([{ id: "call_pr", name: PR_TOOL, args: { action: "update" } }], undefined))
+  const reply = await liveTurn(server, SESSION, "Ship it")
+  const tools = foldTranscriptDetails([streamedRow()], reply?.tools ?? [])
   assert.deepEqual(
     tools?.map((tool) => [tool.label, tool.action, tool.status]),
-    [["pull_request", "update", "running"]],
+    [[PR_TOOL, "update", "running"]],
     "still the stream's row, now saying what it is doing",
   )
   assert.deepEqual(phrases(tools ?? []), ["Updating a pull request"])
+})
+
+test("a streamed row keeps its place when the transcript holds no matching call", async () => {
+  // The fold pairs a call Hermes previews with nothing by its place in the run, and only where both
+  // sides count the same: a truncated list leaves the row as it stands rather than borrowing the
+  // words — or the status — of another call.
+  const tools = foldTranscriptDetails(
+    [streamedRow()],
+    [transcriptRow("ship"), transcriptRow("status")],
+  )
+  assert.equal(tools, undefined, "nothing to fold in, so nothing changes")
 })
 
 test("a streamed row gains its action when catch-up folds the transcript in", async () => {
@@ -303,7 +327,7 @@ test("a streamed row gains its action when catch-up folds the transcript in", as
   ])
   serve(
     sessionRows(
-      [{ id: "call_pr", name: "pull_request", args: { action: "ship", title: TITLE } }],
+      [{ id: "call_pr", name: PR_TOOL, args: { action: "ship", title: TITLE } }],
       JSON.stringify({
         results: [{ name: "repo", pushed: true, pr: { number: 27, title: TITLE } }],
       }),
@@ -314,7 +338,7 @@ test("a streamed row gains its action when catch-up folds the transcript in", as
   const stored = await db.messages.get("a-1")
   const tool = stored?.tools?.[0]
   assert.equal(tool?.action, "ship", "the streamed row took the action its arguments named")
-  assert.equal(tool?.label, "pull_request", "and kept the label the stream gave it")
+  assert.equal(tool?.label, PR_TOOL, "and kept the label the stream gave it")
   assert.deepEqual(
     phrases(stored?.tools ?? []),
     ["Opened a pull request"],
@@ -327,7 +351,7 @@ test("the transcript parse stamps the action and keeps the JSON label", () => {
   const parsed = toMessages(
     "c-1",
     SESSION,
-    sessionRows([{ id: "call_pr", name: "pull_request", args: { action: "update" } }]),
+    sessionRows([{ id: "call_pr", name: PR_TOOL, args: { action: "update" } }]),
     { live: true },
   ).find((message) => message.role === "assistant")
   const tool = parsed?.tools?.[0]
@@ -338,17 +362,4 @@ test("the transcript parse stamps the action and keeps the JSON label", () => {
     "the arguments as JSON: no preview, no primary argument",
   )
   assert.deepEqual(phrases(parsed.tools ?? []), ["Updating a pull request"])
-})
-
-test("the four actions are four kinds, and share the pull request icon", () => {
-  // The row groups calls by their kind, so two actions sharing one would read as a single phrase —
-  // and *Opened* would swallow the other three. They differ by kind and agree on the icon.
-  const kinds = ["ship", "push", "update", "status"].map((action) => kindOf(transcriptRow(action)))
-  assert.deepEqual(
-    kinds.map((kind) => kind.id),
-    ["pr", "pr", "pr", "pr"],
-    "one icon for all of them",
-  )
-  assert.equal(new Set(kinds).size, 4, "four groups, four phrases")
-  assert.equal(kindOf(streamedRow()).id, "used", "and a call the stream can't word is its own row")
 })

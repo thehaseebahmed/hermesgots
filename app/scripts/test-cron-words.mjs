@@ -1,17 +1,13 @@
 /**
- * What a cron call's row says it did. Every `cronjob_manage` call used to read as "Used a tool",
- * whatever its action — a schedule that was listed, a job that was run — so the words never told
- * the user what happened. The action is stamped where the call's arguments are in hand (the
- * transcript parse), and a row stored before the stamp is read from its label, which for this tool
- * is the action word itself. A call whose action the table doesn't know must still read as the
- * generic tool row: the thread's worst case is a vague row, never a claim that a job ran.
+ * What a cron call's row says it did, as a pure rule: the action stamped where the arguments were in
+ * hand, else the label a row stored before it — and the generic row for an action no table knows.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { activityOf, actionOfPreview, kindOf, phrases } from "../src/lib/tools.ts"
+import { activityOf, CRON_TOOL, kindOf, phrases, actionOfPreview } from "../src/lib/tools.ts"
 
-const CRON = "cronjob_manage"
+const CRON = CRON_TOOL
 
 /** A cron call as a thread stores it: its label, its status, and the action stamped at ingest. */
 const call = (label, extra = {}) => ({

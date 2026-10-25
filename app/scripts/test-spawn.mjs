@@ -1,14 +1,16 @@
 /**
  * Did this call set a subagent to work? The one rule a thread's card, its agents poll and its row's
- * words all ask — asked here of each shape a stored call arrives in, because the shapes a render
- * sees are what decide whether a chat can claim work that never ran (ADR 0053).
+ * words all ask — asked here of each shape a stored call arrives in, because the shapes a render sees
+ * are what decide whether a chat can claim work that never ran (ADR 0053).
  */
 import assert from "node:assert/strict"
 import test from "node:test"
 
 import {
   actionOf,
-  actionOfLabel,
+  actionOfJsonLabel,
+  actionOfWords,
+  controlAction,
   controlWords,
   DELEGATE_TOOL,
   spawnInFlight,
@@ -46,6 +48,18 @@ test("a call whose arguments named no action is a spawn, unless its label names 
   assert.equal(spawnedAgent(call(undefined)), false)
 })
 
+test("a label that is an envelope is never a card, whatever action it names", () => {
+  // The arguments fell back as the label, so they say what the call was given — never that it set
+  // anything to work. An action the rule doesn't know is still an action.
+  for (const label of [
+    '{"action":"archive"}',
+    '{"action":"frobnicate","subagent_id":"sub-1"}',
+    '{"goal":"You are the Reviewer for CP3: read the parser end to end"}',
+    '{"tasks":[{"goal":"one"}]}',
+  ])
+    assert.equal(spawnedAgent(call(label)), false, `${label} draws a tool row`)
+})
+
 test("no other tool is ever a spawn, whatever it is called", () => {
   assert.equal(spawnedAgent({ tool: "read_file", label: "list" }), false)
   assert.equal(spawnedAgent({ tool: "terminal", label: GOAL, action: "spawn" }), false)
@@ -53,9 +67,20 @@ test("no other tool is ever a spawn, whatever it is called", () => {
 
 test("a goal that opens on a control word is still work, while a preview stays a control", () => {
   // A preview is the action and at most the id it names; a word more reads as the goal it is.
-  assert.equal(spawnedAgent(call("list all the files in src")), true)
-  assert.equal(spawnedAgent(call("steer the team toward the parser")), true)
-  assert.equal(actionOfLabel("steer sub-1"), "steer", "and the preview still names its action")
+  for (const goal of ["list all the files in src", "steer the team toward the parser", "stop the"])
+    assert.equal(spawnedAgent(call(goal)), true, `${goal} is the work, not an action`)
+  assert.equal(actionOfWords("steer sub-1"), "steer", "and the preview still names its action")
+})
+
+test("a control word stamps only where the word after it looks like a subagent's id", () => {
+  // `_delegate_action_preview` prints `{action} {subagent_id}`, so the second word is an id — never
+  // the short plain word a goal opens with ("stop the parser", "list it").
+  for (const label of ["stop the", "list it", "steer a", "stop all"])
+    assert.equal(actionOfWords(label), undefined, `${label} names no id, so no action`)
+  for (const label of ["steer sub-1", "stop sa-1-4f2a", "stop 20260521_141233_ab12cd"])
+    assert.equal(actionOfWords(label), label.split(" ")[0], `${label} names an id`)
+  assert.equal(actionOfWords("list"), "list", "a list names no id at all")
+  assert.equal(actionOfWords("list 3"), undefined, "and a bare number is not an id either")
 })
 
 test("the stamp is the action the arguments named, trimmed and lower-cased", () => {
@@ -73,6 +98,15 @@ test("the stamp is the action the arguments named, trimmed and lower-cased", () 
   assert.equal(actionOf(undefined), undefined)
 })
 
+test("a JSON envelope's action is read for any tool, and a field cut short still says it", () => {
+  assert.equal(actionOfJsonLabel('{"action":"list","subagent_id":null}'), "list")
+  assert.equal(actionOfJsonLabel('{"action":"archive"}'), "archive", "not only a control action")
+  assert.equal(actionOfJsonLabel('{"action":"ship","title":"feat: a thing…'), "ship")
+  assert.equal(actionOfJsonLabel('{"goal":"read the parser"}'), undefined, "no action field")
+  assert.equal(actionOfJsonLabel("steer sub-1"), undefined, "words are actionOfWords' to read")
+  assert.equal(actionOfJsonLabel(undefined), undefined)
+})
+
 test("a control call's words are the ones Hermes previews, from its own arguments", () => {
   // `_delegate_action_preview` in agent/display.py: f"{action} {subagent_id}".strip().
   assert.equal(controlWords({ action: "list" }), "list", "a list names no id")
@@ -84,6 +118,13 @@ test("a control call's words are the ones Hermes previews, from its own argument
   assert.equal(controlWords({ tasks: [{ goal: GOAL }] }), undefined)
 })
 
+test("the stamp outranks a label, and only a control action is one", () => {
+  assert.equal(controlAction(call("list", "steer")), "steer", "the stamp wins")
+  assert.equal(controlAction(call("steer sub-1")), "steer", "else the label's words")
+  assert.equal(controlAction(call(GOAL, "spawn")), undefined, "a spawn is not a control")
+  assert.equal(controlAction(call("stop the parser")), undefined, "nor is a two-word goal")
+})
+
 test("the same call reads the same while it streams and after the chat reloads", () => {
   for (const args of [
     { action: "list" },
@@ -91,7 +132,7 @@ test("the same call reads the same while it streams and after the chat reloads",
     { action: "stop", subagent_id: "sub-2" },
   ]) {
     const streamed = controlWords(args)
-    assert.equal(actionOfLabel(streamed), args.action, "the preview names the stamped action")
+    assert.equal(actionOfWords(streamed), args.action, "the preview names the stamped action")
     assert.equal(spawnedAgent(call(streamed, actionOf(args))), false, "and classifies the same")
     assert.equal(spawnedAgent(call(streamed)), false, "label alone, as a row stored before it")
   }

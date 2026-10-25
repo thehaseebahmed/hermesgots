@@ -1,10 +1,7 @@
 /**
- * What a delegation's control call says on its row: the action it took — listed subagents, steered
- * or stopped one — in the past once the call is over and in the present while it runs. The words
- * come from the same derivation the rest of the thread asks (ADR 0053): the action stamped where
- * the call's arguments were in hand, else the label a row stored before that stamp. So the two
- * paths must read alike, and an action the phrase table does not know keeps the generic tool row it
- * still is — a row may say less than the truth, never more.
+ * What a delegation's control call says on its row: the action it took, in the past once the call is
+ * over and in the present while it runs. The words come from the same derivation the rest of the
+ * thread asks (ADR 0053), so a row may say less than the truth, never more.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -13,6 +10,7 @@ import { AgentsContext } from "@/lib/agents"
 import { MessageItem } from "@/components/chat/message-item"
 import type { Message, ToolEvent } from "@/lib/db"
 import type { HermesConfig } from "@/lib/hermes"
+import { DELEGATE_TOOL } from "@/lib/spawn"
 import { connection, find, json, mount, text } from "./component-kit.tsx"
 
 const server: HermesConfig = connection("control-action-words")
@@ -21,7 +19,7 @@ const server: HermesConfig = connection("control-action-words")
 function call(toolCallId: string, label: string, extra: Partial<ToolEvent> = {}): ToolEvent {
   return {
     toolCallId,
-    tool: "delegate_task",
+    tool: DELEGATE_TOOL,
     label,
     status: "completed",
     startedAt: 1_000,

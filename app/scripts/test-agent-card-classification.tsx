@@ -1,30 +1,27 @@
 /**
  * What a reply draws for a `delegate_task` call: an agent's card only where the call set a subagent
- * to work, and an ordinary tool row for a control action that ran none. A card needs positive proof
- * of a spawn, and that proof is stamped where the call's arguments are in hand — so the reply below
- * carries all four shapes at once: a spawn, a control call stamped by the transcript parse, a
- * control call stamped from the stream's own preview, and a row stored before the stamp existed,
- * which is read from its label alone. A rule that matched the tool's name would draw a card for
- * every one of them (their labels fall inside the ±5s window a card matches by), so the counts here
- * are what hold the decision (ADR 0053).
+ * to work, and an ordinary tool row for every other shape — a rule that matched the tool's name
+ * would draw a card for all of them (ADR 0053).
  */
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { AgentsContext } from "@/lib/agents"
+import { AgentPopup } from "@/components/chat/agent-card"
 import { MessageItem } from "@/components/chat/message-item"
+import { AgentsContext, CARD_WINDOW_S } from "@/lib/agents"
 import type { Message, ToolEvent } from "@/lib/db"
-import type { DelegatedAgent, HermesConfig } from "@/lib/hermes"
-import { toMessages } from "@/lib/history"
-import { spawnedAgent } from "@/lib/spawn"
-import { click, connection, findAll, find, json, mount, text } from "./component-kit.tsx"
+import type { DelegatedAgent, HermesConfig, SessionMessage } from "@/lib/hermes"
+import { DELEGATE_TOOL } from "@/lib/spawn"
+import { click, connection, findAll, find, json, mount, settle, text } from "./component-kit.tsx"
 
 const server: HermesConfig = connection("card-classification")
 const SESSION = "parent-session"
 const AGENT = "child-session"
 const GOAL = "You are the Reviewer for CP3: read the parser end to end"
-/** When the subagent started, in seconds: each call sits at it, inside the ±5s window a card widens. */
+/** When the subagent started, in seconds. */
 const STARTED = Math.round(Date.now() / 1000) - 60
+/** A call's own moment: the far edge of the window a card widens around an agent it can't name. */
+const AT = (STARTED + CARD_WINDOW_S) * 1000
 
 const agent: DelegatedAgent = {
   id: AGENT,
@@ -40,11 +37,11 @@ const agent: DelegatedAgent = {
 function call(toolCallId: string, label: string, extra: Partial<ToolEvent> = {}): ToolEvent {
   return {
     toolCallId,
-    tool: "delegate_task",
+    tool: DELEGATE_TOOL,
     label,
     status: "completed",
-    startedAt: STARTED * 1000,
-    endedAt: STARTED * 1000 + 1_000,
+    startedAt: AT,
+    endedAt: AT + 1_000,
     ...extra,
   }
 }
@@ -61,10 +58,10 @@ function reply(tools: ToolEvent[]): Message {
   }
 }
 
-function drawn(tools: ToolEvent[], body: () => Promise<void>) {
+function drawn(tools: ToolEvent[], body: () => Promise<void>, agents = [agent]) {
   globalThis.fetch = (async () => json({})) as typeof fetch
   return mount(
-    <AgentsContext.Provider value={{ agents: [agent], server, sessionId: SESSION }}>
+    <AgentsContext.Provider value={{ agents, server, sessionId: SESSION }}>
       <MessageItem message={reply(tools)} />
     </AgentsContext.Provider>,
     body,
@@ -125,44 +122,86 @@ test("proof of the control action outranks a label that would match a subagent",
   })
 })
 
-test("the transcript stamps what each call did, and words a control call as it streamed", () => {
-  // The derivation the thread reads: a control call's arguments, parsed where they are in hand, give
-  // it the action it did and the words Hermes previewed it with — never `{"action":"list"}`.
-  const [reply] = toMessages("c-1", "s-1", [
-    {
-      id: 1,
-      role: "assistant",
-      content: null,
-      timestamp: 1,
-      tool_calls: [
-        { id: "c-list", function: { name: "delegate_task", arguments: '{"action":"list"}' } },
-        {
-          id: "c-steer",
-          function: {
-            name: "delegate_task",
-            arguments: '{"action":"steer","subagent_id":"sub-1"}',
-          },
-        },
-        {
-          id: "c-spawn",
-          function: { name: "delegate_task", arguments: JSON.stringify({ goal: GOAL }) },
-        },
-      ],
-    },
-  ])
-  const tools = reply.tools ?? []
-  assert.deepEqual(
-    tools.map((tool) => [tool.label, tool.action]),
+test("a label that is an envelope never draws a card, whatever action it names", async () => {
+  // A stored row whose arguments fell back as its label says what the call was given, never that it
+  // started anything — even where the action it names is one the rule has no words for.
+  await drawn(
     [
-      ["list", "list"],
-      ["steer sub-1", "steer"],
-      [GOAL, undefined],
+      call("c-archive", '{"action":"archive","subagent_id":"sub-9"}'),
+      call("c-goal", `{"goal":${JSON.stringify(GOAL)}}`),
+      call("c-tasks", '{"tasks":[{"goal":"read the parser"}]}'),
     ],
-    "each call's words and its stamped action",
+    async () => {
+      assert.equal(cards().length, 0, "no card: an envelope is not proof of a spawn")
+      assert.ok(toolRow(), "they are one group of tool rows")
+      assert.match(toolRow()?.getAttribute("aria-label") ?? "", /Used 3 tools/)
+    },
   )
-  assert.deepEqual(
-    tools.map((tool) => spawnedAgent(tool)),
-    [false, false, true],
-    "and the one rule reads them as a row, a row and a card",
+})
+
+test("a goal that opens on a control word keeps its card", async () => {
+  // "stop the" is the short plain word a goal opens with, not the id a preview names after `stop`;
+  // a call whose preview names an id is the control it is.
+  await drawn(
+    [call("c-stop-goal", "stop the"), call("c-steer-id", "steer sa-1-4f2a")],
+    async () => {
+      assert.equal(cards().length, 1, "the goal is the work it is")
+      assert.match(cards()[0].textContent ?? "", /Sub-Agent/, "and it keeps the card a spawn has")
+      const row = toolRow()
+      assert.ok(row, "the steer names an id, so it is a row")
+      assert.equal(row.getAttribute("aria-label"), "Steered subagent")
+    },
+  )
+})
+
+/** A row of the child session's own transcript, as Hermes wrote it. */
+const childRows: SessionMessage[] = [
+  { id: 1, role: "user", content: GOAL, timestamp: STARTED },
+  {
+    id: 2,
+    role: "assistant",
+    content: null,
+    timestamp: STARTED,
+    tool_calls: [
+      {
+        id: "call_child",
+        type: "function",
+        function: {
+          name: DELEGATE_TOOL,
+          arguments: JSON.stringify({ goal: "Audit the reader for unbounded reads" }),
+        },
+      },
+    ],
+  },
+]
+
+const nested: DelegatedAgent = {
+  id: "grandchild-session",
+  goal: "Audit the reader for unbounded reads",
+  model: "test/model",
+  startedAt: STARTED,
+  endedAt: null,
+  toolCalls: 1,
+  status: "running",
+}
+
+test("a spawn inside a subagent's own pop-up still draws its card", async () => {
+  // A subagent that delegated in turn: its own thread is drawn by the same parts, so the card
+  // follows the spawn there too.
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input))
+    if (url.pathname.endsWith("/messages")) return json({ data: childRows })
+    return json({})
+  }) as typeof fetch
+  await mount(
+    <AgentsContext.Provider value={{ agents: [agent, nested], server, sessionId: SESSION }}>
+      <AgentPopup agent={agent} server={server} open onOpenChange={() => {}} />
+    </AgentsContext.Provider>,
+    async () => {
+      await settle()
+      assert.equal(cards().length, 1, "the nested spawn draws its card in the pop-up")
+      assert.equal(cards()[0].getAttribute("data-agent"), nested.id)
+      assert.equal(toolRow(), null, "and nothing about it is a tool row")
+    },
   )
 })
