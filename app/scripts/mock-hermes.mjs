@@ -63,7 +63,7 @@
 // between the two calls — so the thinking before them is a run of its own above one tool group, and
 // the two stretches that follow each call land beside one another under it and draw as one row.
 // Say "stall" as well and the turn then holds 2.5s with nothing else on the wire.
-// Say "think at length" for the same working-out at eight paragraphs: one run, longer than a row is
+// Say "think at length" for the same working-out at ten paragraphs: one run, longer than a row is
 // drawn tall, so a thread that opens it shows all of it and the thread has to scroll.
 // Say "draw the interface" for a reply that carries one: an `openui-lang` block naming itself with
 // `# id: sales` — a card, a table, a callout and two bar charts whose five-digit ticks have to fit
@@ -1741,6 +1741,8 @@ const REASONING_AT_LENGTH = {
     "```sh\ndu -sh /var/log/journal /var/log/*.gz\n```",
     "If every rotation went, the machine would keep running and the next incident would be harder to read. If the journal went the same is true, but the loss is larger: that is the one with yesterday in it.",
     "So the order to look at them in is the rotations first, and the journal only if that isn't enough. The rest of it, the small files, isn't worth a command of its own.",
+    "The journal can be truncated once the rotations are gone, but that still leaves it taking the room it does until someone does.",
+    "Nothing else under /var/log grows the way those two do, so nothing else needs a decision out of this pass.",
     "None of this is mine to decide alone, so the answer names the folders and says what each one costs to lose. The deleting is theirs.",
   ],
 }

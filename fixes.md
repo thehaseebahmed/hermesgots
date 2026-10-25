@@ -2097,3 +2097,85 @@ Found by the `/simplify-code` and `/code-review` passes on this branch. It was a
 spec-compliance review, not a bug hunt — and neither entry blocks the pull request.
 
 ---
+
+# Deferred fixes from the reviews on thinking in a sheet
+
+Three review passes over the branch that puts a reply's thinking in a sheet — `/simplify-code`'s
+four lenses (reuse, quality, efficiency, altitude), `/no-comments`, and `/code-review`'s two axes
+(the house standards and the spec) — found two cleanups too wide for this branch's pass, filed
+below. Everything else they raised is applied on the branch: the row drawn as a first-class pending
+state instead of a fabricated empty run, so nothing empty ever becomes a run and the status row has
+no sheet to open; the rows a reply draws decided once in `lib/thinking.ts` as `thinkingRows`; the
+sheet handed its scroll element over by ref instead of being reached through a `data-slot` string;
+one effect over the sheet's body, gated on a run that can actually follow, the listener registry and
+its false premise gone with it; Dexie v23 filtering the row it retires and every save taking the
+retired key back out of the row it puts; `aria-haspopup="dialog"` naming what the row opens while
+`aria-expanded` keeps saying whether it is open, and the row and its spinner labelled "Thinking…"
+rather than the spinner's default "Loading"; the e2e's `lastReply` polling the compound index
+instead of fetching and sorting the whole conversation; and in the tests, rows found by slot whatever
+shape they are, one tap-and-read helper replacing ten copies, one `shutSheet` in the kit replacing
+two, the fold switch's retirement asserted directly, de-switched titles in thread rendering, the
+sheet's "whole run drawn" asserted through one helper with one tolerance, and the wheel-stop leg
+tightened to prove follow against arriving words (the mock run given paragraphs enough to allow it).
+
+Declined rather than filed, with their reasons: dropping `aria-expanded` now that the row opens a
+dialog — `expanded()` in `scripts/component-kit.tsx:259` reads that attribute as *the* row-open
+signal in `test-live-span.tsx:131,184,217` and `test-thread-rendering.tsx:350,397,433`, six
+assertions the removal would rewrite, and `aria-haspopup="dialog"` + `aria-expanded` is the standard
+popup-trigger pair rather than a disclosure left behind; reverting `test-appearance-switch.tsx` to a
+pure fold-switch test as scope creep — the navigation-shortcuts coverage it carries is valid, and
+what it lacked (an assertion that the fold switch stays gone) is now there; extracting a shared
+sheet component from the two rows — both spell `Popup`/`PopupContent`, the library composed twice,
+while the contents differ (a markdown body with a measuring ref versus stacked pop-ups), so the
+wrapper would alias two lines behind a prop that hides them; and replacing the `drawn` latch with
+`Popup`'s open-change callback — `drawn` is the body *mounting*, when measuring can begin, and the
+callback is the open *animation ending*: different signals, and the follow starts at mount.
+
+## Careful
+
+### 1. Two owners for "the model is quiet now": `thinkingRows` for the row, `describeActivity` for the header
+
+The branch gave the row's question one home — `thinkingRows` (`app/src/lib/thinking.ts:177`)
+decides which stretches of a reply draw as rows, and `message-item.tsx` draws only what it returns.
+The session's question still has its own copy: `describeActivity` (`app/src/lib/format.ts:37`)
+returns `"Thinking…"` from two branches of its own — runs with no content, or the last call sitting
+at the end of the content — and its two readers are the chat header's subtitle
+(`app/src/routes/chat.tsx:502`) and, suppressed while a row can say it, the thread's status line
+(`app/src/components/chat/message-item.tsx:622`).
+
+- Cost: one rule held in two files that must agree by hand. `describeActivity` only speaks when
+  `runsOf(message)` has rows while the row draws before any run exists (the pending state), so the
+  copies already answer differently by design, and the next edit to either can move them further
+  apart — nothing exercises both surfaces together.
+- Suggested fix: make `describeActivity` return a structured activity (`{ kind: "thinking" |
+  "writing" | "waiting" | "tool" }`) and let the header pick its words from it while `thinkingRows`
+  stays the row's rule — or the smaller step, have its two `"Thinking…"` branches take
+  `thinkingRows(message).length > 0` so one predicate answers both.
+- Why it is not applied here: `lib/format.ts` and the header path are outside the files this branch
+  touched, and the header reading "Thinking…" while a turn thinks is a standing product decision —
+  reshaping the describer's return type moves every consumer in one commit, which belongs with
+  whoever next changes the header.
+- Why it is risky: the footer's suppression at `message-item.tsx:622` is derived from what rows
+  exist; if the describer changes shape under it, the footer has to move in the same commit or it
+  starts saying "Thinking…" beside the row again.
+
+### 2. `t.status === "running"` is spelled by hand wherever a running call is asked about
+
+The test for "a call is running" has no home. It is written out at `app/src/lib/format.ts:40`
+(`findLast` — which running tool), `app/src/components/chat/message-item.tsx:549` and
+`app/src/lib/thinking.ts:198` (`some` — whether one runs), `app/src/components/chat/tool-group.tsx:251`
+(`some`), with `app/src/components/chat/approval-card.tsx:32` spelling the finder again and
+`app/src/lib/tools.ts:91` folding the same comparison into a count.
+
+- Cost: four sites can disagree about one fact — a finder and a boolean answering the same question
+  in two shapes — and a change to what "running" means (a status renamed, an intermediate state
+  added) is a find-and-replace across the chat's render path with nothing to fail if one is missed.
+- Suggested fix: `isRunning(tool)` in `app/src/lib/tools.ts`, which already owns tool-call semantics
+  and already writes this comparison (`tools.ts:91`); the finder sites become
+  `.filter(isRunning).at(-1)`, the boolean sites call it directly.
+- Why it is not applied here: three of the four spellings predate the branch, and the extraction
+  lands in `lib/format.ts` and `lib/tools.ts` — files this branch never opened — while the
+  finder/boolean split means both shapes have to move at once to be worth it.
+- Why it is risky: low, but `lib/tools.ts` and `lib/format.ts` are read by every card that draws a
+  call, so each consumer's call is checked rather than bulk-swapped.
+

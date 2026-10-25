@@ -1,20 +1,24 @@
-// One turn on the mock, told to stall so its reasoning is the only thing on the wire for a while: the
-// only way a poll can look at a thread mid-thought. Two calls run back to back in it, so the reply
-// draws the thinking before them above one tool group and the two stretches that follow as one row
-// under it — the merge, the open latch, the fold and the uncapped body are all layout, which no lower
-// tier reaches.
+// One turn on the mock, told to stall so its reasoning is the only thing on the wire for a while:
+// the only way a poll can look at a thread mid-thought. Two calls run back to back in it, so the
+// reply draws the thinking before them above one tool group and the two stretches that follow as
+// one row under it. The merge is layout no lower tier reaches, and the row is the only place a
+// reader touches thinking now: it opens the working-out in the same sheet the tool row opens, and
+// the sheet's follow on a live run, the wheel inside it that stops that follow and the whole height
+// of its body are all geometry the browser has and jsdom cannot give. See ADR 0050.
 import { assert, app, flow, pass, settled } from "./lib.mjs"
 // What a row reads is the app's own rule, imported rather than restated: a second copy of the label
 // format here could drift from the one the thread draws and still pass.
 import { thinkingLabel } from "../../src/lib/thinking.ts"
 
-/** One reply's own row in the thread: the header and the toaster say plenty this flow must not read. */
+/** The reply's own item on the page: its rows, its calls and the sheet are all drawn inside it. */
 const ITEM = "[data-slot=message-scroller-item]"
 const WORKING = '[aria-live="polite"]'
 const THINKING = /^(Thinking…|Thought it through|Thought for \d+[sm])/
-const LINE = THINKING
 const SPAN = /^Thought for \d+s$/
-/** The share of the viewport height the deleted `max-h-[30dvh]` cap held: an open body outgrows it. */
+const ROW = "[data-slot=thinking-line]"
+const SHEET = "[data-slot=thinking-sheet]"
+const BODY = "[data-slot=thinking-body]"
+/** The share of the viewport height the deleted `max-h-[30dvh]` cap held: a sheet body outgrows it. */
 const FORMER_CAP_SHARE = 0.3
 const FIRST = "working-out, not just the answer"
 const MEASURED = "The first look says five gigabytes"
@@ -30,19 +34,21 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   await page.waitForURL("**/c/**", { timeout: 15_000 })
   const chatId = new URL(page.url()).pathname.split("/").at(-1)
   const item = page.locator(ITEM).last()
-  const line = item.getByRole("button", { name: LINE })
+  const rows = item.locator(ROW).locator("button")
 
-  // Everything the reply draws that only the browser has: each row's label and the words it holds,
-  // whether that body is in the tree and the tab order, the box it takes, where the reply's tool
-  // group sits among the rows, and whether a cap, a fade or a Show more survives anywhere in it.
-  const thread = () =>
+  // Everything the reply draws that only the browser has: each row's label and whether it spins,
+  // the order the rows and calls are drawn in, the sheet when one is open — its words, its box and
+  // where it is scrolled to — and whether a cap, a fade or a Show more survives anywhere.
+  const threadState = () =>
     page.evaluate(
-      ({ item, label }) => {
+      ({ item, row, label, sheet: sheetSlot, body: bodySlot }) => {
         const names = new RegExp(label)
         const own = [...document.querySelectorAll(item)].at(-1)
         const buttons = [...(own?.querySelectorAll("button") ?? [])]
-        const lines = [...(own?.querySelectorAll("[data-slot=thinking-line]") ?? [])]
+        const lines = [...(own?.querySelectorAll(row) ?? [])]
         const view = document.querySelector("[data-slot=message-scroller-viewport]")
+        const sheet = document.querySelector(sheetSlot)
+        const body = document.querySelector(bodySlot)
         const box = (node) => {
           if (!node) return null
           const rect = node.getBoundingClientRect()
@@ -52,21 +58,18 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
             height: Math.round(rect.height),
           }
         }
-        const rows = lines.map((drawn) => {
-          const control = drawn.querySelector("button")
-          const node = document.getElementById(control?.getAttribute("aria-controls") ?? "")
-          return {
-            label: control?.textContent?.trim() ?? null,
-            expanded: control?.getAttribute("aria-expanded") ?? null,
-            hidden: node?.getAttribute("aria-hidden") ?? null,
-            inert: node?.hasAttribute("inert") ?? false,
-            text: node?.textContent ?? "",
-            box: box(node),
-            drawn: node ? { height: node.scrollHeight, client: node.clientHeight } : null,
-          }
-        })
         return {
-          rows,
+          // A row is one element carrying its label — a button while there is a sheet to open, a
+          // status row before any word arrives — and its words live in the sheet alone, so a shut
+          // row holds none of them in the thread.
+          rows: lines.map((drawn) => {
+            const control = drawn.firstElementChild
+            return {
+              label: control?.textContent?.trim() ?? null,
+              expanded: control?.getAttribute("aria-expanded") ?? null,
+              spin: Boolean(control?.querySelector("[data-slot=spinner]")),
+            }
+          }),
           // The reply's drawn things in the order they are drawn: a thinking row is a button whose
           // text is its label, and the calls that touch draw as one button of their own.
           order: buttons.map((one) => {
@@ -75,20 +78,35 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
           }),
           group: own?.querySelector("[data-slot=tool-group]")?.getAttribute("aria-label") ?? null,
           groups: own?.querySelectorAll("[data-slot=tool-group]").length ?? 0,
-          cap: own?.querySelectorAll("[data-slot=thinking-cap]").length ?? 0,
-          fade: own?.querySelectorAll("[data-slot=thinking-fade]").length ?? 0,
+          // The sheet is one pop-up wherever a row opened it: its body holds the whole markdown.
+          sheet:
+            sheet && body
+              ? {
+                  text: body.textContent ?? "",
+                  box: box(body),
+                  drawn: { height: body.scrollHeight, client: body.clientHeight },
+                  scroll: {
+                    top: sheet.scrollTop,
+                    height: sheet.clientHeight,
+                    total: sheet.scrollHeight,
+                  },
+                  frame: box(sheet),
+                }
+              : null,
+          cap: document.querySelectorAll("[data-slot=thinking-cap]").length,
+          fade: document.querySelectorAll("[data-slot=thinking-fade]").length,
           frame: box(view),
           scroll: view && { top: view.scrollTop, height: view.clientHeight, total: view.scrollHeight },
           screen: { width: window.innerWidth, height: window.innerHeight },
         }
       },
-      { item: ITEM, label: THINKING.source },
+      { item: ITEM, row: ROW, label: THINKING.source, sheet: SHEET, body: BODY },
     )
 
-  // The cap, the fade and the control it sat behind are gone from the app: nothing may draw any of
-  // them, at any width, whatever a row is doing.
+  // The cap, the fade and the control it sat behind are gone from the app, and the words are gone
+  // from the thread: nothing may draw any of them, at any width, whatever a row is doing.
   const uncapped = async (where) => {
-    const state = await thread()
+    const state = await threadState()
     assert.equal(state.cap, 0, `${where} draws no thinking cap`)
     assert.equal(state.fade, 0, `${where} draws no fade at one`)
     assert.equal(
@@ -99,82 +117,125 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     return state
   }
 
-  // An open body has to be the whole of its markdown wherever it is drawn: taller than the share of
-  // the viewport the deleted cap cut it to, nothing clipped out of it, its last words in the tree and
-  // its end inside the thread's view. The same four at every width and theme, so they live in one
-  // place and every plate runs all of them.
-  const wholeBody = async (state, where) => {
-    const row = state.rows[0]
-    const bound = Math.ceil(state.screen.height * FORMER_CAP_SHARE)
+  /** A run's words are in its sheet or nowhere: never a body in the thread's own scroll. */
+  const inThread = async (snippet, where) => {
     assert.ok(
-      row.box.height > bound,
-      `${where}, an open row draws its whole body, past the ${bound}px the old cap held it to (${row.box.height}px)`,
+      !((await item.textContent()) ?? "").includes(snippet),
+      `${where}, the run's words are not drawn in the thread`,
     )
-    assert.ok(
-      row.drawn.height <= row.drawn.client + 1,
-      `${where}, with nothing clipped out of it (${row.drawn.height}px of ${row.drawn.client}px)`,
-    )
-    assert.ok(
-      (await page.getByText(LONG_LAST).count()) > 0,
-      `${where}, its last words are drawn, the run's final paragraph in full`,
-    )
-    assert.ok(
-      row.box.bottom <= state.frame.bottom + 2 && row.box.bottom > state.frame.top,
-      `${where}, its end sits in the thread's view (${row.box.bottom}px in ${state.frame.top}-${state.frame.bottom}px)`,
-    )
-    return { row, bound }
   }
 
   // A smooth scroll into place is not an animation `settled` waits for, so a reading taken straight
-  // after a row opens can catch the thread mid-move: wait for its scroll to come to rest first.
-  const rested = async () => {
+  // after a sheet opens can catch it mid-move: wait for its scroll to come to rest first. A scroll
+  // that never rests is this leg failing, so the wait's timeout is left to speak.
+  const rested = async (slot) => {
     let last = -1
-    try {
-      await until(
-        async () => {
-          const top = await page.evaluate(
-            () => document.querySelector("[data-slot=message-scroller-viewport]").scrollTop,
-          )
-          const still = top === last
-          last = top
-          return still
-        },
-        5_000,
-        "the thread to stop moving",
-      )
-    } catch {}
+    await until(
+      async () => {
+        const top = await page.evaluate((sel) => document.querySelector(sel)?.scrollTop ?? -1, slot)
+        const still = top === last
+        last = top
+        return still
+      },
+      5_000,
+      "the scroller to stop moving",
+    )
     await settled(page)
   }
 
-  // The turn's own pause and lead-in: nothing has arrived, so the thread says it is writing. The row
-  // and the reply's own box are read in one go, so the state can't move between the two.
-  const beforeReasoning = await until(
-    () =>
-      page.evaluate(
-        async ({ id, item, working, label }) => {
-          const { db } = await import("/src/lib/db.ts")
-          const last = (
-            await db.messages.where("conversationId").equals(id).sortBy("createdAt")
-          ).at(-1)
-          if (last?.role !== "assistant" || last.status !== "streaming") return null
-          if (last.reasoningRuns?.length || last.content) return null
-          const own = [...document.querySelectorAll(item)].at(-1)
-          const says = own?.querySelector(working)?.textContent ?? ""
-          const names = new RegExp(label)
-          const drawn = [...(own?.querySelectorAll("button") ?? [])].filter((one) =>
-            names.test(one.textContent?.trim() ?? ""),
-          )
-          return says ? { says, lines: drawn.length } : null
-        },
-        { id: chatId, item: ITEM, working: WORKING, label: LINE.source },
-      ),
+  /**
+   * How far below what the sheet shows the run's own end still lies: 0, the follow is holding it.
+   * Measured off the body, not the scroll box's own total — the wrapper pads 24px below the run's
+   * last words, and that empty floor is not more of the run to read.
+   */
+  const foot = (state) =>
+    state.sheet
+      ? Math.max(0, state.sheet.box.bottom - state.sheet.frame.bottom)
+      : Infinity
+
+  /** Whether the body has outgrown the share of the screen the old cap held it to. */
+  const tall = (state) =>
+    Boolean(
+      state.sheet && state.sheet.drawn.height > state.screen.height * FORMER_CAP_SHARE,
+    )
+
+  /**
+   * The sheet holds the whole run: past the old cap's share of the screen, and drawn in full — the
+   * body's own height against the room the sheet gives it.
+   */
+  const whole = (state, where) => {
+    const drawn = state.sheet.drawn
+    assert.ok(
+      tall(state),
+      `${where}: ${drawn.height}px of run past the ${Math.round(state.screen.height * FORMER_CAP_SHARE)}px the old cap held`,
+    )
+    assert.ok(
+      drawn.height <= drawn.client + 1,
+      `${where}: nothing clipped out of it (${drawn.height}px of ${drawn.client}px drawn)`,
+    )
+  }
+
+  /** Opens a row's sheet and waits for the words to reach it. */
+  const open = async (index, where) => {
+    await rows.nth(index).click()
+    const opened = await until(
+      async () => {
+        const state = await threadState()
+        return state.sheet ? state : null
+      },
+      10_000,
+      `${where}'s sheet to open`,
+    )
+    await settled(page)
+    return opened
+  }
+
+  /** Closes the sheet the way a reader does — their own key — and waits for the words to go. */
+  const shut = async () => {
+    await page.keyboard.press("Escape")
+    await until(
+      async () => ((await page.evaluate((sel) => !document.querySelector(sel), BODY)) ? true : null),
+      5_000,
+      "the sheet to close",
+    )
+    await settled(page)
+  }
+
+  // The turn's own pause and lead-in: nothing has arrived, so the row carries the turn — its
+  // spinner on screen from the first moment the reply works, before a word of thinking arrives.
+  // The store is waited on first (the row and the footer's line are drawn in one render), then the
+  // row itself through the thread's own probe, which is where every other reading of it comes from.
+  await until(
+    async () =>
+      page.evaluate(async (id) => {
+        const { getMessages } = await import("/src/lib/db.ts")
+        const last = (await getMessages(id)).at(-1)
+        if (last?.role !== "assistant" || last.status !== "streaming") return null
+        return !last.reasoningRuns?.length && !last.content ? true : null
+      }, chatId),
     20_000,
-    "the reply to be up with nothing said yet and its working line showing",
+    "the reply to be up, streaming, before any thinking lands",
   )
-  assert.match(beforeReasoning.says, /Writing…/, "the working line says what it is doing")
-  assert.equal(beforeReasoning.lines, 0, "with no thinking row for a turn that hasn't thought yet")
+  const before = await until(
+    async () => {
+      const state = await threadState()
+      return state.rows.length === 1 && state.rows[0].label === "Thinking…" ? state : null
+    },
+    10_000,
+    "the row carrying the turn before any thinking lands",
+  )
+  assert.equal(before.rows.length, 1, "the row is on screen from the first moment the turn works")
+  assert.equal(before.rows[0].spin, true, "with its spinner, before a word of thinking arrives")
+  assert.equal(
+    before.rows[0].expanded,
+    null,
+    "as a status row with nothing to open: its stretch has not arrived",
+  )
+  assert.equal(before.sheet, null, "and no sheet drawn for a row holding no words")
+  const says = await page.evaluate((sel) => document.querySelector(sel)?.textContent ?? "", WORKING)
+  assert.ok(!/Writing…|Thinking…/.test(says), "the footer says nothing while the row says it")
   await shot("working")
-  pass("the working line reads Writing… before the turn's first thinking, with no thinking row yet")
+  pass("the row wears the spinner from the turn's first working moment, the footer silent")
 
   // The first stretch landing with more of it still to come, and nothing said: a single block would
   // have put the whole working-out on the row at once, which is what the mock is told not to do.
@@ -187,40 +248,42 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     30_000,
     "the turn's first thinking to land, with more of it still to come",
   )
-  await until(
-    async () => ((await item.textContent())?.includes(FIRST) ? true : null),
+  const streaming = await until(
+    async () => {
+      const state = await threadState()
+      return state.rows.length === 1 && state.rows[0].label === "Thinking…" ? state : null
+    },
     5_000,
-    "the thinking to reach the thread",
+    "the thinking to reach the row",
   )
-  const streaming = await thread()
-  assert.equal(streaming.rows.length, 1, "one stretch of thinking draws one row")
-  assert.equal(streaming.rows[0].label, "Thinking…", "which says it is thinking")
-  assert.equal(streaming.rows[0].expanded, "true", "and stands open")
-  assert.ok(
-    streaming.rows[0].text.includes(FIRST),
-    "its body readable, holding the piece that landed",
-  )
+  assert.equal(streaming.rows[0].spin, true, "the row says it is thinking")
+  assert.equal(streaming.rows[0].expanded, "false", "and its words are shut in the sheet")
+  assert.equal(streaming.sheet, null, "with no sheet open")
+  await inThread(FIRST, "while the turn thinks")
   await uncapped("while the turn is thinking")
-  assert.equal(
-    await item.locator(WORKING).count(),
-    0,
-    "the working line has stood down while the thinking streams",
-  )
-  assert.doesNotMatch(
-    (await item.textContent()) ?? "",
-    /Writing…/,
-    "and nothing in the reply still says it is writing",
-  )
-  await shot("thinking")
-  pass("mid-thought the row stands open reading Thinking…, the working line gone from the reply")
 
-  // A call ends that stretch. The row it measured keeps its span and stays open — the turn still
-  // works, so nothing folds until the answer begins.
+  // Tapping the live row opens the sheet on its newest words, which it then keeps in view.
+  const opened = await open(0, "the live row")
+  assert.ok(opened.sheet.text.includes(FIRST), "the sheet holds the piece that landed")
+  const arrived = await until(
+    async () => {
+      const state = await threadState()
+      return state.sheet && foot(state) <= 8 ? state : null
+    },
+    10_000,
+    "the sheet to land on the run's newest words",
+  )
+  assert.equal(arrived.rows[0].expanded, "true", "the row stands open while its sheet is up")
+  await shot("opened-live")
+  pass("tapping the row mid-thought opens the sheet on the run's newest words")
+  await shut()
+
+  // A call ends that stretch. The row it measured takes its span, the stretch after the call thinks.
   const latched = await until(
     async () => {
       const reply = await lastReply(chatId)
       if (reply?.status !== "streaming" || reply.runs.length !== 2 || reply.content) return null
-      return reply.runs[1].text.includes(MEASURED) && reply.runs[0].spanMs !== null ? thread() : null
+      return reply.runs[1].text.includes(MEASURED) && reply.runs[0].spanMs !== null ? threadState() : null
     },
     30_000,
     "the first call to land with the thinking after it streaming",
@@ -231,33 +294,26 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     SPAN,
     `the row the call ended reads the span it measured (${latched.rows[0].label})`,
   )
-  assert.equal(
-    latched.rows[0].expanded,
-    "true",
-    "and stays open: the turn still works, so the row that streamed keeps its place",
-  )
-  assert.ok(latched.rows[0].text.includes(FIRST), "with its own words still there to read")
+  assert.equal(latched.rows[0].spin, false, "and no longer spins: that stretch is written down")
   assert.equal(latched.rows[1].label, "Thinking…", "the stretch after the call is thinking")
-  assert.equal(latched.rows[1].expanded, "true", "and open as its words arrive")
-  assert.ok(latched.rows[1].text.includes(MEASURED), "holding the first thing it says")
+  assert.equal(latched.rows[1].spin, true, "and spins while it arrives")
   assert.deepEqual(
     latched.order.map((one) => one.kind),
     ["thinking", "tool", "thinking"],
     "the thinking before the call is drawn above it, and the thinking it broke below",
   )
+  await inThread(MEASURED, "after the first call")
   await shot("latched")
-  pass(
-    `the run a call ended stays open reading "${latched.rows[0].label}" while the next one streams`,
-  )
+  pass(`the run a call ended reads \"${latched.rows[0].label}\" while the stretch after it streams`)
 
   // A second call, straight after the first with nothing said between them: the two draw as ONE tool
-  // group, and the stretch that follows each of them lands beside the other under it — two rows that
-  // touch, drawn as one row holding every word of both.
+  // group, and the stretch that follows each of them lands beside the other under it — two rows
+  // that touch, drawn as one row holding every word of both.
   const merged = await until(
     async () => {
       const reply = await lastReply(chatId)
       if (reply?.status !== "streaming" || reply.runs.length !== 3 || reply.content) return null
-      return reply.runs[2].text.includes(ACCOUNTING) ? thread() : null
+      return reply.runs[2].text.includes(ACCOUNTING) ? threadState() : null
     },
     30_000,
     "the second call to land with the thinking after it streaming",
@@ -282,62 +338,46 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     "Thinking…",
     "which says it is thinking while its newest stretch streams",
   )
-  assert.equal(merged.rows[1].expanded, "true", "and stands open over both of them")
-  const first = merged.rows[1].text.indexOf(ROTATIONS)
-  const then = merged.rows[1].text.indexOf(ACCOUNTING)
-  assert.ok(first >= 0, "holding the stretch the first call broke")
-  assert.ok(then >= 0, "and the one the second call broke")
-  assert.ok(first < then, "in the order they arrived")
-  assert.equal(merged.rows[1].text.split(ROTATIONS).length - 1, 1, "each stretch once, not once a row")
   assert.deepEqual(
     merged.order.map((one) => one.kind),
     ["thinking", "tool", "thinking"],
     "the run before any call above the group, and the two that touched as one row below it",
   )
-  assert.equal(
-    merged.rows[0].expanded,
-    "true",
-    "the row above the group is still open, its run long ended",
-  )
-  await shot("merged")
-  pass(
-    "two calls back to back draw as one tool group, with the thinking before them above it and the two stretches that follow as one row below",
-  )
+  await inThread(ROTATIONS, "with two calls drawn")
 
-  // The last piece, the turn still holding: nothing has folded, and nothing may.
-  const holding = await until(
+  // That one row's sheet holds both stretches, in the order they arrived, each once.
+  const both = await open(1, "the merged row")
+  const first = both.sheet.text.indexOf(ROTATIONS)
+  const then = both.sheet.text.indexOf(ACCOUNTING)
+  assert.ok(first >= 0, "holding the stretch the first call broke")
+  assert.ok(then >= 0, "and the one the second call broke")
+  assert.ok(first < then, "in the order they arrived")
+  assert.equal(both.sheet.text.split(ROTATIONS).length - 1, 1, "each stretch once, not once a row")
+  await shot("merged")
+  pass("two calls back to back draw as one tool group, their two stretches as one row below")
+  await shut()
+
+  // The last piece, the turn still holding: nothing has folded, and nothing may — the labels are
+  // what changes as stretches end.
+  await until(
     async () => {
       const reply = await lastReply(chatId)
       if (!reply || reply.content || !reply.runs.at(-1)?.text.includes(LAST)) return null
-      const state = await thread()
-      return state.rows.length === 2 && state.rows.every((one) => one.expanded === "true")
-        ? state
-        : null
+      const state = await threadState()
+      return state.rows.length === 2 && state.rows[1].label === "Thinking…" ? state : null
     },
     20_000,
-    "the turn's last thinking piece to land with both of its rows still open",
+    "the turn's last thinking piece to land with the second row still thinking",
   )
-  pass(
-    `the turn thinks to its last piece with both of its ${holding.rows.length} rows still open, and no answer yet`,
-  )
+  pass("the turn thinks to its last piece with the row after the group still wearing the spinner")
 
+  // What each row may read now that its spans are frozen: the run above the group its own span, and
+  // the merged row the sum of the two it holds — never the part of it this device measured for one.
   await until(
     async () => ((await lastReply(chatId))?.content ? true : null),
     30_000,
     "the reply's first answer token",
   )
-  const folded = await until(
-    async () => {
-      const state = await thread()
-      return state.rows.length === 2 && state.rows.every((one) => one.expanded === "false")
-        ? state
-        : null
-    },
-    5_000,
-    "both rows to fold",
-  )
-  // What each row may read now that its spans are frozen: the run above the group its own span, and
-  // the merged row the sum of the two it holds — never the part of it this device measured for one.
   const measured = await lastReply(chatId)
   const spans = measured.runs.map((run) => run.spanMs)
   assert.equal(spans.length, 3, "the reply keeps three stretches of thinking")
@@ -349,31 +389,30 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     thinkingLabel({ thinking: false, spanMs: spans[0] }),
     thinkingLabel({ thinking: false, spanMs: spans[1] + spans[2] }),
   ]
-  assert.deepEqual(
-    folded.rows.map((one) => one.label),
-    labels,
-    "the answer folds both rows together, each reading the span truth for what it holds",
+  const frozen = await until(
+    async () => {
+      const state = await threadState()
+      return state.rows.map((one) => one.label).join("|") === labels.join("|") ? state : null
+    },
+    10_000,
+    "both rows to read their spans",
   )
-  assert.match(folded.rows[1].label ?? "", SPAN, "the merged row reads a span, not a plain phrase")
+  assert.match(frozen.rows[1].label ?? "", SPAN, "the merged row reads a span, not a plain phrase")
   assert.notEqual(
-    folded.rows[1].label,
+    frozen.rows[1].label,
     thinkingLabel({ thinking: false, spanMs: spans[1] }),
     "and reads the two spans added, not the first of them",
   )
   assert.notEqual(
-    folded.rows[1].label,
+    frozen.rows[1].label,
     thinkingLabel({ thinking: false, spanMs: spans[2] }),
     "nor the second alone",
   )
-  // The fold itself, read off the same walk the rows were: what a closed row's body leaves out.
-  for (const index of [0, 1]) {
-    assert.equal(folded.rows[index].hidden, "true", `row ${index + 1}'s thinking leaves the tree`)
-    assert.equal(
-      folded.rows[index].inert,
-      true,
-      `row ${index + 1}'s thinking leaves the tab order too`,
-    )
-  }
+  assert.ok(
+    frozen.rows.every((one) => one.spin === false),
+    "with the spinner gone from every row the turn thought in",
+  )
+  assert.equal(frozen.sheet, null, "the answer closes no sheet: none was open")
 
   await until(
     async () => ((await lastReply(chatId))?.status === "done" ? true : null),
@@ -391,16 +430,26 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     .getByText(/\d+ tokens/)
     .first()
     .waitFor({ timeout: 15_000 })
-  await uncapped("with the turn folded at its answer")
-  await shot("folded")
-  pass(`the answer folds both rows, reading "${labels.join('", "')}"`)
+  await uncapped("with the turn answered")
+  await shot("answered")
+  pass(`the answer leaves both rows reading \"${labels.join('\", \"')}\", the words shut in the sheet`)
 
-  // A row drawn from storage starts closed: the visit's latch was never written down, and the spans
-  // it reads are the ones this device wrote onto the reply's own runs.
+  // The words are read back in the sheet, and the thread goes on holding none of them: the spans
+  // are the ones this device wrote onto the reply's own runs, and nothing was remembered about the
+  // sheet that visit opened — the next load is shut again.
+  const fromSheet = await open(1, "the merged row, answered")
+  assert.ok(fromSheet.sheet.text.includes(ROTATIONS), "with the first stretch still in the row")
+  assert.ok(fromSheet.sheet.text.includes(ACCOUNTING), "and the second one beside it")
+  assert.deepEqual(
+    fromSheet.order.map((one) => one.kind),
+    ["thinking", "tool", "thinking"],
+    "the rows are drawn in the same places as they were live",
+  )
+  await shut()
   await page.reload()
   const restored = await until(
     async () => {
-      const state = await thread()
+      const state = await threadState()
       return state.rows.length === 2 ? state : null
     },
     20_000,
@@ -411,23 +460,20 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     labels,
     "a reload on the device that watched keeps both spans, on the rows they were measured for",
   )
-  for (const index of [0, 1]) {
-    assert.equal(restored.rows[index].expanded, "false", "folded")
-    assert.equal(restored.rows[index].hidden, "true", "its body folded away")
-    assert.equal(restored.rows[index].inert, true, "and kept out of the tab order")
-  }
-  assert.ok(restored.rows[1].text.includes(ROTATIONS), "with the first stretch still in the row")
-  assert.ok(restored.rows[1].text.includes(ACCOUNTING), "and the second one beside it")
-  assert.deepEqual(
-    restored.order.map((one) => one.kind),
-    ["thinking", "tool", "thinking"],
-    "the rows are drawn in the same places as they were live",
+  assert.ok(
+    restored.rows.every((one) => one.expanded === "false"),
+    "with every row shut again, nothing remembered",
   )
+  assert.equal(restored.sheet, null, "and no sheet drawn")
+  await inThread(ROTATIONS, "after the reload")
   await shot("restored")
-  pass(`a reload reads the same two rows in the same places, still saying "${labels.join('", "')}"`)
+  pass(`a reload reads the same two rows in the same places, still saying \"${labels.join('\", \"')}\"`)
 
-  // A second turn, asked to think at length: one run, eight paragraphs of markdown, far taller than
-  // the share of the screen the cap used to hold. The height is geometry — no lower tier has it.
+  // A second turn, asked to think at length: one run, ten paragraphs of markdown, far taller than
+  // the share of the screen the cap used to hold. The height is geometry — no lower tier has it —
+  // and it is a phone's sheet this turn plays on: at a desktop's full-height drawer this run fits
+  // without scrolling, and a follow with no scroll to do proves nothing.
+  await page.setViewportSize({ width: 390, height: 844 })
   await send("think at length, then stall: what is eating /var/log?")
   await until(
     async () => {
@@ -438,135 +484,139 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     30_000,
     "the long working-out to start landing",
   )
-  await until(
-    async () => ((await item.textContent())?.includes(LONG_FIRST) ? true : null),
-    5_000,
-    "the long working-out to reach the thread",
+  const opening = await until(
+    async () => {
+      const state = await threadState()
+      return state.rows.length === 1 && state.rows[0].label === "Thinking…" ? state : null
+    },
+    10_000,
+    "the long run's row",
   )
-  const opening = await thread()
-  assert.equal(opening.rows.length, 1, "one run draws one row")
-  assert.equal(opening.rows[0].expanded, "true", "the row is open, as its run streams")
-  assert.equal(opening.rows[0].label, "Thinking…", "and says it is thinking")
+  assert.equal(opening.rows[0].spin, true, "which spins while its run streams")
+  await inThread(LONG_FIRST, "with a long run streaming")
   await uncapped("with a long run streaming")
 
-  const foot = (state) =>
-    state.scroll ? state.scroll.total - state.scroll.top - state.scroll.height : Infinity
+  // The sheet over the long run follows its end as paragraphs arrive — the follow the open row used
+  // to do in the thread, now bounded by the sheet's own body.
+  await open(0, "the long run")
+  // The wait is for the run to outgrow the cap's share of the screen inside the sheet, with the
+  // sheet at its end — a body still short leaves the sheet with nothing to scroll, which is not
+  // the following this leg is about.
   const followed = await until(
     async () => {
-      const state = await thread()
-      if (!state.scroll || state.scroll.total <= state.scroll.height + 8) return null
-      return foot(state) <= 8 ? state : null
+      const state = await threadState()
+      return tall(state) && foot(state) <= 8 ? state : null
     },
     20_000,
-    "the thread to overflow behind the long run and follow its end",
+    "the sheet to overflow behind the long run and follow its end",
   )
-  assert.ok(
-    followed.rows[0].box.bottom <= followed.frame.bottom + 2,
-    `the run's own end is in view (${followed.rows[0].box.bottom}px of ${followed.frame.bottom}px)`,
-  )
+  whole(followed, "the open sheet")
   const beforePiece = (await lastReply(chatId)).runs[0].text.length
   const grown = await until(
     async () => {
       const reply = await lastReply(chatId)
       if (!reply || reply.runs[0].text.length <= beforePiece) return null
-      const state = await thread()
-      return foot(state) <= 8 ? state : null
+      const state = await threadState()
+      return state.sheet && foot(state) <= 8 ? state : null
     },
     20_000,
     "another paragraph to land and stay in view",
   )
   assert.ok(
-    grown.rows[0].box.bottom <= grown.frame.bottom + 2,
-    "the paragraph that just landed is in view, not scrolled off below",
+    foot(grown) <= 2,
+    "the paragraph that just landed is in view, not scrolled off below the sheet",
   )
   await shot("growing")
-  pass("new words land in view while the open run streams, the thread following its end")
+  pass("new words land in view while the open sheet follows the run's end")
 
-  // A reader scrolling up leaves that follow behind: the thread stays where their wheel put it while
-  // the run keeps talking. The wheel is the reader's own input, which is what the row listens for.
-  const middle = await page.evaluate(() => {
-    const box = document
-      .querySelector("[data-slot=message-scroller-viewport]")
-      .getBoundingClientRect()
+  // A reader scrolling the sheet up leaves that follow behind: it stays where their wheel put it
+  // while the run keeps talking. The wheel is the reader's own input, which is what the row listens
+  // for — against the sheet's own scroll box, not the thread's. The body has to overflow the sheet
+  // with the sheet at its end, which is only the follow holding it there, and far enough up for the
+  // wheel to have somewhere to go.
+  await until(
+    async () => {
+      const state = await threadState()
+      return state.sheet &&
+        state.sheet.scroll.total - state.sheet.scroll.height > 72 &&
+        foot(state) <= 8
+        ? true
+        : null
+    },
+    20_000,
+    "the follow to hold an overflowing body's end in the sheet",
+  )
+  const spot = await page.evaluate((sel) => {
+    const view = document.querySelector(sel)
+    const box = view.getBoundingClientRect()
     return {
       x: Math.round(box.left + box.width / 2),
       y: Math.round(box.top + box.height / 2),
-      top: document.querySelector("[data-slot=message-scroller-viewport]").scrollTop,
+      top: view.scrollTop,
     }
-  })
-  await page.mouse.move(middle.x, middle.y)
+  }, SHEET)
+  await page.mouse.move(spot.x, spot.y)
   await page.mouse.wheel(0, -260)
-  await rested()
-  const put = await page.evaluate(
-    () => document.querySelector("[data-slot=message-scroller-viewport]").scrollTop,
-  )
-  assert.ok(put < middle.top - 40, `the wheel scrolled the thread up (${Math.round(put)}px)`)
+  await rested(SHEET)
+  const put = await page.evaluate((sel) => document.querySelector(sel).scrollTop, SHEET)
+  assert.ok(put < spot.top - 40, `the wheel scrolled the sheet up (${Math.round(put)}px)`)
   const beforeScrollPiece = (await lastReply(chatId)).runs[0].text.length
+  // Another paragraph is the run still talking after the reader put the sheet where they wanted it:
+  // the wait is for those words to really land, so the sheet staying put proves the follow stopped
+  // against words arriving — not against the run having quietly ended.
   const stayed = await until(
     async () => {
       const reply = await lastReply(chatId)
       if (!reply || reply.runs[0].text.length <= beforeScrollPiece) return null
-      return thread()
+      return threadState()
     },
     20_000,
-    "another paragraph after the reader scrolled up",
+    "another paragraph after the reader scrolled the sheet up",
   )
   assert.ok(
-    Math.abs(stayed.scroll.top - put) <= 2,
-    `the thread stayed where the reader put it (${stayed.scroll.top}px of ${Math.round(put)}px)`,
+    Math.abs(stayed.sheet.scroll.top - put) <= 2,
+    `the sheet stayed where the reader put it (${stayed.sheet.scroll.top}px of ${Math.round(put)}px)`,
   )
-  assert.ok(
-    stayed.rows[0].box.bottom > stayed.frame.bottom,
-    "with the run's end no longer chased below the fold",
-  )
-  pass("a scroll up stops the follow: the thread holds still while the run keeps talking")
+  assert.ok(foot(stayed) > 8, "with the run's end no longer chased below the sheet's fold")
+  await shot("stopped")
+  pass("a scroll up stops the follow: the sheet holds still while the run keeps talking")
 
-  // The answer begins: the row folds, and a tap opens it again on a finished run. That is the state
-  // the uncapped body is proved in — the whole of its markdown, however many screens it runs past.
+  // The answer begins with the sheet still up — it never closes itself — and the label beside it
+  // takes the span the moment its run is written down.
   await until(
     async () => ((await lastReply(chatId))?.content ? true : null),
     30_000,
     "the reply's first answer token",
   )
-  await until(
-    async () => ((await thread()).rows[0]?.expanded === "false" ? true : null),
-    5_000,
-    "the long row to fold",
+  const kept = await until(
+    async () => {
+      const state = await threadState()
+      return state.sheet && SPAN.test(state.rows[0].label ?? "") ? state : null
+    },
+    10_000,
+    "the label beside the open sheet to read the span",
   )
+  assert.equal(kept.rows[0].expanded, "true", "the row still stands open over its sheet")
+  assert.ok(kept.sheet.text.includes(LONG_LAST), "the sheet still holds the run's last words")
+  whole(kept, "the sheet as its row's label changed")
+  // The span this run's row reads is the one stamped when the run ended, at the answer: read it
+  // back after, the way the row does.
+  const span = thinkingLabel({ thinking: false, spanMs: (await lastReply(chatId)).runs[0].spanMs })
   await until(
     async () => ((await lastReply(chatId))?.status === "done" ? true : null),
     30_000,
     "the reply to finish",
   )
   await settled(page)
-  await page.evaluate(() => {
-    document.querySelector("[data-slot=message-scroller-viewport]").scrollTop = 0
-  })
-  await settled(page)
-  await line.click()
-  await until(
-    async () => ((await thread()).rows[0]?.expanded === "true" ? true : null),
-    5_000,
-    "the row to open",
-  )
-  await rested()
-  const opened = await uncapped("with the finished run open")
-  const { row: whole, bound } = await wholeBody(opened, "with the finished run open")
-  assert.ok(
-    whole.box.bottom > opened.frame.top + (opened.frame.bottom - opened.frame.top) / 2,
-    "in the lower half of the thread, the tap landing on the row's end",
-  )
-  assert.ok(opened.scroll.top > 0, `the thread moved down to it (${opened.scroll.top}px)`)
-  await shot("opened")
-  pass(
-    `opening the finished run landed the thread on its end (scrollTop ${opened.scroll.top}px), its whole ${whole.box.height}px body drawn with no cap, fade or Show more, past the ${bound}px the old cap held it to`,
-  )
+  const atEnd = await threadState()
+  assert.equal(atEnd.rows[0].label, span, `the label reads \"${span}\" beside the still-open sheet`)
+  await uncapped("with the finished run's sheet still open")
+  await shot("kept-open")
+  pass("the answer never closes the sheet: its label just takes the span while it stays up")
+  await shut()
 
-  // An uncapped body is a height against a real viewport, so it is proved at a phone's width and a
-  // tablet's, in both themes — the four plates the change is reviewed on. Geometry doesn't depend on
-  // the theme, so each width loads once: the row is opened and measured in light, then the theme is
-  // flipped under it and the same reading taken again.
-  const plates = []
+  // A body's height is a height against a real viewport, so the whole run is proved in the sheet at
+  // a phone's width and a tablet's, in both themes — the four plates the change is reviewed on.
   for (const [width, height] of [
     [390, 844],
     [1024, 1112],
@@ -574,7 +624,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     await page.setViewportSize({ width, height })
     await page.emulateMedia({ colorScheme: "light" })
     await page.reload()
-    // The bound is a share of the viewport, so the viewport the rows are measured in has to be the
+    // The bound is a share of the viewport, so the viewport the sheet is measured in has to be the
     // one asked for.
     assert.deepEqual(
       await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })),
@@ -582,9 +632,9 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
       `the page is drawn at ${width}×${height}`,
     )
     await until(
-      async () => ((await thread()).rows.length === 1 ? true : null),
+      async () => ((await threadState()).rows.length === 1 ? true : null),
       20_000,
-      `the long row at ${width}×${height}`,
+      `the long run's row at ${width}×${height}`,
     )
     for (const theme of ["light", "dark"]) {
       const where = `at ${width}px in the ${theme}`
@@ -598,23 +648,16 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
         10_000,
         `the app to draw its ${theme} theme ${where}`,
       )
-      // The load draws the row closed and a theme flip doesn't fold it, so this only taps when the
-      // row isn't already standing open.
-      if ((await thread()).rows[0]?.expanded !== "true") await line.click()
-      await until(
-        async () => ((await thread()).rows[0]?.expanded === "true" ? true : null),
-        10_000,
-        `the row to open ${where}`,
-      )
-      await rested()
-      const at = await uncapped(`the open row ${where}`)
-      const { row, bound } = await wholeBody(at, where)
-      const path = await shot(`uncapped-${width}-${theme}`)
-      plates.push({ width, theme, bound, height: row.box.height, path })
+      const at = await open(0, `the finished run ${where}`)
+      assert.ok(at.sheet.text.includes(LONG_LAST), `${where}, the sheet holds the run's last words`)
+      whole(at, where)
+      await uncapped(`the open sheet ${where}`)
+      await shot(`uncapped-${width}-${theme}`)
+      await shut()
     }
   }
   await page.emulateMedia({ colorScheme: "light" })
   pass(
-    `the open row is uncapped at 390px (${plates[0].height}px past the old ${plates[0].bound}px cap) and 1024px (${plates[2].height}px past ${plates[2].bound}px), in light and in dark`,
+    "the sheet draws the whole run at 390px and at 1024px, in light and in dark, with no cap, fade or Show more anywhere",
   )
 })

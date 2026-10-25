@@ -12,6 +12,7 @@ import {
   noteRunThinking,
   runsOf,
   thinkingLabel,
+  thinkingRows,
 } from "../src/lib/thinking.ts"
 
 const source = (path) =>
@@ -90,6 +91,70 @@ test("a row stored before runs folds into one run at the top", () => {
     }),
     [{ text: "one" }, { text: "two", afterToolId: "c" }],
     "runs win when a row carries both",
+  )
+})
+
+test("the rows a reply draws are its runs, marked where the turn still thinks", () => {
+  const [row] = thinkingRows({
+    content: "",
+    status: "streaming",
+    reasoningRuns: [{ text: "Weighing it." }],
+  })
+  assert.equal(row.thinking, true, "the reply's newest run has no words still arriving")
+  assert.equal(row.key, "run-0", "keyed by its place, as every drawn row is")
+  assert.equal(row.pending, undefined, "it has words of its own, so it is not the pending row")
+
+  const afterCall = thinkingRows({
+    content: "Text.",
+    status: "streaming",
+    reasoningRuns: [{ text: "Quiet.", afterToolId: "c1" }],
+    tools: [{ toolCallId: "c1", status: "completed", contentOffset: 5 }],
+  })
+  assert.equal(afterCall.length, 1, "the run after the call is the row that says its quiet")
+  assert.equal(afterCall[0].thinking, true, "so it spins")
+
+  const done = thinkingRows({
+    content: "Text.",
+    status: "done",
+    reasoningRuns: [{ text: "Weighing it." }],
+  })
+  assert.equal(done[0].thinking, false, "a reply done thinking draws its run without the spinner")
+  assert.equal(done[0].pending, undefined, "and never as a waiting row")
+})
+
+test("before a word arrives, the row is a pending status with nothing to open", () => {
+  assert.deepEqual(
+    thinkingRows({ content: "", status: "streaming" }),
+    [{ key: "run-0", text: "", thinking: true, pending: true }],
+    "the turn works but its model has said nothing: one row, with no tap in it",
+  )
+  const afterCall = thinkingRows({
+    content: "Text.",
+    status: "streaming",
+    tools: [{ toolCallId: "c1", status: "completed", contentOffset: 5 }],
+  })
+  assert.equal(afterCall.length, 1, "the quiet behind a call draws one pending row too")
+  assert.equal(afterCall[0].afterToolId, "c1", "placed after the call it follows")
+  assert.equal(afterCall[0].text, "", "with no words to open")
+
+  assert.deepEqual(
+    thinkingRows({ content: "", status: "streaming", waiting: true }),
+    [],
+    "a turn waiting on the reader is the footer's line to say, not the row's",
+  )
+  assert.deepEqual(
+    thinkingRows({ content: "", status: "streaming", statusText: "Context is compacting…" }),
+    [],
+    "the host's own status names what is happening, so no row joins it",
+  )
+  assert.deepEqual(
+    thinkingRows({
+      content: "",
+      status: "streaming",
+      tools: [{ toolCallId: "c1", status: "running", contentOffset: 0 }],
+    }),
+    [],
+    "a call still running is its own row's to say",
   )
 })
 

@@ -26,11 +26,6 @@ export interface Settings {
   breakReminders?: boolean
   /** Alt+1 to Alt+9 start a new chat with the bot added in that place. Off by default. */
   navShortcuts?: boolean
-  /**
-   * A reply's thinking stays folded until a tap opens it — nothing opens on its own, not even a row
-   * whose stretch still streams. Off by default, so a live turn shows its working out as it happens.
-   */
-  foldThinkingByDefault?: boolean
   /** The clock on this device's copy of the appearance record: a change made here, or one pulled. */
   appearanceAt?: number
   /**
@@ -77,12 +72,7 @@ export interface Settings {
  * since next-themes keeps it on the device. Sync carries them as the `settings` document's one
  * record and the fingerprint watches them, so this list is the one place that says what syncs.
  */
-export const APPEARANCE_FIELDS = [
-  "steerByDefault",
-  "breakReminders",
-  "navShortcuts",
-  "foldThinkingByDefault",
-] as const
+export const APPEARANCE_FIELDS = ["steerByDefault", "breakReminders", "navShortcuts"] as const
 
 /** Those switches as sync reads them, present rather than optional, so a read needs no fallback. */
 export type Appearance = Required<Pick<Settings, (typeof APPEARANCE_FIELDS)[number]>>
@@ -637,7 +627,6 @@ export const DEFAULT_SETTINGS: Settings & Appearance = {
   steerByDefault: false,
   breakReminders: true,
   navShortcuts: false,
-  foldThinkingByDefault: false,
 }
 
 export const DEFAULT_PROFILE = {
@@ -884,6 +873,27 @@ db.version(21).upgrade((tx) =>
 // v22: the account's prompts, kept where the bots are and synced as a document of their own.
 db.version(22).stores({ prompts: "id" })
 
+/**
+ * Settings keys this build retired: a row an older build wrote, or one another device still runs
+ * and syncs, can carry them. Dexie v23 takes them out of every row, and each save takes them out
+ * again — a save re-puts the row it reads, so without that a dead key would outlive its screen.
+ */
+const RETIRED_SETTINGS_KEYS = ["foldThinkingByDefault"] as const
+
+// v23: "Fold thinking by default" is retired — a reply's thinking opens in a sheet now, so nothing
+// opens on its own and there is nothing left to fold. The key goes from every device's settings
+// row: a save re-puts the row it reads, so leaving it behind would carry the dead switch for no
+// one, and a record another device pushes can still name it — `adoptAppearance` takes only the
+// fields this build knows.
+db.version(23).upgrade((tx) =>
+  tx
+    .table("settings")
+    .filter((row: Record<string, unknown>) => RETIRED_SETTINGS_KEYS.some((key) => key in row))
+    .modify((row: Record<string, unknown>) => {
+      for (const key of RETIRED_SETTINGS_KEYS) delete row[key]
+    }),
+)
+
 db.on("populate", (tx) => seedProfile(tx))
 
 export async function getSettings(): Promise<Settings> {
@@ -898,7 +908,14 @@ export async function saveSettings(patch: Partial<Omit<Settings, "id">>) {
     (Object.keys(patch) as (keyof typeof patch)[]).some(
       (key) => JSON.stringify(stored[key]) !== JSON.stringify(patch[key]),
     )
-  if (changed) await db.settings.put({ ...DEFAULT_SETTINGS, ...stored, ...patch, id: "settings" })
+  if (changed) {
+    const row = { ...DEFAULT_SETTINGS, ...stored, ...patch, id: "settings" } as Settings &
+      Record<string, unknown>
+    // `stored` can carry a key nothing reads, written by an older build or pushed by a device
+    // running one: the save puts the whole row, so the retired key goes here too.
+    for (const key of RETIRED_SETTINGS_KEYS) delete row[key]
+    await db.settings.put(row)
+  }
 }
 
 /** Saves an appearance switch; the clock moves so sync carries the change to the account's devices. */

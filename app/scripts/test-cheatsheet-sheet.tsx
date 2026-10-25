@@ -15,6 +15,7 @@ import {
   offersCommand,
   pressEnter,
   seedChat,
+  shutSheet,
   slashOptions,
   type,
   until,
@@ -62,16 +63,6 @@ async function openSheet() {
   await until(async () => offersCommand("/cheatsheet"), "the command in the menu")
   await pressEnter()
   await until(async () => Boolean(sheet()), "the sheet")
-}
-
-/** Escape, the way the pop-up closes. */
-async function shutSheet() {
-  await act(async () => {
-    sheet()?.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
-    )
-  })
-  await until(async () => !sheet(), "the sheet shut")
 }
 
 const storedSwitch = async () => (await getSettings()).navShortcuts
@@ -149,7 +140,7 @@ test("a switch flipped while the sheet was shut shows the next time it opens", a
     await until(async () => Boolean(composerField()), "the composer")
     await openSheet()
     assert.ok(!groups().includes("Navigation"), "absent as it opened, the switch being off")
-    await shutSheet()
+    await shutSheet(sheet)
 
     await act(async () => {
       await saveAppearance({ navShortcuts: true })
@@ -157,7 +148,7 @@ test("a switch flipped while the sheet was shut shows the next time it opens", a
     await openSheet()
     assert.ok(groups().includes("Navigation"), "the group the reopened sheet reads")
 
-    await shutSheet()
+    await shutSheet(sheet)
     await act(async () => {
       await saveAppearance({ navShortcuts: false })
     })

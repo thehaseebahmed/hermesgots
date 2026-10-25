@@ -376,10 +376,10 @@ function helpers(page) {
     },
     lastReply(chatId) {
       return page.evaluate(async (id) => {
-        const { db } = await import("/src/lib/db.ts")
-        const last = (await db.messages.where("conversationId").equals(id).sortBy("createdAt")).at(
-          -1,
-        )
+        const { getMessages } = await import("/src/lib/db.ts")
+        // The index the table already carries, not a full fetch sorted in memory: every flow polls
+        // this for the reply's own fields while the run is still writing.
+        const last = (await getMessages(id)).at(-1)
         return last?.role === "assistant"
           ? {
               status: last.status,

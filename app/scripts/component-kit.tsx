@@ -290,6 +290,16 @@ export async function until(check: () => Promise<boolean>, what: string, ms = 50
   assert.fail(`waited for ${what}`)
 }
 
+/** Escape, the way a pop-up closes, and the sheet `at` points at to be gone. */
+export async function shutSheet(at: () => Element | null) {
+  await act(async () => {
+    at()?.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+    )
+  })
+  await until(async () => !at(), "the sheet shut")
+}
+
 /**
  * Fires the `ResizeObserver`s a screen is watching with, which a DOM without layout never does. With
  * `near`, only the observers watching that box (or a box inside or around it) report, so a test
@@ -394,10 +404,11 @@ export async function pressEnter() {
 export const Path = () => <p data-path>{useLocation().pathname}</p>
 export const path = () => find("[data-path]")?.textContent ?? ""
 
-const THINKING_LABEL = /^(Thinking…|Thought it through|Thought for \d+[sm].*)$/
-
+/** A reply's thinking rows in the order drawn — the row itself, button or status row alike. */
 export const thinkingLines = () =>
-  findAll("button").filter((button) => THINKING_LABEL.test(button.textContent?.trim() ?? ""))
+  findAll("[data-slot=thinking-line]")
+    .map((row) => row.firstElementChild)
+    .filter((row): row is Element => row !== null)
 
 export function onlyThinkingLine() {
   const found = thinkingLines()
