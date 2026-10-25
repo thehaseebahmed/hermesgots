@@ -62,7 +62,7 @@ all.
 | `plugin/outbox.py` | Unchanged — the loopback post the wake uses, with its idempotency key |
 | `plugin/__init__.py` | The stop-a-subagent route; `sync_delegation` no longer advertised in `info` |
 | `plugin/sessions.py` | The mark on a subagent's session that its wake has posted, and children's liveness once the parent's run is over |
-| `app/src/lib/history.ts` | `async_delegation_complete` drawn as the bot's own message with the subagent id behind its tap-through, never a user bubble |
+| `app/src/lib/history.ts` | `async_delegation_complete` recognised and folded away — no message, no bubble, nothing drawn for it |
 | `app/src/lib/agents.ts` | A subagent counts as running while it runs, not only while its parent's run is live; the stop call |
 | `app/src/components/chat/agent-card.tsx` | Stop on the card, once the turn that started it has ended |
 | `app/src/lib/chat.ts`, `app/src/lib/workspace.ts` | The session-state rule: working while any subagent runs |

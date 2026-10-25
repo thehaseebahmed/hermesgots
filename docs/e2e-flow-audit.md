@@ -52,7 +52,8 @@ host's own reasoning as it arrives; `openui` (#389), an interface's geometry at 
 scroll offset a patch must not move; `openui-map` (#490), a map's fitted geometry and the gesture
 contract deciding whether one finger scrolls the thread or pans the map, both things a DOM without
 layout has not got; `question-during-delegation` (#471), the question card taking the composer's
-place while a subagent still runs, with its result and its wake turn landing after it; and
+place while a subagent still runs, its delivery drawing nothing of the thread while its wake turn
+lands after it; and
 `card-widths` (#497), because a card's width and the offset of the column beside it are geometry,
 which no DOM without a layout engine has. The eleventh, `bot-threads` (#422), is a component by the
 same rule as the five: every rule it walks — a card's place in Main, `/thread` with text, the
