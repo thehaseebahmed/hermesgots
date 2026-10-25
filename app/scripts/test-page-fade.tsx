@@ -5,6 +5,7 @@ import { Route } from "react-router"
 import { mainThreadId } from "@/lib/db"
 import { lastThreadKey } from "@/lib/threads"
 import { forgetHeldChats } from "@/lib/chat-hold"
+import { FADE_MS as COPY_FADE_MS } from "@/components/pane-transition"
 import {
   botProfile,
   click,
@@ -124,7 +125,7 @@ test(
 )
 
 test(
-  "a thread opened beside Main fades its own pane, and animates nothing of Main's",
+  "a thread opened beside Main fades the thread left out over the one landing, and animates nothing of Main's",
   laptop(async () => {
     localStorage.clear()
     forgetHeldChats()
@@ -138,7 +139,11 @@ test(
     )
     localStorage.setItem(lastThreadKey(bot.id), "t-a")
     await mount(phone(`/c/${MAIN}`, "/c/t-b"), async () => {
-      await until(async () => text().includes("alpha one"), "the thread beside Main")
+      // The pane itself, drawn and ready: Main's card for the thread carries the same words.
+      await until(async () => {
+        const pane = find('[data-pane="thread"]')
+        return Boolean(pane?.textContent?.includes("alpha one") && !pane.hasAttribute("inert"))
+      }, "the thread beside Main")
       const spy = spyAnimate()
       try {
         await click(find('[data-slot="thread-card"] a[href="/c/t-b"]'))
@@ -148,26 +153,32 @@ test(
         spy.restore()
       }
 
-      assert.deepEqual(
-        spy.overHeld().map((one) => one.pane),
-        [],
-        "no transition plays over the thread the switch left",
+      const out = spy.asked.filter((one) => one.keyframes.at(-1)?.opacity === 0)
+      assert.equal(out.length, 1, "the thread left fades out once")
+      assert.ok(
+        out[0].text.includes("alpha one"),
+        `and what fades out is the thread left (saw "${out[0].text.slice(0, 120)}")`,
       )
+      assert.equal(out[0].options.duration, COPY_FADE_MS)
+      assert.equal(out[0].pane, null, "a copy, which no reader of the panes can mistake for one")
+
+      const played = spy.onPanes()
       assert.deepEqual(
-        spy.asked.filter((one) => one.pane === "main").map((one) => one.element),
-        [],
-        "Main's own pane plays nothing: the thread beside it is the only chat that changed",
+        played.map((one) => one.pane),
+        ["thread"],
+        "the thread asked for fades in once, as it lands, and nothing of Main's moves",
       )
+      assert.deepEqual(played[0].keyframes, FADE)
+      assert.ok(played[0].shown.includes("beta one"), "played as the thread asked for lands")
       assert.deepEqual(
         spy.onScreen().map((one) => one.element),
         [],
         "and the screen's own element is not faded over it",
       )
-      const played = spy.onPanes()
-      assert.equal(played.length, 1, "the thread beside Main fades once, as it lands")
-      assert.equal(played[0].pane, "thread", "on the thread's own pane")
-      assert.deepEqual(played[0].keyframes, FADE)
-      assert.ok(played[0].shown.includes("beta one"), "played as the thread asked for lands")
+      assert.ok(
+        !find('[data-pane="thread"]')?.closest("[inert]"),
+        "the thread asked for answers the reader once it is on screen",
+      )
     })
   }),
 )

@@ -197,6 +197,8 @@ export interface Animated {
   held: string
   shown: string
   body: string
+  /** What the animated element itself holds. */
+  text: string
 }
 
 export function spyAnimate() {
@@ -217,6 +219,7 @@ export function spyAnimate() {
       held: words(true),
       shown: words(false),
       body: document.body.textContent ?? "",
+      text: this.textContent ?? "",
     })
     return animate.call(this, keyframes, options)
   }
@@ -269,7 +272,13 @@ export function mountAfk(
   { library }: { library?: boolean } = {},
 ) {
   return mount(
-    <AfkPopup open onOpenChange={() => {}} config={config} projectId={projectId} library={library} />,
+    <AfkPopup
+      open
+      onOpenChange={() => {}}
+      config={config}
+      projectId={projectId}
+      library={library}
+    />,
     body,
   )
 }
