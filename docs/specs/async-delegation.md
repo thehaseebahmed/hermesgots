@@ -76,8 +76,9 @@ all.
 
 ## Edges
 
-- **Two subagents finish together**: one wake each, deduped per subagent by its idempotency key;
-  the host serialises the turns.
+- **Two subagents finish together**: one wake for the conversation, carrying both results under one
+  batch header (ADR 0052); a lone child keeps its own `wake_<id>` key. The batch's members are stored
+  before the post so a retry reuses them.
 - **A subagent fails**: its result carries the end reason, and the wake still fires so the bot reads
   the failure.
 - **A question is pending when one ends**: the wake waits for the answer (or the question's expiry)
