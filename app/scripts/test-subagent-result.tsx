@@ -204,6 +204,10 @@ const bubble = (row: Element) => row.querySelector("[data-slot=bubble]")
 const resultRow = () => rows().find((row) => row.textContent?.includes("The fixture is in place"))
 const agentCard = () => document.querySelector("[data-slot=agent-card]")
 
+/** The thread as a reader sees it: each row, on its side, holding what it says. */
+const drawn = () =>
+  rows().map((row) => `${row.getAttribute("data-align")}:${row.textContent ?? ""}`)
+
 /** The thread as it lands: the catch-up reads Hermes, then the turn's rows draw. */
 async function landed() {
   await until(
@@ -424,9 +428,6 @@ test("nothing pins under a reply that is still streaming, and nothing goes", asy
   // Hermes holds that turn as far as its delegate call, then the delivery the subagent left.
   const hostRows = [...transcript.slice(0, 3), transcript[4]]
   const run = followedRun()
-  /** The thread as a reader sees it: each row, on its side, holding what it says. */
-  const drawn = () =>
-    rows().map((row) => `${row.getAttribute("data-align")}:${row.textContent ?? ""}`)
   const deliveryShown = () =>
     rows().some((row) => /ASYNC DELEGATION|Original goal:|API calls/.test(row.textContent ?? ""))
   await screen(
@@ -466,9 +467,9 @@ test("nothing pins under a reply that is still streaming, and nothing goes", asy
           "the reply keeps the last row",
         )
         assert.ok(!deliveryShown(), "and the delivery is still drawn nowhere")
-        const kept = await getMessages("chat-1")
+        const stored = await getMessages("chat-1")
         assert.equal(
-          kept.filter((m) => /ASYNC DELEGATION|Original goal:/.test(m.content ?? "")).length,
+          stored.filter((m) => /ASYNC DELEGATION|Original goal:/.test(m.content ?? "")).length,
           0,
           "the delivery was never a message of the thread",
         )
@@ -533,18 +534,18 @@ test("a wake prompt draws nothing, and the answer it starts is a message of its 
       assert.ok(answer, "the answer the wake turn left is drawn")
       assert.equal(answer.getAttribute("data-align"), "start", "the bot's own side")
       assert.equal(bubble(answer), null, "with no bubble, as a reply has none")
-      const kept = await getMessages("chat-1")
+      const stored = await getMessages("chat-1")
       assert.deepEqual(
-        kept.filter((m) => m.role === "user").map((m) => m.content),
+        stored.filter((m) => m.role === "user").map((m) => m.content),
         [ASK],
         "the user's own message, and no message of the prompt",
       )
       assert.ok(
-        kept.some((m) => m.role === "assistant" && m.content === "Sent it off."),
+        stored.some((m) => m.role === "assistant" && m.content === "Sent it off."),
         "the turn before keeps its reply",
       )
       assert.ok(
-        kept.some((m) => m.role === "assistant" && m.content === WAKE_ANSWER),
+        stored.some((m) => m.role === "assistant" && m.content === WAKE_ANSWER),
         "and the wake's answer starts its own message rather than joining that one",
       )
     },
@@ -567,31 +568,29 @@ test("a wake reply keeps its row when its run is adopted, delivery and all", asy
     { id: 5, role: "assistant", content: WAKE_ANSWER, timestamp: 110 },
   ]
   const run = followedRun()
-  const kept = () => getMessages("chat-1")
+  const stored = () => getMessages("chat-1")
   /** The wake run's reply: the row the transcript gave it, adopted and followed since. */
-  const wake = async () => {
-    const all = await kept()
+  const assertWake = async () => {
+    const all = await stored()
     const one = all.filter((m) => m.id === "h-chat-1-hermes-5")
     assert.equal(one.length, 1, "the wake reply is one message, never a copy of it")
     assert.equal(all.at(-1)?.id, "h-chat-1-hermes-5", "and the thread's last")
     return one[0]
   }
-  const drawn = () =>
-    rows().map((row) => `${row.getAttribute("data-align")}:${row.textContent ?? ""}`)
   await screen(
     async () => {
       try {
         await until(
           async () =>
-            (await kept()).some((m) => m.id === "h-chat-1-hermes-5" && m.status === "streaming"),
+            (await stored()).some((m) => m.id === "h-chat-1-hermes-5" && m.status === "streaming"),
           "the wake run's reply to be adopted",
           10_000,
         )
         await settle()
         // The catch-up wrote the row the transcript holds; adopting it for the run keeps that id.
-        assert.equal((await wake()).status, "streaming", "followed as the run's own reply")
-        assert.equal((await wake()).runId, RUN, "on the run the host still works on")
-        assert.equal((await wake()).content, "", "rebuilt from the run, not from its row")
+        assert.equal((await assertWake()).status, "streaming", "followed as the run's own reply")
+        assert.equal((await assertWake()).runId, RUN, "on the run the host still works on")
+        assert.equal((await assertWake()).content, "", "rebuilt from the run, not from its row")
         const before = drawn()
         assert.match(
           rows().at(-1)?.textContent ?? "",
@@ -606,8 +605,8 @@ test("a wake reply keeps its row when its run is adopted, delivery and all", asy
         await reconcileHistory("chat-1")
         await settle()
         assert.deepEqual(drawn(), before, "a catch-up neither drops the reply nor draws it again")
-        assert.equal((await wake()).id, "h-chat-1-hermes-5", "the same row, still")
-        assert.equal((await wake()).status, "streaming", "and still streaming")
+        assert.equal((await assertWake()).id, "h-chat-1-hermes-5", "the same row, still")
+        assert.equal((await assertWake()).status, "streaming", "and still streaming")
       } finally {
         run.end()
         await settledRun()

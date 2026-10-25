@@ -156,21 +156,32 @@ test("a question asked in a wake run reaches the user as a form", async () => {
       </Routes>
     </MemoryRouter>,
     async () => {
-      await until(async () => Boolean(find("button[aria-pressed]")), "the question's form", 10_000)
-      assert.ok(
-        [...document.querySelectorAll("button")].some((one) => one.textContent?.startsWith("Yes")),
-        "its choices can be picked",
-      )
-      assert.ok(
-        [...document.querySelectorAll("button")].some((one) => one.textContent === "Send"),
-        "and sent",
-      )
-      over = true
-      await until(
-        async () => !(await db.messages.toArray()).some((m) => m.status === "streaming"),
-        "the run to end",
-        10_000,
-      )
+      try {
+        await until(
+          async () => Boolean(find("button[aria-pressed]")),
+          "the question's form",
+          10_000,
+        )
+        assert.ok(
+          [...document.querySelectorAll("button")].some((one) =>
+            one.textContent?.startsWith("Yes"),
+          ),
+          "its choices can be picked",
+        )
+        assert.ok(
+          [...document.querySelectorAll("button")].some((one) => one.textContent === "Send"),
+          "and sent",
+        )
+        over = true
+        await until(
+          async () => !(await db.messages.toArray()).some((m) => m.status === "streaming"),
+          "the run to end",
+          10_000,
+        )
+      } finally {
+        // An assertion that fails would otherwise leave this loop following into the next case.
+        over = true
+      }
     },
   )
 })
@@ -187,45 +198,56 @@ test("a delivery ahead of that wake run draws nothing, and its question still re
       </Routes>
     </MemoryRouter>,
     async () => {
-      // The #573 guard holds with a delivery ahead of the wake turn too: the form still takes the
-      // composer's place, so nothing waits on an answer the user can't see.
-      await until(async () => Boolean(find("button[aria-pressed]")), "the question's form", 10_000)
-      assert.ok(
-        [...document.querySelectorAll("button")].some((one) => one.textContent?.startsWith("Yes")),
-        "its choices can be picked",
-      )
-      assert.ok(
-        [...document.querySelectorAll("button")].some((one) => one.textContent === "Send"),
-        "and sent",
-      )
-      // A delivery is bookkeeping: it drew no row, and no stored message holds what it said.
-      assert.ok(
-        ![...document.querySelectorAll("[data-slot=message]")].some((row) =>
-          row.textContent?.includes(DELIVERED),
-        ),
-        "the delivery draws nothing of the thread",
-      )
-      const stored = await db.messages.toArray()
-      assert.ok(
-        !stored.some((message) => message.content.includes(DELIVERED)),
-        "and stores no message of its own",
-      )
-      assert.equal(
-        stored.length,
-        3,
-        "the first turn's two messages and the wake run's reply, the delivery adding none",
-      )
-      assert.equal(
-        document.querySelectorAll("[data-slot=message]").length,
-        stored.length,
-        "the thread draws one row per message, and none for the delivery",
-      )
-      over = true
-      await until(
-        async () => !(await db.messages.toArray()).some((m) => m.status === "streaming"),
-        "the run to end",
-        10_000,
-      )
+      try {
+        // The #573 guard holds with a delivery ahead of the wake turn too: the form still takes the
+        // composer's place, so nothing waits on an answer the user can't see.
+        await until(
+          async () => Boolean(find("button[aria-pressed]")),
+          "the question's form",
+          10_000,
+        )
+        assert.ok(
+          [...document.querySelectorAll("button")].some((one) =>
+            one.textContent?.startsWith("Yes"),
+          ),
+          "its choices can be picked",
+        )
+        assert.ok(
+          [...document.querySelectorAll("button")].some((one) => one.textContent === "Send"),
+          "and sent",
+        )
+        // A delivery is bookkeeping: it drew no row, and no stored message holds what it said.
+        assert.ok(
+          ![...document.querySelectorAll("[data-slot=message]")].some((row) =>
+            row.textContent?.includes(DELIVERED),
+          ),
+          "the delivery draws nothing of the thread",
+        )
+        const stored = await db.messages.toArray()
+        assert.ok(
+          !stored.some((message) => message.content.includes(DELIVERED)),
+          "and stores no message of its own",
+        )
+        assert.equal(
+          stored.length,
+          3,
+          "the first turn's two messages and the wake run's reply, the delivery adding none",
+        )
+        assert.equal(
+          document.querySelectorAll("[data-slot=message]").length,
+          stored.length,
+          "the thread draws one row per message, and none for the delivery",
+        )
+        over = true
+        await until(
+          async () => !(await db.messages.toArray()).some((m) => m.status === "streaming"),
+          "the run to end",
+          10_000,
+        )
+      } finally {
+        // An assertion that fails would otherwise leave this loop following into the next case.
+        over = true
+      }
     },
   )
 })
