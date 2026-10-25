@@ -130,10 +130,19 @@ export function PopupHeader({ className, children, ...props }: ComponentProps<ty
 }
 
 /** The scrolling part, so the header above stays pinned. */
-function Scroll({ children }: { children: ReactNode }) {
+function Scroll({
+  children,
+  dataSlot,
+  scrollRef,
+}: {
+  children: ReactNode
+  dataSlot?: string
+  scrollRef?: (node: HTMLDivElement | null) => void
+}) {
   return (
     <div
-      data-slot="popup-scroll"
+      ref={scrollRef}
+      data-slot={dataSlot}
       className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain"
     >
       {children}
@@ -182,6 +191,8 @@ export function PopupContent({
   size = "lg",
   children,
   initialFocus,
+  dataSlot,
+  scrollRef,
 }: {
   className?: string
   /** A sheet's height that holds between views of its content (a picker's list, then a provider's
@@ -192,6 +203,10 @@ export function PopupContent({
   children: ReactNode
   /** `false` focuses the pop-up itself, so a search field doesn't take focus (and the keyboard) on open. */
   initialFocus?: boolean
+  /** The name this pop-up's scroll box carries as `data-slot`, for a test that has to find it. */
+  dataSlot?: string
+  /** The pop-up's scroll box, handed to the one consumer that follows it — the thinking sheet. */
+  scrollRef?: (node: HTMLDivElement | null) => void
 }) {
   const popup = useRef<HTMLDivElement>(null)
   const headerSeen = useRef(false)
@@ -241,7 +256,9 @@ export function PopupContent({
                 "max-h-[min(36rem,var(--available-height))]",
               )}
             >
-              <Scroll>{children}</Scroll>
+              <Scroll dataSlot={dataSlot} scrollRef={scrollRef}>
+                {children}
+              </Scroll>
             </Popover.Popup>
           </Popover.Positioner>
         </Popover.Portal>
@@ -270,7 +287,9 @@ export function PopupContent({
               )}
             >
               <Drawer.Content className="flex min-h-0 flex-1 flex-col">
-                <Scroll>{children}</Scroll>
+                <Scroll dataSlot={dataSlot} scrollRef={scrollRef}>
+                  {children}
+                </Scroll>
               </Drawer.Content>
             </Drawer.Popup>
           </Drawer.Viewport>
@@ -315,7 +334,9 @@ export function PopupContent({
               <span className="h-1 w-8 rounded-full bg-muted-foreground/60" />
             </Drawer.Close>
             <Drawer.Content className="flex min-h-0 flex-1 flex-col transition-opacity duration-300 group-data-nested-drawer-open/popup:opacity-0 group-data-nested-drawer-swiping/popup:opacity-100">
-              <Scroll>{children}</Scroll>
+              <Scroll dataSlot={dataSlot} scrollRef={scrollRef}>
+                {children}
+              </Scroll>
             </Drawer.Content>
           </Drawer.Popup>
         </Drawer.Viewport>

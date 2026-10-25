@@ -6,7 +6,7 @@ row takes over the footer's working line — it carries the spinner from the fir
 working, before a word of thinking arrives, and the footer never says "Thinking…" again. This
 supersedes the rest of ADR 0049's fold rules: the latch, the fold at the answer, and the "Fold
 thinking by default" switch in Appearance, which is retired — from the settings document, the synced
-appearance record and every device's row (Dexie v22 deletes the key). Runs, their anchoring and ADR
+appearance record and every device's row (Dexie v23 deletes the key). Runs, their anchoring and ADR
 0038's label honesty are untouched.
 
 Two places said "Thinking…" at once — a row and the footer's line under it — and the row was only
@@ -18,8 +18,10 @@ thinking exactly where the tool row's spinner says it is running.
 A live run opened in the sheet lands on its newest words and follows them while they arrive,
 stopping when the reader scrolls up inside the sheet; a run already written opens at the top, where
 its working-out starts. The sheet never closes itself — when the thinking ends, the row's label
-reads the span and the reader closes the sheet when they want it gone. A reply that never thinks
-loses its spinner row the moment the answer's first word lands, so the row exists only where
+reads the span and the reader closes the sheet when they want it gone. Before a stretch's first word
+the row wears the spinner as a status line with nothing to open — the sheet can never open on
+nothing, and under the same key the run's row takes over when the words arrive. A reply that never
+thinks loses its spinner row the moment the answer's first word lands, so the row exists only where
 thinking is happening or happened.
 
 ## Considered options
@@ -41,12 +43,14 @@ thinking is happening or happened.
 ## Consequences
 
 - `foldThinkingByDefault` is gone from `Settings`, `APPEARANCE_FIELDS`, `DEFAULT_SETTINGS` and the
-  pushed appearance record; Dexie v22 deletes the key from every device's settings row, and
+  pushed appearance record; Dexie v23 deletes the key from every device's settings row, and
   `adoptAppearance` goes on ignoring the name should another device still push it.
 - The thread's latch, its tap map and the fold moment are gone with the fold: openness is the row's
   own sheet state, nothing is written down, and `test-thinking-line.tsx` asserts the sheet instead.
-- The spinner row is drawn wherever the footer's line used to say "Thinking…" — while the reply is
+- The spinner row is drawn wherever the footer's line would say "Thinking…" — while the reply is
   silent with nothing of its own yet, and behind the model's last call — but never while a call is
-  running, which is its own row's to say.
+  running (its own row's to say), nor while the turn waits on the reader or the host names its own
+  status, where the footer's line speaks instead. `thinkingRows` in `src/lib/thinking.ts` is the
+  one rule for all of it, so row and footer cannot drift apart.
 - 0049's geometry consequence changes with it: an open run needs no cap and no Show more because it
   is no longer inline; the sheet renders the whole markdown.

@@ -1,6 +1,5 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { act } from "react"
 import { db, type Message, type Settings, type ToolEvent } from "@/lib/db"
 import type { ReasoningRun } from "@/lib/thinking"
 import {
@@ -17,9 +16,9 @@ import {
   resized,
   seedChat,
   settle,
+  shutSheet,
   spyScrollIntoView,
   thinkingLines,
-  until,
   withReducedMotion,
 } from "./component-kit.tsx"
 
@@ -113,19 +112,15 @@ const sheetText = () => sheet()?.textContent ?? ""
 
 /** The sheet's own scroll box, where a live run's newest words land. */
 const sheetScroll = () => {
-  const found = find("[data-slot=popup-scroll]")
+  const found = find("[data-slot=thinking-sheet]")
   assert.ok(found, "the sheet has a scroll box")
   return found
 }
 
-/** Escape, the way the pop-up closes. */
-async function shutSheet() {
-  await act(async () => {
-    sheet()?.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
-    )
-  })
-  await until(async () => !sheet(), "the sheet shut")
+/** A tap, and the words the sheet opened over it. */
+async function read(row: Element) {
+  await click(row)
+  return sheetText()
 }
 
 /** Whether the row carries the spinner that says the turn is thinking right now. */
@@ -191,11 +186,10 @@ test("a reply that never thinks wears the row while it works, and loses it at th
     const line = onlyThinkingLine()
     assert.equal(lineLabel(line), "Thinking…", "the row is on screen from the first working moment")
     assert.ok(spins(line), "with its spinner, before a word of thinking arrives")
-    assert.equal(
-      workingLine(),
-      null,
-      "and the footer leaves the saying to it",
-    )
+    assert.equal(expanded(line), null, "the row offers no tap: its stretch has not arrived")
+    await click(line)
+    assert.equal(sheet(), null, "and nothing opens until there are words to open")
+    assert.equal(workingLine(), null, "and the footer leaves the saying to it")
 
     await db.messages.put({ ...(await db.messages.get(id))!, content: ANSWER })
     await settle()
@@ -238,9 +232,9 @@ test("a tap opens the whole working-out in a sheet, which never closes itself", 
   const id = "sheet"
   await screen(undefined, turn({ id, reasoningRuns: [run(REASONING)] }), async () => {
     await stream(id)
-    await click(onlyThinkingLine())
+    const opened = await read(onlyThinkingLine())
     assert.equal(expanded(onlyThinkingLine()), "true", "a tap opens the row's sheet")
-    assert.match(sheetText(), /then its blocks/, "the run's words read in it")
+    assert.match(opened, /then its blocks/, "the run's words read in it")
     assert.ok(
       !item(onlyThinkingLine()).contains(sheet()),
       "the words open in the sheet, not in the thread under the row",
@@ -257,7 +251,7 @@ test("a tap opens the whole working-out in a sheet, which never closes itself", 
     await settle()
     assert.equal(expanded(onlyThinkingLine()), "true", "the turn ending closes nothing either")
 
-    await shutSheet()
+    await shutSheet(sheet)
     assert.equal(expanded(onlyThinkingLine()), "false", "the reader closes it, their own way")
     assert.equal(sheet(), null, "and the words leave the page with it")
   })
@@ -272,10 +266,9 @@ test("an answered row's sheet opens at the top, a live one lands on its newest w
       undefined,
       turn({ id: "quiet-open", reasoningRuns: [run(REASONING)], content: ANSWER }),
       async () => {
-        await click(onlyThinkingLine())
-        assert.match(sheetText(), /then its blocks/, "the words are all there")
+        assert.match(await read(onlyThinkingLine()), /then its blocks/, "the words are all there")
         assert.equal(spy.into.length, 0, "a finished run's sheet opens at its top")
-        await shutSheet()
+        await shutSheet(sheet)
       },
     )
 
@@ -432,11 +425,9 @@ test("a stopped or failed reply keeps its run, its words behind the row's sheet"
     }
     assert.match(screenText(), /Stopped/, "the stopped reply says so")
     assert.match(screenText(), /The host dropped the run\./, "and the failed one says why")
-    await click(found[0])
-    assert.match(sheetText(), /parse\.ts/, "its thinking still there, in the sheet")
-    await shutSheet()
-    await click(thinkingLines()[1])
-    assert.match(sheetText(), /parse\.ts/, "and the other reply's too")
+    assert.match(await read(found[0]), /parse\.ts/, "its thinking still there, in the sheet")
+    await shutSheet(sheet)
+    assert.match(await read(thinkingLines()[1]), /parse\.ts/, "and the other reply's too")
   })
 })
 
@@ -493,7 +484,11 @@ test("a reply whose thinking is broken by tool calls draws a row above them and 
   await screen(undefined, messages, async () => {
     const [before, after] = thinkingLines()
     assert.ok(before && after, "one row per stretch of thinking")
-    assert.equal(lineLabel(before), "Thought it through", "the first run says it thought it through")
+    assert.equal(
+      lineLabel(before),
+      "Thought it through",
+      "the first run says it thought it through",
+    )
     assert.equal(lineLabel(after), "Thought it through", "and the second, its own way")
 
     const box = item(before)
@@ -504,12 +499,10 @@ test("a reply whose thinking is broken by tool calls draws a row above them and 
     assert.ok(follows(calls, after), "and the thinking after it below, once the calls are one row")
     assert.ok(follows(after, text), "where it happened, before the text that followed")
 
-    await click(before)
-    assert.match(sheetText(), /parse\.ts/, "the first stretch reads in its own sheet")
+    assert.match(await read(before), /parse\.ts/, "the first stretch reads in its own sheet")
     assert.doesNotMatch(sheetText(), /blocks are what matter/, "and only its own")
-    await shutSheet()
-    await click(after)
-    assert.match(sheetText(), /blocks are what matter/, "the second stretch in its own sheet")
+    await shutSheet(sheet)
+    assert.match(await read(after), /blocks are what matter/, "the second stretch in its own sheet")
   })
 })
 
@@ -533,11 +526,13 @@ test("two calls back to back draw one row below them, holding both stretches", a
     assert.equal(item(rows[1]), box, "both rows belong to the one reply")
     const calls = toolRow(box)
     assert.ok(follows(rows[0], calls), "the run before any call is drawn above the group")
-    assert.ok(follows(calls, rows[1]), "and the stretches that touched are drawn below it, as one row")
+    assert.ok(
+      follows(calls, rows[1]),
+      "and the stretches that touched are drawn below it, as one row",
+    )
     assert.equal(lineLabel(rows[1]), "Thought it through", "one label for the two of them")
 
-    await click(rows[1])
-    const body = sheetText()
+    const body = await read(rows[1])
     const first = body.indexOf("first call printed")
     const second = body.indexOf("blocks are what matter")
     assert.ok(first >= 0, "the sheet holds the stretch the first call broke")
@@ -562,7 +557,11 @@ test("a merged row adds up the spans it holds, and claims none where a stretch w
   await screen(undefined, turn(reply("merged-watched", [5_000, 7_000])), async () => {
     const rows = thinkingLines()
     assert.equal(rows.length, 2, "the two stretches that touched are one row")
-    assert.equal(lineLabel(rows[0]), "Thought it through", "the run above the group measured nothing")
+    assert.equal(
+      lineLabel(rows[0]),
+      "Thought it through",
+      "the run above the group measured nothing",
+    )
     assert.equal(lineLabel(rows[1]), "Thought for 12s", "the merged row adds the spans it watched")
   })
   // A transcript rebuilt on another device carried a span onto one stretch only.
@@ -591,11 +590,14 @@ test("a merged row whose last stretch still streams reads Thinking… and spins"
     await stream(id)
     const rows = thinkingLines()
     assert.equal(rows.length, 2, "one row for the stretches that touched")
-    assert.equal(lineLabel(rows[1]), "Thinking…", "a stretch still thinking holds the whole row there")
+    assert.equal(
+      lineLabel(rows[1]),
+      "Thinking…",
+      "a stretch still thinking holds the whole row there",
+    )
     assert.ok(spins(rows[1]), "and the spinner says the turn is at it now")
     assert.equal(expanded(rows[1]), "false", "with its sheet shut until a tap")
-    await click(rows[1])
-    assert.match(sheetText(), /first call printed/, "holding the one that ended")
+    assert.match(await read(rows[1]), /first call printed/, "holding the one that ended")
     assert.match(sheetText(), /blocks are what matter/, "and the one still going")
   })
 })
@@ -617,7 +619,9 @@ test("a steer and an answered approval leave one row per run, never a row apiece
       contentOffset: 0,
       requestedAt: 1_500,
     },
-    steers: [{ id: "steer-1", text: "And its blocks?", contentOffset: reply.indexOf("Then"), at: 2 }],
+    steers: [
+      { id: "steer-1", text: "And its blocks?", contentOffset: reply.indexOf("Then"), at: 2 },
+    ],
   })
   await screen(undefined, messages, async () => {
     const found = thinkingLines()
@@ -649,8 +653,7 @@ test("a reply stored before runs draws its thinking as one row at the top", asyn
     assert.equal(lineLabel(line), "Thought it through", "the fold keeps it as one run")
     const box = item(line)
     assert.ok(follows(line, toolRow(box)), "drawn at the top of the reply, above what it ran")
-    await click(line)
-    assert.match(sheetText(), /blocks are what matter/, "holding all of it")
+    assert.match(await read(line), /blocks are what matter/, "holding all of it")
   })
 })
 
@@ -703,7 +706,10 @@ test("a coding session's thread draws the same rows, in place, as the same reply
     const box = item(session[0])
     assert.equal(item(session[1]), box, "both rows belong to the one reply")
     assert.ok(follows(session[0], toolRow(box)), "the run before the calls is drawn above them")
-    assert.ok(follows(toolRow(box), session[1]), "and the run after them below the call that broke it")
+    assert.ok(
+      follows(toolRow(box), session[1]),
+      "and the run after them below the call that broke it",
+    )
 
     await db.messages.put({
       ...(await db.messages.get("session-reply"))!,
@@ -718,15 +724,14 @@ test("a coding session's thread draws the same rows, in place, as the same reply
     assert.equal(lineLabel(streaming[0]), "Thought it through", "the run before the calls is done")
     assert.equal(lineLabel(streaming[1]), "Thinking…", "its newest run spins, as a chat's does")
     assert.ok(spins(streaming[1]), "with the spinner the row wears everywhere")
-    assert.equal(
-      workingLine(),
-      null,
-      "and the session's footer leaves the saying to the row too",
-    )
+    assert.equal(workingLine(), null, "and the session's footer leaves the saying to the row too")
 
-    await click(streaming[1])
-    assert.match(sheetText(), /blocks are what matter/, "a tap opens the sheet here as well")
-    await shutSheet()
+    assert.match(
+      await read(streaming[1]),
+      /blocks are what matter/,
+      "a tap opens the sheet here as well",
+    )
+    await shutSheet(sheet)
 
     await db.messages.put({
       ...(await db.messages.get("session-reply"))!,

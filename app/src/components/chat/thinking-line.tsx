@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useRef, useState } from "react"
 import { ChevronRightIcon } from "lucide-react"
 
 import { Markdown } from "@/components/chat/markdown"
+import { WORK_ROW_CLASS, WorkRow } from "@/components/chat/work-row"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Spinner } from "@/components/ui/spinner"
 import { COLUMN } from "@/lib/layout"
@@ -13,92 +14,62 @@ const AT_END = 4
 
 const reducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
 
-function scroller(node: HTMLElement | null): HTMLElement | null {
-  // The words live in a pop-up, so its own scroll box is where the reader reads them.
-  const sheet = node?.closest<HTMLElement>("[data-slot=popup-scroll]")
-  if (sheet) return sheet
-  for (let parent = node?.parentElement ?? null; parent; parent = parent.parentElement) {
-    const { overflowY } = getComputedStyle(parent)
-    if (overflowY === "auto" || overflowY === "scroll") return parent
-  }
-  return null
-}
-
 /**
- * The listeners that stop a row following when the reader scrolls away, kept once per thread scroller
- * rather than once per open row: a live turn holds every row of its thinking open, so four listeners
- * per row would be four per stretch of the turn. The wheel, the keys and the touch are the reader's
- * own moves, so one set stops every row of the thread that is following.
+ * "The reader left": a wheel up, the keys that jump up, a finger dragging down — any of them takes
+ * the reader somewhere the run's words are not, so the follow stops. Only the reader's own scrolling
+ * counts: the sheet moves itself as words arrive, and one of its own moves is not the reader
+ * leaving. Answers the way to stop listening again.
  */
-const watchers = new WeakMap<HTMLElement, { rows: Set<() => void>; stop: () => void }>()
-
-/** Registers a row's "the reader left" callback against its scroller; answers the way to drop it. */
 function watchAway(view: HTMLElement, away: () => void) {
-  let watcher = watchers.get(view)
-  if (!watcher) {
-    const rows = new Set<() => void>()
-    const allAway = () => {
-      for (const row of rows) row()
-    }
-    const onWheel = (event: WheelEvent) => {
-      if (event.deltaY < 0) allAway()
-    }
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "ArrowUp" || event.key === "PageUp" || event.key === "Home") allAway()
-    }
-    let touched: number | undefined
-    const onTouchStart = (event: TouchEvent) => {
-      touched = event.touches[0]?.clientY
-    }
-    const onTouchMove = (event: TouchEvent) => {
-      const y = event.touches[0]?.clientY
-      if (y !== undefined && touched !== undefined && y > touched + 4) allAway()
-      touched = y
-    }
-    view.addEventListener("wheel", onWheel, { passive: true })
-    view.addEventListener("keydown", onKey)
-    view.addEventListener("touchstart", onTouchStart, { passive: true })
-    view.addEventListener("touchmove", onTouchMove, { passive: true })
-    const stop = () => {
-      view.removeEventListener("wheel", onWheel)
-      view.removeEventListener("keydown", onKey)
-      view.removeEventListener("touchstart", onTouchStart)
-      view.removeEventListener("touchmove", onTouchMove)
-    }
-    watcher = { rows, stop }
-    watchers.set(view, watcher)
+  const onWheel = (event: WheelEvent) => {
+    if (event.deltaY < 0) away()
   }
-  const held = watcher
-  held.rows.add(away)
+  const onKey = (event: KeyboardEvent) => {
+    if (event.key === "ArrowUp" || event.key === "PageUp" || event.key === "Home") away()
+  }
+  let touched: number | undefined
+  const onTouchStart = (event: TouchEvent) => {
+    touched = event.touches[0]?.clientY
+  }
+  const onTouchMove = (event: TouchEvent) => {
+    const y = event.touches[0]?.clientY
+    if (y !== undefined && touched !== undefined && y > touched + 4) away()
+    touched = y
+  }
+  view.addEventListener("wheel", onWheel, { passive: true })
+  view.addEventListener("keydown", onKey)
+  view.addEventListener("touchstart", onTouchStart, { passive: true })
+  view.addEventListener("touchmove", onTouchMove, { passive: true })
   return () => {
-    held.rows.delete(away)
-    // The last row of the thread that was following has closed: nothing follows now, so the thread
-    // is listened to for nothing until a row opens again.
-    if (held.rows.size) return
-    held.stop()
-    watchers.delete(view)
+    view.removeEventListener("wheel", onWheel)
+    view.removeEventListener("keydown", onKey)
+    view.removeEventListener("touchstart", onTouchStart)
+    view.removeEventListener("touchmove", onTouchMove)
   }
 }
 
 /**
  * One stretch of a reply's thinking — or the stretch still to come, while the reply works and its
- * model has said nothing yet. The row says what the turn is doing: its spinner while the thinking
- * still arrives, its label once this device has measured how long the run took. It opens the
- * working-out in the same sheet the tool row opens, so the thread's two accounts of the work read
- * and open the same way, and the fold the row used to draw in the thread is gone with it. A live
- * run opened in the sheet lands on its newest words and keeps them in view while they arrive,
- * until the reader scrolls away inside the sheet; the sheet never closes itself — when the thinking
- * ends the label beside it just reads the span. See ADR 0050.
+ * model has said nothing yet, drawn as a status row with nothing to open until words arrive. The
+ * row says what the turn is doing: its spinner while the thinking still arrives, its label once
+ * this device has measured how long the run took. It opens the working-out in the same sheet the
+ * tool row opens, so the thread's two accounts of the work read and open the same way. A live run
+ * opened in the sheet lands on its newest words and keeps them in view while they arrive, until the
+ * reader scrolls away inside the sheet; the sheet never closes itself — when the thinking ends the
+ * label beside it just reads the span. See ADR 0050.
  */
 export const ThinkingLine = memo(function ThinkingLine({
   reasoning,
   thinking,
+  pending,
   spanMs,
   className,
 }: {
   reasoning: string
   /** The model is still thinking, so the row spins and reads "Thinking…" wherever it is drawn. */
   thinking: boolean
+  /** The turn works but its stretch has not arrived: the row shows the spinner with no tap. */
+  pending?: boolean
   /** How long this device watched the turn think, when it watched it at all. */
   spanMs?: number
   /** The margin that hugs the row it sits beside, when the thread's parts hand one over. */
@@ -114,25 +85,32 @@ export const ThinkingLine = memo(function ThinkingLine({
     body.current = node
     setDrawn(Boolean(node))
   }, [])
+  // The pop-up hands its scroll box over: the words live in the sheet, so that box is where the
+  // reader reads them and where being "at the end" is measured.
+  const sheet = useRef<HTMLElement | null>(null)
+  const sheetRef = useCallback((node: HTMLDivElement | null) => {
+    sheet.current = node
+  }, [])
   const following = useRef(false)
   const label = thinkingLabel({ thinking, spanMs })
 
-  // The sheet opened over a run still thinking lands on its newest words and keeps them in view as
-  // they arrive — the follow the open row used to do in the thread, now bounded by the sheet's own
-  // body rather than the thread's end. A run already written opens at the top, where its
-  // working-out starts. The body is what is measured: its words are what is growing.
+  // While the run still thinks, the sheet opened over it lands on its newest words and keeps them
+  // in view as they arrive — bounded by the sheet's own body rather than the thread's end. A run
+  // already written opens at the top, where its working-out starts, and listens for nothing: no
+  // words are still arriving. The body is what is measured: its words are what is growing.
   useEffect(() => {
-    if (!open || !thinking || !drawn) return
+    if (!open || !drawn || !thinking) return
     const node = body.current
-    if (!node) return
-    const view = scroller(node)
-    // The tap is the reader asking for this run, so its end comes into view; a box with no room
-    // to scroll has nothing to follow either way.
-    following.current = Boolean(view)
-    if (!following.current) return
+    const view = sheet.current
+    if (!node || !view) return
+    const stopAway = watchAway(view, () => {
+      following.current = false
+    })
+    // The tap is the reader asking for this run, so its end comes into view.
+    following.current = true
     const end = (behavior: ScrollBehavior) => node.scrollIntoView({ block: "end", behavior })
     end(reducedMotion() ? "auto" : "smooth")
-    if (typeof ResizeObserver === "undefined") return
+    if (typeof ResizeObserver === "undefined") return stopAway
     // A browser reports once as soon as an observer is registered, and that report lands while the
     // smooth arrival is still moving the sheet: it would cancel it. The run's growth is waited for.
     let fresh = true
@@ -142,7 +120,7 @@ export const ThinkingLine = memo(function ThinkingLine({
       if (!following.current) return
       // The end is in view already, so there is nothing to write — and a write would cancel a
       // scroll the sheet is making for its own reasons.
-      if (view && Math.abs(view.scrollTop + view.clientHeight - view.scrollHeight) <= AT_END) return
+      if (Math.abs(view.scrollTop + view.clientHeight - view.scrollHeight) <= AT_END) return
       end("auto")
     }
     const observer = new ResizeObserver(() => {
@@ -156,49 +134,49 @@ export const ThinkingLine = memo(function ThinkingLine({
     })
     observer.observe(node)
     return () => {
+      stopAway()
       observer.disconnect()
       cancelAnimationFrame(queued)
     }
   }, [open, thinking, drawn])
 
-  // Scrolling the sheet up takes the reader somewhere else, so the follow stops and stays off
-  // however much more the run has to say. Only the reader's own scrolling counts: the sheet moves
-  // itself as words arrive, and one of its own moves is not the reader leaving.
-  useEffect(() => {
-    if (!open || !drawn) return
-    const view = scroller(body.current)
-    if (!view) return
-    return watchAway(view, () => {
-      following.current = false
-    })
-  }, [open, drawn])
-
   return (
     <div className={cn("flex flex-col", className, COLUMN)} data-slot="thinking-line">
-      <button
-        type="button"
-        aria-expanded={open}
-        className="flex min-h-11 w-full items-center gap-2 text-left text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-        onClick={() => setOpen(true)}
-      >
-        {thinking && <Spinner className="size-4 shrink-0" />}
-        {label}
-        <ChevronRightIcon className="size-4 shrink-0" aria-hidden />
-      </button>
-      <Popup open={open} onOpenChange={setOpen}>
-        <PopupContent>
-          <PopupHeader className="pb-3">
-            <PopupTitle>{label}</PopupTitle>
-          </PopupHeader>
-          <div className="flex flex-col px-6 pb-6">
-            <div ref={bodyRef} data-slot="thinking-body" className="flex min-w-0 flex-col">
-              <Markdown className="text-sm leading-relaxed text-muted-foreground">
-                {reasoning}
-              </Markdown>
+      {pending ? (
+        // The turn's own stretch has not arrived: the row names what the turn is doing and offers
+        // no tap — under this same key, the run's row takes over the moment its words land.
+        <div className={WORK_ROW_CLASS} data-slot="thinking-pending">
+          <Spinner aria-label="Thinking…" className="size-4 shrink-0" />
+          {label}
+        </div>
+      ) : (
+        <WorkRow
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-label={label}
+          onClick={() => setOpen(true)}
+          before={thinking ? <Spinner aria-label="Thinking…" className="size-4 shrink-0" /> : null}
+          after={<ChevronRightIcon className="size-4 shrink-0" aria-hidden />}
+        >
+          {label}
+        </WorkRow>
+      )}
+      {!pending && (
+        <Popup open={open} onOpenChange={setOpen}>
+          <PopupContent dataSlot="thinking-sheet" scrollRef={sheetRef}>
+            <PopupHeader className="pb-3">
+              <PopupTitle>{label}</PopupTitle>
+            </PopupHeader>
+            <div className="flex flex-col px-6 pb-6">
+              <div ref={bodyRef} data-slot="thinking-body" className="flex min-w-0 flex-col">
+                <Markdown className="text-sm leading-relaxed text-muted-foreground">
+                  {reasoning}
+                </Markdown>
+              </div>
             </div>
-          </div>
-        </PopupContent>
-      </Popup>
+          </PopupContent>
+        </Popup>
+      )}
     </div>
   )
 })

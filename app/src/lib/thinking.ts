@@ -1,9 +1,11 @@
 /**
  * A reply's thinking, kept in runs: one per contiguous stretch of thinking between tool calls, each
- * anchored to the call that broke it, and drawn as the rows it touches: `mergeThoughtRows` is the one
- * rule for when two of them are one. The rules here are pure and reach nothing, so
- * `scripts/test-thinking.mjs` drives them without a screen; the ingest that fills them in is
- * `chat.ts`, and the thread that draws them is `message-item.tsx`. See ADR 0038 and ADR 0049.
+ * anchored to the call that broke it, and drawn as the rows it touches: `thinkingRows` is the one
+ * rule for the rows a reply draws — its runs marked where the turn still thinks, and the row for
+ * the stretch still to come — and `mergeThoughtRows` is the one rule for when two of them are one.
+ * The rules here are pure and reach nothing, so `scripts/test-thinking.mjs` drives them without a
+ * screen; the ingest that fills them in is `chat.ts`, and the thread that draws them is
+ * `message-item.tsx`. See ADR 0038 and ADR 0049.
  */
 
 /** One stretch of a reply's thinking, and the tool call it followed. */
@@ -142,6 +144,76 @@ export function runsOf(message: {
 }): ReasoningRun[] {
   const runs = message.reasoningRuns ?? (message.reasoning ? [{ text: message.reasoning }] : [])
   return runs.some(blank) ? runs.filter((run) => !blank(run)) : runs
+}
+
+/**
+ * One row as the thread draws it: its words, the key it keeps across redraws, and the truth its
+ * label reads from. `pending` is the stretch still to come — the turn works but its model has said
+ * nothing yet, so the row wears the spinner over no words at all, and is not a run: `runsOf` would
+ * drop it, which is why it never travels through a store.
+ */
+export type RunPart = {
+  key: string
+  text: string
+  /** How long this device watched the stretch think, where it watched all of it. */
+  spanMs?: number
+  /** The row says the turn is thinking right now, so it spins and reads "Thinking…". */
+  thinking: boolean
+  /** The call this stretch follows; absent on the run at the top of a reply, and on a merged row. */
+  afterToolId?: string
+  /** The turn's own stretch has not arrived: a status row with no words to open yet. */
+  pending?: boolean
+}
+
+/**
+ * The rows a reply's thinking is drawn as, from the runs it already has: the last run still
+ * thinking while the reply works, the run after the model's last call marked where that call left
+ * the model quiet, and — while the reply streams with nothing of its own, or resting behind its
+ * last call — a pending row for the stretch still to come, so the turn's spinner is on screen from
+ * its first working moment and the footer never has to say "Thinking…" itself. The pending row
+ * waits while the turn waits on the reader (an approval or a question) or while the host speaks its
+ * own status, because those are the footer's line to say, not the row's.
+ */
+export function thinkingRows(message: {
+  reasoningRuns?: ReasoningRun[]
+  reasoning?: string
+  content: string
+  status?: string
+  /** The host's own word for what the turn is doing while it has one. */
+  statusText?: string
+  /** An approval or a question is waiting on the reader: the turn waits, it does not think. */
+  waiting?: boolean
+  tools?: { status?: string; contentOffset?: number; toolCallId: string }[]
+}): RunPart[] {
+  const runs = runsOf(message)
+  const working = message.status === "streaming" && !message.content
+  const parts: RunPart[] = runs.map((run, index) => ({
+    ...run,
+    key: `run-${index}`,
+    // A span is stamped exactly when its run ends, so a run carrying one has no words still
+    // arriving: the label reads what it measured, wherever the row is drawn.
+    thinking: index === runs.length - 1 && working && run.spanMs === undefined,
+  }))
+  const last = message.tools?.at(-1)
+  const running = message.tools?.some((tool) => tool.status === "running")
+  const quiet =
+    working || (last !== undefined && (last.contentOffset ?? 0) >= message.content.length)
+  if (message.status !== "streaming" || running || !quiet || message.waiting || message.statusText)
+    return parts
+  const live = parts.at(-1)
+  if (last && live?.afterToolId === last.toolCallId && live.spanMs === undefined) {
+    live.thinking = true
+    return parts
+  }
+  if (last || !live)
+    parts.push({
+      key: `run-${parts.length}`,
+      text: "",
+      thinking: true,
+      pending: true,
+      ...(last ? { afterToolId: last.toolCallId } : {}),
+    })
+  return parts
 }
 
 /** A delta or a block of this run arrived: the span starts at the first one and ends at the last. */

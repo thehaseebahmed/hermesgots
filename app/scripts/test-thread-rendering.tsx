@@ -355,12 +355,12 @@ test("a delegated agent's sub-thread draws its reply's thinking", async () => {
         "Thought it through",
         "read back from the transcript, so no number was measured here",
       )
-      assert.equal(expanded(lines[0]), "false", "and folded over its answer, as a chat's row is")
+      assert.equal(expanded(lines[0]), "false", "and shut over its answer, as a chat's row is")
     },
   )
 })
 
-test("with the switch on, a sub-thread folds its thinking as a chat's reply does", async () => {
+test("a sub-thread draws its thinking shut, as a chat's reply does", async () => {
   const goal = "Review the parser for the reader"
   const thinking = "Read the scan before its blocks."
   host([
@@ -388,23 +388,19 @@ test("with the switch on, a sub-thread folds its thinking as a chat's reply does
       reasoningRuns: [{ text: thinking }],
     },
   ]
-  await screen(
-    undefined,
-    streaming,
-    async () => {
-      // The turn starts thinking: an empty reply with its first stretch in, as the ingest leaves it.
-      await db.messages.put({
-        ...(await db.messages.get("reply"))!,
-        content: "",
-        status: "streaming",
-      })
-      await settle()
-      const [line] = thinkingLines()
-      assert.ok(line, "the chat's reply draws its thinking")
-      assert.equal(lineLabel(line), "Thinking…", "still thinking, so the label says so")
-      assert.equal(expanded(line), "false", "and its sheet stays shut rather than opening itself")
-    },
-  )
+  await screen(undefined, streaming, async () => {
+    // The turn starts thinking: an empty reply with its first stretch in, as the ingest leaves it.
+    await db.messages.put({
+      ...(await db.messages.get("reply"))!,
+      content: "",
+      status: "streaming",
+    })
+    await settle()
+    const [line] = thinkingLines()
+    assert.ok(line, "the chat's reply draws its thinking")
+    assert.equal(lineLabel(line), "Thinking…", "still thinking, so the label says so")
+    assert.equal(expanded(line), "false", "and its sheet stays shut rather than opening itself")
+  })
   await mount(
     <AgentsContext.Provider
       value={{

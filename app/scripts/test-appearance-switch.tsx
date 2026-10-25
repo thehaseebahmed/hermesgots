@@ -1,7 +1,8 @@
 /**
  * The Navigation shortcuts switch under Appearance: the row with its title and its line, off until
  * it is turned on, the write it makes to the settings row the other appearance switches share, and
- * the same switch seeded on reading on.
+ * the same switch seeded on reading on — and the retired Fold thinking switch staying gone from
+ * the section.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -49,7 +50,10 @@ test("turning it on writes the appearance record the account carries", async () 
   await appearance({}, async () => {
     assert.equal(checked(switchOf()), false, "off to start")
     await click(switchOf())
-    await until(async () => (await db.settings.get("settings"))?.navShortcuts === true, "the setting")
+    await until(
+      async () => (await db.settings.get("settings"))?.navShortcuts === true,
+      "the setting",
+    )
     const saved = await db.settings.get("settings")
     assert.equal(saved?.navShortcuts, true, "the device holds the choice")
     assert.equal(
@@ -66,5 +70,13 @@ test("turning it on writes the appearance record the account carries", async () 
 test("seeded on, the switch reads on", async () => {
   await appearance({ navShortcuts: true }, async () => {
     assert.equal(checked(switchOf()), true, "the choice made on this device, or carried to it")
+  })
+})
+
+test("the retired Fold thinking switch draws no row", async () => {
+  await appearance({}, async () => {
+    assert.equal(find("label[for='fold-thinking']"), null, "its row is gone from the section")
+    assert.doesNotMatch(text(), /Fold thinking/, "and nothing on the screen names the switch")
+    assert.ok(rowOf(), "the switches that follow the account are still drawn")
   })
 })

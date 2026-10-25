@@ -34,7 +34,7 @@ import { attachmentSources, mediaRead, useMediaSources } from "@/lib/media-sourc
 import { mediaImages } from "@/lib/media-tags"
 import { openuiParts, REPLY_INSET } from "@/lib/openui-block.ts"
 import type { InterfaceDraw, ThreadBlock } from "@/lib/openui-thread.ts"
-import { mergeThoughtRows, runsOf } from "@/lib/thinking"
+import { mergeThoughtRows, thinkingRows, type RunPart } from "@/lib/thinking"
 import { cn } from "@/lib/utils"
 import { useReveal } from "@/lib/reveal"
 import { isPlanApproval } from "@/lib/workspace"
@@ -60,23 +60,7 @@ type Part =
   | { kind: "agent"; tool: ToolEvent }
   | ({ kind: "thinking" } & RunPart)
 
-/**
- * One thought row as the thread draws it: what `thinking.ts` merged, and the key the row keeps. The
- * call a stretch follows is here for placing it and gone from a merged row, since placement has
- * already happened by the time two rows become one.
- */
-type RunPart = {
-  key: string
-  text: string
-  /** How long this device watched the stretch think, where it watched all of it. */
-  spanMs?: number
-  /** The row still streams: the reply is thinking and nothing has measured it end yet. */
-  thinking: boolean
-  /** The call this stretch follows; absent on the run at the top of a reply, and on a merged row. */
-  afterToolId?: string
-}
-
-/** A stretch of a reply: the text between breaks, and the calls started inside it. */
+/** One stretch of a reply: the text between breaks, and the calls started inside it. */
 type Segment = { start: number; end: number; tools: ToolEvent[] }
 
 /** A segment with no run of its own, so a reply that never thought allocates nothing. */
@@ -464,45 +448,34 @@ export const MessageItem = memo(function MessageItem({
   // revealed, and none of that moves a run or opens one.
   const storedRuns = message.reasoningRuns
   const storedReasoning = message.reasoning
-  const working = message.status === "streaming" && !message.content
   const storedTools = message.tools
   const storedContent = message.content
-  const thinking: RunPart[] = useMemo(() => {
-    const runs = runsOf({ reasoningRuns: storedRuns, reasoning: storedReasoning })
-    const parts: RunPart[] = runs.map((run, index) => ({
-      ...run,
-      key: `run-${index}`,
-      // A span is stamped exactly when its run ends, so a run carrying one has no words still
-      // arriving: the label reads what it measured, wherever the row is drawn.
-      thinking: index === runs.length - 1 && working && run.spanMs === undefined,
-    }))
-    // The footer's working line used to say "Thinking…" in two places, and the row says both now,
-    // drawn with its spinner where that line was: while the reply is silent with nothing of its own
-    // yet, a stretch at the top; behind the model's last call, a stretch after it — so the row is on
-    // screen from the first moment the turn works, before a word of thinking arrives. Neither
-    // stretch outlives its reason to be: a run of the model's own thinking after the call is that
-    // run's row, and the first one goes the moment the answer's first word lands, leaving a reply
-    // that never thought with no row at all. A call still running is its own row's to say, and both
-    // are drawn only while the reply streams.
-    const last = storedTools?.at(-1)
-    const running = storedTools?.some((tool) => tool.status === "running")
-    const silent =
-      working || (last !== undefined && (last.contentOffset ?? 0) >= storedContent.length)
-    if (message.status !== "streaming" || running || !silent) return parts
-    const live = parts.at(-1)
-    // A run of the model's own thinking after that call is the row that says it; the quiet stretch
-    // is drawn otherwise — at the top while the reply is empty, after the call when it is not.
-    if (last && live?.afterToolId === last.toolCallId && live.spanMs === undefined)
-      live.thinking = true
-    else if (last || !live)
-      parts.push({
-        key: `run-${parts.length}`,
-        text: "",
-        afterToolId: last?.toolCallId,
-        thinking: true,
-      })
-    return parts
-  }, [storedRuns, storedReasoning, storedTools, storedContent, working, message.status])
+  const storedStatusText = message.statusText
+  const waiting = Boolean(
+    (message.approval && !message.approval.resolved) ||
+    (message.clarify && !message.clarify.resolved),
+  )
+  const thinking: RunPart[] = useMemo(
+    () =>
+      thinkingRows({
+        reasoningRuns: storedRuns,
+        reasoning: storedReasoning,
+        content: storedContent,
+        status: message.status,
+        statusText: storedStatusText,
+        waiting,
+        tools: storedTools,
+      }),
+    [
+      storedRuns,
+      storedReasoning,
+      storedTools,
+      storedContent,
+      storedStatusText,
+      waiting,
+      message.status,
+    ],
+  )
   // The turn failed: a user message whose send never got there, or a reply that errored instead of
   // answering. The one kept in the thread waits to be sent again; the other says so plainly.
   const failed = message.status === "error"
@@ -620,8 +593,8 @@ export const MessageItem = memo(function MessageItem({
     if (batch) batch.push(part)
     else thinkingBySegment.set(at, [part])
   }
-  // Each segment's parts as it draws them, before anything is rendered: what a row is open asks of
-  // the rows themselves, and a merged row is one row with one key.
+  // Each segment's parts as it draws them, before anything is rendered: a merged row is one row
+  // with one key, and a row holds its own state rather than the thread's.
   const drawn = segments.map((segment, i) =>
     toParts(
       content.slice(segment.start, segment.end),
@@ -633,20 +606,21 @@ export const MessageItem = memo(function MessageItem({
   )
   // A reply's stats come only once it is done and fully revealed, so they never count up.
   const statsShown = showStats && !streaming && !revealing && Boolean(message.stats)
-  // The footer's line says what the turn is doing — waiting on the reader, running a call, writing
-  // — but never while a row says the turn is thinking: the row says that, with its spinner, from
-  // the first moment the turn works, so two places never say it at once or both fall silent.
-  const activity = describeActivity(message)
-  const thinkingProgress =
+  // The footer says what the turn is doing — waiting on the reader, running a call, writing — but
+  // never while a row says the turn is thinking: the row owns that, so two places never say it.
+  const rowSaysThinking =
     !awaitingApproval &&
     !awaitingClarify &&
     drawn.some((parts) => parts.some((part) => part.kind === "thinking" && part.thinking))
-  const statusLine = streaming && !runningTool && !thinkingProgress
+  const statusLine = streaming && !runningTool && !rowSaysThinking
   // Empty, the row would still add two of the message's gaps around itself, so it is drawn only
   // once a line shows.
   const footerLines = [
     statusLine && (
-      <StatusLine key="status" text={awaitingApproval ? "Waiting for your approval…" : activity} />
+      <StatusLine
+        key="status"
+        text={awaitingApproval ? "Waiting for your approval…" : describeActivity(message)}
+      />
     ),
     // An error on a reply that streamed says so plainly: it isn't the bot's answer.
     failed && (
@@ -747,6 +721,7 @@ function AssistantRow({
               key={part.key}
               reasoning={part.text}
               thinking={part.thinking}
+              pending={part.pending}
               spanMs={part.spanMs}
               className={huggingTools(parts, index)}
             />

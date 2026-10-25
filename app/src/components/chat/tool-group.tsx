@@ -17,6 +17,7 @@ import {
 
 import { StepRail } from "@/components/chat/step-rail"
 import { Details } from "@/components/chat/tool-card"
+import { WorkRow } from "@/components/chat/work-row"
 import { Button } from "@/components/ui/button"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { usePopupDrawer, usePopupForm } from "@/lib/popup-form"
@@ -265,24 +266,34 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
   const shownDetail = detail ?? last
   return (
     <>
-      <button
+      <WorkRow
         ref={row}
-        type="button"
         data-slot="tool-group"
         aria-label={full}
-        className="relative flex min-h-11 w-full items-center gap-2 text-left text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         onClick={() => setOpen(true)}
+        before={
+          <>
+            {running && <Spinner className="size-4 shrink-0" />}
+            {failed && !running && (
+              <XIcon
+                className="size-4 shrink-0 text-destructive"
+                strokeWidth={3}
+                aria-label="Failed"
+              />
+            )}
+          </>
+        }
+        after={
+          <>
+            <span ref={ruler} className="invisible absolute w-max whitespace-nowrap" aria-hidden />
+            <ChevronRightIcon className="size-4 shrink-0" />
+          </>
+        }
       >
-        {running && <Spinner className="size-4 shrink-0" />}
-        {failed && !running && (
-          <XIcon className="size-4 shrink-0 text-destructive" strokeWidth={3} aria-label="Failed" />
-        )}
         <span ref={text} className="min-w-0 truncate">
           {label}
         </span>
-        <span ref={ruler} className="invisible absolute w-max whitespace-nowrap" aria-hidden />
-        <ChevronRightIcon className="size-4 shrink-0" />
-      </button>
+      </WorkRow>
       {failed && (
         <p className="-mt-2 truncate pb-1 pl-6 text-sm text-destructive">
           {failures.length === 1 ? whyFailed(failures[0]) : `${failures.length} calls failed`}
