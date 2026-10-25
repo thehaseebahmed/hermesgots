@@ -224,6 +224,18 @@ _Avoid_: child thread, worker view, agent detail
 The model a bot's delegated tasks run on, set in its settings and held on its host as Hermes's own delegation model. Nothing set means a delegated task inherits the bot's own model.
 _Avoid_: second opinion, delegation model, child model
 
+**Session stop**:
+The composer's control while anything in a session is at work: it ends the turn if one is live, and every running subagent the session holds, whichever turn started it. It stands where Send does while the box is empty, and typing brings Send back.
+_Avoid_: cancel, abort, kill, stop all, interrupt
+
+**Subagent line**:
+The line at a thread's foot naming how many of its subagents are still at work — riding beside the live turn's own activity while it streams — which opens the **Subagent sheet**. It goes when the last of them ends.
+_Avoid_: working line, count chip, running count, agent badge
+
+**Subagent sheet**:
+The sheet a **Subagent line** opens: the session's subagent cards, grouped Running then Finished, each running one stoppable there.
+_Avoid_: agent list, delegation sheet, subagent drawer
+
 **AFK**:
 A project being worked without its user present. On, Gots claims its ready tasks and works up to its pick count at a time, within its bot's **pick budget**, and stops picking up while the bot's account is over its usage threshold, until the switch is turned off. A task runs one run on the project's **prompt**, unless the project has picked a **workflow**.
 _Avoid_: autopilot, unattended mode, auto mode, yolo

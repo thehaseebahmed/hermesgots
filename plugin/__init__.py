@@ -426,6 +426,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "todo_tool",
                     "agents",
                     "subagent_stop",
+                    # Every subagent of a session stopped in one call — the app's Stop while a
+                    # session's turn is over and its subagents still work. Advertised apart from
+                    # `subagent_stop`, which a card's own button needs: a host with only that one
+                    # stops the subagents the app can name, one request each (ADR 0051).
+                    "subagents_stop_all",
                     "attachments",
                     "media",
                     "profile_routes",
@@ -944,6 +949,19 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         found = await asyncio.to_thread(delegation.stop, home, session_id, agent_id)
         return web.json_response(
             {"object": "memento.agent_stop", "session_id": session_id, "agent_id": agent_id, **found}
+        )
+
+    async def stop_agents(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        session_id = request.match_info["session_id"]
+        # On the loop thread, like store_path: the profile scope isn't visible inside to_thread.
+        home = hermes_home()
+        live, _ = await asyncio.to_thread(sessions.live_runs, adapter, None, home)
+        found = await asyncio.to_thread(delegation.stop_all, home, session_id, live)
+        return web.json_response(
+            {"object": "memento.agents_stop", "session_id": session_id, **found}
         )
 
     async def session_todos(request: "web.Request") -> "web.Response":
@@ -1738,6 +1756,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/todos", session_todos)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/agents", session_agents)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/agents/{{agent_id}}/stop", stop_agent)
+    app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/agents/stop", stop_agents)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/workspace", post_workspace)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/workspace", get_workspace)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/workspace/remove", remove_workspace)

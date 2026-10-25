@@ -13,6 +13,7 @@ import { ApprovalCard } from "@/components/chat/approval-card"
 import { MediaItems, type MediaItem } from "@/components/chat/media-gallery"
 import { Markdown } from "@/components/chat/markdown"
 import { AgentCards, SubagentResultCard } from "@/components/chat/agent-card"
+import { SubagentLine } from "@/components/chat/subagent-line"
 import { MediaTag } from "@/components/chat/media-image"
 import { ClarifyCard, PlanApprovedCard } from "@/components/chat/session-cards"
 import { ThinkingLine } from "@/components/chat/thinking-line"
@@ -408,11 +409,12 @@ function FailedActions({ message }: { message: Message }) {
   )
 }
 
-function StatusLine({ text }: { text: string }) {
+function StatusLine({ text, children }: { text?: string; children?: ReactNode }) {
   return (
     <div className="flex items-center gap-2 px-1 text-sm text-muted-foreground" aria-live="polite">
       <Spinner className="size-4" />
-      <span className="truncate">{text}</span>
+      {text && <span className="min-w-0 truncate">{text}</span>}
+      {children}
     </div>
   )
 }
@@ -424,6 +426,10 @@ interface MessageItemProps {
   blocks?: ThreadBlock[]
   /** Whether a reply is streaming in this chat, so queued messages know they'll go on their own. */
   busy?: boolean
+  subagents?: number
+  onShowSubagents?: () => void
+  /** Whether this row draws the count beside its activity words, rather than leaving it to the foot. */
+  subagentsInline?: boolean
 }
 
 /**
@@ -436,6 +442,9 @@ export const MessageItem = memo(function MessageItem({
   showStats,
   blocks,
   busy,
+  subagents,
+  onShowSubagents,
+  subagentsInline,
 }: MessageItemProps) {
   // Replies type out a word at a time, however Hermes delivers them.
   const content = useReveal(message.role === "assistant" ? message.content : "")
@@ -613,14 +622,30 @@ export const MessageItem = memo(function MessageItem({
     !awaitingClarify &&
     drawn.some((parts) => parts.some((part) => part.kind === "thinking" && part.thinking))
   const statusLine = streaming && !runningTool && !rowSaysThinking
+  // A subagent at work is the chat's news even while a tool card speaks for this reply.
+  const shown = subagents && subagentsInline && onShowSubagents
+  const activity = statusLine
+    ? awaitingApproval
+      ? "Waiting for your approval…"
+      : describeActivity(message)
+    : undefined
   // Empty, the row would still add two of the message's gaps around itself, so it is drawn only
   // once a line shows.
   const footerLines = [
-    statusLine && (
-      <StatusLine
-        key="status"
-        text={awaitingApproval ? "Waiting for your approval…" : describeActivity(message)}
-      />
+    (activity || shown) && (
+      <StatusLine key="status" text={activity}>
+        {subagents && subagentsInline && onShowSubagents && (
+          <>
+            {activity && <span aria-hidden>·</span>}
+            <SubagentLine
+              count={subagents}
+              onOpen={onShowSubagents}
+              spinner={false}
+              className="-my-2.5"
+            />
+          </>
+        )}
+      </StatusLine>
     ),
     // An error on a reply that streamed says so plainly: it isn't the bot's answer.
     failed && (
@@ -651,7 +676,6 @@ export const MessageItem = memo(function MessageItem({
               <AssistantRow
                 conversationId={message.conversationId}
                 busy={busy}
-                ended={!streaming}
                 parts={parts}
               >
                 {last && footer}
@@ -685,15 +709,12 @@ function sameMessage(a: MessageItemProps, b: MessageItemProps) {
 function AssistantRow({
   conversationId,
   busy,
-  ended,
   parts,
   children,
 }: {
   conversationId: string
   /** A reply is streaming in this chat, so a card that sends (a missed question) waits. */
   busy?: boolean
-  /** The reply has been written: the turn it belongs to has ended. */
-  ended: boolean
   parts: Part[]
   children?: ReactNode
 }) {
@@ -709,7 +730,7 @@ function AssistantRow({
               busy={busy}
             />
           ) : part.kind === "agent" ? (
-            <AgentCards key={part.tool.toolCallId} tool={part.tool} ended={ended} />
+            <AgentCards key={part.tool.toolCallId} tool={part.tool} />
           ) : part.kind === "tools" ? (
             <div key={part.tools[0].toolCallId} className={COLUMN}>
               <div className="w-full max-w-xl">

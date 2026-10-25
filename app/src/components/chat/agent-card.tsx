@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react"
-import { BotIcon, CheckIcon, ChevronRightIcon, PauseIcon } from "lucide-react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
+import { BotIcon, CheckIcon, ChevronRightIcon, PauseIcon, SquareIcon } from "lucide-react"
 
 import { AGENT_WORK_MS } from "@/lib/freshness"
 import { Banner } from "@/components/banner"
@@ -14,114 +14,164 @@ import {
   agentOfResult,
   agentsOf,
   agentTranscript,
+  applyAnswers,
+  stopOneAgent,
   useAgentsSource,
   type AgentsSource,
 } from "@/lib/agents"
 import { type Message, type SubagentRef, type ToolEvent } from "@/lib/db"
 import { usePluginFeatureOn } from "@/lib/features"
-import { stopAgent, type AgentStop, type DelegatedAgent, type HermesConfig } from "@/lib/hermes"
+import type { AgentStopRow, DelegatedAgent, HermesConfig } from "@/lib/hermes"
 import { toMessages } from "@/lib/history"
 import { useDraws } from "@/lib/openui-draws"
-import { activityOf } from "@/lib/tools"
 import { connectionKey } from "@/lib/connection"
 import { cn } from "@/lib/utils"
 
-const RECENT_ROWS = 40
-const STEPS = 2
 const NO_ROWS: Message[] = []
 
 const agentTitle = (goal: string) => `Sub-Agent: ${agentName(goal)}`
 
-/** A `delegate_task` call: a card per agent it started, each offering Stop once its turn has ended. */
-export function AgentCards({ tool, ended }: { tool: ToolEvent; ended: boolean }) {
+/** A `delegate_task` call: a card per agent it started. */
+export function AgentCards({ tool }: { tool: ToolEvent }) {
   const source = useAgentsSource()
   const agents = source ? agentsOf(tool, source.agents) : []
   if (!source || agents.length === 0) return <PendingCard tool={tool} />
   return (
     <>
       {agents.map((agent) => (
-        <AgentCard key={agent.id} agent={agent} source={source} ended={ended} />
+        <SubagentCard key={agent.id} agent={agent} source={source} />
       ))}
     </>
   )
 }
 
-function CardShell({
-  onClick,
-  slot,
-  action,
-  children,
+/**
+ * One subagent as a card: what it is and how it is doing on the left — all of which opens its
+ * sub-thread — and Stop on the right while it works, out of that tap target so a press can't open
+ * the sub-thread by accident. Its commands and its goal are the sub-thread's to show, not the
+ * card's.
+ */
+export function SubagentCard({
+  agent,
+  source,
+  slot = "agent-card",
 }: {
-  onClick?: () => void
+  agent: DelegatedAgent
+  source: AgentsSource
   /** What a test (or a style) can name the card by. */
   slot?: string
-  /** A control on a row of its own under the card's body, never inside its tap target. */
-  action?: React.ReactNode
-  children: React.ReactNode
 }) {
-  const box = cn(FLAT_CARD, "flex flex-col gap-2 px-4 py-3 text-left")
-  if (!action)
-    return onClick ? (
-      <button
-        type="button"
-        data-slot={slot}
-        onClick={onClick}
-        className={cn(
-          box,
-          "outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring",
-        )}
-      >
-        {children}
-      </button>
-    ) : (
-      <div data-slot={slot} className={box}>
-        {children}
-      </div>
-    )
-  // With a row under the body, the card is a box whose body is the tap target: a control of its own
-  // may not sit inside a button.
-  const body = "flex flex-col gap-2 px-4 py-3 text-left"
+  const [busy, setBusy] = useState(false)
+  const [failure, setFailure] = useState<string>()
+  // The host's own answer to this card's Stop, read here at once: the next list read may be a poll
+  // away, and the card should not go on offering to stop something it was just told has stopped.
+  const [answer, setAnswer] = useState<AgentStopRow & { at: number }>()
+  const stoppable = usePluginFeatureOn(source.server, "subagent_stop")
+  const shown = applyAnswers([agent], answer ? [answer] : [])[0]
+  const canStop = shown.status === "running" && Boolean(source.sessionId) && stoppable && !busy
+  const note = failure ?? shown.stopReason
+  const stop = async () => {
+    if (!source.sessionId) return
+    setBusy(true)
+    setFailure(undefined)
+    try {
+      const row = await stopOneAgent(source.server, source.sessionId, agent)
+      setAnswer({ ...row, at: Date.now() / 1000 })
+    } catch (error) {
+      setFailure(error instanceof Error ? error.message : "Couldn't stop this subagent.")
+    } finally {
+      setBusy(false)
+    }
+  }
+  const open = source.onOpen
+  const body = (
+    <CardBody
+      title={agentTitle(shown.goal)}
+      line={
+        <>
+          <StatusIcon agent={shown} />
+          <span className="min-w-0 truncate">{note ?? agentLine(shown)}</span>
+        </>
+      }
+      chevron={Boolean(open)}
+    />
+  )
   return (
     <div
       data-slot={slot}
-      className={cn(FLAT_CARD, "flex flex-col")}
+      data-agent={agent.id}
+      className={cn(FLAT_CARD, "flex items-center gap-3 px-4 py-3")}
     >
-      {onClick ? (
+      {open ? (
         <button
           type="button"
-          onClick={onClick}
-          className={cn(
-            body,
-            "rounded-3xl outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring",
-          )}
+          onClick={() => open(shown)}
+          className="flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-2xl text-left outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring"
         >
-          {children}
+          {body}
         </button>
       ) : (
-        <div className={body}>{children}</div>
+        <span className="flex min-h-11 min-w-0 flex-1 items-center gap-3">{body}</span>
       )}
-      <div className="flex flex-wrap items-center justify-end gap-2 border-t px-4 py-2">
-        {action}
-      </div>
+      {canStop && (
+        <Button
+          variant="outline"
+          size="icon"
+          className="size-11 shrink-0 rounded-full"
+          aria-label={`Stop ${agentName(agent.goal)}`}
+          onClick={() => void stop()}
+        >
+          <SquareIcon className="size-4 fill-current" />
+        </Button>
+      )}
     </div>
+  )
+}
+
+function CardBody({
+  title,
+  line,
+  chevron = false,
+  className,
+}: {
+  title: ReactNode
+  line?: ReactNode
+  chevron?: boolean
+  className?: string
+}) {
+  return (
+    <span className={cn("flex min-w-0 flex-1 flex-col gap-1", className)}>
+      <span className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+        <BotIcon className="size-4 shrink-0" />
+        <span className="min-w-0 flex-1 truncate">{title}</span>
+        {chevron && <ChevronRightIcon className="size-4 shrink-0" />}
+      </span>
+      {line && (
+        <span className="flex items-center gap-1.5 text-xs text-muted-foreground tabular-nums">
+          {line}
+        </span>
+      )}
+    </span>
   )
 }
 
 function PendingCard({ tool }: { tool: ToolEvent }) {
   const running = tool.status === "running"
   return (
-    <CardShell>
-      <span className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-        <BotIcon className="size-4" />
-        <span className="flex-1 truncate">{agentTitle(tool.label)}</span>
-      </span>
-      {running && (
-        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Spinner className="size-3" />
-          Working
-        </span>
-      )}
-    </CardShell>
+    <div data-slot="agent-card" className={cn(FLAT_CARD, "flex items-center gap-3 px-4 py-3")}>
+      <CardBody
+        className="min-h-11 justify-center"
+        title={agentTitle(tool.label)}
+        line={
+          running && (
+            <>
+              <Spinner className="size-3" />
+              Working
+            </>
+          )
+        }
+      />
+    </div>
   )
 }
 
@@ -168,106 +218,6 @@ function useTranscript(server: HermesConfig, agent: DelegatedAgent, limit: numbe
   return { messages: kept ?? messages, failed: !kept && failed }
 }
 
-function AgentCard({
-  agent,
-  source,
-  ended,
-}: {
-  agent: DelegatedAgent
-  source: AgentsSource
-  /** The turn that started it is over, so its own stop is offered here. */
-  ended: boolean
-}) {
-  const [open, setOpen] = useState(false)
-  const [answer, setAnswer] = useState<AgentStop & { at?: number }>()
-  const [busy, setBusy] = useState(false)
-  const [failure, setFailure] = useState<string>()
-  const { messages } = useTranscript(source.server, agent, RECENT_ROWS)
-  const steps = (messages ?? []).flatMap((m) => m.tools ?? []).slice(-STEPS)
-  // A host without the route draws no Stop at all, and neither does a card whose turn still runs.
-  const stoppable = usePluginFeatureOn(source.server, "subagent_stop")
-  const canStop =
-    ended &&
-    agent.status === "running" &&
-    !answer?.stopped &&
-    Boolean(source.sessionId) &&
-    stoppable
-  // What the card reads once it is stopped: when it stopped here, since the host hasn't written an
-  // end yet, and the host's own row takes over on the next read.
-  const shown: DelegatedAgent = answer?.stopped
-    ? { ...agent, status: "stopped", endedAt: agent.endedAt ?? answer.at ?? null }
-    : agent
-  const stop = async () => {
-    if (!source.sessionId) return
-    setBusy(true)
-    setFailure(undefined)
-    try {
-      const next = await stopAgent(source.server, source.sessionId, agent.id)
-      setAnswer({ ...next, at: Date.now() / 1000 })
-    } catch (error) {
-      setFailure(error instanceof Error ? error.message : "Couldn't stop this subagent.")
-    } finally {
-      setBusy(false)
-    }
-  }
-  const note = failure ?? answer?.reason
-  return (
-    <>
-      <CardShell
-        slot="agent-card"
-        onClick={() => setOpen(true)}
-        action={
-          canStop || note ? (
-            <>
-              {note && <p className="min-w-0 flex-1 text-xs text-muted-foreground">{note}</p>}
-              {canStop && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="min-h-9 rounded-full"
-                  disabled={busy}
-                  onClick={() => void stop()}
-                >
-                  {busy ? "Stopping…" : "Stop"}
-                </Button>
-              )}
-            </>
-          ) : undefined
-        }
-      >
-        <span className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-          <BotIcon className="size-4" />
-          <span className="flex-1 truncate">{agentTitle(agent.goal)}</span>
-          <ChevronRightIcon className="size-4" />
-        </span>
-        {steps.length ? (
-          <ul className="flex flex-col gap-1">
-            {steps.map((step) => (
-              <li key={step.toolCallId} className="flex min-w-0 items-center gap-2 text-[15px]">
-                <span className="shrink-0">{activityOf(step)}</span>
-                {step.label && step.label !== step.tool && (
-                  <span className="truncate font-mono text-xs text-muted-foreground">
-                    {step.label}
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="line-clamp-2 text-[15px]">
-            {agentName(agent.goal) === agent.goal.trim() ? "Starting…" : agent.goal}
-          </p>
-        )}
-        <span className="flex items-center gap-1.5 text-xs text-muted-foreground tabular-nums">
-          <StatusIcon agent={shown} />
-          {agentLine(shown)}
-        </span>
-      </CardShell>
-      <AgentPopup agent={shown} server={source.server} open={open} onOpenChange={setOpen} />
-    </>
-  )
-}
-
 /**
  * A subagent's result, as the thread draws it: a line naming the subagent whose work it is, opening
  * the same sub-thread its card does. A chat that can't name the subagent still draws the line — the
@@ -276,45 +226,36 @@ function AgentCard({
 export function SubagentResultCard({ subagent }: { subagent: SubagentRef }) {
   const source = useAgentsSource()
   const agent = source ? agentOfResult(subagent, source.agents) : undefined
-  const [open, setOpen] = useState(false)
-  const goal = agent?.goal ?? subagent.goals[0]
+  if (agent && source) return <SubagentCard agent={agent} source={source} slot="subagent-result" />
+  const goal = subagent.goals[0]
   return (
-    <>
-      <CardShell slot="subagent-result" onClick={agent ? () => setOpen(true) : undefined}>
-        <span className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-          <BotIcon className="size-4" />
-          <span className="flex-1 truncate">{goal ? agentTitle(goal) : "Sub-Agent"}</span>
-          {agent && <ChevronRightIcon className="size-4" />}
-        </span>
-        {agent && (
-          <span className="flex items-center gap-1.5 text-xs text-muted-foreground tabular-nums">
-            <StatusIcon agent={agent} />
-            {agentLine(agent)}
-          </span>
-        )}
-      </CardShell>
-      {agent && source && (
-        <AgentPopup agent={agent} server={source.server} open={open} onOpenChange={setOpen} />
-      )}
-    </>
+    <div data-slot="subagent-result" className={cn(FLAT_CARD, "flex items-center gap-3 px-4 py-3")}>
+      <CardBody className="min-h-11 justify-center" title={goal ? agentTitle(goal) : "Sub-Agent"} />
+    </div>
   )
 }
 
-/** The sub-thread pop-up a delegation's card and its result's message both open. */
-function AgentPopup({
+/**
+ * The sub-thread pop-up an agent's card, its result's line and the subagent sheet all open. The
+ * screen draws it rather than the card, so a press inside the sheet can close the sheet and open
+ * this.
+ */
+export function AgentPopup({
   agent,
   server,
   open,
   onOpenChange,
 }: {
-  agent: DelegatedAgent
+  agent: DelegatedAgent | undefined
   server: HermesConfig
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
   return (
     <Popup open={open} onOpenChange={onOpenChange}>
-      <PopupContent size="xl">{open && <AgentView agent={agent} server={server} />}</PopupContent>
+      <PopupContent size="xl">
+        {open && agent && <AgentView agent={agent} server={server} />}
+      </PopupContent>
     </Popup>
   )
 }

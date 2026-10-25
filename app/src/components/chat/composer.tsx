@@ -68,6 +68,7 @@ const SLIDE_CANCEL_PX = 80
 
 export function Composer({
   busy,
+  subagentsRunning = 0,
   disabled,
   onSend,
   onQueue,
@@ -119,6 +120,8 @@ export function Composer({
   /** Called instead of `onSend` while a reply is streaming: Enter queues the message. */
   onQueue: (text: string, attachments: Attachment[]) => Promise<void> | void
   onStop: () => void
+  /** How many subagents the session has at work: with the turn over, Stop is still the session's. */
+  subagentsRunning?: number
   onCommand: (
     command: LocalCommand,
     message?: { text: string; attachments: Attachment[] },
@@ -210,6 +213,8 @@ export function Composer({
     (value.trim().length > 0 || attachments.length > 0) && !disabled && preparing.length === 0
   // What Enter does now, so the button says so.
   const steering = steersNow(value, attachments)
+  // One press stops everything the session has going, so Send's place is Stop while either works.
+  const working = busy || subagentsRunning > 0
 
   // The menu follows the caret: a `/` that begins a word opens it, wherever in the message it is.
   const token = slashToken(value, caret)
@@ -473,7 +478,7 @@ export function Composer({
       return
     }
     const field = event.currentTarget
-    if (isInterrupt(event.nativeEvent, busy, field.selectionStart !== field.selectionEnd)) {
+    if (isInterrupt(event.nativeEvent, working, field.selectionStart !== field.selectionEnd)) {
       event.preventDefault()
       onStop()
       return
@@ -520,7 +525,7 @@ export function Composer({
           <MicIcon />
         </InputGroupButton>
       )}
-      {busy && !canSend ? (
+      {working && !canSend ? (
         <InputGroupButton
           type="button"
           variant="secondary"

@@ -1,4 +1,5 @@
-"""Stopping a turn stops the subagents that turn started, and only those.
+"""Stopping a turn stops the subagents that turn started, and only those — and a session's own Stop
+stops every subagent it has, whichever turn started it (ADR 0051).
 
 Core detaches a delegated child before it dispatches it, so a run's own stop — the app's
 ``POST /v1/runs/{id}/stop`` — never reaches the children that run began: the API server's stop
@@ -112,7 +113,9 @@ class Core:
         return [record["agent"].session_id for record in self._active_subagents.values()]
 
 
-class StopTest(unittest.TestCase):
+class Harness(unittest.TestCase):
+    """The harness both stop suites stand on: a home, core's two fakes, and the rows they plant."""
+
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -180,6 +183,10 @@ class StopTest(unittest.TestCase):
     def card(self, session_id: str) -> Dict[str, str]:
         """What the app's cards read for a session: each child's id, as its card holds it, and state."""
         return {child["id"]: child["status"] for child in delegation.children(self.home, session_id, set())}
+
+
+class StopTest(Harness):
+    """A stopped turn hands its stop to the children it started, and to no others."""
 
     def test_a_stopped_run_stops_its_live_subagents(self) -> None:
         self.session("s")
@@ -354,6 +361,69 @@ class StopTest(unittest.TestCase):
                 asyncio.run(delegation.watch_stops(self.adapter))
         sleep.assert_called_once_with(delegation.STOP_SECONDS)
         self.assertEqual(self.core.stopped, ["c1"])
+
+
+class StopAllTest(Harness):
+    """A session's own Stop: every subagent it still holds at work, whichever turn started it.
+
+    The app asks this when the reader presses Stop with the turn already over, which is the case the
+    per-run fan-out above deliberately leaves alone (ADR 0038): a background child is named only by
+    the registry core holds it in, since its parent's run has ended and its own row would otherwise
+    read as a child nobody holds.
+    """
+
+    def test_a_background_child_is_stopped_with_its_turn_over(self) -> None:
+        self.session("s")
+        self.session("early", "s", delegate_from="s")
+        self.session("late", "s", delegate_from="s")
+        self.adapter.run("run-1", "completed", "s")
+        answer = delegation.stop_all(self.home, "s", set())
+        self.assertEqual([row["id"] for row in answer["agents"]], ["early", "late"])
+        self.assertTrue(all(row["stopped"] for row in answer["agents"]))
+        self.assertEqual(answer["stopped"], 2)
+        self.assertEqual(self.core.stopped, ["early", "late"])
+        self.assertEqual(self.card("s"), {"early": "stopped", "late": "stopped"})
+
+    def test_a_finished_child_is_left_alone(self) -> None:
+        self.session("s")
+        self.session("done", "s", delegate_from="s", ended=True, reason="agent_close")
+        self.session("open", "s", delegate_from="s")
+        answer = delegation.stop_all(self.home, "s", set())
+        self.assertEqual([row["id"] for row in answer["agents"]], ["open"])
+        self.assertEqual(self.core.stopped, ["open"])
+
+    def test_another_session_s_child_survives(self) -> None:
+        self.session("s")
+        self.session("other")
+        self.session("mine", "s", delegate_from="s")
+        self.session("theirs", "other", delegate_from="other")
+        answer = delegation.stop_all(self.home, "s", set())
+        self.assertEqual([row["id"] for row in answer["agents"]], ["mine"])
+        self.assertEqual(self.core.running(), ["theirs"])
+
+    def test_a_child_nothing_holds_is_not_asked_to_stop(self) -> None:
+        # An open row nobody holds is not at work — `children` says so, and the app's card says so
+        # too — so a session-wide stop leaves it alone rather than reporting a refusal for it.
+        self.session("s")
+        self.session("c1", "s", delegate_from="s")
+        self.core._active_subagents.clear()
+        self.assertEqual(delegation.stop_all(self.home, "s", set()), {"agents": [], "stopped": 0})
+        self.assertEqual(self.core.stopped, [])
+
+    def test_a_session_with_nothing_running_answers_nothing(self) -> None:
+        self.session("s")
+        self.session("done", "s", delegate_from="s", ended=True, reason="agent_close")
+        self.assertEqual(delegation.stop_all(self.home, "s", set()), {"agents": [], "stopped": 0})
+
+    def test_a_live_turn_s_child_is_stopped_too(self) -> None:
+        # A Stop pressed while the turn still runs asks for both, and the children are the same
+        # children: a row still open under a live run is at work whether or not the registry holds it.
+        self.session("s")
+        self.session("c1", "s", delegate_from="s")
+        self.core._active_subagents.clear()
+        answer = delegation.stop_all(self.home, "s", {"s"})
+        self.assertEqual([row["id"] for row in answer["agents"]], ["c1"])
+        self.assertEqual(answer["agents"][0]["stopped"], False, "core had no record to stop")
 
 
 if __name__ == "__main__":
