@@ -392,9 +392,18 @@ export function NotificationSettingsRow() {
 /** Android: the phone's screen for this app, which the app can read but not draw. */
 function SystemNotificationSettingsRow() {
   const open = async () => {
-    // A build too old to have the screen says nothing; one that refused says why.
-    const refused = await openNotificationSettings()
-    if (refused) toast.error(refused)
+    try {
+      // A build too old to have the screen says nothing; one that refused says why.
+      const refused = await openNotificationSettings()
+      if (refused) toast.error(refused)
+    } catch (error) {
+      // The call is made off the tap, so anything it throws must land here or be lost.
+      toast.error(
+        error instanceof Error && error.message
+          ? `Couldn't open notification settings. ${error.message}`
+          : "Couldn't open notification settings",
+      )
+    }
   }
   return (
     <ActionRow

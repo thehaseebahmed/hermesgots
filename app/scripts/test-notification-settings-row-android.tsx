@@ -60,3 +60,28 @@ test("a screen that refuses to open is a toast", async () => {
   }
   assert.deepEqual(said, ["Couldn't open notification settings: no activity"])
 })
+
+test("a tap whose call throws is a toast too, not a lost rejection", async () => {
+  await seedSettings({ fcm: { device: "device-1", on: false } })
+  // The row asks off the tap, so a throw from the one step before the call's own guard — asking the
+  // bridge whether this build has the plugin — would otherwise surface nowhere.
+  const bridge = globalThis.Capacitor as unknown as { isPluginAvailable: () => boolean }
+  const real = bridge.isPluginAvailable
+  bridge.isPluginAvailable = () => {
+    throw new Error("bridge gone")
+  }
+  const said: unknown[] = []
+  const shouted = toast.error
+  toast.error = ((message: unknown) => {
+    said.push(message)
+  }) as typeof toast.error
+  try {
+    await mount(<NotificationSettingsRow />, async () => {
+      await click(find("button"))
+    })
+  } finally {
+    bridge.isPluginAvailable = real
+    toast.error = shouted
+  }
+  assert.deepEqual(said, ["Couldn't open notification settings. bridge gone"])
+})
