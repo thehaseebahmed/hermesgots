@@ -712,7 +712,7 @@ export function ChatPage({
   // only at its next round. Run-scoped on purpose: `reattachRun` only ever picks up a run of this
   // session (`adoptRun` bails on `knownLiveRun`), so a chat whose turn has ended and whose subagents
   // still work has nothing here to reattach — its work reads `working` from the state rule
-  // (`session-work.ts`), its results land through the catch-up below, and the composer stays the
+  // (`session-work.ts`), a finished delivery draws nothing in the thread, and the composer stays the
   // user's. The wake turn it starts is a run: it is followed here once the host lists it.
   const hostRuns = useSessionRunning(
     tracked && baseUrl && apiKey ? { baseUrl, apiKey } : undefined,

@@ -1206,7 +1206,7 @@ async function adoptRun(conversation: Conversation, profile: Profile) {
   const at = messages.findLastIndex((m) => m.role === "user" && m.hermesRowId !== undefined)
   // The wake run a finished subagent starts draws no user message, so its reply is the newest
   // after the user's last one rather than the one beside it.
-  const reply = messages.slice(at + 1).findLast((m) => m.role === "assistant" && !m.subagent)
+  const reply = messages.slice(at + 1).findLast((m) => m.role === "assistant")
   if (!reply || reply.status === "streaming") return
   // The turn of this run, not an earlier one: the host wrote it after the run started. A turn that
   // opened with a user message counts from that message; a wake turn from its reply.

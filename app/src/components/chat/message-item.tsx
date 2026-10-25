@@ -12,7 +12,7 @@ import { toast } from "sonner"
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { MediaItems, type MediaItem } from "@/components/chat/media-gallery"
 import { Markdown } from "@/components/chat/markdown"
-import { AgentCards, SubagentResultCard } from "@/components/chat/agent-card"
+import { AgentCards } from "@/components/chat/agent-card"
 import { SubagentLine } from "@/components/chat/subagent-line"
 import { MediaTag } from "@/components/chat/media-image"
 import { ClarifyCard, PlanApprovedCard } from "@/components/chat/session-cards"
@@ -675,7 +675,6 @@ export const MessageItem = memo(function MessageItem({
   )
   return (
     <div className="flex flex-col gap-3">
-      {message.subagent && <SubagentResultCard subagent={message.subagent} />}
       {drawn.map((parts, i) => {
         const last = i === drawn.length - 1
         return (

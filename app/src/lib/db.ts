@@ -392,20 +392,6 @@ export interface Steer {
 /** `queued` is a user message waiting for the current reply to finish. */
 export type MessageStatus = "triaging" | "queued" | "streaming" | "done" | "error" | "stopped"
 
-/** The subagent a result the thread draws stands for: how its message finds its sub-thread. */
-export interface SubagentRef {
-  /** The delegation Hermes dispatched it under, off the notification's own header. */
-  delegationId?: string
-  /**
-   * Core's own ids for the subagents that finished (`sa-<task>-<hex>`), where the transcript names
-   * them. They never equal a plugin agent's `id` — that is the child's *session* id — so they are
-   * carried as what the call said, never matched on: the goal below is the join.
-   */
-  ids: string[]
-  /** The goals they were given: how the chat's agent list matches a result to its card. */
-  goals: string[]
-}
-
 export interface Message {
   id: string
   conversationId: string
@@ -428,11 +414,6 @@ export interface Message {
   clarify?: ClarifyRequest
   /** A reply's steers, in order. */
   steers?: Steer[]
-  /**
-   * Set on a message a subagent's finished work drew into the thread, never on a reply: it draws as
-   * the bot's own message, and this is the subagent whose sub-thread a tap on it opens.
-   */
-  subagent?: SubagentRef
   status: MessageStatus
   /** Latest `hermes.status` text while streaming, or the error text. */
   statusText?: string
@@ -892,6 +873,16 @@ db.version(23).upgrade((tx) =>
     .modify((row: Record<string, unknown>) => {
       for (const key of RETIRED_SETTINGS_KEYS) delete row[key]
     }),
+)
+
+// v24: a subagent's delivery is not a message in the thread (ADR 0052). The rows an earlier build
+// drew for one are bookkeeping — the finding is read in its sub-thread — and nothing else names
+// them, so they go rather than being migrated.
+db.version(24).upgrade((tx) =>
+  tx
+    .table("messages")
+    .filter((message: Record<string, unknown>) => message.subagent !== undefined)
+    .delete(),
 )
 
 db.on("populate", (tx) => seedProfile(tx))

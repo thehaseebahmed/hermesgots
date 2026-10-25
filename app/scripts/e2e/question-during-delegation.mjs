@@ -53,7 +53,6 @@ await flow("question-during-delegation", async ({ page, seed, send, lastReply, u
         (message) => ({
           role: message.role,
           content: message.content,
-          subagent: message.subagent ?? null,
         }),
       )
     }, chat)
@@ -108,48 +107,30 @@ await flow("question-during-delegation", async ({ page, seed, send, lastReply, u
     "the composer to come back once the answer is sent",
   )
 
-  let tailWhenLanded = null
-  const delivered = await until(
-    async () => {
-      const all = await messages()
-      const index = all.findLastIndex((message) => message.subagent)
-      if (index < 0) return null
-      tailWhenLanded = all.slice(index + 1)
-      return all[index]
-    },
+  // The delivery row core wrote when the subagent finished is bookkeeping: no message of the thread
+  // ever holds its text. The wake turn's own answer lands only after it, so wait on that, and the
+  // delivery has been through the fold by then.
+  await until(
+    async () => (await messages()).some((message) => message.content.startsWith(WAKE_OPEN)),
     40_000,
-    "the subagent's result to be delivered into the thread",
-  )
-  assert.equal(delivered.role, "assistant", "the result is the bot's message, not the user's")
-  assert.ok(delivered.content.includes(RESULT_END), "the result itself is what the message holds")
-  assert.ok(
-    !delivered.content.includes("ASYNC DELEGATION COMPLETE"),
-    "and not the notification's header",
-  )
-  assert.ok(
-    tailWhenLanded.every((message) => message.role === "assistant" && !message.subagent),
-    "it landed at the thread's end",
+    "the wake turn's answer to be drawn",
   )
   const all = await messages()
-  const at = all.findIndex((message) => message.content === delivered.content)
-  const answered = all.findIndex((message) =>
-    message.content.includes("Noted: yes, cap everything"),
+  assert.ok(
+    !all.some((message) => message.content.includes(RESULT_END)),
+    "no message of the thread holds the result's own words",
   )
-  assert.ok(at > answered, "after the reply the answer brought, not inside it")
-  const row = page.locator("[data-slot=message]", { hasText: RESULT_END }).last()
-  await row.waitFor({ timeout: 15_000 })
-  assert.equal(await row.getAttribute("data-align"), "start", "on the bot's own side")
+  assert.ok(
+    !all.some((message) => message.content.includes("ASYNC DELEGATION COMPLETE")),
+    "nor the notification the subagent's delivery arrived in",
+  )
   assert.equal(
-    await row.locator("[data-slot=bubble-content]").count(),
+    await page.getByText(RESULT_END).count(),
     0,
-    "with no bubble, as a reply has none",
+    "the result is drawn nowhere in the thread: its sub-thread is where it is read",
   )
-  const resultCard = page.locator("[data-slot=subagent-result]").first()
-  await resultCard.waitFor({ timeout: 15_000 })
-  assert.match(await resultCard.innerText(), /Sub-Agent: /, "the result names its subagent")
-  assert.ok(await precedes(resultCard, row), "and sits above the result's own words")
-  await shot("result-delivered")
-  pass("the result landed as the bot's own message at the thread's end")
+  await shot("delivery-drew-nothing")
+  pass("the subagent's delivery drew nothing of the thread")
 
   assert.equal(
     await drawnTimes(LEADIN),
@@ -209,10 +190,12 @@ await flow("question-during-delegation", async ({ page, seed, send, lastReply, u
   const wakeRow = page.locator("[data-slot=message]", { hasText: WAKE_END }).last()
   assert.equal(await wakeRow.getAttribute("data-align"), "start", "the bot's own side")
   assert.equal(await wakeRow.locator("[data-slot=bubble-content]").count(), 0, "with no bubble")
-  await row.getByText(RESULT_END).waitFor()
   const wokeTool = page.getByText("Ran a command", { exact: false }).last()
   await wokeTool.waitFor({ timeout: 15_000 })
-  assert.ok(await precedes(row, wokeTool), "the wake turn ran a tool of its own, below the result")
+  assert.ok(
+    await precedes(wakeRow, wokeTool),
+    "the wake turn ran a tool of its own, below its reply",
+  )
   pass("the wake turn ran a tool and drew it")
   await shot("wake-turn")
   pass("the wake turn streamed in as a message of its own")
