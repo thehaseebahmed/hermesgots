@@ -1687,7 +1687,8 @@ export async function steerQueued(message: Message) {
     )
     if (typeof steered.run_id === "string") runId = steered.run_id
   } else {
-    if (!turn || !runId || !canSteer(carried)) throw new HermesError("This reply can't be steered.")
+    if (!turn || !runId || !canSteer(carried))
+      throw new HermesError("This reply can't be steered.")
     carried = await savedForSteer(message, carried)
     said = attachmentsText(message.content, carried)
     await steerRun(turn.config, runId, said)
