@@ -22,7 +22,7 @@ import { useCodePane, useMeetingsPane, useProjectsPane, useResearchPane } from "
 import { useSidebarCollapsed } from "@/lib/sidebar"
 import { useBotPane, useBotThreads } from "@/lib/threads"
 import { cn } from "@/lib/utils"
-import { onChatSwap, heldFrame, type HoldSlot } from "@/lib/chat-hold"
+import { onChatSwap, type HoldSlot } from "@/lib/chat-hold"
 import { ChatPage } from "@/routes/chat"
 
 /**
@@ -127,8 +127,8 @@ function usePageTransition(ref: RefObject<HTMLElement | null>, pane: ListPane | 
 /**
  * The third pane of a bot that has no thread to keep beside Main. It stands at the pane's own width
  * so the layout doesn't move when the bot's first thread opens, and says the one thing it knows —
- * once the bot's thread list has answered. Until then it holds the frame the pane last drew, inert,
- * so neither the lane's place nor what it says moves while the answer is on its way.
+ * once the bot's thread list has answered. Until then it draws nothing, never the previous bot's
+ * thread.
  */
 function ThreadLane({ threads }: { threads?: boolean }) {
   if (threads === false)
@@ -140,20 +140,7 @@ function ThreadLane({ threads }: { threads?: boolean }) {
         <p className="text-sm text-muted-foreground">No threads yet</p>
       </div>
     )
-  const held = threads === undefined ? heldFrame("thread") : undefined
-  if (!held?.frame) return null
-  // The same box `ChatPage` draws a held pane in, so the frame is the pane it was, and inert, so
-  // nothing in a chat the pane has left can be tapped.
-  return (
-    <div
-      data-slot="chat-pane"
-      data-pane="thread"
-      className="relative flex min-h-0 flex-1 flex-col"
-      inert
-    >
-      {held.frame}
-    </div>
-  )
+  return null
 }
 
 /**

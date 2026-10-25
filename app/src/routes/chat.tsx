@@ -164,7 +164,7 @@ import {
 } from "@/lib/workspace"
 import { lastActivityAt } from "@/lib/session-work"
 import { useReadyLine } from "@/lib/greeting"
-import { heldFrame, hold, type HoldSlot } from "@/lib/chat-hold"
+import { hold, type HoldSlot } from "@/lib/chat-hold"
 import { SUGGESTIONS } from "@/lib/suggestions"
 import { DEFAULT_BOT_ID } from "@/components/bots"
 import { useBotThreads, useNow, useThreads, type Thread } from "@/lib/threads"
@@ -273,9 +273,7 @@ function PendingChat() {
   return (
     <>
       <ChatHeader title="" showBot={false} />
-      <div className="flex flex-1 items-center justify-center">
-        <Spinner className="size-6" />
-      </div>
+      <div className="flex-1" />
     </>
   )
 }
@@ -1510,11 +1508,8 @@ export function ChatPage({
   ) : null
 
   useLayoutEffect(() => {
-    if (ready) hold(slot, id, frame)
+    if (ready) hold(slot, id)
   })
-
-  const heldBefore = heldFrame(slot)
-  const holding = heldBefore && heldBefore.id !== id ? heldBefore.frame : undefined
 
   return (
     <div
@@ -1523,7 +1518,7 @@ export function ChatPage({
       className="relative flex min-h-0 flex-1 flex-col"
       inert={!ready}
     >
-      {ready ? frame : (holding ?? <PendingChat />)}
+      {ready ? frame : <PendingChat />}
     </div>
   )
 }

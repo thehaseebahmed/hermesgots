@@ -1,18 +1,8 @@
-import type { ReactNode } from "react"
-
 export type HoldSlot = "main" | "thread" | "route"
 
-export interface HeldFrame {
-  /** The chat the frame is of; absent while the pane held a chat that never started. */
-  id?: string
-  frame: ReactNode
-}
-
-const held = new Map<HoldSlot, HeldFrame>()
+const held = new Map<HoldSlot, string | undefined>()
 
 const landed = new Set<(slot: HoldSlot) => void>()
-
-export const heldFrame = (slot: HoldSlot) => held.get(slot)
 
 export function onChatSwap(listener: (slot: HoldSlot) => void) {
   landed.add(listener)
@@ -21,10 +11,16 @@ export function onChatSwap(listener: (slot: HoldSlot) => void) {
   }
 }
 
-export function hold(slot: HoldSlot, id: string | undefined, frame: ReactNode) {
+/**
+ * Notes the chat a pane last drew ready. Only the id is kept: a pane that changes chat draws a
+ * neutral frame until the new one has answered, never the one it left, and the listeners are told
+ * when the new chat lands so the shell can fade it in.
+ */
+export function hold(slot: HoldSlot, id: string | undefined) {
+  const had = held.has(slot)
   const before = held.get(slot)
-  held.set(slot, { id, frame })
-  if (!before || before.id === id || before.id === undefined) return
+  held.set(slot, id)
+  if (!had || before === id || before === undefined) return
   for (const listener of landed) listener(slot)
 }
 
