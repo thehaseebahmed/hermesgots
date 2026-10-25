@@ -19,7 +19,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import (
     afk,
@@ -134,6 +134,95 @@ def _runs_by_job(job_id: str | None, per_job: int) -> Dict[str, List[Dict[str, A
 def _error(web: Any, message: str, status: int):
     # The API server's own error shape, so clients read every error the same way.
     return web.json_response({"error": {"message": message}}, status=status)
+
+
+def _request_profile():
+    try:
+        from gateway.platforms.api_server import _api_request_profile
+
+        return _api_request_profile.get()
+    except Exception:
+        return None
+
+
+def _plugin_route(
+    web: Any,
+    call: Any,
+    *,
+    guard: Any,
+    profile: Any,
+    read_body: Any,
+    error: Any,
+    answer: Callable[[Any], Dict[str, Any]],
+    unavailable: str,
+    named: bool = True,
+    body: Optional[Any] = None,
+    query: Optional[str] = None,
+) -> Any:
+    """A route into one of the plugin's own callers: the guard, this bot's profile, one answer.
+
+    ``web``, ``guard``, ``profile`` and ``read_body`` are the API server's own, injected because they
+    are bound to the app this is registered on. The call itself runs on a worker thread, never the
+    loop: every caller here either scans the skills tree or reaches Hermes's own machinery. A caller
+    refuses with its own error class — ``error``, carrying the status to answer — and a host that has
+    moved the built-in the call needs is the 501 ``unavailable`` names. ``answer`` is each family's
+    own envelope: MCP and the skills catalog never answered one wire shape, so this core is the
+    plumbing they share rather than a shape either of them had to change.
+    """
+
+    async def handler(request: "web.Request") -> "web.Response":
+        denied = guard(request)
+        if denied is not None:
+            return denied
+        args: List[Any] = [profile()]
+        if named:
+            args.append(request.match_info["name"])
+        if query is not None:
+            path = request.query.get(query) or ""
+            if not path:
+                return _error(web, f"Missing {query}", 400)
+            args.append(path)
+        if body is not None:
+            try:
+                args.extend(body(await read_body(request)))
+            except ValueError as invalid:
+                return _error(web, str(invalid), 400)
+        try:
+            found = await asyncio.to_thread(call, *args)
+        except error as refused:
+            return _error(web, str(refused), refused.status)
+        except ImportError:
+            return _error(web, unavailable, 501)
+        return web.json_response(answer(found))
+
+    return handler
+
+
+def _keyed(key: Optional[str]) -> Callable[[Any], Dict[str, Any]]:
+    """Hermes's own MCP answer: the found thing under its key, or standing alone as the answer."""
+    return lambda found: {"object": found if key is None else {key: found}}
+
+
+def _named(key: str) -> Callable[[Any], Dict[str, Any]]:
+    """The skills catalog's: the kind of thing in ``object``, the thing itself in ``data``."""
+    return lambda found: {"object": key, "data": found}
+
+
+def _enabled_body(body: Any) -> Any:
+    """The switch's new position, which is all a toggle says."""
+    if body is None or not isinstance(body.get("enabled"), bool):
+        raise ValueError('Body must be {"enabled": true} or {"enabled": false}')
+    return (body["enabled"],)
+
+
+def _advertised(features: Tuple[Tuple[str, Callable[[], Optional[str]]], ...]) -> List[str]:
+    """The feature names one family offers, every gate answered in a single worker thread.
+
+    The first entry is the family's own availability, so a host that can't serve it at all gets none
+    of its finer features however those answer — the row is absent rather than a control that errors.
+    """
+    works = [gate() is None for _, gate in features]
+    return [name for (name, _), ok in zip(features, works) if ok] if works[0] else []
 
 
 def _cleanup_pick(path: Path) -> Optional[Dict[str, str]]:
@@ -286,12 +375,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         # and one may have a Catalogue it can only read — and must not offer a control that can't
         # work. Which built-ins each needs is mcp.py's table.
         # Off the loop: the checks import them.
-        serves_mcps = await asyncio.to_thread(mcp.available) is None
-        mcp_features = [
-            name
-            for name, gate in mcp.FEATURES
-            if serves_mcps and await asyncio.to_thread(gate) is None
-        ]
+        mcp_features = await asyncio.to_thread(_advertised, mcp.FEATURES)
+        skills_features = await asyncio.to_thread(_advertised, skill_catalog.FEATURES)
         return web.json_response(
             {
                 "name": "memento",
@@ -305,7 +390,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "todos",
                     "projects",
                     "projects_async",
-                    "skills",
+                    *skills_features,
                     "project_repos",
                     "project_usage",
                     "github",
@@ -462,16 +547,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "This Hermes version can't read models from here.", 501)
         return web.json_response({"object": "memento.fallbacks", "fallbacks": fallbacks})
 
-    async def list_skills(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        profile = request_profile()
+    async def json_body(request: "web.Request"):
         try:
-            skills = await asyncio.to_thread(skill_catalog.read, profile)
-        except ImportError:
-            return _error(web, "This Hermes version can't list skills from here.", 501)
-        return web.json_response({"object": "list", "data": skills})
+            body = await request.json()
+        except ValueError:
+            return None
+        return body if isinstance(body, dict) else None
 
     def mcp_route(
         call: Any,
@@ -487,31 +568,44 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         on this bot and no other, the 400 a body reader raises, the 501 for a host whose Hermes has
         moved the built-in the call needs, and the answer wrapped under one key (or spread, for a
         write that answers more than one thing) — so each declares only its call, its key and what
-        it needs from the request. The call runs on the loop
-        thread inside ``profile``'s scope, where the worker re-enters it; see mcp.py.
+        it needs from the request. The core it shares with the skills routes is ``_plugin_route``.
         """
+        return _plugin_route(
+            web,
+            call,
+            guard=unauthorized,
+            profile=_request_profile,
+            read_body=json_body,
+            error=mcp.McpError,
+            answer=_keyed(key),
+            named=named,
+            unavailable=unavailable,
+            body=body,
+        )
 
-        async def handler(request: "web.Request") -> "web.Response":
-            denied = unauthorized(request)
-            if denied is not None:
-                return denied
-            args: List[Any] = [request_profile()]
-            if named:
-                args.append(request.match_info["name"])
-            if body is not None:
-                try:
-                    args.extend(body(await json_body(request)))
-                except ValueError as error:
-                    return _error(web, str(error), 400)
-            try:
-                answer = await asyncio.to_thread(call, *args)
-            except mcp.McpError as error:
-                return _error(web, str(error), error.status)
-            except ImportError:
-                return _error(web, unavailable, 501)
-            return web.json_response({"object": answer if key is None else {key: answer}})
-
-        return handler
+    def skill_route(
+        call: Any,
+        key: str,
+        *,
+        named: bool = True,
+        unavailable: str = skill_catalog.UNAVAILABLE,
+        body: Optional[Any] = None,
+        query: Optional[str] = None,
+    ) -> Any:
+        """A route into ``skill_catalog.py``, answered as that catalog answers — see ``_named``."""
+        return _plugin_route(
+            web,
+            call,
+            guard=unauthorized,
+            profile=_request_profile,
+            read_body=json_body,
+            error=skill_catalog.SkillError,
+            answer=_named(key),
+            named=named,
+            unavailable=unavailable,
+            body=body,
+            query=query,
+        )
 
     def install_body(body: Any) -> Any:
         """The entry's name and the values it declares, as the form that adds it sends them."""
@@ -546,12 +640,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             )
         return (body,)
 
-    def enabled_body(body: Any) -> Any:
-        """The switch's new position, which is all a toggle says."""
-        if body is None or not isinstance(body.get("enabled"), bool):
-            raise ValueError('Body must be {"enabled": true} or {"enabled": false}')
-        return (body["enabled"],)
-
     def access_body(body: Any) -> Any:
         """The address the browser ended on, pasted back from the phone that followed the flow."""
         if body is None or not isinstance(body.get("url"), str) or not body["url"]:
@@ -575,7 +663,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
 
     # A toggle, a removal, a save and the Server access flow all write this bot's own config through
     # Hermes's writer and reconcile; a server a Hermes plugin provides is refused there.
-    set_mcp_server_enabled = mcp_route(mcp.set_enabled, "server", body=enabled_body)
+    set_mcp_server_enabled = mcp_route(mcp.set_enabled, "server", body=_enabled_body)
     remove_mcp_server = mcp_route(mcp.remove, "servers")
     save_mcp_server = mcp_route(mcp.edit, None, body=server_body)
     start_mcp_access = mcp_route(mcp.start_access, "access", unavailable=mcp.UNAVAILABLE_ACCESS)
@@ -592,6 +680,26 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     get_mcp_server = mcp_route(mcp.detail, "server")
     read_mcp_tools = mcp_route(mcp.tools, "tools")
     probe_mcp_tools = mcp_route(mcp.probe_tools, "tools")
+
+    list_skills = skill_route(skill_catalog.read, "list", named=False)
+    set_skill_enabled = skill_route(
+        skill_catalog.set_enabled,
+        "skill",
+        body=_enabled_body,
+        unavailable=skill_catalog.UNAVAILABLE_WRITE,
+    )
+    view_skill = skill_route(
+        skill_catalog.view, "skill", unavailable=skill_catalog.UNAVAILABLE_VIEW
+    )
+    read_skill_file = skill_route(
+        skill_catalog.file,
+        "skill.file",
+        query="path",
+        unavailable=skill_catalog.UNAVAILABLE_VIEW,
+    )
+    remove_skill = skill_route(
+        skill_catalog.remove, "list", unavailable=skill_catalog.UNAVAILABLE_REMOVE
+    )
 
     async def set_fallbacks(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -717,7 +825,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         # The API server's own per-profile scope (home and secrets) for the request being served, or
         # nothing when this Hermes has none.
         enter = getattr(adapter, "_profile_scope", None)
-        profile = request_profile()
+        profile = _request_profile()
         if not callable(enter):
             return contextlib.nullcontext
         return lambda: enter(profile)
@@ -1281,13 +1389,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         open_db = getattr(adapter, "_ensure_session_db_async", None)
         return await open_db() if callable(open_db) else None
 
-    async def json_body(request: "web.Request"):
-        try:
-            body = await request.json()
-        except ValueError:
-            return None
-        return body if isinstance(body, dict) else None
-
     async def workspace_response(record: Dict[str, Any] | None):
         if record is not None:
             # The pill reads a session's pipeline the way it always has — the step the task is in,
@@ -1603,6 +1704,13 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/triage-model", get_triage_model)
     app.router.add_get(f"{PREFIX}/openui", get_openui)
     app.router.add_get(f"{PREFIX}/skills", list_skills)
+    # The list's writes and one skill's read, in the `skills/{name}` space the list answers for. The
+    # word `skills` itself is a static segment above, so it is registered first; no static sibling
+    # shares `skills/{name}`, so the four sit beside each other.
+    app.router.add_post(f"{PREFIX}/skills/{{name}}/enabled", set_skill_enabled)
+    app.router.add_get(f"{PREFIX}/skills/{{name}}", view_skill)
+    app.router.add_get(f"{PREFIX}/skills/{{name}}/file", read_skill_file)
+    app.router.add_delete(f"{PREFIX}/skills/{{name}}", remove_skill)
     app.router.add_get(f"{PREFIX}/mcp", list_mcp_servers)
     app.router.add_get(f"{PREFIX}/mcp/catalogue", list_mcp_catalogue)
     app.router.add_get(f"{PREFIX}/mcp/catalogue/{{name}}", get_mcp_catalogue_entry)
@@ -1781,16 +1889,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/push/remove", push_unsubscribe)
     app.router.add_post(f"{PREFIX}/push/mute", push_mute)
     app.router.add_post(f"{PREFIX}/runs/{{run_id}}/clarify", answer_clarify)
-    # The profile the request being served belongs to, read on the loop thread (None when this
-    # Hermes has no profile scope). One definition only: everything below resolves it by name.
-    def request_profile():
-        try:
-            from gateway.platforms.api_server import _api_request_profile
-
-            return _api_request_profile.get()
-        except Exception:
-            return None
-
     async def get_speech(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -1864,7 +1962,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         )
 
     def follow_queue(request: "web.Request", session_id: str, path: Path) -> None:
-        outbox.watch(session_id, request_profile(), path, request.headers.get("Authorization"))
+        outbox.watch(session_id, _request_profile(), path, request.headers.get("Authorization"))
         events.note("session", session_id, path, True)
 
     async def get_queue(request: "web.Request") -> "web.Response":
@@ -1889,7 +1987,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         try:
             run = outbox.clean_body(session_id, body.get("body"))
             item = await asyncio.to_thread(
-                outbox.add, path, session_id, request_profile(), body.get("text", ""), files, run
+                outbox.add, path, session_id, _request_profile(), body.get("text", ""), files, run
             )
         except ValueError as error:
             return _error(web, str(error), 400)
@@ -1948,7 +2046,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     started = await asyncio.to_thread(
                         triage.start_thread,
                         path,
-                        request_profile(),
+                        _request_profile(),
                         found["profile_id"],
                         text,
                         files,
@@ -1975,7 +2073,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     delivered = await triage.deliver(
                         adapter,
                         path,
-                        request_profile(),
+                        _request_profile(),
                         found,
                         text,
                         files,
@@ -2063,7 +2161,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 try:
                     await outbox.post(
                         adapter,
-                        request_profile(),
+                        _request_profile(),
                         f"/v1/runs/{item['run_id']}/stop",
                         {},
                         authorization=request.headers.get("Authorization"),
@@ -2072,7 +2170,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     return _error(web, f"Couldn't stop the thread's reply: {error}", 502)
             try:
                 await asyncio.to_thread(
-                    outbox.add, path, session_id, request_profile(), move["text"], move["files"], run
+                    outbox.add, path, session_id, _request_profile(), move["text"], move["files"], run
                 )
             except Exception:
                 logger.debug("memento: couldn't queue an undone move on Main", exc_info=True)
@@ -2129,7 +2227,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         path = store_path()
         steered, failed = await outbox.steer(
             adapter,
-            request_profile(),
+            _request_profile(),
             path,
             session_id,
             request.match_info["item_id"],
@@ -2188,7 +2286,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         reason = research.available()
         if reason:
             return _error(web, reason, 501)
-        path, profile = store_path(), request_profile()
+        path, profile = store_path(), _request_profile()
         try:
             found = await asyncio.to_thread(
                 research.create, path, profile, body.get("input"), body.get("type")
@@ -2206,7 +2304,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
 
     async def start_researcher(request: "web.Request", path: Path, found: Dict[str, Any]) -> None:
         """Starts the mission's researcher as an ordinary run, with the key the app asked with."""
-        profile = request_profile()
+        profile = _request_profile()
         research.watch(path, found["id"], profile)
         try:
             started = await outbox.post(
@@ -2235,7 +2333,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "Body must be a JSON object", 400)
         answer = await research_step(request, research.confirm_brief, body)
         if answer.status == 200:
-            research.spawn(store_path(), request.match_info["mission_id"], request_profile())
+            research.spawn(store_path(), request.match_info["mission_id"], _request_profile())
         return answer
 
     async def research_edit(request: "web.Request") -> "web.Response":
@@ -2259,7 +2357,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "Body must be a JSON object", 400)
         answer = await research_step(request, research.make_format, body.get("format"))
         if answer.status == 200:
-            research.spawn(store_path(), request.match_info["mission_id"], request_profile())
+            research.spawn(store_path(), request.match_info["mission_id"], _request_profile())
         return answer
 
     async def research_followup(request: "web.Request") -> "web.Response":
@@ -2281,7 +2379,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "Body must be a JSON object", 400)
         answer = await research_step(request, research.rewrite, body)
         if answer.status == 200:
-            research.spawn(store_path(), request.match_info["mission_id"], request_profile())
+            research.spawn(store_path(), request.match_info["mission_id"], _request_profile())
         return answer
 
     async def research_retry(request: "web.Request") -> "web.Response":
@@ -2294,7 +2392,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             # The same session, so the researcher carries on from what it already recorded.
             await start_researcher(request, path, found)
         else:
-            research.spawn(path, mission_id, request_profile())
+            research.spawn(path, mission_id, _request_profile())
         return await research_view(path, mission_id)
 
     async def remove_research(request: "web.Request") -> "web.Response":
@@ -2309,7 +2407,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             try:
                 await outbox.post(
                     adapter,
-                    request_profile(),
+                    _request_profile(),
                     f"/v1/runs/{found['run_id']}/stop",
                     {},
                     authorization=request.headers.get("Authorization"),
@@ -2330,7 +2428,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return denied
         path = store_path()
         await asyncio.to_thread(meetings.resume, path)
-        rows = await asyncio.to_thread(meetings.meetings, path, request_profile())
+        rows = await asyncio.to_thread(meetings.meetings, path, _request_profile())
         return web.json_response(
             {"object": "memento.meetings", "meetings": rows, "unavailable": meetings.available()}
         )
@@ -2346,7 +2444,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             found = await asyncio.to_thread(
                 meetings.create,
                 store_path(),
-                request_profile(),
+                _request_profile(),
                 body.get("title"),
                 body.get("project_id"),
                 body.get("parts"),

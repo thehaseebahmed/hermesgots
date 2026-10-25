@@ -4,7 +4,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { skillsState } from "../src/lib/skills-cache.ts"
+import { loadFailure, runnableSkills, skillsState } from "../src/lib/skills-cache.ts"
 
 const held = [{ name: "log-triage", description: "Noisy lines.", category: "ops" }]
 const fresh = [{ name: "plan", description: "A step-by-step plan.", category: null }]
@@ -61,4 +61,57 @@ test("a bot the app reads no plugin route for is never loading", () => {
     status: "ok",
     skills: [],
   })
+})
+
+test("a skill the bot can run is offered", () => {
+  const rows = [{ name: "plan", enabled: true, loadError: null }]
+  assert.deepEqual(runnableSkills(rows), rows)
+})
+
+test("a skill switched off is not offered", () => {
+  assert.deepEqual(runnableSkills([{ name: "plan", enabled: false }]), [])
+})
+
+test("a skill that doesn't load is not offered, whatever it says about being on", () => {
+  const broken = { name: "plan", enabled: true, loadError: "Skill 'plan' is not supported." }
+  assert.deepEqual(runnableSkills([broken]), [])
+})
+
+test("a row from an older plugin, saying neither, is offered", () => {
+  const old = [{ name: "plan", description: "A plan.", category: "ops" }]
+  assert.deepEqual(runnableSkills(old), old)
+})
+
+test("an empty loadError is no reason to hide a skill", () => {
+  const rows = [{ name: "plan", loadError: "" }]
+  assert.deepEqual(runnableSkills(rows), rows)
+})
+
+test("what doesn't load is the host's reason, trimmed, and nothing else", () => {
+  assert.equal(
+    loadFailure({ name: "plan", loadError: "  Skill 'plan' is not supported.  " }),
+    "Skill 'plan' is not supported.",
+  )
+  assert.equal(loadFailure({ name: "plan", loadError: "   " }), null)
+  assert.equal(loadFailure({ name: "plan", loadError: "" }), null)
+  assert.equal(loadFailure({ name: "plan", loadError: null }), null)
+  assert.equal(loadFailure({ name: "plan" }), null)
+})
+
+test("a reason that is only spaces is no reason, and the row stays on offer", () => {
+  const rows = [{ name: "plan", enabled: true, loadError: " \n " }]
+  assert.deepEqual(runnableSkills(rows), rows)
+})
+
+test("one switched-off row leaves every runnable one standing, in order", () => {
+  const rows = [
+    { name: "log-triage", enabled: true },
+    { name: "plan", enabled: false },
+    { name: "review", loadError: "Ambiguous skill name 'review': another copy shares it." },
+    { name: "search", enabled: true },
+  ]
+  assert.deepEqual(runnableSkills(rows), [
+    { name: "log-triage", enabled: true },
+    { name: "search", enabled: true },
+  ])
 })

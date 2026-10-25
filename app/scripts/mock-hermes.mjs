@@ -10,9 +10,9 @@
 // The plugin also keeps the chat list (GET and POST /api/plugins/memento/chats, newer record wins) and
 // labels a chat as Gots's on POST /api/plugins/memento/sessions/{id}/label. Its
 // GET /api/plugins/memento/sessions/{id}/context reports a keyed session's latest model call, and
-// GET /api/plugins/memento/skills serves the composer's `/` menu (three skills, no profile scope),
-// and GET /api/plugins/memento/mcp the Bot's MCP servers the Bot's editor lists in its MCP tab (name, state,
-// source, and the Host's own reason on a failed one; MOCK_MCP=off is a Hermes whose plugin can't).
+// GET /api/plugins/memento/mcp serves the Bot's MCP servers the Bot's editor lists in its MCP tab
+// (name, state, source, and the Host's own reason on a failed one; MOCK_MCP=off is a Hermes whose
+// plugin can't).
 // GET /api/plugins/memento/usage?provider=… serves two windows (Session + Weekly) whose
 // used_percent is MOCK_USAGE_PERCENT (default 94 so the composer banner shows; 0 → no windows), and
 // one Ollama Cloud account's monthly allowance with a purchased-credits detail when the provider is
@@ -135,6 +135,16 @@
 // address. The features it advertises follow its route set (`mcps`, `mcps_write`, `mcps_remove`,
 // `mcps_catalogue`, `mcps_add`, `mcps_access`, `mcps_config`, `mcps_tools`); with MOCK_MCP=off a
 // plugin that has none of them. POST /__mock/mcp puts back every server a flow removed.
+// The Bot's skills, for its Skills tab and the composer's `/` menu: GET …/skills lists them — each row
+// named and described, with its category, where it came from, whether it is on, why it doesn't load
+// and whether the Host will switch it — POST …/skills/{name}/enabled switches one (the one the Host
+// protects is refused), GET …/skills/{name} is one skill's sheet (its SKILL.md, its linked files and
+// the Host's readiness and setup status), GET …/skills/{name}/file?path= reads one linked file, and
+// DELETE …/skills/{name} takes one away where its origin has a removal behind it (a built-in's, a
+// plugin's and a pinned one are refused in the Host's own words). Its features follow its route set
+// (`skills`, `skills_write`, `skills_view`, `skills_remove`); with MOCK_SKILLS=off a Hermes whose
+// plugin has none of it. POST /__mock/skills puts back every skill a flow removed and every switch
+// one flipped.
 // Research missions (GET and POST /api/plugins/memento/research, …/research/{id} and its actions)
 // live in mock-research.mjs.
 // Meetings (GET and POST /api/plugins/memento/meetings, …/meetings/{id} and its actions) live in
@@ -901,6 +911,185 @@ const mcpWritableServer = (res, name) => {
     return null
   }
   return server
+}
+
+const SKILLS = process.env.MOCK_SKILLS !== "off"
+const SKILL_ROWS = [
+  {
+    name: "code-review",
+    description: "Review a change for correctness, clarity and the tests it moves.",
+    category: "review",
+    origin: "builtin",
+    enabled: true,
+    loadError: null,
+    switchable: true,
+  },
+  {
+    name: "code-review-deep",
+    description: "Review a change as its owner's harshest reader would.",
+    category: "review",
+    origin: "yours",
+    enabled: true,
+    loadError: null,
+    switchable: true,
+  },
+  {
+    name: "github-pr-workflow",
+    description: "Open, review and land pull requests.",
+    category: "github",
+    origin: "builtin",
+    enabled: true,
+    loadError: null,
+    switchable: true,
+  },
+  {
+    name: "hub-audit",
+    description: "Audit a repository against the Hub's own checklists.",
+    category: "release",
+    origin: "hub",
+    enabled: true,
+    loadError: null,
+    switchable: true,
+  },
+  {
+    name: "identity",
+    description: "The agent's own operating manual, referenced by its system prompt.",
+    category: "core",
+    origin: "builtin",
+    enabled: true,
+    loadError: null,
+    switchable: false,
+  },
+  {
+    name: "legacy-importer",
+    description: "Move a project's old notes into the library.",
+    category: "ops",
+    origin: "yours",
+    enabled: true,
+    loadError: "SKILL.md names a tool this Hermes doesn't have: `import_legacy`.",
+    switchable: true,
+  },
+  {
+    name: "log-triage",
+    description: "Find the noisy lines in a pile of logs.",
+    category: "ops",
+    origin: "builtin",
+    enabled: true,
+    loadError: null,
+    switchable: true,
+  },
+  {
+    name: "log-rotation",
+    description: "Rotate a log by age, keeping the evidence old failures need.",
+    category: "ops",
+    origin: "hub",
+    enabled: true,
+    loadError: null,
+    switchable: true,
+  },
+  {
+    name: "pinned-notes",
+    description: "Keep the profile's notes in the shape its owner pinned them.",
+    category: "docs",
+    origin: "yours",
+    enabled: true,
+    loadError: null,
+    switchable: true,
+  },
+  {
+    name: "plan",
+    description: "Write a step-by-step plan before touching anything.",
+    category: null,
+    origin: "builtin",
+    enabled: true,
+    loadError: null,
+    switchable: true,
+  },
+  {
+    name: "weekly-digest",
+    description: "Write the week's summary from what merged and what stalled.",
+    category: null,
+    origin: "yours",
+    enabled: false,
+    loadError: null,
+    switchable: true,
+  },
+  {
+    name: "gots:ship",
+    description: "Ship a finished branch as a draft pull request.",
+    category: "plugin",
+    origin: "plugin",
+    enabled: true,
+    loadError: null,
+    switchable: true,
+  },
+]
+const skillSwitched = new Map()
+const skillRemoved = new Set()
+const skillRows = () =>
+  SKILL_ROWS.filter((row) => !skillRemoved.has(row.name)).map(({ name, enabled, ...row }) => ({
+    ...row,
+    name,
+    enabled: skillSwitched.has(name) ? skillSwitched.get(name) : enabled,
+  }))
+const skillRemovalRefusal = (row) => {
+  if (row.origin === "plugin")
+    return `Skill '${row.name}' comes from a plugin, so it can't be removed; switch it off instead.`
+  if (row.origin === "builtin")
+    return `Skill '${row.name}' is built into Hermes, so it can't be removed.`
+  if (row.name === "pinned-notes")
+    return (
+      `Skill '${row.name}' is pinned and cannot be deleted by skill_manage. Ask the user to run ` +
+      `\`hermes curator unpin ${row.name}\` if they want to delete it.`
+    )
+  return null
+}
+const skillEssential = (name) =>
+  `Skill '${name}' is essential to Hermes (the agent's own operating manual referenced by the system ` +
+  `prompt), so it can't be switched off.`
+const SKILL_CONTENT = {
+  "github-pr-workflow": `---
+name: github-pr-workflow
+description: Open, review and land pull requests.
+---
+
+# Pull requests
+
+1. Read the issue and the repository's own conventions.
+2. Open a draft pull request early, and keep its body current.
+3. Land it with the gates green and a reviewer's word.
+`,
+}
+const skillContent = (row) => SKILL_CONTENT[row.name] ?? `# ${row.name}\n\n${row.description}\n`
+const SKILL_LINKED = {
+  "github-pr-workflow": {
+    references: ["references/review-checklist.md"],
+    scripts: ["scripts/open-pr.sh"],
+  },
+}
+const SKILL_FILES = {
+  "references/review-checklist.md": `---
+title: Review checklist
+---
+
+# Review checklist
+
+- The gates pass, and the diff is the change.
+- Every new rule has the test that would catch it.
+`,
+  "scripts/open-pr.sh": `#!/usr/bin/env bash
+set -euo pipefail
+git push -u origin HEAD
+gh pr create --draft --fill
+`,
+}
+const SKILL_READINESS = {
+  "github-pr-workflow": { readiness_status: "available", setup_needed: false },
+  "log-rotation": {
+    readiness_status: "setup_needed",
+    setup_needed: true,
+    setup_note: "Run `gots setup hub` once to install the Hub's CLI.",
+  },
 }
 
 /** How long a pull request's checks run after a turn says "pending", before they pass. */
@@ -3407,7 +3596,7 @@ http
           "fallbacks",
           "delegation_model",
           ...(TRIAGE !== "off" ? ["triage_model"] : []),
-          "skills",
+          ...(SKILLS ? ["skills", "skills_write", "skills_remove", "skills_view"] : []),
           "queue",
           "dictation",
           "speech_model",
@@ -3529,27 +3718,67 @@ http
       }
       return json(res, 405, { error: { message: "That method isn't routed." } })
     }
-    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/skills") {
+    if (PLUGIN && SKILLS && !profile && url.pathname === "/api/plugins/memento/skills") {
+      if (req.method === "GET") return json(res, 200, { object: "list", data: skillRows() })
+      return json(res, 405, { error: { message: "That method isn't routed." } })
+    }
+    const skillEnabled = url.pathname.match(/^\/api\/plugins\/memento\/skills\/([^/]+)\/enabled$/)
+    if (PLUGIN && SKILLS && !profile && skillEnabled && req.method === "POST") {
+      const name = decodeURIComponent(skillEnabled[1])
+      const row = skillRows().find((one) => one.name === name)
+      if (!row)
+        return json(res, 400, { error: { message: `Skill '${name}' isn't on this bot.` } })
+      const { enabled } = await readBody(req)
+      if (typeof enabled !== "boolean")
+        return json(res, 400, {
+          error: { message: 'Body must be {"enabled": true} or {"enabled": false}' },
+        })
+      if (row.switchable === false)
+        return json(res, 400, { error: { message: skillEssential(name) } })
+      skillSwitched.set(name, enabled)
       return json(res, 200, {
-        object: "list",
-        data: [
-          {
-            name: "github-pr-workflow",
-            description: "Open, review and land pull requests.",
-            category: "github",
-          },
-          {
-            name: "log-triage",
-            description: "Find the noisy lines in a pile of logs.",
-            category: "ops",
-          },
-          {
-            name: "plan",
-            description: "Write a step-by-step plan before touching anything.",
-            category: null,
-          },
-        ],
+        object: "skill",
+        data: skillRows().find((one) => one.name === name),
       })
+    }
+    const skillView = url.pathname.match(/^\/api\/plugins\/memento\/skills\/([^/]+)$/)
+    if (PLUGIN && SKILLS && !profile && skillView && req.method === "GET") {
+      const name = decodeURIComponent(skillView[1])
+      const row = skillRows().find((one) => one.name === name)
+      if (!row) return json(res, 404, { error: { message: `Skill '${name}' isn't on this bot.` } })
+      return json(res, 200, {
+        object: "skill",
+        data: {
+          ...row,
+          content: skillContent(row),
+          linkedFiles: SKILL_LINKED[name] ?? null,
+          ...(SKILL_READINESS[name] ?? {}),
+        },
+      })
+    }
+    const skillFile = url.pathname.match(/^\/api\/plugins\/memento\/skills\/([^/]+)\/file$/)
+    if (PLUGIN && SKILLS && !profile && skillFile && req.method === "GET") {
+      const name = decodeURIComponent(skillFile[1])
+      const path = url.searchParams.get("path") ?? ""
+      if (!path) return json(res, 400, { error: { message: "Missing path" } })
+      const row = skillRows().find((one) => one.name === name)
+      if (!row) return json(res, 404, { error: { message: `Skill '${name}' isn't on this bot.` } })
+      if (path.startsWith("/") || path.split("/").includes(".."))
+        return json(res, 400, { error: { message: `'${path}' is not a path inside the skill.` } })
+      if (!(path in SKILL_FILES))
+        return json(res, 404, {
+          error: { message: `Skill '${name}' has no file '${path}'.` },
+        })
+      return json(res, 200, { object: "skill.file", data: { name, path, content: SKILL_FILES[path] } })
+    }
+    if (PLUGIN && SKILLS && !profile && skillView && req.method === "DELETE") {
+      const name = decodeURIComponent(skillView[1])
+      const row = skillRows().find((one) => one.name === name)
+      if (!row) return json(res, 404, { error: { message: `Skill '${name}' isn't on this bot.` } })
+      const refusal = skillRemovalRefusal(row)
+      if (refusal) return json(res, 400, { error: { message: refusal } })
+      skillRemoved.add(name)
+      return json(res, 200, { object: "list", data: skillRows() })
     }
     // The Bot's MCP servers for a screen of its own. The `/p/<profile>` copy lands here too, since
     // the plugin's prefix carries the profile and is stripped just above.
@@ -5021,6 +5250,11 @@ http
         }
       }
       return json(res, 200, { ok: true })
+    }
+    if (url.pathname === "/__mock/skills" && req.method === "POST") {
+      skillSwitched.clear()
+      skillRemoved.clear()
+      return json(res, 200, { object: "list", data: skillRows() })
     }
     if (url.pathname === "/__mock/mcp" && req.method === "POST") {
       // Dev only: puts back every MCP server a flow has removed and takes away every one a flow has

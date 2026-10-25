@@ -60,17 +60,19 @@ import { formatRelative } from "@/lib/format"
 import { botTabOf, botTabPath, type BotTab } from "@/lib/bot-tabs"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
 import { DICTATION } from "@/lib/dictation"
-import { usePluginFeature } from "@/lib/features"
+import { usePluginFeatureAnswers } from "@/lib/features"
 import { checkHealth, getPluginVersion, listModels } from "@/lib/hermes"
-import { useMcpFeatureAnswers } from "@/lib/mcps"
+import { MCP_FEATURES } from "@/lib/mcps"
 import { setDefaultModel } from "@/lib/model-info"
 import { syncContextWindow } from "@/lib/models"
 import { setBotMuted } from "@/lib/push"
 import { isOnline, removeHost, setBotEnabled } from "@/lib/registry"
+import { SKILL_FEATURES } from "@/lib/skills"
 import { useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { MIN_PLUGIN_VERSION, pluginOutdated } from "@/lib/version"
 import { McpsTab } from "@/components/mcps-tab"
+import { SkillsTab } from "@/components/skills-tab"
 
 type Connection =
   | { state: "idle" }
@@ -80,6 +82,19 @@ type Connection =
 
 /** Hermes's default model id; any other advertised id is the profile's name. */
 const UNNAMED_MODEL = "hermes-agent"
+
+const TAB_FEATURES = {
+  dictation: DICTATION,
+  mcps: MCP_FEATURES.list,
+  coding: AFK_PICKS_FEATURE,
+  skills: SKILL_FEATURES.list,
+} as const
+
+type GatedTab = keyof typeof TAB_FEATURES
+
+function gated(tab: BotTab): tab is GatedTab {
+  return tab in TAB_FEATURES
+}
 
 /** The registry's Enabled flag, with when the bot's host last checked in. */
 function EnabledSetting({ profile }: { profile: Profile }) {
@@ -203,20 +218,9 @@ export function BotEditor({
   const [models, setModels] = useState<string[]>([])
   const [modelsFailed, setModelsFailed] = useState(false)
   const [connection, setConnection] = useState<Connection>({ state: "idle" })
-  // The Bot's MCP servers are a tab of its own; the tab exists only where the plugin says it can
-  // list them, and a Host that hasn't answered yet shows General rather than flashing a tab away.
-  const answers = useMcpFeatureAnswers(profile)
-  const mcpServers = answers.list === "yes"
-  const dictates = usePluginFeature(profile, DICTATION)
-  // Coding — how the bot works when it is left alone — is a tab only where the plugin says it holds
-  // the bot's own AFK numbers: a bot whose host predates them keeps the editor it has.
-  const picks = usePluginFeature(profile, AFK_PICKS_FEATURE)
-  const shown: BotTab =
-    (tab === "mcps" && !mcpServers) ||
-    (tab === "dictation" && dictates !== "yes") ||
-    (tab === "coding" && picks !== "yes")
-      ? "general"
-      : tab
+  const answers = usePluginFeatureAnswers(profile, TAB_FEATURES)
+  const gate = gated(tab) ? answers[tab] : undefined
+  const shown: BotTab = gate !== undefined && gate !== "yes" ? "general" : tab
 
   // Local drafts so typing isn't fighting the live query; persisted on every change.
   const [name, setName] = useState(profile.name)
@@ -232,13 +236,8 @@ export function BotEditor({
   // asked for, rather than the address reading MCP over a screen that isn't. Only an answer of "no"
   // sends anyone anywhere — a Host still reading keeps the address and draws General meanwhile.
   useEffect(() => {
-    if (tab === "mcps" && answers.list === "no")
-      void navigate(`/settings/bots/${profile.id}`, { replace: true })
-    if (tab === "dictation" && dictates === "no")
-      void navigate(`/settings/bots/${profile.id}`, { replace: true })
-    if (tab === "coding" && picks === "no")
-      void navigate(`/settings/bots/${profile.id}`, { replace: true })
-  }, [tab, answers.list, dictates, picks, navigate, profile.id])
+    if (gate === "no") void navigate(`/settings/bots/${profile.id}`, { replace: true })
+  }, [gate, navigate, profile.id])
 
   // One read of the host's model list, for both the tab's own open and General's Test connection.
   const readModels = useCallback(
@@ -313,9 +312,10 @@ export function BotEditor({
       <TabsList>
         <TabsTrigger value="general">General</TabsTrigger>
         <TabsTrigger value="models">Models</TabsTrigger>
-        {dictates === "yes" && <TabsTrigger value="dictation">Dictation</TabsTrigger>}
-        {mcpServers && <TabsTrigger value="mcps">MCP</TabsTrigger>}
-        {picks === "yes" && <TabsTrigger value="coding">Coding</TabsTrigger>}
+        {answers.dictation === "yes" && <TabsTrigger value="dictation">Dictation</TabsTrigger>}
+        {answers.mcps === "yes" && <TabsTrigger value="mcps">MCP</TabsTrigger>}
+        {answers.coding === "yes" && <TabsTrigger value="coding">Coding</TabsTrigger>}
+        {answers.skills === "yes" && <TabsTrigger value="skills">Skills</TabsTrigger>}
       </TabsList>
 
       <TabsContent value="general">
@@ -528,21 +528,26 @@ export function BotEditor({
         </FieldGroup>
       </TabsContent>
 
-      {dictates === "yes" && (
+      {answers.dictation === "yes" && (
         <TabsContent value="dictation">
           <DictationTab profile={profile} />
         </TabsContent>
       )}
 
-      {mcpServers && (
+      {answers.mcps === "yes" && (
         <TabsContent value="mcps">
           <McpsTab profile={profile} />
         </TabsContent>
       )}
 
-      {picks === "yes" && (
+      {answers.coding === "yes" && (
         <TabsContent value="coding">
           <CodingTab profile={profile} />
+        </TabsContent>
+      )}
+      {answers.skills === "yes" && (
+        <TabsContent value="skills">
+          <SkillsTab profile={profile} />
         </TabsContent>
       )}
     </Tabs>

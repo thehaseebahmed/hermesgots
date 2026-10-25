@@ -27,3 +27,15 @@ export function skillsState({
   // The read is over and brought nothing: the commands alone, never a panel left holding a spinner.
   return settled === key ? { status: "ok", skills: [] } : { status: "loading" }
 }
+
+export function loadFailure(skill: Skill): string | null {
+  return skill.loadError?.trim() || null
+}
+
+/**
+ * The skills the bot can run right now: what the composer's `/` menu and every picker offer (ADR
+ * 0044). Not `useSkills`' list — the Skills tab reads the whole list from the same hook.
+ */
+export function runnableSkills(skills: Skill[]): Skill[] {
+  return skills.filter((skill) => skill.enabled !== false && loadFailure(skill) === null)
+}

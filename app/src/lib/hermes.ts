@@ -359,23 +359,155 @@ export async function listModels(config: HermesConfig, signal?: AbortSignal): Pr
   return Array.isArray(body?.data) ? body.data.map((m: { id: string }) => m.id) : []
 }
 
+export type SkillOrigin = "builtin" | "hub" | "yours" | "plugin"
+
 export interface Skill {
   name: string
   description?: string | null
   category?: string | null
+  origin?: SkillOrigin | null
+  /** Whether the bot's profile has it switched on; absent where the host couldn't say, which is on. */
+  enabled?: boolean | null
+  /** Why the host can't load it, in the host's own words; null when it loads. */
+  loadError?: string | null
+  /** Whether the host honours a switch for it; absent where the host couldn't say, which is yes. */
+  switchable?: boolean | null
 }
 
-/** The skills the bot's profile can run, for the composer's `/` menu. Hermes's own `/v1/skills`
- * is unscoped and fails on current Hermes, so the plugin lists them under the profile instead. */
+function skillsIn(body: unknown): Skill[] {
+  const data = (body as { data?: unknown })?.data
+  return Array.isArray(data)
+    ? data.filter((s): s is Skill => typeof s?.name === "string" && s.name.length > 0)
+    : []
+}
+
+/**
+ * Every skill the bot's profile holds — the ones it can run and the ones switched off or that no
+ * longer load, each carrying `enabled`/`loadError` so a caller filters to what it needs — for the
+ * composer's `/` menu and the Skills tab. Hermes's own `/v1/skills` is unscoped and fails on current
+ * Hermes, so the plugin lists them under the profile instead.
+ */
 export async function listSkills(config: HermesConfig, signal?: AbortSignal): Promise<Skill[]> {
   const response = await request(`${pluginRoot(config.baseUrl)}/skills`, {
     headers: headers(config),
     signal,
   })
-  const data: unknown = (await response.json())?.data
-  return Array.isArray(data)
-    ? data.filter((s): s is Skill => typeof s?.name === "string" && s.name.length > 0)
-    : []
+  return skillsIn(await response.json())
+}
+
+/**
+ * Switches one of the bot's skills on or off on its Host (the Gots plugin's
+ * `POST /skills/<name>/enabled`), answering the row as the change lands. The Host writes the
+ * profile's **global** disabled list — one switch means the whole bot, never one platform — clears
+ * Hermes's own caches so the change is live for the next turn, and leaves a chat already built with
+ * the abilities it had. A skill the profile doesn't have, or one Hermes will not switch, is refused
+ * there in the Host's own words.
+ */
+export async function setSkillEnabled(
+  config: HermesConfig,
+  name: string,
+  enabled: boolean,
+  signal?: AbortSignal,
+): Promise<Skill> {
+  const response = await request(skillPath(config, name, "enabled"), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ enabled }),
+    signal: signal ?? AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+  const data = (await response.json())?.data as Skill | undefined
+  if (!data || typeof data.name !== "string" || !data.name) {
+    throw new HermesError("The host answered without the skill.")
+  }
+  return data
+}
+
+export async function removeSkill(
+  config: HermesConfig,
+  name: string,
+  signal?: AbortSignal,
+): Promise<Skill[]> {
+  const response = await request(skillPath(config, name), {
+    method: "DELETE",
+    headers: headers(config),
+    signal: signal ?? AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+  return skillsIn(await response.json())
+}
+
+export interface SkillView extends Skill {
+  /** The skill's SKILL.md exactly as it is on disk — nothing preprocessed, nothing rendered. */
+  content: string
+  /** Its files by group (`references`, `templates`, `assets`, `scripts`), or null where the Host can't list them. */
+  linkedFiles: Record<string, string[]> | null
+  /** `available`, `setup_needed` or `unsupported`, where the Host says. */
+  readiness_status?: string | null
+  setup_help?: string
+  gateway_setup_hint?: string
+  setup_note?: string
+}
+
+export interface SkillFile {
+  name: string
+  path: string
+  content: string
+}
+
+function readLinkedFiles(value: unknown): Record<string, string[]> | null {
+  if (!value || typeof value !== "object") return null
+  const groups: Record<string, string[]> = {}
+  for (const [group, paths] of Object.entries(value as Record<string, unknown>)) {
+    if (Array.isArray(paths)) {
+      groups[group] = paths.filter((path): path is string => typeof path === "string")
+    }
+  }
+  return groups
+}
+
+/** One path on the bot's plugin under `root`, every segment escaped. */
+function pluginPath(config: HermesConfig, root: string, ...segments: string[]): string {
+  const rest = segments.map((segment) => `/${encodeURIComponent(segment)}`).join("")
+  return `${pluginRoot(config.baseUrl)}/${root}${rest}`
+}
+
+function skillPath(config: HermesConfig, ...segments: string[]): string {
+  return pluginPath(config, "skills", ...segments)
+}
+
+export async function getSkillView(
+  config: HermesConfig,
+  name: string,
+  signal?: AbortSignal,
+): Promise<SkillView> {
+  const response = await request(skillPath(config, name), {
+    headers: headers(config),
+    signal: signal ?? AbortSignal.timeout(READ_TIMEOUT_MS),
+  })
+  const data = (await response.json())?.data as SkillView | undefined
+  if (!data || typeof data.name !== "string" || typeof data.content !== "string") {
+    throw new HermesError("The host answered without the skill.")
+  }
+  return { ...data, linkedFiles: readLinkedFiles(data.linkedFiles) }
+}
+
+export async function getSkillFile(
+  config: HermesConfig,
+  name: string,
+  path: string,
+  signal?: AbortSignal,
+): Promise<SkillFile> {
+  const response = await request(
+    `${skillPath(config, name, "file")}?path=${encodeURIComponent(path)}`,
+    {
+      headers: headers(config),
+      signal: signal ?? AbortSignal.timeout(READ_TIMEOUT_MS),
+    },
+  )
+  const data = (await response.json())?.data as Partial<SkillFile> | undefined
+  if (!data || typeof data.content !== "string") {
+    throw new HermesError("The host answered without the file.")
+  }
+  return { name: name, path: path, content: data.content }
 }
 
 /** A bot's MCP server, as the Gots plugin's read reports it: its state in Gots' own words. */
@@ -418,8 +550,7 @@ function namedRows<T extends { name: string }>(
 
 /** One path on the bot's plugin under `/mcp`, every segment escaped (`/mcp/<name>/tools`). */
 function mcpPath(config: HermesConfig, ...segments: string[]): string {
-  const rest = segments.map((segment) => `/${encodeURIComponent(segment)}`).join("")
-  return `${pluginRoot(config.baseUrl)}/mcp${rest}`
+  return pluginPath(config, "mcp", ...segments)
 }
 
 const MCP_STATES = new Set<string>(["on", "off", "connecting", "failed", "needs_access", "plugin"])

@@ -60,6 +60,7 @@ import {
 import { isDoubleEscape, isInterrupt } from "@/lib/keys"
 import { useSkills } from "@/lib/skills"
 import { midReply, steerAsked } from "@/lib/steer"
+import { runnableSkills } from "@/lib/skills-cache"
 import { cn, randomId } from "@/lib/utils"
 
 const HOLD_MS = 400
@@ -214,7 +215,9 @@ export function Composer({
   const token = slashToken(value, caret)
   const skills = useSkills(connection, Boolean(token) && !disabled)
   const skillItems: SlashItem[] =
-    skills.status === "ok" ? skills.skills.map((skill) => ({ kind: "skill", ...skill })) : []
+    skills.status === "ok"
+      ? runnableSkills(skills.skills).map((skill) => ({ kind: "skill", ...skill }))
+      : []
   const items = token
     ? rankSlashItems([...localCommands(main), ...(busy ? SEND_COMMANDS : []), ...skillItems], token)
     : []

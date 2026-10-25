@@ -3,12 +3,45 @@ import { useEffect, useState } from "react"
 import { connectionKey } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { db } from "@/lib/db"
+import {
+  usePluginFeatureAnswers,
+  type PluginFeatureAnswer,
+  type PluginServer,
+} from "@/lib/features"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
-import { listSkills, type HermesConfig, type Skill } from "@/lib/hermes"
+import {
+  listSkills,
+  removeSkill as removeFromHost,
+  setSkillEnabled as writeSkillEnabled,
+  type HermesConfig,
+  type Skill,
+} from "@/lib/hermes"
 import { noteFailure } from "@/lib/report"
 import { skillsState, type SkillsState } from "@/lib/skills-cache"
 
 export type { SkillsState } from "@/lib/skills-cache"
+
+/**
+ * Every skills feature the tab asks its Bot's Host about, by the key it answers under: `list` gates
+ * the tab itself, `write` gates each row's switch, because a Host can list a profile's skills without
+ * the config write a switch is made of, and such a Host offers no switch rather than one whose every
+ * tap could only fail (ADR 0044), `remove` gates the sheet's Remove, because a Host can switch a
+ * skill without having either removal the two origins behind it need, and `view` gates a row's
+ * sheet, because a Host can list skills without a lookup that answers for a switched-off one — the
+ * row whose sheet matters most.
+ */
+export const SKILL_FEATURES = {
+  list: "skills",
+  write: "skills_write",
+  remove: "skills_remove",
+  view: "skills_view",
+} as const
+
+export type SkillFeatureAnswers = Record<keyof typeof SKILL_FEATURES, PluginFeatureAnswer>
+
+export function useSkillFeatureAnswers(server: PluginServer): SkillFeatureAnswers {
+  return usePluginFeatureAnswers(server, SKILL_FEATURES)
+}
 
 // This page's answer, so a second open in the same page needs no read; the device keeps the row.
 const memory = new Map<string, Skill[]>()
@@ -20,6 +53,24 @@ const unsupported = cooldown()
 
 async function readStored(key: string) {
   return (await db.skills.get(key))?.skills
+}
+
+async function putIfChanged(key: string, skills: Skill[]) {
+  if (JSON.stringify(await readStored(key)) === JSON.stringify(skills)) return
+  await db.skills.put({ id: key, skills })
+}
+
+async function keepSkills(key: string, skills: Skill[]) {
+  memory.set(key, skills)
+  try {
+    await putIfChanged(key, skills)
+  } catch (error) {
+    noteFailure("Saving the bot's skills", error)
+  }
+}
+
+async function heldSkills(key: string) {
+  return memory.get(key) ?? (await readStored(key))
 }
 
 /** Reads the profile's skills for this server and keeps them, unless the bot can't list them. */
@@ -44,21 +95,30 @@ function readSkills(config: HermesConfig, key: string): Promise<Skill[]> {
       throw error
     }
     unsupported.clear(key)
-    memory.set(key, skills)
-    try {
-      // Keeping the row is a favour to the next page load, not part of the answer: a Dexie failure
-      // here (a blocked upgrade, a full quota) must not throw away what the host just sent.
-      // Don't write what didn't change: a fresh row would wake anything reading this one.
-      if (JSON.stringify(await readStored(key)) !== JSON.stringify(skills)) {
-        await db.skills.put({ id: key, skills })
-      }
-    } catch (error) {
-      noteFailure("Saving the bot's skills", error)
-    }
+    await keepSkills(key, skills)
     return skills
   })().finally(() => inFlight.delete(key))
   inFlight.set(key, request)
   return request
+}
+
+async function switchSkill(config: HermesConfig, key: string, name: string, enabled: boolean) {
+  const row = await writeSkillEnabled(config, name, enabled)
+  const held = await heldSkills(key)
+  if (!held) return
+  await keepSkills(
+    key,
+    held.map((skill) => (skill.name === name ? { ...skill, ...row } : skill)),
+  )
+}
+
+async function removeFromBot(config: HermesConfig, key: string, name: string) {
+  await keepSkills(key, await removeFromHost(config, name))
+}
+
+export type Skills = SkillsState & {
+  setEnabled: (name: string, enabled: boolean) => Promise<void>
+  remove: (name: string) => Promise<void>
 }
 
 /**
@@ -67,7 +127,7 @@ function readSkills(config: HermesConfig, key: string): Promise<Skill[]> {
  * shows without a reload, and a read that fails leaves it standing, so the menu never opens empty on
  * a bot whose host is away. A bot whose plugin has no skills route has none to show.
  */
-export function useSkills(config: HermesConfig | null, open: boolean): SkillsState {
+export function useSkills(config: HermesConfig | null, open: boolean): Skills {
   // A bot the app reads plugin routes for at all: with no key, no route is read, as everywhere else.
   const key = config?.baseUrl.trim() && config.apiKey ? connectionKey(config) : ""
   // The read that has finished for this bot, as a fresh object each time: a read that lands must
@@ -114,5 +174,19 @@ export function useSkills(config: HermesConfig | null, open: boolean): SkillsSta
     }
   }, [open, key, baseUrl, apiKey])
 
-  return state
+  // One write's shape: a bot with nothing to write to answers nothing, and a write marks the list
+  // read again — the list lives in a Map no render watches, so the fresh settled object is what
+  // draws the row the host answered.
+  const write = async (run: (config: HermesConfig) => Promise<void>) => {
+    if (!baseUrl || !apiKey) return
+    await run({ baseUrl, apiKey })
+    setSettled({ key })
+  }
+
+  const setEnabled = (name: string, enabled: boolean) =>
+    write((config) => switchSkill(config, key, name, enabled))
+
+  const remove = (name: string) => write((config) => removeFromBot(config, key, name))
+
+  return { ...state, setEnabled, remove }
 }

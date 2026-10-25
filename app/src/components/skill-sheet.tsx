@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Spinner } from "@/components/ui/spinner"
 import type { Skill } from "@/lib/hermes"
+import { byName } from "@/lib/compare"
+import { runnableSkills } from "@/lib/skills-cache"
 
 /**
  * A bot's skills, to choose from: searchable over the name, the category and the description, one
@@ -54,9 +56,7 @@ export function SkillSheet({
   }
 
   const sorted = useMemo(() => {
-    const ordered = [...skills].sort((one, other) =>
-      one.name.localeCompare(other.name, "en", { sensitivity: "base" }),
-    )
+    const ordered = runnableSkills(skills).sort((one, other) => byName(one.name, other.name))
     const needle = query.trim().toLowerCase()
     if (!needle) return ordered
     return ordered.filter((skill) =>
