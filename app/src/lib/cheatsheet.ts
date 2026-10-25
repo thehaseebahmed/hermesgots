@@ -35,7 +35,7 @@ export function cheatsheetGroups(navShortcuts: boolean): CheatsheetGroup[] {
   }
   const chat: CheatsheetGroup = {
     name: "Chat",
-    rows: [{ keys: ["Ctrl+C"], description: "Stop a running reply" }],
+    rows: [{ keys: ["Ctrl+C"], description: "Stop the reply and its subagents" }],
   }
   const navigation: CheatsheetGroup = {
     name: "Navigation",

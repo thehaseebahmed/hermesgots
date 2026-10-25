@@ -175,9 +175,9 @@ test("a delivery draws as the bot's message at the thread's end", async () => {
 test("a tap on a result opens its subagent's sub-thread", async () => {
   await screen(async () => {
     const row = await drawn()
-    const tap = card()
-    assert.equal(tap?.tagName, "BUTTON", "the result opens its subagent")
-    assert.match(tap?.textContent ?? "", /Sub-Agent: Builder/, "naming the subagent it came from")
+    const tap = card()?.querySelector("button")
+    assert.ok(tap, "the result opens its subagent")
+    assert.match(tap.textContent ?? "", /Sub-Agent: Builder/, "naming the subagent it came from")
     assert.equal(row?.nextElementSibling, null, "the card rides with the message it belongs to")
     await click(tap)
     await settle()
@@ -190,13 +190,70 @@ test("a tap on a result opens its subagent's sub-thread", async () => {
   })
 })
 
+test("the count of what runs is drawn once, by the thread's last row", async () => {
+  const running = { ...AGENT, id: "child-running", ended_at: null, status: "running", tool_calls: 2 }
+  // A reply of the turn's own left empty, so it can be read as the one still streaming.
+  const hostRows = [...transcript, { id: 6, role: "assistant", content: "", timestamp: 30 }]
+  await screen(
+    async () => {
+      await drawn()
+      const count = () =>
+        findAll("button").filter((one) => /subagent[s]? running/.test(one.textContent ?? ""))
+      /** The row the count is drawn in, or null where it is the thread's own foot. */
+      const inRow = () => count()[0]?.closest("[data-slot=message]") ?? null
+      assert.equal(count()[0]?.textContent, "1 subagent running", "the count, said once")
+      assert.equal(inRow(), null, "nothing streams, so it stands at the thread's foot")
+      const last = async () => {
+        const all = await db.messages.where("conversationId").equals("chat-1").toArray()
+        return all.sort((a, b) => a.createdAt - b.createdAt).at(-1)!
+      }
+      const settled = await last()
+      await db.messages.put({ ...settled, content: "", status: "streaming" })
+      await settle()
+      assert.equal(
+        rows().at(-1)?.getAttribute("data-align"),
+        "start",
+        "the streaming reply is last",
+      )
+      assert.equal(count().length, 1, "the count is still said once")
+      assert.equal(inRow(), rows().at(-1), "and rides in the streaming reply's own row")
+      await db.messages.put({
+        id: "sent",
+        conversationId: "chat-1",
+        role: "user",
+        content: "Still going?",
+        status: "queued",
+        createdAt: 40,
+      })
+      try {
+        await settle()
+        const sent = rows().find((row) => row.textContent?.includes("Still going?"))
+        assert.ok(sent, "the message sent during the turn drew")
+        assert.equal(rows().at(-1), sent, "as the thread's last row")
+        assert.equal(count().length, 1, "still said once")
+        assert.equal(inRow(), null, "and the count is the thread's foot again")
+        assert.ok(
+          sent.compareDocumentPosition(count()[0]!) & Node.DOCUMENT_POSITION_FOLLOWING,
+          "under the message it belongs to",
+        )
+      } finally {
+        // The database outlives the test, so the rows it touched do not.
+        await db.messages.put(settled)
+        await db.messages.delete("sent")
+        await settle()
+      }
+    },
+    { agents: [running], rows: hostRows },
+  )
+})
+
 test("a result the chat cannot name still draws as the bot's message", async () => {
   await screen(
     async () => {
       const row = await drawn()
       assert.ok(row, "still the bot's message")
       assert.equal(bubble(row), null, "never the user's")
-      assert.notEqual(card()?.tagName, "BUTTON", "with nothing to open")
+      assert.equal(card()?.querySelector("button"), null, "with nothing to open")
     },
     { agents: [] },
   )

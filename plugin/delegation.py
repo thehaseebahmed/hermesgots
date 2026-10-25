@@ -655,13 +655,50 @@ def stop(hermes_home: Path, parent_id: str, subagent_id: str) -> Dict[str, Any]:
     its model-facing ``delegate_task(action='stop')`` calls. A host too old to offer it, or a child
     that isn't running any more, answers what it always did.
     """
-    stopped = _interrupt_one(hermes_home, subagent_id)
-    if stopped is None:
-        return {"stopped": False, "reason": "This Hermes version can't stop a subagent."}
-    if not stopped:
-        return {"stopped": False, "reason": "That subagent isn't running any more."}
+    row = _stop_row(hermes_home, subagent_id)
+    if not row["stopped"]:
+        return {"stopped": False, "reason": row["reason"]}
     events.note("runs", parent_id, db_path(hermes_home), True)
     return {"stopped": True}
+
+
+def stop_all(hermes_home: Path, session_id: str, live: Collection[str] = ()) -> Dict[str, Any]:
+    """Stops every subagent of a session still at work, and answers one row per child asked about.
+
+    What the app's composer Stop asks for. ``stop_run`` above hands a *stopped run*'s stop to the
+    children that run began, by design leaving an earlier turn's child to its own card (ADR 0038);
+    a session whose turn has ended and whose subagents still work has no run for that watch to see,
+    so this is its own call (ADR 0051). A child is at work while something holds it — its parent's
+    run, which ``live`` names, or core's registry of the children this process runs — so an open row
+    nobody holds is left alone, exactly as ``children`` reads it for the app's cards. Each stop is
+    core's per-child ``interrupt_subagent``, the call a card's own button makes.
+    """
+    home = Path(hermes_home)
+    named = [
+        child["id"] for child in children(home, session_id, set(live)) if child["status"] == "running"
+    ]
+    rows = [_stop_row(home, child_id) for child_id in named]
+    if any(row["stopped"] for row in rows):
+        events.note("runs", session_id, db_path(home), True)
+    return {"agents": rows, "stopped": sum(1 for row in rows if row["stopped"])}
+
+
+def _stop_row(hermes_home: Path, child_id: str) -> Dict[str, Any]:
+    """Stops one child and answers what the host said of it, in the words the app's card draws.
+
+    One child's stop, and its three answers — stopped, nothing left to stop, or a host that has no
+    such call — so a card's own stop and a session's stop can never word the same outcome twice.
+    """
+    stopped = _interrupt_one(hermes_home, child_id)
+    if stopped is None:
+        return {
+            "id": child_id,
+            "stopped": False,
+            "reason": "This Hermes version can't stop a subagent.",
+        }
+    if not stopped:
+        return {"id": child_id, "stopped": False, "reason": "That subagent isn't running any more."}
+    return {"id": child_id, "stopped": True}
 
 
 def _interrupt_one(home: Path, subagent_id: str) -> Optional[bool]:

@@ -34,7 +34,7 @@ test("the Slash menu group says how the menu is walked, picked and closed", () =
 
 test("the Chat group spells the stop as its handler takes it", () => {
   assert.deepEqual(group("Chat", false).rows, [
-    { keys: ["Ctrl+C"], description: "Stop a running reply" },
+    { keys: ["Ctrl+C"], description: "Stop the reply and its subagents" },
   ])
   for (const navShortcuts of [false, true])
     assert.ok(

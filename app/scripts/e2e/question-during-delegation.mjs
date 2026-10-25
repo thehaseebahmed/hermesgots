@@ -67,7 +67,7 @@ await flow("question-during-delegation", async ({ page, seed, send, lastReply, u
 
   await send(ASK)
 
-  const working = page.getByText("Working for", { exact: false })
+  const working = page.getByText("Running for", { exact: false })
   await page
     .getByText(/Sub-Agent: /)
     .first()

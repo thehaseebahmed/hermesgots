@@ -124,9 +124,8 @@ import { moveMarks, openedThread } from "@/lib/move-marks"
 import { undoMove } from "@/lib/moves"
 import { drawnThreadIds, threadCards } from "@/lib/thread-cards"
 import { serverConfig } from "@/lib/connection"
-import { usePluginFeature } from "@/lib/features"
 import { describeActivity } from "@/lib/format"
-import { supportsSteer, type HermesProject, type Move } from "@/lib/hermes"
+import { supportsSteer, type DelegatedAgent, type HermesProject, type Move } from "@/lib/hermes"
 import { readProjects, useProjects } from "@/lib/projects"
 import { caughtUpWithin, loadEarlierHistory, reconcileHistory } from "@/lib/history"
 import { contextWindow } from "@/lib/context"
@@ -170,7 +169,17 @@ import { SUGGESTIONS } from "@/lib/suggestions"
 import { DEFAULT_BOT_ID } from "@/components/bots"
 import { useBotThreads, useNow, useThreads, type Thread } from "@/lib/threads"
 import { draftKey } from "@/lib/drafts"
-import { AgentsContext, DELEGATE_TOOL, useSessionAgents } from "@/lib/agents"
+import {
+  AgentsContext,
+  DELEGATE_TOOL,
+  runningAgents,
+  stopSubagents,
+  useSessionAgents,
+} from "@/lib/agents"
+import { usePluginFeature, usePluginFeatureOn } from "@/lib/features"
+import { AgentPopup } from "@/components/chat/agent-card"
+import { SubagentLine } from "@/components/chat/subagent-line"
+import { SubagentsSheet } from "@/components/chat/subagents"
 
 const NO_ROWS: Message[] = []
 
@@ -619,16 +628,43 @@ export function ChatPage({
   const agents = useSessionAgents(
     conversation ?? undefined,
     profile,
-    Boolean(delegations?.length),
     Boolean(delegations?.some((t) => t.status === "running")),
+    busy,
   )
+  const subagentsRunning = useMemo(() => runningAgents(agents).length, [agents])
+  // The count is drawn once, by whichever row is last: the reply's own while it streams, else the foot.
+  const lastId = thread?.at(-1)?.id
+  const drawsInline = subagentsRunning > 0 && streaming?.id === lastId
+  const [agentView, setAgentView] = useState<DelegatedAgent>()
+  const [agentsOpen, setAgentsOpen] = useState(false)
+  const showSubagents = useCallback(() => setAgentsOpen(true), [setAgentsOpen])
   const agentsSource = useMemo(
     () =>
       agents && baseUrl && apiKey
-        ? { agents, server: { baseUrl, apiKey }, sessionId: conversation?.hermesSessionId }
+        ? {
+            agents,
+            server: { baseUrl, apiKey },
+            sessionId: conversation?.hermesSessionId,
+            onOpen: (agent: DelegatedAgent) => setAgentView(agent),
+          }
         : null,
-    [agents, baseUrl, apiKey, conversation?.hermesSessionId],
+    [agents, baseUrl, apiKey, conversation?.hermesSessionId, setAgentView],
   )
+  const hostStopsAll = usePluginFeatureOn(profile, "subagents_stop_all")
+  const stopEverything = useCallback(async () => {
+    if (!id) return
+    stopMessage(id)
+    if (!agentsSource?.sessionId) return
+    try {
+      await stopSubagents(agentsSource.server, agentsSource.sessionId, agentsSource.agents, {
+        stopAll: hostStopsAll,
+      })
+    } catch {
+      // A subagent the host declined says why on its own card; only a call that never landed has
+      // nowhere to say it.
+      toast.error("Couldn't stop the subagents.")
+    }
+  }, [id, agentsSource, hostStopsAll])
   // Only persistent /v1/runs work survives losing the app's connection; legacy streams do not.
   useBreakReminderEligibility(
     isBackgroundSafeRunActive({
@@ -1115,6 +1151,9 @@ export function ChatPage({
                           message={message}
                           showStats
                           busy={busy}
+                          subagents={message.id === lastId ? subagentsRunning : undefined}
+                          onShowSubagents={showSubagents}
+                          subagentsInline={message.id === lastId && drawsInline}
                           blocks={draws.get(message.id)}
                         />
                       </MessageScrollerItem>
@@ -1122,6 +1161,13 @@ export function ChatPage({
                   })}
                   {compacted.trailing && <Compacted compaction={compacted.trailing} />}
                   {moved.trailing.map(moveMarker)}
+                  {subagentsRunning > 0 && !drawsInline && (
+                    <SubagentLine
+                      count={subagentsRunning}
+                      onOpen={showSubagents}
+                      className="px-1"
+                    />
+                  )}
                 </AgentsContext.Provider>
               </MessageScrollerContent>
             </MessageScrollerViewport>
@@ -1244,7 +1290,8 @@ export function ChatPage({
             }
             filesFeature={filesFeature}
             imagesAvailable={profile?.imageInput !== false}
-            onStop={() => id && stopMessage(id)}
+            subagentsRunning={subagentsRunning}
+            onStop={() => void stopEverything()}
             main={Boolean(botThreads && isMain)}
             onCommand={(command, message) => {
               switch (command) {
@@ -1313,6 +1360,17 @@ export function ChatPage({
         items={todos}
         progress={todoProgress}
         live={busy}
+      />
+      <SubagentsSheet
+        open={agentsOpen}
+        onOpenChange={setAgentsOpen}
+        source={agentsSource ?? undefined}
+      />
+      <AgentPopup
+        agent={agentView}
+        server={serverConfig(profile)}
+        open={agentView !== undefined}
+        onOpenChange={(next) => !next && setAgentView(undefined)}
       />
       <Cheatsheet
         open={cheatsheetOpen}

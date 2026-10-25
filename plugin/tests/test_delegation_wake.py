@@ -461,6 +461,78 @@ class StopRouteTest(unittest.TestCase):
         self.assertEqual(answer["status"], 200)
         self.assertIn("subagent_stop", answer["payload"]["features"])
 
+    def stop_all(self, session_id: str) -> Dict[str, Any]:
+        handler = self.route(plugin.PREFIX + "/sessions/{session_id}/agents/stop")
+        request = FakeWeb.Request()
+        request.match_info = {"session_id": session_id}
+        request.headers = {}
+        return asyncio.run(handler(request))
+
+    def plant_children(self, rows: List[Dict[str, Any]], live: List[str]) -> None:
+        """A ``state.db`` with these delegated children, and core's registry holding `live` ones."""
+        conn = sqlite3.connect(self.home / "state.db")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, model TEXT, model_config TEXT,"
+            " parent_session_id TEXT, started_at REAL, ended_at REAL, end_reason TEXT,"
+            " tool_call_count INTEGER DEFAULT 0)"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY, session_id TEXT,"
+            " role TEXT, content TEXT)"
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO sessions VALUES ('s', 'm', NULL, NULL, 1, NULL, NULL, 0)"
+        )
+        for row in rows:
+            conn.execute(
+                "INSERT INTO sessions VALUES (?, 'm', ?, 's', 2, ?, ?, 0)",
+                (
+                    row["id"],
+                    '{"_delegate_from": "s"}',
+                    None if row.get("open") else 3,
+                    None if row.get("open") else "agent_close",
+                ),
+            )
+        conn.commit()
+        conn.close()
+        for child in live:
+            self.registry._active_subagents[f"sa-{child}"] = {
+                "agent": type(f"Live{child}", (), {"session_id": child})(),
+                "owner_agent_session_id": "s",
+            }
+            self.registry.live.append(f"sa-{child}")
+
+    def test_stop_all_stops_every_child_the_session_still_runs(self) -> None:
+        self.plant_children([{"id": "c1", "open": True}, {"id": "c2", "open": True}], ["c1", "c2"])
+        answer = self.stop_all("s")
+        self.assertEqual(answer["status"], 200)
+        self.assertEqual(answer["payload"]["object"], "memento.agents_stop")
+        self.assertEqual(answer["payload"]["session_id"], "s")
+        self.assertEqual(answer["payload"]["stopped"], 2)
+        self.assertEqual(
+            answer["payload"]["agents"],
+            [{"id": "c1", "stopped": True}, {"id": "c2", "stopped": True}],
+        )
+        self.assertEqual(sorted(self.registry.stopped), ["sa-c1", "sa-c2"])
+
+    def test_stop_all_leaves_a_finished_child_out_of_its_answer(self) -> None:
+        self.plant_children([{"id": "done"}, {"id": "open", "open": True}], ["open"])
+        answer = self.stop_all("s")
+        self.assertEqual(answer["payload"]["agents"], [{"id": "open", "stopped": True}])
+        self.assertEqual(self.registry.stopped, ["sa-open"])
+
+    def test_stop_all_needs_the_bots_key(self) -> None:
+        self.adapter.denied = {"status": 401, "payload": {}}
+        self.assertEqual(self.stop_all("s"), {"status": 401, "payload": {}})
+        self.assertEqual(self.registry.stopped, [])
+
+    def test_info_advertises_stopping_every_subagent_at_once(self) -> None:
+        info = self.route(plugin.PREFIX + "/info")
+        request = FakeWeb.Request()
+        request.match_info, request.headers = {}, {}
+        answer = asyncio.run(info(request))
+        self.assertIn("subagents_stop_all", answer["payload"]["features"])
+
 
 if __name__ == "__main__":
     unittest.main()

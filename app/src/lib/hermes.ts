@@ -2677,6 +2677,11 @@ export interface DelegatedAgent {
   endedAt: number | null
   toolCalls: number
   status: "running" | "done" | "stopped"
+  /**
+   * Why a stop this device asked for didn't happen, in the host's words. Kept on the device, from
+   * the answer to that press: the host's own row says nothing about a stop it refused.
+   */
+  stopReason?: string
 }
 
 function parseAgents(raw: unknown): DelegatedAgent[] {
@@ -2715,10 +2720,10 @@ export interface AgentStop {
 }
 
 /**
- * Stops one subagent of a chat — the child's own session id, which is the card's agent id. The
- * turn's own stop never reaches a child it started (`delegation.stop`), so a card offers this once
- * that turn has ended. Needs plugin 0.79 (`subagent_stop`), and never answers a 404 for an unknown
- * session: a host without the route refuses the request itself, which the card never makes.
+ * Stops one subagent of a chat — the child's own session id, which is the card's agent id — while
+ * its agent works; a session's own Stop takes the rest, through `stopAllAgents` (ADR 0051). Needs
+ * plugin 0.79 (`subagent_stop`), and never answers a 404 for an unknown session: a host without the
+ * route refuses the request itself, which the card never makes.
  */
 export async function stopAgent(
   config: HermesConfig,
@@ -2733,6 +2738,47 @@ export async function stopAgent(
   return {
     stopped: Boolean(body?.stopped),
     reason: typeof body?.reason === "string" && body.reason ? body.reason : undefined,
+  }
+}
+
+/** What a session-wide stop answered: one row per child the host was asked about. */
+export interface AgentsStop {
+  stopped: number
+  agents: AgentStopRow[]
+}
+
+export interface AgentStopRow {
+  /** The child's session id, which is the id the app's card holds. */
+  id: string
+  stopped: boolean
+  /** Why it didn't, in the host's words. */
+  reason?: string
+}
+
+/**
+ * Stops every subagent a session still has at work, whichever turn started it, in one call to the
+ * host (ADR 0051). Needs plugin 0.81 (`subagents_stop_all`); the caller asks once per running agent
+ * on a host without it.
+ */
+export async function stopAllAgents(config: HermesConfig, sessionId: string): Promise<AgentsStop> {
+  const response = await request(pluginSession(config, sessionId, "/agents/stop"), {
+    method: "POST",
+    headers: headers(config),
+  })
+  const body = await response.json()
+  const rows = Array.isArray(body?.agents) ? body.agents : []
+  return {
+    stopped: typeof body?.stopped === "number" ? body.stopped : 0,
+    agents: rows
+      .filter((row: unknown): row is Record<string, unknown> =>
+        Boolean(row && typeof row === "object"),
+      )
+      .filter((row: Record<string, unknown>) => typeof row.id === "string" && Boolean(row.id))
+      .map((row: Record<string, unknown>) => ({
+        id: row.id as string,
+        stopped: Boolean(row.stopped),
+        reason: typeof row.reason === "string" && row.reason ? row.reason : undefined,
+      })),
   }
 }
 

@@ -7,11 +7,12 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { MemoryRouter, Route, Routes } from "react-router"
+import { useState } from "react"
 
-import { AgentCards } from "@/components/chat/agent-card"
+import { AgentCards, AgentPopup } from "@/components/chat/agent-card"
 import { AgentsContext, DELEGATE_TOOL } from "@/lib/agents"
 import { db, type Message, type Profile, type Settings } from "@/lib/db"
-import type { HermesConfig } from "@/lib/hermes"
+import type { DelegatedAgent, HermesConfig } from "@/lib/hermes"
 import { ChatPage } from "@/routes/chat"
 import {
   click,
@@ -258,6 +259,25 @@ test("a reply's code and quotes read on the page", async () => {
   })
 })
 
+/**
+ * A card and the pop-up the thread it belongs to opens (the chat screen owns that pop-up now), so a
+ * tap still shows the agent's own thread.
+ */
+function Opening({ agent, ...rest }: React.ComponentProps<typeof AgentCards> & { agent: DelegatedAgent }) {
+  const [open, setOpen] = useState<DelegatedAgent | undefined>(undefined)
+  return (
+    <AgentsContext.Provider value={{ agents: [agent], server, onOpen: (one) => setOpen(one) }}>
+      <AgentCards {...rest} />
+      <AgentPopup
+        agent={open}
+        server={server}
+        open={open !== undefined}
+        onOpenChange={(next) => !next && setOpen(undefined)}
+      />
+    </AgentsContext.Provider>
+  )
+}
+
 test("a delegated agent's sub-thread draws the same thread", async () => {
   const goal = "Review the parser for the reader"
   host([
@@ -278,24 +298,18 @@ test("a delegated agent's sub-thread draws the same thread", async () => {
     chat = drawn()
   })
   await mount(
-    <AgentsContext.Provider
-      value={{
-        agents: [
-          {
-            id: "agent-1",
-            goal,
-            model: "test/model",
-            startedAt: 1,
-            endedAt: 2,
-            toolCalls: 1,
-            status: "done",
-          },
-        ],
-        server,
+    <Opening
+      tool={tool}
+      agent={{
+        id: "agent-1",
+        goal,
+        model: "test/model",
+        startedAt: 1,
+        endedAt: 2,
+        toolCalls: 1,
+        status: "done",
       }}
-    >
-      <AgentCards tool={tool} ended />
-    </AgentsContext.Provider>,
+    />,
     async () => {
       const card = document.querySelector("button")
       assert.ok(card, "the delegation is a card in the thread")
@@ -324,25 +338,19 @@ test("a delegated agent's sub-thread draws its reply's thinking", async () => {
     endedAt: 2_000,
   }
   await mount(
-    <AgentsContext.Provider
-      value={{
-        agents: [
-          {
-            // Its own agent, so this read is not the finished transcript an earlier test kept.
-            id: "agent-think",
-            goal,
-            model: "test/model",
-            startedAt: 1,
-            endedAt: 2,
-            toolCalls: 1,
-            status: "done",
-          },
-        ],
-        server,
+    <Opening
+      tool={tool}
+      agent={{
+        // Its own agent, so this read is not the finished transcript an earlier test kept.
+        id: "agent-think",
+        goal,
+        model: "test/model",
+        startedAt: 1,
+        endedAt: 2,
+        toolCalls: 1,
+        status: "done",
       }}
-    >
-      <AgentCards tool={tool} />
-    </AgentsContext.Provider>,
+    />,
     async () => {
       const card = document.querySelector("button")
       assert.ok(card, "the delegation is a card in the thread")
@@ -402,24 +410,18 @@ test("a sub-thread draws its thinking shut, as a chat's reply does", async () =>
     assert.equal(expanded(line), "false", "and its sheet stays shut rather than opening itself")
   })
   await mount(
-    <AgentsContext.Provider
-      value={{
-        agents: [
-          {
-            id: "agent-folded",
-            goal,
-            model: "test/model",
-            startedAt: 1,
-            endedAt: 2,
-            toolCalls: 1,
-            status: "done",
-          },
-        ],
-        server,
+    <Opening
+      tool={tool}
+      agent={{
+        id: "agent-folded",
+        goal,
+        model: "test/model",
+        startedAt: 1,
+        endedAt: 2,
+        toolCalls: 1,
+        status: "done",
       }}
-    >
-      <AgentCards tool={tool} />
-    </AgentsContext.Provider>,
+    />,
     async () => {
       const card = document.querySelector("button")
       assert.ok(card, "the delegation is a card in the thread")

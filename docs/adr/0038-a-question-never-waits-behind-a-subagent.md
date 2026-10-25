@@ -1,5 +1,9 @@
 # A question never waits behind a subagent
 
+**Superseded in its "once the turn has ended, each subagent is stopped from its own card" clause by
+[ADR 0051](0051-a-sessions-stop-reaches-every-subagent-it-has.md)**: the card's stop is offered while
+its agent runs, and the composer's Stop reaches every subagent the session holds.
+
 A bot's turn that delegates no longer waits for its subagents: `delegate_task` returns a handle, the
 turn carries on, and every question or approval it raises reaches the user while the subagents still
 work. For a long time the plugin forced every delegation synchronous (commit e17f28e, 2026-10-08)

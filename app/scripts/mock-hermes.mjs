@@ -3582,6 +3582,7 @@ http
           "sessions",
           "runs",
           "subagent_stop",
+          "subagents_stop_all",
           "prs",
           "plans",
           "clarify",
@@ -4759,6 +4760,29 @@ http
         object: "memento.agents",
         session_id: id,
         agents: delegations.get(id) ?? [],
+      })
+    }
+    const sessionAgentsStop =
+      /^\/api\/plugins\/memento\/sessions\/([^/]+)\/agents\/stop$/.exec(url.pathname)
+    if (PLUGIN && !profile && req.method === "POST" && sessionAgentsStop) {
+      const session = decodeURIComponent(sessionAgentsStop[1])
+      const rows = []
+      for (const agent of delegations.get(session) ?? []) {
+        if (agent.status !== "running") continue
+        stoppedDelegations.add(agent.id)
+        Object.assign(agent, {
+          ended_at: Date.now() / 1000,
+          end_reason: "interrupted",
+          status: "stopped",
+        })
+        rows.push({ id: agent.id, stopped: true })
+      }
+      if (rows.length) noteEvent("runs")
+      return json(res, 200, {
+        object: "memento.agents_stop",
+        session_id: session,
+        agents: rows,
+        stopped: rows.length,
       })
     }
     // #470's card stops one child, by the child's own session id (`delegation.stop`'s route). Never
