@@ -1,10 +1,11 @@
 // One turn on the mock, told to stall so its reasoning is the only thing on the wire for a while:
 // the only way a poll can look at a thread mid-thought. Two calls run back to back in it, so the
-// reply draws the thinking before them above one tool group and the two stretches that follow as
-// one row under it. The merge is layout no lower tier reaches, and the row is the only place a
-// reader touches thinking now: it opens the working-out in the same sheet the tool row opens, and
-// the sheet's follow on a live run, the wheel inside it that stops that follow and the whole height
-// of its body are all geometry the browser has and jsdom cannot give. See ADR 0050.
+// reply draws every stretch of its thinking as one row above the one tool group those calls made —
+// a tool row never lands between two thought rows (ADR 0051). The merge is layout no lower tier
+// reaches, and the row is the only place a reader touches thinking now: it opens the working-out in
+// the same sheet the tool row opens, and the sheet's follow on a live run, the wheel inside it that
+// stops that follow and the whole height of its body are all geometry the browser has and jsdom
+// cannot give. See ADR 0050.
 import { assert, app, flow, pass, settled } from "./lib.mjs"
 // What a row reads is the app's own rule, imported rather than restated: a second copy of the label
 // format here could drift from the one the thread draws and still pass.
@@ -278,7 +279,8 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   pass("tapping the row mid-thought opens the sheet on the run's newest words")
   await shut()
 
-  // A call ends that stretch. The row it measured takes its span, the stretch after the call thinks.
+  // A call ends that stretch. The stretch after the call joins the row above it — a tool row never
+  // lands between two thought rows — so the row keeps spinning over both.
   const latched = await until(
     async () => {
       const reply = await lastReply(chatId)
@@ -288,27 +290,25 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     30_000,
     "the first call to land with the thinking after it streaming",
   )
-  assert.equal(latched.rows.length, 2, "the call splits the thinking into a second row")
-  assert.match(
-    latched.rows[0].label ?? "",
-    SPAN,
-    `the row the call ended reads the span it measured (${latched.rows[0].label})`,
+  assert.equal(latched.rows.length, 1, "the call adds no row: the stretch after it joins the one")
+  assert.equal(
+    latched.rows[0].label,
+    "Thinking…",
+    "the row reads the turn's thinking while the stretch after the call arrives",
   )
-  assert.equal(latched.rows[0].spin, false, "and no longer spins: that stretch is written down")
-  assert.equal(latched.rows[1].label, "Thinking…", "the stretch after the call is thinking")
-  assert.equal(latched.rows[1].spin, true, "and spins while it arrives")
+  assert.equal(latched.rows[0].spin, true, "with its spinner while that stretch streams")
   assert.deepEqual(
     latched.order.map((one) => one.kind),
-    ["thinking", "tool", "thinking"],
-    "the thinking before the call is drawn above it, and the thinking it broke below",
+    ["thinking", "tool"],
+    "the row drawn above the call it led into, the call last",
   )
   await inThread(MEASURED, "after the first call")
   await shot("latched")
-  pass(`the run a call ended reads \"${latched.rows[0].label}\" while the stretch after it streams`)
+  pass("the call draws no second row: the row above it keeps spinning while the next stretch streams")
 
   // A second call, straight after the first with nothing said between them: the two draw as ONE tool
-  // group, and the stretch that follows each of them lands beside the other under it — two rows
-  // that touch, drawn as one row holding every word of both.
+  // group, and every stretch of the turn's thinking sits above it as one row holding all their
+  // words — a tool row never lands between two thought rows.
   const merged = await until(
     async () => {
       const reply = await lastReply(chatId)
@@ -332,21 +332,21 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     /\b2 commands\b/,
     `and the group says how many calls it holds ("${merged.group}")`,
   )
-  assert.equal(merged.rows.length, 2, "the two stretches that touched draw as one row")
+  assert.equal(merged.rows.length, 1, "every stretch of the turn draws as one row")
   assert.equal(
-    merged.rows[1].label,
+    merged.rows[0].label,
     "Thinking…",
     "which says it is thinking while its newest stretch streams",
   )
   assert.deepEqual(
     merged.order.map((one) => one.kind),
-    ["thinking", "tool", "thinking"],
-    "the run before any call above the group, and the two that touched as one row below it",
+    ["thinking", "tool"],
+    "the row above the one group both calls made, with nothing drawn under it",
   )
   await inThread(ROTATIONS, "with two calls drawn")
 
-  // That one row's sheet holds both stretches, in the order they arrived, each once.
-  const both = await open(1, "the merged row")
+  // That one row's sheet holds every stretch, in the order they arrived, each once.
+  const both = await open(0, "the merged row")
   const first = both.sheet.text.indexOf(ROTATIONS)
   const then = both.sheet.text.indexOf(ACCOUNTING)
   assert.ok(first >= 0, "holding the stretch the first call broke")
@@ -354,7 +354,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   assert.ok(first < then, "in the order they arrived")
   assert.equal(both.sheet.text.split(ROTATIONS).length - 1, 1, "each stretch once, not once a row")
   await shot("merged")
-  pass("two calls back to back draw as one tool group, their two stretches as one row below")
+  pass("two calls back to back draw as one tool group, every stretch as one row above it")
   await shut()
 
   // The last piece, the turn still holding: nothing has folded, and nothing may — the labels are
@@ -364,15 +364,15 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
       const reply = await lastReply(chatId)
       if (!reply || reply.content || !reply.runs.at(-1)?.text.includes(LAST)) return null
       const state = await threadState()
-      return state.rows.length === 2 && state.rows[1].label === "Thinking…" ? state : null
+      return state.rows.length === 1 && state.rows[0].label === "Thinking…" ? state : null
     },
     20_000,
-    "the turn's last thinking piece to land with the second row still thinking",
+    "the turn's last thinking piece to land with the row still thinking",
   )
-  pass("the turn thinks to its last piece with the row after the group still wearing the spinner")
+  pass("the turn thinks to its last piece with the one row above its calls still wearing the spinner")
 
-  // What each row may read now that its spans are frozen: the run above the group its own span, and
-  // the merged row the sum of the two it holds — never the part of it this device measured for one.
+  // What the row may read now that its spans are frozen: the sum of every stretch it holds — never
+  // the part of it this device measured for one of them.
   await until(
     async () => ((await lastReply(chatId))?.content ? true : null),
     30_000,
@@ -385,32 +385,29 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     spans.every((one) => typeof one === "number"),
     "every one of them measured on this device, watching it arrive",
   )
-  const labels = [
-    thinkingLabel({ thinking: false, spanMs: spans[0] }),
-    thinkingLabel({ thinking: false, spanMs: spans[1] + spans[2] }),
-  ]
+  const labels = [thinkingLabel({ thinking: false, spanMs: spans[0] + spans[1] + spans[2] })]
   const frozen = await until(
     async () => {
       const state = await threadState()
       return state.rows.map((one) => one.label).join("|") === labels.join("|") ? state : null
     },
     10_000,
-    "both rows to read their spans",
+    "the row to read its spans",
   )
-  assert.match(frozen.rows[1].label ?? "", SPAN, "the merged row reads a span, not a plain phrase")
+  assert.match(frozen.rows[0].label ?? "", SPAN, "the row reads a span, not a plain phrase")
   assert.notEqual(
-    frozen.rows[1].label,
-    thinkingLabel({ thinking: false, spanMs: spans[1] }),
-    "and reads the two spans added, not the first of them",
+    frozen.rows[0].label,
+    thinkingLabel({ thinking: false, spanMs: spans[0] }),
+    "and reads every stretch's span added, not the first of them alone",
   )
   assert.notEqual(
-    frozen.rows[1].label,
-    thinkingLabel({ thinking: false, spanMs: spans[2] }),
-    "nor the second alone",
+    frozen.rows[0].label,
+    thinkingLabel({ thinking: false, spanMs: spans[1] + spans[2] }),
+    "nor the two that followed the first call",
   )
   assert.ok(
     frozen.rows.every((one) => one.spin === false),
-    "with the spinner gone from every row the turn thought in",
+    "with the spinner gone from the row the turn thought in",
   )
   assert.equal(frozen.sheet, null, "the answer closes no sheet: none was open")
 
@@ -432,42 +429,42 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     .waitFor({ timeout: 15_000 })
   await uncapped("with the turn answered")
   await shot("answered")
-  pass(`the answer leaves both rows reading \"${labels.join('\", \"')}\", the words shut in the sheet`)
+  pass(`the answer leaves the row reading ${labels[0]}, the words shut in the sheet`)
 
   // The words are read back in the sheet, and the thread goes on holding none of them: the spans
   // are the ones this device wrote onto the reply's own runs, and nothing was remembered about the
   // sheet that visit opened — the next load is shut again.
-  const fromSheet = await open(1, "the merged row, answered")
+  const fromSheet = await open(0, "the row, answered")
   assert.ok(fromSheet.sheet.text.includes(ROTATIONS), "with the first stretch still in the row")
   assert.ok(fromSheet.sheet.text.includes(ACCOUNTING), "and the second one beside it")
   assert.deepEqual(
     fromSheet.order.map((one) => one.kind),
-    ["thinking", "tool", "thinking"],
-    "the rows are drawn in the same places as they were live",
+    ["thinking", "tool"],
+    "the row is drawn above its group, as it was live",
   )
   await shut()
   await page.reload()
   const restored = await until(
     async () => {
       const state = await threadState()
-      return state.rows.length === 2 ? state : null
+      return state.rows.length === 1 ? state : null
     },
     20_000,
-    "the reloaded thread's two rows",
+    "the reloaded thread's row",
   )
   assert.deepEqual(
     restored.rows.map((one) => one.label),
     labels,
-    "a reload on the device that watched keeps both spans, on the rows they were measured for",
+    "a reload on the device that watched keeps the span, on the row it was measured for",
   )
   assert.ok(
     restored.rows.every((one) => one.expanded === "false"),
-    "with every row shut again, nothing remembered",
+    "with the row shut again, nothing remembered",
   )
   assert.equal(restored.sheet, null, "and no sheet drawn")
   await inThread(ROTATIONS, "after the reload")
   await shot("restored")
-  pass(`a reload reads the same two rows in the same places, still saying \"${labels.join('\", \"')}\"`)
+  pass(`a reload reads the same row in the same place, still saying ${labels[0]}`)
 
   // A second turn, asked to think at length: one run, ten paragraphs of markdown, far taller than
   // the share of the screen the cap used to hold. The height is geometry — no lower tier has it —

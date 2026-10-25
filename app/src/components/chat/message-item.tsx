@@ -106,12 +106,15 @@ function segmentOf(part: RunPart, segments: Segment[], tools: ToolEvent[]) {
 }
 
 /**
- * Puts a segment's runs where they happened within it: a run with no anchor opens the segment, and an
- * anchored run follows the part that holds its call — after the whole group when consecutive calls
- * merged into one. Insertion is counted per part, because two runs after the same part arrive in
- * order and a plain "splice after it" would stack the later one above the earlier. A run whose call
- * this segment doesn't draw follows the last call it does draw, and sits at the segment's top when
- * it draws none.
+ * Puts a segment's runs where they belong within it: a run with no anchor opens the segment, and an
+ * anchored stretch draws ABOVE the part that holds its call — above the whole group when
+ * consecutive calls merged into one — so a tool row never lands between two thought rows and the row
+ * still working is the last one the reply draws. Two stretches after the same part arrive in order,
+ * so each is spliced where the part stands by then and the later never stacks above the earlier. The
+ * turn's pending row is the exception: it is the working status at the thread's end and stays behind
+ * its last call, as does a stretch that follows a clarify or an agent card, neither of which is a
+ * tool row. A run whose call this segment doesn't draw follows the last call it does draw, and sits
+ * at the segment's top when it draws none.
  */
 function placeThinking(parts: Part[], runs: RunPart[]): Part[] {
   const row = (run: RunPart): Part => ({ kind: "thinking", ...run })
@@ -122,8 +125,8 @@ function placeThinking(parts: Part[], runs: RunPart[]): Part[] {
   )
   const top = leading.length - 1
   const inserted = new Map<number, number>()
-  for (const part of runs) {
-    const id = part.afterToolId
+  for (const run of runs) {
+    const id = run.afterToolId
     if (!id) continue
     const found = placed.findIndex(
       (one) =>
@@ -132,7 +135,10 @@ function placeThinking(parts: Part[], runs: RunPart[]): Part[] {
     )
     const at = found >= 0 ? found : lastCall >= 0 ? lastCall : top
     const count = inserted.get(at) ?? 0
-    placed.splice(at + 1 + count, 0, row(part))
+    // The stretch of a real call goes above its tool row; the pending row and a card's own stretch
+    // stay behind their part, where the reader's eye already is.
+    const above = found >= 0 && placed[at].kind === "tools" && !run.pending
+    placed.splice(above ? at + count : at + 1 + count, 0, row(run))
     inserted.set(at, count + 1)
   }
   return placed

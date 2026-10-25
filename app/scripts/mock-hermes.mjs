@@ -60,8 +60,8 @@
 // Say "think out loud" for the turn's working-out before any of its answer: three stretches of
 // reasoning, paced, as a run's `reasoning.available` events or a completion's `reasoning_content`
 // deltas, with two looks at the disk run back to back between them and no reply text anywhere
-// between the two calls — so the thinking before them is a run of its own above one tool group, and
-// the two stretches that follow each call land beside one another under it and draw as one row.
+// between the two calls — so the thinking before them and the two stretches that follow each call
+// are three runs that draw as one row above the one tool group the two calls made.
 // Say "stall" as well and the turn then holds 2.5s with nothing else on the wire.
 // Say "think at length" for the same working-out at ten paragraphs: one run, longer than a row is
 // drawn tall, so a thread that opens it shows all of it and the thread has to scroll.
@@ -1693,10 +1693,10 @@ function pageRows(rows, params) {
 // since a run's reasoning reaches the app a block at a time and its blocks are joined as paragraphs.
 // One stretch per run, with the call that breaks it carried on the stretch itself, so how many calls
 // a turn makes can never drift from how many stretches it breaks: each of the first two is followed
-// by a call of its own, and the two run back to back with no reply text between them, so the thinking
-// before them is drawn above one tool group and the two stretches after them land beside one another
-// under it as one row. A stretch of two or three pieces spans long enough that the row it lands in
-// measures a second or more, and the merged row's sum of two of them is a figure neither measured.
+// by a call of its own, and the two run back to back with no reply text between them, so all three
+// stretches draw as one row above the one tool group the calls made — a tool row never lands between
+// two thought rows. A stretch of two or three pieces spans long enough that the row it lands in
+// measures a second or more, and the row's sum of all three of them is a figure none of them measured.
 const REASONING = [
   {
     pieces: [
@@ -1931,8 +1931,8 @@ async function playTurn(req, body, last, out) {
   // A prompt that asks to think out loud gets its working-out before the answer, in both the shapes
   // Hermes streams reasoning in: a completion's `reasoning_content` delta and a run's
   // `reasoning.available` event. Three stretches of it, with a call run after each of the first two —
-  // back to back, nothing said between them — so the thread draws the thinking before them above one
-  // tool group and the two stretches that follow as one row under it. Asked to think at length it
+  // back to back, nothing said between them — so the thread draws all three stretches as one row
+  // above the one tool group those calls made. Asked to think at length it
   // says far more of it in one stretch instead, which no row is drawn short enough to cap.
   const atLength = /\bthink at length\b/i.test(last)
   if (atLength || /\bthink out loud\b/i.test(last)) {

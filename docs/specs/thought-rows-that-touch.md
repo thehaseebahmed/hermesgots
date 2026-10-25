@@ -1,10 +1,12 @@
 # Thought rows that touch draw as one, and open until the answer
 
 Status: grilled 2026-10-24, every decision settled and recorded in ADR 0049, which supersedes the
-row-count, fold and cap clauses of ADR 0038. Published as #547 with tickets #548, #549, #550, #551
-and #552; the build order at the end is the tickets' shape when implementation starts. #547 is
-blocked by the gate issue #554 that the docs pull request #553 carrying this file closes —
-implementation starts once it merges. The spec carries `ready-for-agent` and the tickets stay bare,
+row-count, fold and cap clauses of ADR 0038. Amended 2026-10-25 by ADR 0051, which moves placement
+alone: the stretches a tool group broke draw as one row above that group, not under it, so a tool row
+never lands between two thought rows — every other decision here stands. Published as #547 with
+tickets #548, #549, #550, #551 and #552; the build order at the end is the tickets' shape when
+implementation starts. #547 is blocked by the gate issue #554 that the docs pull request #553
+carrying this file closes — implementation starts once it merges. The spec carries `ready-for-agent` and the tickets stay bare,
 so the agent claims the spec and works the graph in order.
 
 ## Goal
