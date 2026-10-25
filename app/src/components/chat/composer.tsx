@@ -665,7 +665,7 @@ function MicUnavailable({
       size="icon-sm"
       className="size-11 rounded-full text-muted-foreground opacity-50"
       disabled={availability.status === "checking"}
-      aria-label="Voice unavailable"
+      aria-label="Speech-to-text unavailable"
     >
       <MicIcon />
     </InputGroupButton>

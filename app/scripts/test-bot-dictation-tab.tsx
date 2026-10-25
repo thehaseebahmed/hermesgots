@@ -16,6 +16,7 @@ import {
   seedSettings,
   text,
   type,
+  until,
 } from "./component-kit.tsx"
 
 const speech = (patch: Record<string, unknown> = {}) => ({
@@ -115,9 +116,36 @@ const editor = (path: string) => (
 )
 
 const here = () => find("[data-here]")?.textContent
-const dictationTab = () => find('[data-bot-page="speech-to-text"]')
+/** The page itself, and its row in the list beside it. */
+const speechPage = () => find("[data-bot-dictation]")
+const speechRow = () => find('[data-bot-page="speech-to-text"]')
 const chip = (word: string) => find(`[aria-label="Remove ${word}"]`)
 const add = () => click(findAll("button").find((one) => one.textContent?.trim() === "Add") ?? null)
+
+/** The field a setting's own title sits over, and the line under that title. */
+const fieldOf = (title: string) => {
+  const label = findAll("[data-bot-dictation] [data-slot='field-label']").find(
+    (node) => node.textContent?.trim() === title,
+  )
+  return label?.closest("[data-slot='field']") ?? null
+}
+const subtitleOf = (title: string) =>
+  fieldOf(title)?.querySelector("[data-slot='field-description']")?.textContent
+const headings = () => findAll("[data-bot-dictation] h2").map((node) => node.textContent?.trim())
+const titlesIn = (name: string) =>
+  findAll(`[data-bot-group="${name}"] [data-slot='field-label']`).map((node) =>
+    node.textContent?.trim(),
+  )
+
+/** The one speech-model field, and the host's models it opens. */
+const speechField = () => find("#speech-model")
+const speechOptions = () => findAll('[aria-label="Speech models"] button')
+const speechOption = (name: string) =>
+  speechOptions().find((option) => option.textContent?.trim().startsWith(name)) ?? null
+const openSpeech = async () => {
+  await click(speechField())
+  await until(async () => speechOptions().length > 0, "the host's speech models")
+}
 
 async function seed(
   name: string,
@@ -133,24 +161,21 @@ async function seed(
   return server.calls
 }
 
-const modelRow = (name: string) =>
-  findAll('[aria-label="Speech models"] button').find((row) =>
-    row.textContent?.trim().startsWith(name),
-  ) ?? null
-
-test("a host that can dictate has a Dictation tab, and it holds the bot's words", async () => {
+test("a host that can hear speech has a Speech-to-text page, and it holds the bot's words", async () => {
   await seed("dictating", ["dictation"], { vocabulary: ["Haseeb"] })
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
-    assert.ok(dictationTab(), "the Dictation tab is on the editor")
+    assert.ok(speechRow(), "the Speech-to-text row is in the list beside the page")
+    assert.ok(speechPage(), "and the page is the one drawn")
     assert.ok(chip("Haseeb"), "the bot's word is on it")
-    assert.equal(here(), "/settings/bots/bot-1/speech-to-text", "the address is the tab's own")
+    assert.equal(here(), "/settings/bots/bot-1/speech-to-text", "the address is the page's own")
   })
 })
 
-test("a host that can't dictate has no Dictation tab, and its address lands on General", async () => {
+test("a host that can't hear speech has no Speech-to-text page, and its address lands on General", async () => {
   await seed("no-dictation", ["speech_model"])
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
-    assert.equal(dictationTab(), null, "no Speech-to-text page")
+    assert.equal(speechRow(), null, "no Speech-to-text row")
+    assert.equal(speechPage(), null, "no Speech-to-text page")
     assert.equal(here(), "/settings/bots/bot-1/general", "the address is General's")
     assert.match(text(), /Test connection/, "General is what is drawn")
   })
@@ -189,25 +214,92 @@ test("a word removed from the tab leaves the record", async () => {
   })
 })
 
-test("the tab lists the host's speech models with their size, speed and which is in use", async () => {
-  await seed("speech-list", ["dictation", "speech_model"], {}, { speech: speech() })
+test("the page splits into Gots's settings and Hermes's, in that order", async () => {
+  await seed("grouped", ["dictation", "speech_model"], {}, { speech: speech() })
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
-    const base = modelRow("base")
-    assert.match(base?.textContent ?? "", /145 MB/, "the download is named")
-    assert.match(base?.textContent ?? "", /16× realtime/, "and the speed it is weighed on")
-    assert.equal(base?.getAttribute("aria-pressed"), "false")
-    assert.match(modelRow("small")?.textContent ?? "", /In use/)
-    assert.equal(
-      modelRow("small")?.getAttribute("aria-pressed"),
-      "true",
-      "the one in play reads as chosen",
+    assert.deepEqual(
+      headings(),
+      ["Gots Specific Settings", "Hermes Settings"],
+      "the two ownership headings, Gots's first",
     )
-    assert.match(modelRow("large-v3")?.textContent ?? "", /Too slow on a CPU/)
-    assert.match(modelRow("large-v3")?.textContent ?? "", /Not on this host/)
+    assert.deepEqual(
+      titlesIn("gots"),
+      ["Vocabulary", "Cleanup model"],
+      "the bot's own speech settings under Gots's heading",
+    )
+    assert.deepEqual(titlesIn("hermes"), ["Speech model"], "the host's model under Hermes's")
+    assert.equal(
+      subtitleOf("Vocabulary"),
+      "The words this bot's speech leans towards",
+      "Vocabulary's line",
+    )
+    assert.equal(
+      subtitleOf("Cleanup model"),
+      "The model that tidies a take's finished words",
+      "Cleanup model's line",
+    )
+    assert.equal(
+      subtitleOf("Speech model"),
+      "The model that hears this bot's speech-to-text",
+      "Speech model's line",
+    )
   })
 })
 
-test("a model picked on the tab is written to the host, and the list says which is in use", async () => {
+test("the Vocabulary title sits over the word input and its chips", async () => {
+  await seed(
+    "vocabulary-field",
+    ["dictation", "speech_model"],
+    { vocabulary: ["Haseeb"] },
+    { speech: speech() },
+  )
+  await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    const field = fieldOf("Vocabulary")
+    assert.ok(field?.querySelector("#vocabulary-word"), "the word input is inside the field")
+    assert.ok(field?.contains(chip("Haseeb")), "and so are the words already there")
+    assert.equal(
+      field?.querySelector('[aria-label="Words"]')?.tagName,
+      "UL",
+      "the list of words is the field's own",
+    )
+  })
+})
+
+test("the speech model is one field naming the model in play, over the host's own models", async () => {
+  await seed("speech-picker", ["dictation", "speech_model"], {}, { speech: speech() })
+  await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    assert.equal(findAll("#speech-model").length, 1, "one control rather than a row per model")
+    assert.equal(
+      speechField()?.getAttribute("aria-label"),
+      "Speech model: small",
+      "it names the model in play",
+    )
+    await openSpeech()
+    assert.equal(
+      findAll('[aria-label="Speech models"] input').length,
+      0,
+      "no search over a list this short",
+    )
+    assert.equal(speechOptions().length, 3, "one option for each model on the host")
+    assert.equal(speechOption("small")?.getAttribute("aria-pressed"), "true", "the one in play")
+    assert.equal(speechOption("base")?.getAttribute("aria-pressed"), "false")
+    assert.match(speechOption("base")?.textContent ?? "", /145 MB/, "the download is named")
+    assert.match(
+      speechOption("base")?.textContent ?? "",
+      /16× realtime/,
+      "and the speed it is weighed on",
+    )
+    assert.match(speechOption("small")?.textContent ?? "", /In use/)
+    assert.match(speechOption("large-v3")?.textContent ?? "", /Too slow on a CPU/)
+    assert.match(speechOption("large-v3")?.textContent ?? "", /Not on this host/)
+    const clearing = speechOptions().find((option) =>
+      /\b(default|none|clear)\b/i.test(option.textContent ?? ""),
+    )
+    assert.equal(clearing, undefined, "no default or clearing pick: a take always has a model")
+  })
+})
+
+test("a model picked in the list is written to the host, and the field says which is in play", async () => {
   const chosen = speech({ model: "base" })
   chosen.models = chosen.models.map((row) => ({
     ...row,
@@ -220,11 +312,15 @@ test("a model picked on the tab is written to the host, and the list says which 
     { speech: speech(), next: chosen },
   )
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
-    await click(modelRow("base"))
+    await openSpeech()
+    await click(speechOption("base"))
     assert.deepEqual(calls[0]?.body, { model: "base" }, "one field, the model that moved")
-    assert.equal(modelRow("base")?.getAttribute("aria-pressed"), "true")
-    assert.match(modelRow("base")?.textContent ?? "", /In use/)
-    assert.equal(modelRow("small")?.getAttribute("aria-pressed"), "false")
+    assert.equal(
+      speechField()?.getAttribute("aria-label"),
+      "Speech model: base",
+      "the field names the new model",
+    )
+    await until(async () => speechOptions().length === 0, "the list to close behind the pick")
   })
 })
 
@@ -239,10 +335,19 @@ test("a model the host refuses leaves the old one in place and shows the host's 
     },
   )
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
-    await click(modelRow("base"))
+    await openSpeech()
+    await click(speechOption("base"))
     assert.deepEqual(calls[0]?.body, { model: "base" })
-    assert.equal(modelRow("small")?.getAttribute("aria-pressed"), "true", "the old model stays")
+    assert.equal(
+      speechField()?.getAttribute("aria-label"),
+      "Speech model: small",
+      "the old model stays",
+    )
     assert.match(find('[role="alert"]')?.textContent ?? "", /read-only/, "the host's own sentence")
+    assert.ok(
+      find("[data-bot-dictation]")?.firstElementChild?.querySelector('[role="alert"]'),
+      "and it leads the page, over both groups it reports for",
+    )
   })
 })
 
@@ -287,10 +392,11 @@ test("a pick the host does not have says it is downloading", async () => {
     },
   )
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
-    const row = findAll("div").find((node) =>
-      node.textContent?.includes("downloads on the next take"),
+    await openSpeech()
+    const row = speechOptions().find((option) =>
+      (option.textContent ?? "").includes("downloads on the next take"),
     )
-    assert.ok(row, "the row says the pick is downloading")
+    assert.ok(row, "the option for the pick says it is downloading")
   })
 })
 

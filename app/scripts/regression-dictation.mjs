@@ -310,7 +310,7 @@ try {
       await route.continue().catch(() => {})
     })
     await page.reload()
-    const greyed = page.getByRole("button", { name: "Voice unavailable" })
+    const greyed = page.getByRole("button", { name: "Speech-to-text unavailable" })
     await greyed.waitFor()
     assert.ok(await greyed.isDisabled(), "greyed out while checking")
     await shot(page, "phone-light-7-checking")
@@ -325,10 +325,10 @@ try {
   ]) {
     if (!server) continue
     const page = await open(server, { width: 390, height: 844 })
-    const greyed = page.getByRole("button", { name: "Voice unavailable" })
+    const greyed = page.getByRole("button", { name: "Speech-to-text unavailable" })
     await greyed.waitFor()
     await page.waitForFunction(
-      () => !document.querySelector('[aria-label="Voice unavailable"]')?.hasAttribute("disabled"),
+      () => !document.querySelector('[aria-label="Speech-to-text unavailable"]')?.hasAttribute("disabled"),
       undefined,
       { timeout: 10_000 },
     )
@@ -341,7 +341,6 @@ try {
 
   {
     const page = await open(mock, PHONE)
-    const tab = page.locator("[data-bot-dictation]")
     await addWord(page, "Gots")
     await shot(page, "phone-light-18-dictation-word")
 
@@ -353,28 +352,38 @@ try {
       "the word added on the tab is still the bot's after a reload",
     )
 
-    const models = tab.locator('[aria-label="Speech models"] button')
+    // The speech model is picked from the field's own sheet, not a list on the page.
+    const trigger = page.locator("#speech-model")
+    const models = page.locator('[aria-label="Speech models"] button')
     const row = (name) => models.filter({ hasText: new RegExp(`^${name}`) })
-    await models.first().waitFor({ timeout: 15_000 })
+    const openPicker = async () => {
+      await trigger.click()
+      await models.first().waitFor({ timeout: 15_000 })
+    }
+
+    await trigger.waitFor({ timeout: 15_000 })
+    await openPicker()
     assert.match(await row("small").innerText(), /In use/, "the model in play says so")
     assert.equal(await row("base").getAttribute("aria-pressed"), "false")
 
     await row("base").click()
-    for (let picked = false, end = Date.now() + 10_000; !picked; await page.waitForTimeout(100)) {
-      picked = (await row("base").getAttribute("aria-pressed")) === "true"
-      assert.ok(picked || Date.now() < end, "the model picked on the tab is the one in use")
-    }
-    assert.match(await row("base").innerText(), /In use/)
-    assert.equal(await row("small").getAttribute("aria-pressed"), "false", "the old one steps down")
+    await page.waitForFunction(
+      () => document.querySelector("#speech-model")?.getAttribute("aria-label") === "Speech model: base",
+      undefined,
+      { timeout: 10_000 },
+    )
     await shot(page, "phone-light-19-dictation-model")
 
     await page.reload()
-    await models.first().waitFor({ timeout: 15_000 })
+    await trigger.waitFor({ timeout: 15_000 })
+    await openPicker()
     assert.equal(
       await row("base").getAttribute("aria-pressed"),
       "true",
       "the pick written to the host is the one in play",
     )
+    assert.match(await row("base").innerText(), /In use/)
+    assert.equal(await row("small").getAttribute("aria-pressed"), "false", "the old one steps down")
     await page.close()
   }
 

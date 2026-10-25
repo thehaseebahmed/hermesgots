@@ -66,7 +66,7 @@ export function VoiceBar({
   return (
     <div
       role="group"
-      aria-label="Dictation take"
+      aria-label="Speech-to-text take"
       onPointerDownCapture={() => (pressed.current = true)}
       className="flex flex-col rounded-[1.75rem] border border-input bg-background shadow-lg shadow-black/5 dark:bg-input/30"
     >

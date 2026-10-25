@@ -62,7 +62,7 @@ function availability(key: string): DictationAvailability {
   if (!hit) return CHECKING
   if (!hit.info) return FAILED
   if (hit.info.ready) return READY
-  const reason = hit.info.reason || "Dictation is off on this bot's host."
+  const reason = hit.info.reason || "Speech-to-text is off on this bot's host."
   if (!offs.has(reason)) offs.set(reason, { status: "off", reason })
   return offs.get(reason)!
 }
@@ -127,7 +127,7 @@ export const SILENT_MS = 2500
 export const STOPPED = "The recording stopped."
 export const TAKEN = "The microphone is in use by another app."
 export const SILENT = "The microphone isn't picking up any sound."
-export const TAKE_RUNNING = "A dictation is already being heard on this bot."
+export const TAKE_RUNNING = "A speech-to-text take is already being heard on this bot."
 
 /** A click from Enter or Space: no pointer made it (a touch's click can also have no detail). */
 export function keyboardClick(event: MouseEvent) {

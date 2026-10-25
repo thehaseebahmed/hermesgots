@@ -53,7 +53,7 @@ const composer = (draftKey: string, sent: { text: string; attachments: Attachmen
 const field = (scope: ParentNode = document) =>
   scope.querySelector("textarea") as HTMLTextAreaElement | null
 const bar = (scope: ParentNode = document) =>
-  scope.querySelector('[role="group"][aria-label="Dictation take"]')
+  scope.querySelector('[role="group"][aria-label="Speech-to-text take"]')
 const region = (scope: ParentNode = document) =>
   scope.querySelector('[role="region"][aria-label="Dictation"]')
 const button = (label: string, scope: ParentNode = document) =>
