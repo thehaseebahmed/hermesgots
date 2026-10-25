@@ -176,15 +176,14 @@ test("the second line says why the row waits only while the row waits", async ()
   })
 })
 
-test("a session this device hasn't read wears the dot, and a read mark clears it", async () => {
-  await drawRow(conversation("unread"), {
+test("a dot needs a read mark to measure against, and a read mark clears it", async () => {
+  await drawRow(conversation("never-opened"), {
     body: async () => {
-      const dot = document.querySelector("[data-unread]")
-      assert.ok(dot, "never opened here, so unread")
-      const circle = icon().circle
-      assert.equal(dot.parentElement, circle.parentElement, "the dot sits on the icon's own wrapper")
-      assert.ok([...(dot as HTMLElement).classList].includes("bg-info"), "the dot is the blue one")
-      assert.match(document.body.textContent ?? "", /New activity/, "the dot is said in words too")
+      assert.equal(
+        document.querySelector("[data-unread]"),
+        null,
+        "never opened here: no reference of when it was last read",
+      )
     },
   })
   await drawRow(conversation("read"), {
@@ -196,15 +195,30 @@ test("a session this device hasn't read wears the dot, and a read mark clears it
   await drawRow(conversation("older", { updatedAt: Date.now() }), {
     mark: Date.now() - 60_000,
     body: async () => {
-      assert.ok(document.querySelector("[data-unread]"), "activity landed since the mark")
+      const dot = document.querySelector("[data-unread]")
+      assert.ok(dot, "activity landed since the mark")
+      const circle = icon().circle
+      assert.equal(dot.parentElement, circle.parentElement, "the dot sits on the icon's own wrapper")
+      assert.ok([...(dot as HTMLElement).classList].includes("bg-info"), "the dot is the blue one")
+      assert.match(document.body.textContent ?? "", /New activity/, "the dot is said in words too")
     },
   })
 })
 
-test("a closed session with new activity is dotted too", async () => {
-  await drawRow(conversation("closed-new", { resolvedAt: 300 }), {
+test("a closed session this device never opened is not dotted, and one read before it closing is", async () => {
+  await drawRow(conversation("closed-never-opened", { resolvedAt: 300 }), {
     body: async () => {
-      assert.ok(document.querySelector("[data-unread]"), "Resolved still tells this device it is new")
+      assert.equal(
+        document.querySelector("[data-unread]"),
+        null,
+        "Resolved with no mark here: nothing to compare against",
+      )
+    },
+  })
+  await drawRow(conversation("closed-read", { resolvedAt: 300 }), {
+    mark: 250,
+    body: async () => {
+      assert.ok(document.querySelector("[data-unread]"), "Resolved after the mark, so it is new")
     },
   })
 })

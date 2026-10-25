@@ -184,10 +184,12 @@ export function lastActivityAt(session: SessionActivity): number {
 
 /**
  * Whether the Code row shows its unread dot: the session's last activity is newer than this
- * device's read mark — and a session this device has never opened has no mark, so it is unread.
+ * device's read mark. A session this device has never opened has no mark to measure against, so
+ * the dot stays off — it means "new since you last looked", and without a reference of when that
+ * was there is nothing to be newer than.
  */
 export function isUnread(session: SessionActivity, mark: number | undefined): boolean {
-  return lastActivityAt(session) > (mark ?? 0)
+  return mark != null && mark > 0 && lastActivityAt(session) > mark
 }
 
 /**

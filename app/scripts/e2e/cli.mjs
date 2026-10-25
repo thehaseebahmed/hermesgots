@@ -63,7 +63,7 @@ export const FLOWS = {
   "code-list": {
     script: "e2e/code-list.mjs",
     about:
-      "The Code list grouped by session state: four headed groups with counts and Closed collapsed, the sort menu kept on the device, one flat list under a search, and the unread dot at the icon's corner cleared by reading",
+      "The Code list grouped by session state: four headed groups with counts and Closed collapsed, the sort menu kept on the device, one flat list under a search, and the unread dot at the icon's corner — absent until this device has read the row, then cleared by reading it again",
   },
   "approval-missed": {
     script: "e2e/approval-missed.mjs",
