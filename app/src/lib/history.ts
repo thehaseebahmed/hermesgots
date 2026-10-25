@@ -24,7 +24,9 @@ import {
 import { splitAttachments } from "@/lib/attachment-text"
 import { appendThinking, carrySpans } from "@/lib/thinking"
 import { readLiveRuns } from "@/lib/waiting"
-import { failureReason, TODO_TOOLS } from "@/lib/tools"
+import { failureReason } from "@/lib/tools"
+import { actionOf, controlWords, DELEGATE_TOOL } from "@/lib/spawn"
+import { labelComparable, primaryArg, TODO_TOOLS } from "@/lib/tool-preview"
 import { isSubagentResult } from "@/lib/subagent-results.ts"
 import { isWakePrompt } from "@/lib/wake-prompt.ts"
 
@@ -37,30 +39,7 @@ const PAGE = 50
 /** Pages to skip past rows sent since the last load, before giving up on finding older ones. */
 const MAX_SKIPS = 10
 
-/** Hermes's main argument per tool (`_PRIMARY_ARGS` in agent/display.py), shown beside its name. */
-const PRIMARY_ARGS: Record<string, string> = {
-  terminal: "command",
-  execute_code: "code",
-  browser_exec: "code",
-  web_search: "query",
-  web_extract: "urls",
-  read_file: "path",
-  write_file: "path",
-  patch: "path",
-  search_files: "pattern",
-  browser_navigate: "url",
-  browser_click: "ref",
-  browser_type: "text",
-  image_generate: "prompt",
-  text_to_speech: "text",
-  vision_analyze: "question",
-  clarify: "question",
-  skill_view: "name",
-  skill_manage: "name",
-  skills_list: "category",
-  cronjob_manage: "action",
-  delegate_task: "goal",
-}
+/** Where Hermes names no primary argument: the first of these the call carried is its label. */
 const FALLBACK_ARGS = ["query", "text", "command", "path", "name", "prompt", "code", "goal"]
 const MAX_DETAIL = 4000
 
@@ -93,7 +72,14 @@ function argsLabel(name: string, args: unknown) {
       .filter(Boolean)
     if (asked.length) return asked[0]
   }
-  const key = PRIMARY_ARGS[name] ?? FALLBACK_ARGS.find((k) => k in record)
+  // A delegation's control call names no goal, and its arguments as JSON are not words. Hermes's
+  // preview gives it `list`, `steer <id>` or `stop <id>`, derived here the same way so the row reads
+  // while it streams exactly as it does after a reload (`_delegate_action_preview` in display.py).
+  if (name === DELEGATE_TOOL) {
+    const control = controlWords(record)
+    if (control) return control
+  }
+  const key = primaryArg(name) ?? FALLBACK_ARGS.find((k) => k in record)
   let value = key ? record[key] : undefined
   if (Array.isArray(value)) value = value[0]
   if (value !== undefined && value !== null && value !== "") return String(value).trim()
@@ -171,6 +157,9 @@ function toolCalls(row: SessionMessage) {
           id: call?.id ?? `${row.id}-${i}`,
           name,
           label: clip(label) || name,
+          // What the call's arguments said it did, stamped where they are in hand: the one spawn
+          // proof a render can read, and the word a control call's row is phrased by (ADR 0053).
+          action: actionOf(args),
           stats: writeStats(name, args),
         }
       })
@@ -353,6 +342,7 @@ export function toMessages(
         status: "running",
         startedAt: createdAt,
         contentOffset: reply.content.length,
+        ...(call.action ? { action: call.action } : {}),
         ...call.stats,
         ...(call.stats ? { created: true } : {}),
       }
@@ -432,23 +422,56 @@ function withTranscriptToolOffsets(local: Message, transcript: Message) {
 }
 
 /**
- * What streamed calls only learn from the transcript: their edits' size, and the whole result
- * where the stream sent a cut preview. Matched by tool and label, in order.
+ * What streamed calls only learn from the transcript: their edits' size, the whole result where the
+ * stream sent a cut preview, and the action their arguments named — the authority on what the call
+ * did, where the live stream could only read its preview.
+ *
+ * A call is matched to its transcript row in two passes, so no row can take a detail that belongs to
+ * another: the same tool and the same label first, then — only where both sides hold the same number
+ * of calls of that tool — the k-th row to the k-th call, which is the one pairing that is a placement
+ * rather than a guess. A call with no counterpart keeps what it has, so a fold can say less than the
+ * transcript and never something the transcript didn't say (ADR 0053).
  */
-function withTranscriptDetails(local: ToolEvent[], fromHermes: ToolEvent[]) {
-  const spare = [...fromHermes]
-  let changed = false
-  const tools = local.map((tool) => {
-    // A todo call's streamed label is Hermes's preview, worded unlike the transcript's.
-    const i = spare.findIndex(
-      (t) => t.tool === tool.tool && (t.label === tool.label || TODO_TOOLS.has(t.tool)),
+export function foldTranscriptDetails(local: ToolEvent[], transcript: ToolEvent[]) {
+  const matched = new Map<number, ToolEvent>()
+  const taken = new Set<number>()
+  for (const [index, tool] of local.entries()) {
+    if (!labelComparable(tool.tool)) continue
+    const at = transcript.findIndex(
+      (found, i) => !taken.has(i) && found.tool === tool.tool && found.label === tool.label,
     )
-    if (i < 0) return tool
-    const [found] = spare.splice(i, 1)
+    if (at < 0) continue
+    taken.add(at)
+    matched.set(index, transcript[at])
+  }
+  // A call whose label can't agree with the transcript's is paired by its place in the run — a todo
+  // call, whose preview is worded differently, and a call Hermes previews with nothing at all.
+  for (const name of new Set(local.map((tool) => tool.tool))) {
+    if (labelComparable(name)) continue
+    const mine = local.flatMap((tool, index) =>
+      tool.tool === name && !matched.has(index) ? [index] : [],
+    )
+    const theirs = transcript.flatMap((tool, index) =>
+      tool.tool === name && !taken.has(index) ? [index] : [],
+    )
+    // A truncated list of one side's calls can't place them: leaving the row as it stands says less
+    // about the call, where pairing it by ordinal would claim a detail from another call.
+    if (mine.length !== theirs.length) continue
+    mine.forEach((index, k) => {
+      taken.add(theirs[k])
+      matched.set(index, transcript[theirs[k]])
+    })
+  }
+  let changed = false
+  const tools = local.map((tool, index) => {
+    const found = matched.get(index)
+    if (!found) return tool
     const needsStats = tool.added === undefined
     // A question's result is written here when it's answered, whole.
     const needsResult = isPreview(tool) && tool.tool !== "clarify"
-    if (!needsStats && !needsResult) return tool
+    // The transcript read the arguments; a preview that read like a control call was a guess.
+    const needsAction = tool.action !== found.action
+    if (!needsStats && !needsResult && !needsAction) return tool
     const next = { ...tool }
     if (needsStats && found.added !== undefined)
       Object.assign(next, { added: found.added, removed: found.removed, created: found.created })
@@ -456,7 +479,12 @@ function withTranscriptDetails(local: ToolEvent[], fromHermes: ToolEvent[]) {
       next.result = found.result
       if (found.error) next.error = found.error
     }
-    if (next.added === tool.added && next.result === tool.result) return tool
+    if (needsAction) {
+      if (found.action === undefined) delete next.action
+      else next.action = found.action
+    }
+    if (next.added === tool.added && next.result === tool.result && next.action === tool.action)
+      return tool
     changed = true
     return next
   })
@@ -469,7 +497,7 @@ function withTranscriptDetails(local: ToolEvent[], fromHermes: ToolEvent[]) {
  */
 function withReplyDetails(local: Message, reply: Message | undefined) {
   if (!local.tools?.length || !reply?.tools?.length) return
-  const tools = withTranscriptDetails(local.tools, reply.tools)
+  const tools = foldTranscriptDetails(local.tools, reply.tools)
   return tools ? { ...local, tools } : undefined
 }
 

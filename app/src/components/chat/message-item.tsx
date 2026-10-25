@@ -22,7 +22,7 @@ import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Button } from "@/components/ui/button"
 import { Message as MessageRow, MessageContent } from "@/components/ui/message"
 import { Spinner } from "@/components/ui/spinner"
-import { DELEGATE_TOOL } from "@/lib/agents"
+import { spawnedAgent } from "@/lib/spawn"
 import { attachmentUrl } from "@/lib/attachment-url"
 import { downloadAttachment } from "@/lib/attachments"
 import { splitAttachments } from "@/lib/attachment-text"
@@ -231,7 +231,9 @@ function toParts(
     if (at > cursor) pushText(at)
     const last = parts.at(-1)
     if (tool.tool === "clarify") parts.push({ kind: "clarify", tool })
-    else if (tool.tool === DELEGATE_TOOL) parts.push({ kind: "agent", tool })
+    // A card is drawn only where the call set a subagent to work; a control call is a tool row like
+    // any other, which the same classifier decides (ADR 0053).
+    else if (spawnedAgent(tool)) parts.push({ kind: "agent", tool })
     else if (last?.kind === "tools") last.tools.push(tool)
     else parts.push({ kind: "tools", tools: [tool] })
   }

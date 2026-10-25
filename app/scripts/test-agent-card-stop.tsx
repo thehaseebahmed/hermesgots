@@ -11,6 +11,7 @@ import { act } from "react"
 import { createRoot } from "react-dom/client"
 
 import { AgentsContext } from "@/lib/agents"
+import { DELEGATE_TOOL } from "@/lib/spawn"
 import { AgentCards } from "@/components/chat/agent-card"
 import type { ToolEvent } from "@/lib/db"
 import type { HermesConfig } from "@/lib/hermes"
@@ -37,7 +38,7 @@ const agent = (status: "running" | "done" | "stopped") => ({
 
 const tool = (status: "running" | "completed"): ToolEvent => ({
   toolCallId: "call-1",
-  tool: "delegate_task",
+  tool: DELEGATE_TOOL,
   label: GOAL,
   status,
   startedAt: 1_000,
