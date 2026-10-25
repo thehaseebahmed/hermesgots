@@ -1,11 +1,12 @@
 /**
- * A bot's settings as a multi-step screen (ADR 0055): three cards with no headings and no captions —
- * General alone, the Gots plugin's pages, then the bot's Hermes's — the rows in the order they are
- * drawn and the copy each carries, an icon a row and no chevron, the rows a host's features leave out
- * and the addresses that land on General instead, the segments that named pages before the list
- * landing on the pages that took their place, the out-of-date banner leading the list, a row pushing
- * its page on a phone and swapping the pane beside the list on a laptop, the header's trash named for
- * the bot it deletes, and each page still holding what its tab held — values that open their edits.
+ * A bot's settings as a multi-step screen (ADR 0055): two cards with no headings and no captions —
+ * General alone, then every other page together — the rows in the order they are drawn and the copy
+ * each carries, an icon a row and no chevron, the rows a host's features leave out and the addresses
+ * that land on General instead, the segments that named pages before the list landing on the pages
+ * that took their place, a fourth segment that names nothing landing on the page it was asked under,
+ * the out-of-date banner leading the list, a row pushing its page on a phone and swapping the pane
+ * beside the list on a laptop, the header's trash named for the bot it deletes, and each page still
+ * holding what its tab held — values that open their edits.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -58,9 +59,9 @@ const headings = () =>
   findAll(
     "[data-bot-settings-list] h1, [data-bot-settings-list] h2, [data-bot-settings-list] h3",
   ).map((heading) => heading.textContent)
-/** The cards the list draws, each with the pages it holds — General's alone, then Gots's, Hermes's. */
+/** The cards the list draws, each with the pages it holds: General's alone, then every other page's. */
 const cards = () =>
-  findAll("[data-bot-settings-list] > div").map((card) =>
+  findAll("[data-bot-settings-list] [data-settings-group]").map((card) =>
     [...card.querySelectorAll("[data-bot-page]")].map((one) => one.getAttribute("data-bot-page")),
   )
 /** The icons a row wears: its page's own, and no chevron beside it. */
@@ -161,6 +162,23 @@ test("an address naming no page of this bot's lands on its list", async () => {
   await mount(settings("/settings/bots/bot-1/nonsense"), async () => {
     assert.equal(path(), "/settings/bots/bot-1", "the bot's own list")
     assert.ok(find("[data-bot-settings-list]"), "and the list is what is drawn")
+  })
+})
+
+test("a fourth segment that names no edit of its page lands on the page", async () => {
+  await seed("unknown-edit", ALL)
+  await mount(settings("/settings/bots/bot-1/general/nonsense"), async () => {
+    assert.equal(path(), "/settings/bots/bot-1/general", "the page it was asked under")
+    assert.deepEqual(titles(), ["General"], "which is drawn, in the entry the address had")
+    assert.doesNotMatch(text(), /Cannot GET|no edit/, "and nothing says the address was wrong")
+  })
+})
+
+test("a fourth segment under a page with no sub-screens lands on the page too", async () => {
+  await seed("sub-under-none", ALL)
+  await mount(settings("/settings/bots/bot-1/coding/nonsense"), async () => {
+    assert.equal(path(), "/settings/bots/bot-1/coding", "Coding, the page the segment followed")
+    assert.deepEqual(titles(), ["Coding"], "drawn without a sub-screen it doesn't have")
   })
 })
 

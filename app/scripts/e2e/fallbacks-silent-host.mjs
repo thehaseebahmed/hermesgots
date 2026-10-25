@@ -4,7 +4,6 @@ import { app, assert, flow, mock, pass } from "./lib.mjs"
 
 await flow("fallbacks-silent-host", async ({ page, profileId, until, shot }) => {
   const add = page.getByRole("button", { name: "Add fallback" })
-  const field = page.locator("[data-fallbacks]")
   const row1 = page.locator('[data-fallback="1"]')
   // The host's own record, so an answer it gave can be told from a pick the app made.
   const hosted = async () => {
@@ -23,7 +22,7 @@ await flow("fallbacks-silent-host", async ({ page, profileId, until, shot }) => 
   await page.goto(`${app}/settings/bots/${profileId}/models`)
   await page.locator('[data-setting="fallbacks"]').waitFor({ timeout: 15_000 })
   await page.locator('[data-setting="fallbacks"]').click()
-  await page.waitForURL((url) => url.pathname === `/settings/bots/${profileId}/chat/fallbacks`, {
+  await page.waitForURL((url) => url.pathname === `/settings/bots/${profileId}/models/fallbacks`, {
     timeout: 15_000,
   })
   await add.waitFor({ timeout: 15_000 })

@@ -41,7 +41,7 @@ import { AccountSettings } from "@/components/account-settings"
 import { CommunitySettings } from "@/components/community-settings"
 import { BotSettingsList, BotSettingsPage } from "@/components/bot-settings"
 import type { BotSub } from "@/lib/bot-subs"
-import { botPageOf, botTabOf, botTabPath, type BotPage } from "@/lib/bot-tabs"
+import { botPageOf, botPath, botTabOf, botTabPath, type BotPage } from "@/lib/bot-tabs"
 import { botSubOf } from "@/lib/bot-subs"
 import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
@@ -119,12 +119,6 @@ const SECTIONS: Record<string, { title: string; render: () => ReactNode }> = {
   developer: { title: "Developer", render: () => <DeveloperSettings /> },
 }
 
-/** The title of an open section screen; a bot's screen is named after the bot. */
-function sectionTitle(section: string, botName?: string) {
-  const page = SECTIONS[section]
-  return page ? page.title : (botName ?? "Bot")
-}
-
 /** Which section the menu shows as open, and whether picking one swaps it in place. */
 const MenuContext = createContext<{ active?: string; replace: boolean }>({ replace: false })
 
@@ -156,7 +150,7 @@ export function SettingsPage() {
     const back = botSub
       ? botTabPath(botId!, botTab!)
       : botId && botTab
-        ? `/settings/bots/${botId}`
+        ? botPath(botId)
         : "/settings"
     return setBackGuard(() => {
       up(back)
@@ -168,15 +162,13 @@ export function SettingsPage() {
     return <Navigate to="/settings" replace />
   // The bot pages: a hand-typed segment naming one this screen doesn't have lands on the bot's own
   // list, and one asked for on anything but a bot lands on the section without it.
-  if (tab && !botTab)
-    return <Navigate to={botId ? `/settings/bots/${botId}` : "/settings"} replace />
+  if (tab && !botTab) return <Navigate to={botId ? botPath(botId) : "/settings"} replace />
   if (tab && (section !== "bots" || !botId)) return <Navigate to="/settings" replace />
   // A segment that named a page before the list: the page that took its place, in its entry.
   if (botId && botTab && tab !== botTab) return <Navigate to={botTabPath(botId, botTab)} replace />
   // A fourth segment that names nothing on this page is the page itself, in its own entry.
   if (sub && botTab && !botSub) return <Navigate to={botTabPath(botId!, botTab)} replace />
-  if (sub && !botTab)
-    return <Navigate to={botId ? `/settings/bots/${botId}` : "/settings"} replace />
+  if (sub && !botTab) return <Navigate to={botId ? botPath(botId) : "/settings"} replace />
   // A botId that isn't one of this device's bots is the menu, and nothing of a bot's screen.
   if (section === "bots" && botId && !bot)
     return profiles === undefined ? null : <Navigate to="/settings" replace />
@@ -215,15 +207,17 @@ export function SettingsPage() {
           />
         </Screen>
         <Screen
-          key={`${botTab ?? "general"}-${botSub?.id ?? ""}`}
-          title={botSub?.title ?? page?.title ?? botPageOf("general").title}
+          key={botTab ?? "general"}
+          // The pane is titled by the sub only where the sub is the pane: an edit rides over the page
+          // as a card and names itself there, so the page's own title still heads the pane.
+          title={
+            (botSub?.kind === "detail" ? botSub.title : undefined) ??
+            page?.title ??
+            botPageOf("general").title
+          }
           leading={
             botSub && botTab ? (
-              <BackButton
-                onClick={() =>
-                  navigate(botTabPath(bot.id, botTab), { replace: true, state: { quiet: true } })
-                }
-              />
+              <BackButton onClick={() => up(botTabPath(bot.id, botTab))} />
             ) : undefined
           }
           className="duration-200 ease-out motion-safe:animate-in motion-safe:fade-in-0"
@@ -244,7 +238,7 @@ export function SettingsPage() {
       </MenuContext.Provider>
       <Screen
         key={open}
-        title={sectionTitle(open, bot?.name)}
+        title={SECTIONS[open].title}
         className="duration-200 ease-out motion-safe:animate-in motion-safe:fade-in-0"
       >
         {SECTIONS[open].render()}
@@ -274,7 +268,7 @@ function BotListScreen({
 /** One page of a bot's settings, or one of its sub-screens, under the list that opened it. */
 function BotPageScreen({ profile, page, sub }: { profile: Profile; page: BotPage; sub?: BotSub }) {
   const { up } = useNav()
-  const back = sub ? botTabPath(profile.id, page.segment) : `/settings/bots/${profile.id}`
+  const back = sub ? botTabPath(profile.id, page.segment) : botPath(profile.id)
   return (
     <Screen title={sub?.title ?? page.title} leading={<BackButton onClick={() => up(back)} />}>
       <BotSettingsPage profile={profile} tab={page.segment} sub={sub} />

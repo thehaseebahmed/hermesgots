@@ -16,12 +16,13 @@ import { botTabOf } from "@/lib/bot-tabs"
 import { db } from "@/lib/db"
 import {
   Path,
+  absent,
   botProfile,
   click,
-  absent,
   find,
   findAll,
   json,
+  laptop,
   mount,
   path,
   seedSettings,
@@ -64,12 +65,15 @@ function host({
   version = "0.81.0" as string | null,
   models = ["own-model", "cheap-model"],
   health,
+  away = false,
 }: {
   features?: string[]
   version?: string | null
   models?: string[]
   /** What the health check refuses with, where the test is of a host that isn't well. */
   health?: string
+  /** A host that hasn't answered at all: no feature list, so no page has a gate to read. */
+  away?: boolean
 } = {}) {
   const calls: Sent[] = []
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -78,7 +82,9 @@ function host({
     const body = init?.body ? JSON.parse(String(init.body)) : null
     calls.push({ method, path: url.pathname, body })
     if (url.pathname.endsWith("/plugins/memento/info"))
-      return json({ name: "memento", version, features })
+      return away
+        ? json({ error: { message: "Not home." } }, 503)
+        : json({ name: "memento", version, features })
     if (url.pathname.endsWith("/plugins/memento/delegation"))
       return json({ delegation: body ? body.delegation : null })
     if (url.pathname.endsWith("/api/model/options"))
@@ -121,7 +127,7 @@ async function seed(
   return server.calls
 }
 
-/** The page's own subtree, and what a user reads on it with its spacing flattened. */
+/** What a user reads on an element, with its spacing flattened. */
 const page = () => find("[data-general-page]")
 const words = (element: Element | null) => (element?.textContent ?? "").replace(/\s+/g, " ").trim()
 /** Where a string sits on the page, for asking what comes before what. */
@@ -151,10 +157,9 @@ const button = (label: string) =>
   findAll("[data-general-page] button").find((one) => words(one) === label) ?? null
 const testButton = () => find('[aria-label="Test connection"]')
 
-/** The bottom sheet a pick opens on a phone: its radio list, and the choices it offers. */
-const sheet = (label: string) => find(`[role="radiogroup"][aria-label="${label}"]`)
-const choices = (label: string) =>
-  findAll(`[role="radiogroup"][aria-label="${label}"] [role="radio"]`)
+/** The bottom sheet a pick opens on a phone: its list of buttons, and the choices it offers. */
+const sheet = (label: string) => find(`[data-pick-list="${label}"]`)
+const choices = (label: string) => findAll(`[data-pick-list="${label}"] > button`)
 const choice = (label: string, name: string) =>
   choices(label).find((one) => words(one) === name) ?? null
 /** A model a model pick offers, in the sheet it opened. */
@@ -164,7 +169,7 @@ const modelOption = (name: string) =>
 async function openPick(id: string) {
   await click(row(id))
   await until(
-    async () => Boolean(find('[role="radiogroup"]')) || Boolean(find("[aria-pressed]")),
+    async () => Boolean(find("[data-pick-list]")) || Boolean(find("[aria-pressed]")),
     "the pick's sheet",
   )
 }
@@ -443,21 +448,23 @@ test("Test connection answers Connected, with the plugin version the host runs",
   await mount(general(), async () => {
     await click(testButton())
     await until(async () => words(page()).includes("Connected"), "the test's answer")
-    assert.match(
-      words(row("test")),
-      /Connected · Plugin 0\.81\.0/,
-      "the row's value says it connected and names the plugin the host runs",
+    const answer = find('[data-setting="test"] [role="status"]')
+    assert.equal(
+      words(answer),
+      "Connected · Plugin 0.81.0",
+      "the row's answer line says it connected and names the plugin the host runs",
     )
-    assert.equal(find('[data-setting="test"] [role="alert"]'), null, "and nothing is raised")
+    assert.match(answer?.className ?? "", /text-primary/, "in the accent colour, as a value is")
+    absent('[data-setting="test"] [role="alert"]', "and nothing is raised")
   })
 
   await seed("general-test-bare", {}, FEATURES, { version: null })
   await mount(general(), async () => {
     await click(testButton())
     await until(async () => words(page()).includes("Connected"), "the test's answer")
-    assert.match(
-      words(row("test")),
-      /Connected · No plugin/,
+    assert.equal(
+      words(find('[data-setting="test"] [role="status"]')),
+      "Connected · No plugin",
       "a host without the plugin says so in the same place",
     )
   })
@@ -468,12 +475,74 @@ test("a test the host refuses shows its own sentence in the row's alert", async 
   await mount(general(), async () => {
     await click(testButton())
     await until(async () => Boolean(find('[role="alert"]')), "the host's refusal")
-    assert.equal(words(find('[role="alert"]')), "Hermes is restarting.", "in the host's own words")
+    const alert = find('[role="alert"]')
+    assert.equal(words(alert), "Hermes is restarting.", "in the host's own words")
+    assert.match(alert?.className ?? "", /text-destructive/, "in red, as a refusal is")
     assert.equal(
       words(row("test")).match(/Hermes is restarting\./g)?.length ?? 0,
       1,
       "the row's value carries the sentence, once",
     )
     assert.doesNotMatch(words(row("test")), /Connected/, "and nothing claims it connected")
+  })
+})
+
+test(
+  "a test's answer belongs to the connection it tested, and reads idle once that changes",
+  laptop(async () => {
+    await seed("general-test-stale")
+    await mount(general(), async () => {
+      await click(testButton())
+      await until(async () => words(page()).includes("Connected"), "the test's answer")
+      // The answer's own writes land after it: the page is read again, and its rows come back.
+      await until(async () => Boolean(row("base-url")), "the page's rows")
+
+      // The edit rides over the page at this width, so the page that holds the answer stays mounted.
+      await click(row("base-url"))
+      const field = find("#edit-api-base-url") as HTMLInputElement | null
+      assert.ok(field, "the address's edit")
+      await type(field, "http://elsewhere.test/v1")
+      // The card is a dialog, drawn in a portal: its Save is not inside the page's own subtree.
+      await click(findAll("button").find((one) => words(one) === "Save") ?? null)
+      await until(
+        async () => (await db.profiles.get("bot-1"))?.baseUrl === "http://elsewhere.test/v1",
+        "the new address to land",
+      )
+
+      assert.doesNotMatch(
+        words(row("test")),
+        /Connected/,
+        "the row claims nothing about a server it never reached",
+      )
+      absent('[data-setting="test"] [role="status"]', "and no answer is left standing over it")
+    })
+  }),
+)
+
+test("an address into a page this bot doesn't have draws no edit of it, and writes no key", async () => {
+  const calls = await seed("general-foreign-sub", {}, FEATURES, { away: true })
+  const before = await db.profiles.get("bot-1")
+  await mount(general("/settings/bots/bot-1/speech-to-text/vocabulary"), async () => {
+    assert.equal(
+      path(),
+      "/settings/bots/bot-1/speech-to-text/vocabulary",
+      "the address it was asked for stands",
+    )
+    assert.match(words(page()), /Test connection/, "General is what is drawn")
+    absent("#edit-vocabulary", "and the page it names is not, so its edit has no field")
+    absent(
+      '[data-general-page] input:not([type="checkbox"])',
+      "nothing on the screen is typed into",
+    )
+    assert.equal(
+      (await db.profiles.get("bot-1"))?.apiKey,
+      before?.apiKey,
+      "the server key is untouched",
+    )
+    assert.deepEqual(
+      calls.filter((one) => one.method !== "GET"),
+      [],
+      "and nothing was sent anywhere",
+    )
   })
 })

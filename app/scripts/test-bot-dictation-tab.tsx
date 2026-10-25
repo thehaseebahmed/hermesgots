@@ -204,9 +204,11 @@ const chevrons = () =>
     (svg.getAttribute("class") ?? "").includes("chevron"),
   )
 
-/** The sheet the Speech model row opens, and a row of the host's models the cleanup pick draws. */
-const speechSheet = () => find('[role="radiogroup"][aria-label="Speech models"]')
-const speechOptions = () => findAll('[aria-label="Speech models"] [role="radio"]')
+/** The sheet the Speech model row opens, and the options it lists. */
+const speechSheet = () => find('[data-pick-list="Speech models"]')
+const speechOptions = () => findAll('[data-pick-list="Speech models"] > button')
+/** The option wearing the tick: the model the host has in play. */
+const speechInPlay = () => speechOptions().find((option) => option.querySelector("svg")) ?? null
 const speechOption = (name: string) =>
   speechOptions().find((option) => (option.textContent ?? "").trim().startsWith(name)) ?? null
 const openSpeech = async () => {
@@ -260,9 +262,9 @@ test("a host that can hear speech has a Speech-to-text page, its Vocabulary row 
 test("a host that can't hear speech has no Speech-to-text page, and its address lands on General", async () => {
   await seed("no-dictation", ["speech_model"])
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
-    assert.equal(speechRow(), null, "no Speech-to-text row")
-    assert.equal(speechPage(), null, "no Speech-to-text page")
-    assert.equal(row("vocabulary"), null, "and no setting to read")
+    assert.ok(!speechRow(), "no Speech-to-text row")
+    assert.ok(!speechPage(), "no Speech-to-text page")
+    assert.ok(!row("vocabulary"), "and no setting to read")
     assert.equal(here(), "/settings/bots/bot-1/general", "the address is General's")
     assert.match(text(), /Test connection/, "General is what is drawn")
   })
@@ -319,7 +321,7 @@ test("Vocabulary reads Not set where the bot holds none, and its row drills into
       "the row drills into the words themselves",
     )
     assert.ok(vocabulary(), "and the words are what is drawn")
-    assert.equal(speechPage(), null, "in place of the page")
+    assert.ok(!speechPage(), "in place of the page")
   })
 })
 
@@ -341,7 +343,7 @@ test("the Vocabulary detail says No words yet. where the bot holds none", async 
   await seed("vocabulary-empty", ["dictation"])
   await mount(editor("/settings/bots/bot-1/speech-to-text/vocabulary"), async () => {
     assert.match(vocabulary()?.textContent ?? "", /No words yet\./, "the empty list says so")
-    assert.equal(removeButton("Gots"), null, "with no word to remove")
+    assert.ok(!removeButton("Gots"), "with no word to remove")
     assert.equal(detailButton("Add")?.hasAttribute("disabled"), true, "and nothing to add yet")
   })
 })
@@ -371,7 +373,7 @@ test("a word the list already holds is not added again", async () => {
     await type(addField(), "gots")
     await add()
     assert.equal((await db.profiles.get("bot-1"))?.vocabulary?.length, 1, "the list keeps one")
-    assert.equal(removeButton("gots"), null, "the spelling it already has stands")
+    assert.ok(!removeButton("gots"), "the spelling it already has stands")
     assert.ok(removeButton("Gots"), "and the word it holds is untouched")
   })
 })
@@ -380,7 +382,7 @@ test("a word removed from the screen leaves the record", async () => {
   await seed("removing", ["dictation"], { vocabulary: ["Gots", "Haseeb"] })
   await mount(editor("/settings/bots/bot-1/speech-to-text/vocabulary"), async () => {
     await click(removeButton("Haseeb"))
-    assert.equal(removeButton("Haseeb"), null, "the word is gone from the screen")
+    assert.ok(!removeButton("Haseeb"), "the word is gone from the screen")
     assert.deepEqual((await db.profiles.get("bot-1"))?.vocabulary, ["Gots"])
     assert.ok(removeButton("Gots"), "the words beside it stay")
   })
@@ -392,7 +394,7 @@ test("the Vocabulary detail's Done takes the page back over the list", async () 
     await click(detailButton("Done"))
     assert.equal(here(), "/settings/bots/bot-1/speech-to-text", "the page's own address")
     assert.ok(speechPage(), "and the page is drawn again")
-    assert.equal(vocabulary(), null, "with the list gone")
+    assert.ok(!vocabulary(), "with the list gone")
   })
 })
 
@@ -401,7 +403,7 @@ test("the Speech model row names the model in play, and opens the host's models 
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
     assert.equal(valueOf(row("speech-model")), "small", "the row names the model in play")
     assert.equal(findAll("#speech-model").length, 0, "no field of its own: the row is the control")
-    assert.equal(findAll('[role="radiogroup"]').length, 0, "with nothing open yet")
+    assert.equal(findAll("[data-pick-list]").length, 0, "with nothing open yet")
     await openSpeech()
     assert.ok(speechSheet(), "the row opens a sheet holding the host's models")
     assert.equal(
@@ -416,11 +418,11 @@ test("the Speech model row names the model in play, and opens the host's models 
     )
     assert.equal(speechOptions().length, 3, "one option for each model on the host")
     assert.equal(
-      speechOption("small")?.getAttribute("aria-checked"),
-      "true",
-      "the one in play is the one marked",
+      speechInPlay()?.textContent?.startsWith("small"),
+      true,
+      "the one in play is the one ticked",
     )
-    assert.equal(speechOption("base")?.getAttribute("aria-checked"), "false")
+    assert.equal(speechInPlay() === speechOption("base"), false, "and no other row wears it")
     assert.match(speechOption("base")?.textContent ?? "", /145 MB/, "the download is named")
     assert.match(
       speechOption("base")?.textContent ?? "",
@@ -456,7 +458,7 @@ test("a model picked in the sheet is written to the host, and the row says which
     assert.equal(valueOf(row("speech-model")), "base", "the row names the new model")
     assert.equal(valueColour(row("speech-model")), "accent", "in the accent colour")
     await until(async () => speechOptions().length === 0, "the sheet to close behind the pick")
-    assert.equal(findAll('[role="radiogroup"]').length, 0, "and nothing left open")
+    assert.equal(findAll("[data-pick-list]").length, 0, "and nothing left open")
   })
 })
 
@@ -475,7 +477,7 @@ test("a host that lists no models leaves the Speech model row with nothing to op
     )
     assert.equal(row("speech-model")?.hasAttribute("disabled"), true, "and the row can't be tapped")
     await click(row("speech-model"))
-    assert.equal(findAll('[role="radiogroup"]').length, 0, "so no sheet of nothing opens")
+    assert.equal(findAll("[data-pick-list]").length, 0, "so no sheet of nothing opens")
   })
 })
 
@@ -494,7 +496,11 @@ test("a model the host refuses leaves the old one in place and shows the host's 
     await click(speechOption("base"))
     assert.deepEqual(calls[0]?.body, { model: "base" }, "the pick was written")
     assert.equal(valueOf(row("speech-model")), "small", "the old model stays in place")
-    assert.match(find('[role="alert"]')?.textContent ?? "", /read-only/, "the host's own sentence")
+    assert.equal(
+      find('[role="alert"]')?.textContent?.trim(),
+      "Couldn't write config.yaml: the file is read-only.",
+      "the host's own sentence, in full",
+    )
     assert.ok(
       speechPage()?.firstElementChild?.querySelector('[role="alert"]'),
       "and it leads the page, over both captions it reports for",
@@ -656,6 +662,6 @@ test("a host that withholds the model-override permission says so instead of off
     )
     assert.notEqual(refused?.tagName, "BUTTON", "with no pick behind it: a tap the host ignores")
     await click(refused)
-    assert.equal(findAll('[role="radiogroup"]').length, 0, "so no sheet opens")
+    assert.equal(findAll("[data-pick-list]").length, 0, "so no sheet opens")
   })
 })

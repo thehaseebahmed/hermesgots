@@ -17,8 +17,21 @@ import {
   type LucideIcon,
 } from "lucide-react"
 
+import { toast } from "sonner"
+
+import { ModelPicker } from "@/components/chat/model-picker"
 import { ExperimentalBadge } from "@/components/experimental-badge"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
@@ -28,7 +41,9 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { Switch } from "@/components/ui/switch"
+import type { ModelChoice, Profile } from "@/lib/db"
 import { useLarge } from "@/lib/media"
+import { useModelInfo } from "@/lib/model-info"
 import { cn } from "@/lib/utils"
 
 /**
@@ -105,22 +120,12 @@ export function Group({ children }: { children: ReactNode }) {
   )
 }
 
-/**
- * A settings group's heading over the line saying what it holds; its Group cards follow as siblings.
- */
-export function GroupHeading({ title, subtitle }: { title: ReactNode; subtitle?: ReactNode }) {
-  return (
-    <div className="flex flex-col px-5">
-      <h2 className="text-base font-semibold">{title}</h2>
-      {subtitle && <p className="text-sm text-muted-foreground">{subtitle}</p>}
-    </div>
-  )
-}
-
 export const rowClass =
   "flex min-h-14 w-full items-center gap-4 bg-card px-5 py-3 text-left text-card-foreground"
 /** `rowClass` for a row that opens something. */
 export const linkRowClass = `${rowClass} transition-colors hover:bg-muted`
+/** The row that heads the group it controls: the card's own fill, taller than the rows beneath it. */
+export const headerRowClass = `${rowClass} bg-muted py-4`
 
 /** A row's title over its muted second line. */
 export function RowText({ title, subtitle }: { title: ReactNode; subtitle?: ReactNode }) {
@@ -204,9 +209,8 @@ export function SwitchRow({
     <label
       htmlFor={id}
       className={cn(
-        rowClass,
+        variant === "header" ? headerRowClass : rowClass,
         "cursor-pointer",
-        variant === "header" && "bg-muted py-4",
         variant === "nested" && "pl-9",
       )}
     >
@@ -292,7 +296,6 @@ export function EditCard({
   )
 }
 
-/** What a row says where the setting holds nothing. */
 export const NOT_SET = "Not set"
 
 /**
@@ -307,32 +310,68 @@ export function ValueRow({
   onClick,
   disabled,
   busy,
+  trailing,
+  children,
   ...rest
 }: {
   title: string
   /** What the setting is for: kept only where the row drills in or the purpose isn't obvious. */
   purpose?: string
+  /** The value the setting holds; left off where the row holds something other than a value. */
   value?: string | null
   onClick?: () => void
   disabled?: boolean
-  /** While a pick is on its way to the host: the row says so rather than reading as saved. */
+  /** While a pick is on its way to the host: the row wears `aria-busy` and takes no taps. */
   busy?: boolean
+  /** A control of the row's own, after its value: a bot's avatar, or the button that runs it. */
+  trailing?: ReactNode
+  /** A line of the row's own under its value: the answer a row reports rather than holds. */
+  children?: ReactNode
 } & Record<`data-${string}`, string | undefined>) {
   const holds = Boolean(value && String(value).trim())
   const body = (
     <span className="flex min-w-0 flex-1 flex-col gap-0.5 py-0.5">
       <span className="truncate text-base">{title}</span>
       {purpose && <span className="line-clamp-2 text-sm text-muted-foreground">{purpose}</span>}
-      <span className={cn("truncate text-sm", holds ? "text-primary" : "text-muted-foreground")}>
-        {holds ? value : NOT_SET}
-      </span>
+      {value != null && (
+        <span className={cn("truncate text-sm", holds ? "text-primary" : "text-muted-foreground")}>
+          {holds ? value : NOT_SET}
+        </span>
+      )}
+      {children}
     </span>
   )
   const state = { "aria-busy": busy || undefined, ...rest }
+  // A row with a control of its own can't be one button: the tap column and the control sit side by
+  // side, as a split switch row's do, so the control's own tap never reaches the row behind it.
+  if (onClick && trailing)
+    return (
+      <div className={cn(rowClass, "gap-0 p-0", disabled && "opacity-60")}>
+        <button
+          type="button"
+          onClick={onClick}
+          disabled={disabled}
+          className="flex min-h-14 min-w-0 flex-1 items-center gap-4 px-5 py-3 text-left transition-colors hover:bg-muted disabled:cursor-default"
+          {...state}
+        >
+          {body}
+        </button>
+        {trailing}
+      </div>
+    )
   if (!onClick)
     return (
-      <div className={cn(rowClass, "items-start")} {...state}>
+      <div
+        className={cn(
+          rowClass,
+          trailing ? "items-center" : "items-start",
+          disabled && "opacity-60",
+        )}
+        aria-disabled={disabled || undefined}
+        {...state}
+      >
         {body}
+        {trailing}
       </div>
     )
   return (
@@ -385,7 +424,7 @@ export function EditForm({
         <label htmlFor={id} className="text-sm font-medium">
           {label}
         </label>
-        <InputGroup>
+        <InputGroup className="h-11">
           <InputGroupInput
             id={id}
             autoComplete="off"
@@ -401,7 +440,8 @@ export function EditForm({
           {kind === "secret" && (
             <InputGroupAddon align="inline-end">
               <InputGroupButton
-                size="icon-xs"
+                size="icon-sm"
+                className="size-11"
                 aria-label={shown ? "Hide key" : "Show key"}
                 onClick={() => setShown((open) => !open)}
               >
@@ -423,6 +463,98 @@ export function EditForm({
   )
 }
 
+/**
+ * One model pick, wherever a setting offers one: its surface, the sentence a host that answered no
+ * models leaves, and the close every pick makes. `onPick`'s refusal is said once, over the page.
+ */
+export function ModelPick({
+  open,
+  title,
+  profile,
+  choice,
+  fallback,
+  onPick,
+  onClose,
+}: {
+  open: boolean
+  title: string
+  profile: Profile
+  /** The model the pick marks as in force. */
+  choice?: ModelChoice
+  /** The row that clears the choice: its label and the model it runs. */
+  fallback: { label: string; model?: string }
+  onPick: (choice: ModelChoice | undefined) => void | Promise<void>
+  onClose: () => void
+}) {
+  const info = useModelInfo(profile)
+  const providers = info?.providers ?? []
+  return (
+    <PickSurface open={open} onOpenChange={(next) => !next && onClose()} title={title}>
+      {providers.length ? (
+        <ModelPicker
+          header={false}
+          providers={providers}
+          fallback={fallback}
+          recent={profile.recentModels}
+          choice={choice}
+          onChoose={(next) => {
+            void Promise.resolve(onPick(next)).catch((error: unknown) => {
+              toast.error(error instanceof Error ? error.message : String(error))
+            })
+            onClose()
+          }}
+        />
+      ) : (
+        <p className="px-1 py-2 text-sm text-muted-foreground">Couldn't read this bot's models.</p>
+      )}
+    </PickSurface>
+  )
+}
+
+/**
+ * A destructive confirmation: the question, what it does, and a Cancel that writes nothing. `busy`
+ * holds the dialog open on the write, so a refused one can be read before it is dismissed by hand.
+ */
+export function ConfirmDestructive({
+  open,
+  title,
+  description,
+  confirmLabel,
+  busy,
+  onOpenChange,
+  onConfirm,
+}: {
+  open: boolean
+  title: string
+  description: ReactNode
+  confirmLabel: string
+  busy?: boolean
+  onOpenChange: (open: boolean) => void
+  onConfirm: () => void
+}) {
+  return (
+    <AlertDialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && !busy) onOpenChange(false)
+      }}
+    >
+      <AlertDialogContent size="sm">
+        <AlertDialogHeader>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
+          <AlertDialogDescription>{description}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" disabled={busy} onClick={onConfirm}>
+            {confirmLabel}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
 /** One thing a list can pick: what it is called, and the muted line saying what it is. */
 export type PickOption = {
   id: string
@@ -433,8 +565,8 @@ export type PickOption = {
 }
 
 /**
- * The list a pick offers: searchable where there is much to search, one radio row per option, and
- * the chosen one marked. It is the same list whether it is pushed as a screen or shown in a card.
+ * The list a pick offers: searchable where there is much to search, a row per option with the chosen
+ * one ticked. It is the same list whether it is pushed as a screen or shown in a card.
  */
 export function PickList({
   label,
@@ -471,15 +603,13 @@ export function PickList({
           />
         </InputGroup>
       )}
-      <div role="radiogroup" aria-label={label} className="flex min-h-0 flex-col overflow-y-auto">
+      <div data-pick-list={label} className="flex min-h-0 flex-col overflow-y-auto">
         {shown.map((option) => {
           const chosen = option.id === selected
           return (
             <button
               key={option.id}
               type="button"
-              role="radio"
-              aria-checked={chosen}
               onClick={() => onPick(option.id)}
               className={cn(
                 "flex min-h-14 w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",

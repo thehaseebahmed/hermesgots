@@ -3,8 +3,14 @@ import { PlusIcon, XIcon } from "lucide-react"
 import { useNavigate } from "react-router"
 
 import { Banner } from "@/components/banner"
-import { ModelPicker } from "@/components/chat/model-picker"
-import { Caption, Group, PickList, PickSurface, ValueRow } from "@/components/settings-chrome"
+import {
+  Caption,
+  Group,
+  ModelPick,
+  PickList,
+  PickSurface,
+  ValueRow,
+} from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { botSubPath, type BotSub } from "@/lib/bot-subs"
@@ -12,14 +18,7 @@ import { botTabPath } from "@/lib/bot-tabs"
 import { updateProfile, type Profile } from "@/lib/db"
 import { useSpeech } from "@/lib/host-speech"
 import { botModel, fullModel, useModelInfo } from "@/lib/model-info"
-import {
-  marked,
-  modelSize,
-  modelSpeed,
-  type SpeechModel,
-  type SpeechPick,
-  type SpeechSettings,
-} from "@/lib/speech"
+import { marked, modelSize, modelSpeed, type SpeechModel, type SpeechSettings } from "@/lib/speech"
 import { cn } from "@/lib/utils"
 import { MAX_WORD, addWord, cleanWord, readVocabulary, removeWord } from "@/lib/vocabulary"
 
@@ -34,13 +33,13 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
   const settings = speech.supported ? speech.settings : undefined
   const navigate = useNavigate()
   const words = readVocabulary(profile.vocabulary)
+  const info = useModelInfo(profile)
+  const own = botModel(profile, info)
   const [pick, setPick] = useState<"speech" | "cleanup">()
 
   // A detail takes the page's place at either width: below 1024px the route pushed it, and from
   // 1024px it is the pane the page would have drawn in.
-  if (sub?.kind === "detail" && sub.id === "vocabulary")
-    return <VocabularyPage profile={profile} words={words} />
-  if (sub) return null
+  if (sub) return <VocabularyPage profile={profile} words={words} />
 
   return (
     <div className="flex flex-col gap-4" data-bot-dictation>
@@ -109,19 +108,15 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
       )}
 
       {settings && (
-        <PickSurface
+        <ModelPick
           open={pick === "cleanup"}
-          onOpenChange={(open) => !open && setPick(undefined)}
           title="Cleanup model"
-        >
-          <CleanupPicker
-            profile={profile}
-            settings={settings}
-            saving={speech.saving}
-            onChoose={speech.chooseCleanup}
-            onDone={() => setPick(undefined)}
-          />
-        </PickSurface>
+          profile={profile}
+          choice={settings.cleanup.model ?? undefined}
+          fallback={{ label: "Default", model: own?.model }}
+          onPick={(next) => (speech.saving ? undefined : void speech.chooseCleanup(next ?? null))}
+          onClose={() => setPick(undefined)}
+        />
       )}
     </div>
   )
@@ -156,42 +151,6 @@ function CleanupRow({
       disabled={saving}
       onClick={onClick}
       data-setting="cleanup-model"
-    />
-  )
-}
-
-/** The host's models, in the same picker the composer uses, with "Default" at its head. */
-function CleanupPicker({
-  profile,
-  settings,
-  saving,
-  onChoose,
-  onDone,
-}: {
-  profile: Profile
-  settings: SpeechSettings
-  saving: boolean
-  onChoose: (model: SpeechPick | null) => Promise<boolean>
-  onDone: () => void
-}) {
-  const info = useModelInfo(profile)
-  const providers = info?.providers ?? []
-  const own = botModel(profile, info)
-  if (!providers.length)
-    return (
-      <p className="px-1 py-2 text-sm text-muted-foreground">Couldn't read this bot's models.</p>
-    )
-  return (
-    <ModelPicker
-      header={false}
-      providers={providers}
-      fallback={{ label: "Default", model: own?.model }}
-      choice={settings.cleanup.model ?? undefined}
-      onChoose={(next) => {
-        if (saving) return
-        void onChoose(next ?? null)
-        onDone()
-      }}
     />
   )
 }

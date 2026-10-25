@@ -20,36 +20,28 @@ import { Bot } from "@/components/bot"
 import { BOTS } from "@/components/bots"
 import { CodingTab } from "@/components/bot-coding-tab"
 import { DictationTab } from "@/components/bot-dictation-tab"
-import { ModelPicker } from "@/components/chat/model-picker"
 import { McpsTab } from "@/components/mcps-tab"
 import { SkillsTab } from "@/components/skills-tab"
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
-import { Button } from "@/components/ui/button"
-import {
   Caption,
+  ConfirmDestructive,
   EditCard,
   EditForm,
   Group,
-  NOT_SET,
+  ModelPick,
   PickList,
   PickSurface,
+  RowText,
   SwitchRow,
   ValueRow,
   linkRowClass,
-  rowClass,
   useHeaderAction,
 } from "@/components/settings-chrome"
+import { Button } from "@/components/ui/button"
 import { AFK_PICKS_FEATURE } from "@/lib/afk-picks"
+import { botTabPath, BOT_PAGES, type BotPage, type BotTab } from "@/lib/bot-tabs"
 import { botSubPath, type BotSub } from "@/lib/bot-subs"
+import { connectionKey } from "@/lib/connection"
 import {
   db,
   deleteProfile,
@@ -65,9 +57,9 @@ import { DICTATION } from "@/lib/dictation"
 import { MAX_FALLBACKS } from "@/lib/fallback-list"
 import { useFallbackModels } from "@/lib/fallbacks"
 import { usePluginFeatureAnswers } from "@/lib/features"
+import { READ_TIMEOUT_MS } from "@/lib/freshness"
 import { formatRelative } from "@/lib/format"
 import { checkHealth, getPluginVersion, listModels } from "@/lib/hermes"
-import { BOT_PAGES, botTabPath, type BotPage, type BotTab } from "@/lib/bot-tabs"
 import { useLarge } from "@/lib/media"
 import { MCP_FEATURES } from "@/lib/mcps"
 import { botModel, fullModel, setDefaultModel, useModelInfo } from "@/lib/model-info"
@@ -83,8 +75,8 @@ import { MIN_PLUGIN_VERSION, pluginOutdated } from "@/lib/version"
 type Connection =
   | { state: "idle" }
   | { state: "testing" }
-  | { state: "ok"; plugin: string | null }
-  | { state: "error"; message: string }
+  | { state: "ok"; plugin: string | null; key: string }
+  | { state: "error"; message: string; key: string }
 
 /** The pages a plugin can withhold, by the segment naming them: the rest are always there. */
 const PAGE_FEATURES = {
@@ -108,7 +100,7 @@ function gated(page: BotTab): page is GatedPage {
 const PAGE_ANSWERS = { ...PAGE_FEATURES, delegation: "delegation_model" } as const
 
 /** What the Models page's two rows need: the Gots triage pick, and the chain after the main model. */
-const CHAT_ANSWERS = { triage: "triage_model", fallbacks: "fallbacks" } as const
+const MODELS_ANSWERS = { triage: "triage_model", fallbacks: "fallbacks" } as const
 
 /** The icon a page's row, and the screen it opens, wear. */
 const PAGE_ICONS: Record<BotTab, LucideIcon> = {
@@ -195,41 +187,32 @@ function DeleteBotDialog({
   const others = siblings?.map((p) => p.name).join(", ")
 
   return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent size="sm">
-        <AlertDialogHeader>
-          <AlertDialogTitle>Delete {profile.name}?</AlertDialogTitle>
-          <AlertDialogDescription>
-            {linked
-              ? `Its host is unlinked${others ? `, and so is every bot it linked: ${others}` : ""}. Its chats stay on your Hermes server, and linking it again brings them back.`
-              : "Its chats are removed too. The profile and its sessions on your Hermes server are untouched."}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction
-            variant="destructive"
-            onClick={async () => {
-              if (linked) {
-                try {
-                  await removeHost(profile.hostId!)
-                } catch (error) {
-                  toast.error(error instanceof Error ? error.message : "Couldn't remove it.")
-                  return
-                }
-              } else {
-                await deleteProfile(profile.id)
-              }
-              const next = await getActiveProfile()
-              if (next) await setActiveProfile(next.id)
-              onDeleted?.()
-            }}
-          >
-            Delete
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <ConfirmDestructive
+      open={open}
+      title={`Delete ${profile.name}?`}
+      description={
+        linked
+          ? `Its host is unlinked${others ? `, and so is every bot it linked: ${others}` : ""}. Its chats stay on your Hermes server, and linking it again brings them back.`
+          : "Its chats are removed too. The profile and its sessions on your Hermes server are untouched."
+      }
+      confirmLabel="Delete"
+      onOpenChange={onOpenChange}
+      onConfirm={async () => {
+        if (linked) {
+          try {
+            await removeHost(profile.hostId!)
+          } catch (error) {
+            toast.error(error instanceof Error ? error.message : "Couldn't remove it.")
+            return
+          }
+        } else {
+          await deleteProfile(profile.id)
+        }
+        const next = await getActiveProfile()
+        if (next) await setActiveProfile(next.id)
+        onDeleted?.()
+      }}
+    />
   )
 }
 
@@ -253,20 +236,16 @@ function PageRow({
       className={linkRowClass}
     >
       <Icon className="size-5 shrink-0 text-muted-foreground" />
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="truncate text-base">{page.title}</span>
-        <span className="line-clamp-2 text-sm text-muted-foreground">{page.subtitle}</span>
-      </span>
+      <RowText title={page.title} subtitle={page.subtitle} />
     </Link>
   )
 }
 
 /**
  * A bot's settings as a list of pages: the plugin banner when it is out of date, then the pages in
- * three cards — General on its own, the Gots plugin's pages, then the bot's Hermes's — separated by
- * gaps and carrying no captions (ADR 0055). A page the plugin withholds draws no row. The header's
- * trash deletes the bot, asking first; an unlinked bot is left alone where this device holds no
- * other bot to fall back on.
+ * two cards — General on its own, then every other page under it — separated by gaps and carrying no
+ * captions (ADR 0055). A page the plugin withholds draws no row. The header's trash deletes the bot,
+ * asking first; an unlinked bot is left alone where this device holds no other bot to fall back on.
  */
 export function BotSettingsList({
   profile,
@@ -284,8 +263,8 @@ export function BotSettingsList({
   const answers = usePluginFeatureAnswers(profile, PAGE_FEATURES)
   const [confirming, setConfirming] = useState(false)
   const linked = Boolean(profile.hostId)
-  const rows = (group: BotPage["group"]) =>
-    BOT_PAGES.filter((page) => page.group === group).map((page) => {
+  const rows = (pages: readonly BotPage[]) =>
+    pages.map((page) => {
       const segment = page.segment
       if (gated(segment) && answers[segment] !== "yes") return null
       return <PageRow key={segment} page={page} botId={profile.id} replace={replace} />
@@ -315,8 +294,8 @@ export function BotSettingsList({
           {`This bot's plugin is out of date! Update it to ${MIN_PLUGIN_VERSION} or newer.`}
         </Banner>
       )}
-      <Group>{rows("general")}</Group>
-      <Group>{rows("rest")}</Group>
+      <Group>{rows(BOT_PAGES.slice(0, 1))}</Group>
+      <Group>{rows(BOT_PAGES.slice(1))}</Group>
       <DeleteBotDialog
         profile={profile}
         open={confirming}
@@ -346,6 +325,9 @@ export function BotSettingsPage({
   const shown: BotTab = gate !== undefined && gate !== "yes" ? "general" : tab
   const large = useLarge()
   const navigate = useNavigate()
+  // Only the page on screen owns its sub: an address into a page this bot doesn't have draws the
+  // page it fell back to, never the other page's edit — and never a write to a field it doesn't hold.
+  const own = tab === shown ? sub : undefined
 
   // A URL into a page this bot doesn't have: General takes its place, in the history entry it was
   // asked for, rather than the address reading MCP over a screen that isn't. Only an answer of "no"
@@ -359,20 +341,20 @@ export function BotSettingsPage({
     [navigate, profile.id, shown],
   )
 
-  // The pages with sub-screens of their own draw them; General and Chat draw theirs here.
-  if (shown === "speech-to-text") return <DictationTab profile={profile} sub={sub} />
-  if (shown === "mcps") return <McpsTab profile={profile} sub={sub} />
+  // The pages with sub-screens of their own draw them; General and Models draw theirs here.
+  if (shown === "speech-to-text") return <DictationTab profile={profile} sub={own} />
+  if (shown === "mcps") return <McpsTab profile={profile} sub={own} />
   if (shown === "coding") return <CodingTab profile={profile} />
-  if (shown === "skills") return <SkillsTab profile={profile} sub={sub} />
+  if (shown === "skills") return <SkillsTab profile={profile} sub={own} />
 
   // A detail is the pane's content at either width; below 1024px the route pushed it there, and a
   // page's own edit is the screen the route pushed.
-  if (sub && (sub.kind === "detail" || !large))
-    return <PageSub profile={profile} tab={shown} sub={sub} close={close} />
+  if (own && (own.kind === "detail" || !large))
+    return <PageSub profile={profile} tab={shown} sub={own} close={close} />
 
   const page =
     shown === "models" ? (
-      <ChatPage profile={profile} />
+      <ModelsPage profile={profile} />
     ) : (
       <GeneralPage
         profile={profile}
@@ -381,12 +363,12 @@ export function BotSettingsPage({
       />
     )
 
-  if (!sub) return page
+  if (!own) return page
   return (
     <>
       {page}
-      <EditCard title={sub.title} onClose={close}>
-        <PageSub profile={profile} tab={shown} sub={sub} close={close} />
+      <EditCard title={own.title} onClose={close}>
+        <PageSub profile={profile} tab={shown} sub={own} close={close} />
       </EditCard>
     </>
   )
@@ -404,42 +386,61 @@ function PageSub({
   sub: BotSub
   close: () => void
 }) {
-  if (tab === "models" && sub.id === "fallbacks") return <FallbacksPage profile={profile} />
-  if (tab !== "general") return null
+  if (tab === "models") return <FallbacksPage profile={profile} />
+  const edit = generalEdit(sub.id)
+  // A segment the router refused never reaches here; one the table doesn't name holds no field, so
+  // no id can fall through to a write the page doesn't mean.
+  if (!edit) return null
   return (
     <EditForm
       label={sub.title}
-      value={editValue(profile, sub.id)}
-      placeholder={editPlaceholder(sub.id)}
-      kind={sub.id === "server-key" ? "secret" : sub.id === "base-url" ? "url" : "text"}
-      onSave={(value) => {
-        void updateProfile(profile.id, editPatch(sub.id, value))
-        close()
+      value={edit.read(profile)}
+      placeholder={edit.placeholder}
+      kind={edit.kind}
+      onSave={async (value) => {
+        try {
+          await updateProfile(profile.id, edit.patch(value))
+          close()
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : "Couldn't save that.")
+        }
       }}
       onCancel={close}
     />
   )
 }
 
-/** The field a General edit holds, read from the bot. */
-function editValue(profile: Profile, id: string) {
-  if (id === "name") return profile.name
-  if (id === "base-url") return profile.baseUrl
-  if (id === "server-key") return profile.apiKey
-  return ""
+/** A General edit: the field it holds on the bot, and the one write it makes. */
+type GeneralEdit = {
+  read: (profile: Profile) => string
+  placeholder: string
+  kind: "text" | "url" | "secret"
+  patch: (value: string) => Partial<Omit<Profile, "id">>
 }
 
-function editPlaceholder(id: string) {
-  if (id === "name") return "Hermes profile name"
-  if (id === "base-url") return "http://localhost:8642/v1"
-  return "API_SERVER_KEY"
-}
+const GENERAL_EDITS = {
+  name: {
+    read: (profile) => profile.name,
+    placeholder: "Hermes profile name",
+    kind: "text",
+    patch: (value) => ({ name: value.trim() || "Hermes" }),
+  },
+  "base-url": {
+    read: (profile) => profile.baseUrl,
+    placeholder: "http://localhost:8642/v1",
+    kind: "url",
+    patch: (value) => ({ baseUrl: value.trim() }),
+  },
+  "server-key": {
+    read: (profile) => profile.apiKey,
+    placeholder: "API_SERVER_KEY",
+    kind: "secret",
+    patch: (value) => ({ apiKey: value.trim() }),
+  },
+} satisfies Record<string, GeneralEdit>
 
-/** The one write an edit makes, in the field the value belongs to. */
-function editPatch(id: string, value: string): Partial<Omit<Profile, "id">> {
-  if (id === "name") return { name: value.trim() || "Hermes" }
-  if (id === "base-url") return { baseUrl: value.trim() }
-  return { apiKey: value.trim() }
+function generalEdit(id: string): GeneralEdit | undefined {
+  return id in GENERAL_EDITS ? GENERAL_EDITS[id as keyof typeof GENERAL_EDITS] : undefined
 }
 
 const TRIAGE_PURPOSE = "Whether a message from Main starts a new thread or continues one"
@@ -462,21 +463,27 @@ function GeneralPage({
   const linked = Boolean(profile.hostId)
   const [pick, setPick] = useState<string>()
   const info = useModelInfo(profile)
-  const providers = info?.providers ?? []
   const own = botModel(profile, info)
   const record = useDelegationModel(profile)
   const character = BOTS.find((bot) => bot.id === profile.botId)
   const [connection, setConnection] = useState<Connection>({ state: "idle" })
+  // The answer belongs to the connection it tested: an edited address or key is a connection nothing
+  // has asked yet, so the row reads idle rather than claiming a server it never reached.
+  const key = connectionKey(profile)
+  const tested = connection.state === "ok" || connection.state === "error" ? connection : undefined
+  const answer = tested?.key === key ? tested : undefined
   const save = (patch: Partial<Omit<Profile, "id">>) => void updateProfile(profile.id, patch)
 
   const test = async () => {
+    // Bounded like every read: a host that stops answering mid-way leaves no row testing.
+    const signal = AbortSignal.timeout(READ_TIMEOUT_MS)
     setConnection({ state: "testing" })
     try {
-      await checkHealth(profile)
-      const ids = await listModels(profile, AbortSignal.timeout(10_000))
+      await checkHealth(profile, signal)
+      const ids = await listModels(profile, signal)
       if (ids.length && !ids.includes(profile.model)) save({ model: ids[0] })
       const plugin = await getPluginVersion(profile)
-      setConnection({ state: "ok", plugin })
+      setConnection({ state: "ok", plugin, key })
       if (plugin) await db.profiles.update(profile.id, { pluginVersion: plugin })
       const saved = await db.profiles.get(profile.id)
       if (saved) await syncContextWindow(saved)
@@ -484,6 +491,7 @@ function GeneralPage({
       setConnection({
         state: "error",
         message: error instanceof Error ? error.message : String(error),
+        key,
       })
     }
   }
@@ -503,61 +511,51 @@ function GeneralPage({
           onClick={() => onOpen("name")}
           data-setting="name"
         />
-        <button
-          type="button"
+        <ValueRow
+          title="Image"
+          value={character?.name ?? ""}
           onClick={() => setPick("image")}
-          className={cn(linkRowClass, "items-center gap-3")}
+          trailing={<Bot id={profile.botId} className="size-10" />}
           data-setting="image"
+        />
+        <ValueRow
+          title="Test connection"
+          purpose="Ask this bot's server how it is"
+          // The answer takes the value's place under the purpose: the accent where it connected, the
+          // host's own sentence in red where it didn't.
+          trailing={
+            <Button
+              onClick={test}
+              disabled={connection.state === "testing" || profile.disabled}
+              aria-label="Test connection"
+            >
+              <PlugZapIcon data-icon="inline-start" />
+              {connection.state === "testing" ? "Testing…" : "Test"}
+            </Button>
+          }
+          data-setting="test"
         >
-          <span className="flex min-w-0 flex-1 flex-col gap-0.5 py-0.5">
-            <span className="truncate text-base">Image</span>
+          {answer && (
             <span
+              role={answer.state === "error" ? "alert" : "status"}
               className={cn(
-                "truncate text-sm",
-                character ? "text-primary" : "text-muted-foreground",
+                "line-clamp-2 text-sm",
+                answer.state === "error" ? "text-destructive" : "text-primary",
               )}
             >
-              {character?.name ?? NOT_SET}
+              {answer.state === "error"
+                ? answer.message
+                : answer.plugin
+                  ? `Connected · Plugin ${answer.plugin}`
+                  : "Connected · No plugin"}
             </span>
-          </span>
-          <Bot id={profile.botId} className="size-10" />
-        </button>
-        <div className={cn(rowClass, "flex-wrap items-center gap-3")} data-setting="test">
-          <span className="flex min-w-0 flex-1 flex-col gap-0.5 py-0.5">
-            <span className="truncate text-base">Test connection</span>
-            <span className="line-clamp-2 text-sm text-muted-foreground">
-              Ask this bot's server how it is
-            </span>
-            {/* The answer takes the row's value place, under the purpose: green where it connected,
-                the host's own sentence in red where it didn't. */}
-            {(connection.state === "ok" || connection.state === "error") && (
-              <span
-                role={connection.state === "error" ? "alert" : undefined}
-                className={cn(
-                  "line-clamp-2 text-sm",
-                  connection.state === "ok" ? "text-primary" : "text-destructive",
-                )}
-              >
-                {connection.state === "ok"
-                  ? connection.plugin
-                    ? `Connected · Plugin ${connection.plugin}`
-                    : "Connected · No plugin"
-                  : connection.message}
-              </span>
-            )}
-          </span>
-          <Button
-            onClick={test}
-            disabled={connection.state === "testing" || profile.disabled}
-            aria-label="Test connection"
-          >
-            <PlugZapIcon data-icon="inline-start" />
-            {connection.state === "testing" ? "Testing…" : "Test"}
-          </Button>
-        </div>
+          )}
+        </ValueRow>
       </Group>
 
-      {(delegation || !linked) && (
+      {/* The caption and its rows read one gate: a bot whose host withholds the row, or hasn't
+          answered, draws no card at all rather than one with a caption over nothing. */}
+      {((delegation && record.supported) || !linked) && (
         <>
           <Caption>Hermes</Caption>
           <Group>
@@ -615,46 +613,34 @@ function GeneralPage({
         />
       </PickSurface>
 
-      <PickSurface
+      <ModelPick
         open={pick === "subagent"}
-        onOpenChange={(open) => !open && setPick(undefined)}
         title="Subagent model"
-      >
-        <ModelPicker
-          header={false}
-          providers={providers}
-          fallback={{ label: "Default model", model: own?.model }}
-          recent={profile.recentModels}
-          choice={record.pick}
-          onChoose={(next) => {
-            void record.save(next).catch((error: unknown) => {
-              toast.error(error instanceof Error ? error.message : String(error))
-            })
-            setPick(undefined)
-          }}
-        />
-      </PickSurface>
+        profile={profile}
+        choice={record.pick}
+        fallback={{ label: "Default model", model: own?.model }}
+        onPick={(next) => record.save(next)}
+        onClose={() => setPick(undefined)}
+      />
     </>
   )
 }
 
 /** The Models page: Gots's triage model over the bot's Hermes models, each a value that opens its pick. */
-function ChatPage({ profile }: { profile: Profile }) {
-  const answers = usePluginFeatureAnswers(profile, CHAT_ANSWERS)
+function ModelsPage({ profile }: { profile: Profile }) {
+  const answers = usePluginFeatureAnswers(profile, MODELS_ANSWERS)
   const triage = answers.triage === "yes"
   const fallbacks = answers.fallbacks === "yes"
   const [pick, setPick] = useState<string>()
   const navigate = useNavigate()
   const info = useModelInfo(profile)
-  const providers = info?.providers ?? []
   const own = botModel(profile, info)
   const triageRecord = useTriageModel(profile)
   const chain = useFallbackModels(profile)
-  const defaultModel = botModel(profile, info)
   const chains = chain.list.length
 
   return (
-    <div className="flex flex-col gap-4" data-bot-chat>
+    <div className="flex flex-col gap-4" data-bot-models>
       {triage && triageRecord.supported && (
         <>
           <Caption>Gots</Caption>
@@ -690,7 +676,7 @@ function ChatPage({ profile }: { profile: Profile }) {
         <ValueRow
           title="Default model"
           purpose="The host's main model, on every surface"
-          value={defaultModel ? fullModel(defaultModel) : ""}
+          value={own ? fullModel(own) : ""}
           onClick={() => setPick("default-model")}
           data-setting="default-model"
         />
@@ -705,65 +691,35 @@ function ChatPage({ profile }: { profile: Profile }) {
         )}
       </Group>
 
-      <PickSurface
+      <ModelPick
         open={pick === "model"}
-        onOpenChange={(open) => !open && setPick(undefined)}
         title="Model"
-      >
-        {!providers.length && <NoModels />}
-        <ModelPicker
-          header={false}
-          providers={providers}
-          fallback={{ label: "Default model", model: own?.model }}
-          recent={profile.recentModels}
-          choice={profile.model ? { provider: "", model: profile.model } : undefined}
-          onChoose={(next) => {
-            if (next) void updateProfile(profile.id, { model: next.model })
-            setPick(undefined)
-          }}
-        />
-      </PickSurface>
+        profile={profile}
+        choice={own}
+        fallback={{ label: "Default model", model: own?.model }}
+        onPick={(next) => (next ? updateProfile(profile.id, { model: next.model }) : undefined)}
+        onClose={() => setPick(undefined)}
+      />
 
-      <PickSurface
+      <ModelPick
         open={pick === "default-model"}
-        onOpenChange={(open) => !open && setPick(undefined)}
         title="Default model"
-      >
-        {!providers.length && <NoModels />}
-        <ModelPicker
-          header={false}
-          providers={providers}
-          fallback={{ label: "Default", model: info?.model }}
-          recent={profile.recentModels}
-          choice={profile.modelChoice}
-          onChoose={(next) => {
-            void setDefaultModel(profile, next).catch((error: unknown) => {
-              toast.error(error instanceof Error ? error.message : String(error))
-            })
-            setPick(undefined)
-          }}
-        />
-      </PickSurface>
+        profile={profile}
+        choice={profile.modelChoice}
+        fallback={{ label: "Default", model: info?.model }}
+        onPick={(next) => setDefaultModel(profile, next)}
+        onClose={() => setPick(undefined)}
+      />
 
-      <PickSurface
+      <ModelPick
         open={pick === "triage-model"}
-        onOpenChange={(open) => !open && setPick(undefined)}
         title="Triage model"
-      >
-        <ModelPicker
-          header={false}
-          providers={providers}
-          fallback={{ label: "Default model", model: own?.model }}
-          recent={profile.recentModels}
-          choice={triageRecord.pick}
-          onChoose={(next) => {
-            void triageRecord.save(next).catch((error: unknown) => {
-              toast.error(error instanceof Error ? error.message : String(error))
-            })
-            setPick(undefined)
-          }}
-        />
-      </PickSurface>
+        profile={profile}
+        choice={triageRecord.pick}
+        fallback={{ label: "Default model", model: own?.model }}
+        onPick={(next) => triageRecord.save(next)}
+        onClose={() => setPick(undefined)}
+      />
     </div>
   )
 }
@@ -785,30 +741,28 @@ function FallbacksPage({ profile }: { profile: Profile }) {
     <div className="flex flex-col gap-4" data-fallbacks>
       <Group>
         {list.map((fallback, index) => (
-          <div key={index} className="flex items-center gap-1 bg-card">
-            <button
-              type="button"
-              disabled={cannotEdit}
-              aria-busy={saving || undefined}
-              onClick={() => setPick(index)}
-              className="flex min-h-14 min-w-0 flex-1 flex-col justify-center gap-0.5 px-5 py-3 text-left transition-colors hover:bg-muted disabled:opacity-60"
-              data-fallback={index + 1}
-            >
-              <span className="text-base">Fallback {index + 1}</span>
-              <span className="truncate text-sm text-primary">{fullModel(fallback)}</span>
-            </button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-lg"
-              className="mr-3 size-11 shrink-0"
-              aria-label={`Remove fallback ${index + 1}`}
-              disabled={saving}
-              onClick={() => write(list.filter((_, at) => at !== index))}
-            >
-              <XIcon />
-            </Button>
-          </div>
+          <ValueRow
+            key={index}
+            title={`Fallback ${index + 1}`}
+            value={fullModel(fallback)}
+            onClick={() => setPick(index)}
+            disabled={cannotEdit}
+            busy={saving}
+            data-fallback={index + 1}
+            trailing={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-lg"
+                className="mr-3 size-11 shrink-0"
+                aria-label={`Remove fallback ${index + 1}`}
+                disabled={saving}
+                onClick={() => write(list.filter((_, at) => at !== index))}
+              >
+                <XIcon />
+              </Button>
+            }
+          />
         ))}
         {list.length < MAX_FALLBACKS && (
           <button
@@ -823,38 +777,24 @@ function FallbacksPage({ profile }: { profile: Profile }) {
         )}
       </Group>
 
-      <PickSurface
+      <ModelPick
         open={pick !== undefined}
-        onOpenChange={(open) => !open && setPick(undefined)}
         title="Fallback provider"
-      >
-        <ModelPicker
-          header={false}
-          providers={providers}
-          fallback={{ label: "None" }}
-          recent={profile.recentModels}
-          choice={pick === undefined ? undefined : list[pick]}
-          onChoose={(next) => {
-            if (pick === undefined) {
-              setPick(undefined)
-              return
-            }
-            if (next) {
-              const kept = [...list]
-              kept[pick] = next
-              write(kept)
-            } else if (pick < list.length) {
-              write(list.filter((_, at) => at !== pick))
-            }
-            setPick(undefined)
-          }}
-        />
-      </PickSurface>
+        profile={profile}
+        choice={pick === undefined ? undefined : list[pick]}
+        fallback={{ label: "None" }}
+        onPick={(next) => {
+          if (pick === undefined) return
+          if (next) {
+            const kept = [...list]
+            kept[pick] = next
+            write(kept)
+          } else if (pick < list.length) {
+            write(list.filter((_, at) => at !== pick))
+          }
+        }}
+        onClose={() => setPick(undefined)}
+      />
     </div>
   )
-}
-
-/** What a pick says where the bot's host answered no models at all. */
-function NoModels() {
-  return <p className="px-1 py-2 text-sm text-muted-foreground">Couldn't read this bot's models.</p>
 }

@@ -5,23 +5,15 @@ import { toast } from "sonner"
 import { SkillDetail } from "@/components/skill-detail-sheet"
 import {
   Caption,
+  ConfirmDestructive,
   Group,
+  headerRowClass,
   linkRowClass,
   rowClass,
   RowText,
   SplitSwitchRow,
   SwitchRow,
 } from "@/components/settings-chrome"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import type { Profile } from "@/lib/db"
 import type { Skill } from "@/lib/hermes"
 import { useSkillFeatureAnswers, useSkills } from "@/lib/skills"
@@ -49,7 +41,6 @@ export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) 
   const [saving, setSaving] = useState<string | null>(null)
   const [flipping, setFlipping] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
-  /** The skill whose removal is being confirmed, until the Host answers it. */
   const [removing, setRemoving] = useState<string | null>(null)
   if (answer !== "yes") return null
   if (state.status === "loading") return null
@@ -100,35 +91,17 @@ export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) 
   }
 
   /** Remove's question: a destructive confirmation, which stays a dialog wherever the note is. */
-  const confirmation = () =>
-    removing !== null && (
-      <AlertDialog
-        open
-        onOpenChange={(next) => {
-          if (!next && !pending) setRemoving(null)
-        }}
-      >
-        <AlertDialogContent size="sm">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Remove {removing}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              The bot stops having it, and its files go with it. A Hub skill is uninstalled, and one
-              written on the profile is deleted.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              disabled={pending}
-              onClick={() => void confirmRemove(removing)}
-            >
-              Remove
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    )
+  const confirmation = (
+    <ConfirmDestructive
+      open={removing !== null}
+      title={`Remove ${removing ?? ""}?`}
+      description="The bot stops having it, and its files go with it. A Hub skill is uninstalled, and one written on the profile is deleted."
+      confirmLabel="Remove"
+      busy={pending}
+      onOpenChange={(open) => !open && setRemoving(null)}
+      onConfirm={() => removing !== null && void confirmRemove(removing)}
+    />
+  )
 
   const controls = answers.write === "yes" ? { onToggle: toggle, saving } : undefined
   // A row's own tap is its note's address: the note is a detail the route draws, not a sheet.
@@ -149,7 +122,7 @@ export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) 
           name={sub.title}
           onRemove={offersRemove ? () => setRemoving(sub.title) : undefined}
         />
-        {confirmation()}
+        {confirmation}
       </>
     )
   }
@@ -166,7 +139,7 @@ export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) 
           flipping={flipping}
         />
       ))}
-      {confirmation()}
+      {confirmation}
     </div>
   )
 }
@@ -257,7 +230,7 @@ function CategoryRow({
       </div>
     )
   return (
-    <div className={cn(rowClass, "bg-muted py-4")} data-skill-category={header.title}>
+    <div className={headerRowClass} data-skill-category={header.title}>
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate text-base font-semibold">{header.title}</span>
         {header.subtitle && (

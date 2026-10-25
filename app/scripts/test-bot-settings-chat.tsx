@@ -28,7 +28,7 @@ import {
   until,
 } from "./component-kit.tsx"
 
-/** The triage explanation, which was the info icon's tooltip and is now the row's own line. */
+/** The triage row's purpose line, as the page words it. */
 const TRIAGE = "Whether a message from Main starts a new thread or continues one"
 
 type Choice = { provider: string; model: string }
@@ -128,21 +128,20 @@ async function seed(name: string, options: Parameters<typeof host>[0] = {}, patc
 
 /** What a user reads on an element, with its spacing flattened. */
 const words = (element: Element | null) => (element?.textContent ?? "").replace(/\s+/g, " ").trim()
-/** The page's own subtree. */
-const chat = () => find("[data-bot-chat]")
+const chat = () => find("[data-bot-models]")
 /** Any heading the page still draws: the captions replaced them. */
 const headings = () =>
-  findAll("[data-bot-chat] h1, [data-bot-chat] h2, [data-bot-chat] h3").map((one) =>
+  findAll("[data-bot-models] h1, [data-bot-models] h2, [data-bot-models] h3").map((one) =>
     one.textContent?.trim(),
   )
 /** A caption: the muted line standing over a card of its own. */
 const caption = (title: string) =>
-  findAll("[data-bot-chat] p").find((one) => words(one) === title) ?? null
+  findAll("[data-bot-models] p").find((one) => words(one) === title) ?? null
 /** The settings the page draws, in the order it draws them. */
 const rows = () =>
-  findAll("[data-bot-chat] [data-setting]").map((one) => one.getAttribute("data-setting"))
+  findAll("[data-bot-models] [data-setting]").map((one) => one.getAttribute("data-setting"))
 /** A setting's row, what a user reads on it, and the value it holds in the accent colour. */
-const row = (id: string) => find(`[data-bot-chat] [data-setting="${id}"]`)
+const row = (id: string) => find(`[data-bot-models] [data-setting="${id}"]`)
 const rowText = (id: string) => words(row(id))
 const accent = (id: string) => row(id)?.querySelector(".text-primary")?.textContent ?? null
 /** A model a model pick offers, in the sheet it opened. */
@@ -249,6 +248,28 @@ test("the model and default model rows say what each is for, and the value it ho
       rowText("default-model"),
       "Default modelThe host's main model, on every surfaceopenrouter/own-model",
       "and the default the host runs",
+    )
+  })
+})
+
+test("the model pick marks the model the page already shows as the value", async () => {
+  await seed("chat-model-marked")
+  await mount(page("/settings/bots/bot-1/models"), async () => {
+    assert.equal(
+      accent("default-model"),
+      "openrouter/own-model",
+      "the model in force, as the page shows it",
+    )
+    await openPick("model")
+    assert.equal(
+      modelOption("own-model")?.getAttribute("aria-pressed"),
+      "true",
+      "the pick ticks the row the page is already running",
+    )
+    assert.equal(
+      modelOption("cheap-model")?.getAttribute("aria-pressed"),
+      "false",
+      "and marks no other row",
     )
   })
 })
@@ -364,7 +385,7 @@ test("removing a fallback writes the chain without it", async () => {
   })
 })
 
-test("picking a model on the Chat page writes it to the bot", async () => {
+test("picking a model on the Models page writes it to the bot", async () => {
   await seed("chat-model-pick")
   await mount(page("/settings/bots/bot-1/models"), async () => {
     assert.equal(accent("model"), "test/model", "the model the bot runs now")

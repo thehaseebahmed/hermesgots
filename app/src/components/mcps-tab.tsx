@@ -15,6 +15,7 @@ import { ItemSearch } from "@/components/item-list"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import {
   Caption,
+  ConfirmDestructive,
   Group,
   linkRowClass,
   rowClass,
@@ -22,16 +23,6 @@ import {
   useHeaderAction,
 } from "@/components/settings-chrome"
 import { useCopied } from "@/lib/copied"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -120,7 +111,7 @@ export function McpsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) {
   const [busy, setBusy] = useState(false)
   // The server this address drills into. Its name is the segment's, so a server the Host has stopped
   // listing still opens as the address it was given, saying the bot no longer has it.
-  const detail = sub?.kind === "detail" ? sub : undefined
+  const detail = sub
   const grantingServer =
     sheet?.kind === "access" ? servers?.find((server) => server.name === sheet.name) : undefined
   const mine = servers?.filter((server) => server.source === "config") ?? []
@@ -279,45 +270,27 @@ function RemoveDialog({
   onCancel,
   onConfirm,
 }: {
-  /** The server being removed, or nothing where the question isn't up. */
   name?: string
   busy: boolean
   onCancel: () => void
   onConfirm: (name: string) => void
 }) {
   return (
-    <AlertDialog
+    <ConfirmDestructive
       open={Boolean(name)}
-      onOpenChange={(open) => {
-        if (!open && !busy) onCancel()
-      }}
-    >
-      <AlertDialogContent size="sm">
-        <AlertDialogHeader>
-          <AlertDialogTitle>Remove {name ?? ""}?</AlertDialogTitle>
-          <AlertDialogDescription>
-            The bot stops having it, and its stored access goes with it. The values you gave it stay
-            on the host, so adding it again doesn't mean finding them twice.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
-          <AlertDialogAction
-            variant="destructive"
-            disabled={busy}
-            onClick={() => name && onConfirm(name)}
-          >
-            Remove
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+      title={`Remove ${name ?? ""}?`}
+      description="The bot stops having it, and its stored access goes with it. The values you gave it stay on the host, so adding it again doesn't mean finding them twice."
+      confirmLabel="Remove"
+      busy={busy}
+      onOpenChange={onCancel}
+      onConfirm={() => name && onConfirm(name)}
+    />
   )
 }
 
 /**
- * What a row of *Your servers* can do: the switch, the sheet and the access flow. A plugin's rows get
- * none of it, because Hermes refuses to modify what a plugin provides (ADR 0014).
+ * What a row of *Your servers* can do: the switch and the access flow. A plugin's rows get none of
+ * it, because Hermes refuses to modify what a plugin provides (ADR 0014).
  */
 type RowControls = {
   /** Whether the Host can write this bot's config, so a row may offer its switch. */
@@ -475,7 +448,6 @@ function ServerDetail({
   saveConfig: (name: string, edit: McpServerEdit) => Promise<McpServerDetail | undefined>
   onRemove: () => void
 }) {
-  // Still reading the bot's servers: nothing to say either way yet.
   if (servers === undefined) return null
   const server = servers.find((one) => one.name === name)
   if (!server)
@@ -486,7 +458,6 @@ function ServerDetail({
     )
   return (
     <div className="flex flex-col gap-4" data-mcp-server={server.name}>
-      {/* The screen's title lives in the header above the pane; the content leads with the tabs. */}
       <Tabs defaultValue={config ? "config" : "tools"} className="gap-2">
         <TabsList>
           {config && <TabsTrigger value="config">Config</TabsTrigger>}

@@ -74,7 +74,7 @@ const assertList = async (page, viewport) => {
   )
   const cards = list.locator("[data-settings-group]")
   const count = await cards.count()
-  assert.ok(count >= 3, `General, the plugin's pages and the bot's Hermes's are cards (${count})`)
+  assert.equal(count, 2, `General alone, then every other page, are two cards (${count})`)
   let previous = null
   for (let i = 0; i < count; i++) {
     const box = await cards.nth(i).boundingBox()
@@ -125,7 +125,7 @@ const wide = async ({ page, profileId, shot }) => {
   )
   await shot("general")
 
-  await list.locator('[data-bot-page="chat"]').click()
+  await list.locator('[data-bot-page="models"]').click()
   await page.waitForURL((url) => url.pathname === `/settings/bots/${profileId}/models`, {
     timeout: 15_000,
   })
@@ -136,7 +136,7 @@ const wide = async ({ page, profileId, shot }) => {
   assert.equal(
     await page.getByRole("heading", { level: 1, name: "General", exact: true }).count(),
     0,
-    "the pane beside the list swapped from General to Chat",
+    "the pane beside the list swapped from General to Models",
   )
   assert.ok(
     await kept.evaluate((element) => element.isConnected),
@@ -146,7 +146,7 @@ const wide = async ({ page, profileId, shot }) => {
   const after = await list.boundingBox()
   assert.ok(after, "the list still has a box")
   assert.ok(same(before, after), "the list's box did not move while the pane beside it swapped")
-  await shot("chat")
+  await shot("models")
   assert.deepEqual(errors, [], `no error on the page (${errors.join("; ")})`)
 }
 
@@ -172,7 +172,7 @@ const phone = async ({ page, profileId, shot }) => {
   const list = await assertList(page, viewport)
   await shot("list")
 
-  await list.locator('[data-bot-page="chat"]').click()
+  await list.locator('[data-bot-page="models"]').click()
   await page.waitForURL((url) => url.pathname === `/settings/bots/${profileId}/models`, {
     timeout: 15_000,
   })
@@ -223,5 +223,5 @@ for (const dark of [false, true]) {
   })
 }
 pass(
-  "a bot's settings is a list of pages with no headings anywhere: three caption-free cards separated by gaps under the out-of-date plugin's banner; at 1024px it takes the Settings menu's pane, General open in the pane beside it, and tap Chat swaps that pane while the same list element stays put at the same box; on a 390px phone the list pushes over the menu and a page over the list, both with a back control, and back returns to the list and then to the menu — light and dark at both widths",
+  "a bot's settings is a list of pages with no headings anywhere: two caption-free cards separated by gaps under the out-of-date plugin's banner, General alone in the first and the other five pages in the second; at 1024px it takes the Settings menu's pane, General open in the pane beside it, and tap Models swaps that pane while the same list element stays put at the same box; on a 390px phone the list pushes over the menu and a page over the list, both with a back control, and back returns to the list and then to the menu — light and dark at both widths",
 )

@@ -234,17 +234,17 @@ test("a server's name drills into its own page, under its own address", async ()
       "the server's own page is what the address drew",
     )
     assert.equal(find("h1")?.textContent, "github", "the screen is titled with the server")
-    assert.equal(
-      find('[data-mcp-server="github"] h2')?.textContent === "github",
-      false,
-      "and the content doesn't repeat that title",
+    assert.ok(find("[data-mcp-detail]"), "the server's page is drawn")
+    assert.deepEqual(
+      findAll('[data-mcp-server="github"] h2').map((one) => one.textContent),
+      ["Environment variables"],
+      "and its content's own heading is not the title above it",
     )
     assert.equal(findAll("[data-mcp]").length, 0, "the lists are not drawn beside it")
     assert.equal(Boolean(addButton()), false, "and a server's own page offers no +")
     const command = find("#mcp-config-command") as HTMLInputElement | null
     assert.equal(command?.value, "npx", "the Config tab is the content, read from the Host")
 
-    // The back address is the page the server was opened from.
     await click(find('button[aria-label="Back"]'))
     await until(
       async () => path() === "/settings/bots/bot-1/mcps",

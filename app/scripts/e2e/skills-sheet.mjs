@@ -45,9 +45,9 @@ const run = async ({ page, profileId, shot }) => {
   assert.ok(box.x >= -1 && box.x + box.width <= viewport.width + 1, "the note is on screen")
   if (viewport.width < LAPTOP) {
     assert.equal(
-      await page.locator("[data-bot-settings-list]").count(),
+      await page.locator("[data-skills-tab]").count(),
       0,
-      "a phone pushed the note over the page: the list is a screen behind it",
+      "a phone pushed the note over the page: the page it was opened from is a screen behind it",
     )
     assert.ok(
       Math.abs(box.x - column.x) <= 2 && Math.abs(box.width - column.width) <= 2,

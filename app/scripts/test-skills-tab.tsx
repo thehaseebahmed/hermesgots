@@ -410,7 +410,7 @@ const title = (name: string) =>
 const noteBody = () => find("[data-skill-sheet]")
 // The screen's words are in the header the real route draws (asserted once in test-mcps-add-action
 // and in e2e); this harness mounts the pages, so identity comes from the detail's own attribute.
-const noteTitle = () => find("[data-skill-sheet]")?.getAttribute("data-skill-sheet")
+const noteSkill = () => find("[data-skill-sheet]")?.getAttribute("data-skill-sheet")
 const openNote = async (name: string) => {
   await click(title(name))
   await until(async () => noteBody() !== null, `the note of ${name}`)
@@ -423,7 +423,7 @@ test("a row's title opens the skill's own note, at the note's own address", asyn
     await click(title("pr-review"))
     await until(async () => noteBody() !== null, "the skill's note")
     assert.equal(here(), "/settings/bots/bot-1/skills/pr-review", "the note is the route's own")
-    assert.equal(noteTitle(), "pr-review", "the note is headed by the skill")
+    assert.equal(noteSkill(), "pr-review", "the note is that skill's own page")
     assert.equal(find("[data-skills-tab]"), null, "and it takes the page's place")
     assert.equal(find("[data-skill-origin]")?.textContent, "Yours", "where it came from, first")
     assert.equal(
@@ -478,7 +478,7 @@ test("a linked file opens in the same note, and the way back returns to the skil
     await click(find('button[aria-label="Back to the skill"]'))
     await until(async () => find("[data-skill-files]") !== null, "the skill's own note again")
     assert.equal(find("[data-skill-file]"), null, "the file's text went with the tap back")
-    assert.equal(noteTitle(), "pr-review", "the note is still the skill's")
+    assert.equal(noteSkill(), "pr-review", "and stays that skill's page")
   })
 })
 
@@ -699,7 +699,7 @@ test("a removal the Host refuses is its own sentence, with the row as it was", a
       await settle()
       assert.equal(alert(), null, "the confirmation closes with the refusal")
       assert.ok(noteBody(), "back on the skill's own note")
-      assert.equal(noteTitle(), "pr-review", "still the skill's")
+      assert.equal(noteSkill(), "pr-review", "still that skill's page")
       assert.ok(removeButton(), "and it still offers the removal the Host refused")
       const stored = (await db.skills.toArray()).flatMap((cached) => cached.skills)
       assert.ok(
@@ -917,7 +917,7 @@ test("a skill row with both targets: the left opens its note, the switch toggles
     assert.equal(find("[data-skill-sheet]"), null, "the switch opens nothing")
     await click(find('[data-skill="ops-one"] button'))
     await until(async () => noteBody() !== null, "the skill's sheet")
-    assert.equal(noteTitle(), "ops-one", "the left column opened it")
+    assert.equal(noteSkill(), "ops-one", "the left column opened it")
   })
 })
 
@@ -966,7 +966,7 @@ test("a Host with no write: a plain category title, and the rows still open", as
     )
     await click(row("ops-two"))
     await until(async () => noteBody() !== null, "the skill's sheet")
-    assert.equal(noteTitle(), "ops-two", "the whole row is the tap")
+    assert.equal(noteSkill(), "ops-two", "the whole row is the tap")
     assert.equal(posts(calls).length, 0, "nothing was written")
   })
 })

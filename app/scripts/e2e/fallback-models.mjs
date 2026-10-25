@@ -17,7 +17,6 @@ await flow("fallback-models", async ({ page, profileId, until, shot, held }) => 
   }
   // The drill-in page the row opens: the rows it holds, and the aria-busy they wear while a write
   // is on its way (ADR 0055).
-  const field = page.locator("[data-fallbacks]")
   const row1 = page.locator('[data-fallback="1"]')
   const row2 = page.locator('[data-fallback="2"]')
   // Every fallback write the page sends, so the greying out is checked against what goes to the host
@@ -39,7 +38,7 @@ await flow("fallback-models", async ({ page, profileId, until, shot, held }) => 
   await page.goto(`${app}/settings/bots/${profileId}/models`)
   await page.locator('[data-setting="fallbacks"]').waitFor({ timeout: 15_000 })
   await page.locator('[data-setting="fallbacks"]').click()
-  await page.waitForURL((url) => url.pathname === `/settings/bots/${profileId}/chat/fallbacks`, {
+  await page.waitForURL((url) => url.pathname === `/settings/bots/${profileId}/models/fallbacks`, {
     timeout: 15_000,
   })
   const add = page.getByRole("button", { name: "Add fallback" })
@@ -59,7 +58,7 @@ await flow("fallback-models", async ({ page, profileId, until, shot, held }) => 
   )
   assert.ok(await add.isDisabled(), "and no second pick can start")
   assert.equal(await row1.getAttribute("aria-busy"), "true", "the row says a save is happening")
-  await page.waitForTimeout(300)
+  await until(async () => writes.length >= 1, 5_000, "the pick's write to go out")
   assert.equal(writes.length, 1, "and only the one write went out")
   await shot("saving")
   write.release()

@@ -215,6 +215,17 @@ const run = async ({ page, profileId, shot, until }) => {
 
     // Back leaves the server's page for the list, where the name is the way in again.
     await back()
+    if ((page.viewportSize()?.width ?? 0) >= 1024) {
+      // The pane's Back pops the address the row pushed rather than pushing a second one, so the
+      // browser's own Back leaves the list too instead of re-entering the server's page.
+      await page.goBack()
+      assert.ok(
+        !new URL(page.url()).pathname.startsWith(`${screen}/`),
+        "the pane's Back left no address behind it to return to",
+      )
+      await page.goto(`${app}${screen}`)
+      await page.locator('[data-mcp="github"]').waitFor({ timeout: 15_000 })
+    }
 
     // A server a Hermes plugin provides: its Config is read, not edited.
     await openServer("filesystem")

@@ -3,7 +3,7 @@
  * screen passes none; the split switch row, whose left column opens what it names while the switch in
  * the column beside it toggles on its own; and the pieces ADR 0055 added — the muted caption over a
  * card, the value row that shows a setting and opens its edit, the edit form that writes once on Save,
- * the pick surface with its radio list, and the radio list itself. Nothing here is a heading and
+ * the pick surface with its list of buttons, and the list itself. Nothing here is a heading and
  * nothing here is a field sitting inside a card.
  */
 import assert from "node:assert/strict"
@@ -24,7 +24,16 @@ import {
   useHeaderAction,
 } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
-import { click, find, findAll, mount, settle, text, type as typing } from "./component-kit.tsx"
+import {
+  absent,
+  click,
+  find,
+  findAll,
+  mount,
+  settle,
+  text,
+  type as typing,
+} from "./component-kit.tsx"
 
 const TITLE = "Code review"
 const SUBTITLE = "Reviews a change before it ships"
@@ -144,8 +153,8 @@ test("a screen's action sits beside its title, and a screen that passes none dra
   )
 
   await mount(screen(), async () => {
-    assert.equal(find("header button"), null, "a screen given no action draws no control there")
-    assert.equal(named("button", "Delete bot"), null, "and nothing named for one")
+    absent("header button", "a screen given no action draws no control there")
+    assert.ok(!named("button", "Delete bot"), "and nothing named for one")
   })
 })
 
@@ -285,7 +294,7 @@ test("the action goes away with the page that offered it", async () => {
   await mount(<WithOrWithout />, async () => {
     assert.ok(named("button", "Add a server"), "the page is here, so its action is")
     await click(named("button", "Take it away"))
-    assert.equal(named("button", "Add a server"), null, "the page is gone, and its action with it")
+    assert.ok(!named("button", "Add a server"), "the page is gone, and its action with it")
     await click(named("button", "Bring it back"))
     assert.ok(named("button", "Add a server"), "and it comes back with the page")
   })
@@ -299,9 +308,8 @@ test("a Screen's own action is the one it draws", async () => {
     </Screen>,
     async () => {
       assert.ok(named("button", "Delete bot"), "the screen's own action is drawn")
-      assert.equal(
-        named("button", "Add a server"),
-        null,
+      assert.ok(
+        !named("button", "Add a server"),
         "and takes the place of anything its page offered",
       )
     },
@@ -329,11 +337,7 @@ test("a caption names what a card holds without becoming a heading", async () =>
         0,
         "and stays out of the document's headings: a card has no heading of its own",
       )
-      assert.equal(
-        caption.closest('[role="heading"]'),
-        null,
-        "nothing announces it as a heading either",
-      )
+      assert.ok(!caption.closest('[role="heading"]'), "nothing announces it as a heading either")
     },
   )
 })
@@ -368,9 +372,8 @@ test("a value row is its title over what it is for over its value", async () => 
         /text-primary/,
         "in the accent colour, so a value reads as one at a glance",
       )
-      assert.equal(
-        row.querySelector("svg"),
-        null,
+      assert.ok(
+        !row.querySelector("svg"),
         "and no chevron: the value and the press state are what mark the row tappable",
       )
 
@@ -447,7 +450,11 @@ const picked: string[] = []
 
 const FRUIT = ["apple", "apricot", "banana", "blackberry", "blueberry", "cherry", "date", "fig"]
 
-test("a pick is a list of radios, the chosen one marked, searchable where it is long", async () => {
+const options = (label: string) => findAll(`[data-pick-list="${label}"] > button`)
+/** The one option wearing the tick: the chosen one, marked without a radio's semantics. */
+const ticked = () => options("Fruit").find((row) => row.querySelector("svg"))
+
+test("a pick is a list of buttons, the chosen one ticked, searchable where it is long", async () => {
   picked.length = 0
   await mount(
     <PickList
@@ -457,23 +464,20 @@ test("a pick is a list of radios, the chosen one marked, searchable where it is 
       onPick={(id) => picked.push(id)}
     />,
     async () => {
-      const list = find('[role="radiogroup"]')
-      assert.ok(list, "the list is a radio group")
+      assert.ok(find('[data-pick-list="Fruit"]'), "the list names the setting it fills")
+      assert.equal(options("Fruit").length, FRUIT.length, "one row per thing to pick")
+      assert.equal(ticked()?.textContent?.startsWith("cherry"), true, "the chosen one ticked")
+      assert.match(ticked()?.textContent ?? "", /cherry notes/, "each row says what it is, muted")
       assert.equal(
-        findAll('[role="radio"]').length,
-        FRUIT.length,
-        "one radio row per thing to pick",
+        options("Fruit").filter((row) => row.querySelector("svg")).length,
+        1,
+        "and only the chosen one wears the tick",
       )
-      const chosen = findAll('[role="radio"]').find(
-        (row) => row.getAttribute("aria-checked") === "true",
-      )
-      assert.equal(chosen?.textContent?.startsWith("cherry"), true, "the chosen one marked")
-      assert.match(chosen?.textContent ?? "", /cherry notes/, "each row says what it is, muted")
 
       const search = find('input[aria-label="Search fruit"]')
       assert.ok(search, "a long list is searchable")
       await typing(search, "blue")
-      const left = findAll('[role="radio"]')
+      const left = options("Fruit")
       assert.equal(left.length, 1, "the search narrows the list")
       assert.match(left[0].textContent ?? "", /blueberry/, "to what matches")
 
@@ -495,8 +499,8 @@ test("a pick offers no search over a list too short to need one", async () => {
       onPick={(id) => shortPicked.push(id)}
     />,
     async () => {
-      assert.equal(find("input"), null, "no search field")
-      await click(findAll('[role="radio"]')[2])
+      absent("input", "no search field")
+      await click(options("Fruit")[2])
       assert.deepEqual(shortPicked, ["banana"], "and the rows still pick")
     },
   )
@@ -514,7 +518,7 @@ test("a pick surface says what it is picking and holds the list", async () => {
     </PickSurface>,
     async () => {
       assert.match(text(), /Image/, "the surface carries the setting's name")
-      assert.ok(find('[role="radiogroup"]'), "with the list inside it")
+      assert.ok(find('[data-pick-list="Image"]'), "with the list inside it")
     },
   )
 })

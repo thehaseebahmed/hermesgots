@@ -12,9 +12,8 @@ await flow("delegation-model", async ({ page, profileId, until, shot, held }) =>
     await picker.getByRole("textbox", { name: "Search models" }).fill(query)
     await picker.getByRole("button", { name: label }).first().click()
   }
-  // The value row: its value, and the aria-busy it wears while the pick is on its way (ADR 0055).
+  // The row is the control: no chevron, no button inside it (ADR 0055).
   const field = page.locator('[data-setting="subagent-model"]')
-  const opener = field
   // Every delegation write the page sends, so the greying out is checked against what goes to the
   // host and not only against how the field looks.
   const writes = []
@@ -32,18 +31,18 @@ await flow("delegation-model", async ({ page, profileId, until, shot, held }) =>
   assert.equal(await hosted(), null)
 
   await page.goto(`${app}/settings/bots/${profileId}/general`)
-  await opener.waitFor({ timeout: 15_000 })
-  await opener.getByText("Default model").waitFor()
+  await field.waitFor({ timeout: 15_000 })
+  await field.getByText("Default model").waitFor()
   await shot("inherited")
 
   // A pick is written whole, so while it is on its way the field is greyed out and says so.
   const write = await held("**/api/plugins/memento/delegation")
   write.hold()
-  await opener.click()
+  await field.click()
   await pick("gpt-5-mini", "openai/gpt-5-mini")
-  assert.ok(await opener.isDisabled(), "the field is greyed out while saving")
+  assert.ok(await field.isDisabled(), "the field is greyed out while saving")
   assert.equal(await field.getAttribute("aria-busy"), "true", "the row says a save is happening")
-  await page.waitForTimeout(300)
+  await until(async () => writes.length >= 1, 5_000, "the pick's write to go out")
   assert.equal(writes.length, 1, "and only the one write went out")
   await shot("saving")
   write.release()
@@ -53,18 +52,18 @@ await flow("delegation-model", async ({ page, profileId, until, shot, held }) =>
     "the host to record the subagent model",
   )
   assert.deepEqual(await hosted(), { provider: "openrouter", model: "openai/gpt-5-mini" })
-  await opener.getByText("openrouter/openai/gpt-5-mini").waitFor()
+  await field.getByText("openrouter/openai/gpt-5-mini").waitFor()
   assert.equal(await field.getAttribute("aria-busy"), null, "the row is quiet once it landed")
-  assert.ok(!(await opener.isDisabled()), "and the field is usable again")
+  assert.ok(!(await field.isDisabled()), "and the field is usable again")
   await shot("picked")
   // Read back from the host, not from what this page remembers: a reload shows its record.
   await page.reload()
-  await opener.getByText("openrouter/openai/gpt-5-mini").waitFor({ timeout: 15_000 })
+  await field.getByText("openrouter/openai/gpt-5-mini").waitFor({ timeout: 15_000 })
 
-  await opener.click()
+  await field.click()
   await picker.getByRole("button", { name: "Default model" }).first().click()
   await until(async () => (await hosted()) === null, 10_000, "the host to clear the pick")
-  await opener.getByText("Default model").waitFor()
+  await field.getByText("Default model").waitFor()
   assert.equal(writes.length, 2, "the clear is a write of its own")
   await shot("cleared")
 
@@ -76,7 +75,7 @@ await flow("delegation-model", async ({ page, profileId, until, shot, held }) =>
   })
   await page.reload()
   await page.getByRole("button", { name: "Test connection" }).waitFor({ timeout: 15_000 })
-  assert.equal(await opener.count(), 0, "no picker without the feature")
+  assert.equal(await field.count(), 0, "no picker without the feature")
   assert.equal(await field.count(), 0, "and no row around it")
   await shot("no-picker")
 
