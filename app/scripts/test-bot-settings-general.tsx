@@ -461,6 +461,11 @@ test("a test the host refuses shows its own sentence in the row's alert", async 
     await click(testButton())
     await until(async () => Boolean(find('[role="alert"]')), "the host's refusal")
     assert.equal(words(find('[role="alert"]')), "Hermes is restarting.", "in the host's own words")
+    assert.equal(
+      words(row("test")).match(/Hermes is restarting\./g)?.length ?? 0,
+      0,
+      "the row keeps its purpose, so the sentence is said once",
+    )
     assert.doesNotMatch(words(row("test")), /Connected/, "and nothing claims it connected")
   })
 })

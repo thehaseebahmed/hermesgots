@@ -514,11 +514,7 @@ function GeneralPage({
         <div className={cn(rowClass, "flex-wrap items-center gap-3")} data-setting="test">
           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
             <span className="text-base">Test connection</span>
-            <span className="text-sm text-muted-foreground">
-              {connection.state === "error"
-                ? connection.message
-                : "Ask this bot's server how it is"}
-            </span>
+            <span className="text-sm text-muted-foreground">Ask this bot's server how it is</span>
           </span>
           {connection.state === "ok" && (
             <span className="flex flex-wrap gap-2">
