@@ -1182,9 +1182,10 @@ export async function reattachRun(conversationId: string) {
 const RUN_START_SLACK_S = 5
 
 /**
- * Follows a run this device didn't start (another device's, the plugin's queue), once the host's
- * shared `runs/live` answer names it for this chat, so the session screen shows what its project
- * does. The turn has to be in the transcript with a reply row already, so the live reply is the
+ * Follows a run this device didn't start (another device's, the plugin's queue, the wake run a
+ * finished subagent starts), once the host's shared `runs/live` answer names it for this chat, so
+ * the session screen shows what its project does and a question or approval it raises reaches the
+ * user. The turn has to be in the transcript with a reply row already, so the live reply is the
  * one the transcript will hold when the run ends; a turn the host hasn't written yet waits for the
  * next catch-up.
  */
@@ -1203,10 +1204,14 @@ async function adoptRun(conversation: Conversation, profile: Profile) {
   if (!ACTIVE_RUN.has(run.status) || run.createdAt === undefined) return
   const messages = await getMessages(id)
   const at = messages.findLastIndex((m) => m.role === "user" && m.hermesRowId !== undefined)
-  const reply = messages[at + 1]
-  if (at < 0 || reply?.role !== "assistant" || reply.status === "streaming") return
-  // The turn of this run, not an earlier one: the host wrote it after the run started.
-  if (messages[at].createdAt / 1000 < run.createdAt - RUN_START_SLACK_S) return
+  // The wake run a finished subagent starts draws no user message, so its reply is the newest
+  // after the user's last one rather than the one beside it.
+  const reply = messages.slice(at + 1).findLast((m) => m.role === "assistant" && !m.subagent)
+  if (!reply || reply.status === "streaming") return
+  // The turn of this run, not an earlier one: the host wrote it after the run started. A turn that
+  // opened with a user message counts from that message; a wake turn from its reply.
+  const opener = messages[at + 1] === reply && at >= 0 ? messages[at] : reply
+  if (opener.createdAt / 1000 < run.createdAt - RUN_START_SLACK_S) return
   // The replay of the run's events builds the reply again from its start.
   const adopted: Message = {
     ...reply,
