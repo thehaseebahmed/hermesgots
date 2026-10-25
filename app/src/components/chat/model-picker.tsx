@@ -24,7 +24,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Field, FieldLabel } from "@/components/ui/field"
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Spinner } from "@/components/ui/spinner"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -653,6 +653,7 @@ function HostModelField({
   label,
   record: { pick, saving, save },
   hint,
+  subtitle,
   children,
 }: {
   profile: Profile
@@ -665,6 +666,8 @@ function HostModelField({
   }
   /** What the model is for, behind an info icon beside the label. */
   hint?: string
+  /** What the setting is for, under its label: the row's subtitle. */
+  subtitle?: string
   children?: ReactNode
 }) {
   const [open, setOpen] = useState(false)
@@ -696,6 +699,7 @@ function HostModelField({
         )}
         {saving && <Spinner className="size-3.5" />}
       </div>
+      {subtitle && <FieldDescription>{subtitle}</FieldDescription>}
       {children}
       <Button
         ref={field}
@@ -732,7 +736,14 @@ function HostModelField({
  * A bot's subagent model, in its settings: the model every task it delegates runs on, which is its
  * host's own delegation model.
  */
-export function DelegationModelSetting({ profile }: { profile: Profile }) {
+export function DelegationModelSetting({
+  profile,
+  subtitle,
+}: {
+  profile: Profile
+  /** What the setting is for, under its label. */
+  subtitle?: string
+}) {
   const record = useDelegationModel(profile)
   if (!record.supported) return null
   return (
@@ -740,6 +751,7 @@ export function DelegationModelSetting({ profile }: { profile: Profile }) {
       profile={profile}
       name="delegation-model"
       label="Subagent model"
+      subtitle={subtitle}
       record={record}
     />
   )
