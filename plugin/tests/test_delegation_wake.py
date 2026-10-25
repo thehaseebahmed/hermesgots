@@ -212,7 +212,7 @@ class WakeTest(unittest.TestCase):
         self.assertIn("Status: completed", text)
         self.assertTrue(text.endswith(FOOTER))
         # The mark is written after the post, so the next look — or a restarted plugin — sees it.
-        self.assertEqual(sessions.marked_wakes(db_path(self.home), ["c1"]), {"c1"})
+        self.assertEqual(set(sessions.wake_marks(db_path(self.home), ["c1"])), {"c1"})
 
     def test_a_wake_is_posted_once(self) -> None:
         self.chat("s")
@@ -229,34 +229,34 @@ class WakeTest(unittest.TestCase):
         with mock.patch.object(delegation, "_stage", return_value=None):
             self.assertEqual(self.sweep(), 0)
         self.assertEqual(self.posted, [])
-        self.assertEqual(sessions.marked_wakes(db_path(self.home), ["c1"]), set())
+        self.assertEqual(set(sessions.wake_marks(db_path(self.home), ["c1"])), set())
         self.assertEqual(self.sweep(), 1, "the next look wakes it once the check answers")
         self.assertEqual(self.posted[0]["key"], "wake_c1")
 
-    def test_a_batch_member_that_cannot_be_read_waits_the_retry(self) -> None:
-        """An unreadable row is not a gone row: the whole retry waits, no member is dropped, and
-        the stored set is posted intact once the store reads again."""
+    def test_a_batches_text_froze_at_its_intent(self) -> None:
+        """The retry re-posts the batch byte-for-byte under its own key, even after a member's row
+        is gone: core answers 409 for the same key over a changed payload, and the outbox treats
+        that as permanent — a retry that shed a vanished member would drop the whole batch."""
         self.chat("s")
         self.child("c1", "s", said="the first one's work")
         self.child("c2", "s", said="the second one's work")
         self.refuse = True
         self.assertEqual(self.sweep(), 0)
-        key = self.posted[0]["key"]
+        first = self.posted[0]
         self.refuse = False
         self.due()
-        with mock.patch.object(delegation, "_ended_delegation", return_value=delegation._UNREADABLE):
-            self.assertEqual(self.sweep(), 0)
-        self.assertEqual(len(self.posted), 1, "the retry posted nothing")
-        marks = self.marks(["c1", "c2"])
+        self.conn.execute("DELETE FROM sessions WHERE id = 'c2'")
+        self.conn.commit()
+        self.assertEqual(self.sweep(), 1, "the retry re-posts the batch as it was frozen")
+        retry = self.posted[-1]
+        self.assertEqual(retry["key"], first["key"], "the same key carries the same payload")
+        self.assertEqual(retry["body"], first["body"], "byte-identical, so the host replays")
+        self.assertIn("the second one's work", self.text(), "the frozen text keeps its result")
         self.assertEqual(
-            {one["status"] for one in marks.values()},
-            {"held"},
-            "an unreadable member is neither dropped nor given another attempt",
+            {one["status"] for one in self.marks(["c1", "c2"]).values()},
+            {"sent"},
+            "a member whose result was in the posted text is settled sent, not dropped",
         )
-        self.assertEqual({one["attempts"] for one in marks.values()}, {1})
-        self.assertEqual(self.sweep(), 1, "the next look re-posts the batch as it was stored")
-        self.assertEqual(self.posted[-1]["key"], key)
-        self.assertIn("the first one's work", self.text())
 
     def test_holding_a_wake_again_rewrites_nothing(self) -> None:
         """A conversation held for an hour is looked at every 5 seconds; each look must cost the
@@ -296,7 +296,7 @@ class WakeTest(unittest.TestCase):
         """What keeps a restart from doubling is the store's mark, not this process's memory."""
         self.chat("s")
         self.child("c1", "s", said="done")
-        sessions.mark_wake(db_path(self.home), "c1", "s", "run-from-before")
+        sessions.mark_wakes(db_path(self.home), "s", ["c1"], "run-from-before")
         self.assertEqual(self.sweep(), 0)
         self.assertEqual(self.posted, [])
 
@@ -307,11 +307,11 @@ class WakeTest(unittest.TestCase):
         self.child("c1", "s", said="the post for this one failed")
         for i in range(delegation.WAKE_LIMIT):
             self.child(f"settled-{i}", "s", said="done")
-            sessions.mark_wake(db_path(self.home), f"settled-{i}", "s", f"run-{i}")
+            sessions.mark_wakes(db_path(self.home), "s", [f"settled-{i}"], f"run-{i}")
         # The failed one is the oldest end, and page one is now entirely woken ones.
         self.assertEqual(self.sweep(), 1)
         self.assertEqual([post["key"] for post in self.posted], ["wake_c1"])
-        self.assertEqual(sessions.marked_wakes(db_path(self.home), ["c1"]), {"c1"})
+        self.assertEqual(set(sessions.wake_marks(db_path(self.home), ["c1"])), {"c1"})
 
     def test_a_dropped_wake_does_not_occupy_a_page(self) -> None:
         """A stage's child is dropped the moment it is read, so a page of them costs the walk
@@ -532,7 +532,7 @@ class WakeTest(unittest.TestCase):
         self.assertIn("The diff has two real changes.", self.text())
         # Marked against the child the app knows, not the continuation it ended on.
         self.assertEqual(self.posted[0]["key"], "wake_c1")
-        self.assertEqual(sessions.marked_wakes(db_path(self.home), ["c1", "c1b"]), {"c1"})
+        self.assertEqual(set(sessions.wake_marks(db_path(self.home), ["c1", "c1b"])), {"c1"})
 
     def test_a_subagent_that_ended_before_the_plugin_watched_is_left_alone(self) -> None:
         """A home carries every subagent it ever ran; the first look must not wake all of them."""
@@ -542,7 +542,7 @@ class WakeTest(unittest.TestCase):
         self.conn.commit()
         self.assertEqual(self.sweep(), 0)
         self.assertEqual(self.posted, [])
-        self.assertEqual(sessions.marked_wakes(db_path(self.home), ["c1"]), set())
+        self.assertEqual(set(sessions.wake_marks(db_path(self.home), ["c1"])), set())
         # One that ends after the watch began is woken.
         self.child("c2", "s", said="from just now")
         self.assertEqual(self.sweep(), 1)

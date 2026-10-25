@@ -297,7 +297,7 @@ class StageWakeTests(StageCase):
         self.assertEqual(asyncio.run(delegation.sweep(self.adapter, self.home)), 0)
         self.assertEqual(self.posted, [], "a wake would be a second run on a stage's session")
         # Dropped at the drop, with its reason: the stage's child is settled and never read again.
-        self.assertEqual(sessions.marked_wakes(db_path(self.home), [CHILD]), {CHILD})
+        self.assertEqual(set(sessions.wake_marks(db_path(self.home), [CHILD])), {CHILD})
         mark = sessions.wake_marks(db_path(self.home), [CHILD])[CHILD]
         self.assertEqual(mark["status"], "dropped")
         self.assertEqual(mark["reason"], delegation.DROP_STAGE)

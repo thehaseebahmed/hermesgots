@@ -2,7 +2,7 @@
 
 Usage: python3 .github/scripts/check-hermes-internals.py <hermes checkout> <plugin dir>
 
-The wake text is a copy of Hermes's own completion notice (#595, ADR 0052): the first line, the
+The wake text is a copy of Hermes's own completion notice (#595): the first line, the
 intro, the batch header, the truncation note and its Status-line mark, the iteration nudge and the
 machine-provenance footer are Hermes's sentences, composed here rather than imported, and three of
 its internals are read by name (``_active_subagents``, ``_run_statuses``, ``interrupt_subagent``).
@@ -41,6 +41,10 @@ ANCHORS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
         "A background subagent you dispatched earlier has finished. You may",
     ),
     (("tools/process_registry_notifications.py",), "TRUNCATED — subagent hit its iteration cap"),
+    (
+        ("tools/process_registry_notifications.py",),
+        "Unrecorded outcomes remain unknown; inspect evidence before retrying side effects.",
+    ),
     (("tools/process_registry_notifications.py",), "hit max_iterations — work may be incomplete"),
     (("tools/process_registry_notifications.py",), "background processes completed."),
     (("tools/process_registry_notifications.py",), "The subagent did not complete successfully (status="),

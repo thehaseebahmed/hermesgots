@@ -1160,24 +1160,12 @@ def after_run(**kwargs: Any) -> None:
 SETTLED_WAKES = (None, "sent", "dropped")
 
 
-def marked_wakes(path: Path, subagent_ids: Iterable[str]) -> Set[str]:
-    """The subagents among ``subagent_ids`` that have a wake mark of any status.
-
-    Kept as the set-shaped answer older callers reach for; a mark now carries a disposition, so
-    anything that acts on the answer asks ``wake_marks`` and reads what became of each wake. This
-    is its one source of truth rather than a second query to keep in step with the first.
-    """
-    return set(wake_marks(path, subagent_ids))
-
-
 def wake_marks(path: Path, subagent_ids: Iterable[str]) -> Dict[str, Dict[str, Any]]:
     """What has become of each subagent's wake, for every one of ``subagent_ids`` that has a mark.
 
-    One read, like ``marked_wakes``: the watcher asks it about a whole page of ends, then again for
-    one batch, and a per-child lookup would open the store once per child. A mark with no status is
-    one a store older than v41 wrote — a wake that was posted, so it reads as sent. A reason a drop
-    carries is one of ``delegation``'s DROP_* words; a held or backing-off wake's is the sentence
-    that says why it waits — read by an operator, not by a rule.
+    A mark with no status is one a store older than v41 wrote — a wake that was posted, so it
+    reads as sent. A drop's reason is one of ``delegation``'s DROP_* words; a hold's or backoff's
+    is the sentence that says why it waits — read by an operator, not by a rule.
     """
     ids = [one for one in subagent_ids if one]
     if not ids or not path.exists():
@@ -1203,29 +1191,14 @@ def wake_marks(path: Path, subagent_ids: Iterable[str]) -> Dict[str, Dict[str, A
     }
 
 
-def mark_wake(path: Path, subagent_id: str, parent_id: str, run_id: Optional[str]) -> None:
-    """Records that a subagent's result has been posted to its conversation, and the run it started.
-
-    Written after the post answered, never before: a post that failed must be retried, and the
-    ``Idempotency-Key`` it carries is what makes that retry safe.
-    """
-    mark_wakes(path, parent_id, [subagent_id], run_id)
-
-
 def mark_wakes(path: Path, parent_id: str, subagent_ids: Iterable[str], run_id: Optional[str]) -> None:
-    """Records one posted run for every subagent of a batch, in one transaction.
-
-    A batch is marked as a whole: half a batch settled would be a batch half-posted, and nothing
-    downstream could tell which half the host already ran.
-    """
+    """Records one posted run for every subagent of a batch, in one transaction: half a batch
+    settled would be a batch half-posted."""
     _write_marks(path, parent_id, subagent_ids, status="sent", run_id=run_id)
 
 
 def hold_wakes(path: Path, parent_id: str, subagent_ids: Iterable[str], reason: str) -> None:
-    """Records that a wake is owed but may not go yet, and why.
-
-    Holding costs nothing: nothing was posted, so no attempt is spent and no backoff is set.
-    """
+    """Records that a wake is owed but may not go yet, and why."""
     _write_marks(path, parent_id, subagent_ids, status="held", reason=reason)
 
 
@@ -1322,17 +1295,21 @@ def _write_marks(
         conn.close()
 
 
-def put_wake_batch(path: Path, batch_id: str, root: str, members: Iterable[str]) -> None:
-    """Records a batch's intent before its run is posted.
+def put_wake_batch(
+    path: Path, batch_id: str, root: str, members: Iterable[str], text: str
+) -> None:
+    """Records a batch's intent — its membership and its text — before its run is posted.
 
-    The intent is what makes a restart mid-post safe: the retry re-posts this batch's own key, so
-    the host answers with the run it already started rather than starting a second one.
+    The text travels with the intent because a retry under this batch's key must be byte-identical
+    to the first attempt: core replays the run a repeated key already started, and answers 409 for
+    the same key over a different payload, which the outbox treats as permanent.
     """
     conn = connect(path)
     try:
         conn.execute(
-            "INSERT INTO subagent_wake_batches (id, root, members, created_at) VALUES (?, ?, ?, ?)",
-            (batch_id, root, json.dumps(list(members)), int(time.time() * 1000)),
+            """INSERT INTO subagent_wake_batches (id, root, members, text, created_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (batch_id, root, json.dumps(list(members)), text, int(time.time() * 1000)),
         )
     finally:
         conn.close()
@@ -1352,11 +1329,11 @@ def open_wake_batch(path: Path, root: str) -> Optional[Dict[str, Any]]:
     conn = connect(path)
     try:
         rows = conn.execute(
-            """SELECT id, root, members, created_at FROM subagent_wake_batches
+            """SELECT id, root, members, text, created_at FROM subagent_wake_batches
                WHERE root = ? AND run_id IS NULL ORDER BY created_at DESC""",
             (root,),
         ).fetchall()
-        for batch_id, batch_root, members, created_at in rows:
+        for batch_id, batch_root, members, text, created_at in rows:
             ids = _batch_members(members)
             if not ids:
                 continue
@@ -1370,6 +1347,7 @@ def open_wake_batch(path: Path, root: str) -> Optional[Dict[str, Any]]:
                 "id": batch_id,
                 "root": batch_root,
                 "members": ids,
+                "text": text,
                 "marks": marks,
                 "created_at": created_at,
             }
@@ -1388,7 +1366,7 @@ def finish_wake_batch(path: Path, batch_id: str, run_id: str) -> None:
 
 
 def _batch_members(raw: Any) -> List[str]:
-    """A batch row's members, oldest end first, as the JSON column keeps them."""
+    """A batch row's members, as the JSON column keeps them."""
     members = _json(raw, [])
     if not isinstance(members, list):
         return []

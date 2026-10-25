@@ -604,6 +604,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    id TEXT PRIMARY KEY,
                    root TEXT NOT NULL,
                    members TEXT NOT NULL,
+                   text TEXT NOT NULL,
                    created_at INTEGER NOT NULL,
                    run_id TEXT
                )"""

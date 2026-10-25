@@ -23,10 +23,9 @@ subagents' work in a new turn, without the user writing again.
 One run per conversation per look, however many of its children ended at once: a batch arrives in
 Hermes's own words — one header, one notice per child, one footer — so a fan-out that finished
 together is read as the one unit of work it was. The batch is also the idempotency unit
-(``wakeb_<batch id>``), and its intent is written before the post, so a restart mid-post re-posts
-the same key and the host answers with the run it already started; a lone child keeps the key it
-always had (``wake_<child id>``), so an upgrade mid-flight can never fire twice. What became of a
-wake is a disposition in the plugin's own store, and each one is a bound:
+(``wakeb_<batch id>``), and a lone child keeps the key it always had (``wake_<child id>``) — a
+restart neither doubles nor drops it (``docs/specs/async-delegation.md``, ADR 0038). What became
+of a wake is a disposition in the plugin's own store, and each one is a bound:
 
 - held: owed, but not now. A confirmation gate or a live turn of the conversation — checked before
   the post and again after it, since a wake is an ordinary run and may cross neither — or a post
@@ -77,21 +76,15 @@ WAKE_LIMIT = 100
 # woken: a child whose post failed must not be pushed out of the window by newer, settled ends.
 WAKE_PAGES = 10
 WAKE_RESULT_CHARS = 20_000
-# One batched wake's whole result budget, shared by its children in the order they are listed: a
-# wake is never refused for size, so a result that doesn't fit is cut, and says so.
+# One batched wake's whole result budget, shared by its children in the order they are listed.
 WAKE_BATCH_CHARS = 40_000
-# And one batch's whole message: with the boilerplate each notice carries, 50 children stay under
-# the outbox's own text cap the wake's direct post would otherwise sail past. A fan-out larger
-# than this wakes in the next look's batch — nothing is lost, only later.
+# One batch's membership, so every mark, read and post that names the batch covers it whole —
+# well inside SQLite's 999-variable limit. Past it the rest wake in the next look's batch:
+# nothing is lost, only later.
 WAKE_BATCH_MEMBERS = 50
-# A failed post is retried on a growing wait: attempt n waits ``WAKE_BACKOFF_SECONDS[n - 1]``, and
-# the eighth failure drops the wake rather than waiting again. A bound, not a queue.
 WAKE_MAX_ATTEMPTS = 8
 WAKE_BACKOFF_SECONDS = (5.0, 15.0, 45.0, 135.0, 405.0, 1215.0, 3645.0)
-# How old an owed end may be before it is history: a replay bound, in epoch ms.
 WAKE_MAX_AGE_MS = 48 * 60 * 60 * 1000
-# Why a wake will never be posted: a stage keeps its one run, the host refused for good, the end is
-# too old to hand over, or it failed as often as a wake may.
 DROP_STAGE, DROP_GONE, DROP_STALE, DROP_EXHAUSTED = "stage", "gone", "stale", "exhausted"
 
 # Core's completion notice, and its machine-provenance footer (``INTERNAL_NOTIFICATION_FOOTER``,
@@ -130,8 +123,9 @@ ITERATION_NUDGE = (
     "response summarizing what you've found and accomplished so far, without calling any more tools."
 )
 # Where the evidence is when a child didn't finish, in core's own recovery shape
-# (``_recovery_lines`` in the same file) — honest about this case: the
-# status is the one its session closed with, and its transcript is the sub-thread the app draws.
+# (``_recovery_lines`` in the same file), adapted where core's words would lie: its parenthetical
+# says "before owner exit" — here the owner is alive and the child's session closed — and the
+# transcript pointer names the sub-thread the app draws for the child.
 RECOVERY_STATUS = (
     "Last persisted unit status: {status} (recorded when the subagent's session closed; not current "
     "liveness). Unrecorded outcomes remain unknown; inspect evidence before retrying side effects."
@@ -360,28 +354,8 @@ def pending(hermes_home: Path, since: int, offset: int = 0) -> List[Dict[str, An
     return [one for one in (_delegation(row) for row in rows) if one is not None]
 
 
-def _ended_delegation(hermes_home: Path, child_id: str) -> Any:
-    """One ended delegation, read again by the id a stored batch names — or None when it is gone.
-
-    A retry posts the children its batch was made of, re-read here rather than trusted: a member
-    that no longer reads as ended is left out of the retry, never made up for. ``_UNREADABLE`` is
-    the third answer — the store couldn't be read — because a failure is not a row's absence and
-    must never settle a wake.
-    """
-    conn = sessions._open_state(hermes_home)
-    if conn is None:
-        return _UNREADABLE
-    try:
-        with closing(conn):
-            row = conn.execute(f"{_DELEGATIONS} AND s.id = ?", (child_id,)).fetchone()
-    except sqlite3.Error:
-        logger.debug("memento: couldn't read subagent %s", child_id, exc_info=True)
-        return _UNREADABLE
-    return _delegation(row) if row else None
-
-
-# One delegation, as both the sweep's page and a retry read it: the child's own row, its parent, and
-# the goal its first user turn gave it.
+# One delegation as the sweep reads it: the child's own row, its parent, and the goal its first
+# user turn gave it.
 _DELEGATIONS = """SELECT s.id, s.model, s.model_config, s.parent_session_id, s.started_at,
         s.ended_at, s.end_reason, s.tool_call_count, s.api_call_count,
         (SELECT content FROM messages m WHERE m.session_id = s.id AND m.role = 'user'
@@ -393,8 +367,7 @@ _DELEGATIONS = """SELECT s.id, s.model, s.model_config, s.parent_session_id, s.s
 
 
 def _delegation(row: sqlite3.Row) -> Optional[Dict[str, Any]]:
-    """One row of ``_DELEGATIONS`` as the sweep reads a child, or None for one that isn't a
-    delegation of the session it sits under."""
+    """One row of ``_DELEGATIONS``, or None for one that isn't a delegation of its session."""
     parent = _delegated_from(row["model_config"])
     if parent != row["parent_session_id"]:
         return None
@@ -415,13 +388,8 @@ async def sweep(adapter: Any, home: Path) -> int:
     """Wakes every bot whose subagents have finished and haven't woken it yet; answers how many went.
 
     Nothing is kept in memory: the store's marks are the only record of what was posted, so a
-    plugin that restarts resumes exactly where the last one left off, and a wake that failed to post
-    is still owed on the next look. What can never be woken is dropped once, so a look every 5
-    seconds doesn't carry it forever: an end 48 hours old is history, not work to hand over, and a
-    stage's child is settled at the posting seam (``_wake_root``) — the one place every wake goes
-    through, where a second entry point can never post a second run onto a stage.
-
-    One run per conversation per look, however many of its children are owed.
+    restart resumes exactly where the last one left off. One run per conversation per look,
+    however many of its children are owed, and only through the posting seam (``_wake_root``).
     """
     path = db_path(home)
     # Stamped before the read, so a child that ends between the two is one of the watcher's own.
@@ -463,15 +431,9 @@ def _by_root(home: Path, rows: Iterable[Dict[str, Any]]) -> List[Tuple[str, List
 async def _unwoken(home: Path, path: Path, since: int) -> List[Dict[str, Any]]:
     """The ended delegations that still need a wake, read past the ones that are settled.
 
-    One page (``WAKE_LIMIT`` ends) is read at a time, with its marks read in one batch: a page whose
-    every end is settled says nothing about the ends behind it, so the next page is read, up to
-    ``WAKE_PAGES``. A page shorter than the window ends the walk — there is nothing behind it.
-
-    Settled is a mark whose wake was sent or dropped, and one a store older than v41 wrote with no
-    status at all: none of them is ever collected again. A held wake is owed once its wait has
-    passed, so a gate that clears and a backoff that expires are both simply the next look's work.
-    Dropped marks make their pages walk-past-cheap, so a wake that will never be posted can't crowd
-    out one that still can.
+    Settled is sent, dropped, or a mark a store older than v41 wrote with no status at all. A held
+    wake is owed again once its wait passes, so a gate that clears and a backoff that expires are
+    both simply the next look's work.
     """
     unmarked: List[Dict[str, Any]] = []
     now = _now_ms()
@@ -497,25 +459,44 @@ async def _unwoken(home: Path, path: Path, since: int) -> List[Dict[str, Any]]:
     return unmarked
 
 
+async def _wakeable(
+    home: Path, children: List[Dict[str, Any]]
+) -> Tuple[List[Dict[str, Any]], Dict[str, List[str]]]:
+    """The children that may wake their bot, grouped with the ones a stage owns its one run to.
+
+    A stage is asked once per conversation it hangs off — stage-ness is the parent's, not the
+    child's. A check that couldn't be answered settles nothing: the child keeps its mark for the
+    next look.
+    """
+    wakeable: List[Dict[str, Any]] = []
+    staged: Dict[str, List[str]] = {}
+    answers: Dict[str, Optional[bool]] = {}
+    for child in children:
+        parent = child["parent_id"]
+        if parent not in answers:
+            answers[parent] = await asyncio.to_thread(_stage, home, parent)
+        if answers[parent] is True:
+            staged.setdefault(parent, []).append(child["id"])
+        elif answers[parent] is None:
+            logger.debug("memento: %s's stage check couldn't be answered; it waits", child["id"])
+        else:
+            wakeable.append(child)
+    return wakeable, staged
+
+
 async def _wake_root(adapter: Any, home: Path, root: str, children: List[Dict[str, Any]]) -> int:
     """Posts one run carrying every finished subagent of a conversation; 1 when it went.
 
     The only place a wake is posted, so every wake obeys the same rules however it arrives: the
     gate before the post and again after it, a stage's one run, the batch's bounds. A wake is an
-    ordinary run of the conversation and may cross neither a confirmation gate nor a live turn; a
-    gate that closes after the post leaves the batch unconfirmed with its key, which is what makes
-    the retry the same run rather than a second one.
+    ordinary run of the conversation and may cross neither a confirmation gate nor a live turn.
 
     The gate is asked before anything that costs more than ``memento.db`` — a conversation that
-    waits on its user for hours holds its batch every look, and waiting must cost nothing — and the
-    hold goes on the batch's stored members when one exists, even before their ``state.db`` rows are
-    re-read, so a held retry never opens the state store at all.
+    waits on its user for hours holds its batch every look, and waiting must cost nothing.
 
-    A batch already stored for this conversation is the batch: its members are re-read from
-    ``state.db`` and a member that no longer reads as ended is left out, so a retry covers the
-    children the batch was made of and re-posts its own key. A child that ended meanwhile waits for
-    the next look's batch — a batch is what ended together, and one already stored may already be
-    the run the host has.
+    A batch already stored for this conversation re-posts its own intent whole: the same key and
+    the same text, so the host replays the run it may already have rather than refusing a changed
+    payload under a key it remembers (``docs/specs/async-delegation.md``, ADR 0038).
     """
     path = db_path(home)
     now = _now_ms()
@@ -524,63 +505,45 @@ async def _wake_root(adapter: Any, home: Path, root: str, children: List[Dict[st
     held = await _deferred(adapter, home, root)
     if held:
         ids = stored["members"] if stored else [child["id"] for child in children]
-        await asyncio.to_thread(
-            sessions.hold_wakes, path, root if stored else parent_id, ids, held
-        )
+        # A stored batch's members hang off the conversation; fresh children off their parent.
+        hold_parent = root if stored else parent_id
+        await asyncio.to_thread(sessions.hold_wakes, path, hold_parent, ids, held)
         logger.debug("memento: the wake for %s waits: %s", root, held)
         return 0
     if stored:
-        # The batch is its stored members, re-read: a child that ended meanwhile waits for the next
-        # look's batch, and one whose row is gone is settled rather than invented.
-        children = await asyncio.to_thread(_retry_members, home, path, stored)
+        # The batch's text froze at its intent, so a retry re-posts it byte-for-byte under the
+        # batch's own key: core replays the run a repeated key already started and answers 409 for
+        # a changed payload, which the outbox treats as permanent — a retry that shed a vanished
+        # member would drop the whole batch. The gate above still guards the post, and what became
+        # of each member waits in its mark.
+        batch_id, members = stored["id"], stored["members"]
+        text, marks = stored["text"], stored["marks"]
+        if any(
+            mark.get("next_at") is not None and mark["next_at"] > now for mark in marks.values()
+        ):
+            return 0
+    else:
+        wakeable, staged = await _wakeable(home, children)
+        for stage_parent, ids in staged.items():
+            await asyncio.to_thread(sessions.drop_wakes, path, stage_parent, ids, DROP_STAGE)
+            logger.debug("memento: %s's completion doesn't wake it: a stage keeps its one run", root)
+        children = wakeable[:WAKE_BATCH_MEMBERS]
         if not children:
             return 0
-        parent_id = children[0]["parent_id"]
-        marks: Dict[str, Dict[str, Any]] = stored["marks"]
-    else:
-        marks = {}
-    # A stage is asked once per conversation it hangs off — stage-ness is the parent's, not the
-    # child's — and settled here, at the seam, so nothing else can post a second run onto it. A
-    # check that couldn't be answered settles nothing: the child keeps its mark for the next look.
-    wakeable: List[Dict[str, Any]] = []
-    staged: Dict[str, List[str]] = {}
-    stage_answers: Dict[str, Optional[bool]] = {}
-    for child in children:
-        parent = child["parent_id"]
-        if parent not in stage_answers:
-            stage_answers[parent] = await asyncio.to_thread(_stage, home, parent)
-        if stage_answers[parent] is True:
-            staged.setdefault(parent, []).append(child["id"])
-        elif stage_answers[parent] is None:
-            logger.debug("memento: %s's stage check couldn't be answered; it waits", child["id"])
-        else:
-            wakeable.append(child)
-    for stage_parent, ids in staged.items():
-        await asyncio.to_thread(sessions.drop_wakes, path, stage_parent, ids, DROP_STAGE)
-        logger.debug("memento: %s's completion doesn't wake it: a stage keeps its one run", root)
-    # One run is one turn's input: past the cap the rest are simply the next look's batch.
-    children = wakeable[:WAKE_BATCH_MEMBERS]
-    if not children:
-        return 0
-    if not stored:
         marks = await asyncio.to_thread(
             sessions.wake_marks, path, [child["id"] for child in children]
         )
-    if any(mark.get("next_at") is not None and mark["next_at"] > now for mark in marks.values()):
-        return 0
-    text, carried = await asyncio.to_thread(_text_for, home, children)
-    if not carried:
-        return 0
-    if stored:
-        batch_id, members = stored["id"], stored["members"]
-    else:
+        if any(
+            mark.get("next_at") is not None and mark["next_at"] > now for mark in marks.values()
+        ):
+            return 0
+        text, carried = await asyncio.to_thread(_text_for, home, children)
+        if not carried:
+            return 0
         batch_id, members = uuid.uuid4().hex[:20], carried
-        # The intent before the post: a restart between the two re-posts this batch, not a new one.
-        await asyncio.to_thread(sessions.put_wake_batch, path, batch_id, root, members)
-    # A batch is its own idempotent unit; a lone child keeps the key it always had, so an upgrade
-    # mid-flight can never post the same result twice. ``members`` is the batch's stored membership
-    # — a vanished member doesn't change the set the host may already be running — while the marks
-    # go to the children this post actually carried.
+        # The intent before the post, carrying the text itself: a restart between the two re-posts
+        # the same run, not a new one.
+        await asyncio.to_thread(sessions.put_wake_batch, path, batch_id, root, members, text)
     key = f"wakeb_{batch_id}" if len(members) >= 2 else f"wake_{members[0]}"
     body = outbox.clean_body(root, {"input": [{"role": "user", "content": text}]})
     try:
@@ -594,63 +557,28 @@ async def _wake_root(adapter: Any, home: Path, root: str, children: List[Dict[st
         )
     except outbox.StartError as error:
         await asyncio.to_thread(
-            _failed, path, parent_id, carried, str(error), error.permanent, marks
+            _failed, path, parent_id, members, str(error), error.permanent, marks
         )
         return 0
     run_id = started.get("run_id")
     if not isinstance(run_id, str) or not run_id:
         # An answer that names no run is a post that may not have landed: wait it out like a failure.
         await asyncio.to_thread(
-            _failed, path, parent_id, carried, "the host answered without a run", False, marks
+            _failed, path, parent_id, members, "the host answered without a run", False, marks
         )
         return 0
     post_held = await _deferred(adapter, home, root)
     if post_held:
-        # The gate closed while the post was in flight. Nothing is marked sent: the retry re-posts
-        # this batch's own key, so the host answers with the run it has rather than starting another.
-        await asyncio.to_thread(sessions.hold_wakes, path, parent_id, carried, post_held)
+        # The gate closed while the post was in flight: nothing is marked sent, so the retry
+        # re-posts this key and the host answers with the run it already started.
+        await asyncio.to_thread(sessions.hold_wakes, path, parent_id, members, post_held)
         logger.debug("memento: %s's wake landed into a gate and waits: %s", root, post_held)
         return 0
-    # The marks first, then the batch: a crash between them leaves members settled and the intent
-    # unconfirmed, which ``open_wake_batch`` reads as finished — never the other way round.
-    await asyncio.to_thread(sessions.mark_wakes, path, parent_id, carried, run_id)
+    # Marks first, then the confirm: a crash between them is read as finished, never as still owed.
+    await asyncio.to_thread(sessions.mark_wakes, path, parent_id, members, run_id)
     await asyncio.to_thread(sessions.finish_wake_batch, path, batch_id, run_id)
     events.note("runs", root, path, True)
     return 1
-
-
-# The third answer ``_ended_delegation`` gives: the row couldn't be read, which is not the same as
-# gone. A failure settles nothing — only a row that really isn't there drops a member.
-_UNREADABLE = object()
-
-
-def _retry_members(home: Path, path: Path, batch: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """A stored batch's members, re-read from ``state.db``: its own children, never a fresh read.
-
-    A member whose row is gone has nothing left to wake — a pruned store, a session removed — so it
-    is settled as gone, which is also what lets the batch finish. A member that couldn't be read is
-    not gone: the whole retry waits for the next look, so one locked store never settles an owed
-    wake, and no subset is posted under the batch's key without the members it was made of.
-    """
-    rows: List[Dict[str, Any]] = []
-    dropped: List[str] = []
-    for child_id in batch["members"]:
-        row = _ended_delegation(home, child_id)
-        if row is _UNREADABLE:
-            logger.debug(
-                "memento: batch %s's member %s couldn't be read; the retry waits",
-                batch["id"],
-                child_id,
-            )
-            return []
-        if row is None:
-            logger.debug("memento: batch %s's member %s is gone", batch["id"], child_id)
-            dropped.append(child_id)
-            continue
-        rows.append(row)
-    if dropped:
-        sessions.drop_wakes(path, batch["root"], dropped, DROP_GONE)
-    return rows
 
 
 def _failed(
@@ -664,8 +592,7 @@ def _failed(
     """Records a post that failed: a permanent refusal drops the wake, anything else waits it out.
 
     The count is the batch's, not one child's: a batch fails and retries together, so its members
-    share one count and one wait. A drop is said once, here — a watcher that looks every 5 seconds
-    must never say the same thing again — while a transient failure only earns a debug line.
+    share one count and one wait.
     """
     ids = [one for one in ids if one]
     if not ids:
@@ -685,7 +612,7 @@ def _failed(
 
 
 def _now_ms() -> int:
-    """The clock the marks keep, in epoch ms — read once per decision, so a batch is judged once."""
+    """The clock the marks keep, in epoch ms."""
     return int(time.time() * 1000)
 
 
