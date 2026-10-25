@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { App } from "@capacitor/app"
+import type { Importance } from "@capacitor/push-notifications"
 import { liveQuery } from "dexie"
 import { useLiveQuery } from "dexie-react-hooks"
 
@@ -20,10 +21,14 @@ import { callFunction, failure, functionUrl } from "@/lib/account"
 import {
   PUSH_CATEGORIES,
   PUSH_FEATURES,
+  allowedCategoryIds,
+  changedList,
+  channelPlan,
   categoryOn,
-  channelName,
   pushPath,
+  reachableCategories,
   wantedCategories,
+  type PhoneChannel,
   type PushCategory,
   type PushFeature,
 } from "@/lib/push-kinds"
@@ -279,34 +284,87 @@ function step<T>(what: string, promise: Promise<T>, ms = 15_000): Promise<T> {
   })
 }
 
-async function sendToken(device: string, token: string) {
-  const categories = wantedCategories((await getSettings()).pushCategories)
-  const response = await callFunction(
-    "POST",
-    functionUrl("registry", { route: "devices", id: device }),
-    { token, categories },
-  )
-  if (!response.ok) throw await failure(response)
-  registeredToken = token
-  sentCategories = categories.join()
+/** One pass's read of the phone: whether it lets this app notify, and the channels it lists. */
+interface PhoneRead {
+  allowed: boolean
+  channels: PhoneChannel[]
+}
+
+/** The phone read once a pass, so a token's POST and a resume's list compare against one answer. */
+async function readPhone(push: Push): Promise<PhoneRead> {
+  const allowed = (await push.checkPermissions()).receive === "granted"
+  if (!allowed) return { allowed, channels: [] }
+  try {
+    return { allowed, channels: (await push.listChannels()).channels }
+  } catch {
+    // A failed read is not an off switch: a channel the phone didn't mention counts as allowed.
+    return { allowed, channels: [] }
+  }
+}
+
+/** What the registry hears for this read: the phone's answer, held to what this device can reach. */
+async function categoriesToRegister(read: PhoneRead) {
+  const { meetings } = await getSettings()
+  return allowedCategoryIds(read, meetings)
 }
 
 /** The categories the registry last heard for this device, so only a change is sent again. */
 let sentCategories: string | undefined
 
-/** Tells the registry which categories this phone wants. An older app's registration has none. */
-async function syncCategories() {
-  const { fcm, pushCategories } = await getSettings()
-  if (!fcm?.on || !registeredToken) return
-  const categories = wantedCategories(pushCategories)
-  if (categories.join() === sentCategories) return
+/**
+ * A call about this device's categories, remembering the list the registry now holds. What was sent
+ * is kept only once the call answers, so one that failed is asked again on the next pass.
+ */
+async function tellRegistry(method: "POST" | "PATCH", device: string, body: unknown, wire: string) {
   const response = await callFunction(
-    "PATCH",
-    functionUrl("registry", { route: "devices", id: fcm.device }),
-    { categories },
+    method,
+    functionUrl("registry", { route: "devices", id: device }),
+    body,
   )
   if (!response.ok) throw await failure(response)
-  sentCategories = categories.join()
+  sentCategories = wire
+}
+
+/** Registers a token, with the categories the phone allows: the pass's read where there is one. */
+async function sendToken(device: string, token: string, read?: PhoneRead) {
+  const categories = await categoriesToRegister(read ?? (await readPhone((await plugin()).push)))
+  await tellRegistry("POST", device, { token, categories }, categories.join())
+  registeredToken = token
+}
+
+/** The PATCH under way, so a pass landing inside one waits rather than sending the same list twice. */
+let patching: Promise<void> | undefined
+
+/** The newest read that landed inside the PATCH under way: told once it settles, never dropped. */
+let parked: PhoneRead | undefined
+
+/**
+ * Tells the registry which categories this phone still allows. A PATCH needs only the device id:
+ * with the phone's notifications off no token arrives, and the empty list must still reach the
+ * registry. Only a change is sent, so a device carrying an older list is told the live one exactly
+ * once and then leaves it alone. A pass that lands inside a call is parked rather than dropped: when
+ * the call settles its read is compared against what was sent, and one more PATCH follows if the
+ * phone changed again meanwhile, so a list a later read has already left behind is never sent.
+ */
+function syncCategories(device: string, read?: PhoneRead): Promise<void> {
+  parked = read ?? parked
+  if (patching) return patching
+  const call = (async () => {
+    while (parked) {
+      const next = parked
+      parked = undefined
+      const categories = await categoriesToRegister(next)
+      const wire = changedList(sentCategories, categories)
+      // A read that landed while this call was out is the next turn's: it is compared then.
+      if (wire !== undefined) await tellRegistry("PATCH", device, { categories }, wire)
+    }
+  })().finally(() => {
+    patching = undefined
+    // A read that landed as the last call settled starts the drain it was waiting for.
+    if (parked) void syncCategories(device).catch(() => {})
+  })
+  patching = call
+  return call
 }
 
 const openers = new Set<(path: string) => void>()
@@ -343,20 +401,38 @@ async function listen(push: Push) {
     if (openers.size) openers.forEach((open) => open(path))
     else pendingOpen = path
   })
-  // One channel per category: Android lets the user turn each off in its own settings too. The
-  // test notification has the one the app made before there were categories.
-  await push
-    .createChannel({ id: "sessions", name: "Test notification", importance: 4 })
-    .catch(() => {})
-  for (const category of PUSH_CATEGORIES) {
-    await push
-      .createChannel({
-        id: category.id,
-        name: channelName(category),
-        importance: category.importance,
-      })
-      .catch(() => {})
-  }
+}
+
+/** The channels written this launch, and the Meetings flag they were written for. */
+let provisioned: Promise<void> | undefined
+let provisionedFor: boolean | undefined
+
+/** The `sessions` channel an earlier build made for every device, deleted once a launch. */
+let legacyDeleted = false
+
+/**
+ * Makes the channel of every category this phone can reach, once a launch and again when the
+ * Meetings experiment flips: its two are reachable only while it is on, so turning it on mid-session
+ * gives them the channels they never got. Android lets the user switch each one in its own settings.
+ * A channel made again with its own id is renamed in place, at the importance the phone reported.
+ */
+function provisionChannels(push: Push, held: PhoneChannel[], meetings = false) {
+  if (provisionedFor === meetings) return provisioned
+  provisionedFor = meetings
+  provisioned = Promise.all(
+    channelPlan(reachableCategories(meetings), held).map((channel) =>
+      push
+        .createChannel({ ...channel, importance: channel.importance as Importance })
+        .catch(() => {}),
+    ),
+  ).then(async () => {
+    if (legacyDeleted) return
+    legacyDeleted = true
+    // The test notification's channel is made on the tap that sends one, so the one an earlier
+    // build made for every device is deleted rather than left to sit in the phone's settings.
+    await push.deleteChannel({ id: "sessions" }).catch(() => {})
+  })
+  return provisioned
 }
 
 async function enableNative(): Promise<PushPermission> {
@@ -371,6 +447,10 @@ async function enableNative(): Promise<PushPermission> {
   if (!nativeConfigured) throw new Error("This build has no Firebase configuration")
   try {
     await listen(push)
+    // The switch's own pass: the channels first, then the token, so a push never names a channel the
+    // phone has not been given.
+    const read = await readPhone(push)
+    await provisionChannels(push, read.channels, settings.meetings)
     const token = new Promise<string>((resolve, reject) => {
       pendingToken = { resolve, reject }
     })
@@ -383,6 +463,7 @@ async function enableNative(): Promise<PushPermission> {
       await step("Firebase's token", token).finally(() => {
         pendingToken = undefined
       }),
+      read,
     )
   } catch (error) {
     pendingToken = undefined
@@ -409,26 +490,52 @@ async function disableNative() {
   }
 }
 
+/** The re-registration waiting on the pass, one per app: the newest pass's read replaces it. */
+let categoriesTimer: number | undefined
+
+/**
+ * Registers the list once the registration event has had time to land: that event carries a fresh
+ * token and posts the list itself, so this only covers the resume where the token didn't move. What
+ * is handed over is the read, not its answer: the phone is read when the timer fires, so a channel
+ * switched off in those three seconds travels with the list, and a list the event's own POST has
+ * just sent is not overwritten with the one this pass began with.
+ */
+function soonCategories(device: string, read: () => Promise<PhoneRead>) {
+  window.clearTimeout(categoriesTimer)
+  categoriesTimer = window.setTimeout(() => {
+    void read()
+      .then((phone) => syncCategories(device, phone))
+      .catch(() => {})
+  }, 3000)
+}
+
+/** One pass: the phone is read once, its channels made for this launch's features, its list registered. */
+async function syncNative() {
+  const { fcm, meetings } = await getSettings()
+  if (fcm?.trying) {
+    // The last attempt to register ended the app; stay off until the user turns it on again.
+    await saveSettings({ fcm: { device: fcm.device, on: false } })
+    return
+  }
+  if (!fcm?.on || !nativeConfigured) return
+  const { push } = await plugin()
+  await listen(push)
+  const read = await readPhone(push)
+  // A phone that cannot notify has no channel to make and no token to collect; its empty list still
+  // reaches the registry below. The channels come before the registration, so the token the event
+  // brings is posted with a read that saw them.
+  if (read.allowed) {
+    await provisionChannels(push, read.channels, meetings)
+    await guarded(fcm.device, () => push.register())
+  }
+  soonCategories(fcm.device, () => readPhone(push))
+}
+
 /** On launch and whenever the app returns, a rotated token or a new sign-in is told to the registry. */
 function startNative() {
-  const sync = async () => {
-    const { fcm } = await getSettings()
-    if (fcm?.trying) {
-      // The last attempt to register ended the app; stay off until the user turns it on again.
-      await saveSettings({ fcm: { device: fcm.device, on: false } })
-      return
-    }
-    if (!fcm?.on || !nativeConfigured) return
-    const { push } = await plugin()
-    if ((await push.checkPermissions()).receive !== "granted") return
-    await listen(push)
-    await guarded(fcm.device, () => push.register())
-    // The registration event brings the token; an install from before categories says them now.
-    setTimeout(() => void syncCategories().catch(() => {}), 3000)
-  }
-  void sync().catch(() => {})
+  void syncNative().catch(() => {})
   void App.addListener("resume", () => {
-    void sync().catch(() => {})
+    void syncNative().catch(() => {})
     void clearNotifications()
   })
 }
@@ -437,6 +544,12 @@ function startNative() {
 export async function sendTestPush() {
   const { fcm } = await getSettings()
   if (!isNative || !fcm?.on) throw new Error("Notifications are off")
+  // Its channel is made here, on the tap that sends one, so a device that never sends a test never
+  // lists it. Before the POST: a push must never arrive ahead of the channel it names.
+  const { push } = await plugin()
+  await push
+    .createChannel({ id: "test_notification", name: "Test notification", importance: 4 })
+    .catch(() => {})
   const response = await callFunction(
     "POST",
     functionUrl("registry", { route: "push-test", id: fcm.device }),
@@ -444,18 +557,17 @@ export async function sendTestPush() {
   if (!response.ok) throw await failure(response)
 }
 
-/** Turns some categories of push on or off on this device, and tells whoever sends them. */
+/** Turns some categories of push on or off where the app's own list is the switch: the web. */
 async function setCategories(ids: PushCategory[], on: boolean) {
+  // A phone reads its own channels instead, so a list stored there would have no reader (ADR 0050).
+  if (isNative) return
   const { pushCategories } = await getSettings()
   await saveSettings({
     pushCategories: { ...pushCategories, ...Object.fromEntries(ids.map((id) => [id, on])) },
   })
-  if (isNative) await syncCategories()
-  else {
-    // Every bot's plugin keeps what this device asked for with its subscription.
-    given.clear()
-    await syncPush()
-  }
+  // Every bot's plugin keeps what this device asked for with its subscription.
+  given.clear()
+  await syncPush()
 }
 
 export function setPushCategory(category: PushCategory, on: boolean) {

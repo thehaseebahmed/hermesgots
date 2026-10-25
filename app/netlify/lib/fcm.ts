@@ -228,10 +228,10 @@ export function message(
         ttl: "600s",
         // A newer message of the same category about the same thing replaces one still showing. The
         // app makes a channel for each category (`src/lib/push.ts`), which Android's settings turn
-        // off one by one; the test has the one the app has always had.
+        // off one by one; the test has its own, made on the tap that sends one.
         notification: {
           tag: `${category}:${sessionId}`.slice(0, 200),
-          channel_id: kind === "test" ? "sessions" : category,
+          channel_id: kind === "test" ? "test_notification" : category,
         },
       },
     },

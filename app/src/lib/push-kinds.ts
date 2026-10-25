@@ -32,7 +32,10 @@ export interface PushCategoryInfo {
   title: string
   /** On until the user turns it off; the quieter ones start off. */
   on: boolean
-  /** Android's importance for its channel: 4 makes a sound and peeks, 3 makes a sound, 2 is silent. */
+  /**
+   * Android's importance for its channel: 4 makes a sound and peeks, 3 makes a sound, 2 is silent.
+   * Only what waits on the user may peek; a failure or a completion must not take over the screen.
+   */
   importance: 2 | 3 | 4
 }
 
@@ -52,7 +55,7 @@ export const PUSH_CATEGORIES: PushCategoryInfo[] = [
     on: true,
     importance: 4,
   },
-  { id: "chat_run_failed", feature: "chats", title: "Run failed", on: true, importance: 4 },
+  { id: "chat_run_failed", feature: "chats", title: "Run failed", on: true, importance: 3 },
   { id: "chat_run_done", feature: "chats", title: "Run finished", on: false, importance: 3 },
   {
     id: "code_input",
@@ -61,7 +64,7 @@ export const PUSH_CATEGORIES: PushCategoryInfo[] = [
     on: true,
     importance: 4,
   },
-  { id: "code_run_failed", feature: "code", title: "Run failed", on: true, importance: 4 },
+  { id: "code_run_failed", feature: "code", title: "Run failed", on: true, importance: 3 },
   { id: "code_run_done", feature: "code", title: "Run finished", on: false, importance: 3 },
   {
     id: "code_pr_checks",
@@ -80,7 +83,7 @@ export const PUSH_CATEGORIES: PushCategoryInfo[] = [
   {
     id: "code_afk_pr",
     feature: "code",
-    title: "A task's pull request is ready to review",
+    title: "Pull request ready to review",
     on: true,
     importance: 3,
   },
@@ -95,7 +98,7 @@ export const PUSH_CATEGORIES: PushCategoryInfo[] = [
   {
     id: "research_input",
     feature: "research",
-    title: "Brief and scope to review",
+    title: "Brief or scope to review",
     on: true,
     importance: 4,
   },
@@ -116,6 +119,84 @@ export function wantedCategories(prefs: PushPrefs | undefined) {
   return PUSH_CATEGORIES.filter((category) => categoryOn(category, prefs)).map(
     (category) => category.id,
   )
+}
+
+/**
+ * The categories this device can reach, and so the channels it gets: Meetings' two exist only once
+ * that experiment is on, the other fourteen always.
+ */
+export function reachableCategories(meetings?: boolean) {
+  return PUSH_CATEGORIES.filter((category) => category.feature !== "meetings" || Boolean(meetings))
+}
+
+/**
+ * A channel as Android lists it for this app: its id and the importance the user left it at. The
+ * plugin answers with the whole channel; only these two decide what is still allowed.
+ */
+export interface PhoneChannel {
+  id: string
+  /** 0 is the user's off, 2 to 4 are still on, absent says nothing. */
+  importance?: number
+}
+
+export interface PhoneChannels {
+  /** Whether the phone lets this app notify at all: its master switch, read as the permission. */
+  allowed: boolean
+  /** The channels the phone lists; one it doesn't list has not been created yet. */
+  channels: PhoneChannel[]
+}
+
+/**
+ * The categories the registry should be told this phone still allows. Android owns each switch, so
+ * the phone is read, not asked: a channel at importance none was switched off in its settings and
+ * is left out, one it doesn't list has not been created yet and counts as allowed, and with its
+ * notifications off nothing is. The universe is every category this device can reach, so a first
+ * launch registers the full list.
+ */
+export function allowedCategoryIds(report: PhoneChannels, meetings?: boolean): PushCategory[] {
+  if (!report.allowed) return []
+  const off = new Set(
+    report.channels.filter((channel) => channel.importance === 0).map((channel) => channel.id),
+  )
+  return reachableCategories(meetings)
+    .filter((category) => !off.has(category.id))
+    .map((category) => category.id)
+}
+
+/**
+ * The list to tell the registry, or nothing when it already heard it: the comparison is the wire's
+ * own form, the joined ids, so a device carrying an older list is told the live one exactly once
+ * and a resume that changed nothing costs no call. A list never sent is always a change.
+ */
+export function changedList(sent: string | undefined, next: PushCategory[]) {
+  const wire = next.join()
+  return wire === sent ? undefined : wire
+}
+
+/** A channel a launch writes: its id, the name Android's list shows, and the importance to make it. */
+export interface PlannedChannel {
+  id: PushCategory
+  name: string
+  /** Android's importance: the phone's own where it reported one, else the row's default. */
+  importance: number
+}
+
+/**
+ * The channels to write, one per reachable category: a channel the phone already holds keeps the
+ * importance Android reported, and one it never had is made at its row's importance. Android takes
+ * an app's importance only at creation, so a default written later would never take — the phone's
+ * answer is the only one that means anything once a channel exists.
+ */
+export function channelPlan(
+  categories: PushCategoryInfo[],
+  held: PhoneChannel[],
+): PlannedChannel[] {
+  const reported = new Map(held.map((channel) => [channel.id, channel.importance]))
+  return categories.map((category) => ({
+    id: category.id,
+    name: channelName(category),
+    importance: reported.get(category.id) ?? category.importance,
+  }))
 }
 
 /** The category's name in Android's notification settings, where the feature isn't a heading. */

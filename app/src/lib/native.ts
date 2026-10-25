@@ -14,6 +14,40 @@ export async function minimizeAndroidApp() {
   await App.minimizeApp()
 }
 
+/** The plugin's registration name, as `MainActivity` registers it: the phone's own settings screen. */
+const NOTIFICATION_SETTINGS_PLUGIN = "NotificationSettings"
+
+interface NotificationSettingsPlugin {
+  open(): Promise<void>
+}
+
+const NotificationSettings = registerPlugin<NotificationSettingsPlugin>(
+  NOTIFICATION_SETTINGS_PLUGIN,
+)
+
+/**
+ * Opens the phone's own notification settings for this app: the master switch, then every channel
+ * with its own on/off, sound and peek setting. Those are the switches Android keeps and the app can
+ * only read back, so this is where a phone changes them. Returns nothing when there is nothing to
+ * open, and the message to show when the screen was asked for and refused.
+ */
+export async function openNotificationSettings(): Promise<string | undefined> {
+  if (!isNative) return
+  // An APK built before the plugin has no screen to open and no method to call: one would throw.
+  if (!Capacitor.isPluginAvailable(NOTIFICATION_SETTINGS_PLUGIN)) {
+    console.debug("[memento] no notification settings plugin in this build")
+    return
+  }
+  try {
+    await NotificationSettings.open()
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error ?? "")
+    return reason
+      ? `Couldn't open notification settings: ${reason}`
+      : "Couldn't open notification settings"
+  }
+}
+
 interface OpenImagePlugin {
   open(options: { dataBase64: string; name: string; type?: string }): Promise<void>
 }
