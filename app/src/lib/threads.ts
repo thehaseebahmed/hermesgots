@@ -1,5 +1,5 @@
 import Dexie from "dexie"
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { matchPath, useLocation } from "react-router"
 
@@ -66,12 +66,15 @@ async function latestLine(conversationId: string) {
 /**
  * A bot's chats as threads, oldest started first so the newest sits at the bottom by the composer.
  * They keep the order they were started in, so a new message doesn't move a thread.
+ *
+ * `undefined` is "not answered yet": the hook hands back the answer it already had while the next
+ * one lands, so a list read for another bot is no answer at all rather than no threads.
  */
 export function useThreads(profileId: string | undefined): Thread[] | undefined {
   const live = useWaiting()
   const subagents = useLiveSubagents()
-  const rows = useLiveQuery(async () => {
-    if (!profileId) return []
+  const answer = useLiveQuery(async () => {
+    if (!profileId) return { profileId, rows: [] }
     const chats = await db.conversations
       .where("[profileId+updatedAt]")
       .between([profileId, -Infinity], [profileId, Infinity])
@@ -120,23 +123,29 @@ export function useThreads(profileId: string | undefined): Thread[] | undefined 
       }),
     )
     // Main stays first, whenever it was made.
-    return rows.sort(
-      (a, b) =>
-        Number(Boolean(b.chat.main)) - Number(Boolean(a.chat.main)) ||
-        a.chat.createdAt - b.chat.createdAt,
-    )
+    return {
+      profileId,
+      rows: rows.sort(
+        (a, b) =>
+          Number(Boolean(b.chat.main)) - Number(Boolean(a.chat.main)) ||
+          a.chat.createdAt - b.chat.createdAt,
+      ),
+    }
   }, [profileId])
 
-  return rows?.map(({ chat, opener, last, replies, streaming, failed, local }) => {
-    const reason = local ?? live[chat.hermesSessionId]
-    const state = threadState({
-      waiting: Boolean(reason),
-      streaming,
-      failed,
-      subagents: subagents[chat.hermesSessionId],
+  return useMemo(() => {
+    if (!answer || answer.profileId !== profileId) return undefined
+    return answer.rows.map(({ chat, opener, last, replies, streaming, failed, local }) => {
+      const reason = local ?? live[chat.hermesSessionId]
+      const state = threadState({
+        waiting: Boolean(reason),
+        streaming,
+        failed,
+        subagents: subagents[chat.hermesSessionId],
+      })
+      return { chat, opener, last, replies, state, reason }
     })
-    return { chat, opener, last, replies, state, reason }
-  })
+  }, [answer, profileId, live, subagents])
 }
 
 export interface BotSummary {
@@ -266,8 +275,12 @@ export interface BotPane {
   thread?: string
   /** The thread the third pane reopens while the address is Main: this bot's last one opened here. */
   last?: string
-  /** Whether the bot has a thread at all, since a bot with none gets the pane's empty state. */
-  threads: boolean
+  /**
+   * Whether the bot has a thread at all, since a bot with none gets the pane's empty state. Absent
+   * while its thread list has not answered for this bot: an unanswered list is never read as no
+   * threads, so the pane holds what it had until the answer lands.
+   */
+  threads?: boolean
 }
 
 /**
@@ -289,18 +302,15 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
   const hint = (state as { bot?: string } | null)?.bot
   // A Main id names its own bot, so only a thread's id costs a row read. The query answers with
   // the address it ran for, so an answer for the one before it can't pass for this one's.
-  const owner = useLiveQuery(
-    async (): Promise<{ chat?: string; found?: ChatOwner | null }> => {
-      if (!chat) return { found: null }
-      if (main) return { chat, found: { profileId: main } }
-      const found = await db.conversations.get(chat)
-      return {
-        chat,
-        found: found ? { profileId: found.profileId, projectId: found.projectId } : null,
-      }
-    },
-    [chat, main],
-  )
+  const owner = useLiveQuery(async (): Promise<{ chat?: string; found?: ChatOwner | null }> => {
+    if (!chat) return { found: null }
+    if (main) return { chat, found: { profileId: main } }
+    const found = await db.conversations.get(chat)
+    return {
+      chat,
+      found: found ? { profileId: found.profileId, projectId: found.projectId } : null,
+    }
+  }, [chat, main])
   const found = owner && owner.chat === chat ? owner.found : undefined
   // The bot this pane is for, and the thread the address itself is, if it is one of the bot's.
   let profileId: string | undefined
@@ -338,6 +348,7 @@ export function useBotPane(enabled: boolean | undefined): BotPane | undefined {
 
   if (!large || !enabled || !profileId) return undefined
   if (thread) return { profileId, thread, threads: true }
-  // Nothing remembered yet reads as no thread to show, never as a bot without threads.
-  return { profileId, last: answer?.last, threads: answer?.threads !== 0 }
+  // Nothing remembered yet reads as no thread to show, never as a bot without threads; a list that
+  // has not answered is not a list of none.
+  return { profileId, last: answer?.last, threads: answer ? answer.threads > 0 : undefined }
 }

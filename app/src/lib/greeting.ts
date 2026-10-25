@@ -6,10 +6,16 @@ const SEEN = "memento:last-greeted"
 const TURN = "memento:line-turn:"
 const ABSENCE_MS = 60 * 60 * 1000
 
+export const GREETINGS = ["Good morning.", "Good afternoon.", "Good evening."]
+
+/** Where the morning ends and the afternoon begins, in the user's own clock. */
+const NOON = 12
+const EVENING = 18
+
 /** The time of day's greeting, in the user's own clock. */
 export const greetingAt = (now: Date) => {
   const hour = now.getHours()
-  return hour < 12 ? "Good morning." : hour < 18 ? "Good afternoon." : "Good evening."
+  return GREETINGS[hour < NOON ? 0 : hour < EVENING ? 1 : 2]
 }
 
 const read = (key: string) => {

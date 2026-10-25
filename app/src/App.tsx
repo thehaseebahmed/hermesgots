@@ -76,7 +76,11 @@ export function Home() {
     [botThreads],
   )
   if (botThreads === undefined || (botThreads && active === undefined)) return null
-  return active ? <Navigate to={`/c/${mainThreadId(active.id)}`} replace /> : <ChatPage />
+  return active ? (
+    <Navigate to={`/c/${mainThreadId(active.id)}`} replace />
+  ) : (
+    <ChatPage slot="route" />
+  )
 }
 
 /** A project's old address, from before projects had a place of their own. */
@@ -100,7 +104,7 @@ function AppRoutes() {
       <Route element={<AppShell />}>
         <Route index element={<Home />} />
         <Route path="b/:profileId" element={<BotThreadsPage />} />
-        <Route path="c/:id" element={<ChatPage />} />
+        <Route path="c/:id" element={<ChatPage slot="route" />} />
         <Route path="s/:sessionId" element={<OpenSessionPage />} />
         <Route path="code" element={<CodePage />} />
         <Route path="code/:profileId/:projectId" element={<MovedProject />} />
@@ -115,7 +119,7 @@ function AppRoutes() {
         <Route path="settings/:section?/:botId?/:tab?" element={<SettingsPage />} />
         <Route path="bots" element={<BotsPage />} />
         <Route path="share" element={<SharePage />} />
-        <Route path="*" element={<ChatPage />} />
+        <Route path="*" element={<ChatPage slot="route" />} />
       </Route>
     </Routes>
   )

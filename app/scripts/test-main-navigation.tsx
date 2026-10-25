@@ -77,7 +77,7 @@ const homeScreen = (
         path="c/:id"
         element={
           <>
-            <ChatPage />
+            <ChatPage slot="route" />
             <Where />
           </>
         }
@@ -95,7 +95,7 @@ const staleScreen = (
         path="c/:id"
         element={
           <>
-            <ChatPage />
+            <ChatPage slot="route" />
             <Where />
           </>
         }
@@ -109,9 +109,9 @@ const nav = () => find("[data-nav]")?.textContent ?? ""
 
 const paneScreen = (entry: string) => (
   <MemoryRouter initialEntries={[entry]}>
-    <ChatPage key={bot.id} chatId={MAIN} />
+    <ChatPage key={bot.id} chatId={MAIN} slot="route" />
     <Routes>
-      <Route path="/c/:id" element={<ChatPage />} />
+      <Route path="/c/:id" element={<ChatPage slot="route" />} />
     </Routes>
     <Nav />
   </MemoryRouter>
@@ -147,7 +147,7 @@ test("with no room, a tapped card pushes its thread so back returns to Main", as
   await mount(
     <MemoryRouter initialEntries={[`/c/${MAIN}`]}>
       <Routes>
-        <Route path="/c/:id" element={<ChatPage />} />
+        <Route path="/c/:id" element={<ChatPage slot="route" />} />
       </Routes>
       <Nav />
     </MemoryRouter>,
@@ -235,7 +235,7 @@ test("Main's empty state sends a suggestion into Main, triaged, without a thread
   await mount(
     <MemoryRouter initialEntries={[`/c/${MAIN}`]}>
       <Routes>
-        <Route path="c/:id" element={<ChatPage />} />
+        <Route path="c/:id" element={<ChatPage slot="route" />} />
       </Routes>
     </MemoryRouter>,
     async () => {

@@ -76,9 +76,13 @@ const screen = (entry: string) => (
     <Link to={`/c/${MAIN}`} data-to-main>
       Main
     </Link>
+    {/* The way to another bot's Main, which is a switch of every pane the shell draws. */}
+    <Link to={`/c/${mainThreadId(other.id)}`} data-to-other>
+      Other
+    </Link>
     <Routes>
       <Route element={<AppShell />}>
-        <Route path="c/:id" element={<ChatPage />} />
+        <Route path="c/:id" element={<ChatPage slot="route" />} />
       </Route>
     </Routes>
   </MemoryRouter>
@@ -90,6 +94,40 @@ const titles = () => findAll('[data-slot="header-title"]').map((node) => node.te
 const openCards = () => findAll('[data-slot="thread-card"] [aria-current="page"]')
 const cardLink = (id: string) => find(`[data-slot="thread-card"] a[href="/c/${id}"]`)
 const remembered = (profileId: string) => localStorage.getItem(lastThreadKey(profileId))
+
+/**
+ * Holds the thread count a bot's pane reads, so a test can look at the lane between a switch and the
+ * answer that says what the bot has. `release()` lets the read through and `restore()` puts the
+ * table back; nothing but the count is held, so the lists a screen draws are never delayed.
+ */
+function holdThreadCount() {
+  const table = db.conversations as unknown as Record<string, (...args: unknown[]) => unknown>
+  const where = table.where.bind(db.conversations)
+  let release = () => {}
+  const held = new Promise<void>((done) => {
+    release = done
+  })
+  table.where = (key: unknown) => {
+    const clause = where(key) as Record<string, (...args: unknown[]) => unknown>
+    const between = clause.between.bind(clause)
+    clause.between = (...range: unknown[]) => {
+      const collection = between(...range) as Record<string, () => Promise<number>>
+      const count = collection.count.bind(collection)
+      collection.count = async () => {
+        await held
+        return count()
+      }
+      return collection
+    }
+    return clause
+  }
+  return {
+    release,
+    restore() {
+      table.where = where
+    },
+  }
+}
 
 test(
   "a thread opened for a bot is the one its pane keeps",
@@ -184,6 +222,75 @@ test(
 )
 
 test(
+  "a bot switch holds its thread lane, and no frame calls a bot thread-less before its list answers",
+  laptop(async () => {
+    localStorage.clear()
+    await seed(["t-a"])
+    // The other bot has a thread of its own, and this device remembers opening it.
+    await ensureMainThread(other.id)
+    await db.conversations.put({
+      id: "t-b",
+      profileId: other.id,
+      title: "Thread t-b",
+      titleEdited: true,
+      hermesSessionId: "memento-t-b",
+      createdAt: 20,
+      updatedAt: 20,
+      changedAt: 20,
+    })
+    await db.messages.put({
+      id: "t-b-open",
+      conversationId: "t-b",
+      role: "user",
+      content: "Opened t-b",
+      status: "done",
+      createdAt: 21,
+    })
+    localStorage.setItem(lastThreadKey(bot.id), "t-a")
+    localStorage.setItem(lastThreadKey(other.id), "t-b")
+    await mount(screen(`/c/${MAIN}`), async () => {
+      await until(async () => titles().includes("Thread t-a"), "the thread beside Main")
+      const seen: boolean[] = []
+      const look = () => seen.push(Boolean(find('[data-slot="bot-pane-empty"]')))
+      const observer = new MutationObserver(look)
+      observer.observe(document.body, { childList: true, subtree: true, characterData: true })
+      const count = holdThreadCount()
+      try {
+        // The switch, while the other bot's thread list is still on its way.
+        await click(find("[data-to-other]"))
+        const lane = () => find('[data-pane="thread"]')?.textContent ?? ""
+        assert.equal(
+          find('[data-slot="bot-pane-empty"]'),
+          null,
+          "nothing says the bot has no threads while its list is on its way",
+        )
+        assert.ok(
+          lane().includes("Opened t-a"),
+          `the lane holds the thread it was showing (saw "${lane().slice(0, 80)}")`,
+        )
+        assert.equal(
+          find('[data-pane="thread"]')?.hasAttribute("inert"),
+          true,
+          "and it is inert: a tap on the chat the pane has left reaches nothing",
+        )
+        count.release()
+
+        await until(
+          async () => titles().includes("Thread t-b"),
+          "the new bot's thread beside its Main",
+        )
+        observer.disconnect()
+        assert.deepEqual(seen.filter(Boolean), [], "no frame ever said the bot has no threads")
+        assert.equal(find('[data-slot="bot-pane-empty"]'), null, "and it has one")
+        assert.deepEqual(titles(), ["Otherly", "Thread t-b"], "both panes are the new bot's")
+      } finally {
+        count.restore()
+      }
+    })
+  }),
+)
+
+test(
   "with the switch off a bot is one screen, as it was",
   laptop(async () => {
     localStorage.clear()
@@ -231,12 +338,20 @@ test(
     await mount(screen(`/c/${MAIN}`), async () => {
       await until(async () => titles().includes("Thread t-a"), "the thread beside Main")
       await until(async () => openCards().length === 1, "the card marked open")
-      assert.equal(openCards()[0]?.getAttribute("href"), "/c/t-a", "the card of the thread on screen")
+      assert.equal(
+        openCards()[0]?.getAttribute("href"),
+        "/c/t-a",
+        "the card of the thread on screen",
+      )
       const pane = findAll('[data-slot="header-row"]')[1]
 
       await click(openCards()[0])
       await until(async () => path() === "/c/t-a", "the address names the thread")
-      assert.deepEqual(titles(), ["Mainly", "Thread t-a"], "Main and its thread are both still there")
+      assert.deepEqual(
+        titles(),
+        ["Mainly", "Thread t-a"],
+        "Main and its thread are both still there",
+      )
       assert.equal(
         findAll('[data-slot="header-row"]')[1]?.isSameNode(pane),
         true,
@@ -253,10 +368,7 @@ test(
     await seed(["t-a", "t-b"])
     localStorage.setItem(lastThreadKey(bot.id), "t-a")
     await mount(screen("/c/t-a"), async () => {
-      await until(
-        async () => openCards().length === 1,
-        "the card marked open",
-      )
+      await until(async () => openCards().length === 1, "the card marked open")
       const open = openCards()[0]
 
       await click(open)

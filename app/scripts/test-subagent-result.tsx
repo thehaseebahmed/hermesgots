@@ -61,7 +61,10 @@ const transcript = [
     role: "assistant",
     content: "",
     tool_calls: [
-      { id: "call-1", function: { name: "delegate_task", arguments: JSON.stringify({ goal: GOAL }) } },
+      {
+        id: "call-1",
+        function: { name: "delegate_task", arguments: JSON.stringify({ goal: GOAL }) },
+      },
     ],
     timestamp: 11,
   },
@@ -129,7 +132,7 @@ async function screen(
   await mount(
     <MemoryRouter initialEntries={["/c/chat-1"]}>
       <Routes>
-        <Route path="/c/:id" element={<ChatPage />} />
+        <Route path="/c/:id" element={<ChatPage slot="route" />} />
       </Routes>
     </MemoryRouter>,
     body,
@@ -156,7 +159,11 @@ test("a delivery draws as the bot's message at the thread's end", async () => {
     assert.equal(row.getAttribute("data-align"), "start", "the bot's own side, not the user's")
     assert.equal(bubble(row), null, "with no bubble, as a reply has none")
     assert.equal(rows().at(-1), row, "and last, where it arrived")
-    assert.match(row.textContent ?? "", /The fixture is in place/, "carrying what the subagent left")
+    assert.match(
+      row.textContent ?? "",
+      /The fixture is in place/,
+      "carrying what the subagent left",
+    )
     assert.doesNotMatch(
       row.textContent ?? "",
       /ASYNC DELEGATION|Original goal:|API calls/,

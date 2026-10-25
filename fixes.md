@@ -2034,3 +2034,66 @@ Declined with the evidence, each for what it is:
   spacer box, which reads as a mystery div without it, while a width claim in prose is what needed
   correcting twice already.
 
+---
+
+# Deferred fixes from the reviews on switching chats without flicker
+
+Two review passes over `feat(chat): hold the chat until its answers are in` and the three tickets
+under it — `/simplify-code`'s four parallel reviewers (reuse, quality, efficiency, altitude) and
+`/code-review`'s two independent passes (the repo's documented standards, and the ticket with its
+parent spec) — turned up three findings worth recording rather than applying. Everything else both
+reviews found is applied on this branch: the swap fade plays per pane rather than over the whole
+screen (a thread opening beside Main no longer re-fades the unchanged pane), an answered gone chat
+lands as gone with its own list's title, the thread lane refuses to read an unanswered list as "No
+threads yet" and holds the previous frame inert while the list is unknown, one thread list's answer
+feeds every memo that maps it, the frame is built only where it is drawn, the switch tests read one
+harness, the flow samples a switch by the pane it swaps on both lanes, and 237 narration lines are
+gone from the branch's files.
+
+## Careful
+
+### 1. The thread lane draws the previous thread live while the owners read is unknown
+
+The lane's empty state now waits for the thread list to answer (this branch's fix), but while a
+thread's *owners* read is still unknown the lane can stand on the previous thread's own instance,
+mounted and live, until the addressed thread remounts over it — the beat the inert hold covers on
+the main pane, uncovered here.
+
+- Cost: for that beat the lane's composer and buttons belong to the chat the address has left
+  (story 3's "nothing I do can reach the wrong chat", narrowed to a window only a read's latency
+  opens); the flow's frame sampler cannot see it, since a live old pane still draws old frames.
+- Suggested fix: gate the lane's content on the owners answer the way its empty state now waits
+  on the list — hold `heldFrame("thread")` inert while the read for the addressed chat is unknown
+  and mount the addressed thread only when the read lands.
+- Why it is not applied here: it re-times the lane's mount for every navigation onto a thread,
+  which is a second decision beside this branch's switch path, and the window's length is the
+  host's own read. It wants the laptop switch legs sampling for inertness (the flow asserts
+  frame *content* today) before the gate is trusted.
+
+## Rejected, with the evidence
+
+### The hold should keep the outgoing pane mounted instead of storing its element
+
+The altitude pass proposed replacing the stored-frame hold (`src/lib/chat-hold.ts`) with the
+outgoing pane kept mounted behind the arriving one, unmounted when the swap lands. The spec's
+solution is written the other way round — the pane's children kept as one element and removed when
+its chat is ready (`docs/specs/switching-chats-without-flicker.md`) — and a kept-mounted pane
+would keep its queries, timers and composer running for a chat the address has left, which is the
+interactivity the hold exists to end. The stored frame answers both (inert, and no second live
+chat) with less machinery.
+
+### Home to chat no longer slides
+
+The spec pass read the navigation guard as silently dropping the transition between the unstarted
+home and a chat. Verified: the guard fires exactly where the spec retimes a chat switch — "the
+navigation into a bot or thread switch is silent", with the fade playing at the swap instead —
+and home to chat *is* such a switch under the spec's model (the held hero frame is the outgoing
+chat). Back to home still fades through the swap; the first open of a chat is silent by the same
+rule that keeps the first send quiet. The slide it replaces is the transition the spec retimed.
+
+---
+
+Found by the `/simplify-code` and `/code-review` passes on this branch. It was a cleanup and a
+spec-compliance review, not a bug hunt — and neither entry blocks the pull request.
+
+---

@@ -7,9 +7,10 @@
 import assert from "node:assert/strict"
 import { act } from "react"
 import { createRoot } from "react-dom/client"
-import { MemoryRouter, Route, Routes, useLocation } from "react-router"
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router"
 
 import { AfkPopup } from "@/components/afk"
+import { AppShell } from "@/components/app-shell"
 import { DEFAULT_SETTINGS, db, type Message, type Profile, type Settings } from "@/lib/db"
 import { ChatPage } from "@/routes/chat"
 
@@ -74,10 +75,161 @@ export async function mount(element: React.ReactNode, body: () => Promise<void>)
 export const chatScreen = (id: string) => (
   <MemoryRouter initialEntries={[`/c/${id}`]}>
     <Routes>
-      <Route path="/c/:id" element={<ChatPage />} />
+      <Route path="/c/:id" element={<ChatPage slot="route" />} />
     </Routes>
   </MemoryRouter>
 )
+
+export const laptop = (body: () => Promise<void>) => async () => {
+  const width = window.innerWidth
+  window.innerWidth = 1440
+  try {
+    await body()
+  } finally {
+    window.innerWidth = width
+  }
+}
+
+export function SwitchTo({
+  to,
+  replace,
+  quiet,
+}: {
+  to: string
+  replace?: boolean
+  quiet?: boolean
+}) {
+  const navigate = useNavigate()
+  return (
+    <button
+      type="button"
+      data-switch
+      onClick={() => navigate(to, { replace, state: quiet ? { quiet: true } : undefined })}
+    >
+      switch
+    </button>
+  )
+}
+
+export const phone = (
+  entry: string,
+  to: string,
+  { routes, replace, quiet }: { routes?: React.ReactNode; replace?: boolean; quiet?: boolean } = {},
+) => (
+  <MemoryRouter initialEntries={[entry]}>
+    <Path />
+    <SwitchTo to={to} replace={replace} quiet={quiet} />
+    <Routes>
+      <Route element={<AppShell />}>
+        <Route path="/" element={<ChatPage slot="route" />} />
+        <Route path="c/:id" element={<ChatPage slot="route" />} />
+        {routes}
+      </Route>
+    </Routes>
+  </MemoryRouter>
+)
+
+export interface SeededChat {
+  id: string
+  profileId?: string
+  title?: string
+  main?: boolean
+  at?: number
+  messages?: (string | { id?: string; content: string; at?: number; role?: "user" | "assistant" })[]
+}
+
+export async function seedChats(
+  chats: SeededChat[],
+  {
+    bots = [],
+    botThreads = false,
+    active = bots[0]?.id,
+    settings = {},
+  }: {
+    bots?: Profile[]
+    botThreads?: boolean
+    active?: string
+    settings?: Partial<Omit<Settings, "id">>
+  } = {},
+) {
+  await seedSettings({ developer: true, botThreads, activeProfileId: active, ...settings })
+  await db.profiles.clear()
+  await db.profiles.bulkPut(bots)
+  await db.conversations.clear()
+  await db.messages.clear()
+  const at = (chat: SeededChat, place: number) => chat.at ?? 10 + place
+  await db.conversations.bulkPut(
+    chats.map((chat, place) => ({
+      id: chat.id,
+      profileId: chat.profileId ?? active ?? "",
+      title: chat.title ?? "A chat",
+      main: chat.main,
+      titleEdited: true,
+      hermesSessionId: `memento-${chat.id}`,
+      createdAt: at(chat, place),
+      updatedAt: at(chat, place),
+      changedAt: 10,
+    })),
+  )
+  await db.messages.bulkPut(
+    chats.flatMap((chat, place) =>
+      (chat.messages ?? []).map((one, said) => {
+        const message = typeof one === "string" ? { content: one } : one
+        return {
+          id: message.id ?? `${chat.id}-${said}`,
+          conversationId: chat.id,
+          role: message.role ?? ("user" as const),
+          content: message.content,
+          status: "done" as const,
+          createdAt: message.at ?? at(chat, place) + 1 + said,
+        }
+      }),
+    ),
+  )
+  globalThis.fetch = async () => json({})
+}
+
+export interface Animated {
+  pane: string | null
+  element: string
+  keyframes: Keyframe[]
+  options: KeyframeAnimationOptions
+  held: string
+  shown: string
+  body: string
+}
+
+export function spyAnimate() {
+  const asked: Animated[] = []
+  const animate = HTMLElement.prototype.animate
+  HTMLElement.prototype.animate = function (keyframes, options) {
+    const panes = [...document.querySelectorAll('[data-slot="chat-pane"]')]
+    const words = (held: boolean) =>
+      panes
+        .filter((pane) => pane.hasAttribute("inert") === held)
+        .map((pane) => pane.textContent ?? "")
+        .join("|")
+    asked.push({
+      pane: this.getAttribute("data-pane"),
+      element: this.tagName.toLowerCase(),
+      keyframes: Array.isArray(keyframes) ? (keyframes as Keyframe[]) : [],
+      options: typeof options === "number" ? { duration: options } : (options ?? {}),
+      held: words(true),
+      shown: words(false),
+      body: document.body.textContent ?? "",
+    })
+    return animate.call(this, keyframes, options)
+  }
+  return {
+    asked,
+    onPanes: () => asked.filter((one) => one.pane !== null),
+    onScreen: () => asked.filter((one) => one.element === "main"),
+    overHeld: () => asked.filter((one) => one.pane !== null && one.held !== ""),
+    restore() {
+      HTMLElement.prototype.animate = animate
+    },
+  }
+}
 
 export async function seedChat({
   id,
@@ -131,7 +283,7 @@ export async function click(element: Element | null) {
 }
 
 export async function until(check: () => Promise<boolean>, what: string, ms = 5000) {
-  for (const end = Date.now() + ms; Date.now() < end; ) {
+  for (const end = Date.now() + ms; Date.now() < end;) {
     if (await check()) return
     await new Promise((resolve) => setTimeout(resolve, 10))
   }
@@ -149,8 +301,7 @@ export async function resized(near?: string) {
   ).__resizeObservers
   assert.ok(observers, "the harness records the observers a screen makes")
   const box = near ? document.querySelector(near) : null
-  const watching = (one: Element) =>
-    !box || one === box || box.contains(one) || one.contains(box)
+  const watching = (one: Element) => !box || one === box || box.contains(one) || one.contains(box)
   await act(async () => {
     for (const observer of observers) {
       if (!observer.watching.length) continue
@@ -341,7 +492,9 @@ export function mediaHost({
         return json({ error: "No such file." }, failure)
       const served = type?.(path) ?? SERVED[path.slice(path.lastIndexOf(".")).toLowerCase()]
       const kind = served ?? "application/octet-stream"
-      return new Response(new Blob(["bytes"], { type: kind }), { headers: { "content-type": kind } })
+      return new Response(new Blob(["bytes"], { type: kind }), {
+        headers: { "content-type": kind },
+      })
     }
     return json({})
   }) as typeof fetch

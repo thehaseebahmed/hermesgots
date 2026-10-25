@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { Link, matchPath, useLocation, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
@@ -165,6 +165,7 @@ import {
 } from "@/lib/workspace"
 import { lastActivityAt } from "@/lib/session-work"
 import { useReadyLine } from "@/lib/greeting"
+import { heldFrame, hold, type HoldSlot } from "@/lib/chat-hold"
 import { SUGGESTIONS } from "@/lib/suggestions"
 import { DEFAULT_BOT_ID } from "@/components/bots"
 import { useBotThreads, useNow, useThreads, type Thread } from "@/lib/threads"
@@ -191,11 +192,14 @@ function ReadyLine({ botId, id }: { botId?: string; id?: string }) {
   )
 }
 
+export const SETUP_COPY = "Point Gots at your Hermes Agent API server to start chatting."
+
 function EmptyState({
   botId,
   configured,
   session,
   id,
+  line = true,
 }: {
   botId?: string
   configured: boolean
@@ -203,20 +207,19 @@ function EmptyState({
   session?: { repos: RepoRef[] }
   /** The chat or session on screen, none for a new chat. */
   id?: string
+  line?: boolean
 }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-6 px-4 pt-24 pb-8 text-center">
       <Bot id={botId} animate className="size-24" />
       {configured ? (
         <div className="flex max-w-md flex-col items-center gap-3">
-          <ReadyLine botId={botId} id={id} />
+          {line && <ReadyLine botId={botId} id={id} />}
           {session && <RepoChips repos={session.repos} />}
         </div>
       ) : (
         <>
-          <p className="max-w-sm text-sm text-muted-foreground">
-            Point Gots at your Hermes Agent API server to start chatting.
-          </p>
+          <p className="max-w-sm text-sm text-muted-foreground">{SETUP_COPY}</p>
           <Button nativeButton={false} render={<Link to="/settings" replace />} size="lg">
             <SettingsIcon data-icon="inline-start" />
             Open settings
@@ -257,6 +260,17 @@ function MainEmptyState({
   )
 }
 
+function PendingChat() {
+  return (
+    <>
+      <ChatHeader title="" showBot={false} />
+      <div className="flex flex-1 items-center justify-center">
+        <Spinner className="size-6" />
+      </div>
+    </>
+  )
+}
+
 /** An approval or question card temporarily replaces the composer; once answered, follow the reply again. */
 function FollowAfterApproval({ pending }: { pending: boolean }) {
   const { scrollToEnd } = useMessageScroller()
@@ -279,7 +293,15 @@ function FollowOnSend({ lastUserId }: { lastUserId?: string }) {
   return null
 }
 
-export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?: string } = {}) {
+export function ChatPage({
+  chatId,
+  paneThread,
+  slot,
+}: {
+  chatId?: string
+  paneThread?: string
+  slot: HoldSlot
+}) {
   const params = useParams()
   const { pathname } = useLocation()
   const id = chatId ?? params.id
@@ -292,7 +314,9 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
   }, [id])
   const navigate = useNavigate()
   const { root, up } = useNav()
-  const settings = useLiveQuery(() => db.settings.get("settings"), [])
+  // Settings answer "no row" on a device that never wrote one, so an absent answer is `null` here
+  // rather than the `undefined` a query that has not run hands back.
+  const settings = useLiveQuery(async () => (await db.settings.get("settings")) ?? null, [])
   const botThreads = useBotThreads()
   const found = useLiveQuery(
     async () => (id ? ((await db.conversations.get(id)) ?? null) : undefined),
@@ -302,6 +326,7 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
   // so a session swapped in place beside Code's list can still hand back the one before it: nothing
   // of that session may render or be acted on here — its plan card's Approve would send its plan.
   const conversation = found && found.id !== id ? undefined : found
+  const gone = id !== undefined && conversation === null
   // A chat talks to its own bot; a new chat goes to the selected one. Same rule as the row above:
   // the query answers with the id it ran for, so a stale answer can't pass for this route's.
   const owners = useLiveQuery(async () => {
@@ -330,6 +355,7 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
   const [outputsOpen, setOutputsOpen] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   const [historyMissing, setHistoryMissing] = useState<string>()
+  const readyRef = useRef<{ id?: string }>(undefined)
 
   const resolved = { ...DEFAULT_SETTINGS, ...settings }
   const configured = Boolean(profile?.baseUrl.trim())
@@ -347,14 +373,28 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
     [messages],
   )
   const threadList = useThreads(
-    botThreads && conversation?.main ? conversation.profileId : undefined,
+    botThreads && conversation?.main ? conversation.profileId : gone ? profile?.id : undefined,
   )
   const cards = useMemo(
     () =>
-      botThreads && conversation?.main ? threadCards(thread ?? NO_ROWS, threadList) : undefined,
+      botThreads && conversation?.main
+        ? threadList && threadCards(thread ?? NO_ROWS, threadList)
+        : undefined,
     [botThreads, conversation?.main, thread, threadList],
   )
   const threadsDrawnAsCards = useMemo(() => drawnThreadIds(cards), [cards])
+  const answered =
+    settings !== undefined &&
+    botThreads !== undefined &&
+    (id === undefined || conversation !== undefined) &&
+    profile !== undefined &&
+    messages !== undefined &&
+    (!(botThreads && conversation?.main) || threadList !== undefined)
+  const keptReady = readyRef.current !== undefined && readyRef.current.id === id
+  const ready = answered || keptReady
+  useLayoutEffect(() => {
+    if (answered) readyRef.current = { id }
+  })
   const now = useNow()
   const flow = useMemo(() => {
     const entries: FlowEntry[] = []
@@ -571,7 +611,7 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
   const updatedAt = conversation?.updatedAt
   const hasMessages = (messages?.length ?? 0) > 0
   const hasCards = Boolean(cards && (cards.before.size || cards.trailing.length))
-  const unstarted = configured && !hasMessages && !hasCards && !loadingHistory
+  const unstarted = !gone && configured && !hasMessages && !hasCards && !loadingHistory
   // The agents this chat's agent delegated to, for their cards in the thread.
   const delegations = messages
     ?.flatMap((m) => m.tools ?? [])
@@ -655,19 +695,11 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
   }, [mainOf])
 
   const mainOwner = id ? mainThreadProfile(id) : undefined
-  // A deleted (or unknown) conversation id falls back to a fresh chat.
   useEffect(() => {
-    if (!id || conversation !== null) return
-    if (mainOwner) {
-      if (botThreads === undefined) return
-      if (botThreads) {
-        void db.profiles
-          .get(mainOwner)
-          .then((owner) => (owner ? ensureMainThread(mainOwner) : root("/")))
-        return
-      }
-    }
-    root("/")
+    if (!id || conversation !== null || !mainOwner || !botThreads) return
+    void db.profiles
+      .get(mainOwner)
+      .then((owner) => (owner ? ensureMainThread(mainOwner) : root("/")))
   }, [id, conversation, root, botThreads, mainOwner])
 
   // A session that was never sent anything isn't kept; typed text is the user's to keep or drop.
@@ -956,12 +988,24 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
   // Nothing started has no title yet, and its bot is the big one in the middle. Main is the bot's
   // face, so its title is the bot's name rather than the `Main` its record is stored under: the
   // name Bot settings edits, so a rename shows here at once.
-  const headerTitle = unstarted
+  // A chat that answered gone keeps the title it is still known by: Main is its bot's name, and a
+  // thread is the one the list this device last read carries for it. Nothing once that list has
+  // nothing left — a gone chat is never drawn as a new one, and its header standing empty is the
+  // honest answer. The scan runs only on the branch that draws it.
+  const goneTitle = !gone
     ? ""
-    : isMain
-      ? profile?.name || conversation?.title || ""
-      : (conversation?.title ?? "New chat")
-  const mainLine = botThreads && isMain ? threadsLine(threadCount(threadList)) : undefined
+    : mainOwner
+      ? (profile?.name ?? "")
+      : (threadList?.find((one) => one.chat.id === id)?.chat.title ?? "")
+  const headerTitle = gone
+    ? goneTitle
+    : unstarted
+      ? ""
+      : isMain
+        ? profile?.name || conversation?.title || ""
+        : (conversation?.title ?? "New chat")
+  const mainLine =
+    botThreads && isMain && threadList ? threadsLine(threadCount(threadList)) : undefined
   let subtitle: string | undefined
   if (!unstarted)
     subtitle = session
@@ -973,8 +1017,8 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
         })
       : activity || mainLine || repliesLine
 
-  return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
+  const frame = ready ? (
+    <>
       <ChatHeader
         title={headerTitle}
         subtitle={subtitle}
@@ -986,40 +1030,38 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
         showBot={!session && !unstarted && !besideMain}
         actions={actions}
         leading={
-          mainPath ? (
-            // Beside Main a thread needs no control of its own: the bot is on screen with it, and
-            // the pane keeps the thread wherever the address goes. Below `xl` it is a screen over
-            // Main, and leads back to it.
-            !besideMain && (
-              <Button
-                variant="outline"
-                size="icon-lg"
-                className="size-11 rounded-full bg-background/80 backdrop-blur"
-                onClick={() => up(mainPath)}
-                aria-label={`Back to ${profile?.name ?? "bot"}`}
-              >
-                <ArrowLeftIcon />
-              </Button>
-            )
-          ) : (
-            session &&
-            !beside && (
-              <Button
-                variant="outline"
-                size="icon-lg"
-                className="size-11 rounded-full bg-background/80 backdrop-blur"
-                onClick={leave}
-                aria-label="Back to Code"
-              >
-                <ArrowLeftIcon />
-              </Button>
-            )
-          )
+          mainPath
+            ? // Beside Main a thread needs no control of its own: the bot is on screen with it, and
+              // the pane keeps the thread wherever the address goes. Below `xl` it is a screen over
+              // Main, and leads back to it.
+              !besideMain && (
+                <Button
+                  variant="outline"
+                  size="icon-lg"
+                  className="size-11 rounded-full bg-background/80 backdrop-blur"
+                  onClick={() => up(mainPath)}
+                  aria-label={`Back to ${profile?.name ?? "bot"}`}
+                >
+                  <ArrowLeftIcon />
+                </Button>
+              )
+            : session &&
+              !beside && (
+                <Button
+                  variant="outline"
+                  size="icon-lg"
+                  className="size-11 rounded-full bg-background/80 backdrop-blur"
+                  onClick={leave}
+                  aria-label="Back to Code"
+                >
+                  <ArrowLeftIcon />
+                </Button>
+              )
         }
       />
 
       {hasMessages || hasCards || (thread && moved.trailing.length) ? (
-        <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+        <MessageScrollerProvider key={id ?? "new"} autoScroll defaultScrollPosition="end">
           <MessageScroller className="flex-1">
             <MessageScrollerViewport aria-label="Messages">
               <MessageScrollerContent className="w-full gap-6 px-4 pt-32 pb-6">
@@ -1101,6 +1143,7 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
           configured={configured}
           session={session && { repos: sessionRepos }}
           id={conversation?.id}
+          line={!gone}
         />
       )}
 
@@ -1406,6 +1449,24 @@ export function ChatPage({ chatId, paneThread }: { chatId?: string; paneThread?:
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </>
+  ) : null
+
+  useLayoutEffect(() => {
+    if (ready) hold(slot, id, frame)
+  })
+
+  const heldBefore = heldFrame(slot)
+  const holding = heldBefore && heldBefore.id !== id ? heldBefore.frame : undefined
+
+  return (
+    <div
+      data-slot="chat-pane"
+      data-pane={slot}
+      className="relative flex min-h-0 flex-1 flex-col"
+      inert={!ready}
+    >
+      {ready ? frame : (holding ?? <PendingChat />)}
     </div>
   )
 }

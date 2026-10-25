@@ -100,7 +100,7 @@ const screen = (id: string) => (
         path="c/:id"
         element={
           <>
-            <ChatPage />
+            <ChatPage slot="route" />
             <Where />
           </>
         }

@@ -105,7 +105,7 @@ async function screen(
   await mount(
     <MemoryRouter initialEntries={[`/c/${id}`]}>
       <Routes>
-        <Route path="/c/:id" element={<ChatPage />} />
+        <Route path="/c/:id" element={<ChatPage slot="route" />} />
       </Routes>
     </MemoryRouter>,
     body,
@@ -243,9 +243,17 @@ test("a reply's code and quotes read on the page", async () => {
     assert.ok(reply)
     const block = reply.querySelector("div[data-md-code]")
     assert.ok(block, "the code keeps its own block")
-    assert.equal(block?.closest("[data-slot=bubble]"), null, "which is on the page, not in a bubble")
+    assert.equal(
+      block?.closest("[data-slot=bubble]"),
+      null,
+      "which is on the page, not in a bubble",
+    )
     assert.match(block?.className ?? "", /bg-muted/, "and the surface it takes on the page")
-    assert.match(reply.querySelector("code[data-md-code]")?.className ?? "", /bg-muted/, "the same inline")
+    assert.match(
+      reply.querySelector("code[data-md-code]")?.className ?? "",
+      /bg-muted/,
+      "the same inline",
+    )
     assert.ok(reply.querySelector("blockquote"), "the quote keeps its treatment")
   })
 })
@@ -431,7 +439,11 @@ test("with the switch on, a sub-thread folds its thinking as a chat's reply does
       )
       // A transcript's reply arrives written, so it never streams: the switch reaches this row
       // through the same setting as a chat's, and the row it draws is folded either way.
-      assert.equal(expanded(lines[0]), "false", "and folded, under the switch the chat beside it read")
+      assert.equal(
+        expanded(lines[0]),
+        "false",
+        "and folded, under the switch the chat beside it read",
+      )
     },
   )
 })

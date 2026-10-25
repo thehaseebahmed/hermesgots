@@ -7,7 +7,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react"
-import { Outlet, useLocation, useNavigationType } from "react-router"
+import { Outlet, matchPath, useLocation, useNavigationType } from "react-router"
 
 import { ConversationList } from "@/components/conversation-list"
 import { BreakReminderProvider } from "@/components/break-reminder-provider"
@@ -22,6 +22,7 @@ import { useCodePane, useMeetingsPane, useProjectsPane, useResearchPane } from "
 import { useSidebarCollapsed } from "@/lib/sidebar"
 import { useBotPane, useBotThreads } from "@/lib/threads"
 import { cn } from "@/lib/utils"
+import { onChatSwap, heldFrame, type HoldSlot } from "@/lib/chat-hold"
 import { ChatPage } from "@/routes/chat"
 
 /**
@@ -57,6 +58,23 @@ const ProjectsPane = lazy(() =>
   import("@/routes/projects").then((m) => ({ default: m.ProjectsPane })),
 )
 
+function chatOf(screen: string) {
+  const chat = matchPath("/c/:id", screen)?.params.id
+  if (chat) return chat
+  return screen === "/" ? "" : undefined
+}
+
+function isChatSwitch(from: string, to: string) {
+  const before = chatOf(from)
+  const after = chatOf(to)
+  return before !== undefined && after !== undefined && before !== after
+}
+
+const EASE = "cubic-bezier(0.2, 0, 0, 1)"
+const EASE_CLASS = "ease-[cubic-bezier(0.2,0,0,1)]"
+const FADE_MS = 200
+const FADE: Keyframe[] = [{ opacity: 0 }, { opacity: 1 }]
+
 /**
  * Animates the main pane in when the screen changes: from the right when it was opened on top of
  * the last one, from the left when going back to it, and a fade when it took the last one's place.
@@ -67,6 +85,7 @@ function usePageTransition(ref: RefObject<HTMLElement | null>, pane: ListPane | 
   const large = useLarge()
   const screen = screenOf(location.pathname, large, pane)
   const last = useRef({ screen, idx: depth(), key: location.key })
+  const faded = useRef(new Map<HoldSlot, string>())
 
   useLayoutEffect(() => {
     const previous = last.current
@@ -76,6 +95,7 @@ function usePageTransition(ref: RefObject<HTMLElement | null>, pane: ListPane | 
     if (location.key === previous.key) return
     // A new chat taking its id once the first message is sent stays the same screen.
     if (type === "REPLACE" && (location.state as { quiet?: boolean } | null)?.quiet) return
+    if (isChatSwitch(previous.screen, screen)) return
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return
     const step = Math.sign(last.current.idx - previous.idx)
     ref.current?.animate(
@@ -84,23 +104,54 @@ function usePageTransition(ref: RefObject<HTMLElement | null>, pane: ListPane | 
             { opacity: 0, transform: `translateX(${step * 24}px)` },
             { opacity: 1, transform: "none" },
           ]
-        : [{ opacity: 0 }, { opacity: 1 }],
-      { duration: step ? 260 : 200, easing: "cubic-bezier(0.2, 0, 0, 1)" },
+        : FADE,
+      { duration: step ? 260 : FADE_MS, easing: EASE },
     )
   }, [location, type, screen, ref])
+
+  useLayoutEffect(
+    () =>
+      onChatSwap((slot) => {
+        if (faded.current.get(slot) === location.key) return
+        faded.current.set(slot, location.key)
+        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return
+        document.querySelector<HTMLElement>(`[data-pane="${slot}"]`)?.animate(FADE, {
+          duration: FADE_MS,
+          easing: EASE,
+        })
+      }),
+    [location.key],
+  )
 }
 
 /**
  * The third pane of a bot that has no thread to keep beside Main. It stands at the pane's own width
- * so the layout doesn't move when the bot's first thread opens, and says the one thing it knows.
+ * so the layout doesn't move when the bot's first thread opens, and says the one thing it knows —
+ * once the bot's thread list has answered. Until then it holds the frame the pane last drew, inert,
+ * so neither the lane's place nor what it says moves while the answer is on its way.
  */
-function BotPaneEmpty() {
+function ThreadLane({ threads }: { threads?: boolean }) {
+  if (threads === false)
+    return (
+      <div
+        data-slot="bot-pane-empty"
+        className="flex min-h-0 flex-1 items-center justify-center px-6 text-center"
+      >
+        <p className="text-sm text-muted-foreground">No threads yet</p>
+      </div>
+    )
+  const held = threads === undefined ? heldFrame("thread") : undefined
+  if (!held?.frame) return null
+  // The same box `ChatPage` draws a held pane in, so the frame is the pane it was, and inert, so
+  // nothing in a chat the pane has left can be tapped.
   return (
     <div
-      data-slot="bot-pane-empty"
-      className="flex min-h-0 flex-1 items-center justify-center px-6 text-center"
+      data-slot="chat-pane"
+      data-pane="thread"
+      className="relative flex min-h-0 flex-1 flex-col"
+      inert
     >
-      <p className="text-sm text-muted-foreground">No threads yet</p>
+      {held.frame}
     </div>
   )
 }
@@ -119,7 +170,7 @@ function Panes({ pane, children }: { pane: ListPane | undefined; children: React
         { opacity: 0, transform: "translateX(48px)" },
         { opacity: 1, transform: "none" },
       ],
-      { duration: 300, easing: "cubic-bezier(0.2, 0, 0, 1)" },
+      { duration: 300, easing: EASE },
     )
   }, [open])
 
@@ -128,7 +179,7 @@ function Panes({ pane, children }: { pane: ListPane | undefined; children: React
       {pane && (
         <div
           className={cn(
-            "flex min-h-0 flex-none flex-col transition-[width] duration-300 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none",
+            `flex min-h-0 flex-none flex-col transition-[width] duration-300 ${EASE_CLASS} motion-reduce:transition-none`,
             // Material 3's list pane width, as in Settings.
             open ? "w-103 border-r" : "w-full",
           )}
@@ -161,16 +212,25 @@ export function AppShell({ children }: { children?: ReactNode }) {
   // address's thread, else the last opened, else nothing at all.
   const shown = bot && (bot.thread ?? bot.last)
   const botItem = shown ? (
-    <ChatPage key={shown} chatId={shown} />
-  ) : bot && !bot.threads ? (
-    <BotPaneEmpty />
+    <ChatPage key={shown} chatId={shown} slot="thread" />
+  ) : bot ? (
+    <ThreadLane threads={bot.threads} />
   ) : undefined
   const pane: ListPane | undefined = bot
     ? {
         screen: `/c/${mainThreadId(bot.profileId)}`,
-        open: Boolean(bot.thread || bot.last || !bot.threads),
+        // Open while the bot has a thread to show, or while its thread list has yet to say it has
+        // none: a lane that closed and reopened would move Main twice for one switch.
+        open: Boolean(bot.thread || bot.last || bot.threads !== true),
         // Main is told what the third pane holds, so its own flow can mark that thread open.
-        node: <ChatPage key={bot.profileId} chatId={mainThreadId(bot.profileId)} paneThread={shown} />,
+        node: (
+          <ChatPage
+            key={bot.profileId}
+            chatId={mainThreadId(bot.profileId)}
+            paneThread={shown}
+            slot="main"
+          />
+        ),
         item: botItem,
       }
     : code
@@ -195,7 +255,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
           {wide && (
             <aside
               className={cn(
-                "shrink-0 border-r bg-sidebar text-sidebar-foreground transition-[width] duration-300 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none",
+                `shrink-0 border-r bg-sidebar text-sidebar-foreground transition-[width] duration-300 ${EASE_CLASS} motion-reduce:transition-none`,
                 collapsed ? "w-20" : "w-72 lg:w-80",
               )}
             >
