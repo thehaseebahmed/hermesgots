@@ -27,9 +27,12 @@ This supersedes ADR 0049's placement of a run "after the part that holds its cal
 group when consecutive calls merged into one", the sentence "the run after each call lands beside
 the other under that group", and its rejected option *"Merge only where no real call sits between
 the rows"*, whose stated reason — the reader sees two rows touching and the call is above them, not
-between them — is now what the drawing guarantees. ADR 0049's merge, its labels and its sheet stay;
-ADR 0050's pending row keeps its place; ADR 0038's runs, spans and label honesty are untouched, since
-where a row is drawn has nothing to do with what its label may claim.
+between them — is now what the drawing guarantees. It supersedes ADR 0038's placement clause, which
+0049 kept standing: the title's "each drawn after the tool call that broke it" and its "a thread
+draws one row per run, placed after the tool call that broke it" — both now the other way round.
+ADR 0049's merge, its labels and its sheet stay; ADR 0050's pending row keeps its place; ADR 0038's
+runs, their anchoring to the call they follow, spans and label honesty are untouched, since where a
+row is drawn has nothing to do with what its label may claim.
 
 ## Considered options
 
