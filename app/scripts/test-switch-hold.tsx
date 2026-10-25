@@ -10,7 +10,7 @@ import { db, ensureMainThread, mainThreadId } from "@/lib/db"
 import { GREETINGS } from "@/lib/greeting"
 import { forgetHeldChats } from "@/lib/chat-hold"
 import { lastThreadKey, useThreads } from "@/lib/threads"
-import { ChatPage, SETUP_COPY } from "@/routes/chat"
+import { ChatPage, FIRST_ROWS, SETUP_COPY } from "@/routes/chat"
 import {
   botProfile,
   click,
@@ -427,6 +427,61 @@ test("two switches in a row draw the chat that was ready and the one asked for, 
     read.release()
     read.restore()
   }
+})
+
+test("a long chat switched to draws its last rows first, then every row", async () => {
+  localStorage.clear()
+  forgetHeldChats()
+  const LONG = 30
+  await seedChats(
+    [
+      { id: "c-a", title: "Alpha", messages: ["alpha one"] },
+      {
+        id: "c-b",
+        title: "Beta",
+        messages: Array.from({ length: LONG }, (_, index) => `beta row ${index}`),
+      },
+    ],
+    { bots: [bot, other], active: bot.id },
+  )
+  await mount(phone("/c/c-a", "/c/c-b"), async () => {
+    await until(async () => paneText().includes("alpha one"), "the chat on screen")
+    const drawn: number[] = []
+    const observer = new MutationObserver(() => {
+      const pane = find('[data-pane="route"]')
+      if (pane && !pane.hasAttribute("inert") && pane.textContent?.includes("beta row"))
+        drawn.push(pane.querySelectorAll('[data-slot="message-scroller-item"]').length)
+    })
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true })
+    // Outside `act`, which would flush the rows' transition in the tap's own batch: a browser
+    // paints the first commit before the transition runs.
+    const actEnvironment = globalThis.IS_REACT_ACT_ENVIRONMENT
+    globalThis.IS_REACT_ACT_ENVIRONMENT = false
+    try {
+      find("[data-switch]")?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true }),
+      )
+      await until(
+        async () =>
+          findAll('[data-pane="route"] [data-slot="message-scroller-item"]').length === LONG,
+        "every row of the chat asked for",
+      )
+      // The reads and effects the switch set going land before `act` is back.
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      globalThis.IS_REACT_ACT_ENVIRONMENT = actEnvironment
+      await settle()
+    } finally {
+      globalThis.IS_REACT_ACT_ENVIRONMENT = actEnvironment
+      observer.disconnect()
+    }
+    assert.ok(drawn.length > 0, "the chat asked for was drawn")
+    assert.ok(
+      drawn[0] <= FIRST_ROWS && drawn[0] < LONG,
+      `the first frame of it holds only its last ${FIRST_ROWS} rows, not ${drawn[0]} of ${LONG}`,
+    )
+    assert.ok(paneText().includes(`beta row ${LONG - 1}`), "and its newest row is among them")
+    assert.equal(drawn.at(-1), LONG, "and every row lands after it")
+  })
 })
 
 const answers: string[] = []
