@@ -40,8 +40,8 @@ const run = async ({ page, profileId, shot, until }) => {
     await page.locator('[data-mcp="github"]').waitFor({ timeout: 15_000 })
     const servers = await page.locator("[data-mcp]").count()
 
-    // The Add action's first sheet leads into the Catalogue; picking an entry that declares values
-    // opens its form above it.
+    // The header's + opens the Add sheet, whose Catalogue leads on; picking an entry that declares
+    // values opens its form above it.
     const browse = async () => {
       await page.getByRole("button", { name: "Add a server" }).click()
       await page.locator('[data-mcp-source="catalogue"]').click()

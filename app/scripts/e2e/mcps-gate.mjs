@@ -1,16 +1,16 @@
 // What the plugin's own `info` advertises decides what the app draws. A Bot whose plugin answers
-// without `mcps` — a Hermes this plugin can't list MCP servers on — has no MCP tab on its editor at
-// all, and the tab's own URL brings the user back to the Bot's General tab instead of leaving them on
-// a blank page. A Bot whose plugin lists servers but doesn't advertise `mcps_write` — a Hermes whose
-// write built-ins are missing — still lists them, with no switch on any row rather than one whose
-// every tap could only come back refused. One that lists, writes and reads but doesn't advertise
-// `mcps_catalogue` keeps its Add action for a server typed in by hand and offers no way into the
-// Catalogue, since reading one is the whole of that choice; one that reads a Catalogue but predates
-// `mcps_add` offers no Add action at all, as the action's whole work is the adding. One without
-// `mcps_remove` keeps every row and its Config tab with no Remove server on it, and one without
-// `mcps_config` opens a sheet with only the Tools tab it can fill — with the removal under it, since
-// removing a server is its own feature and doesn't need the block. The `info` answer is the only
-// thing that changes; nothing logs an error.
+// without `mcps` — a Hermes this plugin can't list MCP servers on — has no MCP page on its settings
+// list at all, and the page's own URL brings the user back to the Bot's General page instead of
+// leaving them on a blank page. A Bot whose plugin lists servers but doesn't advertise `mcps_write` —
+// a Hermes whose write built-ins are missing — still lists them, with no switch on any row rather
+// than one whose every tap could only come back refused. One that lists, writes and reads but
+// doesn't advertise `mcps_catalogue` keeps its Add action — the header's + — for a server typed in
+// by hand and offers no way into the Catalogue, since reading one is the whole of that choice; one
+// that reads a Catalogue but predates `mcps_add` offers no + at all, as the action's whole work is
+// the adding. One without `mcps_remove` keeps every row and its Config tab with no Remove server on
+// it, and one without `mcps_config` opens a sheet with only the Tools tab it can fill — with the
+// removal under it, since removing a server is its own feature and doesn't need the block. The
+// `info` answer is the only thing that changes; nothing logs an error.
 import { app, assert, flow, pass, settled } from "./lib.mjs"
 
 const run = async ({ page, profileId, shot }) => {
@@ -38,14 +38,14 @@ const run = async ({ page, profileId, shot }) => {
       })
     })
   }
-  const tab = () => page.getByRole("tab", { name: "MCP", exact: true })
-  // The tab's own panel: the editor's other tabs stay mounted, so a control is counted here rather
-  // than anywhere on the screen.
+  const mcpRow = () => page.locator('[data-bot-page="mcps"]')
+  // The MCP page's own body: the settings list's other rows stay on screen, so a control is counted
+  // here rather than anywhere on the screen.
   const panel = () => page.locator("[data-mcp-tab]")
-  const openTab = async () => {
+  const openPage = async () => {
     await page.goto(`${app}${editor}`)
-    await tab().waitFor({ timeout: 15_000 })
-    await tab().click()
+    await mcpRow().waitFor({ timeout: 15_000 })
+    await mcpRow().click()
     await page.waitForURL(`**${screen}`, { timeout: 15_000 })
   }
   // One server's own sheet, opened by tapping its name.
@@ -54,12 +54,12 @@ const run = async ({ page, profileId, shot }) => {
     await page.getByRole("tab", { name: "Config" }).waitFor({ timeout: 15_000 })
   }
 
-  // A Hermes that can neither list a Bot's servers nor switch one: no tab, and no screen to be stuck
+  // A Hermes that can neither list a Bot's servers nor switch one: no page, and no screen to be stuck
   // on. A plugin that can't list them can't have written the switch either, so both go together.
   await gate("mcps", "mcps_write")
 
-  // The Bot's editor answers, and carries no MCP tab at all.
-  // No tab is only an answer once the host's has come back: before it, there is none either.
+  // The Bot's settings list answers, and carries no MCP page row at all.
+  // No row is only an answer once the host's has come back: before it, there is none either.
   const answered = page.waitForResponse(
     (response) =>
       response.url().includes("/api/plugins/memento/info") && response.request().method() === "GET",
@@ -68,21 +68,21 @@ const run = async ({ page, profileId, shot }) => {
   await page.getByRole("button", { name: "Test connection" }).waitFor({ timeout: 15_000 })
   await answered
   await settled(page)
-  assert.equal(await tab().count(), 0, "the Bot's editor has no MCP tab")
-  await shot("no-tab")
+  assert.equal(await mcpRow().count(), 0, "the bot's list of pages has no MCP page")
+  await shot("no-page")
 
-  // Reached by URL, the tab lands back on the Bot's General tab: no server list, and nowhere left to
-  // be stuck.
+  // Reached by URL, the page lands back on the Bot's General page: no server list, and nowhere left
+  // to be stuck.
   await page.goto(`${app}${screen}`)
   await page.waitForURL(`**${editor}`, { timeout: 15_000 })
   assert.equal(await page.locator("[data-mcp]").count(), 0, "no server is listed")
   await page.getByRole("button", { name: "Test connection" }).waitFor({ timeout: 15_000 })
   await shot("back-on-general")
 
-  // A Hermes that can list a Bot's servers but not switch one: the tab lists them and offers no
+  // A Hermes that can list a Bot's servers but not switch one: the page lists them and offers no
   // switch at all, rather than one whose every tap could only come back refused.
   await gate("mcps_write")
-  await openTab()
+  await openPage()
   await page.locator('[data-mcp="github"]').waitFor({ timeout: 15_000 })
   assert.equal(await panel().locator("[data-mcp]").count(), 6, "the Bot's servers are listed")
   assert.equal(
@@ -94,7 +94,7 @@ const run = async ({ page, profileId, shot }) => {
 
   // A Host that can't remove one: every row is there and the sheet's Config tab has no removal.
   await gate("mcps_remove")
-  await openTab()
+  await openPage()
   await page.locator('[data-mcp="github"]').waitFor({ timeout: 15_000 })
   assert.equal(await panel().getByRole("switch").count(), 5, "its servers keep their switch")
   await openServer("github")
@@ -105,12 +105,17 @@ const run = async ({ page, profileId, shot }) => {
   )
   await shot("no-removals")
 
-  // A Host with no Catalogue to read: the Add action is there for a server typed in by hand, and the
+  // A Host with no Catalogue to read: the + is in the header for a server typed in by hand, and the
   // sheet it opens offers no way into a Catalogue it can't read.
   await gate("mcps_catalogue")
-  await openTab()
+  await openPage()
   await page.locator('[data-mcp="github"]').waitFor({ timeout: 15_000 })
-  await page.getByRole("button", { name: "Add a server" }).click()
+  const add = page.getByRole("button", { name: "Add a server" })
+  assert.ok(
+    await add.evaluate((node) => Boolean(node.closest("header"))),
+    "the + sits in the screen's header",
+  )
+  await add.click()
   await page.locator('[data-mcp-source="custom"]').waitFor({ timeout: 15_000 })
   assert.equal(
     await page.locator('[data-mcp-source="catalogue"]').count(),
@@ -119,21 +124,22 @@ const run = async ({ page, profileId, shot }) => {
   )
   await shot("no-catalogue")
 
-  // A Host that reads a Catalogue but can't add from one: no Add action at all, rather than one whose
-  // every tap could only be a 501.
+  // A Host that reads a Catalogue but can't add from one: no + at all, rather than one whose every
+  // tap could only be a 501.
   await gate("mcps_add")
-  await openTab()
+  await openPage()
   await page.locator('[data-mcp="github"]').waitFor({ timeout: 15_000 })
   assert.equal(
     await page.getByRole("button", { name: "Add a server" }).count(),
     0,
-    "a Host that can read a Catalogue but can't add from one offers no Add action",
+    "a Host that can read a Catalogue but can't add from one offers no +",
   )
+  assert.equal(await page.locator("[data-mcp-add]").count(), 0, "and nothing of the Add action")
   await shot("no-add")
 
   // A Host that can't describe a block: the sheet has no Config tab, and only the one tab it can fill.
   await gate("mcps_config")
-  await openTab()
+  await openPage()
   await page.locator('[data-mcp="github"]').waitFor({ timeout: 15_000 })
   await page.locator('[data-mcp="github"] button').first().click()
   await page.getByRole("tab", { name: "Tools" }).waitFor({ timeout: 15_000 })
@@ -157,5 +163,5 @@ const run = async ({ page, profileId, shot }) => {
 
 await flow("mcps-gate", run)
 pass(
-  "a Bot whose plugin answers without `mcps` has no MCP tab and its tab URL returns to General, one that lists servers without `mcps_write` lists them with no switch, one without `mcps_remove` keeps its rows and offers no removal in Config, one with no Catalogue offers only a custom server to add, one that has a Catalogue but can't add from one offers no Add action, one without `mcps_config` opens Tools alone with the removal still under it, and no error is logged",
+  "a Bot whose plugin answers without `mcps` has no MCP page and its page URL returns to General, one that lists servers without `mcps_write` lists them with no switch, one without `mcps_remove` keeps its rows and offers no removal in Config, one with no Catalogue offers only a custom server to add from the header's +, one that has a Catalogue but can't add from one offers no + at all, one without `mcps_config` opens Tools alone with the removal still under it, and no error is logged",
 )

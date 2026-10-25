@@ -1,4 +1,4 @@
-// A Bot's Add action opens Hermes's Catalogue as a searchable list at
+// The + on a Bot's MCP page opens Hermes's Catalogue as a searchable list at
 // /settings/bots/<botId>/mcps: every entry the Host's Hermes offers that this Bot doesn't have, so
 // the ones it already has are left out of the list entirely rather than marked as added, and a
 // search that narrows the list — in an entry's name or in what Hermes says it is — with a search
@@ -25,10 +25,13 @@ const run = async ({ page, profileId, shot, until }) => {
   await page.locator('[data-mcp="github"]').waitFor({ timeout: 15_000 })
   const servers = await page.locator("[data-mcp]").count()
 
-  // The tab offers the Add action, and its sheet leads into the Catalogue.
+  // The page's header offers the Add action, and its sheet leads into the Catalogue.
   const add = page.getByRole("button", { name: "Add a server" })
   await add.waitFor({ timeout: 15_000 })
-  await add.scrollIntoViewIfNeeded()
+  assert.ok(
+    await add.evaluate((node) => Boolean(node.closest("header"))),
+    "the + sits in the screen's header",
+  )
   await shot("add")
   await add.click()
   await page.locator('[data-mcp-source="catalogue"]').waitFor({ timeout: 15_000 })
