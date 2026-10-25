@@ -24,6 +24,9 @@ or approval is pending. Everything ships plugin- and app-side; no Hermes-core ch
 
 ## Consequences
 
+- How the wake is delivered — batched per conversation, with a disposition for every attempt — is
+  [ADR 0052](0052-the-subagent-wake-stays-plugin-owned-and-batches-per-conversation.md).
+
 - A workflow stage does not advance until its run and every subagent that run started have ended;
   completions never wake a stage session, so a stage keeps its one run.
 - Stopping a turn stops its subagents; once the turn has ended, each subagent is stopped from its
