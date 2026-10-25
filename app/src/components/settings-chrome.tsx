@@ -1,4 +1,12 @@
-import { useState, type ReactNode } from "react"
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react"
 
 import { ChevronRightIcon, type LucideIcon } from "lucide-react"
 
@@ -6,31 +14,66 @@ import { ExperimentalBadge } from "@/components/experimental-badge"
 import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 
+/**
+ * The slot a page fills in the header of the Screen holding it, keyed so one page's action replaces
+ * another's. Each Screen provides its own, so a page beside its list never reaches the list's head.
+ */
+const HeaderSlot = createContext<(key: string, draw: (() => ReactNode) | null) => void>(() => {})
+
 /** The chrome every Settings screen wears: a sticky header over one centred column of groups. */
 export function Screen({
   title,
   leading,
+  action,
   className,
   children,
 }: {
   title: string
   leading?: ReactNode
+  /** A control at the header's right edge, after the title: the screen's own action. */
+  action?: ReactNode
   className?: string
   children: ReactNode
 }) {
+  const [page, setPage] = useState<{ key: string; draw: () => ReactNode } | null>(null)
+  const publish = useCallback((key: string, draw: (() => ReactNode) | null) => {
+    setPage(draw ? { key, draw } : null)
+  }, [])
+  const shown = action ?? page?.draw() ?? null
   return (
     <div className={cn("flex min-h-0 flex-1 flex-col overflow-y-auto", className)}>
       <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
         <div className="mx-auto flex min-h-11 max-w-2xl items-center gap-3">
           {leading}
           <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
+          {shown && <div className="ml-auto flex min-h-11 shrink-0 items-center">{shown}</div>}
         </div>
       </header>
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pb-[max(2rem,env(safe-area-inset-bottom))]">
-        {children}
-      </div>
+      <HeaderSlot.Provider value={publish}>
+        <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pb-[max(2rem,env(safe-area-inset-bottom))]">
+          {children}
+        </div>
+      </HeaderSlot.Provider>
     </div>
   )
+}
+
+/**
+ * Puts a control in the header of the Screen this page renders under, under `key`: the page owns
+ * the slot until it unmounts, and a page that returns nothing takes its control with it. What the
+ * header draws is read from a ref whenever the Screen renders, so hand over a node whose handlers
+ * are stable (a state setter) — the header does not re-render when the page does.
+ */
+export function useHeaderAction(key: string, action: ReactNode) {
+  const publish = useContext(HeaderSlot)
+  const node = useRef(action)
+  useEffect(() => {
+    node.current = action
+  })
+  useEffect(() => {
+    publish(key, () => node.current)
+    return () => publish(key, null)
+  }, [publish, key])
 }
 
 /** The rounded card list with hairline separators the Settings rows sit in. */
@@ -143,5 +186,61 @@ export function SwitchRow({
       </span>
       <Switch id={id} checked={checked} disabled={disabled} onCheckedChange={onCheckedChange} />
     </label>
+  )
+}
+
+/**
+ * A row that both opens something and toggles: two fully clickable columns, the left doing the tap
+ * and the right the switch, so turning a setting on never opens the screen behind it.
+ */
+export function SplitSwitchRow({
+  icon: Icon,
+  title,
+  subtitle,
+  extra,
+  switchLabel,
+  checked,
+  disabled,
+  onOpen,
+  onCheckedChange,
+}: {
+  icon?: LucideIcon
+  title: string
+  subtitle?: ReactNode
+  /** Extra lines under the subtitle, still inside the clickable left column (a skill's health line). */
+  extra?: ReactNode
+  /** The switch's own accessible name; defaults to `title`. */
+  switchLabel?: string
+  checked: boolean
+  disabled?: boolean
+  onOpen: () => void
+  onCheckedChange: (checked: boolean) => void
+}) {
+  return (
+    <div className={cn(rowClass, "gap-0 p-0")}>
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex min-h-14 min-w-0 flex-1 items-center gap-4 px-5 py-3 text-left transition-colors hover:bg-muted"
+      >
+        {Icon && <Icon className="size-5 shrink-0 text-muted-foreground" />}
+        <span className="flex min-w-0 flex-1 flex-col">
+          <RowText title={title} subtitle={subtitle} />
+          {extra}
+        </span>
+      </button>
+      {/* The label holds only the switch, so a tap here toggles and never reaches the column beside
+          it. Its words are hidden: the switch's element is a span, which takes its name from the
+          label it sits in, and without them the name is empty. */}
+      <label className="flex min-h-14 shrink-0 cursor-pointer items-center px-5 py-3">
+        <span className="sr-only">{switchLabel ?? title}</span>
+        <Switch
+          aria-label={switchLabel ?? title}
+          checked={checked}
+          disabled={disabled}
+          onCheckedChange={onCheckedChange}
+        />
+      </label>
+    </div>
   )
 }
