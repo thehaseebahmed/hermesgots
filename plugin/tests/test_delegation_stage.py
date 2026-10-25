@@ -296,7 +296,13 @@ class StageWakeTests(StageCase):
         self.end_child()
         self.assertEqual(asyncio.run(delegation.sweep(self.adapter, self.home)), 0)
         self.assertEqual(self.posted, [], "a wake would be a second run on a stage's session")
-        self.assertEqual(sessions.marked_wakes(db_path(self.home), [CHILD]), set())
+        # Dropped at the drop, with its reason: the stage's child is settled and never read again.
+        self.assertEqual(sessions.marked_wakes(db_path(self.home), [CHILD]), {CHILD})
+        mark = sessions.wake_marks(db_path(self.home), [CHILD])[CHILD]
+        self.assertEqual(mark["status"], "dropped")
+        self.assertEqual(mark["reason"], delegation.DROP_STAGE)
+        self.assertEqual(asyncio.run(delegation.sweep(self.adapter, self.home)), 0)
+        self.assertEqual(self.posted, [])
 
     def test_another_conversations_subagent_still_wakes_its_bot(self) -> None:
         """The suppression is the stage's, not every session's in the same home."""

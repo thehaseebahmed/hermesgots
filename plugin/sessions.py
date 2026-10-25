@@ -28,7 +28,7 @@ import time
 from contextlib import closing
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, NamedTuple, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple
 
 from . import approvals, events, push
 from .store import connect
@@ -1155,6 +1155,11 @@ def after_run(**kwargs: Any) -> None:
         logger.debug("memento: on_session_end failed", exc_info=True)
 
 
+# A mark's dispositions: a settled one is never collected again, and a held one is owed again once
+# its ``next_at`` has passed (``delegation.sweep`` reads them the same way).
+SETTLED_WAKES = (None, "sent", "dropped")
+
+
 def marked_wakes(path: Path, subagent_ids: Iterable[str]) -> Set[str]:
     """The subagents among ``subagent_ids`` whose result has already woken their bot.
 
@@ -1175,21 +1180,199 @@ def marked_wakes(path: Path, subagent_ids: Iterable[str]) -> Set[str]:
     return {row[0] for row in rows}
 
 
+def wake_marks(path: Path, subagent_ids: Iterable[str]) -> Dict[str, Dict[str, Any]]:
+    """What has become of each subagent's wake, for every one of ``subagent_ids`` that has a mark.
+
+    One read, like ``marked_wakes``: the watcher asks it about a whole page of ends, then again for
+    one batch, and a per-child lookup would open the store once per child. A mark with no status is
+    one a store older than v41 wrote — a wake that was posted, so it reads as sent.
+    """
+    ids = [one for one in subagent_ids if one]
+    if not ids or not path.exists():
+        return {}
+    marks = ", ".join("?" for _ in ids)
+    conn = connect(path)
+    try:
+        rows = conn.execute(
+            f"""SELECT subagent_id, status, attempts, next_at, reason FROM subagent_wakes
+                WHERE subagent_id IN ({marks})""",
+            ids,
+        ).fetchall()
+    finally:
+        conn.close()
+    return {
+        row[0]: {
+            "status": row[1],
+            "attempts": row[2] or 0,
+            "next_at": row[3],
+            "reason": row[4],
+        }
+        for row in rows
+    }
+
+
 def mark_wake(path: Path, subagent_id: str, parent_id: str, run_id: Optional[str]) -> None:
     """Records that a subagent's result has been posted to its conversation, and the run it started.
 
     Written after the post answered, never before: a post that failed must be retried, and the
     ``Idempotency-Key`` it carries is what makes that retry safe.
     """
+    mark_wakes(path, parent_id, [subagent_id], run_id)
+
+
+def mark_wakes(path: Path, parent_id: str, subagent_ids: Iterable[str], run_id: Optional[str]) -> None:
+    """Records one posted run for every subagent of a batch, in one transaction.
+
+    A batch is marked as a whole: half a batch settled would be a batch half-posted, and nothing
+    downstream could tell which half the host already ran.
+    """
+    _write_marks(path, parent_id, subagent_ids, status="sent", run_id=run_id)
+
+
+def hold_wakes(path: Path, parent_id: str, subagent_ids: Iterable[str], reason: str) -> None:
+    """Records that a wake is owed but may not go yet, and why.
+
+    Holding costs nothing: nothing was posted, so no attempt is spent and no backoff is set.
+    """
+    _write_marks(path, parent_id, subagent_ids, status="held", reason=reason)
+
+
+def backoff_wakes(
+    path: Path, parent_id: str, subagent_ids: Iterable[str], attempts: int, next_at: int, reason: str
+) -> None:
+    """Records a post that failed and when the next attempt may go, with how many have been made."""
+    _write_marks(
+        path, parent_id, subagent_ids, status="held", reason=reason, attempts=attempts, next_at=next_at
+    )
+
+
+def drop_wakes(path: Path, parent_id: str, subagent_ids: Iterable[str], reason: str) -> None:
+    """Settles a wake that will never be posted, and why — it is read once and never collected."""
+    _write_marks(path, parent_id, subagent_ids, status="dropped", reason=reason)
+
+
+def _write_marks(
+    path: Path,
+    parent_id: str,
+    subagent_ids: Iterable[str],
+    *,
+    status: str,
+    reason: Optional[str] = None,
+    attempts: Optional[int] = None,
+    next_at: Optional[int] = None,
+    run_id: Optional[str] = None,
+) -> None:
+    """Writes one disposition for every subagent of a batch, in one transaction.
+
+    A field left out is kept as it was, which is what makes holding free and a retry's count
+    cumulative. A child with no row gets one: the parent it hangs off is all a mark needs to be
+    read back later.
+    """
+    ids = [one for one in subagent_ids if one]
+    if not ids:
+        return
+    now = int(time.time() * 1000)
+    conn = connect(path)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        for subagent_id in ids:
+            row = conn.execute(
+                "SELECT run_id, attempts, next_at FROM subagent_wakes WHERE subagent_id = ?",
+                (subagent_id,),
+            ).fetchone()
+            kept_run, kept_attempts, kept_next = row if row else (None, 0, None)
+            conn.execute(
+                """INSERT INTO subagent_wakes
+                       (subagent_id, parent_id, run_id, at, status, attempts, next_at, reason)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(subagent_id) DO UPDATE SET
+                       parent_id = excluded.parent_id, run_id = excluded.run_id,
+                       at = excluded.at, status = excluded.status,
+                       attempts = excluded.attempts, next_at = excluded.next_at,
+                       reason = excluded.reason""",
+                (
+                    subagent_id,
+                    parent_id,
+                    run_id if run_id is not None else kept_run,
+                    now,
+                    status,
+                    attempts if attempts is not None else kept_attempts,
+                    next_at if next_at is not None else kept_next,
+                    reason,
+                ),
+            )
+        conn.execute("COMMIT")
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.close()
+
+
+def put_wake_batch(path: Path, batch_id: str, root: str, members: Iterable[str]) -> None:
+    """Records a batch's intent before its run is posted.
+
+    The intent is what makes a restart mid-post safe: the retry re-posts this batch's own key, so
+    the host answers with the run it already started rather than starting a second one.
+    """
     conn = connect(path)
     try:
         conn.execute(
-            """INSERT INTO subagent_wakes (subagent_id, parent_id, run_id, at) VALUES (?, ?, ?, ?)
-               ON CONFLICT(subagent_id) DO UPDATE SET run_id = excluded.run_id""",
-            (subagent_id, parent_id, run_id, int(time.time() * 1000)),
+            "INSERT INTO subagent_wake_batches (id, root, members, created_at) VALUES (?, ?, ?, ?)",
+            (batch_id, root, json.dumps(list(members)), int(time.time() * 1000)),
         )
     finally:
         conn.close()
+
+
+def open_wake_batch(path: Path, root: str) -> Optional[Dict[str, Any]]:
+    """The batch owed to ``root`` whose run was never confirmed, or None when there is none.
+
+    Newest first, and only while a member is still owed: a batch whose every member is settled
+    finished inside a crash window — its post landed, or its children were dropped — so nothing is
+    left to re-post and the next batch starts fresh.
+    """
+    if not path.exists():
+        return None
+    conn = connect(path)
+    try:
+        rows = conn.execute(
+            """SELECT id, root, members, created_at FROM subagent_wake_batches
+               WHERE root = ? AND run_id IS NULL ORDER BY created_at DESC""",
+            (root,),
+        ).fetchall()
+    finally:
+        conn.close()
+    for batch_id, batch_root, members, created_at in rows:
+        ids = _batch_members(members)
+        if not ids:
+            continue
+        marks = wake_marks(path, ids)
+        if len(marks) == len(ids) and all(
+            one["status"] in SETTLED_WAKES for one in marks.values()
+        ):
+            continue
+        return {"id": batch_id, "root": batch_root, "members": ids, "created_at": created_at}
+    return None
+
+
+def finish_wake_batch(path: Path, batch_id: str, run_id: str) -> None:
+    """Confirms a batch's run: the intent becomes the record of what was posted."""
+    conn = connect(path)
+    try:
+        conn.execute("UPDATE subagent_wake_batches SET run_id = ? WHERE id = ?", (run_id, batch_id))
+    finally:
+        conn.close()
+
+
+def _batch_members(raw: Any) -> List[str]:
+    """A batch row's members, oldest end first, as the JSON column keeps them."""
+    try:
+        members = json.loads(raw) if raw else []
+    except ValueError:
+        return []
+    return [one for one in members if isinstance(one, str) and one] if isinstance(members, list) else []
 
 
 def remember_agent(path: Path, subagent_id: str, agent_id: str) -> None:
