@@ -122,12 +122,20 @@ export function wantedCategories(prefs: PushPrefs | undefined) {
 }
 
 /**
+ * The categories this device can reach, and so the channels it gets: Meetings' two exist only once
+ * that experiment is on, the other fourteen always.
+ */
+export function reachableCategories(meetings?: boolean) {
+  return PUSH_CATEGORIES.filter((category) => category.feature !== "meetings" || Boolean(meetings))
+}
+
+/**
  * A channel as Android lists it for this app: its id and the importance the user left it at. The
  * plugin answers with the whole channel; only these two decide what is still allowed.
  */
 export interface PhoneChannel {
   id: string
-  /** Android's importance: 0 is the user's off, 2 to 4 are still on, absent says nothing. */
+  /** 0 is the user's off, 2 to 4 are still on, absent says nothing. */
   importance?: number
 }
 
@@ -139,36 +147,56 @@ export interface PhoneChannels {
 }
 
 /**
- * The categories the registry should be told this phone still allows. The phone is read, not
- * asked: a channel at importance none was switched off by the user in Android's settings and is
- * left out, one the phone doesn't list has not been created yet and counts as allowed, and with
- * the phone's notifications off altogether nothing is allowed. The universe is every category, so
- * a first launch registers the full list.
+ * The categories the registry should be told this phone still allows. Android owns each switch, so
+ * the phone is read, not asked: a channel at importance none was switched off in its settings and
+ * is left out, one it doesn't list has not been created yet and counts as allowed, and with its
+ * notifications off nothing is. The universe is every category this device can reach, so a first
+ * launch registers the full list.
  */
-export function allowedCategories(report: PhoneChannels): PushCategory[] {
+export function allowedCategoryIds(report: PhoneChannels, meetings?: boolean): PushCategory[] {
   if (!report.allowed) return []
   const off = new Set(
     report.channels.filter((channel) => channel.importance === 0).map((channel) => channel.id),
   )
-  return PUSH_CATEGORIES.filter((category) => !off.has(category.id)).map((category) => category.id)
+  return reachableCategories(meetings)
+    .filter((category) => !off.has(category.id))
+    .map((category) => category.id)
 }
 
 /**
- * Whether the registry has to hear a list: one never told always does, and one that reads the same
- * as what was last sent there is a change already told. The comparison is the wire's — the joined
- * ids — so a device carrying an older list is told the live one exactly once, and a resume that
- * changed nothing costs no call.
+ * The list to tell the registry, or nothing when it already heard it: the comparison is the wire's
+ * own form, the joined ids, so a device carrying an older list is told the live one exactly once
+ * and a resume that changed nothing costs no call. A list never sent is always a change.
  */
-export function categoriesChanged(sent: string | undefined, next: PushCategory[]) {
-  return next.join() !== sent
+export function changedList(sent: string | undefined, next: PushCategory[]) {
+  const wire = next.join()
+  return wire === sent ? undefined : wire
+}
+
+/** A channel a launch writes: its id, the name Android's list shows, and the importance to make it. */
+export interface PlannedChannel {
+  id: PushCategory
+  name: string
+  /** Android's importance: the phone's own where it reported one, else the row's default. */
+  importance: number
 }
 
 /**
- * The categories this device can reach, and so the channels it gets: Meetings' two exist only once
- * that experiment is on, the other fourteen always.
+ * The channels to write, one per reachable category: a channel the phone already holds keeps the
+ * importance Android reported, and one it never had is made at its row's importance. Android takes
+ * an app's importance only at creation, so a default written later would never take — the phone's
+ * answer is the only one that means anything once a channel exists.
  */
-export function reachableCategories(meetings?: boolean) {
-  return PUSH_CATEGORIES.filter((category) => category.feature !== "meetings" || Boolean(meetings))
+export function channelPlan(
+  categories: PushCategoryInfo[],
+  held: PhoneChannel[],
+): PlannedChannel[] {
+  const reported = new Map(held.map((channel) => [channel.id, channel.importance]))
+  return categories.map((category) => ({
+    id: category.id,
+    name: channelName(category),
+    importance: reported.get(category.id) ?? category.importance,
+  }))
 }
 
 /** The category's name in Android's notification settings, where the feature isn't a heading. */

@@ -1,14 +1,13 @@
 /**
- * The channels a phone gets: one per notification type it can reach. Meetings' two exist only once
- * that experiment is on, so a device that never turns it on is never asked about notes it cannot get.
- * A unit test because the rule is pure (`reachableCategories`), and `listen()` is not reachable
- * without Capacitor.
+ * The channels a phone gets: one per notification type it can reach, and the test push's own made on
+ * the tap that sends one. `reachableCategories` and `channelPlan` are pure and driven here; the
+ * writes around them are pinned as text (`push-source.mjs`), since Capacitor makes the calls.
  */
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
 import test from "node:test"
 
 import { PUSH_CATEGORIES, reachableCategories } from "../src/lib/push-kinds.ts"
+import { read } from "./push-source.mjs"
 
 const ids = (categories) => categories.map((category) => category.id)
 
@@ -32,15 +31,7 @@ test("with the experiment on, every type is", () => {
   assert.deepEqual(ids(reachableCategories(true)).slice(-2), ["meeting_done", "meeting_failed"])
 })
 
-/**
- * The rest of the ticket is text, not a rule `node --test` can call: `listen()` and `sendTestPush()`
- * need Capacitor, and the registry and the manifest are other files entirely. So the same way
- * `plugin/tests/test_push_kinds.py` guards the four id lists, these read the three files as text and
- * pin the one id they must agree on.
- */
-const app = new URL("../src/lib/", import.meta.url)
-const read = (path) => readFileSync(new URL(path, app), "utf8")
-
+/** The rest is text: `createChannel` and the registry need Capacitor and a deploy, so the lines are pinned. */
 const push = read("push.ts")
 const registry = read("../../netlify/lib/fcm.ts")
 const manifest = read("../../android/app/src/main/AndroidManifest.xml")
@@ -48,8 +39,8 @@ const manifest = read("../../android/app/src/main/AndroidManifest.xml")
 test("launch makes the channels this phone can reach, not all sixteen", () => {
   assert.match(
     push,
-    /for \(const category of reachableCategories\(meetings\)\)/,
-    "the loop asks the rule with the experiment's own flag",
+    /channelPlan\(reachableCategories\(meetings\), held\)/,
+    "the plan asks the rule with the experiment's own flag",
   )
   assert.doesNotMatch(push, /for \(const category of PUSH_CATEGORIES\)/)
 })

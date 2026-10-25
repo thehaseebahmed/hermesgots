@@ -1,19 +1,26 @@
 /**
- * What the registry is told this phone still allows. Android owns each type's switch, so the app
- * reads a channel's live importance instead of asking: none means the user switched it off, an id
- * the phone doesn't list has never been made and counts as allowed, and the phone's notifications
- * off altogether is an empty list — and whether a list is news at all, so only a change is sent
- * again. A unit test because the rules are pure (`allowedCategories`, `categoriesChanged`); listing
- * the phone's channels needs Capacitor.
+ * What the registry is told this phone allows, when a list is news, and the channels a launch
+ * writes. Pure rules over plain inputs, so the unit tier drives them exhaustively; the wiring around
+ * them is pinned as text (`push-source.mjs`) because listing a phone's channels needs Capacitor.
  */
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
 import test from "node:test"
 
-import { PUSH_CATEGORIES, allowedCategories, categoriesChanged } from "../src/lib/push-kinds.ts"
+import {
+  PUSH_CATEGORIES,
+  allowedCategoryIds,
+  changedList,
+  channelName,
+  channelPlan,
+  reachableCategories,
+} from "../src/lib/push-kinds.ts"
+import { body, read } from "./push-source.mjs"
 
-/** The rule answers with ids, so the expected lists are the ids in the order the list keeps. */
-const all = PUSH_CATEGORIES.map((category) => category.id)
+const ids = (categories) => categories.map((category) => category.id)
+/** Every id, in the order the list keeps: what a phone that can reach everything is told. */
+const all = ids(reachableCategories(true))
+/** The fourteen a phone without the Meetings experiment can reach. */
+const withoutMeetings = ids(reachableCategories(false))
 /** A phone that has made every channel and left it alone: Android's importance 2, 3 or 4. */
 const healthy = PUSH_CATEGORIES.map(({ id, importance }) => ({ id, importance }))
 
@@ -22,7 +29,7 @@ test("a channel switched off in Android's settings is left out", () => {
     channel.id === "code_run_done" ? { ...channel, importance: 0 } : channel,
   )
   assert.deepEqual(
-    allowedCategories({ allowed: true, channels }),
+    allowedCategoryIds({ allowed: true, channels }, true),
     all.filter((id) => id !== "code_run_done"),
     "that one stops costing a push, and nothing else changes",
   )
@@ -34,39 +41,42 @@ test("each channel the user switched off is left out, however many", () => {
     off.includes(channel.id) ? { ...channel, importance: 0 } : channel,
   )
   assert.deepEqual(
-    allowedCategories({ allowed: true, channels }),
+    allowedCategoryIds({ allowed: true, channels }, true),
     all.filter((id) => !off.includes(id)),
   )
 })
 
 test("a channel the phone doesn't list counts as allowed", () => {
   assert.deepEqual(
-    allowedCategories({ allowed: true, channels: [] }),
+    allowedCategoryIds({ allowed: true, channels: [] }, true),
     all,
     "a first launch has made no channel it can read, and must still register the full list",
   )
   // A phone that lists some of them: the ones it hasn't made are allowed, the rest by importance.
   assert.deepEqual(
-    allowedCategories({
-      allowed: true,
-      channels: [
-        { id: "chat_input", importance: 4 },
-        { id: "code_input", importance: 0 },
-      ],
-    }),
+    allowedCategoryIds(
+      {
+        allowed: true,
+        channels: [
+          { id: "chat_input", importance: 4 },
+          { id: "code_input", importance: 0 },
+        ],
+      },
+      true,
+    ),
     all.filter((id) => id !== "code_input"),
   )
 })
 
 test("a healthy phone allows every type, in the order the list keeps", () => {
-  const allowed = allowedCategories({ allowed: true, channels: healthy })
+  const allowed = allowedCategoryIds({ allowed: true, channels: healthy }, true)
   assert.deepEqual(allowed, all)
   assert.equal(allowed.length, PUSH_CATEGORIES.length, "the sixteen stay sixteen")
 })
 
 test("with the phone's notifications off the registration carries an empty list", () => {
   assert.deepEqual(
-    allowedCategories({ allowed: false, channels: healthy }),
+    allowedCategoryIds({ allowed: false, channels: healthy }, true),
     [],
     "not a deleted device, and not a list that would keep sending",
   )
@@ -75,60 +85,101 @@ test("with the phone's notifications off the registration carries an empty list"
 test("an importance the phone doesn't report is a channel the user left alone", () => {
   const channels = healthy.map(({ id }) => ({ id }))
   assert.deepEqual(
-    allowedCategories({ allowed: true, channels }),
+    allowedCategoryIds({ allowed: true, channels }, true),
     all,
     "a plugin that answers without importance must not silence anything",
   )
 })
 
-/** `allowedCategories` is a rule; the wiring around it is text. These pin what the ticket changes. */
-const push = readFileSync(new URL("../src/lib/push.ts", import.meta.url), "utf8")
-const body = (name) =>
-  push.match(new RegExp(`(?:async )?function ${name}\\([^)]*\\)[\\s\\S]*?\\n\\}`))?.[0] ?? ""
+test("a phone that cannot reach Meetings does not register its two", () => {
+  for (const meetings of [false, undefined]) {
+    const allowed = allowedCategoryIds({ allowed: true, channels: healthy }, meetings)
+    assert.deepEqual(allowed, withoutMeetings, "fourteen, and Meetings' two among the missing")
+    assert.equal(allowed.includes("meeting_done"), false, "no channel it will never be shown")
+    assert.equal(allowed.includes("meeting_failed"), false)
+  }
+  assert.deepEqual(
+    allowedCategoryIds({ allowed: true, channels: [] }, false),
+    withoutMeetings,
+    "a first launch on such a phone registers fourteen",
+  )
+})
 
-/**
- * Only a change is sent again: the registry filters by the list a device last sent, so a list that
- * reads the same must cost no call, while a device carrying an older one is told the live one on
- * its first resume.
- */
-test("a list never sent is sent, and a list already told is not", () => {
-  assert.equal(categoriesChanged(undefined, all), true, "nothing sent yet, so the live list goes")
+test("a channel the phone already holds keeps the importance the phone reported", () => {
+  const plan = channelPlan(reachableCategories(false), [
+    { id: "code_pr_merged", importance: 4 },
+    { id: "chat_input", importance: 2 },
+  ])
+  const planned = (id) => plan.find((channel) => channel.id === id)
+  assert.equal(planned("code_pr_merged").importance, 4, "the user's louder choice is left as it is")
+  assert.equal(planned("chat_input").importance, 2, "and their silence is not undone")
   assert.equal(
-    categoriesChanged(all.join(), all),
-    false,
+    planned("code_pr_merged").name,
+    "Code: Pull request merged",
+    "while the name still tracks the code",
+  )
+})
+
+test("a channel the phone never had is made with its row's importance", () => {
+  const plan = channelPlan(reachableCategories(false), [])
+  assert.deepEqual(
+    plan.map(({ id, importance }) => [id, importance]),
+    PUSH_CATEGORIES.filter((category) => category.feature !== "meetings").map(
+      ({ id, importance }) => [id, importance],
+    ),
+    "the first launch's defaults, one channel each",
+  )
+  assert.equal(plan.length, 14, "and none for a feature this phone cannot reach")
+  for (const channel of plan) {
+    const row = PUSH_CATEGORIES.find((category) => category.id === channel.id)
+    assert.equal(channel.name, channelName(row), channel.id)
+  }
+})
+
+test("a channel the phone lists without an importance keeps its row's", () => {
+  const plan = channelPlan(reachableCategories(false), [{ id: "research_done" }])
+  assert.equal(plan.find((channel) => channel.id === "research_done").importance, 3)
+})
+
+test("a list never sent is sent, and a list already told is not", () => {
+  assert.equal(changedList(undefined, all), all.join(), "nothing sent yet, so the live list goes")
+  assert.equal(
+    changedList(all.join(), all),
+    undefined,
     "a resume that changed nothing costs no call",
   )
   assert.equal(
-    categoriesChanged(all.slice(0, 5).join(), all),
-    true,
+    changedList(all.slice(0, 5).join(), all),
+    all.join(),
     "a device carrying an older subset is told the live one",
   )
 })
 
 test("a phone that lost a channel is told, and the list it now has is what is kept", () => {
   const after = all.filter((id) => id !== "code_run_done")
-  assert.equal(categoriesChanged(all.join(), after), true, "one channel switched off is a change")
-  assert.equal(categoriesChanged(after.join(), after), false, "and telling it once is enough")
+  assert.equal(changedList(all.join(), after), after.join(), "one channel switched off is a change")
+  assert.equal(changedList(after.join(), after), undefined, "and telling it once is enough")
 })
 
 test("with notifications off the empty list is still a change, told once", () => {
-  assert.equal(categoriesChanged(undefined, []), true, "an empty list is news, not silence")
-  assert.equal(categoriesChanged(all.join(), []), true, "the phone switched everything off")
-  assert.equal(categoriesChanged([].join(), []), false, "and repeating it says nothing new")
-  assert.equal(categoriesChanged([].join(), all), true, "turning them back on is a change again")
+  assert.equal(changedList(undefined, []), "", "an empty list is news, not silence")
+  assert.equal(changedList(all.join(), []), "", "the phone switched everything off")
+  assert.equal(changedList("", []), undefined, "and repeating it says nothing new")
+  assert.equal(changedList("", all), all.join(), "turning them back on is a change again")
 })
 
-test("syncCategories sends only a changed list, before it patches, and records what it sent", () => {
+test("syncCategories asks the rule first, and patches only what is news", () => {
   const sync = body("syncCategories")
   assert.ok(sync, "syncCategories is in push.ts")
-  const checked = sync.indexOf("categoriesChanged(sentCategories, categories)")
+  const asked = sync.indexOf("changedList(sentCategories, categories)")
   const patched = sync.indexOf('"PATCH"')
-  const recorded = sync.lastIndexOf("sentCategories = categories.join()")
-  assert.ok(checked >= 0, "it asks the rule whether this list is news")
-  assert.ok(patched >= 0, "and patches the device when it is")
-  assert.ok(recorded >= 0, "then records the list the registry now has")
-  assert.ok(checked < patched, "the check comes first, so the same list never patches twice")
-  assert.ok(patched < recorded, "and the record is of the list that got through")
+  assert.ok(asked >= 0, "it asks the rule whether this list is news")
+  assert.ok(patched > asked, "and patches the device only when it is")
+  assert.match(
+    sync,
+    /if \(wire === undefined\) return/,
+    "an empty list is still a list: only one never told is skipped",
+  )
   assert.doesNotMatch(
     sync,
     /"POST"/,
@@ -136,13 +187,48 @@ test("syncCategories sends only a changed list, before it patches, and records w
   )
 })
 
-test("sendToken records the list a registered token carried", () => {
-  const send = body("sendToken")
-  assert.ok(send, "sendToken is in push.ts")
-  const posted = send.indexOf('"POST"')
-  const recorded = send.indexOf("sentCategories = categories.join()")
-  assert.ok(posted >= 0, "registering a token posts the device")
-  assert.ok(recorded > posted, "and leaves behind the list it sent, so a resume doesn't repeat it")
+test("one call records what the registry was told", () => {
+  const tell = body("tellRegistry")
+  assert.ok(tell, "tellRegistry is in push.ts")
+  const refused = tell.indexOf("!response.ok")
+  const kept = tell.indexOf("sentCategories = wire")
+  assert.ok(refused >= 0, "a refusal is thrown")
+  assert.ok(
+    kept > refused,
+    "and the wire form is kept only once the call answered, so a failure is asked again",
+  )
+  for (const name of ["sendToken", "syncCategories"]) {
+    assert.match(body(name), /tellRegistry\(/, `${name} registers through it, not around it`)
+    assert.doesNotMatch(body(name), /sentCategories =/, `${name} keeps no copy of the record`)
+  }
+})
+
+test("a pass reads the phone once, through one read", () => {
+  const asks = body("readPhone")
+  assert.ok(asks, "readPhone is in push.ts")
+  assert.match(asks, /checkPermissions/, "the permission is read there")
+  assert.match(asks, /listChannels/, "with the channel list, in the same read")
+  // A pass, the switch's own state, and the tap that asks for the permission: no fourth reader.
+  const elsewhere = read("push.ts")
+    .replace(asks, "")
+    .replace(body("useNativePermission"), "")
+    .replace(body("enableNative"), "")
+  assert.doesNotMatch(elsewhere, /checkPermissions/, "nothing else asks the phone again")
+})
+
+test("the channels are written once a launch, and only for a phone that may notify", () => {
+  const writes = body("provisionChannels")
+  assert.ok(writes, "provisionChannels is in push.ts")
+  assert.match(writes, /provisioned \?\?=/, "the first pass writes them and the rest reuse it")
+  assert.match(writes, /channelPlan\(/, "the importance comes from the phone's own answer")
+  const pass = body("syncNative")
+  assert.ok(pass, "syncNative is in push.ts")
+  assert.match(
+    pass,
+    /if \(read\.allowed\) \{[\s\S]*provisionChannels/,
+    "a phone that cannot notify is given none",
+  )
+  assert.doesNotMatch(body("listen"), /createChannel/, "registering listeners writes no channel")
 })
 
 test("the registration carries the phone's list, not the app's stored preferences", () => {
@@ -156,11 +242,10 @@ test("the registration carries the phone's list, not the app's stored preference
   }
 })
 
-test("the web's per-type writer no longer tells the registry on a phone", () => {
-  assert.ok(body("setCategories"), "setCategories is in push.ts")
-  assert.doesNotMatch(
-    body("setCategories"),
-    /syncCategories/,
-    "the in-app list is the web's switch only",
-  )
+test("the app's own list is saved on the web alone", () => {
+  const set = body("setCategories")
+  assert.ok(set, "setCategories is in push.ts")
+  assert.match(set, /if \(isNative\) return/, "a phone reads its channels, so it stores no list")
+  assert.match(set, /syncPush\(\)/, "the web's bots are told with its subscription")
+  assert.doesNotMatch(set, /syncCategories/, "and the phone's registration is never its business")
 })
