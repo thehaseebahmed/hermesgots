@@ -74,7 +74,7 @@ const run = async ({ page, profileId, shot }) => {
   // Reached by URL, the page lands back on the Bot's General page: no server list, and nowhere left
   // to be stuck.
   await page.goto(`${app}${screen}`)
-  await page.waitForURL(`**${editor}`, { timeout: 15_000 })
+  await page.waitForURL(`**${editor}/general`, { timeout: 15_000 })
   assert.equal(await page.locator("[data-mcp]").count(), 0, "no server is listed")
   await page.getByRole("button", { name: "Test connection" }).waitFor({ timeout: 15_000 })
   await shot("back-on-general")
