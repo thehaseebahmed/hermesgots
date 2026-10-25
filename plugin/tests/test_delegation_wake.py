@@ -258,6 +258,44 @@ class WakeTest(unittest.TestCase):
             "a member whose result was in the posted text is settled sent, not dropped",
         )
 
+    def test_a_deleted_conversations_held_wakes_are_dropped_once(self) -> None:
+        """A chat deleted out of the store never reaches the posting seam — ``_DELEGATIONS``
+        requires the parent row — so a wait left on its children is settled here, with why, once."""
+        self.chat("s")
+        self.child("c1", "s", said="done")
+        self.adapter.run(
+            "run-1", "s", "waiting_for_approval",
+            clarify={"clarify_id": "q", "questions": [{"id": "q0", "question": "Which branch?"}]},
+        )
+        self.assertEqual(self.sweep(), 0)
+        self.assertEqual(self.mark("c1")["status"], "held")
+        self.conn.execute("DELETE FROM sessions WHERE id IN ('s', 'c1')")
+        self.conn.commit()
+        self.assertEqual(self.sweep(), 0)
+        self.assertEqual(self.posted, [], "nothing is posted for a conversation that is gone")
+        self.assertEqual(self.mark("c1")["status"], "dropped")
+        self.assertEqual(self.mark("c1")["reason"], "gone")
+        self.assertEqual(self.sweep(), 0, "and the drop is settled, never said again")
+        self.assertEqual(self.mark("c1")["status"], "dropped")
+
+    def test_a_failed_store_read_never_drops_an_orphan(self) -> None:
+        """The orphan pass is a read too: a store that can't be read answers nothing, so a held
+        wake waits rather than being judged gone."""
+        self.chat("s")
+        self.child("c1", "s", said="done")
+        self.adapter.run(
+            "run-1", "s", "waiting_for_approval",
+            clarify={"clarify_id": "q", "questions": [{"id": "q0", "question": "Which branch?"}]},
+        )
+        self.assertEqual(self.sweep(), 0)
+        self.conn.execute("DELETE FROM sessions WHERE id IN ('s', 'c1')")
+        self.conn.commit()
+        with mock.patch.object(sessions, "_open_state", return_value=None):
+            self.assertEqual(self.sweep(), 0)
+        self.assertEqual(self.mark("c1")["status"], "held", "a failed read settles nothing")
+        self.assertEqual(self.sweep(), 0)
+        self.assertEqual(self.mark("c1")["status"], "dropped")
+
     def test_holding_a_wake_again_rewrites_nothing(self) -> None:
         """A conversation held for an hour is looked at every 5 seconds; each look must cost the
         store no write, and the mark must not drift."""

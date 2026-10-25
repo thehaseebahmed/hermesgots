@@ -1211,6 +1211,23 @@ def backoff_wakes(
     )
 
 
+def held_wakes(path: Path) -> Dict[str, List[str]]:
+    """Every still-held wake, grouped by the conversation it hangs off."""
+    if not path.exists():
+        return {}
+    conn = connect(path)
+    try:
+        rows = conn.execute(
+            "SELECT parent_id, subagent_id FROM subagent_wakes WHERE status = 'held'"
+        ).fetchall()
+    finally:
+        conn.close()
+    held: Dict[str, List[str]] = {}
+    for parent_id, subagent_id in rows:
+        held.setdefault(parent_id, []).append(subagent_id)
+    return held
+
+
 def drop_wakes(path: Path, parent_id: str, subagent_ids: Iterable[str], reason: str) -> None:
     """Settles a wake that will never be posted, and why — it is read once and never collected."""
     _write_marks(path, parent_id, subagent_ids, status="dropped", reason=reason)

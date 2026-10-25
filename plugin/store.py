@@ -615,4 +615,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
             """CREATE INDEX IF NOT EXISTS wake_batch_open
                    ON subagent_wake_batches (root, created_at) WHERE run_id IS NULL"""
         )
+        # The orphan pass asks for every still-held wake on every look; the partial index keeps
+        # that off the sent rows a store accumulates, one per posted wake.
+        conn.execute(
+            """CREATE INDEX IF NOT EXISTS held_wakes
+                   ON subagent_wakes (parent_id) WHERE status = 'held'"""
+        )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

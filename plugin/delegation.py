@@ -406,6 +406,7 @@ async def sweep(adapter: Any, home: Path) -> int:
         owed.append(row)
     for parent, ids in stale.items():
         await asyncio.to_thread(sessions.drop_wakes, path, parent, ids, DROP_STALE)
+    await _settle_orphans(home, path)
     posted = 0
     for root, children in await asyncio.to_thread(_by_root, home, owed):
         try:
@@ -413,6 +414,38 @@ async def sweep(adapter: Any, home: Path) -> int:
         except Exception:
             logger.debug("memento: couldn't wake %s for its subagents", root, exc_info=True)
     return posted
+
+
+async def _settle_orphans(home: Path, path: Path) -> int:
+    """Held wakes whose conversation is gone from ``state.db``, settled once with why.
+
+    A deleted chat's children never reach the posting seam — ``_DELEGATIONS`` requires the parent
+    row — so a wait or a backoff left on them would sit unsettled forever. Only a store that
+    reads answers: a failed read settles nothing.
+    """
+    held = await asyncio.to_thread(sessions.held_wakes, path)
+    if not held:
+        return 0
+    conn = sessions._open_state(home)
+    if conn is None:
+        return 0
+    dropped = 0
+    with closing(conn):
+        for parent_id, ids in held.items():
+            try:
+                row = conn.execute("SELECT 1 FROM sessions WHERE id = ?", (parent_id,)).fetchone()
+            except sqlite3.Error:
+                logger.debug("memento: couldn't check the conversation of held wakes", exc_info=True)
+                return dropped
+            if row is None:
+                await asyncio.to_thread(sessions.drop_wakes, path, parent_id, ids, DROP_GONE)
+                logger.debug(
+                    "memento: dropped %d held wake(s): the conversation %s is gone",
+                    len(ids),
+                    parent_id,
+                )
+                dropped += len(ids)
+    return dropped
 
 
 def _by_root(home: Path, rows: Iterable[Dict[str, Any]]) -> List[Tuple[str, List[Dict[str, Any]]]]:
