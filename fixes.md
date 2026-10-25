@@ -2245,3 +2245,41 @@ cleanup and conformance reviews, not a bug hunt — the two defects they did tur
 universe ignoring reachability, and importance being re-written on every resume) are fixed above
 rather than deferred, and neither the entry nor the deviations block the pull request.
 
+---
+
+# Deferred: classifying a `tool_call`-wrapped call while it streams
+
+Recorded by the design session behind `docs/adr/0053-a-card-is-drawn-only-where-a-subagent-was-set-to-work.md`:
+the classifier it adds reads a call's arguments where they are in hand — the transcript for stored
+rows, Hermes's control previews for the live stream — but a call sent through Hermes's `tool_call`
+bridge exposes neither while it streams. The live projection sends the tool name `tool_call` and the
+inner call's preview text; the inner tool's name arrives only in the transcript, where
+`describeCall` (`app/src/lib/history.ts`) unwraps a single inner call onto the row. So a wrapped
+`delegate_task` spawn draws as a plain tool row while it streams and as its agent card once
+catch-up rebuilds the turn — the opposite direction from the bug ADR 0053 fixes: work that ran is
+briefly hidden, never work that didn't.
+
+## Careful
+
+### 1. The stream never names the tool inside a `tool_call` bridge
+
+- Cost: while the stream runs, a wrapped spawn's card is missing and the agents poll — now gated on
+  the classifier — reads the row as no delegation, so both wait for catch-up. The wrongness is
+  bounded: reclassification is authoritative the moment the turn is rebuilt, and nothing false is
+  ever drawn.
+- Suggested fix: either have the host's run projection carry the inner tool's name for bridge calls
+  (`gateway/platforms/api_server_runs.py` in Hermes core), or unwrap `tool_call` in the live ingest
+  the way `describeCall` does — but the live event carries only preview text, so the app-side
+  version means inferring the inner tool from a label, which ADR 0053 rejected as the primary
+  signal.
+- Why it is not applied here: both routes sit outside the change — one is a Hermes-core projection
+  edit (the ADR deliberately stayed client-side so any host version works), the other is the label
+  heuristic the decision rejected — and the row self-heals at catch-up, so neither is worth
+  contradicting the ADR for a row-instead-of-card that lasts one rebuild.
+- Why it is risky: low. The classifier's default (unknown → tool row) is exactly what draws it; a
+  fix must not flip that default back toward a card.
+
+---
+
+Found by the design session for the agent-card classification change (ADR 0053). It does not block
+the pull request.
