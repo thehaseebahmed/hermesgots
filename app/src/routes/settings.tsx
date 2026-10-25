@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTheme } from "next-themes"
-import { Link, Navigate, useParams, useSearchParams } from "react-router"
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router"
 import {
   ArrowLeftIcon,
   AudioLinesIcon,
@@ -39,8 +39,8 @@ import { toast } from "sonner"
 
 import { AccountSettings } from "@/components/account-settings"
 import { CommunitySettings } from "@/components/community-settings"
-import { BotEditor } from "@/components/bot-settings"
-import { botTabOf, type BotTab } from "@/lib/bot-tabs"
+import { BotSettingsList, BotSettingsPage } from "@/components/bot-settings"
+import { botPageOf, botTabOf, botTabPath, type BotPage } from "@/lib/bot-tabs"
 import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { OnlineDot } from "@/components/bot-card"
@@ -135,44 +135,88 @@ export function SettingsPage() {
   const { section, botId, tab } = useParams()
   const large = useLarge()
   const { up, root } = useNav()
+  const navigate = useNavigate()
   const { account } = useSyncState()
   const profiles = useLiveQuery(listProfiles, [])
   // The bots live on the menu itself now, so /settings/bots without a bot is the menu.
   const screen = section === "bots" && !botId ? undefined : section
   const separate = !large && Boolean(screen)
-  const botName = botId ? profiles?.find((p) => p.id === botId)?.name : undefined
-  // On its own screen, a section sits under the Settings menu.
+  const bot = botId ? profiles?.find((p) => p.id === botId) : undefined
+  const canDelete = (profiles?.length ?? 0) > 1
+  // One reading of the URL's third segment, so nothing downstream narrows it again with a cast.
+  const botTab = botTabOf(tab)
+  const page = botTab ? botPageOf(botTab) : undefined
+  // On its own screen, a page sits under its bot's list and the list under the Settings menu.
   useEffect(() => {
     if (!separate) return
+    const back = botId && botTab ? `/settings/bots/${botId}` : "/settings"
     return setBackGuard(() => {
-      up("/settings")
+      up(back)
       return true
     })
-  }, [separate, up])
+  }, [separate, up, botId, botTab])
 
   if (section && section !== "bots" && !SECTIONS[section])
     return <Navigate to="/settings" replace />
-  // The bot tabs: a hand-typed address naming one this screen doesn't have lands on the bot itself,
-  // and one asked for on anything but a bot lands on the section without it.
-  // One reading of the URL's third segment, so nothing downstream narrows it again with a cast.
-  const botTab = botTabOf(tab)
+  // The bot pages: a hand-typed segment naming one this screen doesn't have lands on the bot's own
+  // list, and one asked for on anything but a bot lands on the section without it.
   if (tab && !botTab)
     return <Navigate to={botId ? `/settings/bots/${botId}` : "/settings"} replace />
   if (tab && (section !== "bots" || !botId)) return <Navigate to="/settings" replace />
-  // General's address is the bot's own: one URL per tab, and none of them an alias of another.
-  if (botTab === "general") return <Navigate to={`/settings/bots/${botId}`} replace />
-  if (!large)
-    return screen ? (
-      <SectionScreen
-        section={screen}
-        botId={botId}
-        botName={botName}
-        tab={botTab}
-        profiles={profiles}
-      />
-    ) : (
-      <MenuScreen profiles={profiles} />
+  // A segment that named a page before the list: the page that took its place, in its entry.
+  if (botId && botTab && tab !== botTab) return <Navigate to={botTabPath(botId, botTab)} replace />
+  // A botId that isn't one of this device's bots is the menu, and nothing of a bot's screen.
+  if (section === "bots" && botId && !bot)
+    return profiles === undefined ? null : <Navigate to="/settings" replace />
+
+  if (!large) {
+    if (section === "bots" && botId) {
+      if (!bot) return null
+      return page ? (
+        <BotPageScreen
+          profile={bot}
+          page={page}
+          canDelete={canDelete}
+          onDeleted={() => root("/settings")}
+        />
+      ) : (
+        <BotListScreen profile={bot} />
+      )
+    }
+    return screen ? <SectionScreen section={screen} /> : <MenuScreen profiles={profiles} />
+  }
+
+  // A bot's settings is two panes of its own: the list where the menu was, the page beside it.
+  if (section === "bots" && botId) {
+    if (!bot) return null
+    return (
+      <div className="flex min-h-0 flex-1">
+        <Screen
+          title={bot.name}
+          className="w-90 flex-none border-r min-[1200px]:w-103"
+          leading={
+            <BackButton
+              onClick={() => navigate("/settings", { replace: true, state: { quiet: true } })}
+            />
+          }
+        >
+          <BotSettingsList profile={bot} replace />
+        </Screen>
+        <Screen
+          key={botTab ?? "general"}
+          title={page?.title ?? botPageOf("general").title}
+          className="duration-200 ease-out motion-safe:animate-in motion-safe:fade-in-0"
+        >
+          <BotSettingsPage
+            profile={bot}
+            tab={botTab}
+            canDelete={canDelete}
+            onDeleted={() => root("/settings")}
+          />
+        </Screen>
+      </div>
     )
+  }
 
   const open =
     screen ??
@@ -184,47 +228,50 @@ export function SettingsPage() {
       </MenuContext.Provider>
       <Screen
         key={open}
-        title={sectionTitle(open, botName)}
+        title={sectionTitle(open, bot?.name)}
         className="duration-200 ease-out motion-safe:animate-in motion-safe:fade-in-0"
       >
-        {open === "bots" ? (
-          <BotSection
-            profiles={profiles}
-            botId={botId}
-            tab={botTab}
-            onDeleted={() => root("/settings")}
-          />
-        ) : (
-          SECTIONS[open].render()
-        )}
+        {SECTIONS[open].render()}
       </Screen>
     </div>
   )
 }
 
-/** One bot's settings, as a section screen's content or the side pane's. */
-function BotSection({
-  profiles,
-  botId,
-  tab,
+/** A bot's settings as pushed screens: the list, and a page over it. */
+function BotListScreen({ profile }: { profile: Profile }) {
+  const { up } = useNav()
+  return (
+    <Screen title={profile.name} leading={<BackButton onClick={() => up("/settings")} />}>
+      <BotSettingsList profile={profile} />
+    </Screen>
+  )
+}
+
+/** One page of a bot's settings, under the list that opened it. */
+function BotPageScreen({
+  profile,
+  page,
+  canDelete,
   onDeleted,
 }: {
-  profiles: Profile[] | undefined
-  botId?: string
-  tab?: BotTab
+  profile: Profile
+  page: BotPage
+  canDelete: boolean
   onDeleted: () => void
 }) {
-  const bot = profiles?.find((p) => p.id === botId)
-  if (profiles === undefined) return null
-  if (!bot) return <Navigate to="/settings" replace />
+  const { up } = useNav()
   return (
-    <BotEditor
-      key={bot.id}
-      profile={bot}
-      tab={tab}
-      canDelete={profiles.length > 1}
-      onDeleted={onDeleted}
-    />
+    <Screen
+      title={page.title}
+      leading={<BackButton onClick={() => up(`/settings/bots/${profile.id}`)} />}
+    >
+      <BotSettingsPage
+        profile={profile}
+        tab={page.segment}
+        canDelete={canDelete}
+        onDeleted={onDeleted}
+      />
+    </Screen>
   )
 }
 
@@ -637,47 +684,31 @@ function LiveRow({ bot }: { bot: Profile }) {
   )
 }
 
-function SectionScreen({
-  section,
-  botId,
-  botName,
-  tab,
-  profiles,
-}: {
-  section: string
-  botId?: string
-  botName?: string
-  tab?: BotTab
-  profiles: Profile[] | undefined
-}) {
-  const { up, root } = useNav()
-  const page = SECTIONS[section]
+/** A section's own screen, under the Settings menu. */
+function SectionScreen({ section }: { section: string }) {
+  const { up } = useNav()
   return (
     <Screen
-      title={sectionTitle(section, botName)}
-      leading={
-        <Button
-          variant="outline"
-          size="icon-lg"
-          className="size-11 rounded-full"
-          onClick={() => up("/settings")}
-          aria-label="Back"
-        >
-          <ArrowLeftIcon />
-        </Button>
-      }
+      title={SECTIONS[section].title}
+      leading={<BackButton onClick={() => up("/settings")} />}
     >
-      {page
-        ? page.render()
-        : botId && (
-            <BotSection
-              profiles={profiles}
-              botId={botId}
-              tab={tab}
-              onDeleted={() => root("/settings")}
-            />
-          )}
+      {SECTIONS[section].render()}
     </Screen>
+  )
+}
+
+/** The round back control every pushed Settings screen wears. */
+function BackButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Button
+      variant="outline"
+      size="icon-lg"
+      className="size-11 rounded-full"
+      onClick={onClick}
+      aria-label="Back"
+    >
+      <ArrowLeftIcon />
+    </Button>
   )
 }
 

@@ -85,6 +85,18 @@ export function Group({ children }: { children: ReactNode }) {
   )
 }
 
+/**
+ * A settings group's heading over the line saying what it holds; its Group cards follow as siblings.
+ */
+export function GroupHeading({ title, subtitle }: { title: ReactNode; subtitle?: ReactNode }) {
+  return (
+    <div className="flex flex-col px-5">
+      <h2 className="text-base font-semibold">{title}</h2>
+      {subtitle && <p className="text-sm text-muted-foreground">{subtitle}</p>}
+    </div>
+  )
+}
+
 export const rowClass =
   "flex min-h-14 w-full items-center gap-4 bg-card px-5 py-3 text-left text-card-foreground"
 /** `rowClass` for a row that opens something. */

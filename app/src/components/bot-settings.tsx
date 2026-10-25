@@ -1,7 +1,19 @@
 import { useCallback, useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { EyeIcon, EyeOffIcon, PlugZapIcon, Trash2Icon } from "lucide-react"
-import { useNavigate } from "react-router"
+import {
+  AudioLinesIcon,
+  ChevronRightIcon,
+  CodeXmlIcon,
+  EyeIcon,
+  EyeOffIcon,
+  MessagesSquareIcon,
+  PlugZapIcon,
+  SlidersHorizontalIcon,
+  Trash2Icon,
+  WrenchIcon,
+  type LucideIcon,
+} from "lucide-react"
+import { Link, useNavigate } from "react-router"
 import { toast } from "sonner"
 
 import { Banner } from "@/components/banner"
@@ -44,7 +56,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Group, GroupHeading, RowText, linkRowClass } from "@/components/settings-chrome"
 import { AFK_PICKS_FEATURE } from "@/lib/afk-picks"
 import {
   db,
@@ -57,7 +69,7 @@ import {
 } from "@/lib/db"
 import { connectionKey } from "@/lib/connection"
 import { formatRelative } from "@/lib/format"
-import { botTabOf, botTabPath, type BotTab } from "@/lib/bot-tabs"
+import { BOT_PAGES, botTabPath, type BotPage, type BotTab } from "@/lib/bot-tabs"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
 import { DICTATION } from "@/lib/dictation"
 import { usePluginFeatureAnswers } from "@/lib/features"
@@ -83,17 +95,28 @@ type Connection =
 /** Hermes's default model id; any other advertised id is the profile's name. */
 const UNNAMED_MODEL = "hermes-agent"
 
-const TAB_FEATURES = {
-  dictation: DICTATION,
+/** The pages a plugin can withhold, by the segment naming them: the rest are always there. */
+const PAGE_FEATURES = {
+  "speech-to-text": DICTATION,
   mcps: MCP_FEATURES.list,
   coding: AFK_PICKS_FEATURE,
   skills: SKILL_FEATURES.list,
 } as const
 
-type GatedTab = keyof typeof TAB_FEATURES
+type GatedPage = keyof typeof PAGE_FEATURES
 
-function gated(tab: BotTab): tab is GatedTab {
-  return tab in TAB_FEATURES
+function gated(page: BotTab): page is GatedPage {
+  return page in PAGE_FEATURES
+}
+
+/** The icon a page's row, and the screen it opens, wear. */
+const PAGE_ICONS: Record<BotTab, LucideIcon> = {
+  general: SlidersHorizontalIcon,
+  chat: MessagesSquareIcon,
+  coding: CodeXmlIcon,
+  "speech-to-text": AudioLinesIcon,
+  mcps: PlugZapIcon,
+  skills: WrenchIcon,
 }
 
 /** The registry's Enabled flag, with when the bot's host last checked in. */
@@ -197,11 +220,74 @@ function RemoveBot({ profile, onDeleted }: { profile: Profile; onDeleted?: () =>
   )
 }
 
+/** The two ownership headings the list wears; every page under one repeats it. */
+const GROUP_TITLES = {
+  gots: "Gots Specific Settings",
+  hermes: "Hermes Settings",
+} as const
+
+/** A page's row: its icon, its name over what it holds, and the chevron into it. */
+function PageRow({
+  page,
+  botId,
+  replace,
+}: {
+  page: BotPage
+  botId: string
+  /** Whether the row swaps the pane beside it rather than opening a screen of its own. */
+  replace?: boolean
+}) {
+  const Icon = PAGE_ICONS[page.segment]
+  return (
+    <Link
+      to={botTabPath(botId, page.segment)}
+      replace={replace}
+      data-bot-page={page.segment}
+      className={linkRowClass}
+    >
+      <Icon className="size-5 shrink-0 text-muted-foreground" />
+      <RowText title={page.title} subtitle={page.subtitle} />
+      <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
+    </Link>
+  )
+}
+
 /**
- * A linked bot's address and key come from its host and aren't shown; a bot added by hand before
- * linking keeps its own.
+ * A bot's settings as a list of pages: the plugin banner when it is out of date, then General on
+ * its own, then the Gots plugin's pages and the bot's Hermes's, each under its ownership heading. A
+ * page the plugin withholds draws no row — there is nothing behind it to open.
  */
-export function BotEditor({
+export function BotSettingsList({ profile, replace }: { profile: Profile; replace?: boolean }) {
+  const answers = usePluginFeatureAnswers(profile, PAGE_FEATURES)
+  const rows = (group: BotPage["group"]) =>
+    BOT_PAGES.filter((page) => page.group === group).map((page) => {
+      const segment = page.segment
+      if (gated(segment) && answers[segment] !== "yes") return null
+      return <PageRow key={segment} page={page} botId={profile.id} replace={replace} />
+    })
+
+  return (
+    <div className="flex flex-col gap-4" data-bot-settings-list>
+      {!profile.disabled && pluginOutdated(profile.pluginVersion) && (
+        <Banner tone="warning">
+          {`This bot's plugin is out of date! Update it to ${MIN_PLUGIN_VERSION} or newer.`}
+        </Banner>
+      )}
+      <Group>{rows("general")}</Group>
+      <GroupHeading title={GROUP_TITLES.gots} />
+      <Group>{rows("gots")}</Group>
+      <GroupHeading title={GROUP_TITLES.hermes} />
+      <Group>{rows("hermes")}</Group>
+    </div>
+  )
+}
+
+/**
+ * One page of a bot's settings, drawing what its tab drew before the list: no tab strip, and a page
+ * the plugin withholds is never shown — its address is given General's, in the entry it was asked
+ * for.
+ */
+export function BotSettingsPage({
   profile,
   tab = "general",
   canDelete = false,
@@ -218,7 +304,7 @@ export function BotEditor({
   const [models, setModels] = useState<string[]>([])
   const [modelsFailed, setModelsFailed] = useState(false)
   const [connection, setConnection] = useState<Connection>({ state: "idle" })
-  const answers = usePluginFeatureAnswers(profile, TAB_FEATURES)
+  const answers = usePluginFeatureAnswers(profile, PAGE_FEATURES)
   const gate = gated(tab) ? answers[tab] : undefined
   const shown: BotTab = gate !== undefined && gate !== "yes" ? "general" : tab
 
@@ -230,13 +316,11 @@ export function BotEditor({
 
   const save = (patch: Partial<Omit<Profile, "id">>) => void updateProfile(profile.id, patch)
 
-  const open = (next: BotTab) => navigate(botTabPath(profile.id, next))
-
-  // A URL into a tab this bot doesn't have: General takes its place, in the history entry it was
+  // A URL into a page this bot doesn't have: General takes its place, in the history entry it was
   // asked for, rather than the address reading MCP over a screen that isn't. Only an answer of "no"
   // sends anyone anywhere — a Host still reading keeps the address and draws General meanwhile.
   useEffect(() => {
-    if (gate === "no") void navigate(`/settings/bots/${profile.id}`, { replace: true })
+    if (gate === "no") void navigate(botTabPath(profile.id, "general"), { replace: true })
   }, [gate, navigate, profile.id])
 
   // One read of the host's model list, for both the tab's own open and General's Test connection.
@@ -254,7 +338,7 @@ export function BotEditor({
   const hostApiKey = linked ? profile.apiKey : apiKey
   const modelsKey = connectionKey({ baseUrl: hostBaseUrl, apiKey: hostApiKey })
   useEffect(() => {
-    if (shown !== "models") return
+    if (shown !== "chat") return
     let cancelled = false
     void readModels({ baseUrl: hostBaseUrl, apiKey: hostApiKey })
       .then((ids) => {
@@ -299,257 +383,229 @@ export function BotEditor({
     }
   }
 
+  // Each page draws what its tab drew, and nothing of the others: the state above belongs to the
+  // page on screen, since a phone shows one and a wide screen keys the pane by the page.
+  if (shown === "chat")
+    return <ChatPage profile={profile} models={models} modelsFailed={modelsFailed} save={save} />
+  if (shown === "speech-to-text") return <DictationTab profile={profile} />
+  if (shown === "mcps") return <McpsTab profile={profile} />
+  if (shown === "coding") return <CodingTab profile={profile} />
+  if (shown === "skills") return <SkillsTab profile={profile} />
+
+  // General: a linked bot's address and key come from its host and aren't shown; a bot added by
+  // hand before linking keeps its own.
   return (
-    <Tabs
-      value={shown}
-      onValueChange={(next) => {
-        const tab = botTabOf(next)
-        if (tab) open(tab)
-      }}
-      className="gap-4"
-      data-bot-tabs
-    >
-      <TabsList>
-        <TabsTrigger value="general">General</TabsTrigger>
-        <TabsTrigger value="models">Models</TabsTrigger>
-        {answers.dictation === "yes" && <TabsTrigger value="dictation">Dictation</TabsTrigger>}
-        {answers.mcps === "yes" && <TabsTrigger value="mcps">MCP</TabsTrigger>}
-        {answers.coding === "yes" && <TabsTrigger value="coding">Coding</TabsTrigger>}
-        {answers.skills === "yes" && <TabsTrigger value="skills">Skills</TabsTrigger>}
-      </TabsList>
+    <FieldGroup>
+      {linked && <EnabledSetting profile={profile} />}
+      <MutedSetting profile={profile} />
 
-      <TabsContent value="general">
-        <FieldGroup>
-          {!profile.disabled && pluginOutdated(profile.pluginVersion) && (
-            <Banner tone="warning">
-              {profile.name}'s Gots plugin is out of date! Update it to {MIN_PLUGIN_VERSION} or
-              newer.
-            </Banner>
-          )}
-          {linked && <EnabledSetting profile={profile} />}
-          <MutedSetting profile={profile} />
+      <Field>
+        <FieldLabel htmlFor="bot-name">Name</FieldLabel>
+        <Input
+          id="bot-name"
+          autoComplete="off"
+          placeholder="Hermes profile name"
+          value={name}
+          onChange={(e) => {
+            setName(e.target.value)
+            setNameTouched(true)
+            save({ name: e.target.value.trim() || "Hermes" })
+          }}
+        />
+      </Field>
 
+      <Field>
+        <FieldLabel id="bot-image-label">Image</FieldLabel>
+        <div
+          role="radiogroup"
+          aria-labelledby="bot-image-label"
+          className="grid grid-cols-4 gap-2 sm:grid-cols-8"
+        >
+          {BOTS.map((bot) => {
+            const checked = bot.id === profile.botId
+            return (
+              <button
+                key={bot.id}
+                type="button"
+                role="radio"
+                aria-checked={checked}
+                aria-label={bot.name}
+                onClick={() => save({ botId: bot.id })}
+                className={cn(
+                  "flex aspect-square min-h-11 items-center justify-center rounded-2xl ring-1 ring-foreground/10 transition-colors outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50",
+                  checked && "bg-primary/10 ring-2 ring-primary hover:bg-primary/15",
+                )}
+              >
+                <Bot id={bot.id} className="size-3/5" />
+              </button>
+            )
+          })}
+        </div>
+      </Field>
+
+      {!linked && (
+        <>
           <Field>
-            <FieldLabel htmlFor="bot-name">Name</FieldLabel>
+            <FieldLabel htmlFor="base-url">API base URL</FieldLabel>
             <Input
-              id="bot-name"
-              autoComplete="off"
-              placeholder="Hermes profile name"
-              value={name}
+              id="base-url"
+              inputMode="url"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              placeholder="http://localhost:8642/v1"
+              value={baseUrl}
               onChange={(e) => {
-                setName(e.target.value)
-                setNameTouched(true)
-                save({ name: e.target.value.trim() || "Hermes" })
+                setBaseUrl(e.target.value)
+                setConnection({ state: "idle" })
+                save({ baseUrl: e.target.value.trim() })
               }}
             />
           </Field>
 
           <Field>
-            <FieldLabel id="bot-image-label">Image</FieldLabel>
-            <div
-              role="radiogroup"
-              aria-labelledby="bot-image-label"
-              className="grid grid-cols-4 gap-2 sm:grid-cols-8"
-            >
-              {BOTS.map((bot) => {
-                const checked = bot.id === profile.botId
-                return (
-                  <button
-                    key={bot.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={checked}
-                    aria-label={bot.name}
-                    onClick={() => save({ botId: bot.id })}
-                    className={cn(
-                      "flex aspect-square min-h-11 items-center justify-center rounded-2xl ring-1 ring-foreground/10 transition-colors outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50",
-                      checked && "bg-primary/10 ring-2 ring-primary hover:bg-primary/15",
-                    )}
-                  >
-                    <Bot id={bot.id} className="size-3/5" />
-                  </button>
-                )
-              })}
-            </div>
-          </Field>
-
-          {!linked && (
-            <>
-              <Field>
-                <FieldLabel htmlFor="base-url">API base URL</FieldLabel>
-                <Input
-                  id="base-url"
-                  inputMode="url"
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  placeholder="http://localhost:8642/v1"
-                  value={baseUrl}
-                  onChange={(e) => {
-                    setBaseUrl(e.target.value)
-                    setConnection({ state: "idle" })
-                    save({ baseUrl: e.target.value.trim() })
-                  }}
-                />
-              </Field>
-
-              <Field>
-                <FieldLabel htmlFor="api-key">API key</FieldLabel>
-                <InputGroup>
-                  <InputGroupInput
-                    id="api-key"
-                    type={showKey ? "text" : "password"}
-                    autoComplete="off"
-                    spellCheck={false}
-                    placeholder="API_SERVER_KEY"
-                    value={apiKey}
-                    onChange={(e) => {
-                      setApiKey(e.target.value)
-                      setConnection({ state: "idle" })
-                      save({ apiKey: e.target.value.trim() })
-                    }}
-                  />
-                  <InputGroupAddon align="inline-end">
-                    <InputGroupButton
-                      size="icon-xs"
-                      aria-label={showKey ? "Hide key" : "Show key"}
-                      onClick={() => setShowKey((v) => !v)}
-                    >
-                      {showKey ? <EyeOffIcon /> : <EyeIcon />}
-                    </InputGroupButton>
-                  </InputGroupAddon>
-                </InputGroup>
-              </Field>
-            </>
-          )}
-
-          <div className="flex flex-wrap items-center gap-3">
-            <Button onClick={test} disabled={connection.state === "testing" || profile.disabled}>
-              <PlugZapIcon data-icon="inline-start" />
-              {connection.state === "testing" ? "Testing…" : "Test connection"}
-            </Button>
-            {connection.state === "ok" && (
-              <div className="flex flex-wrap gap-2">
-                <Badge className="bg-primary/15 text-primary dark:bg-primary/30 dark:text-sidebar-primary">
-                  Connected
-                </Badge>
-                {connection.plugin ? (
-                  <Badge variant="secondary">Plugin {connection.plugin}</Badge>
-                ) : (
-                  <Badge variant="outline">No plugin</Badge>
-                )}
-              </div>
-            )}
-            {linked ? (
-              <RemoveBot profile={profile} onDeleted={onDeleted} />
-            ) : (
-              <AlertDialog>
-                <AlertDialogTrigger
-                  render={<Button variant="outline" className="ml-auto" disabled={!canDelete} />}
+            <FieldLabel htmlFor="api-key">API key</FieldLabel>
+            <InputGroup>
+              <InputGroupInput
+                id="api-key"
+                type={showKey ? "text" : "password"}
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="API_SERVER_KEY"
+                value={apiKey}
+                onChange={(e) => {
+                  setApiKey(e.target.value)
+                  setConnection({ state: "idle" })
+                  save({ apiKey: e.target.value.trim() })
+                }}
+              />
+              <InputGroupAddon align="inline-end">
+                <InputGroupButton
+                  size="icon-xs"
+                  aria-label={showKey ? "Hide key" : "Show key"}
+                  onClick={() => setShowKey((v) => !v)}
                 >
-                  <Trash2Icon data-icon="inline-start" />
-                  Delete bot
-                </AlertDialogTrigger>
-                <AlertDialogContent size="sm">
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Delete {profile.name}?</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      Its chats are removed too. The profile and its sessions on your Hermes server
-                      are untouched.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction
-                      variant="destructive"
-                      onClick={async () => {
-                        await deleteProfile(profile.id)
-                        const next = await getActiveProfile()
-                        if (next) await setActiveProfile(next.id)
-                        onDeleted?.()
-                      }}
-                    >
-                      Delete
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
+                  {showKey ? <EyeOffIcon /> : <EyeIcon />}
+                </InputGroupButton>
+              </InputGroupAddon>
+            </InputGroup>
+          </Field>
+        </>
+      )}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <Button onClick={test} disabled={connection.state === "testing" || profile.disabled}>
+          <PlugZapIcon data-icon="inline-start" />
+          {connection.state === "testing" ? "Testing…" : "Test connection"}
+        </Button>
+        {connection.state === "ok" && (
+          <div className="flex flex-wrap gap-2">
+            <Badge className="bg-primary/15 text-primary dark:bg-primary/30 dark:text-sidebar-primary">
+              Connected
+            </Badge>
+            {connection.plugin ? (
+              <Badge variant="secondary">Plugin {connection.plugin}</Badge>
+            ) : (
+              <Badge variant="outline">No plugin</Badge>
             )}
           </div>
-          {connection.state === "error" && (
-            <p className="text-sm text-destructive" role="alert">
-              {connection.message}
-            </p>
-          )}
-        </FieldGroup>
-      </TabsContent>
-
-      <TabsContent value="models">
-        <FieldGroup>
-          {models.length > 1 && (
-            <Field>
-              <FieldLabel htmlFor="model">Model</FieldLabel>
-              <Select
-                value={profile.model}
-                onValueChange={(value) => value && save({ model: value })}
-              >
-                <SelectTrigger id="model" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {models.map((id) => (
-                    <SelectItem key={id} value={id}>
-                      {id}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-          )}
-          {modelsFailed && models.length === 0 && (
-            <p className="text-sm text-muted-foreground">Couldn't read this bot's models.</p>
-          )}
-          {profile.baseUrl.trim() && (
-            <Field>
-              <FieldLabel htmlFor="default-model">Default model</FieldLabel>
-              <DefaultModelSetting
-                profile={profile}
-                onChoose={(modelChoice) =>
-                  setDefaultModel(profile, modelChoice).catch((error: unknown) => {
-                    toast.error(error instanceof Error ? error.message : String(error))
-                  })
-                }
-              />
-            </Field>
-          )}
-          <DelegationModelSetting profile={profile} />
-          <TriageModelSetting profile={profile} />
-          <FallbackModelsSetting profile={profile} />
-        </FieldGroup>
-      </TabsContent>
-
-      {answers.dictation === "yes" && (
-        <TabsContent value="dictation">
-          <DictationTab profile={profile} />
-        </TabsContent>
+        )}
+        {linked ? (
+          <RemoveBot profile={profile} onDeleted={onDeleted} />
+        ) : (
+          <AlertDialog>
+            <AlertDialogTrigger
+              render={<Button variant="outline" className="ml-auto" disabled={!canDelete} />}
+            >
+              <Trash2Icon data-icon="inline-start" />
+              Delete bot
+            </AlertDialogTrigger>
+            <AlertDialogContent size="sm">
+              <AlertDialogHeader>
+                <AlertDialogTitle>Delete {profile.name}?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Its chats are removed too. The profile and its sessions on your Hermes server are
+                  untouched.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  variant="destructive"
+                  onClick={async () => {
+                    await deleteProfile(profile.id)
+                    const next = await getActiveProfile()
+                    if (next) await setActiveProfile(next.id)
+                    onDeleted?.()
+                  }}
+                >
+                  Delete
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
+      </div>
+      {connection.state === "error" && (
+        <p className="text-sm text-destructive" role="alert">
+          {connection.message}
+        </p>
       )}
+    </FieldGroup>
+  )
+}
 
-      {answers.mcps === "yes" && (
-        <TabsContent value="mcps">
-          <McpsTab profile={profile} />
-        </TabsContent>
+/** The Chat page: which model this bot talks with, its triage and subagent models, and its fallbacks. */
+function ChatPage({
+  profile,
+  models,
+  modelsFailed,
+  save,
+}: {
+  profile: Profile
+  /** The host's model ids, read by the page that owns the connection's drafts. */
+  models: string[]
+  modelsFailed: boolean
+  save: (patch: Partial<Omit<Profile, "id">>) => void
+}) {
+  return (
+    <FieldGroup>
+      {models.length > 1 && (
+        <Field>
+          <FieldLabel htmlFor="model">Model</FieldLabel>
+          <Select value={profile.model} onValueChange={(value) => value && save({ model: value })}>
+            <SelectTrigger id="model" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {models.map((id) => (
+                <SelectItem key={id} value={id}>
+                  {id}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
       )}
-
-      {answers.coding === "yes" && (
-        <TabsContent value="coding">
-          <CodingTab profile={profile} />
-        </TabsContent>
+      {modelsFailed && models.length === 0 && (
+        <p className="text-sm text-muted-foreground">Couldn't read this bot's models.</p>
       )}
-      {answers.skills === "yes" && (
-        <TabsContent value="skills">
-          <SkillsTab profile={profile} />
-        </TabsContent>
+      {profile.baseUrl.trim() && (
+        <Field>
+          <FieldLabel htmlFor="default-model">Default model</FieldLabel>
+          <DefaultModelSetting
+            profile={profile}
+            onChoose={(modelChoice) =>
+              setDefaultModel(profile, modelChoice).catch((error: unknown) => {
+                toast.error(error instanceof Error ? error.message : String(error))
+              })
+            }
+          />
+        </Field>
       )}
-    </Tabs>
+      <DelegationModelSetting profile={profile} />
+      <TriageModelSetting profile={profile} />
+      <FallbackModelsSetting profile={profile} />
+    </FieldGroup>
   )
 }

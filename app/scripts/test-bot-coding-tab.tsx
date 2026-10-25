@@ -11,8 +11,8 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-router"
 import { toast } from "sonner"
 
-import { BotEditor } from "@/components/bot-settings"
-import { botTabOf } from "@/lib/bot-tabs"
+import { BotSettingsList, BotSettingsPage } from "@/components/bot-settings"
+import { botPageOf, botTabOf, type BotTab } from "@/lib/bot-tabs"
 import { db } from "@/lib/db"
 import {
   afkHost,
@@ -30,7 +30,12 @@ function LiveEditor() {
   const { tab } = useParams()
   const profile = useLiveQuery(() => db.profiles.get("bot-1"), [])
   if (!profile) return null
-  return <BotEditor key={profile.id} profile={profile} tab={botTabOf(tab) ?? "general"} />
+  return (
+    <>
+      <BotSettingsList profile={profile} />
+      <BotSettingsPage key={profile.id} profile={profile} tab={botTabOf(tab) ?? "general"} />
+    </>
+  )
 }
 
 function Where() {
@@ -48,9 +53,10 @@ const editor = (path: string) => (
 )
 
 const here = () => find("[data-here]")?.textContent
-const tabNames = () => findAll('[role="tab"]').map((tab) => tab.textContent?.trim())
-const codingTab = () =>
-  findAll('[role="tab"]').find((tab) => tab.textContent?.trim() === "Coding") ?? null
+/** The pages the list draws, by the title each row carries. */
+const pageTitle = (row: Element) => botPageOf(row.getAttribute("data-bot-page") as BotTab).title
+const tabNames = () => findAll("[data-bot-page]").map(pageTitle)
+const codingTab = () => find('[data-bot-page="coding"]')
 const budget = () => find("[data-pick-budget]")
 const shown = () => budget()?.textContent
 const step = (name: "Decrease pick budget" | "Increase pick budget") =>
@@ -73,11 +79,11 @@ async function seed(name: string, features: string[], options: Parameters<typeof
 test("a host that advertises afk_picks has a Coding tab, holding the bot's pick budget", async () => {
   const calls = await seed("coding-tab", ["afk", "afk_switch", "afk_picks"], { pickBudget: 3 })
   await mount(editor("/settings/bots/bot-1/coding"), async () => {
-    assert.ok(codingTab(), "the Coding tab is on the editor")
+    assert.ok(codingTab(), "the Coding page is on the list")
     assert.deepEqual(
       tabNames(),
-      ["General", "Models", "Coding"],
-      "in tab order, after the tabs before it",
+      ["General", "Chat", "Coding"],
+      "in page order, after the pages before it",
     )
     assert.equal(here(), "/settings/bots/bot-1/coding", "the address is the tab's own")
     assert.equal(shown(), "3", "the budget the bot's own route answers")
@@ -88,8 +94,8 @@ test("a host that advertises afk_picks has a Coding tab, holding the bot's pick 
 test("a host without afk_picks has no Coding tab, and its address lands on General", async () => {
   await seed("no-coding-tab", ["afk", "afk_switch"])
   await mount(editor("/settings/bots/bot-1/coding"), async () => {
-    assert.equal(codingTab(), null, "no Coding tab")
-    assert.equal(here(), "/settings/bots/bot-1", "the address is the bot's own")
+    assert.equal(codingTab(), null, "no Coding page")
+    assert.equal(here(), "/settings/bots/bot-1/general", "the address is General's")
     assert.match(text(), /Test connection/, "General is what is drawn")
     assert.equal(budget(), null, "and no budget to set")
   })

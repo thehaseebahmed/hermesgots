@@ -4,8 +4,8 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-router"
 import { toast } from "sonner"
 
-import { BotEditor } from "@/components/bot-settings"
-import { botTabOf } from "@/lib/bot-tabs"
+import { BotSettingsList, BotSettingsPage } from "@/components/bot-settings"
+import { botPageOf, botTabOf, type BotTab } from "@/lib/bot-tabs"
 import { db } from "@/lib/db"
 import {
   botProfile,
@@ -63,7 +63,8 @@ const SHEETS: Record<string, Sheet> = {
       "---\nname: pr-review\nlicense: MIT\nallowed-tools:\n  - read\n  - write\n---\n# pr-review\n\nRead the diff, then say what is wrong with it.\n",
     linkedFiles: { references: ["references/checklist.md"] },
     files: {
-      "references/checklist.md": "---\ntitle: The checklist\n---\n- Every hunk read.\n- Nothing invented.\n",
+      "references/checklist.md":
+        "---\ntitle: The checklist\n---\n- Every hunk read.\n- Nothing invented.\n",
     },
     readiness_status: "available",
   },
@@ -151,7 +152,12 @@ function LiveEditor() {
   const { tab } = useParams()
   const profile = useLiveQuery(() => db.profiles.get("bot-1"), [])
   if (!profile) return null
-  return <BotEditor key={profile.id} profile={profile} tab={botTabOf(tab) ?? "general"} />
+  return (
+    <>
+      <BotSettingsList profile={profile} />
+      <BotSettingsPage key={profile.id} profile={profile} tab={botTabOf(tab) ?? "general"} />
+    </>
+  )
 }
 
 function Where() {
@@ -170,7 +176,9 @@ const editor = (path: string) => (
 
 const here = () => find("[data-here]")?.textContent
 const tabNamed = (name: string) =>
-  findAll('[role="tab"]').find((tab) => tab.textContent?.trim() === name) ?? null
+  findAll("[data-bot-page]").find(
+    (row) => botPageOf(row.getAttribute("data-bot-page") as BotTab).title === name,
+  ) ?? null
 const sections = () =>
   findAll("[data-skill-section]").map((one) => one.getAttribute("data-skill-section"))
 const headings = () => findAll("[data-skill-section] h2").map((one) => one.textContent)
@@ -308,9 +316,9 @@ test("a row is its name over its description, with no icon and no category badge
 test("a host that can't list skills has no Skills tab, and its address lands on General", async () => {
   await seed("skills-absent", ["mcps"])
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
-    assert.equal(tabNamed("Skills"), null, "no Skills tab")
+    assert.equal(tabNamed("Skills"), null, "no Skills page")
     assert.equal(find("[data-skills-tab]"), null, "and nothing of the tab is drawn")
-    assert.equal(here(), "/settings/bots/bot-1", "the address is the bot's own")
+    assert.equal(here(), "/settings/bots/bot-1/general", "the address is General's")
     assert.match(text(), /Test connection/, "General is what is drawn")
   })
 })
@@ -687,7 +695,10 @@ test("a removal the Host refuses is its own sentence, with the row as it was", a
       assert.ok(row("pr-review"), "the skill is still the bot's")
       assert.match(row("pr-review")?.textContent ?? "", /Ready/, "and its row is as it was")
       const stored = (await db.skills.toArray()).flatMap((cached) => cached.skills)
-      assert.ok(stored.some((skill) => skill.name === "pr-review"), "the device keeps it too")
+      assert.ok(
+        stored.some((skill) => skill.name === "pr-review"),
+        "the device keeps it too",
+      )
     })
   } finally {
     toast.error = original
