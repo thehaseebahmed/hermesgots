@@ -36,7 +36,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -56,7 +55,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Group, GroupHeading, RowText, linkRowClass } from "@/components/settings-chrome"
+import {
+  Group,
+  GroupHeading,
+  RowText,
+  linkRowClass,
+  useHeaderAction,
+} from "@/components/settings-chrome"
 import { AFK_PICKS_FEATURE } from "@/lib/afk-picks"
 import {
   db,
@@ -197,26 +202,41 @@ function MutedSetting({ profile }: { profile: Profile }) {
   )
 }
 
-/** Unlinks the bot's host, which takes every bot it linked with it. */
-function RemoveBot({ profile, onDeleted }: { profile: Profile; onDeleted?: () => void }) {
+/**
+ * The confirmation a bot's deletion asks for, in the words its kind settled: a linked bot's host is
+ * unlinked, and an unlinked bot's chats go with it — the profile on the Hermes server staying either
+ * way. It lives in the list, so its open state dies with the screen that opened it.
+ */
+function DeleteBotDialog({
+  profile,
+  open,
+  onOpenChange,
+  onDeleted,
+}: {
+  profile: Profile
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onDeleted?: () => void
+}) {
+  const linked = Boolean(profile.hostId)
   const siblings = useLiveQuery(
-    () => db.profiles.filter((p) => p.hostId === profile.hostId && p.id !== profile.id).toArray(),
+    async (): Promise<Profile[]> =>
+      profile.hostId
+        ? db.profiles.filter((p) => p.hostId === profile.hostId && p.id !== profile.id).toArray()
+        : [],
     [profile.hostId, profile.id],
   )
   const others = siblings?.map((p) => p.name).join(", ")
 
   return (
-    <AlertDialog>
-      <AlertDialogTrigger render={<Button variant="outline" className="ml-auto" />}>
-        <Trash2Icon data-icon="inline-start" />
-        Remove
-      </AlertDialogTrigger>
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent size="sm">
         <AlertDialogHeader>
-          <AlertDialogTitle>Remove {profile.name}?</AlertDialogTitle>
+          <AlertDialogTitle>Delete {profile.name}?</AlertDialogTitle>
           <AlertDialogDescription>
-            Its host is unlinked{others ? `, and so is every bot it linked: ${others}` : ""}. Its
-            chats stay on your Hermes server, and linking it again brings them back.
+            {linked
+              ? `Its host is unlinked${others ? `, and so is every bot it linked: ${others}` : ""}. Its chats stay on your Hermes server, and linking it again brings them back.`
+              : "Its chats are removed too. The profile and its sessions on your Hermes server are untouched."}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -224,18 +244,22 @@ function RemoveBot({ profile, onDeleted }: { profile: Profile; onDeleted?: () =>
           <AlertDialogAction
             variant="destructive"
             onClick={async () => {
-              try {
-                await removeHost(profile.hostId!)
-              } catch (error) {
-                toast.error(error instanceof Error ? error.message : "Couldn't remove it.")
-                return
+              if (linked) {
+                try {
+                  await removeHost(profile.hostId!)
+                } catch (error) {
+                  toast.error(error instanceof Error ? error.message : "Couldn't remove it.")
+                  return
+                }
+              } else {
+                await deleteProfile(profile.id)
               }
               const next = await getActiveProfile()
               if (next) await setActiveProfile(next.id)
               onDeleted?.()
             }}
           >
-            Remove
+            Delete
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -278,16 +302,49 @@ function PageRow({
 /**
  * A bot's settings as a list of pages: the plugin banner when it is out of date, then General on
  * its own, then the Gots plugin's pages and the bot's Hermes's, each under its ownership heading. A
- * page the plugin withholds draws no row — there is nothing behind it to open.
+ * page the plugin withholds draws no row — there is nothing behind it to open. The header's trash
+ * deletes the bot, asking first; an unlinked bot is left alone where this device holds no other bot
+ * to fall back on.
  */
-export function BotSettingsList({ profile, replace }: { profile: Profile; replace?: boolean }) {
+export function BotSettingsList({
+  profile,
+  replace,
+  canDelete = false,
+  onDeleted,
+}: {
+  profile: Profile
+  /** Whether the row swaps the pane beside it rather than opening a screen of its own. */
+  replace?: boolean
+  /** Whether this device holds a bot to fall back on: an unlinked bot can't be the last one. */
+  canDelete?: boolean
+  onDeleted?: () => void
+}) {
   const answers = usePluginFeatureAnswers(profile, PAGE_FEATURES)
+  const [confirming, setConfirming] = useState(false)
+  const linked = Boolean(profile.hostId)
   const rows = (group: BotPage["group"]) =>
     BOT_PAGES.filter((page) => page.group === group).map((page) => {
       const segment = page.segment
       if (gated(segment) && answers[segment] !== "yes") return null
       return <PageRow key={segment} page={page} botId={profile.id} replace={replace} />
     })
+
+  // The trash is the screen's own action, and its handler is the setter: the header reads the node
+  // it was published with, and never re-renders for a change in the list below it.
+  useHeaderAction(
+    "delete",
+    <Button
+      variant="outline"
+      size="icon-lg"
+      className="size-11 rounded-full"
+      aria-label={`Delete ${profile.name}`}
+      title={`Delete ${profile.name}`}
+      disabled={!linked && !canDelete}
+      onClick={() => setConfirming(true)}
+    >
+      <Trash2Icon />
+    </Button>,
+  )
 
   return (
     <div className="flex flex-col gap-4" data-bot-settings-list>
@@ -301,6 +358,12 @@ export function BotSettingsList({ profile, replace }: { profile: Profile; replac
       <Group>{rows("gots")}</Group>
       <GroupHeading title={GROUP_TITLES.hermes} />
       <Group>{rows("hermes")}</Group>
+      <DeleteBotDialog
+        profile={profile}
+        open={confirming}
+        onOpenChange={setConfirming}
+        onDeleted={onDeleted}
+      />
     </div>
   )
 }
@@ -313,13 +376,9 @@ export function BotSettingsList({ profile, replace }: { profile: Profile; replac
 export function BotSettingsPage({
   profile,
   tab = "general",
-  canDelete = false,
-  onDeleted,
 }: {
   profile: Profile
   tab?: BotTab
-  canDelete?: boolean
-  onDeleted?: () => void
 }) {
   const linked = Boolean(profile.hostId)
   const navigate = useNavigate()
@@ -493,41 +552,6 @@ export function BotSettingsPage({
                 <Badge variant="outline">No plugin</Badge>
               )}
             </div>
-          )}
-          {linked ? (
-            <RemoveBot profile={profile} onDeleted={onDeleted} />
-          ) : (
-            <AlertDialog>
-              <AlertDialogTrigger
-                render={<Button variant="outline" className="ml-auto" disabled={!canDelete} />}
-              >
-                <Trash2Icon data-icon="inline-start" />
-                Delete bot
-              </AlertDialogTrigger>
-              <AlertDialogContent size="sm">
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Delete {profile.name}?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    Its chats are removed too. The profile and its sessions on your Hermes server
-                    are untouched.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction
-                    variant="destructive"
-                    onClick={async () => {
-                      await deleteProfile(profile.id)
-                      const next = await getActiveProfile()
-                      if (next) await setActiveProfile(next.id)
-                      onDeleted?.()
-                    }}
-                  >
-                    Delete
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
           )}
         </div>
         {connection.state === "error" && (

@@ -3,7 +3,8 @@
  * each carries, the rows a host's features leave out and the addresses that land on General instead,
  * the segments that named pages before the list landing on the pages that took their place, the
  * out-of-date banner leading the list, a row pushing its page on a phone and swapping the pane
- * beside the list on a laptop, and each page still holding what its tab held.
+ * beside the list on a laptop, the header's trash named for the bot it deletes, and each page still
+ * holding what its tab held.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -81,6 +82,10 @@ test("the list draws General, then the Gots plugin's pages, then the bot's Herme
       "every row is its name over the line saying what it holds",
     )
     assert.deepEqual(titles(), ["A bot"], "the list screen is named after the bot")
+    assert.ok(
+      find('header button[aria-label="Delete A bot"]'),
+      "and its header carries the trash named for the bot it deletes",
+    )
   })
 })
 

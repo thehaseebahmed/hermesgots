@@ -173,14 +173,9 @@ export function SettingsPage() {
     if (section === "bots" && botId) {
       if (!bot) return null
       return page ? (
-        <BotPageScreen
-          profile={bot}
-          page={page}
-          canDelete={canDelete}
-          onDeleted={() => root("/settings")}
-        />
+        <BotPageScreen profile={bot} page={page} />
       ) : (
-        <BotListScreen profile={bot} />
+        <BotListScreen profile={bot} canDelete={canDelete} onDeleted={() => root("/settings")} />
       )
     }
     return screen ? <SectionScreen section={screen} /> : <MenuScreen profiles={profiles} />
@@ -200,19 +195,19 @@ export function SettingsPage() {
             />
           }
         >
-          <BotSettingsList profile={bot} replace />
+          <BotSettingsList
+            profile={bot}
+            replace
+            canDelete={canDelete}
+            onDeleted={() => root("/settings")}
+          />
         </Screen>
         <Screen
           key={botTab ?? "general"}
           title={page?.title ?? botPageOf("general").title}
           className="duration-200 ease-out motion-safe:animate-in motion-safe:fade-in-0"
         >
-          <BotSettingsPage
-            profile={bot}
-            tab={botTab}
-            canDelete={canDelete}
-            onDeleted={() => root("/settings")}
-          />
+          <BotSettingsPage profile={bot} tab={botTab} />
         </Screen>
       </div>
     )
@@ -238,39 +233,32 @@ export function SettingsPage() {
 }
 
 /** A bot's settings as pushed screens: the list, and a page over it. */
-function BotListScreen({ profile }: { profile: Profile }) {
+function BotListScreen({
+  profile,
+  canDelete,
+  onDeleted,
+}: {
+  profile: Profile
+  canDelete: boolean
+  onDeleted: () => void
+}) {
   const { up } = useNav()
   return (
     <Screen title={profile.name} leading={<BackButton onClick={() => up("/settings")} />}>
-      <BotSettingsList profile={profile} />
+      <BotSettingsList profile={profile} canDelete={canDelete} onDeleted={onDeleted} />
     </Screen>
   )
 }
 
 /** One page of a bot's settings, under the list that opened it. */
-function BotPageScreen({
-  profile,
-  page,
-  canDelete,
-  onDeleted,
-}: {
-  profile: Profile
-  page: BotPage
-  canDelete: boolean
-  onDeleted: () => void
-}) {
+function BotPageScreen({ profile, page }: { profile: Profile; page: BotPage }) {
   const { up } = useNav()
   return (
     <Screen
       title={page.title}
       leading={<BackButton onClick={() => up(`/settings/bots/${profile.id}`)} />}
     >
-      <BotSettingsPage
-        profile={profile}
-        tab={page.segment}
-        canDelete={canDelete}
-        onDeleted={onDeleted}
-      />
+      <BotSettingsPage profile={profile} tab={page.segment} />
     </Screen>
   )
 }
