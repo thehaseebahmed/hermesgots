@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import {
+  startTransition,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { Link, matchPath, useLocation, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
@@ -164,7 +172,7 @@ import {
 } from "@/lib/workspace"
 import { lastActivityAt } from "@/lib/session-work"
 import { useReadyLine } from "@/lib/greeting"
-import { heldFrame, hold, type HoldSlot } from "@/lib/chat-hold"
+import { hold, type HoldSlot } from "@/lib/chat-hold"
 import { SUGGESTIONS } from "@/lib/suggestions"
 import { DEFAULT_BOT_ID } from "@/components/bots"
 import { useBotThreads, useNow, useThreads, type Thread } from "@/lib/threads"
@@ -182,6 +190,14 @@ import { SubagentLine } from "@/components/chat/subagent-line"
 import { SubagentsSheet } from "@/components/chat/subagents"
 
 const NO_ROWS: Message[] = []
+// The rows a chat draws in the commit it opens with: the end the reader lands on. Every row's
+// markdown is parsed as it mounts, so drawing a long transcript whole kept a switch blank for
+// hundreds of milliseconds on a phone; the rows above follow in a transition.
+export const FIRST_ROWS = 8
+// The least height a row and its gap take: a chat with more rows than fit the window this way
+// overflows it once drawn whole, so its last row ends where the opening frame put it.
+const LEAST_ROW = 44
+const REST_AFTER_MS = 250
 
 type FlowEntry =
   | { kind: "heading"; day: string; at: number }
@@ -273,9 +289,7 @@ function PendingChat() {
   return (
     <>
       <ChatHeader title="" showBot={false} />
-      <div className="flex flex-1 items-center justify-center">
-        <Spinner className="size-6" />
-      </div>
+      <div className="flex-1" />
     </>
   )
 }
@@ -429,6 +443,20 @@ export function ChatPage({
     }
     return entries
   }, [cards, thread, now])
+  // The chat this pane has drawn whole. A long one opens on its last rows and draws the rest in a
+  // transition; one short enough to be sure of not overflowing the window is cheap to draw at once,
+  // so it is whole from its first frame, with no second commit to disturb its placing.
+  const [whole, setWhole] = useState<string>()
+  const long = flow.length > Math.max(FIRST_ROWS, window.innerHeight / LEAST_ROW)
+  if (answered && whole !== (id ?? "") && !long) setWhole(id ?? "")
+  const cut = answered && whole !== (id ?? "") && long
+  useEffect(() => {
+    if (!cut) return
+    // A beat later, so a reader moving straight on to another chat never waits behind these rows.
+    const timer = window.setTimeout(() => startTransition(() => setWhole(id ?? "")), REST_AFTER_MS)
+    return () => window.clearTimeout(timer)
+  }, [cut, id])
+  const drawn = cut ? flow.slice(-FIRST_ROWS) : flow
   // Where this chat's model changed, as the host recorded it: the divider each turn below carries.
   const changes = useMemo(
     () => modelChanges(thread ?? [], conversation?.modelChanges),
@@ -1100,8 +1128,13 @@ export function ChatPage({
         <MessageScrollerProvider key={id ?? "new"} autoScroll defaultScrollPosition="end">
           <MessageScroller className="flex-1">
             <MessageScrollerViewport aria-label="Messages">
-              <MessageScrollerContent className="w-full gap-6 px-4 pt-32 pb-6">
-                {conversation?.olderThan && (
+              <MessageScrollerContent
+                // A cut chat's rows sit at the end, where they will be once the rows above land.
+                className={
+                  cut ? "w-full justify-end gap-6 px-4 pt-32 pb-6" : "w-full gap-6 px-4 pt-32 pb-6"
+                }
+              >
+                {!cut && conversation?.olderThan && (
                   <Button
                     variant="outline"
                     className="min-h-11 self-center rounded-full"
@@ -1121,7 +1154,7 @@ export function ChatPage({
                   </Button>
                 )}
                 <AgentsContext.Provider value={agentsSource}>
-                  {flow.map((entry) => {
+                  {drawn.map((entry) => {
                     if (entry.kind === "heading")
                       return <DayHeading key={`day-${entry.at}`} day={entry.day} />
                     if (entry.kind === "card")
@@ -1510,11 +1543,8 @@ export function ChatPage({
   ) : null
 
   useLayoutEffect(() => {
-    if (ready) hold(slot, id, frame)
+    if (ready) hold(slot, id)
   })
-
-  const heldBefore = heldFrame(slot)
-  const holding = heldBefore && heldBefore.id !== id ? heldBefore.frame : undefined
 
   return (
     <div
@@ -1523,7 +1553,7 @@ export function ChatPage({
       className="relative flex min-h-0 flex-1 flex-col"
       inert={!ready}
     >
-      {ready ? frame : (holding ?? <PendingChat />)}
+      {ready ? frame : <PendingChat />}
     </div>
   )
 }

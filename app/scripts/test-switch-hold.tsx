@@ -10,7 +10,7 @@ import { db, ensureMainThread, mainThreadId } from "@/lib/db"
 import { GREETINGS } from "@/lib/greeting"
 import { forgetHeldChats } from "@/lib/chat-hold"
 import { lastThreadKey, useThreads } from "@/lib/threads"
-import { ChatPage, SETUP_COPY } from "@/routes/chat"
+import { ChatPage, FIRST_ROWS, SETUP_COPY } from "@/routes/chat"
 import {
   botProfile,
   click,
@@ -80,13 +80,39 @@ function recordFrames(read: () => Frame) {
   }
 }
 
-function onlyReadyFrames(seen: ReturnType<typeof recordFrames>, before: string, after: string) {
+/**
+ * Every frame of a switch is the chat that was there, the chat asked for, or the neutral pane drawn
+ * while that chat answers — which carries nothing of the chat left (`left`: words only it held).
+ */
+function onlyReadyFrames(
+  seen: ReturnType<typeof recordFrames>,
+  before: string,
+  after: string,
+  left: string,
+) {
   seen.stop()
   assert.ok(seen.frames.length > 0, "the switch painted something")
   assert.deepEqual(
-    seen.frames.map((frame) => frame.text).filter((one) => one !== before && one !== after),
+    seen.frames
+      .filter((frame) => !frame.holding)
+      .map((frame) => frame.text)
+      .filter((one) => one !== before && one !== after),
     [],
     "every frame carried the chat that was there or the one asked for",
+  )
+  assert.deepEqual(
+    seen.frames.filter((frame) => frame.holding && frame.text.includes(left)),
+    [],
+    "and the pane that waits for the chat asked for draws nothing of the one left",
+  )
+  assert.ok(
+    seen.frames.some((frame) => frame.holding),
+    "the pane waited neutral for the chat asked for",
+  )
+  assert.equal(
+    seen.frames.some((frame) => frame.holding && frame.composer),
+    false,
+    "with no composer, so a tap on send reaches no chat at all",
   )
   assert.deepEqual(
     seen.written.filter((words) => PROVISIONAL.some((copy) => words.includes(copy))),
@@ -107,7 +133,7 @@ const paneTitle = () =>
 
 const card = (id: string) => find(`[data-slot="thread-card"] a[href="/c/${id}"]`)
 
-test("a chat switched to in place holds the one it left until its own answers are in", async () => {
+test("a chat switched to in place draws nothing of the one it left while its own answers come in", async () => {
   localStorage.clear()
   forgetHeldChats()
   await seedChats(
@@ -127,22 +153,7 @@ test("a chat switched to in place holds the one it left until its own answers ar
     await until(async () => paneText().includes("beta one"), "the chat asked for")
     await settle()
 
-    onlyReadyFrames(seen, before, paneText())
-    assert.ok(
-      seen.frames.some((frame) => frame.holding && frame.text === before),
-      "the chat left is the one drawn while the next one answers",
-    )
-    assert.ok(
-      seen.frames.some((frame) => frame.holding && frame.composer),
-      "and its composer is held with it, so a tap on send reaches no chat at all",
-    )
-    assert.deepEqual(
-      seen.frames
-        .filter((frame) => frame.holding && frame.text !== before)
-        .map((frame) => frame.text),
-      [],
-      "nothing but the chat left is ever drawn inert",
-    )
+    onlyReadyFrames(seen, before, paneText(), "alpha one")
     assert.equal(
       seen.frames.at(-1)?.holding,
       false,
@@ -153,7 +164,7 @@ test("a chat switched to in place holds the one it left until its own answers ar
 })
 
 test(
-  "a thread opened beside Main holds the thread it replaced until its answers are in",
+  "a thread opened beside Main draws nothing of the thread it replaced while its answers come in",
   laptop(async () => {
     localStorage.clear()
     forgetHeldChats()
@@ -177,17 +188,13 @@ test(
       await until(async () => paneFrame("thread").text.includes("beta one"), "the thread asked for")
       await settle()
 
-      onlyReadyFrames(seen, before, paneFrame("thread").text)
-      assert.ok(
-        seen.frames.some((frame) => frame.holding && frame.text === before),
-        "the thread replaced is the one drawn while the next one answers",
-      )
+      onlyReadyFrames(seen, before, paneFrame("thread").text, "alpha one")
       assert.deepEqual(greetingKeys(), greeting, "the switch wrote nothing of the greeting")
     })
   }),
 )
 
-test("a cold start paints a spinner under an empty header, never the setup copy", async () => {
+test("a cold start paints an empty header over a blank pane, never the setup copy", async () => {
   localStorage.clear()
   forgetHeldChats()
   await seedChats([{ id: "c-a", title: "Alpha", messages: ["alpha one"] }], {
@@ -199,12 +206,11 @@ test("a cold start paints a spinner under an empty header, never the setup copy"
   const seen = recordFrames(() => {
     const chat = find('[data-pane="route"]')
     if (!chat) return { text: "nothing", holding: false, composer: false }
-    const spinner = chat.querySelector('[data-slot="spinner"]') ? "spinner" : "no-spinner"
     const title = [...chat.querySelectorAll('[data-slot="header-title"]')]
       .map((node) => node.textContent)
       .join("|")
     return {
-      text: `${spinner}|${title}|${chat.textContent ?? ""}`,
+      text: `${title}|${chat.textContent ?? ""}`,
       holding: chat.hasAttribute("inert"),
       composer: false,
     }
@@ -216,7 +222,11 @@ test("a cold start paints a spinner under an empty header, never the setup copy"
     seen.stop()
     const painted = seen.frames.map((frame) => frame.text).filter((one) => one !== "nothing")
     assert.ok(painted.length > 0, "the pane painted something")
-    assert.ok(painted[0].startsWith("spinner||"), `the first frame is a spinner: ${painted[0]}`)
+    assert.equal(
+      painted[0],
+      "|",
+      `the first frame is an empty header over a blank pane: ${painted[0]}`,
+    )
     assert.ok(!painted[0].includes(SETUP_COPY), "the setup copy is never a loading state")
     const last = painted.at(-1) ?? ""
     assert.equal(last.includes("alpha one"), true, "and the first ready frame is the chat itself")
@@ -275,9 +285,9 @@ async function switchToGone(title: string, { carried }: { carried: boolean }) {
         "its empty state draws no greeting and no bot line: the ready line mounts on no gone chat",
       )
       assert.equal(
-        find('[data-pane="route"] [data-slot="spinner"]'),
-        null,
-        "and it is ready: the pane answers the reader rather than spinning",
+        paneFrame("route").holding,
+        false,
+        "and it is ready: the pane answers the reader rather than waiting",
       )
       assert.deepEqual(
         greetingKeys(),
@@ -336,7 +346,7 @@ const switchable = (entry: string, ...to: string[]) => (
   </MemoryRouter>
 )
 
-test("a switch away from a reply still streaming holds the frame it had, not the words after it", async () => {
+test("a switch away from a reply still streaming leaves none of its words on screen", async () => {
   localStorage.clear()
   forgetHeldChats()
   await seedChats(
@@ -353,21 +363,16 @@ test("a switch away from a reply still streaming holds the frame it had, not the
     await mount(phone("/c/c-a", "/c/c-b"), async () => {
       await until(async () => paneText().includes("alpha one"), "the chat on screen")
       const greeting = greetingKeys()
-      const before = paneText()
 
       await click(find("[data-switch]"))
-      await until(async () => paneFrame("route").holding, "the chat left to be held")
+      await until(async () => paneFrame("route").holding, "the pane to wait for the chat asked for")
       // The turn keeps writing to the chat the pane has left.
       await db.messages.update("c-a-0", { content: "alpha one, and then some" })
       await settle()
 
-      assert.equal(
-        paneText(),
-        before,
-        "the held frame is the one it had: a stream runs no further in it",
-      )
+      assert.ok(!paneText().includes("alpha one"), "nothing of the chat left is drawn")
       assert.ok(!paneText().includes("and then some"), "and none of the words that came after it")
-      assert.deepEqual(greetingKeys(), greeting, "the hold wrote nothing of the greeting")
+      assert.deepEqual(greetingKeys(), greeting, "the wait wrote nothing of the greeting")
 
       read.release()
       await until(async () => paneText().includes("beta one"), "the chat asked for")
@@ -410,15 +415,11 @@ test("two switches in a row draw the chat that was ready and the one asked for, 
       await until(async () => paneText().includes("gamma one"), "the chat asked for second")
       await settle()
 
-      onlyReadyFrames(seen, before, paneText())
+      onlyReadyFrames(seen, before, paneText(), "alpha one")
       assert.deepEqual(
         seen.frames.filter((frame) => frame.text.includes("beta one")).map((frame) => frame.text),
         [],
         "the chat the second switch skipped was never drawn",
-      )
-      assert.ok(
-        seen.frames.some((frame) => frame.holding && frame.text === before),
-        "the chat it left was the one held, both switches long",
       )
       assert.deepEqual(greetingKeys(), greeting, "and neither switch touched the greeting")
     })
@@ -426,6 +427,61 @@ test("two switches in a row draw the chat that was ready and the one asked for, 
     read.release()
     read.restore()
   }
+})
+
+test("a long chat switched to draws its last rows first, then every row", async () => {
+  localStorage.clear()
+  forgetHeldChats()
+  const LONG = 30
+  await seedChats(
+    [
+      { id: "c-a", title: "Alpha", messages: ["alpha one"] },
+      {
+        id: "c-b",
+        title: "Beta",
+        messages: Array.from({ length: LONG }, (_, index) => `beta row ${index}`),
+      },
+    ],
+    { bots: [bot, other], active: bot.id },
+  )
+  await mount(phone("/c/c-a", "/c/c-b"), async () => {
+    await until(async () => paneText().includes("alpha one"), "the chat on screen")
+    const drawn: number[] = []
+    const observer = new MutationObserver(() => {
+      const pane = find('[data-pane="route"]')
+      if (pane && !pane.hasAttribute("inert") && pane.textContent?.includes("beta row"))
+        drawn.push(pane.querySelectorAll('[data-slot="message-scroller-item"]').length)
+    })
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true })
+    // Outside `act`, which would flush the rows' transition in the tap's own batch: a browser
+    // paints the first commit before the transition runs.
+    const actEnvironment = globalThis.IS_REACT_ACT_ENVIRONMENT
+    globalThis.IS_REACT_ACT_ENVIRONMENT = false
+    try {
+      find("[data-switch]")?.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true }),
+      )
+      await until(
+        async () =>
+          findAll('[data-pane="route"] [data-slot="message-scroller-item"]').length === LONG,
+        "every row of the chat asked for",
+      )
+      // The reads and effects the switch set going land before `act` is back.
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      globalThis.IS_REACT_ACT_ENVIRONMENT = actEnvironment
+      await settle()
+    } finally {
+      globalThis.IS_REACT_ACT_ENVIRONMENT = actEnvironment
+      observer.disconnect()
+    }
+    assert.ok(drawn.length > 0, "the chat asked for was drawn")
+    assert.ok(
+      drawn[0] <= FIRST_ROWS && drawn[0] < LONG,
+      `the first frame of it holds only its last ${FIRST_ROWS} rows, not ${drawn[0]} of ${LONG}`,
+    )
+    assert.ok(paneText().includes(`beta row ${LONG - 1}`), "and its newest row is among them")
+    assert.equal(drawn.at(-1), LONG, "and every row lands after it")
+  })
 })
 
 const answers: string[] = []

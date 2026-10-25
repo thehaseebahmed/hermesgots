@@ -136,7 +136,10 @@ function watchFrames(page, { lanes }) {
           return {
             title: "",
             match: -1,
-            wrong: [`no [data-pane="${pane}"]`],
+            whole: false,
+            waiting: true,
+            absent: true,
+            wrong: [],
             held: false,
             empty: false,
             scrollTop: 0,
@@ -149,7 +152,19 @@ function watchFrames(page, { lanes }) {
         const viewport = root.querySelector('[data-slot="message-scroller-viewport"]')
         const content = root.querySelector('[data-slot="message-scroller-content"]')
         const mine = rowsIn(content)
-        const match = chats.findIndex((chat) => title === chat.title && text.includes(chat.says))
+        // The chat being left is known by its words; the one asked for by its title over rows of its
+        // own, since it draws its newest rows first and the words may be in the ones that follow.
+        const match = chats.findIndex(
+          (chat, index) =>
+            title === chat.title && (index === 0 ? text.includes(chat.says) : mine.length > 0),
+        )
+        const whole = match >= 0 && text.includes(chats[match].says)
+        // The pane waiting on the chat asked for: inert, untitled, and carrying neither chat.
+        const waiting =
+          match < 0 &&
+          root.hasAttribute("inert") &&
+          !title &&
+          !chats.some((chat) => text.includes(chat.says))
         // The scroller holds itself back while it places its content: a `data-pending-scroll`
         // viewport is `visibility: hidden`, so the browser paints none of that frame, and its
         // items are still at their `content-visibility: auto` estimate rather than their size.
@@ -158,6 +173,9 @@ function watchFrames(page, { lanes }) {
         return {
           title,
           match,
+          whole,
+          waiting,
+          absent: false,
           held,
           // A bot's pane saying it has no threads: what an unanswered list must never be read as.
           empty: Boolean(root.querySelector('[data-slot="bot-pane-empty"]')),
@@ -185,6 +203,8 @@ function watchFrames(page, { lanes }) {
         Boolean(one && other) &&
         one.title === other.title &&
         one.match === other.match &&
+        one.whole === other.whole &&
+        one.waiting === other.waiting &&
         one.held === other.held &&
         one.empty === other.empty &&
         one.scrollTop === other.scrollTop &&
@@ -258,14 +278,24 @@ function assertSwitchFrames(frames, { what }) {
   )
   const seen = [...new Set(frames.map((frame) => frame.title || "(no title)"))]
   assert.deepEqual(
-    frames.filter((frame) => frame.match < 0),
+    frames.filter((frame) => frame.match < 0 && !frame.waiting),
     [],
-    `${what}: every frame is one of the two chats, whole (saw ${seen.join(" → ")})`,
+    `${what}: every frame is one of the two chats, whole, or the pane waiting on the next (saw ${seen.join(" → ")})`,
   )
   assert.equal(frames[0].match, 0, `${what}: the first frame is the chat being left`)
+  const left = frames.findIndex((frame) => frame.match !== 0)
+  assert.deepEqual(
+    frames
+      .slice(left)
+      .filter((frame) => frame.match === 0)
+      .map((frame) => frame.title),
+    [],
+    `${what}: once a frame has left the chat, it is never drawn again`,
+  )
   const landed = frames.findIndex((frame) => frame.match === 1 && !frame.held)
   assert.ok(landed > 0, `${what}: the chat asked for lands after the one left`)
   assert.equal(frames.at(-1).match, 1, `${what}: and it is still the one on screen`)
+  assert.ok(frames.at(-1).whole, `${what}: and drawn whole once the switch settles`)
   const after = frames.slice(landed)
   assert.deepEqual(
     after.filter((frame) => frame.held).map((frame) => frame.title),
@@ -293,16 +323,28 @@ const SETTLED_FRAMES = 3
 
 /**
  * A second pane sampled through the same switch — the thread beside the chat — must only ever draw a
- * chat of its own across it: the one it had, or the one the bot asked for keeps. Never a frame that
- * calls the bot thread-less while its list is still answering, and never one with no pane at all.
+ * chat of its own across it: the one it had, the one the bot asked for keeps, or nothing while that
+ * one answers. Never a frame that calls the bot thread-less while its list is still answering, and
+ * never the thread it had once it has left it.
  */
 function assertLaneFrames(frames, { what }) {
   assert.ok(frames.length > 4, `${what}: frames were sampled (${frames.length})`)
   const seen = [...new Set(frames.map((frame) => frame.title || "(no title)"))]
   assert.deepEqual(
-    frames.filter((frame) => frame.match < 0).map((frame) => frame.title || "(no title)"),
+    frames
+      .filter((frame) => frame.match < 0 && !frame.waiting)
+      .map((frame) => frame.title || "(no title)"),
     [],
-    `${what}: every frame is one of the two chats, whole (saw ${seen.join(" → ")})`,
+    `${what}: every frame is one of the two chats, whole, or waiting on the next (saw ${seen.join(" → ")})`,
+  )
+  const left = frames.findIndex((frame) => frame.match !== 0)
+  assert.deepEqual(
+    frames
+      .slice(left)
+      .filter((frame) => frame.match === 0)
+      .map((frame) => frame.title),
+    [],
+    `${what}: once a frame has left the thread, it is never drawn again`,
   )
   assert.deepEqual(
     frames.filter((frame) => frame.empty).map((frame) => frame.title),
@@ -327,6 +369,14 @@ async function sampleSwitch(page, { chats, pane = "route", act, what, also = [] 
         ?.querySelector('[data-slot="header-title"]')
         ?.textContent?.trim() === title,
     { pane, title: chats[1].title },
+    { timeout: 15_000 },
+  )
+  // A long chat opens on its newest rows and draws the rest a beat later: the switch has settled
+  // once the chat is whole, and the frames sampled until then are the ones that must not move.
+  await page.waitForFunction(
+    ({ pane, says }) =>
+      document.querySelector(`[data-pane="${pane}"]`)?.textContent?.includes(says),
+    { pane, says: chats[1].says },
     { timeout: 15_000 },
   )
   await settled(page)

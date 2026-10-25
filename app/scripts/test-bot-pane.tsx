@@ -222,7 +222,7 @@ test(
 )
 
 test(
-  "a bot switch holds its thread lane, and no frame calls a bot thread-less before its list answers",
+  "a bot switch leaves its thread lane blank, and no frame calls a bot thread-less before its list answers",
   laptop(async () => {
     localStorage.clear()
     await seed(["t-a"])
@@ -265,13 +265,13 @@ test(
           "nothing says the bot has no threads while its list is on its way",
         )
         assert.ok(
-          lane().includes("Opened t-a"),
-          `the lane holds the thread it was showing (saw "${lane().slice(0, 80)}")`,
+          !lane().includes("Opened t-a"),
+          `the lane draws nothing of the thread it was showing (saw "${lane().slice(0, 80)}")`,
         )
-        assert.equal(
+        assert.notEqual(
           find('[data-pane="thread"]')?.hasAttribute("inert"),
-          true,
-          "and it is inert: a tap on the chat the pane has left reaches nothing",
+          false,
+          "and no live chat stands in it while the new bot's thread answers",
         )
         count.release()
 

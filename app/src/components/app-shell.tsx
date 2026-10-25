@@ -22,7 +22,8 @@ import { useCodePane, useMeetingsPane, useProjectsPane, useResearchPane } from "
 import { useSidebarCollapsed } from "@/lib/sidebar"
 import { useBotPane, useBotThreads } from "@/lib/threads"
 import { cn } from "@/lib/utils"
-import { onChatSwap, heldFrame, type HoldSlot } from "@/lib/chat-hold"
+import { onChatSwap, type HoldSlot } from "@/lib/chat-hold"
+import { PaneTransition } from "@/components/pane-transition"
 import { ChatPage } from "@/routes/chat"
 
 /**
@@ -36,6 +37,8 @@ interface ListPane {
   open: boolean
   node: ReactNode
   item?: ReactNode
+  /** The item open beside the list: when it changes, the item left fades out over the next. */
+  itemKey?: string
 }
 
 /**
@@ -127,8 +130,8 @@ function usePageTransition(ref: RefObject<HTMLElement | null>, pane: ListPane | 
 /**
  * The third pane of a bot that has no thread to keep beside Main. It stands at the pane's own width
  * so the layout doesn't move when the bot's first thread opens, and says the one thing it knows —
- * once the bot's thread list has answered. Until then it holds the frame the pane last drew, inert,
- * so neither the lane's place nor what it says moves while the answer is on its way.
+ * once the bot's thread list has answered. Until then it draws nothing, never the previous bot's
+ * thread.
  */
 function ThreadLane({ threads }: { threads?: boolean }) {
   if (threads === false)
@@ -140,20 +143,7 @@ function ThreadLane({ threads }: { threads?: boolean }) {
         <p className="text-sm text-muted-foreground">No threads yet</p>
       </div>
     )
-  const held = threads === undefined ? heldFrame("thread") : undefined
-  if (!held?.frame) return null
-  // The same box `ChatPage` draws a held pane in, so the frame is the pane it was, and inert, so
-  // nothing in a chat the pane has left can be tapped.
-  return (
-    <div
-      data-slot="chat-pane"
-      data-pane="thread"
-      className="relative flex min-h-0 flex-1 flex-col"
-      inert
-    >
-      {held.frame}
-    </div>
-  )
+  return null
 }
 
 /**
@@ -189,7 +179,11 @@ function Panes({ pane, children }: { pane: ListPane | undefined; children: React
       )}
       <div ref={session} className="flex min-w-0 flex-1 flex-col">
         {/* A list's own route has nothing to add beside it. */}
-        {pane && !open ? null : <Suspense fallback={null}>{pane?.item ?? children}</Suspense>}
+        {pane && !open ? null : (
+          <PaneTransition item={pane?.itemKey}>
+            <Suspense fallback={null}>{pane?.item ?? children}</Suspense>
+          </PaneTransition>
+        )}
       </div>
     </div>
   )
@@ -232,16 +226,28 @@ export function AppShell({ children }: { children?: ReactNode }) {
           />
         ),
         item: botItem,
+        itemKey: shown,
       }
     : code
-      ? { screen: "/code", open: code.open, node: <CodePane pane={code} /> }
+      ? { screen: "/code", open: code.open, itemKey: code.selected, node: <CodePane pane={code} /> }
       : projects
-        ? { screen: "/projects", open: projects.open, node: <ProjectsPane pane={projects} /> }
+        ? {
+            screen: "/projects",
+            open: projects.open,
+            itemKey: projects.selected,
+            node: <ProjectsPane pane={projects} />,
+          }
         : meetings
-          ? { screen: "/meetings", open: meetings.open, node: <MeetingsPane pane={meetings} /> }
+          ? {
+              screen: "/meetings",
+              open: meetings.open,
+              itemKey: meetings.selected,
+              node: <MeetingsPane pane={meetings} />,
+            }
           : research && {
               screen: "/research",
               open: research.open,
+              itemKey: research.selected,
               node: <ResearchPane pane={research} />,
             }
   usePageTransition(main, pane)
