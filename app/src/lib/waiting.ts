@@ -85,8 +85,7 @@ export async function readLiveRuns(server: Server): Promise<LiveRuns | undefined
 async function poll(only: Server[] = servers) {
   if (document.visibilityState !== "visible") return
   await Promise.all(only.map(readLiveRuns))
-  // One read per server went out in this pass; named so a resume can show them.
-  markResume("runs-live-end", only.length)
+  if (only.length) markResume("runs-live-end", { requests: only.length })
   notify()
 }
 

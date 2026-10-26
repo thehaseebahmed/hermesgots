@@ -1,11 +1,7 @@
 /**
- * The latest return to the foreground, timed: when it began, and for each stage a resume runs, the
- * milliseconds since it began and the requests the resume made there. Started by the app's return
- * trigger (`onReturn` in `wake.ts`, wired in `main.tsx`), marked at each stage's own site, and read
- * into the device state a bug report carries (`diagResume` in `diagnostics.ts`), so a report can
- * say where a resume spent its time. In memory for this launch only: the newest return replaces the
- * trace, and nothing here is written anywhere. Import-free, so `scripts/test-resume-trace.mjs`
- * drives it as a pure rule.
+ * The latest return to the foreground, timed: in memory for this launch only, replaced by the
+ * newest return, never written anywhere. The device state a bug report carries reads it through
+ * `diagResume` in `diagnostics.ts`. Import-free, so `scripts/test-resume-trace.mjs` drives it.
  */
 
 /** Every stage a resume can mark; the dump picks by this list, so nothing else can ride along. */
@@ -34,31 +30,56 @@ export interface ResumeTrace {
 }
 
 /**
- * How long after a return its marks still count as that resume's own: past this, the session is
- * just running normally, and its polls and reconciles must not keep growing the trace forever.
+ * How long after a return its marks still count as that resume's own. Past it the session is just
+ * running normally, and a screen left polling would keep growing the dump with marks that are no
+ * longer the resume.
  */
 export const TRACE_WINDOW_MS = 120_000
 
+/** The offsets one stage keeps: enough to show it ran again, not every poll of a window. */
+export const MARKS_PER_STAGE = 8
+
 let trace: ResumeTrace | undefined
 
-/** Begins the trace for this return, replacing any earlier one: the newest return is the trace. */
-export function startResumeTrace(at = Date.now(), started = performance.now()) {
+export interface ResumeStart {
+  /** Defaults to `Date.now()`. */
+  at?: number
+  /** Defaults to `performance.now()`. */
+  started?: number
+}
+
+/** The newest return replaces the trace. */
+export function startResumeTrace({
+  at = Date.now(),
+  started = performance.now(),
+}: ResumeStart = {}) {
   trace = { at, started, stages: {}, requests: {} }
 }
 
-/**
- * Records that a stage of the current return finished, and `requests` of them where its site knows
- * the count, as milliseconds since the return. A mark with no trace to land in, or past the window,
- * is dropped: there is no return to attribute it to.
- */
-export function markResume(stage: ResumeStage, requests = 0, now = performance.now()) {
-  if (!trace) return
-  const offset = now - trace.started
-  if (offset > TRACE_WINDOW_MS) return
-  const offsets = (trace.stages[stage] ??= [])
-  offsets.push(Math.round(offset))
-  if (requests > 0) trace.requests[stage] = (trace.requests[stage] ?? 0) + requests
+export interface ResumeMark {
+  /** The requests the stage made, where its site knows the count. */
+  requests?: number
+  /** Defaults to `performance.now()`; the tests pass one. */
+  now?: number
 }
 
-/** The latest return's trace, or undefined before this launch's first return. */
-export const resumeTrace = () => trace
+/** A mark with no trace to land in, or past the window, is dropped: there is no return to attribute it to. */
+export function markResume(stage: ResumeStage, { requests, now }: ResumeMark = {}) {
+  if (!trace) return
+  const offset = (now ?? performance.now()) - trace.started
+  if (!Number.isFinite(offset) || offset > TRACE_WINDOW_MS) return
+  const offsets = (trace.stages[stage] ??= [])
+  if (offsets.length < MARKS_PER_STAGE) offsets.push(Math.round(offset))
+  if (requests) trace.requests[stage] = (trace.requests[stage] ?? 0) + requests
+}
+
+/** A copy, so later marks can't appear in a trace a reader already holds. */
+export function resumeTrace(): ResumeTrace | undefined {
+  if (!trace) return
+  const stages: ResumeTrace["stages"] = {}
+  for (const stage of RESUME_STAGES) {
+    const offsets = trace.stages[stage]
+    if (offsets) stages[stage] = [...offsets]
+  }
+  return { at: trace.at, started: trace.started, stages, requests: { ...trace.requests } }
+}

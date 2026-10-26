@@ -620,8 +620,7 @@ async function mergePluginChats(profile: Profile) {
   const local = await localChats(profile.id, drafts)
   try {
     const merged = await mergeChatList(profile, local, AbortSignal.timeout(READ_TIMEOUT_MS))
-    // One mark per merge, so two bots on one server show as the two requests they are.
-    markResume("chats-merge-end", 1)
+    markResume("chats-merge-end", { requests: 1 })
     return { local, merged }
   } catch (error) {
     noteFailure(`Syncing ${profile.name}'s chats`, error)
@@ -656,8 +655,6 @@ async function runSync() {
     if (key) {
       await Promise.all([syncBots(key), syncAppearance(key), syncPrompts(key)])
       markResume("account-docs-end")
-    }
-    if (key) {
       await pullRegistry()
       markResume("registry-end")
     }

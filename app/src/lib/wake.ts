@@ -8,44 +8,56 @@ import { isNative } from "@/lib/native"
  */
 const AWAY_MS = 5_000
 
-const listeners = new Set<() => void>()
-const returnListeners = new Set<() => void>()
+/** One event, one announcement: Android's `resume` and the page's `visibilitychange` both say it. */
+const AGAIN_MS = 1_000
+
+function notifier() {
+  const listeners = new Set<() => void>()
+  let last = 0
+  return {
+    on(listener: () => void) {
+      listeners.add(listener)
+      return () => {
+        listeners.delete(listener)
+      }
+    },
+    announce() {
+      const now = Date.now()
+      if (now - last < AGAIN_MS) return
+      last = now
+      for (const listener of [...listeners]) listener()
+    },
+    /** A page that went away can come back inside the debounce; that is a return of its own. */
+    reopen() {
+      last = 0
+    },
+  }
+}
+
+const wakeTurn = notifier()
+const returnToApp = notifier()
+
 let hiddenAt: number | undefined
-let lastWake = 0
-let lastReturn = 0
-
-function wake() {
-  // Android's resume and the page's visibilitychange both say so; one wake is enough.
-  if (Date.now() - lastWake < 1000) return
-  lastWake = Date.now()
-  for (const listener of [...listeners]) listener()
-}
-
-function returned() {
-  // The same double announcement as a wake; the trace times one return, not two.
-  if (Date.now() - lastReturn < 1000) return
-  lastReturn = Date.now()
-  for (const listener of [...returnListeners]) listener()
-}
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") {
     hiddenAt ??= Date.now()
+    returnToApp.reopen()
     return
   }
   const away = hiddenAt === undefined ? 0 : Date.now() - hiddenAt
   hiddenAt = undefined
-  returned()
-  if (away >= AWAY_MS) wake()
+  returnToApp.announce()
+  if (away >= AWAY_MS) wakeTurn.announce()
 })
 window.addEventListener("online", () => {
-  returned()
-  wake()
+  returnToApp.announce()
+  wakeTurn.announce()
 })
 if (isNative)
   void App.addListener("resume", () => {
-    returned()
-    wake()
+    returnToApp.announce()
+    wakeTurn.announce()
   })
 
 /**
@@ -55,20 +67,13 @@ if (isNative)
  * it. Returns the cleanup.
  */
 export function onWake(listener: () => void) {
-  listeners.add(listener)
-  return () => {
-    listeners.delete(listener)
-  }
+  return wakeTurn.on(listener)
 }
 
 /**
  * Calls `listener` on every return to the foreground: the page visible again, the network back, or
- * Android's `resume`, with no minimum time away (unlike `onWake`). The resume trace times what
- * each return runs from here. Returns the cleanup.
+ * Android's `resume`, with no minimum time away (unlike `onWake`). Returns the cleanup.
  */
 export function onReturn(listener: () => void) {
-  returnListeners.add(listener)
-  return () => {
-    returnListeners.delete(listener)
-  }
+  return returnToApp.on(listener)
 }

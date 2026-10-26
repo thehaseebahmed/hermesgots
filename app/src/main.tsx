@@ -24,8 +24,7 @@ if (!handBackNativeSignIn()) {
   void startSync()
   startLive()
   startPush()
-  // Every return to the foreground begins the trace the resume stages mark.
-  onReturn(startResumeTrace)
+  onReturn(() => startResumeTrace())
 }
 
 createRoot(document.getElementById("root")!).render(
