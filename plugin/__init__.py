@@ -2613,6 +2613,8 @@ def register(ctx) -> None:
         # see delegation.py. Its end is also the moment there is a wake to post, so the watcher looks
         # again rather than waiting out its tick.
         register_hook("subagent_start", delegation.started)
+        # A turn sent while subagents still work is told so; see delegation.running_note.
+        register_hook("pre_llm_call", delegation.running_note)
         register_hook("on_session_end", lambda **_kwargs: delegation.wake())
     register_cli = getattr(ctx, "register_cli_command", None)
     if register_cli is not None:

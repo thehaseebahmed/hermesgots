@@ -1043,6 +1043,41 @@ class StopRouteTest(unittest.TestCase):
         self.assertEqual(self.stop_all("s"), {"status": 401, "payload": {}})
         self.assertEqual(self.registry.stopped, [])
 
+    def test_a_subagent_the_user_stopped_does_not_wake_the_bot(self) -> None:
+        self.plant_children([{"id": "c1", "open": True}], ["c1"])
+        self.stop_all("s")
+        # The child's session closes after the interrupt, as core unwinds it.
+        conn = sqlite3.connect(self.home / "state.db")
+        conn.execute("UPDATE sessions SET ended_at = ?, end_reason = 'interrupted' WHERE id = 'c1'",
+                     (time.time() + 1,))
+        conn.commit()
+        conn.close()
+        mark = sessions.wake_marks(db_path(self.home), ["c1"])["c1"]
+        self.assertEqual((mark["status"], mark["reason"]), ("dropped", delegation.DROP_STOPPED))
+        self.assertEqual(delegation.waking_sessions(self.home), {})
+
+    def test_a_card_stop_settles_the_wake_too(self) -> None:
+        self.plant_children([{"id": "c1", "open": True}], ["c1"])
+        sessions.remember_agent(db_path(self.home), "c1", "sa-c1")
+        self.stop("s", "c1")
+        self.assertEqual(sessions.wake_marks(db_path(self.home), ["c1"])["c1"]["status"], "dropped")
+
+    def test_a_stop_that_found_nothing_to_stop_settles_nothing(self) -> None:
+        self.plant_children([{"id": "c1", "open": True}], [])
+        self.stop("s", "c1")
+        self.assertEqual(sessions.wake_marks(db_path(self.home), ["c1"]), {})
+
+    def test_a_turn_is_told_which_subagents_still_work(self) -> None:
+        self.plant_children([{"id": "c1", "open": True}, {"id": "c2", "open": True}], ["c1"])
+        answer = delegation.running_note(session_id="s", platform="api_server")
+        self.assertIn("1 of this conversation's subagents is still at work", answer["context"])
+        self.assertIn("Its result is not in yet", answer["context"])
+
+    def test_a_turn_with_no_subagent_at_work_is_told_nothing(self) -> None:
+        self.plant_children([{"id": "c1"}], [])
+        self.assertIsNone(delegation.running_note(session_id="s", platform="api_server"))
+        self.assertIsNone(delegation.running_note(session_id="s", platform="cli"))
+
     def test_info_advertises_stopping_every_subagent_at_once(self) -> None:
         info = self.route(plugin.PREFIX + "/info")
         request = FakeWeb.Request()

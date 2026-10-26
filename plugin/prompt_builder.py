@@ -228,6 +228,32 @@ class StageWords(NamedTuple):
     brief: str
 
 
+_SUBAGENTS_RUNNING = (
+    "Note from Gots, not written by the user: {count} of this conversation's subagents "
+    "{is_are} still at work ({goals}). {their_results} not in yet and arrive as a later turn "
+    "of their own. Answer with what you have; where this message depends on a subagent's work, "
+    "say so rather than presenting it as done."
+)
+
+
+def subagents_running(goals: List[str]) -> str:
+    """The line a turn is given while subagents still work, so it doesn't answer as if they were done.
+
+    Rides in the turn's context (the ``pre_llm_call`` hook) rather than the instructions, which are
+    fixed per session so the prompt cache holds.
+    """
+    count = len(goals)
+    named = "; ".join(goal or "no goal recorded" for goal in goals[:3])
+    if count > 3:
+        named += f"; +{count - 3} more"
+    return _SUBAGENTS_RUNNING.format(
+        count=count,
+        is_are="is" if count == 1 else "are",
+        goals=named,
+        their_results="Its result is" if count == 1 else "Their results are",
+    )
+
+
 _WORDS = {
     pipeline.BUILD: StageWords("implementing", _BUILD_STAGE),
     pipeline.CRITIQUE: StageWords("reviewing the build of", _REVIEW_STAGE),

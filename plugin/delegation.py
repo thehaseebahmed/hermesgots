@@ -57,7 +57,7 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any, Collection, Dict, Iterable, Iterator, List, NamedTuple, Optional, Tuple
 
-from . import events, link, outbox, sessions
+from . import events, link, outbox, prompt_builder, sessions
 from .store import db_path, get_setting, put_setting
 
 logger = logging.getLogger(__name__)
@@ -86,6 +86,8 @@ WAKE_MAX_ATTEMPTS = 8
 WAKE_BACKOFF_SECONDS = (5.0, 15.0, 45.0, 135.0, 405.0, 1215.0, 3645.0)
 WAKE_MAX_AGE_MS = 48 * 60 * 60 * 1000
 DROP_STAGE, DROP_GONE, DROP_STALE, DROP_EXHAUSTED = "stage", "gone", "stale", "exhausted"
+# The user stopped the child: they asked it to end, so its end is not news for the bot to act on.
+DROP_STOPPED = "stopped"
 
 # Core's completion notice, and its machine-provenance footer (``INTERNAL_NOTIFICATION_FOOTER``,
 # gateway/run_notifications.py), which every notification that re-enters a conversation as a
@@ -1041,6 +1043,35 @@ def started(
         logger.debug("memento: couldn't keep subagent %s's id", child_session_id, exc_info=True)
 
 
+def running_note(**kwargs: Any) -> Optional[Dict[str, str]]:
+    """The ``pre_llm_call`` hook: tells a turn which of the conversation's subagents still work.
+
+    A turn the user sends while a subagent runs has nothing in its history saying the work isn't
+    in, so it can answer as if it were. The note goes into that turn's context (never the system
+    prompt, which stays identical so the cache holds) and nothing when no subagent runs. The
+    results arrive later as a wake turn, so the note says to answer with what there is.
+    """
+    try:
+        session_id = kwargs.get("session_id")
+        if not isinstance(session_id, str) or not session_id or kwargs.get("platform") != "api_server":
+            return None
+        home = _home()
+        root = sessions.chat_session(home, session_id)
+        # An empty ``live`` set: a child counts as running only while core's registry holds it, not
+        # because the turn about to start is the parent's run.
+        goals = [
+            child["goal"]
+            for child in children(home, root, set())
+            if child["status"] == "running"
+        ]
+        if not goals:
+            return None
+        return {"context": prompt_builder.subagents_running(goals)}
+    except Exception:
+        logger.debug("memento: couldn't note the running subagents", exc_info=True)
+        return None
+
+
 def stop(hermes_home: Path, parent_id: str, subagent_id: str) -> Dict[str, Any]:
     """Stops one subagent's work, from the child's session id the app holds.
 
@@ -1082,7 +1113,7 @@ def _stop_row(hermes_home: Path, child_id: str) -> Dict[str, Any]:
     One child's stop, and its three answers — stopped, nothing left to stop, or a host that has no
     such call — so a card's own stop and a session's stop can never word the same outcome twice.
     """
-    stopped = _interrupt_one(hermes_home, child_id)
+    stopped = _stop_child(hermes_home, child_id)
     if stopped is None:
         return {
             "id": child_id,
@@ -1092,6 +1123,37 @@ def _stop_row(hermes_home: Path, child_id: str) -> Dict[str, Any]:
     if not stopped:
         return {"id": child_id, "stopped": False, "reason": "That subagent isn't running any more."}
     return {"id": child_id, "stopped": True}
+
+
+def _stop_child(home: Path, subagent_id: str) -> Optional[bool]:
+    """Stops one subagent and, when that took, settles its wake as dropped.
+
+    Every stop the plugin makes goes through here — a card's, the session's and a stopped run's
+    fan-out — so none of them leaves the bot owed a turn about work the user called off. The mark is
+    written before the child's session closes, so the sweep never sees the end unsettled. A child
+    that ended any other way (a crash, the host's own interrupt) still wakes its bot.
+    """
+    stopped = _interrupt_one(home, subagent_id)
+    if stopped:
+        try:
+            parent = _parent_of(home, subagent_id)
+            if parent:
+                sessions.drop_wakes(db_path(home), parent, [subagent_id], DROP_STOPPED)
+        except Exception:
+            logger.debug("memento: couldn't settle %s's wake after its stop", subagent_id, exc_info=True)
+    return stopped
+
+
+def _parent_of(home: Path, subagent_id: str) -> Optional[str]:
+    """The session a subagent hangs off, as ``state.db`` has it (read-only), or None."""
+    conn = sessions._open_state(home)
+    if conn is None:
+        return None
+    with closing(conn):
+        row = conn.execute(
+            "SELECT parent_session_id FROM sessions WHERE id = ?", (subagent_id,)
+        ).fetchone()
+    return row[0] if row and row[0] else None
 
 
 def _interrupt_one(home: Path, subagent_id: str) -> Optional[bool]:
@@ -1199,7 +1261,7 @@ def stop_run(home: Path, run: Dict[str, Any]) -> List[str]:
         if child["status"] == "running" and _since(child["started_at"], began)
     ]
     for child_id in named:
-        if _interrupt_one(home, child_id) is False:
+        if _stop_child(home, child_id) is False:
             logger.debug("memento: %s named no subagent core could stop", child_id)
     return named
 
