@@ -864,12 +864,22 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             body = await request.json()
         except ValueError:
             return _error(web, "Body must be JSON", 400)
+        incoming = (body or {}).get("chats") if isinstance(body, dict) else None
+        path, home = store_path(), hermes_home()
+        # Before the merge replaces them: a tombstone no longer says which session it was.
         try:
-            records = await asyncio.to_thread(
-                chats.merge, store_path(), (body or {}).get("chats") if isinstance(body, dict) else None
-            )
+            ending = await asyncio.to_thread(chats.ending, path, incoming)
+        except Exception:
+            ending = []
+        try:
+            records = await asyncio.to_thread(chats.merge, path, incoming)
         except chats.InvalidChats as error:
             return _error(web, str(error), 400)
+        if ending:
+            try:
+                await asyncio.to_thread(delegation.settle_closed, home, ending)
+            except Exception:
+                logger.warning("memento: couldn't end a closed chat's subagents", exc_info=True)
         return web.json_response({"object": "memento.chats", "chats": records})
 
     async def session_context(request: "web.Request") -> "web.Response":
@@ -1580,6 +1590,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 afk.wake()
         except Exception:
             logger.warning("memento: couldn't release a closed session's task", exc_info=True)
+        # Before the trees go: a subagent still working in one would lose its directory.
+        try:
+            await asyncio.to_thread(delegation.stop_all, home, session_id, ())
+        except Exception:
+            logger.warning("memento: couldn't stop a closed session's subagents", exc_info=True)
         # Before the branches go: a tree whose commits are only on its remote branch can still go.
         try:
             removed = await asyncio.to_thread(sessions.remove, path, record["session_id"])

@@ -1078,6 +1078,35 @@ class StopRouteTest(unittest.TestCase):
         self.assertIsNone(delegation.running_note(session_id="s", platform="api_server"))
         self.assertIsNone(delegation.running_note(session_id="s", platform="cli"))
 
+    def test_closing_a_conversation_stops_its_subagents_and_drops_what_is_owed(self) -> None:
+        self.plant_children([{"id": "c1", "open": True}], ["c1"])
+        path = db_path(self.home)
+        since = delegation.watch_since(path)
+        conn = sqlite3.connect(self.home / "state.db")
+        # The wake query reads a column the stop tests' stub table doesn't carry.
+        conn.execute("ALTER TABLE sessions ADD COLUMN api_call_count INTEGER DEFAULT 0")
+        conn.execute(
+            "INSERT INTO sessions (id, model, model_config, parent_session_id, started_at, ended_at, "
+            "end_reason, tool_call_count) VALUES ('c2', 'm', '{\"_delegate_from\": \"s\"}', 's', 2, ?, "
+            "'agent_close', 0)",
+            (since / 1000 + 5,),
+        )
+        conn.commit()
+        conn.close()
+        self.assertEqual(delegation.waking_sessions(self.home), {"s": 1})
+        stopped = delegation.settle_closed(self.home, ["s"])
+        self.assertEqual(stopped, 1)
+        self.assertEqual(self.registry.stopped, ["sa-c1"])
+        marks = sessions.wake_marks(path, ["c1", "c2"])
+        self.assertEqual(marks["c1"]["reason"], delegation.DROP_STOPPED)
+        self.assertEqual((marks["c2"]["status"], marks["c2"]["reason"]), ("dropped", delegation.DROP_CLOSED))
+        self.assertEqual(delegation.waking_sessions(self.home), {})
+
+    def test_closing_a_conversation_with_nothing_running_is_a_no_op(self) -> None:
+        self.plant_children([{"id": "done"}], [])
+        self.assertEqual(delegation.settle_closed(self.home, ["s", "s"]), 0)
+        self.assertEqual(self.registry.stopped, [])
+
     def test_info_advertises_stopping_every_subagent_at_once(self) -> None:
         info = self.route(plugin.PREFIX + "/info")
         request = FakeWeb.Request()

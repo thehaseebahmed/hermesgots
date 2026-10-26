@@ -88,6 +88,8 @@ WAKE_MAX_AGE_MS = 48 * 60 * 60 * 1000
 DROP_STAGE, DROP_GONE, DROP_STALE, DROP_EXHAUSTED = "stage", "gone", "stale", "exhausted"
 # The user stopped the child: they asked it to end, so its end is not news for the bot to act on.
 DROP_STOPPED = "stopped"
+# The user deleted or discarded the conversation: nothing of it should keep working or be woken.
+DROP_CLOSED = "closed"
 
 # Core's completion notice, and its machine-provenance footer (``INTERNAL_NOTIFICATION_FOOTER``,
 # gateway/run_notifications.py), which every notification that re-enters a conversation as a
@@ -1041,6 +1043,40 @@ def started(
         sessions.remember_agent(db_path(home), str(child_session_id), str(child_subagent_id))
     except Exception:
         logger.debug("memento: couldn't keep subagent %s's id", child_session_id, exc_info=True)
+
+
+def settle_closed(hermes_home: Path, session_ids: Iterable[str]) -> int:
+    """Ends the work of conversations the user deleted or discarded; answers how many subagents it stopped.
+
+    A delete or a discard reaches the host only as a chat-list record, so this is where the
+    conversation's subagents learn of it: each one still at work is stopped (which settles its wake,
+    ``_stop_child``), and a finished one the bot hasn't been woken for is dropped, so no run is
+    posted into a conversation the user can no longer see. Idempotent: a conversation with nothing
+    left to stop or wake is a no-op.
+    """
+    home = Path(hermes_home)
+    path = db_path(home)
+    roots: Dict[str, str] = {}
+    seen: set = set()
+    stopped = 0
+    for session_id in session_ids:
+        root = sessions.chat_session(home, session_id, roots)
+        if root in seen:
+            continue
+        seen.add(root)
+        stopped += int(stop_all(home, root, ()).get("stopped") or 0)
+    if not seen:
+        return stopped
+    owed: Dict[str, List[str]] = {}
+    since = watch_since(path)
+    for row, mark in _ended_wakes(home, path, since):
+        if mark is not None and mark["status"] in sessions.SETTLED_WAKES:
+            continue
+        if sessions.chat_session(home, row["parent_id"], roots) in seen:
+            owed.setdefault(row["parent_id"], []).append(row["id"])
+    for parent, ids in owed.items():
+        sessions.drop_wakes(path, parent, ids, DROP_CLOSED)
+    return stopped
 
 
 def running_note(**kwargs: Any) -> Optional[Dict[str, str]]:

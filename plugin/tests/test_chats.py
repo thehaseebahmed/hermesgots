@@ -42,5 +42,32 @@ class DraftsAndModes(unittest.TestCase):
         self.assertEqual(chats.read(self.path), {})
 
 
+class EndingChats(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = db_path(Path(self.tmp.name))
+        chats.merge(self.path, {"c1": {"at": 1, "value": {"hermesSessionId": "memento-other"}}})
+
+    def test_a_deleted_chat_names_the_session_its_record_held(self):
+        found = chats.ending(self.path, {"c1": {"at": 2, "deleted": True}})
+        self.assertEqual(found, ["memento-other", "memento-c1", "c1"])
+
+    def test_a_discarded_chat_ends_its_work_but_a_resolved_one_does_not(self):
+        self.assertEqual(
+            chats.ending(self.path, {"c1": {"at": 2, "value": {"resolvedAt": 5}}}), []
+        )
+        found = chats.ending(self.path, {"c1": {"at": 2, "value": {"discardedAt": 5}}})
+        self.assertIn("memento-other", found)
+
+    def test_a_record_the_merge_would_not_take_ends_nothing(self):
+        self.assertEqual(chats.ending(self.path, {"c1": {"at": 1, "deleted": True}}), [])
+
+    def test_a_chat_already_ended_or_never_seen_ends_nothing(self):
+        chats.merge(self.path, {"c1": {"at": 2, "deleted": True}})
+        self.assertEqual(chats.ending(self.path, {"c1": {"at": 3, "deleted": True}}), [])
+        self.assertEqual(chats.ending(self.path, {"new": {"at": 3, "deleted": True}}), [])
+
+
 if __name__ == "__main__":
     unittest.main()

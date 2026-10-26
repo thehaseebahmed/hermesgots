@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from . import events
 from .store import connect
@@ -97,6 +97,46 @@ def closed(entry: Optional[Dict[str, Any]]) -> bool:
     return bool(entry.get("deleted")) or (
         isinstance(value, dict) and bool(value.get("discardedAt") or value.get("resolvedAt"))
     )
+
+
+def _ends_work(entry: Optional[Dict[str, Any]]) -> bool:
+    """Whether the user ended a chat so nothing of it should keep working: deleted or discarded.
+
+    Narrower than ``closed``: a resolved session is done with, not abandoned, and its pull request
+    merging says nothing about a subagent still reviewing.
+    """
+    if not isinstance(entry, dict):
+        return False
+    value = entry.get("value")
+    return bool(entry.get("deleted")) or (isinstance(value, dict) and bool(value.get("discardedAt")))
+
+
+def ending(path: Path, chats: Any) -> List[str]:
+    """The sessions of chats an incoming merge is about to delete or discard, read before it lands.
+
+    A tombstone keeps no value, so the session a deleted chat ran under has to be read off the
+    record it replaces: its own ``hermesSessionId``, plus the two shapes Gots mints (the chat's id,
+    and ``memento-<id>``, which a bot's Main and an AFK session use). Only a record the merge would
+    actually take counts, and only a chat that was still open.
+    """
+    if not isinstance(chats, dict):
+        return []
+    found: List[str] = []
+    for chat_id, entry in chats.items():
+        if not isinstance(entry, dict) or not _ends_work(entry):
+            continue
+        existing = one(path, chat_id)
+        at = entry.get("at")
+        if existing is None or _ends_work(existing) or not isinstance(at, (int, float)):
+            continue
+        if at <= existing["at"]:
+            continue
+        value = existing.get("value")
+        named = value.get("hermesSessionId") if isinstance(value, dict) else None
+        for session_id in (named, f"memento-{chat_id}", chat_id):
+            if isinstance(session_id, str) and session_id and session_id not in found:
+                found.append(session_id)
+    return found
 
 
 def merge(path: Path, chats: Any) -> Dict[str, Dict[str, Any]]:

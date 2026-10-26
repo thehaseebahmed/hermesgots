@@ -19,6 +19,15 @@ still holds. Hermes puts a hook's context into the turn's user message and never
 (the hooks documentation), so the instructions stay identical and the prompt cache holds, and the
 visible message is unchanged, so the thread shows nothing.
 
+**Closing a conversation ended nothing.** Deleting or discarding a chat reaches the host only as a
+chat-list record, and a tombstone keeps no session id, so its subagents kept running and their wakes
+kept posting runs into a conversation nobody could see. The merge route now reads the sessions it is
+about to delete or discard from the records they replace (`chats.ending`), and
+`delegation.settle_closed` stops each subagent still at work and drops the wakes owed (reason
+`closed`). A project session's close route also stops them before its worktrees are removed. A
+resolved session is deliberately left out: a merged pull request says nothing about a subagent still
+reviewing.
+
 ## Considered options
 
 - **Waking the bot on a stop with a "stopped by the user" notice** — rejected: the user asked for the
@@ -33,4 +42,6 @@ visible message is unchanged, so the thread shows nothing.
 - A subagent stopped by the user shows `Stopped` on its card and the session reads at rest once
   nothing else works, with no wake turn following.
 - The note costs a read of `state.db` per turn, the read the app's cards already take.
+- A chat deleted before the host ever saw it open has no record to read, so it ends nothing; its
+  subagents, if any, were never the host's to settle.
 - The note is context for the model only; a wake turn gets it too while other subagents still work.
