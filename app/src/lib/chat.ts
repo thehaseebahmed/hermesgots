@@ -25,7 +25,6 @@ import {
   followRun,
   getRun,
   getQueue,
-  getSessionTitle,
   hasPluginFeature,
   triageMessage,
   HermesError,
@@ -72,6 +71,8 @@ import {
   wantsPin,
 } from "@/lib/model-pick"
 import { refreshMoves } from "@/lib/moves"
+import { takeHostTitle } from "@/lib/title"
+import { isLive } from "@/lib/live"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { appendThinking, closeRun, forgetRuns, noteRunThinking } from "@/lib/thinking"
 import { quietly } from "@/lib/report"
@@ -118,11 +119,11 @@ const PLUGIN_SETTLE_MS = 1500
 const TITLED_TURNS = 3
 /**
  * When after a turn the host's title is read again while the chat still holds another one: Hermes
- * titles with a model call in the background, which can land whenever — a slow call, a busy host —
- * and the host's own `title` event only reaches a device that is listening when it fires. So the
- * checks run whether or not the server streams its changes, and reach well past the reply.
+ * titles with a model call in the background, which can land whenever — a slow call, a busy host.
+ * A device with a stream open is told by the host's own `title` event, so the checks are the path
+ * for one that isn't listening: the app put away, a host too old to stream them.
  */
-const TITLE_CHECKS_MS = [0, 3000, 10_000, 30_000, 90_000]
+const TITLE_RECHECKS_MS = [3000, 10_000, 30_000, 90_000]
 /** A reply whose connection gave up is followed again after these waits, the last one repeating. */
 const REATTACH_MS = [2_000, 5_000, 15_000, 30_000, 60_000]
 const controllers = new Map<string, AbortController>()
@@ -138,22 +139,15 @@ function titleFrom(text: string) {
   return line.length > 48 ? `${line.slice(0, 47).trimEnd()}…` : line || "New chat"
 }
 
-/**
- * Swaps the first-line title for the one Hermes generated, unless the user renamed the chat. The
- * ladder runs however the server delivers its changes: a live stream's `title` event is announced
- * where it is listened for, so a device that was away when one fired would keep its placeholder
- * forever without these checks.
- */
 async function syncTitle(conversationId: string, config: HermesConfig, sessionId: string) {
+  if (await takeHostTitle(conversationId, config, sessionId)) return
   const started = Date.now()
-  for (const delay of TITLE_CHECKS_MS) {
-    // Offsets from the turn, not waits between the checks: read at 0, 3, 10, 30 and 90 seconds.
+  for (const delay of TITLE_RECHECKS_MS) {
+    if (isLive(config)) return
+    // Offsets from the turn, not waits between the checks.
     const wait = started + delay - Date.now()
     if (wait > 0) await new Promise((resolve) => window.setTimeout(resolve, wait))
-    const title = await getSessionTitle(config, sessionId)
-    const conversation = await db.conversations.get(conversationId)
-    if (!conversation || conversation.titleEdited) return
-    if (title && title !== conversation.title) await updateConversation(conversationId, { title })
+    if (await takeHostTitle(conversationId, config, sessionId)) return
   }
 }
 
