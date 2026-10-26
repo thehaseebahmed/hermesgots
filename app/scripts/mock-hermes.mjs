@@ -1684,9 +1684,15 @@ const STEER_CLOSE = "[/OUT-OF-BAND USER MESSAGE]"
 function pageRows(rows, params) {
   const limit = Math.min(Number(params.get("limit") ?? 500), 500)
   const offset = Number(params.get("offset") ?? 0)
+  // A compaction leaves its rows archived rather than deleted, and a display read is the only one
+  // that carries them — minus the ones a carried copy stands for, which the host drops so a turn
+  // reads once.
+  const asked = (params.get("include_compacted") ?? "").toLowerCase()
+  const compacted = asked === "1" || asked === "true"
+  const shown = rows.filter((row) => !row.superseded && (compacted || !row.archived))
   return params.get("order") === "oldest"
-    ? rows.slice(offset, offset + limit)
-    : rows
+    ? shown.slice(offset, offset + limit)
+    : shown
         .slice()
         .reverse()
         .slice(offset, offset + limit)
@@ -5372,14 +5378,28 @@ http
     }
     // Dev only: POST { session_id, rows } compacts a session in place the way Hermes's does. What it
     // carried is re-emitted under fresh row ids with its payloads and timestamps untouched, behind the
-    // task-list notice row compression writes at the boundary, and the rows before the tail leave the
-    // active transcript. A device that already showed those turns meets them again as new rows.
+    // task-list notice row compression writes at the boundary, and the rows before the tail are
+    // archived — off the live transcript, carried by the display read, and superseded where a carried
+    // copy stands for them, so a turn reads once. A device that already showed those turns meets them
+    // again as new rows.
     if (url.pathname === "/__mock/compact" && req.method === "POST") {
       const { session_id: sessionId, rows = 50 } = await readBody(req)
       const stored = transcripts.get(sessionId)
       if (!stored) return json(res, 404, { error: { message: "Session not found" } })
-      const carried = stored.slice(-rows).map((row) => ({ ...row, id: ++lastRowId }))
+      const tail = stored.slice(-Math.max(1, rows))
+      const carried = new Set(tail)
+      // A compaction rewrites the clock behind its seam: the rows it keeps live hold the times they
+      // had, and the ones it archives are stamped earlier still, so a device reading them back in
+      // the host's order finds the whole conversation oldest first.
+      const floor = Math.min(...stored.map((row) => row.timestamp)) - 60
+      const archived = stored.map((row) =>
+        carried.has(row)
+          ? { ...row, archived: true, superseded: true }
+          : { ...row, archived: true, timestamp: floor },
+      )
+      const copies = tail.map((row) => ({ ...row, id: ++lastRowId }))
       transcripts.set(sessionId, [
+        ...archived,
         {
           id: ++lastRowId,
           session_id: sessionId,
@@ -5388,10 +5408,15 @@ http
           content:
             "[Your active task list was preserved across context compression]\n" +
             "Reload the skills listed below before acting on these tasks.",
+          display_kind: "hidden",
         },
-        ...carried,
+        ...copies,
       ])
-      return json(res, 200, { ok: true, rows: carried.length })
+      compactions.set(sessionId, [
+        ...(compactions.get(sessionId) ?? []),
+        { at: Date.now() },
+      ])
+      return json(res, 200, { ok: true, rows: copies.length, archived: archived.length })
     }
     // Dev only: POST { session, child } rotates a chat onto a child session the way Hermes's context
     // compression does. The child shares the lineage's rows: a read of either id sees root→tip, and

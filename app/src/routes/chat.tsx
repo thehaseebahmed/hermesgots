@@ -97,6 +97,7 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
   useMessageScroller,
+  useMessageScrollerScrollable,
 } from "@/components/ui/message-scroller"
 import { Spinner } from "@/components/ui/spinner"
 import {
@@ -312,6 +313,57 @@ function FollowOnSend({ lastUserId }: { lastUserId?: string }) {
   return null
 }
 
+/**
+ * The thread's top is the request for its older rows: a compacted chat's live transcript starts at
+ * the compaction's summary, and the rows it archived are only in the host's display read, so the
+ * window grows there and nowhere else (ADR 0058). A chat whose whole thread fits its pane asks at
+ * once, since its top is on screen; one taller than its pane asks when the reader reaches the top.
+ */
+function LoadOlderWindow({
+  cursor,
+  enabled,
+  loading,
+  onLoad,
+}: {
+  /** The window's edge, which moves as rows land: undefined once the chat's first row is in. */
+  cursor?: string
+  /** Nothing to ask while the chat's own window is still landing, or a step is already running. */
+  enabled: boolean
+  loading: boolean
+  onLoad: () => void
+}) {
+  const { start, end } = useMessageScrollerScrollable()
+  // The scroller reports its edges as what lies beyond them: `start` is true while anything sits
+  // above the pane — the reader is away from the thread's oldest row — and `end` likewise below.
+  const atTop = !start
+  const fits = !start && !end
+  // Whether the thread has ever been away from its top: a chat's arrival, placed at its newest row,
+  // is not the reader reaching for anything.
+  const leftTop = useRef(false)
+  useEffect(() => {
+    if (start) leftTop.current = true
+  }, [start])
+  // The edges are reported as the scroller measures itself, and a chat too short to scroll never
+  // reports them at all — so nothing is asked until the pane has been laid out once.
+  const [measured, setMeasured] = useState(false)
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setMeasured(true))
+    return () => cancelAnimationFrame(frame)
+  }, [])
+  // A step that changed nothing is not asked for again until the reader leaves the top and returns.
+  const tried = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (start) tried.current = undefined
+  }, [start])
+  const reached = measured && atTop && (leftTop.current || fits)
+  useEffect(() => {
+    if (!enabled || loading || !cursor || !reached || tried.current === cursor) return
+    tried.current = cursor
+    onLoad()
+  }, [enabled, loading, cursor, reached, onLoad])
+  return null
+}
+
 export function ChatPage({
   chatId,
   paneThread,
@@ -373,6 +425,20 @@ export function ChatPage({
   const [pipelineOpen, setPipelineOpen] = useState(false)
   const [outputsOpen, setOutputsOpen] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
+  // The window's edge as one value the reach watches: the oldest row this device holds, and which
+  // numbering it was found in — the archive counts its own rows, so the flag is part of the edge.
+  const cursor = conversation?.olderThan
+    ? `${conversation.olderThan.id}:${conversation.olderThan.archived ? "a" : "l"}`
+    : undefined
+  const loadOlder = useCallback(() => {
+    if (!id) return
+    setLoadingEarlier(true)
+    loadEarlierHistory(id)
+      .catch((error) =>
+        toast.error(error instanceof Error ? error.message : "Couldn't load more."),
+      )
+      .finally(() => setLoadingEarlier(false))
+  }, [id])
   const [historyMissing, setHistoryMissing] = useState<string>()
   const readyRef = useRef<{ id?: string }>(undefined)
 
@@ -1135,24 +1201,10 @@ export function ChatPage({
                   cut ? "w-full justify-end gap-6 px-4 pt-32 pb-6" : "w-full gap-6 px-4 pt-32 pb-6"
                 }
               >
-                {!cut && conversation?.olderThan && (
-                  <Button
-                    variant="outline"
-                    className="min-h-11 self-center rounded-full"
-                    disabled={loadingEarlier}
-                    onClick={() => {
-                      setLoadingEarlier(true)
-                      loadEarlierHistory(conversation.id)
-                        .catch((error) =>
-                          toast.error(
-                            error instanceof Error ? error.message : "Couldn't load more.",
-                          ),
-                        )
-                        .finally(() => setLoadingEarlier(false))
-                    }}
-                  >
-                    Load earlier messages
-                  </Button>
+                {!cut && loadingEarlier && (
+                  <div className="flex shrink-0 justify-center py-2" aria-hidden>
+                    <Spinner className="size-4 text-muted-foreground" />
+                  </div>
                 )}
                 <AgentsContext.Provider value={agentsSource}>
                   {drawn.map((entry) => {
@@ -1208,6 +1260,12 @@ export function ChatPage({
             <MessageScrollerButton />
             <FollowAfterApproval pending={Boolean(awaitingApproval || awaitingClarify)} />
             <FollowOnSend lastUserId={thread!.findLast((m) => m.role === "user")?.id} />
+            <LoadOlderWindow
+              cursor={cursor}
+              enabled={answered && !cut}
+              loading={loadingEarlier}
+              onLoad={loadOlder}
+            />
           </MessageScroller>
         </MessageScrollerProvider>
       ) : loadingHistory ? (

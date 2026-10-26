@@ -1334,13 +1334,24 @@ export interface SessionMessage {
 /**
  * One page of a session's transcript, counted back from the newest row (`offset` rows skipped)
  * but returned oldest first. A 404 means Hermes has no such session.
+ *
+ * `includeCompacted` asks for the display read, which also carries the rows a compaction archived:
+ * one row per logical message, deduped by the host, so a turn a compaction carried forward under a
+ * fresh row id comes back once — as the live copy. It counts its offset in those logical messages
+ * and refuses keyset paging, so it's the window's own numbering, never the live transcript's.
  */
 export async function listSessionMessages(
   config: HermesConfig,
   sessionId: string,
-  { limit, offset, signal }: { limit: number; offset: number; signal?: AbortSignal },
+  {
+    limit,
+    offset,
+    includeCompacted,
+    signal,
+  }: { limit: number; offset: number; includeCompacted?: boolean; signal?: AbortSignal },
 ): Promise<SessionMessage[]> {
   const query = new URLSearchParams({ order: "latest", limit: `${limit}`, offset: `${offset}` })
+  if (includeCompacted) query.set("include_compacted", "1")
   try {
     const response = await request(
       `${serverRoot(config.baseUrl)}/api/sessions/${encodeURIComponent(sessionId)}/messages?${query}`,

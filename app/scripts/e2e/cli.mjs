@@ -116,7 +116,12 @@ export const FLOWS = {
   "history-pages": {
     script: "e2e/history-pages.mjs",
     about:
-      "A session opened mid-turn from another device loads whole turns, pages back twice and keeps one reply",
+      "A session opened mid-turn from another device loads whole turns, grows its window back twice and keeps one reply",
+  },
+  "chat-archive": {
+    script: "e2e/chat-archive.mjs",
+    about:
+      "A chat compacted in place brings its archived turns back when the reader reaches the top, each once, with the compaction's divider where it happened and the reader's place held",
   },
   "history-generations": {
     script: "e2e/history-generations.mjs",

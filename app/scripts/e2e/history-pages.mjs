@@ -1,8 +1,9 @@
 // A session started on another device and opened here while a turn longer than a transcript page
-// runs: the newest turn loads whole, "Load earlier" pages back a whole long turn twice, and the running
-// reply stays one reply at the end of the chat. Main split the turn at the page edge, so it showed
-// twice, and the live reply grew above the stale part. Then a chat left in that split state by an
-// older version is mended by its next "Load earlier".
+// runs: the newest turn loads whole, and the window growing backwards brings back a whole long turn
+// twice without repeating a word of it, while the running reply stays one reply at the end of the
+// chat. Main split the turn at the page edge, so it showed twice, and the live reply grew above the
+// stale part. Then a chat left in that split state by an older version is mended by its next window
+// step.
 import { app, assert, flow, mock, pass, runId } from "./lib.mjs"
 
 const auth = { Authorization: "Bearer mock-key", "Content-Type": "application/json" }
@@ -34,12 +35,19 @@ async function transcript(sessionId) {
 const thread = (page, chatId) =>
   page.evaluate(async (id) => {
     const { getMessages } = await import("/src/lib/db.ts")
-    return (await getMessages(id)).map((m) => ({ role: m.role, status: m.status, text: m.content }))
+    return (await getMessages(id)).map((m) => ({
+      role: m.role,
+      status: m.status,
+      text: m.content,
+      row: m.hermesRowId ?? null,
+      at: m.createdAt,
+      id: m.id,
+    }))
   }, chatId)
 
 /** Every step of each long turn is in the chat exactly once, in order, with one reply a turn. */
 function assertWhole(messages) {
-  const summary = messages.map((m) => `${m.role}:${m.text.slice(0, 40)}`).join(" | ")
+  const summary = messages.map((m) => `${m.role}#${m.row}:${m.text.slice(0, 24)}`).join(" | ")
   assert.deepEqual(
     messages.map((m) => m.role),
     ["user", "assistant", "user", "assistant", "user", "assistant"],
@@ -57,6 +65,21 @@ function assertWhole(messages) {
     assert.ok(reply.includes(`The ${name} is over.`), `${name}'s reply ends whole`)
   }
 }
+
+/** One step of the window, as reaching the top of the thread takes. */
+const growWindow = (page, chatId) =>
+  page.evaluate(async (id) => (await import("/src/lib/history.ts")).loadEarlierHistory(id), chatId)
+
+/** What each window step did, for a failing run's diagnosis. */
+const trace = (page) => page.evaluate(() => globalThis.TRACE ?? [])
+
+/** Whether Hermes still holds rows older than the ones on this device. */
+const hasMore = (page, chatId) =>
+  page.evaluate(
+    async (id) =>
+      Boolean((await (await import("/src/lib/db.ts")).db.conversations.get(id)).olderThan),
+    chatId,
+  )
 
 await flow("history-pages", async ({ page, seed, until, shot }) => {
   const chatId = `e2e-pages-${runId()}`
@@ -84,8 +107,11 @@ await flow("history-pages", async ({ page, seed, until, shot }) => {
   assert.equal(await runStatus(marathon), "running", "the marathon still runs")
 
   await page.goto(`${app}/c/${chatId}`)
-  const earlier = page.getByRole("button", { name: "Load earlier messages" })
-  await earlier.waitFor({ timeout: 15_000 })
+  await until(
+    async () => (await thread(page, chatId)).length >= 2,
+    15_000,
+    "the newest turn to load",
+  )
   const opened = await thread(page, chatId)
   assert.equal(opened[0]?.role, "user", "the chat opens at the start of a turn")
   assert.match(opened[0].text, /marathon/)
@@ -94,16 +120,46 @@ await flow("history-pages", async ({ page, seed, until, shot }) => {
     1,
     "the running turn is one reply",
   )
-  pass("the newest turn loads whole, with Load earlier above it")
+  assert.ok(await hasMore(page, chatId), "the window still holds the turns above it")
+  pass("the newest turn loads whole, with the window still open above it")
 
-  await earlier.click()
-  await until(async () => (await thread(page, chatId)).length === 4, 15_000, "the relay to load")
-  await earlier.click()
-  await until(async () => (await thread(page, chatId)).length === 6, 15_000, "the sprint to load")
-  await earlier.waitFor({ state: "detached", timeout: 10_000 })
-  pass("Load earlier pages back whole turns, twice, and goes once the session's start is in")
+  await growWindow(page, chatId)
+  const grown = await until(
+    async () => {
+      const messages = await thread(page, chatId)
+      return messages.length === 6 ? messages : null
+    },
+    30_000,
+    "the relay and the sprint to load",
+  )
+  assert.equal(grown.length, 6, "three turns land")
+  if (process.env.DEBUG_PAGES) {
+    const rows = await transcript(sessionId)
+    console.log(
+      "thread:",
+      grown.map((m) => `${m.role}#${m.row}@${m.at}:${m.text.slice(0, 14)}`).join(" | "),
+    )
+    console.log(
+      "host:",
+      rows.map((r) => `${r.role}#${r.id}@${Math.round(r.timestamp * 1000)}`).join(" | "),
+    )
+  }
+  assert.equal(await hasMore(page, chatId), false, "the window reaches the session's start")
+  pass("the window grows back whole turns and stops at the session's start")
 
-  await until(async () => (await runStatus(marathon)) === "completed", 40_000, "the run to finish")
+  // The turn that was running when the chat opened is the host's to finish, and it lands whole.
+  await until(async () => (await runStatus(marathon)) === "completed", 60_000, "the marathon to end")
+  const whole = await until(
+    async () => {
+      const messages = await thread(page, chatId)
+      return messages.at(-1)?.text.includes("The marathon is over.") ? messages : null
+    },
+    20_000,
+    "the marathon's reply to land whole",
+  )
+  assertWhole(whole)
+  pass("each long turn is in the chat once, in order, with one reply")
+
   const done = await until(
     async () => {
       const messages = await thread(page, chatId)
@@ -143,16 +199,8 @@ await flow("history-pages", async ({ page, seed, until, shot }) => {
   const split = await thread(page, oldChat)
   assert.equal(split[0]?.role, "assistant", "the old chat starts with a cut reply")
   // The cut turn's start (mended in place), then the relay, then the sprint.
-  for (let i = 0; i < 3; i++) {
-    const before = (await thread(page, oldChat)).length
-    await earlier.click()
-    await until(
-      async () => (await thread(page, oldChat)).length !== before,
-      15_000,
-      "earlier turns to load",
-    )
-  }
-  await earlier.waitFor({ state: "detached", timeout: 10_000 })
+  await growWindow(page, oldChat)
+  await until(async () => !(await hasMore(page, oldChat)), 15_000, "the window to reach the start")
   assertWhole(await thread(page, oldChat))
-  pass("Load earlier mends a chat whose first turn an older version cut")
+  pass("one window step mends a chat whose first turn an older version cut")
 })
