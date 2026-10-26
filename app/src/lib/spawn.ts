@@ -78,6 +78,55 @@ export function controlWords(args: unknown): string | undefined {
   return named ? `${action} ${named}` : action
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+/** Whitespace and newlines collapsed to single spaces, as Hermes's `_oneline` does. */
+const oneline = (text: string) => text.replace(/\s+/g, " ").trim()
+
+/** How much of each goal a batch preview shows: `_preview_delegate_task`'s per-goal cut. */
+const GOAL_PREVIEW_CHARS = 40
+
+/** A task's goal as a batch preview shows it, `?` where the model sent none. */
+function goalPreview(goal: unknown) {
+  if (goal === undefined || goal === null) return "?"
+  const words = oneline(String(goal))
+  if (!words) return "?"
+  return words.length <= GOAL_PREVIEW_CHARS ? words : `${words.slice(0, GOAL_PREVIEW_CHARS - 3)}...`
+}
+
+/**
+ * The words Hermes gives a batch in its preview (`_preview_delegate_task` in `agent/display.py`):
+ * `"N tasks: goal1 | goal2"`, each goal one line and cut short, or `"N parallel tasks"` where the
+ * batch names no goal. Undefined for a call that isn't a batch, whose label is its own to derive.
+ *
+ * A batch carries no `goal`, so this is the only shape whose label can't come from the primary
+ * argument — and the raw arguments are no fallback, since they run past the clip that would cut the
+ * `tasks` array in half (ADR 0053).
+ */
+export function batchWords(args: unknown): string | undefined {
+  if (!isRecord(args)) return undefined
+  const tasks = args.tasks
+  if (!Array.isArray(tasks) || !tasks.length) return undefined
+  const goals = tasks.filter(isRecord).map((task) => goalPreview(task.goal))
+  const count = goals.length
+  return count ? `${count} tasks: ${goals.join(" | ")}` : `${tasks.length} parallel tasks`
+}
+
+/** Whether these arguments set a subagent to work: the `tasks` a batch was given, or a `goal`. */
+export function spawnInArgs(args: unknown): boolean {
+  if (!isRecord(args)) return false
+  if (Array.isArray(args.tasks) && args.tasks.length > 0) return true
+  const goal = args.goal
+  return typeof goal === "string" && goal.trim().length > 0
+}
+
+/**
+ * `"spawn"` where these arguments set a subagent to work, so a card never has to read a label.
+ */
+export const spawnStamp = (tool: string, args: unknown): "spawn" | undefined =>
+  tool === DELEGATE_TOOL && spawnInArgs(args) ? SPAWN : undefined
+
 /**
  * The control action a stored preview's words name — the action, and at most the id it names, which
  * has to look like an id. Undefined for everything else: a goal that happens to open on a control
@@ -147,10 +196,7 @@ function spawnedByEnvelope(words: string): boolean {
   if (!fields) return false
   const action = actionOf(fields)
   if (action !== undefined) return action === SPAWN
-  const tasks = fields.tasks
-  if (Array.isArray(tasks) && tasks.length > 0) return true
-  const goal = fields.goal
-  return typeof goal === "string" && goal.trim().length > 0
+  return spawnInArgs(fields)
 }
 
 /**

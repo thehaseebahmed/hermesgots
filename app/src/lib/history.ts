@@ -26,7 +26,7 @@ import { splitAttachments } from "@/lib/attachment-text"
 import { appendThinking, carrySpans } from "@/lib/thinking"
 import { readLiveRuns } from "@/lib/waiting"
 import { failureReason } from "@/lib/tools"
-import { actionOf, controlWords, DELEGATE_TOOL } from "@/lib/spawn"
+import { actionOf, batchWords, controlWords, DELEGATE_TOOL, spawnStamp } from "@/lib/spawn"
 import { labelComparable, primaryArg, TODO_TOOLS } from "@/lib/tool-preview"
 import { isSubagentResult } from "@/lib/subagent-results.ts"
 import { isWakePrompt } from "@/lib/wake-prompt.ts"
@@ -43,19 +43,10 @@ const MAX_SKIPS = 10
 
 /** Where Hermes names no primary argument: the first of these the call carried is its label. */
 const FALLBACK_ARGS = ["query", "text", "command", "path", "name", "prompt", "code", "goal"]
-const MAX_DETAIL = 4000
+export const MAX_LABEL_CHARS = 4000
 
-const clip = (text: string) => (text.length > MAX_DETAIL ? `${text.slice(0, MAX_DETAIL)}…` : text)
-
-/** One line: whitespace and newlines collapsed to single spaces, as Hermes's `_oneline` does. */
-const oneline = (text: string) => text.split(/\s+/).filter(Boolean).join(" ")
-
-/** Tail-truncate with `...`, never past `limit`, as Hermes's `_tail_trunc` does. */
-const tailTrunc = (text: string, limit: number) =>
-  text.length <= limit ? text : limit <= 3 ? ".".repeat(limit) : `${text.slice(0, limit - 3)}...`
-
-/** How much of each goal a batch preview shows, matching `_preview_delegate_task`'s per-goal cut. */
-const GOAL_PREVIEW_CHARS = 40
+const clip = (text: string) =>
+  text.length > MAX_LABEL_CHARS ? `${text.slice(0, MAX_LABEL_CHARS)}…` : text
 
 function parseArgs(value: unknown): unknown {
   if (typeof value !== "string") return value
@@ -90,25 +81,11 @@ function argsLabel(name: string, args: unknown) {
   if (name === DELEGATE_TOOL) {
     const control = controlWords(record)
     if (control) return control
-    // A batch names its goals in `tasks`, and Hermes previews it `"N tasks: goal1 | goal2"`
-    // (`_preview_delegate_task` in display.py) — each goal one line, tail-truncated. Left to the
-    // arguments fallback the label was the raw JSON, which a real fan-out pushes past MAX_DETAIL:
-    // clipped, its unfinished `tasks` array no longer proved a spawn, so the call drew as an ordinary
-    // row and its cards never showed (the plugin's own list still counted them running).
-    if (Array.isArray(record.tasks) && record.tasks.length) {
-      const goals = record.tasks
-        .filter(
-          (task): task is Record<string, unknown> => Boolean(task) && typeof task === "object",
-        )
-        .map((task) => {
-          const goal =
-            task.goal === undefined || task.goal === null ? "?" : oneline(String(task.goal))
-          return tailTrunc(goal || "?", GOAL_PREVIEW_CHARS)
-        })
-      return goals.length
-        ? `${goals.length} ${goals.length === 1 ? "task" : "tasks"}: ${goals.join(" | ")}`
-        : `${record.tasks.length} parallel tasks`
-    }
+    // A batch is worded as Hermes previews it, so its label stays words a row can read. Left to the
+    // arguments fallback it is the raw JSON, which a fan-out pushes past MAX_LABEL_CHARS: clipped, the
+    // unfinished `tasks` array proved no spawn and the call drew as an ordinary row.
+    const batch = batchWords(record)
+    if (batch) return batch
   }
   const key = primaryArg(name) ?? FALLBACK_ARGS.find((k) => k in record)
   let value = key ? record[key] : undefined
@@ -188,9 +165,10 @@ function toolCalls(row: SessionMessage) {
           id: call?.id ?? `${row.id}-${i}`,
           name,
           label: clip(label) || name,
-          // What the call's arguments said it did, stamped where they are in hand: the one spawn
-          // proof a render can read, and the word a control call's row is phrased by (ADR 0053).
-          action: actionOf(args),
+          // What the call's arguments said it did, or `spawn` where they set a subagent to work:
+          // stamped where they are in hand, so a card is drawn from proof and not from the shape of
+          // a label the clip can change (ADR 0053).
+          action: actionOf(args) ?? spawnStamp(name, args),
           stats: writeStats(name, args),
         }
       })

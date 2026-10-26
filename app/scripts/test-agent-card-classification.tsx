@@ -8,10 +8,10 @@ import test from "node:test"
 
 import { AgentPopup } from "@/components/chat/agent-card"
 import { MessageItem } from "@/components/chat/message-item"
-import { AgentsContext, agentsOf, CARD_WINDOW_S } from "@/lib/agents"
+import { AgentsContext, CARD_WINDOW_S } from "@/lib/agents"
 import type { Message, ToolEvent } from "@/lib/db"
 import type { DelegatedAgent, HermesConfig, SessionMessage } from "@/lib/hermes"
-import { toMessages } from "@/lib/history"
+import { MAX_LABEL_CHARS, toMessages } from "@/lib/history"
 import { controlAction, DELEGATE_TOOL, spawnedAgent } from "@/lib/spawn"
 import { click, connection, findAll, find, json, mount, settle, text } from "./component-kit.tsx"
 
@@ -204,8 +204,8 @@ test("the transcript stamps what each call did, and words a control call as it s
     [
       ["list", "list"],
       ["steer sub-1", "steer"],
-      [GOAL, undefined],
-      ["1 task: read the parser", undefined],
+      [GOAL, "spawn"],
+      ["1 tasks: read the parser", "spawn"],
     ],
     "each call's words and its stamped action",
   )
@@ -220,11 +220,9 @@ test("the transcript stamps what each call did, and words a control call as it s
 })
 
 test("a fan-out too long for its arguments to survive as a label still draws its cards", async () => {
-  // A real review fan-out — 7 subagents, each briefed at length — is 26k chars of arguments in the
-  // session this came from. Left as the raw JSON, its label was clipped at MAX_DETAIL (4000), the
-  // unfinished `tasks` array read as no spawn, and the call drew as an ordinary row: no cards for
-  // any of the 7, while the plugin's own list still counted them running. Wording a batch as Hermes
-  // previews it keeps the label short, so it never clips and always proves the spawn it was.
+  // The session this came from: a 26k-char, 7-agent review fan-out. As raw JSON its label was
+  // clipped at MAX_LABEL_CHARS, the unfinished `tasks` array read as no spawn, and the call drew as an
+  // ordinary row — no cards, while the plugin's list still counted the 7 running.
   const goals = [
     "Review this diff for CODE REUSE problems only.",
     "Review this diff for CODE QUALITY problems only.",
@@ -237,7 +235,7 @@ test("a fan-out too long for its arguments to survive as a label still draws its
   const args = JSON.stringify({
     tasks: goals.map((goal) => ({ goal, context: "x".repeat(2000) })),
   })
-  assert.ok(args.length > 4000, "the arguments are long enough that a JSON label would clip")
+  assert.ok(args.length > MAX_LABEL_CHARS, "long enough that a JSON label would clip")
   const [reply] = toMessages("c-1", "s-1", [
     {
       id: 1,
@@ -248,15 +246,42 @@ test("a fan-out too long for its arguments to survive as a label still draws its
     },
   ])
   const tool = (reply.tools ?? [])[0]
-  assert.equal(spawnedAgent(tool), true, "a real-sized batch proves a spawn")
+  assert.equal(tool.action, "spawn", "the arguments prove the spawn, whatever the label became")
   assert.doesNotMatch(tool.label ?? "", /^\{/, "and its label is words, not clipped JSON")
-  assert.equal(
-    agentsOf(
-      tool,
-      goals.map((goal, i) => ({ ...agent, id: `child-${i}`, goal })),
-    ).length,
-    goals.length,
-    "every agent the fan-out started finds its card",
+  const agents = goals.map((goal, i) => ({ ...agent, id: `child-${i}`, goal }))
+  await drawn(
+    [tool],
+    async () => {
+      assert.equal(cards().length, goals.length, "every agent the fan-out started draws its card")
+    },
+    agents,
+  )
+})
+
+test("a goal that opens on a brace draws its card, because the arguments stamped it", async () => {
+  // A single spawn whose goal is itself JSON — a schema brief, say. Its label therefore opens on a
+  // brace, which reads as an envelope with nothing in it and proved no spawn at all.
+  const goal = '{"type":"object","properties":{"id":{"type":"string"}}}'
+  const [reply] = toMessages("c-1", "s-1", [
+    {
+      id: 1,
+      role: "assistant",
+      content: null,
+      timestamp: STARTED,
+      tool_calls: [
+        { id: "c-brace", function: { name: DELEGATE_TOOL, arguments: JSON.stringify({ goal }) } },
+      ],
+    },
+  ])
+  const tool = (reply.tools ?? [])[0]
+  assert.equal(tool.label, goal, "its label is the goal, brace and all")
+  assert.equal(tool.action, "spawn", "which the stamp reads whatever the label opens on")
+  await drawn(
+    [tool],
+    async () => {
+      assert.equal(cards().length, 1, "so its card is drawn, not a bare tool row")
+    },
+    [{ ...agent, goal }],
   )
 })
 
