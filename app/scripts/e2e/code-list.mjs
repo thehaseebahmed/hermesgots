@@ -27,7 +27,6 @@ const countIn = async (page, label) => {
   return (await span.count()) ? await span.innerText() : null
 }
 
-/** The dots one row wears, so a leg asks the row rather than the whole group. */
 const dotsIn = (row) => row.locator("[data-unread]").count()
 
 await flow("code-list", async ({ page, seed, shot, until }) => {

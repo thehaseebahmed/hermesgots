@@ -509,7 +509,7 @@ export function SessionItem({
         )
       }
       tone={rowTone(session, row)}
-      unread={isUnread(session, mark, activity)}
+      unread={isUnread(activity, mark)}
       botId={botId}
       title={session.title}
       badge={

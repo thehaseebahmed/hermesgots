@@ -81,7 +81,6 @@ function icon() {
   }
 }
 
-/** The unread dot, once the row is drawn: absent, or the element wearing the blue. */
 const dot = () => document.querySelector("[data-unread]")
 
 const toneHas = (tone: string[], token: string) =>

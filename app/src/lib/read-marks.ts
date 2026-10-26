@@ -11,14 +11,15 @@ const KEY = "memento:read-marks"
 /** The store only ever grows: the oldest marks drop past this many. */
 const KEEP = 500
 
+const isMark = (at: unknown): at is number => typeof at === "number" && at > 0
+
 const load = (): Record<string, number> => {
   try {
     const stored: unknown = JSON.parse(localStorage.getItem(KEY) ?? "{}")
     if (!stored || typeof stored !== "object" || Array.isArray(stored)) return {}
     const marks: Record<string, number> = {}
     for (const [id, at] of Object.entries(stored)) {
-      // Absence is the only spelling of "no mark", so a stored zero or negative is not one.
-      if (typeof at === "number" && at > 0) marks[id] = at
+      if (isMark(at)) marks[id] = at
     }
     return marks
   } catch {

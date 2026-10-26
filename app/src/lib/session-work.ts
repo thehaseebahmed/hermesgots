@@ -183,15 +183,11 @@ export function lastActivityAt(session: SessionActivity): number {
 }
 
 /**
- * Whether the Code row shows its unread dot: the session's last activity is newer than this
- * device's read mark, and a session with no mark — never opened here, or evicted from a full store
- * — draws no dot at all (ADR 0055). `activity` is passed by the row that has already worked it out.
+ * Whether the Code row shows its unread dot: this moment is later than this device's read mark, and
+ * a session with no mark — never opened here, or evicted from a full store — has none to be against
+ * and draws no dot at all (ADR 0055).
  */
-export function isUnread(
-  session: SessionActivity,
-  mark: number | undefined,
-  activity = lastActivityAt(session),
-): boolean {
+export function isUnread(activity: number, mark: number | undefined): boolean {
   return mark != null && activity > mark
 }
 
