@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
-from plugin import alerts, chats, push
+from plugin import alerts, chats, delegation, push
 from plugin.store import connect, db_path
 
 
@@ -224,6 +224,7 @@ class Messages(unittest.TestCase):
 class Turns(unittest.TestCase):
     def setUp(self):
         alerts._started.clear()
+        alerts._held.clear()
         self.told = []
         self.patches = [
             mock.patch.object(push, "notify", lambda kind, sid, path=None, **_: self.told.append((kind, sid))),
@@ -258,6 +259,36 @@ class Turns(unittest.TestCase):
         alerts._started["memento-1"] = time.monotonic() - alerts.RUN_DONE_MIN_S - 1
         self.end(completed=True, failed=False, interrupted=False)
         self.assertEqual(self.told, [("run_done", "memento-1")])
+
+    def test_a_turn_whose_subagents_still_work_is_not_finished_yet(self):
+        alerts._started["memento-1"] = time.monotonic() - alerts.RUN_DONE_MIN_S - 1
+        with mock.patch.object(delegation, "live_sessions", lambda home: {"memento-1": 1}):
+            self.end(completed=True, failed=False, interrupted=False)
+        self.assertEqual(self.told, [])
+
+    def test_that_turn_is_told_once_its_subagents_are_gone(self):
+        alerts._started["memento-1"] = time.monotonic() - alerts.RUN_DONE_MIN_S - 1
+        with mock.patch.object(delegation, "live_sessions", lambda home: {"memento-1": 1}):
+            self.end(completed=True, failed=False, interrupted=False)
+            self.assertEqual(self.told, [], "the news waits while the run still has work")
+        with mock.patch.object(delegation, "live_sessions", lambda home: {}):
+            alerts.tell_finished(*alerts.sessions._paths())
+        self.assertEqual(self.told, [("run_done", "memento-1")])
+
+    def test_a_turn_held_for_its_subagents_is_told_only_once(self):
+        alerts._started["memento-1"] = time.monotonic() - alerts.RUN_DONE_MIN_S - 1
+        with mock.patch.object(delegation, "live_sessions", lambda home: {"memento-1": 1}):
+            self.end(completed=True, failed=False, interrupted=False)
+        with mock.patch.object(delegation, "live_sessions", lambda home: {}):
+            alerts.tell_finished(*alerts.sessions._paths())
+            alerts.tell_finished(*alerts.sessions._paths())
+        self.assertEqual(self.told, [("run_done", "memento-1")])
+
+    def test_a_failure_is_told_at_once_whatever_its_subagents_do(self):
+        alerts._started["memento-1"] = time.monotonic() - alerts.RUN_DONE_MIN_S - 1
+        with mock.patch.object(delegation, "live_sessions", lambda home: {"memento-1": 1}):
+            self.end(completed=False, failed=True, interrupted=False)
+        self.assertEqual(self.told, [("run_failed", "memento-1")])
 
     def test_a_session_of_another_surface_is_ignored(self):
         alerts._started["telegram-9"] = time.monotonic() - 1000

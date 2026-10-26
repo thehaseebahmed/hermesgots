@@ -41,8 +41,8 @@ function Ring({ value }: { value: number }) {
 }
 
 /**
- * An item the agent left in progress when its turn ended: it isn't being worked on any more, so it
- * doesn't spin.
+ * An item the agent left in progress when its run finished: the run has ended and no subagent it
+ * left at work still runs, so the item isn't being worked on any more and doesn't spin.
  */
 const stalled = (item: Todo, live: boolean) => item.status === "in_progress" && !live
 
@@ -124,7 +124,7 @@ export function TodosSheet({
   items: Todo[]
   /** The list's progress, as the plugin worked it out; an older plugin reports none. */
   progress?: TodoProgress
-  /** A turn is running, so an item in progress is being worked on. */
+  /** The run has not finished, so an item in progress is being worked on. */
   live: boolean
 }) {
   return (

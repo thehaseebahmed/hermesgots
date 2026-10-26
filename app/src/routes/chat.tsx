@@ -138,7 +138,8 @@ import { readProjects, useProjects } from "@/lib/projects"
 import { caughtUpWithin, loadEarlierHistory, reconcileHistory } from "@/lib/history"
 import { contextWindow } from "@/lib/context"
 import { useLive, watchChat } from "@/lib/live"
-import { useSessionRunning } from "@/lib/waiting"
+import { useLiveRun, useLiveSubagents } from "@/lib/waiting"
+import { runFinished } from "@/lib/session-work"
 import { usePoll } from "@/lib/poll"
 import { useXLarge, useWide } from "@/lib/media"
 import { useCodePane, useRememberOpened } from "@/lib/pane"
@@ -703,10 +704,21 @@ export function ChatPage({
   // still work has nothing here to reattach — its work reads `working` from the state rule
   // (`session-work.ts`), a finished delivery draws nothing in the thread, and the composer stays the
   // user's. The wake turn it starts is a run: it is followed here once the host lists it.
-  const hostRuns = useSessionRunning(
+  const runStatus = useLiveRun(
     tracked && baseUrl && apiKey ? { baseUrl, apiKey } : undefined,
     conversation?.hermesSessionId,
   )
+  const hostRuns = Boolean(runStatus)
+  // What the run still has to do is read from one answer, the rule the plugin holds its
+  // run-finished push to as well: the run has ended and no subagent it left at work still runs.
+  // Neither half alone says it — a delegation outlives the turn that dispatched it, and a run
+  // started elsewhere lists before this device streams a word of it.
+  const subagents = useLiveSubagents()
+  const runLive = !runFinished({
+    live: runStatus,
+    local: { streaming: busy },
+    subagents: conversation ? subagents[conversation.hermesSessionId] : undefined,
+  })
   // Until the host has written the running turn to its transcript there is nothing to show yet.
   usePoll(() => id && void reattachRun(id).catch(quietly("Following a run")), RUNS_MS, [id], {
     active: Boolean(id && hasMessages && hostRuns && !busy),
@@ -1230,7 +1242,7 @@ export function ChatPage({
                 <TodosPill
                   items={todos}
                   progress={todoProgress}
-                  live={busy}
+                  live={runLive}
                   onClick={() => setTodosOpen(true)}
                 />
               )}
@@ -1381,7 +1393,7 @@ export function ChatPage({
         onOpenChange={setTodosOpen}
         items={todos}
         progress={todoProgress}
-        live={busy}
+        live={runLive}
       />
       <SubagentsSheet
         open={agentsOpen}

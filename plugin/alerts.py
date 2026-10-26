@@ -33,6 +33,10 @@ ROUTINE_FRESH_S = 30 * 60
 
 _lock = threading.Lock()
 _started: Dict[str, float] = {}
+# A finished run whose session still had subagents at work, kept until they are gone: session id ->
+# when its news started waiting. In memory, like `_started`: a restart loses this and the turn
+# clock the same turn was judged against, so neither half outlives the process alone.
+_held: Dict[str, float] = {}
 
 
 def _text(value: Any) -> Optional[str]:
@@ -50,6 +54,55 @@ def turn_started(**kwargs: Any) -> None:
         _started.setdefault(session_id, time.monotonic())
 
 
+def _working(home: Path, session_id: str) -> bool:
+    """Whether the session still has a subagent at work — the other half of a finished run.
+
+    ``delegation.live_sessions`` is what ``runs/live`` reports to the app, so a push and every
+    screen the app draws read one answer rather than each deciding what "finished" means. A
+    delegation outlives the turn that dispatches it, and the turn's own end says nothing about
+    it. A read that fails says nothing either, and holds nothing back.
+    """
+    from . import delegation
+
+    try:
+        root = sessions.chat_session(home, session_id)
+        return delegation.live_sessions(home).get(root, 0) > 0
+    except Exception:
+        logger.debug("memento: couldn't tell whether %s still works", session_id, exc_info=True)
+        return False
+
+
+def _hold(session_id: str) -> None:
+    """Keeps a finished run's news until the subagents it left are gone, bounded like `_started`."""
+    with _lock:
+        if len(_held) > 512:
+            _held.clear()
+        _held[session_id] = time.monotonic()
+
+
+def tell_finished(path: Path, home: Path) -> int:
+    """Tells the runs held at their turn's end that have really finished; how many went.
+
+    A run finishes when it has ended and no subagent it left at work still runs, so a turn that
+    ended over live subagents parked its ``run_done`` here rather than telling the user the run
+    was over while it still worked. Asked where a turn ends — a wake, or the user's own next
+    turn — and from the every-few-minutes pass, which is the answer when nothing else ends a turn
+    of that session: the conversation can be left waiting on the user with the subagents long
+    since gone.
+    """
+    with _lock:
+        held = list(_held)
+    told = 0
+    for session_id in held:
+        if _working(home, session_id):
+            continue
+        with _lock:
+            _held.pop(session_id, None)
+        push.notify("run_done", session_id, path)
+        told += 1
+    return told
+
+
 def turn_finished(**kwargs: Any) -> None:
     """``on_session_end``: a turn of one of Gots's chats ended. Never raises."""
     try:
@@ -64,6 +117,8 @@ def turn_finished(**kwargs: Any) -> None:
         # Delegated children and other surfaces' sessions end turns too.
         if not record and not session_id.startswith("memento-"):
             return
+        # A turn's end is where an earlier held run can have finished: its subagents may be gone.
+        tell_finished(path, home)
         if stopped.failed:
             push.notify("run_failed", session_id, path)
         elif (
@@ -73,7 +128,13 @@ def turn_finished(**kwargs: Any) -> None:
             # A plan waiting for review is told as such.
             and not (record and record["mode"] == "plan")
         ):
-            push.notify("run_done", session_id, path)
+            # The turn ended, but the run may not have: subagents this turn left at work carry it
+            # on, and the run finishes only when they are gone. Their absence is what the news
+            # waits for, so it goes then rather than now.
+            if _working(home, session_id):
+                _hold(session_id)
+            else:
+                push.notify("run_done", session_id, path)
     except Exception:
         logger.debug("memento: couldn't tell a turn's end", exc_info=True)
 
@@ -138,12 +199,17 @@ def check_pull_requests(path: Path, home: Path, now: int) -> int:
 
 
 def check(hermes_home: Path, now: Optional[int] = None) -> None:
-    """One pass: routines, then pull requests. Nothing is looked up when no device could be told."""
+    """One pass: the runs that have finished with their subagents, then routines, then pull
+    requests. Nothing is looked up when no device could be told."""
     path = db_path(hermes_home)
     if not path.exists() or not push.reachable(path):
         return
     now = int(time.time() * 1000) if now is None else now
-    for look in (lambda: check_routines(path, now / 1000), lambda: check_pull_requests(path, hermes_home, now)):
+    for look in (
+        lambda: tell_finished(path, hermes_home),
+        lambda: check_routines(path, now / 1000),
+        lambda: check_pull_requests(path, hermes_home, now),
+    ):
         try:
             look()
         except Exception:

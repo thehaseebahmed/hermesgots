@@ -174,14 +174,19 @@ export function knownLiveRun(server: Server, sessionId: string) {
 }
 
 /**
- * Whether the host runs this session, read from the shared poll like the project screen's: an open
- * chat asks nothing of its own. Needs the plugin.
+ * What the host says of this session's run: its status while one is in flight, and nothing once it
+ * has ended — the half of `runFinished` that is the host's to answer. Read from the shared poll like
+ * the project screen's, so an open chat asks nothing of its own. Needs the plugin.
  */
-export function useSessionRunning(profile: Server | undefined, sessionId: string | undefined) {
+export function useLiveRun(
+  profile: Server | undefined,
+  sessionId: string | undefined,
+): LiveRunStatus | undefined {
   useWaiting()
   const key = profile?.baseUrl && profile.apiKey ? connectionKey(profile as Server) : undefined
-  return useSyncExternalStore(subscribe, () =>
-    Boolean(key && sessionId && answers.get(key)?.sessions[sessionId]),
+  return useSyncExternalStore(
+    subscribe,
+    () => (key && sessionId && answers.get(key)?.sessions[sessionId]) || undefined,
   )
 }
 

@@ -52,6 +52,10 @@ _Avoid_: client-side computation
 What a project session is doing — idle, working, waiting on the user, or closed by the user as resolved or discarded. A run in flight is read first: while the session's own run runs, it is working, and no wait mark from a moment before it starts counts (it is what puts the row in the Code list's Working). Waiting is the user's move: an answer, an approval, a plan review, a stall, or a live pull request's checks to watch. A session whose subagents are still at work is working, whether or not a turn is live. Composed from the host's run status, its subagents and this device's own marks, not derived from one source.
 _Avoid_: status, state machine
 
+**Run finished**:
+A run that has ended and has no active subagents — the one answer to whether the work it started is over, read by whatever draws or tells it: a turn's end ends its own stream, and a delegation that turn set to work carries the run on past it, so neither is read alone.
+_Avoid_: turn over, run complete, session idle
+
 **Last activity**:
 The most recent event a session has seen — a turn ending, its pull request moving, the session being resolved or discarded — worked out from those moments rather than stored as one.
 _Avoid_: updated at, updatedAt, last update

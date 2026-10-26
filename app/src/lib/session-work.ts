@@ -92,6 +92,25 @@ function runInFlight(live?: LiveTurn, local?: LocalTurn): boolean {
   return Boolean(local?.streaming) && !local?.waiting
 }
 
+/**
+ * Whether a session's run has finished: it has ended — no run of it is in flight at the host and
+ * this device's own reply is not still streaming — and no subagent it left at work still runs.
+ *
+ * One answer to "is the run over", for every screen that draws what a run still has to do. The
+ * two halves arrive at different moments: a turn's end closes its run while a background
+ * delegation the turn dispatched carries on, and a run started elsewhere lists at the host before
+ * this device streams a word of it. Reading either half alone called a run finished while it was
+ * still working — a stop mark on a list the agent was working through, a push saying the run was
+ * done while its subagents ran.
+ *
+ * The host's own status decides first, and its presence is the answer: `waiting_for_approval` is
+ * a run still there, blocked on the user, which is not a run that has ended.
+ */
+export function runFinished(facts: Pick<SessionFacts, "live" | "local" | "subagents">): boolean {
+  const inFlight = facts.live !== undefined || Boolean(facts.local?.streaming)
+  return !inFlight && !working(facts.subagents)
+}
+
 /** The slice of a session `sessionGroup` reads: its closure and wait marks, and its pull requests. */
 type SessionPrs = Pick<Conversation, "resolvedAt" | "discardedAt" | "planPending" | "prs">
 
