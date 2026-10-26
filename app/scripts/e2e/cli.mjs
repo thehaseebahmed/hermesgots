@@ -276,7 +276,7 @@ export const FLOWS = {
   "bot-settings": {
     script: "e2e/bot-settings.mjs",
     about:
-      "A bot's settings as a list of pages: at 1024px the list takes the Settings menu's pane with General open beside it and the pane swapping to Chat while the same list stays put at the same box, and on a 390px phone the list pushes over the menu with a back control and a page over the list, back landing on the list and then on the menu, at both widths, light and dark",
+      "A bot's settings as a list of pages: at 1024px the list takes the Settings menu's pane with General open beside it and the pane swapping to Models while the same list stays put at the same box, and on a 390px phone the list pushes over the menu with a back control and a page over the list, back landing on the list and then on the menu, at both widths, light and dark",
   },
   "fallbacks-silent-host": {
     script: "e2e/fallbacks-silent-host.mjs",
