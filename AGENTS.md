@@ -356,11 +356,15 @@ Bots register themselves instead of being typed in (design: https://claude.ai/co
 
 ## Settings UX
 
+- **A settings card never holds a text box, a picker or a stepper.** A card shows a value and the edit drills in: a text value opens a pushed edit screen below 1024px and a centred dialog card from 1024px (a labelled input, Cancel, Save); a list that is picked from opens a bottom sheet below 1024px and the same centred card from it (search, radio rows); a list that is only read drills in as a screen — a push below 1024px, the page pane from it. Switches, steppers, avatars and buttons act in place. The rules, their Material and Android evidence and a review checklist are `.agents/skills/settings-ux/SKILL.md` (ADR 0055).
+- **A settings row is a title over the value it holds**, in the accent colour, or *Not set* in muted grey where nothing is set. A subtitle saying what the setting is for stays only where the row drills in or the purpose isn't otherwise obvious — the one exception to **No explanatory copy**. No chevrons: the value and the press state mark a row tappable.
 - **A settings group that holds only toggle settings always has a parent that switches them all together** — a Notification types feature header, a Skills category header.
 - **A toggle setting whose row also has a tap action is two columns:** the left column (icon, title, subtitle) is fully clickable and does the tap action; the right column (the switch) is fully clickable and toggles.
-- **Settings rows are a title over a subtitle, and the subtitle says what the setting is for.** This is the one exception to **No explanatory copy**.
-- **Input labels on settings are styled the same everywhere**; the Name label in Settings > Bot > General is the baseline.
-- **Settings are grouped into Gots Specific Settings and Hermes Settings by ownership** (the glossary's **Gots setting** and **Hermes setting**). A Hermes setting is named as the Hermes Dashboard names it.
+- **Cards are captioned by ownership where it disambiguates** — *Gots* and *Hermes* above a page's cards, a card that names itself like *Bot Profile* above its own; the bot-settings list, and a page whose cards need no disambiguation, carry none. Cards are separated by gaps, and a caption is short and muted rather than a heading.
+- **Settings are grouped into Gots specific settings and Hermes settings by ownership** (the glossary's **Gots setting** and **Hermes setting**). A Hermes setting is named as the Hermes Dashboard names it.
+- **Input labels on settings are styled the same everywhere**; the label on an edit screen or edit card — Name in Settings > Bot > General — is the baseline.
+- **1024px is the app's one breakpoint** for panes, pop-ups and these screens; Material's 840dp expansion point is a later, app-wide change (ADR 0055), never a per-screen one.
+- **A destructive action stays where its spec puts it** — the bot-settings list's trash, for one — and a page earns an overflow menu only where it needs more than one action.
 
 ## Conventions
 
