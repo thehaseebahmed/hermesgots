@@ -7,6 +7,7 @@ import { hasServer, serverConfig } from "@/lib/connection"
 import {
   diagBot,
   diagChat,
+  diagResume,
   formatDiagnostics,
   type DiagBot,
   type DiagChat,
@@ -23,6 +24,7 @@ import {
 } from "@/lib/db"
 import { getPluginInfo, type PluginInfo } from "@/lib/hermes"
 import { isNative } from "@/lib/native"
+import { resumeTrace } from "@/lib/resume-trace"
 import { lastOpened } from "@/lib/threads"
 import { MIN_PLUGIN_VERSION } from "@/lib/version"
 
@@ -86,6 +88,7 @@ export async function readDeviceDiagnostics(): Promise<DiagDevice> {
   const bots = await Promise.all(
     profiles.map((profile) => botState(profile).catch(() => unreadBot(profile))),
   )
+  const trace = resumeTrace()
   return {
     at: new Date().toISOString(),
     app: __APP_VERSION__,
@@ -95,6 +98,7 @@ export async function readDeviceDiagnostics(): Promise<DiagDevice> {
     schema: db.verno,
     developer: Boolean(settings?.developer),
     botThreads: Boolean(settings?.botThreads),
+    ...(trace ? { resume: diagResume(trace) } : {}),
     bots,
   }
 }

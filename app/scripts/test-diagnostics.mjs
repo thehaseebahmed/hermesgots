@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { diagBot, diagChat, formatDiagnostics } from "../src/lib/diagnostics.ts"
+import { diagBot, diagChat, diagResume, formatDiagnostics } from "../src/lib/diagnostics.ts"
 
 const profile = {
   id: "bot-1",
@@ -117,6 +117,39 @@ test("a bot whose own reads failed says so rather than claiming emptiness", () =
   })
   assert.equal(built.unread, true, "an unread bot is marked, not mistaken for a fresh one")
   assert.deepEqual(built.chats, [])
+})
+
+test("the resume block names stages and offsets, and nothing can ride along", () => {
+  const clean = diagResume({
+    at: 1_000,
+    started: 10,
+    stages: { "sync-start": [400, Number.NaN, "private thoughts"], "sync-end": [900] },
+    requests: { "chats-merge-end": 2, "runs-live-end": "key-one" },
+  })
+  assert.equal(clean.at, new Date(1_000).toISOString(), "the return is dated")
+  assert.deepEqual(clean.stages["sync-start"], [400], "non-numbers are dropped field by field")
+  assert.deepEqual(clean.stages["sync-end"], [900])
+  assert.equal(clean.requests["chats-merge-end"], 2)
+  assert.equal(clean.requests["runs-live-end"], undefined, "a count that isn't a count claims nothing")
+
+  const poisoned = diagResume({
+    at: "secret-host.test",
+    started: 10,
+    stages: {
+      "https://secret-host.test/v1": [1],
+      "a chat titled private thoughts": [2],
+      "sync-start": [3, { leaked: "key-one" }],
+    },
+    requests: { "https://secret-host.test/v1": 4, "sync-start": 5 },
+  })
+  assert.equal(poisoned.at, undefined, "a clock that isn't a clock never dates the dump")
+  assert.deepEqual(Object.keys(poisoned.stages), ["sync-start"], "only stages the trace can name")
+  assert.deepEqual(poisoned.stages["sync-start"], [3], "and only the numbers among their offsets")
+  assert.deepEqual(poisoned.requests, { "sync-start": 5 }, "the rest of the stage names never ride")
+  const text = formatDiagnostics({ ...device(), resume: poisoned })
+  assert.ok(!text.includes("secret-host"), "the address is never in the dump")
+  assert.ok(!text.includes("key-one"), "the key is never in the dump")
+  assert.ok(!text.includes("private thoughts"), "no chat or message is ever in the dump")
 })
 
 const device = () => ({

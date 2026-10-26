@@ -1,4 +1,5 @@
 import type { Conversation, Profile } from "@/lib/db"
+import { RESUME_STAGES, type ResumeStage, type ResumeTrace } from "./resume-trace.ts"
 
 /**
  * The device's own state as one JSON a bug report can carry: what build is running, what the
@@ -64,7 +65,19 @@ export interface DiagDevice {
   schema: number
   developer: boolean
   botThreads: boolean
+  /** The latest return to the foreground, timed; absent before this launch's first one. */
+  resume?: DiagResume
   bots: DiagBot[]
+}
+
+/** One return to the foreground: when it happened, and where its stages landed. */
+export interface DiagResume {
+  /** When the return happened; absent when the trace carries no usable clock for it. */
+  at?: string
+  /** Stage -> the milliseconds since the return it landed at, in landing order. */
+  stages: Partial<Record<ResumeStage, number[]>>
+  /** Stage -> the requests the resume made there, where any were counted. */
+  requests?: Partial<Record<ResumeStage, number>>
 }
 
 /** A title cut short: enough to recognise a chat, not a page of text. */
@@ -141,3 +154,26 @@ export function diagBot(input: {
 
 /** The state as the sheet shows and the clipboard takes. */
 export const formatDiagnostics = (device: DiagDevice) => JSON.stringify(device, null, 2)
+
+/**
+ * The trace as the dump carries it: each stage picked by name out of `RESUME_STAGES` and each
+ * value copied only when it is really a number, so a poisoned trace can't ride a server address, a
+ * key or message text into a bug report. An `at` that isn't a clock is left out entirely.
+ */
+export function diagResume(trace: ResumeTrace): DiagResume {
+  const stages: Partial<Record<ResumeStage, number[]>> = {}
+  const requests: Partial<Record<ResumeStage, number>> = {}
+  for (const stage of RESUME_STAGES) {
+    const offsets = trace.stages[stage]
+    if (Array.isArray(offsets)) {
+      const numbers = offsets.filter((one) => typeof one === "number" && Number.isFinite(one))
+      if (numbers.length) stages[stage] = numbers
+    }
+    const count = trace.requests[stage]
+    if (typeof count === "number" && Number.isFinite(count)) requests[stage] = count
+  }
+  const built: DiagResume = { stages }
+  if (Number.isFinite(trace.at)) built.at = stamp(trace.at)
+  if (Object.keys(requests).length) built.requests = requests
+  return built
+}
