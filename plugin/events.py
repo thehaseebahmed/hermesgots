@@ -160,6 +160,18 @@ def read_since(path: Path, cursor: int, limit: int = 500) -> Tuple[List[Dict[str
     return [{"id": r[0], "kind": r[1], "session_id": r[2]} for r in rows], gap
 
 
+def tail_before(path: Path, at: int) -> int:
+    """The last row written before ``at``, so a reader can start on the ones written after it."""
+    if not path.exists():
+        return 0
+    conn = connect(path)
+    try:
+        row = conn.execute("SELECT MAX(id) FROM events WHERE at < ?", (at,)).fetchone()
+    finally:
+        conn.close()
+    return int(row[0]) if row and row[0] is not None else 0
+
+
 # Hooks. Gots only talks to the API server, so other surfaces' sessions are skipped.
 
 

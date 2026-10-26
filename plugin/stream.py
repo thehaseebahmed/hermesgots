@@ -43,14 +43,12 @@ CRON_JOB_FIELDS = (
 # One fingerprint per profile, shared by every stream open on it: [read at, fingerprint].
 _cron: Dict[str, List[Any]] = {}
 
-# One title watch per store path: {session_id: [title last seen, watched until]}, and the task
-# reading them. The watch lives outside any one connection on purpose — a watcher inside a
-# connection lost the title the moment the device backgrounded the app, and the event it sent was
-# never logged, so nothing carried it back. The change is noted into the events ledger instead:
-# every open stream sends it within a tick, and a device that was away reads it back from its own
-# cursor when it returns.
-_watches: Dict[str, Dict[str, List[Any]]] = {}
-_watchers: Dict[str, Any] = {}
+# The titles watched per store, for the plugin's life: {path: {"sessions": {id: {title, until}}}}.
+# It arms itself off the events ledger, not off a connection: Hermes titles a chat in the background,
+# after the device that sent the turn has put the app away as often as not, so a watcher that lived
+# inside a stream lost that case. Noted into the ledger, every open stream sends the title within a
+# tick, and a device that was away reads it from its own cursor when it returns.
+_title_watchers: Dict[str, Dict[str, Any]] = {}
 
 
 def _cron_mark() -> Any:
@@ -87,53 +85,54 @@ async def _title_of(db: Any, session_id: str) -> Optional[str]:
     try:
         return await asyncio.to_thread(get, session_id)
     except Exception:
+        logger.debug("memento: couldn't read a session's title", exc_info=True)
         return None
 
 
-async def _watch_titles(path: Path, db: Any) -> None:
-    """Reads every session watched on this store until none is, noting the titles that changed."""
-    key = str(path)
-    try:
-        while True:
-            watches = _watches.get(key) or {}
+def watch_titles(path: Path, db: Any) -> "asyncio.Task[None]":
+    """Starts this store's title reader; the plugin keeps one running for its life.
+
+    The start is stamped here, not in the reader, so a session that moves the moment the plugin
+    comes up is watched: only the rows written from now on are armed, and the ledger's history —
+    a restart's hour of rows, whose titles landed long ago — is left alone.
+    """
+    return asyncio.ensure_future(_read_titles(path, db, int(time.time() * 1000)))
+
+
+async def _read_titles(path: Path, db: Any, since: int) -> None:
+    """Notes the title of every session that moves on this store after ``since``."""
+    record = _title_watchers.setdefault(str(path), {"sessions": {}})
+    sessions: Dict[str, Dict[str, Any]] = record["sessions"]
+    cursor = await asyncio.to_thread(events.tail_before, path, since)
+    while True:
+        try:
+            rows, _gap = await asyncio.to_thread(events.read_since, path, cursor)
+            if rows:
+                cursor = rows[-1]["id"]
+            for row in rows:
+                if row["kind"] == "session" and row["session_id"]:
+                    until = time.monotonic() + TITLE_WATCH_SECONDS
+                    sessions.setdefault(row["session_id"], {"title": None, "until": until})
+                    sessions[row["session_id"]]["until"] = until
             now = time.monotonic()
-            for session_id in [one for one, watch in list(watches.items()) if now > watch[1]]:
-                del watches[session_id]
-            if not watches:
-                _watches.pop(key, None)
-                return
-            for session_id in list(watches):
-                watch = watches.get(session_id)
-                if watch is None:
-                    continue
-                title = await _title_of(db, session_id)
+            for session_id in [one for one, watch in sessions.items() if now > watch["until"]]:
+                del sessions[session_id]
+            titles = await asyncio.gather(*(_title_of(db, one) for one in sessions))
+            for session_id, title in zip(list(sessions), titles):
                 if title is None:
                     continue
-                if watch[0] is None:
-                    watch[0] = title
-                elif title != watch[0]:
-                    watch[0] = title
+                watch = sessions[session_id]
+                if watch["title"] is None:
+                    watch["title"] = title
+                elif title != watch["title"]:
                     events.note("title", session_id, path, True)
-            await asyncio.sleep(TITLE_TICK_SECONDS)
-    finally:
-        _watchers.pop(key, None)
-        # A watch that arrived as the task was leaving is still owed its reader.
-        if any(time.monotonic() <= watch[1] for watch in (_watches.get(key) or {}).values()):
-            _watchers[key] = asyncio.ensure_future(_watch_titles(path, db))
-
-
-async def watch_title(path: Path, db: Any, session_id: str) -> None:
-    """Watches a session's title for a while after the session moves, so the change is noted."""
-    key = str(path)
-    watches = _watches.setdefault(key, {})
-    until = time.monotonic() + TITLE_WATCH_SECONDS
-    watching = watches.get(session_id)
-    if watching is None:
-        watches[session_id] = [None, until]
-    else:
-        watching[1] = until
-    if _watchers.get(key) is None or _watchers[key].done():
-        _watchers[key] = asyncio.ensure_future(_watch_titles(path, db))
+                    # A later title comes with the turn that caused it, which arms a new watch.
+                    del sessions[session_id]
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.debug("memento: a title watch failed a pass", exc_info=True)
+        await asyncio.sleep(TITLE_TICK_SECONDS)
 
 
 def sse_headers(adapter: Any, request: Any) -> Dict[str, str]:
@@ -155,7 +154,6 @@ async def serve(
     headers: Dict[str, str],
     path: Path,
     profile: str,
-    db: Any,
     home: Path,
     cursor: Optional[int],
     version: str,
@@ -220,10 +218,6 @@ async def serve(
                         changed.append((row["kind"], session_id))
                 for kind, session_id in changed:
                     await send(kind, {"cursor": cursor, **({"session_id": session_id} if session_id else {})})
-                    if kind == "session" and session_id:
-                        # A session that moved is one Hermes may title in the background; the
-                        # watcher notes the change for every device, wherever it is listening.
-                        await watch_title(path, db, session_id)
             if loop.time() - cron_checked >= CRON_SECONDS:
                 cron_checked = loop.time()
                 try:

@@ -320,6 +320,13 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             # A stopped turn takes the subagents it started with it; see delegation.py.
             asyncio.ensure_future(delegation.watch_stops(adapter)),
         ]
+        # A chat's title lands after the turn that caused it, sometimes long after the app was put
+        # away; it is noted for every device, listening or not; see stream.py.
+        open_db = getattr(adapter, "_ensure_session_db_async", None)
+        title_db = await open_db() if callable(open_db) else None
+        if title_db is not None:
+            # The reader hands back its task, so the shutdown below cancels it with the rest.
+            tasks.append(stream.watch_titles(store_path(), title_db))
         yield
         for task in tasks:
             task.cancel()
@@ -1648,11 +1655,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except ValueError:
             return _error(web, "since must be a number", 400)
         path = store_path()
-        home = hermes_home()
-        open_db = getattr(adapter, "_ensure_session_db_async", None)
-        db = await open_db() if callable(open_db) else None
         return await stream.serve(
-            web, request, stream.sse_headers(adapter, request), path, str(path), db, home,
+            web, request, stream.sse_headers(adapter, request), path, str(path), hermes_home(),
             cursor, VERSION,
             request.query.get("device") or None,
         )
