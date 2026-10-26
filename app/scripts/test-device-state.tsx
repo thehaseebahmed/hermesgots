@@ -3,6 +3,7 @@ import test from "node:test"
 
 import { DeviceStateSheet, readDeviceDiagnostics } from "@/components/device-state"
 import { db, ensureMainThread, mainThreadId } from "@/lib/db"
+import { markResume, startResumeTrace } from "@/lib/resume-trace"
 import { lastThreadKey } from "@/lib/threads"
 import { botProfile, json, mount, seedSettings, until } from "./component-kit.tsx"
 
@@ -84,11 +85,43 @@ test("the sheet shows the state as a copy block, with no message text or key in 
   globalThis.fetch = async () => json({ version: "0.99.0", features: ["triage"] })
   const sheet = <DeviceStateSheet open onOpenChange={() => {}} />
   await mount(sheet, async () => {
-    await until(async () => document.querySelector("pre")?.textContent?.includes('"bots"'), "the state")
+    await until(
+      async () => document.querySelector("pre")?.textContent?.includes('"bots"'),
+      "the state",
+    )
     const text = document.querySelector("pre")?.textContent ?? ""
     assert.ok(text.includes(mainThreadId(bot.id)), "Main is named on screen")
     assert.ok(!text.includes(bot.apiKey), "the key is never shown")
     assert.ok(!text.includes("device-state.test"), "the server address is never shown")
     assert.ok(!text.includes("private thoughts"), "no message text is shown")
+  })
+})
+
+test("the dump and the sheet carry a return's stage offsets", async () => {
+  await seed()
+  globalThis.fetch = async () => json({ version: "0.99.0", features: ["triage"] })
+  startResumeTrace({ at: 1_000, started: 10_000 })
+  markResume("sync-start", { now: 10_400 })
+  markResume("chats-merge-end", { requests: 1, now: 10_800 })
+  markResume("runs-live-end", { requests: 2, now: 11_200 })
+
+  const device = await readDeviceDiagnostics()
+  assert.ok(device.resume, "the return is in the dump")
+  assert.equal(device.resume.at, new Date(1_000).toISOString(), "dated by the return itself")
+  assert.deepEqual(device.resume.stages["sync-start"], [400])
+  assert.deepEqual(device.resume.stages["chats-merge-end"], [800])
+  assert.equal(device.resume.requests?.["chats-merge-end"], 1, "the merge request is counted")
+  assert.equal(device.resume.requests?.["runs-live-end"], 2, "one read per server is counted")
+
+  const sheet = <DeviceStateSheet open onOpenChange={() => {}} />
+  await mount(sheet, async () => {
+    await until(
+      async () => document.querySelector("pre")?.textContent?.includes('"resume"'),
+      "the trace",
+    )
+    const text = document.querySelector("pre")?.textContent ?? ""
+    const shown = JSON.parse(text)
+    assert.deepEqual(shown.resume.stages["sync-start"], [400], "its offset is on screen")
+    assert.equal(shown.resume.requests["chats-merge-end"], 1, "and so is its request count")
   })
 })

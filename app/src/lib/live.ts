@@ -14,6 +14,7 @@ import {
   type HermesConfig,
 } from "@/lib/hermes"
 import { reconcileHistory } from "@/lib/history"
+import { markResume } from "@/lib/resume-trace"
 import { syncChatsOf, syncNow } from "@/lib/sync"
 
 /**
@@ -221,6 +222,7 @@ function onEvent(key: string, event: string, data: Record<string, unknown>) {
   switch (event) {
     case "hello":
       setLive(key, true)
+      markResume("stream-hello")
       // A first stream only starts listening now; whatever happened before was missed.
       if (!resumed) catchUpAll(key)
       break

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { diagBot, diagChat, formatDiagnostics } from "../src/lib/diagnostics.ts"
+import { diagBot, diagChat, diagResume, formatDiagnostics } from "../src/lib/diagnostics.ts"
 
 const profile = {
   id: "bot-1",
@@ -26,10 +26,13 @@ const chat = (id, createdAt, extra = {}) => ({
 })
 
 test("a chat is named by its shape and clocks, never by what it holds", () => {
-  const built = diagChat(chat("c1", 1_000, { main: true, moves: [{}], olderThan: { id: 4, offset: 2 } }), {
-    user: 3,
-    assistant: 2,
-  })
+  const built = diagChat(
+    chat("c1", 1_000, { main: true, moves: [{}], olderThan: { id: 4, offset: 2 } }),
+    {
+      user: 3,
+      assistant: 2,
+    },
+  )
   assert.equal(built.main, true)
   assert.equal(built.older, true)
   assert.equal(built.moves, 1, "the moves it carries are a count")
@@ -129,4 +132,45 @@ const device = () => ({
   developer: true,
   botThreads: true,
   bots: [],
+})
+
+test("the resume block names stages and offsets, and nothing can ride along", () => {
+  const clean = diagResume({
+    at: 1_000,
+    started: 10,
+    stages: { "sync-start": [400, Number.NaN, "private thoughts"], "sync-end": [900] },
+    requests: { "chats-merge-end": 2, "runs-live-end": "key-one" },
+  })
+  assert.equal(clean.at, new Date(1_000).toISOString(), "the return is dated")
+  assert.deepEqual(clean.stages["sync-start"], [400], "non-numbers are dropped field by field")
+  assert.deepEqual(clean.stages["sync-end"], [900])
+  assert.equal(clean.requests["chats-merge-end"], 2)
+  assert.equal(
+    clean.requests["runs-live-end"],
+    undefined,
+    "a count that isn't a count claims nothing",
+  )
+
+  const poisoned = diagResume({
+    at: "secret-host.test",
+    started: 10,
+    stages: {
+      "https://secret-host.test/v1": [1],
+      "a chat titled private thoughts": [2],
+      "sync-start": [3, { leaked: "key-one" }],
+    },
+    requests: { "https://secret-host.test/v1": 4, "sync-start": 5 },
+  })
+  assert.equal(poisoned.at, undefined, "a clock that isn't a clock never dates the dump")
+  assert.deepEqual(Object.keys(poisoned.stages), ["sync-start"], "only stages the trace can name")
+  assert.deepEqual(poisoned.stages["sync-start"], [3], "and only the numbers among their offsets")
+  assert.deepEqual(poisoned.requests, { "sync-start": 5 }, "the rest of the stage names never ride")
+
+  const text = formatDiagnostics({ ...device(), resume: poisoned })
+  assert.ok(!text.includes("secret-host"), "the address is never in the dump")
+  assert.equal(
+    diagResume({ at: 1e300, started: 0, stages: {}, requests: {} }).at,
+    undefined,
+    "a clock no date can hold never dates it",
+  )
 })
