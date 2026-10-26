@@ -61,10 +61,12 @@ so the walk reads that turn whole and it replaces the cut part — the same mend
 a turn it catches up on. A reply this device streamed for a running turn names no row of its own, so
 the catch-up that lands after it replaces it outright instead of writing a second one beside it.
 
-Nothing marks the window edge. The pre-compaction turns either land or they don't, and a divider at
-the edge would be a claim the app can't make: `compactionMarks` already holds that a compaction older
-than every loaded row marks nothing, and it keeps that rule — the dividers appear where the
-compactions happened as the rows above arrive.
+Nothing of this change's own marks the window edge. A divider does stand there sometimes, and it is
+the host's: `compactionMarks` places a compaction older than every loaded row above the first message
+the device holds (`app/src/lib/compactions.ts`), because the rows it took away are off the transcript
+and that top is the closest the app can get. This change only makes that approximation unnecessary —
+the archived rows arrive and the same divider comes to rest where the compaction happened, with no
+second one drawn — and it adds no marker of its own to say so.
 
 ## Considered options
 
