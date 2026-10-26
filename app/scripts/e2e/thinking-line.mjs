@@ -28,6 +28,8 @@ const ACCOUNTING = "The journal's own accounting agrees"
 const LAST = "leaves the delete to them"
 const LONG_FIRST = "the reasoning itself, so here is the whole of it"
 const LONG_LAST = "The deleting is theirs"
+/** How tall a reply's work row stands: the exception to the app's 44px target (ADR 0058). */
+const ROW_HEIGHT = 29
 
 await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   await page.goto(app)
@@ -59,6 +61,14 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
             height: Math.round(rect.height),
           }
         }
+        // A part's inner left edge: its box less the inset it carries, so a row and the text beside
+        // it are compared at the pixels their readers see rather than at their containers' edges.
+        const edge = (node) => {
+          if (!node) return null
+          const rect = node.getBoundingClientRect()
+          return { ...box(node), left: Math.round(rect.left + parseFloat(getComputedStyle(node).paddingLeft)) }
+        }
+        const parts = (slot) => [...(own?.querySelectorAll(`[data-slot=${slot}]`) ?? [])]
         return {
           // A row is one element carrying its label — a button while there is a sheet to open, a
           // status row before any word arrives — and its words live in the sheet alone, so a shut
@@ -77,6 +87,13 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
             const text = one.textContent?.trim() ?? ""
             return names.test(text) ? { kind: "thinking", text } : { kind: "tool", text }
           }),
+          // How the reply's parts stand against each other: each one's inner left edge, and the box
+          // a thought row and its group meet at.
+          layout: {
+            rows: parts("thinking-line").map((line) => edge(line.firstElementChild ?? line)),
+            groups: parts("tool-group").map(edge),
+            text: parts("markdown").map(edge),
+          },
           group: own?.querySelector("[data-slot=tool-group]")?.getAttribute("aria-label") ?? null,
           groups: own?.querySelectorAll("[data-slot=tool-group]").length ?? 0,
           // The sheet is one pop-up wherever a row opened it: its body holds the whole markdown.
@@ -103,6 +120,41 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
       },
       { item: ITEM, row: ROW, label: THINKING.source, sheet: SHEET, body: BODY },
     )
+
+  /**
+   * The reply's work rows are one block: a row meets the group it accounts for with no part gap
+   * between them, the reply's own words stand apart from it, and every part stands on one left edge
+   * — geometry only a laid-out page has, which is why it is asserted here and at every width.
+   */
+  const standing = (state, where) => {
+    const { rows: drawn, groups, text } = state.layout
+    assert.equal(drawn.length, 1, `${where}, the reply drew one row of thinking`)
+    assert.equal(drawn[0].height, ROW_HEIGHT, `${where}, the row stands ${ROW_HEIGHT}px tall`)
+    for (const group of groups)
+      assert.equal(group.height, ROW_HEIGHT, `${where}, a tool group stands ${ROW_HEIGHT}px tall too`)
+    assert.ok(text.length > 0, `${where}, the reply answers after the work it did`)
+    const edges = [...drawn, ...groups, ...text].map((one) => one.left)
+    assert.equal(
+      new Set(edges).size,
+      1,
+      `${where}, every part stands on one left edge (${edges.join(", ")})`,
+    )
+  }
+
+  /** The same, for a reply whose thinking a tool group follows: the two of them one block. */
+  const meets = (state, where) => {
+    standing(state, where)
+    const { rows: drawn, groups, text } = state.layout
+    assert.equal(groups.length, 1, `${where}, the one group the calls it broke made`)
+    assert.ok(
+      Math.abs(groups[0].top - drawn[0].bottom) <= 1,
+      `${where}, the row touches the group under it (${drawn[0].bottom} to ${groups[0].top}px)`,
+    )
+    assert.ok(
+      text[0].top - groups[0].bottom >= 8,
+      `${where}, its words stand apart from that block (${text[0].top - groups[0].bottom}px)`,
+    )
+  }
 
   // The cap, the fade and the control it sat behind are gone from the app, and the words are gone
   // from the thread: nothing may draw any of them, at any width, whatever a row is doing.
@@ -431,6 +483,9 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   await shot("answered")
   pass(`the answer leaves the row reading ${labels[0]}, the words shut in the sheet`)
 
+  meets(await threadState(), "with the turn answered")
+  pass("the row and its group draw as one block on the reply's edge, its words apart from it")
+
   // The words are read back in the sheet, and the thread goes on holding none of them: the spans
   // are the ones this device wrote onto the reply's own runs, and nothing was remembered about the
   // sheet that visit opened — the next load is shut again.
@@ -645,6 +700,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
         10_000,
         `the app to draw its ${theme} theme ${where}`,
       )
+      standing(await threadState(), where)
       const at = await open(0, `the finished run ${where}`)
       assert.ok(at.sheet.text.includes(LONG_LAST), `${where}, the sheet holds the run's last words`)
       whole(at, where)

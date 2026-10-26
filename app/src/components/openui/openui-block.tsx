@@ -2,7 +2,7 @@ import { memo, useEffect, useRef } from "react"
 import { Renderer } from "@openuidev/react-lang"
 
 import { Markdown } from "@/components/chat/markdown"
-import { INFO, REPLY_INSET } from "@/lib/openui-block.ts"
+import { INFO } from "@/lib/openui-block.ts"
 import type { InterfaceDraw } from "@/lib/openui-thread.ts"
 import { noteFailure } from "@/lib/report"
 
@@ -64,14 +64,10 @@ function OpenUIBlock(props: Props) {
   }, [props.streaming, answer, failure])
   if (answer === "nothing") return null
   if (answer === "code")
-    return (
-      <Markdown className={`${REPLY_INSET} text-[15px] leading-relaxed`}>
-        {fenced(props.source)}
-      </Markdown>
-    )
+    return <Markdown className="text-[15px] leading-relaxed">{fenced(props.source)}</Markdown>
   return (
     <Renderer.Root response={props.source} library={library} isStreaming={props.streaming}>
-      <Renderer.Content className={`w-full min-w-0 space-y-3 ${REPLY_INSET}`} />
+      <Renderer.Content className="w-full min-w-0 space-y-3" />
     </Renderer.Root>
   )
 }

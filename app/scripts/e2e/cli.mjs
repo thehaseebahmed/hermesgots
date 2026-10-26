@@ -38,7 +38,7 @@ export const FLOWS = {
   "thinking-line": {
     script: "e2e/thinking-line.mjs",
     about:
-      "A turn whose thinking two calls break back to back: the working line first, then the first row open on Thinking…, every stretch the turn makes joining that one row while the calls run, both calls drawn as one tool group with the row always above it — a tool row never between two thought rows — the row taking the sum of its three spans at the first answer token, where any one stretch alone would read less, and a reload reading the same row in the same place; then a long run landing on its newest words and following them until the reader's wheel stops it, and a finished row opened by a tap drawn whole at 390 and 1024px in both themes, with no cap, no fade and no Show more",
+      "A turn whose thinking two calls break back to back: the working line first, then the first row open on Thinking…, every stretch the turn makes joining that one row while the calls run, both calls drawn as one tool group with the row always above it — a tool row never between two thought rows — and the two drawn as one block, meeting with no gap and standing on the reply's own left edge with its text, the row taking the sum of its three spans at the first answer token, where any one stretch alone would read less, and a reload reading the same row in the same place; then a long run landing on its newest words and following them until the reader's wheel stops it, and a finished row opened by a tap drawn whole at 390 and 1024px in both themes, with no cap, no fade and no Show more",
   },
   "slash-skills": {
     script: "e2e/slash-skills.mjs",

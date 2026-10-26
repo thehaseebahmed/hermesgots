@@ -72,7 +72,7 @@ export const ThinkingLine = memo(function ThinkingLine({
   pending?: boolean
   /** How long this device watched the turn think, when it watched it at all. */
   spanMs?: number
-  /** The margin that hugs the row it sits beside, when the thread's parts hand one over. */
+  /** The part's own classes: the reply's inset, and the gap the pair's upper half drops (ADR 0058). */
   className?: string
 }) {
   const [open, setOpen] = useState(false)

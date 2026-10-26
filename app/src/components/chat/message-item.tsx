@@ -29,11 +29,11 @@ import { splitAttachments } from "@/lib/attachment-text"
 import { removeQueued, sendQueued } from "@/lib/chat"
 import type { Attachment, Message, ToolEvent } from "@/lib/db"
 import { describeActivity, formatDuration } from "@/lib/format"
-import { COLUMN } from "@/lib/layout"
+import { COLUMN, REPLY_INSET } from "@/lib/layout"
 import { mediaCell, mediaKind, type MediaCell } from "@/lib/media-kind"
 import { attachmentSources, mediaRead, useMediaSources } from "@/lib/media-source"
 import { mediaImages } from "@/lib/media-tags"
-import { openuiParts, REPLY_INSET } from "@/lib/openui-block.ts"
+import { openuiParts } from "@/lib/openui-block.ts"
 import type { InterfaceDraw, ThreadBlock } from "@/lib/openui-thread.ts"
 import { mergeThoughtRows, thinkingRows, type RunPart } from "@/lib/thinking"
 import { cn } from "@/lib/utils"
@@ -145,16 +145,12 @@ function placeThinking(parts: Part[], runs: RunPart[]): Part[] {
 }
 
 /**
- * The margin that pulls a thinking row toward the tool row it sits beside: the two lines are one
- * unit of the thread's account of the work, so only the tool-adjacent side closes up — the gap to
- * the reply's text on the other side stays as it is.
+ * A thought row and the tool row it accounts for are one unit of the work, so the upper of the two
+ * drops the space the reply puts under it — see `PARTS` for why that is enough.
  */
-function huggingTools(parts: Part[], index: number) {
-  const beside = (part: Part | undefined) => part?.kind === "tools"
-  const top = beside(parts[index - 1])
-  const bottom = beside(parts[index + 1])
-  if (top && bottom) return "-my-2"
-  return top ? "-mt-2" : bottom ? "-mb-2" : undefined
+function huggingWork(part: Part, next: Part | undefined) {
+  const work = (one: Part | undefined) => one?.kind === "thinking" || one?.kind === "tools"
+  return work(part) && work(next) ? "mb-0" : undefined
 }
 
 /**
@@ -245,7 +241,7 @@ function Stats({ message }: { message: Message }) {
   const stats = message.stats
   if (!stats) return null
   return (
-    <div className="px-1 text-xs text-muted-foreground/80 tabular-nums">
+    <div className={cn(REPLY_INSET, "text-xs text-muted-foreground/80 tabular-nums")}>
       {stats.estimated ? "~" : ""}
       {stats.tokens} tokens
       {stats.tokensPerSecond !== undefined && ` · ${stats.tokensPerSecond} tok/s`} ·{" "}
@@ -419,7 +415,10 @@ function FailedActions({ message }: { message: Message }) {
 
 function StatusLine({ text, children }: { text?: string; children?: ReactNode }) {
   return (
-    <div className="flex items-center gap-2 px-1 text-sm text-muted-foreground" aria-live="polite">
+    <div
+      className={cn(REPLY_INSET, "flex items-center gap-2 text-sm text-muted-foreground")}
+      aria-live="polite"
+    >
       <Spinner className="size-4" />
       {text && <span className="min-w-0 truncate">{text}</span>}
       {children}
@@ -660,12 +659,15 @@ export const MessageItem = memo(function MessageItem({
     ),
     // An error on a reply that streamed says so plainly: it isn't the bot's answer.
     failed && (
-      <div key="failed" className="flex items-start gap-2 px-1 text-[15px] text-destructive">
+      <div
+        key="failed"
+        className={cn(REPLY_INSET, "flex items-start gap-2 text-[15px] text-destructive")}
+      >
         {error}
       </div>
     ),
     message.status === "stopped" && !message.content && (
-      <div key="stopped" className="px-1 text-xs text-muted-foreground">
+      <div key="stopped" className={cn(REPLY_INSET, "text-xs text-muted-foreground")}>
         Stopped
       </div>
     ),
@@ -683,11 +685,7 @@ export const MessageItem = memo(function MessageItem({
           <Fragment key={breaks[i - 1]?.key ?? "start"}>
             {i > 0 && breaks[i - 1].node}
             {(parts.length > 0 || (last && footerShown)) && (
-              <AssistantRow
-                conversationId={message.conversationId}
-                busy={busy}
-                parts={parts}
-              >
+              <AssistantRow conversationId={message.conversationId} busy={busy} parts={parts}>
                 {last && footer}
               </AssistantRow>
             )}
@@ -716,6 +714,12 @@ function sameMessage(a: MessageItemProps, b: MessageItemProps) {
   return a.blocks === b.blocks || JSON.stringify(a.blocks) === JSON.stringify(b.blocks)
 }
 
+/**
+ * The reply's parts space themselves rather than the row they sit in: `space-y-3` puts each part's
+ * space under it, so the one above a work pair can drop its own and the pair still meets.
+ */
+const PARTS = "gap-0 space-y-3"
+
 function AssistantRow({
   conversationId,
   busy,
@@ -728,58 +732,68 @@ function AssistantRow({
   parts: Part[]
   children?: ReactNode
 }) {
+  // Every part but a card stands on the reply's edge; a card fills its own gutters (ADR 0047).
+  const edge = cn(REPLY_INSET, COLUMN)
   return (
     <MessageRow align="start">
-      <MessageContent className="gap-3">
-        {parts.map((part, index) =>
-          part.kind === "clarify" ? (
-            <ClarifyCard
-              key={part.tool.toolCallId}
-              tool={part.tool}
-              conversationId={conversationId}
-              busy={busy}
-            />
-          ) : part.kind === "agent" ? (
-            <AgentCards key={part.tool.toolCallId} tool={part.tool} />
-          ) : part.kind === "tools" ? (
-            <div key={part.tools[0].toolCallId} className={COLUMN}>
-              <div className="w-full max-w-xl">
-                <ToolGroup tools={part.tools} />
+      <MessageContent className={PARTS}>
+        {parts.map((part, index) => {
+          const hug = huggingWork(part, parts[index + 1])
+          if (part.kind === "clarify")
+            return (
+              <ClarifyCard
+                key={part.tool.toolCallId}
+                tool={part.tool}
+                conversationId={conversationId}
+                busy={busy}
+              />
+            )
+          if (part.kind === "agent")
+            return <AgentCards key={part.tool.toolCallId} tool={part.tool} />
+          if (part.kind === "tools")
+            return (
+              <div key={part.tools[0].toolCallId} className={cn(edge, hug)}>
+                <div className="w-full max-w-xl">
+                  <ToolGroup tools={part.tools} />
+                </div>
               </div>
-            </div>
-          ) : part.kind === "thinking" ? (
-            <ThinkingLine
-              key={part.key}
-              reasoning={part.text}
-              thinking={part.thinking}
-              pending={part.pending}
-              spanMs={part.spanMs}
-              className={huggingTools(parts, index)}
-            />
-          ) : part.kind === "media" ? (
-            <div key={part.at} className={COLUMN}>
-              <MediaTag conversationId={conversationId} paths={part.paths} />
-            </div>
-          ) : part.kind === "openui" ? (
-            <div key={part.at} className={COLUMN}>
-              <Suspense fallback={null}>
-                <OpenUIBlock
-                  source={part.block.source}
-                  open={part.block.open}
-                  streaming={part.block.streaming}
-                  draw={part.block.draw}
-                />
-              </Suspense>
-            </div>
-          ) : (
-            <Markdown
-              key={part.at}
-              className={cn(REPLY_INSET, "text-[15px] leading-relaxed", COLUMN)}
-            >
+            )
+          if (part.kind === "thinking")
+            return (
+              <ThinkingLine
+                key={part.key}
+                reasoning={part.text}
+                thinking={part.thinking}
+                pending={part.pending}
+                spanMs={part.spanMs}
+                className={cn(REPLY_INSET, hug)}
+              />
+            )
+          if (part.kind === "media")
+            return (
+              <div key={part.at} className={edge}>
+                <MediaTag conversationId={conversationId} paths={part.paths} />
+              </div>
+            )
+          if (part.kind === "openui")
+            return (
+              <div key={part.at} className={edge}>
+                <Suspense fallback={null}>
+                  <OpenUIBlock
+                    source={part.block.source}
+                    open={part.block.open}
+                    streaming={part.block.streaming}
+                    draw={part.block.draw}
+                  />
+                </Suspense>
+              </div>
+            )
+          return (
+            <Markdown key={part.at} className={cn(edge, "text-[15px] leading-relaxed")}>
               {part.text}
             </Markdown>
-          ),
-        )}
+          )
+        })}
         {children}
       </MessageContent>
     </MessageRow>

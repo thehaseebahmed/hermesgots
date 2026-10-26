@@ -11,12 +11,6 @@ const LIST_ITEM = /^( *)([*+-]|[0-9]{1,9}[.)])( +|$)/
 const ID = /^# id: ([a-z0-9-]{1,40})$/
 export const INFO = "openui-lang"
 
-/**
- * The inset a reply's text carries, and the one its interface takes beside it: with both, a block
- * starting to draw moves nothing and its edges land on the text's.
- */
-export const REPLY_INSET = "px-1"
-
 function fenceOf(line: string) {
   const match = FENCE.exec(line.replace(/\r$/, ""))
   if (!match) return null

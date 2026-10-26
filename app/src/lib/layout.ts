@@ -11,3 +11,10 @@ export const COLUMN = "mx-auto w-full max-w-[736px]"
  * 16px gutters either side of the text, so a card capped here frames the text measure exactly.
  */
 export const COLUMN_BOX = "mx-auto w-full max-w-3xl"
+
+/**
+ * The inset every part of a reply stands on — its text, the interface a block draws, the rows that
+ * account for its work — so one edge serves them all and a block starting to draw moves nothing
+ * (ADR 0058). A card fills COLUMN_BOX to its own gutters instead (ADR 0047).
+ */
+export const REPLY_INSET = "px-1"
