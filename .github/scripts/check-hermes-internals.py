@@ -7,7 +7,10 @@ intro, the batch header, the truncation note and its Status-line mark, the itera
 machine-provenance footer are Hermes's sentences, composed here rather than imported, and three of
 its internals are read by name (``_active_subagents``, ``_run_statuses``, ``interrupt_subagent``).
 Hermes renames and rewrites them without knowing this plugin exists, so this check says so on the
-next pull request, or on the weekly run, instead of on a user's wake.
+next pull request, or on the weekly run, instead of on a user's wake. The app's compaction seam is
+the same bet in the other half of the repo: three sentences Hermes writes into ``user`` rows at a
+compression boundary with no flag to mark them, matched off the row's text by
+``app/src/lib/compaction-seam.ts``, and the item-line shape its snapshot is recognised by.
 
 Everything here reads source text — a substring of a Hermes file, a module-level string constant, or
 the same on the plugin side — so it runs against any checkout with no host and no network. The
@@ -50,6 +53,8 @@ ANCHORS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
     (("tools/process_registry_notifications.py",), "The subagent did not complete successfully (status="),
     # The nudge a truncated child's transcript is recognized by, on both sides.
     (("agent/context_compressor.py",), "You've reached the maximum number of tool-calling iterations allowed"),
+    # The status markers the app's snapshot check reads an item line by.
+    (("tools/todo_tool.py",), '_STATUS_MARKERS = {"completed": "[x]"'),
 )
 
 # Hermes's own constants, read out of the checkout as they are: they are what the plugin's copies are
@@ -57,11 +62,19 @@ ANCHORS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
 FOOTER_REL = "gateway/run_notifications.py"
 NUDGE_REL = "agent/context_compressor.py"
 NOTICE_REL = "tools/process_registry_notifications.py"
+REPLAY_REL = "agent/context_compressor.py"
+TODO_REL = "tools/todo_tool.py"
+RELOAD_REL = "agent/conversation_compression.py"
 
 CONSTANTS: Tuple[Tuple[str, str, str, str], ...] = (
     (FOOTER_REL, "INTERNAL_NOTIFICATION_FOOTER", "footer", "the machine-provenance footer"),
     (NUDGE_REL, "MAX_ITERATIONS_SUMMARY_REQUEST", "nudge", "the iteration nudge"),
     (NOTICE_REL, "_TRUNCATED_SUMMARY_NOTE", "note", "the truncation note"),
+    # The compaction seam the app reads off a `user` row's text: no flag crosses the store, so these
+    # sentences are what the fold matches, and what a reworded Hermes has to fail on.
+    (REPLAY_REL, "_INFLIGHT_TASK_REPLAY_HEADER", "replay", "the restatement's header"),
+    (TODO_REL, "TODO_INJECTION_HEADER", "snapshot", "the preserved task list's header"),
+    (RELOAD_REL, "_PRUNED_SKILL_RELOAD_NOTICE_HEADER", "reload", "the reload notice's header"),
 )
 
 # The plugin's copies. Each is compared, character for character, with the value the checkout holds
@@ -76,6 +89,22 @@ COPIES: Tuple[Tuple[str, str, str], ...] = (
     ("ITERATION_NUDGE", "nudge", "the iteration nudge a child's transcript is recognized by"),
 )
 
+# The app's copies of the same sentences, in one module of its own (`app/src/lib/compaction-seam.ts`):
+# the fold matches them off the row's text because Hermes stores no flag, so a sentence Hermes rewords
+# has to fail here rather than on a transcript that draws the host's notes as the user's message.
+APP_SEAM_REL = "app/src/lib/compaction-seam.ts"
+APP_COPIES: Tuple[Tuple[str, str, str], ...] = (
+    ("REPLAY_HEADER", "replay", "the restatement's header"),
+    ("TASK_SNAPSHOT_HEADER", "snapshot", "the preserved task list's header"),
+    ("RELOAD_NOTICE_HEADER", "reload", "the reload notice's header"),
+)
+
+# Compared as an opening rather than whole: the app keys on the notice's first sentence to tell the
+# notice from a message quoting its header, and that is as much of the body as the rule needs.
+APP_OPENINGS: Tuple[Tuple[str, str, str], ...] = (
+    ("RELOAD_NOTICE_BODY", "reloadBody", "the notice's own opening"),
+)
+
 # The plugin's own half of the names above: a rename here would leave the checks below passing while
 # the plugin stopped reading what they guard.
 PLUGIN_NAMES: Tuple[Tuple[str, str], ...] = (
@@ -84,7 +113,7 @@ PLUGIN_NAMES: Tuple[Tuple[str, str], ...] = (
     ("interrupt_subagent", "core's per-child stop"),
 )
 
-TOTAL = len(ANCHORS) + len(CONSTANTS) + len(COPIES) + len(PLUGIN_NAMES)
+TOTAL = len(ANCHORS) + len(CONSTANTS) + len(COPIES) + len(APP_COPIES) + len(APP_OPENINGS) + len(PLUGIN_NAMES)
 
 _OPENING = re.compile(r"(?:[rRbBuUfF]{0,2})('''|\"\"\"|'|\")")
 _SPACE = " \t\r\n\f\v"
@@ -191,6 +220,22 @@ def _constant(src: str, name: str) -> Optional[str]:
     return "".join(parts) or None
 
 
+def _ts_constant(src: str, name: str) -> Optional[str]:
+    """The text an exported ``const NAME = "..."`` carries, whether or not it wraps below the ``=``.
+
+    TypeScript spells a long sentence as one literal, which Prettier moves onto the line after the
+    assignment; there is no implicit concatenation to join the way Python has one.
+    """
+    match = re.search(r"(?m)^export const " + re.escape(name) + r"\s*=\s*", src)
+    if not match:
+        return None
+    pos = match.end()
+    while pos < len(src) and src[pos] in _SPACE:
+        pos += 1
+    piece = _read_string(src, pos)
+    return piece[0] if piece else None
+
+
 def _status_mark(src: str) -> Optional[str]:
     """The Status line's truncation suffix, which core appends inline rather than naming."""
     match = re.search(r'"(\s*\[TRUNCATED:[^"\n]*max_iterations[^"\n]*\])"', src)
@@ -295,6 +340,13 @@ def main(argv: List[str]) -> int:
     derive("mark", NOTICE_REL, notice, _status_mark, "the Status line's truncation mark")
     for rel, name, key, what in CONSTANTS:
         derive(key, rel, sourced(rel), lambda src, name=name: _constant(src, name), what)
+    derive(
+        "reloadBody",
+        RELOAD_REL,
+        sourced(RELOAD_REL),
+        lambda src: _joined(src, '"The task list above crossed'),
+        "the reload notice's own opening",
+    )
 
     # The plugin side: the same names, and the same sentences.
     delegation = plugin / "delegation.py"
@@ -322,6 +374,41 @@ def main(argv: List[str]) -> int:
                 failures.append(
                     f"plugin:delegation.py: {constant} ({what}) is not what hermes:{rel} writes — "
                     f"hermes {expected!r} plugin {value!r}"
+                )
+
+    # The app side: the compaction seam, in its own module beside the plugin.
+    seam = read(plugin.parent / APP_SEAM_REL)
+    if seam is None:
+        failures.append(f"app:{APP_SEAM_REL}: missing file")
+    else:
+
+        def app_pair(constant: str, key: str, what: str) -> Optional[Tuple[str, str, str]]:
+            """The app's copy, the host's text and the file it came from: ``None`` once reported."""
+            value = _ts_constant(seam, constant)
+            if value is None:
+                failures.append(f"app:{APP_SEAM_REL}: missing constant {constant} ({what})")
+                return None
+            if key not in derived:
+                failures.append(
+                    f"app:{APP_SEAM_REL}: {constant} ({what}) compares against unknown check {key!r}"
+                )
+                return None
+            expected, rel = derived[key]
+            return value, expected, rel
+
+        for constant, key, what in APP_COPIES:
+            pair = app_pair(constant, key, what)
+            if pair and _canonical(pair[0]) != _canonical(pair[1]):
+                failures.append(
+                    f"app:{APP_SEAM_REL}: {constant} ({what}) is not what hermes:{pair[2]} writes — "
+                    f"hermes {pair[1]!r} app {pair[0]!r}"
+                )
+        for constant, key, what in APP_OPENINGS:
+            pair = app_pair(constant, key, what)
+            if pair and not _canonical(pair[1]).startswith(_canonical(pair[0])):
+                failures.append(
+                    f"app:{APP_SEAM_REL}: {constant} ({what}) does not open what hermes:{pair[2]} "
+                    f"writes — hermes {pair[1]!r} app {pair[0]!r}"
                 )
 
     if failures:
