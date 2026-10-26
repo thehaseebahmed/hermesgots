@@ -53,13 +53,16 @@ export interface AgentCall {
 /** What a call's action is read from, for the tools whose words are the action they took. */
 export type ActionCall = Pick<AgentCall, "action" | "label">
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
 /**
  * The action a call's arguments name, ready to stamp: trimmed, lower-cased, and undefined where they
  * name none (a spawn by its goal alone) or aren't an object at all.
  */
 export function actionOf(args: unknown): string | undefined {
-  if (!args || typeof args !== "object" || Array.isArray(args)) return undefined
-  const action = (args as { action?: unknown }).action
+  if (!isRecord(args)) return undefined
+  const action = args.action
   if (typeof action !== "string") return undefined
   return action.trim().toLowerCase() || undefined
 }
@@ -72,11 +75,53 @@ export function actionOf(args: unknown): string | undefined {
  */
 export function controlWords(args: unknown): string | undefined {
   const action = actionOf(args)
-  if (!isControl(action) || !args || typeof args !== "object") return undefined
-  const id = (args as { subagent_id?: unknown }).subagent_id
+  if (!isControl(action) || !isRecord(args)) return undefined
+  const id = args.subagent_id
   const named = id === undefined || id === null ? "" : String(id).trim()
   return named ? `${action} ${named}` : action
 }
+
+/** Whitespace and newlines collapsed to single spaces, as Hermes's `_oneline` does. */
+const oneline = (text: string) => text.replace(/\s+/g, " ").trim()
+
+/** How much of each goal a batch preview shows: `_preview_delegate_task`'s per-goal cut. */
+const GOAL_PREVIEW_CHARS = 40
+
+/** A task's goal as a batch preview shows it, `?` where the model sent none. */
+function goalPreview(goal: unknown) {
+  if (goal === undefined || goal === null) return "?"
+  const words = oneline(String(goal))
+  if (!words) return "?"
+  return words.length <= GOAL_PREVIEW_CHARS ? words : `${words.slice(0, GOAL_PREVIEW_CHARS - 3)}...`
+}
+
+/**
+ * The words Hermes gives a batch in its preview (`_preview_delegate_task` in `agent/display.py`):
+ * `"N tasks: goal1 | goal2"`, each goal one line and cut short, or `"N parallel tasks"` where the
+ * batch names no goal. Undefined for a call that isn't a batch, whose label is its own to derive.
+ */
+export function batchWords(args: unknown): string | undefined {
+  if (!isRecord(args)) return undefined
+  const tasks = args.tasks
+  if (!Array.isArray(tasks) || !tasks.length) return undefined
+  const goals = tasks.filter(isRecord).map((task) => goalPreview(task.goal))
+  const count = goals.length
+  return count ? `${count} tasks: ${goals.join(" | ")}` : `${tasks.length} parallel tasks`
+}
+
+/** Whether these arguments set a subagent to work: the `tasks` a batch was given, or a `goal`. */
+export function spawnInArgs(args: unknown): boolean {
+  if (!isRecord(args)) return false
+  if (Array.isArray(args.tasks) && args.tasks.length > 0) return true
+  const goal = args.goal
+  return typeof goal === "string" && goal.trim().length > 0
+}
+
+/**
+ * `"spawn"` where these arguments set a subagent to work, so a card never has to read a label.
+ */
+export const spawnStamp = (tool: string, args: unknown): "spawn" | undefined =>
+  tool === DELEGATE_TOOL && spawnInArgs(args) ? SPAWN : undefined
 
 /**
  * The control action a stored preview's words name — the action, and at most the id it names, which
@@ -147,10 +192,7 @@ function spawnedByEnvelope(words: string): boolean {
   if (!fields) return false
   const action = actionOf(fields)
   if (action !== undefined) return action === SPAWN
-  const tasks = fields.tasks
-  if (Array.isArray(tasks) && tasks.length > 0) return true
-  const goal = fields.goal
-  return typeof goal === "string" && goal.trim().length > 0
+  return spawnInArgs(fields)
 }
 
 /**
