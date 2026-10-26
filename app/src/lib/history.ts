@@ -43,10 +43,10 @@ const MAX_SKIPS = 10
 
 /** Where Hermes names no primary argument: the first of these the call carried is its label. */
 const FALLBACK_ARGS = ["query", "text", "command", "path", "name", "prompt", "code", "goal"]
-export const MAX_LABEL_CHARS = 4000
+export const MAX_TEXT_CHARS = 4000
 
 const clip = (text: string) =>
-  text.length > MAX_LABEL_CHARS ? `${text.slice(0, MAX_LABEL_CHARS)}…` : text
+  text.length > MAX_TEXT_CHARS ? `${text.slice(0, MAX_TEXT_CHARS)}…` : text
 
 function parseArgs(value: unknown): unknown {
   if (typeof value !== "string") return value
@@ -82,7 +82,7 @@ function argsLabel(name: string, args: unknown) {
     const control = controlWords(record)
     if (control) return control
     // A batch is worded as Hermes previews it, so its label stays words a row can read. Left to the
-    // arguments fallback it is the raw JSON, which a fan-out pushes past MAX_LABEL_CHARS: clipped, the
+    // arguments fallback it is the raw JSON, which a fan-out pushes past MAX_TEXT_CHARS: clipped, the
     // unfinished `tasks` array proved no spawn and the call drew as an ordinary row.
     const batch = batchWords(record)
     if (batch) return batch

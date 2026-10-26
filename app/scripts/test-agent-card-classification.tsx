@@ -11,7 +11,7 @@ import { MessageItem } from "@/components/chat/message-item"
 import { AgentsContext, CARD_WINDOW_S } from "@/lib/agents"
 import type { Message, ToolEvent } from "@/lib/db"
 import type { DelegatedAgent, HermesConfig, SessionMessage } from "@/lib/hermes"
-import { MAX_LABEL_CHARS, toMessages } from "@/lib/history"
+import { MAX_TEXT_CHARS, toMessages } from "@/lib/history"
 import { controlAction, DELEGATE_TOOL, spawnedAgent } from "@/lib/spawn"
 import { click, connection, findAll, find, json, mount, settle, text } from "./component-kit.tsx"
 
@@ -221,7 +221,7 @@ test("the transcript stamps what each call did, and words a control call as it s
 
 test("a fan-out too long for its arguments to survive as a label still draws its cards", async () => {
   // The session this came from: a 26k-char, 7-agent review fan-out. As raw JSON its label was
-  // clipped at MAX_LABEL_CHARS, the unfinished `tasks` array read as no spawn, and the call drew as an
+  // clipped at MAX_TEXT_CHARS, the unfinished `tasks` array read as no spawn, and the call drew as an
   // ordinary row — no cards, while the plugin's list still counted the 7 running.
   const goals = [
     "Review this diff for CODE REUSE problems only.",
@@ -235,7 +235,7 @@ test("a fan-out too long for its arguments to survive as a label still draws its
   const args = JSON.stringify({
     tasks: goals.map((goal) => ({ goal, context: "x".repeat(2000) })),
   })
-  assert.ok(args.length > MAX_LABEL_CHARS, "long enough that a JSON label would clip")
+  assert.ok(args.length > MAX_TEXT_CHARS, "long enough that a JSON label would clip")
   const [reply] = toMessages("c-1", "s-1", [
     {
       id: 1,

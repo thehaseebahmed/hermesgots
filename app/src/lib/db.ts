@@ -308,8 +308,9 @@ export interface ToolEvent {
   result?: string
   /**
    * The action the call's arguments named, lower-cased ("list", "ship") — or `spawn` where they set
-   * a subagent to work — stamped where the arguments were in hand: the transcript parse and the live
-   * stream. Absent on a call whose arguments named none, and on every row stored before it was
+   * a subagent to work. The transcript parse stamps both, where the arguments are in hand; a live
+   * stream stamps only the control words the host's preview names, so a spawn's arrives with the
+   * transcript. Absent on a call whose arguments named none, and on every row stored before it was
    * stamped — a delegation's card-or-row decision and a pull request's or cron call's words are read
    * from it (ADR 0053).
    */

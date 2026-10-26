@@ -53,13 +53,16 @@ export interface AgentCall {
 /** What a call's action is read from, for the tools whose words are the action they took. */
 export type ActionCall = Pick<AgentCall, "action" | "label">
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
 /**
  * The action a call's arguments name, ready to stamp: trimmed, lower-cased, and undefined where they
  * name none (a spawn by its goal alone) or aren't an object at all.
  */
 export function actionOf(args: unknown): string | undefined {
-  if (!args || typeof args !== "object" || Array.isArray(args)) return undefined
-  const action = (args as { action?: unknown }).action
+  if (!isRecord(args)) return undefined
+  const action = args.action
   if (typeof action !== "string") return undefined
   return action.trim().toLowerCase() || undefined
 }
@@ -72,14 +75,11 @@ export function actionOf(args: unknown): string | undefined {
  */
 export function controlWords(args: unknown): string | undefined {
   const action = actionOf(args)
-  if (!isControl(action) || !args || typeof args !== "object") return undefined
-  const id = (args as { subagent_id?: unknown }).subagent_id
+  if (!isControl(action) || !isRecord(args)) return undefined
+  const id = args.subagent_id
   const named = id === undefined || id === null ? "" : String(id).trim()
   return named ? `${action} ${named}` : action
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
 
 /** Whitespace and newlines collapsed to single spaces, as Hermes's `_oneline` does. */
 const oneline = (text: string) => text.replace(/\s+/g, " ").trim()
@@ -99,10 +99,6 @@ function goalPreview(goal: unknown) {
  * The words Hermes gives a batch in its preview (`_preview_delegate_task` in `agent/display.py`):
  * `"N tasks: goal1 | goal2"`, each goal one line and cut short, or `"N parallel tasks"` where the
  * batch names no goal. Undefined for a call that isn't a batch, whose label is its own to derive.
- *
- * A batch carries no `goal`, so this is the only shape whose label can't come from the primary
- * argument — and the raw arguments are no fallback, since they run past the clip that would cut the
- * `tasks` array in half (ADR 0053).
  */
 export function batchWords(args: unknown): string | undefined {
   if (!isRecord(args)) return undefined
