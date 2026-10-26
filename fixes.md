@@ -2337,3 +2337,79 @@ rows do, and only for the calls whose label was a title.
 
 Found by the review pass on the agent-card classification change (ADR 0053). It does not block the
 pull request.
+
+---
+
+# Deferred fixes from the review passes on the Compaction divider
+
+Four review passes over `fix(hermes): draw the Compaction divider on every device` — code reuse,
+code quality, efficiency and altitude — turned up two changes too wide for this branch. They are
+recorded here instead of applied: each needs a schema or a wire contract this branch doesn't own.
+
+Everything else the four passes found is applied on the branch rather than filed. The real defect
+among them: `_in_place` probed for the `messages` *table* but queried the `_compressed_summary`
+*column*, inside the rotation walk's own `try`, so a store from a Hermes predating in-place
+compression answered `None` for the whole route — silently losing the rotation marks that worked
+before this branch, since the app reads `None` as "unknown" and keeps what it has. The probe is now
+`PRAGMA table_info(messages)` on the column, the in-place read has its own
+`try/except sqlite3.Error` logged at warning, and a test pins a pre-in-place store keeping its
+rotation marks. Beside it: the per-session `SELECT` in a loop (bounded by `COMPRESSION_DEPTH`, 1000)
+is one `IN (...)` query, the duplicated `lineage`/`walked` lists are one list, the two mark shapes
+are two lists merged after sizing rather than one list probed with a `""` sentinel key, the plugin
+tests' positional seven-tuples are one `message()` builder, and the component test now calls
+`seedChat`, `until` and `findAll` from `component-kit.tsx` instead of re-spelling them, dropping the
+label regexes and `items > 0` premises that `test-compaction-divider.tsx` and `test-compactions.mjs`
+already own. Placement also moved onto the host's own row time (`hermesAt`, falling back to
+`createdAt`), since `history.ts` floors `createdAt` forward on catch-up and could push a divider a
+row early — the millisecond mirror `_ms` stops being the only thing holding that line.
+
+## Careful
+
+### 1. An in-place compaction's divider carries no size
+
+`plugin/compactions.py:78` sizes only the rotation marks: `_sizes` is keyed by session id, and an
+in-place mark has no session of its own to name, so the default compression mode draws a bare
+`Compaction` divider forever while a rotated host still says `168k of 200k`. The figure is not
+unknown to the system — `plugin/context.py` upserts it on every call — but the `context` table's
+primary key is `session_id` (`plugin/store.py:126`), so each call overwrites the pre-compaction
+number before anything can read it.
+
+- Cost: the divider's main signal is missing on the path most hosts actually run, and differs by
+  Hermes config; a reader can't tell a 15k compaction from a 190k one where it matters most.
+- Suggested fix: capture the size where the compaction happens rather than deriving it later — a row
+  per compaction (a `compaction_sizes` table, or `context` keyed by session and time) written by the
+  `post_api_request` hook when that session's summary count moves, the previous call's
+  `prompt_tokens` being the context just before.
+- Why it is risky: a schema plus a hook on the host, which has to stay correct while the app is
+  closed, so it is plugin work with its own migration and its own tests — a task, not a cleanup.
+
+### 2. Placement infers the row from a timestamp instead of being told it
+
+`app/src/lib/compactions.ts:28` finds the divider's row by comparing times, which is why both the
+plugin's millisecond rounding (`_ms`) and the app's `hermesAt` fallback exist: two modules encoding
+one comparison rule across two languages. The plugin reads the transcript and already knows which
+row is the summary, so it could name the first row written after it outright.
+
+- Cost: any drift between the two encodings silently misplaces a divider, and the rounding rule has
+  to be re-justified at every new caller. The current pair is correct and proven against a copy of a
+  real store, but it is agreement by convention rather than by construction.
+- Suggested fix: have the route answer the summary's row id and have the app match it against
+  `hermesRowId` (`h-<session>-<row>`), making placement exact rather than approximate.
+- Why it is risky: it changes the `compactions` wire contract, so it needs a plugin version, an
+  older-plugin fallback to the timestamp path, and the app's own migration of stored marks.
+
+## Not entries
+
+- `compactions.read` still carries its own copy of `sessions.chat_session`'s lineage walk (the
+  duplication predates this branch, blame `02d3925c`). A single `_lineage()` in `sessions.py`
+  returning the walked path would serve both callers and keep the fork rule in one place — worth
+  doing the next time that walk moves, not from a cleanup pass over an unrelated change.
+- A rotated chat may report its compaction twice (once from the parent's `ended_at`, once from the
+  child's own summary row, which Hermes flags). The app collapses two marks in one gap to a single
+  divider, so the cost is bytes rather than pixels, and no store reachable here has a rotated chat
+  to confirm it on — left alone rather than fixed blind.
+
+---
+
+Found by the four review passes on the Compaction divider change. The defect they turned up (the
+column probe above) is fixed on the branch; the two entries above do not block the pull request.

@@ -39,14 +39,12 @@ def read(home: Path, session_id: str) -> Optional[List[Dict[str, Any]]]:
     conn = _open_state(home)
     if conn is None:
         return []
-    found: List[Dict[str, Any]] = []
-    lineage: List[str] = []
+    rotated: List[Dict[str, Any]] = []
     walked = [session_id]
     try:
         with closing(conn):
             current = session_id
             for _ in range(COMPRESSION_DEPTH):
-                lineage.append(current)
                 row = conn.execute(
                     """SELECT child.parent_session_id AS parent_id,
                               parent.end_reason AS parent_end,
@@ -67,16 +65,17 @@ def read(home: Path, session_id: str) -> Optional[List[Dict[str, Any]]]:
                 ):
                     break
                 if isinstance(row["parent_ended"], (int, float)) and row["parent_ended"] > 0:
-                    found.append({"at": _ms(row["parent_ended"]), "session": parent_id})
+                    rotated.append({"at": _ms(row["parent_ended"]), "session": parent_id})
                 current = parent_id
                 walked.append(current)
-            found.extend(_in_place(conn, lineage))
+            in_place = _in_place(conn, walked)
     except sqlite3.Error:
         logger.debug("memento: couldn't read a chat's compactions", exc_info=True)
         return None
-    found.sort(key=lambda item: item["at"])
-    sizes = _sizes(home, [item["session"] for item in found if item.get("session")])
-    return [{"at": item["at"], **sizes.get(item.get("session") or "", {})} for item in found]
+    sizes = _sizes(home, [item["session"] for item in rotated])
+    marks = [{"at": item["at"], **sizes.get(item["session"], {})} for item in rotated] + in_place
+    marks.sort(key=lambda item: item["at"])
+    return marks
 
 
 def _ms(seconds: float) -> int:
@@ -89,7 +88,7 @@ def _ms(seconds: float) -> int:
     return int(seconds * 1000 + 0.5)
 
 
-def _in_place(conn: sqlite3.Connection, lineage: List[str]) -> List[Dict[str, Any]]:
+def _in_place(conn: sqlite3.Connection, walked: List[str]) -> List[Dict[str, Any]]:
     """Each in-place compaction in those sessions' transcripts, as ``{ at }`` in ms.
 
     ``at`` is the summary row's own time — the moment the compaction ran, which is also the row
@@ -99,25 +98,24 @@ def _in_place(conn: sqlite3.Connection, lineage: List[str]) -> List[Dict[str, An
     written at it, so all of them sit above the line and the first turn afterwards sits below.
     Dating the mark to the last row the compaction archived instead would drop the divider inside
     the carried turns, minutes of chat before the context was actually compacted.
+
+    Best effort on its own: a transcript this read can't answer — a store from before in-place
+    compression flagged its rows, or one too busy to open — costs these marks and never the
+    rotation ones the walk already collected.
     """
-    found: List[Dict[str, Any]] = []
-    table = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages'"
-    ).fetchone()
-    if table is None:
-        # A store with no transcript has nowhere to leave an in-place mark.
-        return found
-    for session in lineage:
+    try:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(messages)")}
+        if "_compressed_summary" not in columns:
+            return []
         rows = conn.execute(
-            "SELECT timestamp FROM messages WHERE session_id = ? AND _compressed_summary = 1"
-            " ORDER BY id",
-            (session,),
+            "SELECT timestamp FROM messages WHERE session_id IN ({}) AND _compressed_summary = 1"
+            " ORDER BY id".format(",".join("?" * len(walked))),
+            walked,
         ).fetchall()
-        for row in rows:
-            when = row[0]
-            if isinstance(when, (int, float)) and when > 0:
-                found.append({"at": _ms(when)})
-    return found
+    except sqlite3.Error:
+        logger.warning("memento: couldn't read a chat's in-place compactions", exc_info=True)
+        return []
+    return [{"at": _ms(row[0])} for row in rows if isinstance(row[0], (int, float)) and row[0] > 0]
 
 
 def _sizes(home: Path, sessions: List[str]) -> Dict[str, Dict[str, int]]:

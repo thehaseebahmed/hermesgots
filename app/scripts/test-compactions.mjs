@@ -44,10 +44,16 @@ test("one before every loaded message stands above the first", () => {
   assert.deepEqual(marked(turn(1, 100), [{ at: 50 }]), { before: ["u1"], trailing: false })
 })
 
-test("several before every loaded message are one divider, the first's", () => {
+test("one is placed on the host's row time, not the row's floored createdAt", () => {
+  // A catch-up floors `createdAt` forward past the mark (history.ts); the host's own time the row
+  // kept decides, so a floor can't push the divider a row early.
+  const thread = [{ ...message("u1", "user", 201), hermesAt: 199 }, ...turn(2, 300)]
+  assert.deepEqual(marked(thread, [{ at: 200 }]), { before: ["u2"], trailing: false })
+})
+
+test("several before every loaded message are one divider", () => {
   const thread = turn(1, 100)
   assert.deepEqual(marked(thread, [{ at: 20 }, { at: 50 }]), { before: ["u1"], trailing: false })
-  assert.deepEqual(compactionMarks(thread, [{ at: 20 }, { at: 50 }]).before.get("u1"), { at: 20 })
 })
 
 test("no compactions, or none known, mark nothing", () => {
@@ -61,6 +67,8 @@ test("each divider carries the compaction it marks, the first of a gap", () => {
   const first = { at: 120, tokens: 168000, window: 200000 }
   const marks = compactionMarks(thread, [first, { at: 130, tokens: 90000 }])
   assert.deepEqual(marks.before.get("u2"), first)
+  const head = compactionMarks(turn(1, 100), [{ at: 20 }, { at: 50 }])
+  assert.deepEqual(head.before.get("u1"), { at: 20 })
   const last = compactionMarks(thread, [{ at: 500, tokens: 7 }])
   assert.deepEqual(last.trailing, { at: 500, tokens: 7 })
 })

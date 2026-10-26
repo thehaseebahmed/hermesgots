@@ -35,6 +35,20 @@ def store(home: Path, rows, messages=()) -> None:
         conn.commit()
 
 
+def message(
+    id: int,
+    at: float,
+    *,
+    session: str = "s1",
+    role: str = "user",
+    active: int = 1,
+    compacted: int = 0,
+    summary: int = 0,
+) -> tuple:
+    """One transcript row: the flags say how the compaction left it, not how the read counts it."""
+    return (id, session, role, at, active, compacted, summary)
+
+
 class CompactionsTest(unittest.TestCase):
     def setUp(self) -> None:
         self.home = temp_hermes_home(self)
@@ -98,6 +112,24 @@ class CompactionsTest(unittest.TestCase):
         )
         self.assertEqual(compactions.read(self.home, "s2"), [])
 
+    def test_a_store_from_before_in_place_compression_keeps_its_rotation_marks(self) -> None:
+        # Hermes predating in-place compression has a `messages` table without the summary flag:
+        # the rotation marks must still be read, not the whole answer going unknown.
+        store(
+            self.home,
+            [
+                ("s1", None, "compression", 100.0, None, None),
+                ("s2", "s1", None, None, None, None),
+            ],
+        )
+        with closing(sqlite3.connect(self.home / "state.db")) as conn:
+            conn.execute(
+                "CREATE TABLE messages (id INTEGER PRIMARY KEY, session_id TEXT, role TEXT,"
+                " timestamp REAL, active INTEGER DEFAULT 1, compacted INTEGER DEFAULT 0)"
+            )
+            conn.commit()
+        self.assertEqual(compactions.read(self.home, "s2"), [{"at": 100_000}])
+
     def test_an_in_place_compaction_marks_the_session_it_happened_in(self) -> None:
         # The default compression is in place (Hermes's `compression.in_place`): one session id, the
         # rows it took away soft-archived, and the summary that starts the live context flagged
@@ -106,10 +138,10 @@ class CompactionsTest(unittest.TestCase):
             self.home,
             [("s1", None, None, None, None, None)],
             [
-                (1, "s1", "user", 100.0, 0, 1, 0),
-                (2, "s1", "assistant", 110.0, 0, 1, 0),
-                (3, "s1", "user", 500.0, 1, 0, 1),
-                (4, "s1", "assistant", 600.0, 1, 0, 0),
+                message(1, 100.0, active=0, compacted=1),
+                message(2, 110.0, role="assistant", active=0, compacted=1),
+                message(3, 500.0, summary=1),
+                message(4, 600.0, role="assistant"),
             ],
         )
         # The mark is the summary's own time — the moment the compaction ran — so the divider
@@ -126,8 +158,8 @@ class CompactionsTest(unittest.TestCase):
             self.home,
             [("s1", None, None, None, None, None)],
             [
-                (1, "s1", "user", 5.0, 0, 1, 0),
-                (2, "s1", "assistant", 6.0009, 1, 0, 1),
+                message(1, 5.0, active=0, compacted=1),
+                message(2, 6.0009, role="assistant", summary=1),
             ],
         )
         self.assertEqual(
@@ -144,13 +176,13 @@ class CompactionsTest(unittest.TestCase):
             self.home,
             [("s1", None, None, None, None, None)],
             [
-                (1, "s1", "user", 100.0, 0, 1, 0),  # archived: what was summarized away
-                (2, "s1", "assistant", 480.0, 0, 0, 0),  # carried original, hidden
-                (3, "s1", "user", 490.0, 0, 0, 0),  # carried original, hidden
-                (4, "s1", "assistant", 480.0, 1, 0, 0),  # its copy, live
-                (5, "s1", "user", 490.0, 1, 0, 0),  # its copy, live
-                (6, "s1", "user", 500.0, 1, 0, 1),  # the summary: the compaction itself
-                (7, "s1", "assistant", 600.0, 1, 0, 0),  # first turn written after it
+                message(1, 100.0, active=0, compacted=1),  # archived: what was summarized away
+                message(2, 480.0, role="assistant", active=0),  # carried original, hidden
+                message(3, 490.0, active=0),  # carried original, hidden
+                message(4, 480.0, role="assistant"),  # its copy, live
+                message(5, 490.0),  # its copy, live
+                message(6, 500.0, summary=1),  # the summary: the compaction itself
+                message(7, 600.0, role="assistant"),  # first turn written after it
             ],
         )
         self.assertEqual(compactions.read(self.home, "s1"), [{"at": 500_000}])
@@ -162,13 +194,13 @@ class CompactionsTest(unittest.TestCase):
             self.home,
             [("s1", None, None, None, None, None)],
             [
-                (1, "s1", "user", 100.0, 0, 1, 0),
-                (2, "s1", "assistant", 110.0, 0, 1, 0),
-                (3, "s1", "user", 500.0, 0, 1, 1),
-                (4, "s1", "assistant", 600.0, 0, 1, 0),
-                (5, "s1", "user", 700.0, 0, 1, 0),
-                (6, "s1", "user", 800.0, 1, 0, 1),
-                (7, "s1", "assistant", 900.0, 1, 0, 0),
+                message(1, 100.0, active=0, compacted=1),
+                message(2, 110.0, role="assistant", active=0, compacted=1),
+                message(3, 500.0, active=0, compacted=1, summary=1),
+                message(4, 600.0, role="assistant", active=0, compacted=1),
+                message(5, 700.0, active=0, compacted=1),
+                message(6, 800.0, summary=1),
+                message(7, 900.0, role="assistant"),
             ],
         )
         self.assertEqual(compactions.read(self.home, "s1"), [{"at": 500_000}, {"at": 800_000}])
@@ -183,21 +215,21 @@ class CompactionsTest(unittest.TestCase):
                 ("s2", "s1", None, None, None, None),
             ],
             [
-                (1, "s2", "user", 200.0, 0, 1, 0),
-                (2, "s2", "assistant", 300.0, 0, 1, 0),
-                (3, "s2", "user", 700.0, 1, 0, 1),
-                (4, "s2", "assistant", 800.0, 1, 0, 0),
+                message(1, 200.0, session="s2", active=0, compacted=1),
+                message(2, 300.0, session="s2", role="assistant", active=0, compacted=1),
+                message(3, 700.0, session="s2", summary=1),
+                message(4, 800.0, session="s2", role="assistant"),
             ],
         )
         self.assertEqual(compactions.read(self.home, "s2"), [{"at": 100_000}, {"at": 700_000}])
 
-    def test_a_session_with_no_compaction_marks_nothing(self) -> None:
+    def test_a_live_row_with_no_summary_flag_is_not_a_mark(self) -> None:
         store(
             self.home,
             [("s1", None, None, None, None, None)],
             [
-                (1, "s1", "user", 100.0, 1, 0, 0),
-                (2, "s1", "assistant", 110.0, 1, 0, 0),
+                message(1, 100.0),
+                message(2, 110.0, role="assistant"),
             ],
         )
         self.assertEqual(compactions.read(self.home, "s1"), [])

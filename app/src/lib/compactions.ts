@@ -24,8 +24,11 @@ export interface CompactionMarks {
 export function compactionMarks(messages: Message[], compactions?: Compaction[]): CompactionMarks {
   const marks: CompactionMarks = { before: new Map() }
   if (!messages.length || !compactions?.length) return marks
+  // The host's own time where the row kept it: `createdAt` is this device's, and a catch-up can
+  // floor it forward past the mark, one row the wrong side of the line.
+  const at = (message: Message) => message.hermesAt ?? message.createdAt
   for (const compaction of compactions) {
-    const next = messages.find((message) => message.createdAt > compaction.at)
+    const next = messages.find((message) => at(message) > compaction.at)
     if (!next) marks.trailing ??= compaction
     else if (!marks.before.has(next.id)) marks.before.set(next.id, compaction)
   }

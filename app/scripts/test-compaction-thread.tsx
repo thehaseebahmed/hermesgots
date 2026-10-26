@@ -9,7 +9,7 @@ import test from "node:test"
 import { db, type Message } from "@/lib/db"
 import { ChatPage } from "@/routes/chat"
 
-import { botProfile, chatScreen, json, mount, seedSettings, settle } from "./component-kit.tsx"
+import { botProfile, chatScreen, findAll, json, mount, seedChat, until } from "./component-kit.tsx"
 
 const bot = botProfile("compaction")
 const FIRST = "first turn's work"
@@ -28,7 +28,14 @@ async function host(compactions: unknown[] = []) {
 }
 
 const turn: Message[] = [
-  { id: "ask-1", conversationId: "", role: "user", content: FIRST, status: "done", createdAt: 1_000 },
+  {
+    id: "ask-1",
+    conversationId: "",
+    role: "user",
+    content: FIRST,
+    status: "done",
+    createdAt: 1_000,
+  },
   {
     id: "reply-1",
     conversationId: "",
@@ -55,45 +62,28 @@ const turn: Message[] = [
   },
 ]
 
-/** What the thread drew, read while it is on the page: its rows, and where each divider landed. */
+/** What the thread drew, read while it is on the page: its dividers, and where one landed. */
 interface Drawn {
-  dividers: string[]
-  items: number
-  messages: number
+  dividers: number
   /** The row holding the divider, and the row holding the turn after the compaction. */
   place: { divider: number; second: number }
 }
 
-const dividers = () => [...document.querySelectorAll("[role=separator]")]
+const dividers = () => findAll("[role=separator]")
 
 async function screen(compactions: unknown[], id = "chat-1"): Promise<Drawn> {
   host(compactions)
-  await seedSettings()
-  await db.profiles.clear()
-  await db.profiles.put(bot)
-  await db.messages.clear()
-  await db.conversations.clear()
-  await db.conversations.put({
-    id,
-    profileId: bot.id,
-    title: "A chat",
-    hermesSessionId: `${id}-hermes`,
-    createdAt: 1,
-    updatedAt: 1,
-    changedAt: 1,
-  })
-  await db.messages.bulkPut(turn.map((message) => ({ ...message, conversationId: id })))
-  let seen: Drawn = { dividers: [], items: 0, messages: 0, place: { divider: -1, second: -1 } }
+  await seedChat({ id, messages: turn, profile: bot })
+  let seen: Drawn = { dividers: 0, place: { divider: -1, second: -1 } }
   await mount(chatScreen(id), async () => {
-    // The thread's markdown chunk is behind a lazy import; its rows land when it does.
+    await until(async () => findAll("[data-slot=message]").length > 0, "the thread's rows")
+    // The divider's words ride the markdown renderer, a lazy import on this route.
     await import("@/components/chat/markdown-renderer")
-    for (let tries = 0; tries < 20 && dividers().length === 0; tries += 1) await settle()
+    if (compactions.length) await until(async () => dividers().length > 0, "the divider")
     const drawn = dividers()
-    const items = [...document.querySelectorAll("[data-slot=message-scroller-item]")]
+    const items = findAll("[data-slot=message-scroller-item]")
     seen = {
-      dividers: drawn.map((one) => one.textContent?.trim() ?? ""),
-      items: items.length,
-      messages: document.querySelectorAll("[data-slot=message]").length,
+      dividers: drawn.length,
       place: {
         divider: items.findIndex((item) => drawn.some((one) => item.contains(one))),
         second: items.findIndex((item) => item.textContent?.includes(SECOND)),
@@ -105,10 +95,7 @@ async function screen(compactions: unknown[], id = "chat-1"): Promise<Drawn> {
 
 test("the compaction the host recorded draws its divider above the next message", async () => {
   const drawn = await screen([{ at: AT, tokens: 168_000, window: 200_000 }], "chat-divided")
-  assert.equal(drawn.items > 0, true, `the thread drew its rows (${drawn.messages} messages)`)
-  assert.equal(drawn.dividers.length, 1, `one divider, found ${drawn.dividers.length}`)
-  assert.match(drawn.dividers[0] ?? "", /^Compaction/, "it says what it marks")
-  assert.match(drawn.dividers[0] ?? "", /168k of 200k/, "and how full the context was")
+  assert.equal(drawn.dividers, 1, `one divider, found ${drawn.dividers}`)
   // Above the first message written after it, in that message's own row.
   assert.equal(drawn.place.divider, drawn.place.second, "it sits on the turn after the compaction")
   // And the device keeps the host's list, so a reload draws it again from what it has.
@@ -124,13 +111,11 @@ test("a device that loaded the chat after it was compacted still marks it", asyn
   // The second device's view: Hermes keeps the rows a compaction took away off the transcript, so
   // everything this one loads is newer than the mark and the divider stands above the first of them.
   const drawn = await screen([{ at: 900 }], "chat-fresh")
-  assert.equal(drawn.items > 0, true, `the thread drew its rows (${drawn.messages} messages)`)
-  assert.equal(drawn.dividers.length, 1, `one divider, found ${drawn.dividers.length}`)
+  assert.equal(drawn.dividers, 1, `one divider, found ${drawn.dividers}`)
   assert.equal(drawn.place.divider, 0, "it stands above the first message the device holds")
 })
 
 test("a chat the host never compacted draws nothing", async () => {
   const drawn = await screen([], "chat-open")
-  assert.equal(drawn.items > 0, true, `the thread drew its rows (${drawn.messages} messages)`)
-  assert.deepEqual(drawn.dividers, [], "no compaction, no divider")
+  assert.equal(drawn.dividers, 0, "no compaction, no divider")
 })
