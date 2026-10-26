@@ -1512,12 +1512,19 @@ again. The other is how a message reaches the middle of a turn at all — a plai
 live is stored as a *steer*, and the composer decides which it is from one local flag.
 
 One of the two findings below is applied since: the seam note a compaction writes no longer renders
-as the user's own message. The fold cuts the three headers Hermes writes for the model at the
+as the user's own message. The fold reads the three headers Hermes writes for the model at the
 boundary off a `user` row's text — the restatement's `[STILL IN PROGRESS …]`, the preserved
-`[Your active task list …]` snapshot, the `[Skills pruned …]` reload notice after it, each matched
-on its header's own line the way the host strips its snapshot — keeping only what the user typed,
-and a row carrying nothing but those notes draws nothing, closes nothing and starts no turn;
-`history-generations` now asserts the note draws nothing in the thread. What follows is the finding
+`[Your active task list …]` snapshot, the `[Skills pruned …]` reload notice after it, pinned in
+`app/src/lib/compaction-seam.ts` and held to Hermes's own constants by `hermes-internals-drift.yml`
+— keeping only what the user typed, and a row carrying nothing but those notes draws nothing, closes
+nothing and starts no turn. A header counts only with the payload the host writes under it (an item
+line, the notice's body, the restated request), so a message quoting the host's words stays the
+user's; that leaves the one residual this rule can't reach, a user who types the whole of the host's
+prose *and* its payload losing that message, which is what the shape is for. A device that had
+already drawn the bubble keeps it no longer: catch-up drops a message held for a row that folds to
+nothing, and rewrites one that drew a restatement's header. `scripts/test-compaction-seam.mjs`
+drives the rule, `test-compaction-seam.tsx` the fold and that repair, and `history-generations`
+asserts both notes draw nothing in a browser. What follows is the finding
 that remains.
 
 ## Risky
@@ -1570,11 +1577,11 @@ transcript (its rows carry the re-emitted compaction generations). The duplicati
 branch, the seam note since (above); the steer below is not, and the steer-as-a-plain-send model it
 sits inside is the user's setting rather than a defect. Both came out of reading the same transcript
 and a review of the fix rather than from a repro of their own: what is verified is the shape above —
-one local status decides the send's kind and a stop leaves it set, and a seam row Hermes writes as a
-`user` note is drawn as the user's message — read in the tree and matched against the transcript and
-the reporter's screenshot. The four chat flows (`chat-message`, `reattach`, `history-pages` and the
-branch's new `history-generations`) all pass, and none of them stops a reply and sends in the same
-breath; what a compaction's seam row draws is asserted by `history-generations` since the note fix.
+one local status decides the send's kind and a stop leaves it set — read in the tree and matched
+against the transcript and the reporter's screenshot. The four chat flows (`chat-message`,
+`reattach`, `history-pages` and the branch's new `history-generations`) all pass, and none of them
+stops a reply and sends in the same breath; what a compaction's seam row draws is asserted by
+`history-generations` since the note fix.
 
 # Deferred from the code review on the MCP tab
 

@@ -1,15 +1,23 @@
 /**
- * The seam a compaction leaves in the transcript, as the fold reads it: the host writes its own
- * bookkeeping into `user` rows at the boundary — the restated request under the `[STILL IN PROGRESS]`
- * header, the preserved task list, the pruned-skills reload notice — and none of it is the user's
- * message. The thread must draw only what the user actually typed: the request whole, and nothing
- * at all of a row that carries only the host's notes.
+ * A compaction's seam, as the thread draws it: the `user` row Hermes writes at the boundary carries
+ * its own bookkeeping — the restated request, the preserved task list, the pruned-skills reload
+ * notice — and only the request is the user's message. The rule itself is driven in
+ * `test-compaction-seam.mjs`; what this file holds is the fold over it, and the chat that drew the
+ * seam before the fold read it.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { toMessages } from "@/lib/history"
+import {
+  RELOAD_NOTICE_BODY,
+  RELOAD_NOTICE_HEADER,
+  REPLAY_HEADER,
+  TASK_SNAPSHOT_HEADER,
+} from "@/lib/compaction-seam"
+import { getMessages, type Message } from "@/lib/db"
+import { reconcileHistory, toMessages } from "@/lib/history"
 import type { SessionMessage } from "@/lib/hermes"
+import { botProfile, json, seedChat } from "./component-kit.tsx"
 
 const SESSION = "seam-session"
 const AT = 1_760_000_000
@@ -17,19 +25,17 @@ const AT = 1_760_000_000
 /** The request, as the user typed it: the one thing of the seam row the thread draws. */
 const REQUEST = "Discuss the plan first before implementing."
 
-/**
- * The host's three writes, word for word — the fold's match is textual, the same way the host's own
- * `_strip_stale_todo_snapshot` finds its header in content alone (the synthetic row flags never
- * cross the store):
- * - `agent/context_compressor.py` `_INFLIGHT_TASK_REPLAY_HEADER` (the restatement, line 1 of its row);
- * - `tools/todo_tool.py` `TODO_INJECTION_HEADER` (the task snapshot, folded after the real text);
- * - `agent/conversation_compression.py` `_PRUNED_SKILL_RELOAD_NOTICE_HEADER` (the notice, after it).
- */
-const REPLAY_HEADER =
-  "[STILL IN PROGRESS — this is the active request, restated after the compaction boundary because it was not finished yet. Continue it; do not start over.]"
-const TASK_SNAPSHOT_HEADER = "[Your active task list was preserved across context compression]"
-const RELOAD_NOTICE_HEADER =
-  "[Skills pruned during compression — reload before acting on these tasks]"
+/** The host's snapshot as `TodoStore.format_for_injection` writes it: a header, then its items. */
+const SNAPSHOT = [
+  TASK_SNAPSHOT_HEADER,
+  "- [>] 4. Wire waiting.ts and threads.ts (in_progress)",
+].join("\n")
+
+/** The notice as `_pruned_skill_reload_notice` writes it, its own body under the header. */
+const NOTICE = [
+  RELOAD_NOTICE_HEADER,
+  `${RELOAD_NOTICE_BODY} verbatim, but the skill instructions that governed it were pruned.`,
+].join("\n")
 
 /** A `user` row as the host writes it at the boundary. */
 const seamRow = (content: string, id = 51): SessionMessage => ({
@@ -47,50 +53,22 @@ const replyRow = (content: string, id: number): SessionMessage => ({
   timestamp: AT,
 })
 
-/** The row the screenshot shows: request restated, task snapshot and reload notice folded in. */
-const seamRowContent = [
-  `${REPLAY_HEADER}\n${REQUEST}`,
-  `${TASK_SNAPSHOT_HEADER}\n- [>] 4. Wire waiting.ts and threads.ts (in_progress)\n- [ ] 5. Red loop C (pending)`,
-  `${RELOAD_NOTICE_HEADER}\nThe task list above crossed the compression boundary verbatim, but the skill instructions that governed it were pruned.`,
-].join("\n\n")
-
-/** Everything the fold would draw for these rows, readable in a failure. */
+/** The thread these rows fold to, once, readable in a failure. */
 const drawn = (rows: SessionMessage[]) =>
   toMessages("c-1", SESSION, rows).map((m) => `${m.role}: ${m.content}`)
 
-test("the seam row draws the request as the user's message, never the seam's own text", () => {
-  const messages = toMessages("c-1", SESSION, [seamRow(seamRowContent)])
-  const users = messages.filter((m) => m.role === "user")
-  assert.equal(users.length, 1, `one user message, not a bubble of host notes: ${drawn([seamRow(seamRowContent)])}`)
-  assert.equal(users[0].content, REQUEST, "the request, whole, as the user typed it")
-  const all = JSON.stringify(messages)
-  for (const marker of [REPLAY_HEADER, TASK_SNAPSHOT_HEADER, RELOAD_NOTICE_HEADER])
-    assert.ok(!all.includes(marker), `no seam header reaches the thread: ${marker.slice(0, 48)}…`)
+test("the seam row draws the request, and nothing of the host's notes", () => {
+  const rows = [seamRow([`${REPLAY_HEADER}\n${REQUEST}`, SNAPSHOT, NOTICE].join("\n\n"))]
+  assert.deepEqual(drawn(rows), [`user: ${REQUEST}`], "the request alone, as the user typed it")
 })
 
-test("a task snapshot row of its own draws nothing at all", () => {
-  const rows = [seamRow(`${TASK_SNAPSHOT_HEADER}\n- [>] 4. Wire waiting.ts (in_progress)`, 44)]
-  assert.deepEqual(drawn(rows), [], `the host's note is not a message: ${drawn(rows)}`)
-})
-
-test("a reload notice of its own draws nothing at all", () => {
-  const rows = [seamRow(`${RELOAD_NOTICE_HEADER}\nLoad the skills before acting on these tasks.`, 45)]
-  assert.deepEqual(drawn(rows), [], `the host's note is not a message: ${drawn(rows)}`)
-})
-
-test("a restatement header with no request under it draws nothing", () => {
-  const rows = [seamRow(REPLAY_HEADER, 46)]
-  assert.deepEqual(drawn(rows), [], `a header alone is not a message: ${drawn(rows)}`)
-})
-
-test("a snapshot row between a reply and its continuation leaves the reply whole", () => {
-  // The boundary lands mid-run: the host's note follows the reply in progress and the run's next
-  // output follows the note. The note is nobody's message, so it must neither split the reply into
-  // two messages nor take a message of its own.
+test("a row carrying only the host's notes draws nothing, and leaves the reply whole", () => {
+  // The boundary lands mid-run: the note follows the reply in progress and the run's next output
+  // follows the note. It must neither split the reply into two messages nor take one of its own.
   const rows = [
     seamRow(REQUEST, 40),
     replyRow("Working through the plan", 41),
-    seamRow(`${TASK_SNAPSHOT_HEADER}\n- [>] 4. Wire waiting.ts (in_progress)`, 42),
+    seamRow(SNAPSHOT, 42),
     replyRow(" — starting with the fold.", 43),
   ]
   const messages = toMessages("c-1", SESSION, rows)
@@ -100,7 +78,7 @@ test("a snapshot row between a reply and its continuation leaves the reply whole
     `only the request is a message: ${drawn(rows)}`,
   )
   const replies = messages.filter((m) => m.role === "assistant")
-  assert.equal(replies.length, 1, `the note does not split the run's reply: ${drawn(rows)}`)
+  assert.equal(replies.length, 1, `the note does not split the reply: ${drawn(rows)}`)
   assert.equal(
     replies[0].content,
     "Working through the plan\n\n — starting with the fold.",
@@ -108,15 +86,63 @@ test("a snapshot row between a reply and its continuation leaves the reply whole
   )
 })
 
+test("a header with nothing under it is the user's own message", () => {
+  // Reporting this bug by pasting the note is the likeliest way a header arrives without its payload,
+  // and the host never writes one that way: the message must survive whole.
+  for (const header of [REPLAY_HEADER, TASK_SNAPSHOT_HEADER, RELOAD_NOTICE_HEADER])
+    assert.deepEqual(
+      drawn([seamRow(header, 46)]),
+      [`user: ${header}`],
+      `drawn whole: ${header.slice(0, 40)}…`,
+    )
+})
+
 test("a message that is not the seam keeps every word", () => {
-  // The match is textual, so what it must never catch: the user's own bracketed words.
-  const content = "Ship it — [x] list preserved, [like so] mid-sentence, and TODO in the README."
-  const messages = toMessages("c-1", SESSION, [seamRow(content, 47)])
-  assert.equal(messages[0]?.content, content, "an ordinary message draws untouched")
-  const quoted = `As the note said: "${TASK_SNAPSHOT_HEADER}" — but that was hours ago, keep the rest.`
-  assert.equal(
-    toMessages("c-1", SESSION, [seamRow(quoted, 48)])[0]?.content,
-    quoted,
-    "quoting the header mid-message still draws the whole message",
+  const ordinary = "Ship it — [x] list preserved, [like so] mid-sentence, and TODO in the README."
+  assert.deepEqual(drawn([seamRow(ordinary, 47)]), [`user: ${ordinary}`], "no header, no cut")
+  const quoted = `As the note said: "${TASK_SNAPSHOT_HEADER}" — that was hours ago.`
+  assert.deepEqual(
+    drawn([seamRow(quoted, 48)]),
+    [`user: ${quoted}`],
+    "a header mid-line is a quote",
   )
+  const reported = `Here is the row the app drew as a bubble:\n\n${TASK_SNAPSHOT_HEADER}\n\nThat is the bug I reported.`
+  assert.deepEqual(
+    drawn([seamRow(reported, 49)]),
+    [`user: ${reported}`],
+    "a header on its own line, with no items under it, is still the user's",
+  )
+})
+
+test("a chat that drew the seam before the fold read it stops showing it", async () => {
+  // The reporter's own chat: the bubble was drawn, so the device holds a message for the host's row.
+  // Catching up must drop the note's message and put the restatement's request in its place.
+  const profile = botProfile("compaction-seam")
+  const rows = [seamRow(SNAPSHOT, 44), seamRow(`${REPLAY_HEADER}\n${REQUEST}`, 51)]
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input))
+    if (/\/api\/sessions\/chat-1-hermes\/messages$/.test(url.pathname)) return json({ data: rows })
+    return json({ error: { message: "no route" } }, 404)
+  }) as unknown as typeof fetch
+  const ghost: Message = {
+    id: "h-chat-1-hermes-44",
+    conversationId: "chat-1",
+    role: "user",
+    content: SNAPSHOT,
+    status: "done",
+    createdAt: 10,
+  }
+  const restated: Message = {
+    id: "m-51",
+    conversationId: "chat-1",
+    role: "user",
+    content: `${REPLAY_HEADER}\n${REQUEST}`,
+    status: "done",
+    createdAt: 20,
+    hermesRowId: 51,
+  }
+  await seedChat({ id: "chat-1", profile, messages: [ghost, restated] })
+  await reconcileHistory("chat-1")
+  const after = (await getMessages("chat-1")).map((m) => `${m.role}: ${m.content}`)
+  assert.deepEqual(after, [`user: ${REQUEST}`], `the request alone is left: ${after.join(" | ")}`)
 })
