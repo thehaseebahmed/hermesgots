@@ -1,12 +1,18 @@
 """When a chat's context was compacted, for its thread to mark.
 
-Hermes compresses a long session by ending it with ``end_reason = 'compression'`` and continuing in a
+A chat's context is compacted in two ways, and the thread marks both. When Hermes rotates a session
+(``compression.in_place: false``) it ends it with ``end_reason = 'compression'`` and continues in a
 child, so each ended parent in a chat's lineage is one compaction and its ``ended_at`` is when it
-happened. The parent's last call is the context as it stood just before, which the ``context`` table
-already keeps per session, so each compaction carries that size and the window it was measured
-against. The walk is ``sessions.chat_session``'s, read the other way: only a parent whose turn ended
-in compression and a child that continues it rather than forking off it count, since a branch, a
+happened; the parent's last call is the context as it stood just before, which the ``context`` table
+already keeps per session, so each of those carries that size and the window it was measured
+against. It compacts in place by default: the same session id goes on, the rows it took away are
+soft-archived (``compacted``) and the summary that starts the live context is flagged
+``_compressed_summary`` — the only record such a compaction leaves, and one it carries no size for.
+
+The walk is ``sessions.chat_session``'s, read the other way: only a parent whose turn ended in
+compression and a child that continues it rather than forking off it count, since a branch, a
 delegation and a tool session share ``parent_session_id`` without being the same conversation.
+In-place marks are read from the transcript of every session that walk reaches.
 """
 
 from __future__ import annotations
@@ -34,11 +40,13 @@ def read(home: Path, session_id: str) -> Optional[List[Dict[str, Any]]]:
     if conn is None:
         return []
     found: List[Dict[str, Any]] = []
+    lineage: List[str] = []
     walked = [session_id]
     try:
         with closing(conn):
             current = session_id
             for _ in range(COMPRESSION_DEPTH):
+                lineage.append(current)
                 row = conn.execute(
                     """SELECT child.parent_session_id AS parent_id,
                               parent.end_reason AS parent_end,
@@ -62,12 +70,45 @@ def read(home: Path, session_id: str) -> Optional[List[Dict[str, Any]]]:
                     found.append({"at": int(row["parent_ended"] * 1000), "session": parent_id})
                 current = parent_id
                 walked.append(current)
+            found.extend(_in_place(conn, lineage))
     except sqlite3.Error:
         logger.debug("memento: couldn't read a chat's compactions", exc_info=True)
         return None
     found.sort(key=lambda item: item["at"])
-    sizes = _sizes(home, [item["session"] for item in found])
-    return [{"at": item["at"], **sizes.get(item["session"], {})} for item in found]
+    sizes = _sizes(home, [item["session"] for item in found if item.get("session")])
+    return [{"at": item["at"], **sizes.get(item.get("session") or "", {})} for item in found]
+
+
+def _in_place(conn: sqlite3.Connection, lineage: List[str]) -> List[Dict[str, Any]]:
+    """Each in-place compaction in those sessions' transcripts, as ``{ at }`` in ms.
+
+    The mark sits at the last row the compaction took away, so the thread's divider lands above the
+    summary — the first thing written after it. A summary with nothing before it has only its own
+    time to stand on.
+    """
+    found: List[Dict[str, Any]] = []
+    table = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'messages'"
+    ).fetchone()
+    if table is None:
+        # A store with no transcript has nowhere to leave an in-place mark.
+        return found
+    for session in lineage:
+        rows = conn.execute(
+            """SELECT summary.timestamp AS at,
+                      (SELECT MAX(older.timestamp) FROM messages older
+                        WHERE older.session_id = summary.session_id
+                          AND older.id < summary.id AND older.compacted = 1) AS before
+               FROM messages summary
+               WHERE summary.session_id = ? AND summary._compressed_summary = 1
+               ORDER BY summary.id""",
+            (session,),
+        ).fetchall()
+        for row in rows:
+            when = row["before"] if row["before"] is not None else row["at"]
+            if isinstance(when, (int, float)) and when > 0:
+                found.append({"at": int(when * 1000)})
+    return found
 
 
 def _sizes(home: Path, sessions: List[str]) -> Dict[str, Dict[str, int]]:
