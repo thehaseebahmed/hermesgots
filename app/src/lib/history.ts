@@ -8,7 +8,7 @@ import {
   type ToolEvent,
 } from "@/lib/db"
 import { CLOCK_SLACK_MS, refreshQueue } from "@/lib/chat"
-import { FOLLOW_UP_MS, JUST_FOLLOWED_UP_MS } from "@/lib/freshness"
+import { FOLLOW_UP_MS, JUST_FOLLOWED_UP_MS, READ_TIMEOUT_MS } from "@/lib/freshness"
 import { quietly } from "@/lib/report"
 import { markResume } from "@/lib/resume-trace"
 import { refreshContext } from "@/lib/context"
@@ -30,6 +30,7 @@ import { actionOf, controlWords, DELEGATE_TOOL } from "@/lib/spawn"
 import { labelComparable, primaryArg, TODO_TOOLS } from "@/lib/tool-preview"
 import { isSubagentResult } from "@/lib/subagent-results.ts"
 import { isWakePrompt } from "@/lib/wake-prompt.ts"
+import { mayHoldArchive, nextWindow, type WindowCursor } from "@/lib/history-window"
 
 /**
  * Message bodies don't sync; every device's turns live in the chat's Hermes session. Opening a chat
@@ -832,7 +833,9 @@ async function reconcile(conversationId: string) {
         floor = turnEnd(seen)
         if (seen.id === user.id && reply) {
           // A turn loaded from Hermes earlier, possibly before it finished: refresh its reply, keeping
-          // the spans this device measured on the runs that are still the same runs.
+          // the spans this device measured on the runs that are still the same runs. The rows this
+          // pass read may start inside the turn — a tail read does — so `partsOf`'s range is not the
+          // turn's own, and the reply this device holds for it is named after the first row it wrote.
           const local = byId.get(reply.id)
           const createdAt = local?.createdAt ?? Math.max(reply.createdAt, floor)
           writes.push({ ...reply, createdAt, ...mergedRuns(reply, local) })
@@ -908,9 +911,19 @@ async function reconcile(conversationId: string) {
     await db.messages.bulkPut(writes)
     await db.conversations.update(conversationId, {
       hermesTip: rows[rows.length - 1].id,
-      ...(current.length
-        ? {}
-        : { olderThan: full ? { id: rows[0].id, offset: rows.length } : undefined }),
+      // Where the window's edge is, so a reader who reaches the top can walk the rows above it. A
+      // window that begins at the live transcript's first row is the chat's own edge only if
+      // nothing was archived above it, and only the host says whether anything was: the reach asks
+      // before it reads a display order. So this names the live numbering, and the archive is where
+      // that numbering runs out — and a window left without an edge, by a host that couldn't answer
+      // or a reach that found nothing, is given one again here rather than left unreachable.
+      ...(current.length === 0
+        ? {
+            olderThan: full
+              ? { kind: "live" as const, id: rows[0].id, offset: rows.length }
+              : { kind: "archive" as const, id: rows[0].id },
+          }
+        : {}),
     })
     return writes.filter((m) => !byId.has(m.id)).length
   })
@@ -918,10 +931,20 @@ async function reconcile(conversationId: string) {
 
 const loadingEarlier = new Map<string, Promise<void>>()
 
+/** Rows one step of the window asks for: the host's page cap. */
+const STEP = 500
+/** Steps one visit takes before it leaves the rest for the next reach, so a host that keeps
+ *  answering with rows can't hold a reader in a loop. */
+const MAX_STEPS = 40
+
 /**
- * Loads the whole turns before the oldest row loaded so far, placed before the chat's first message.
- * A chat opened before turns were loaded whole may start with a reply whose start was cut off by
- * the page edge: that turn is loaded again, whole, in its place.
+ * Loads the whole turns before the oldest row the device holds, placed before the chat's first
+ * message. A chat opened before turns were loaded whole may start with a reply whose start was cut
+ * off by the page edge: that turn is loaded again, whole, in its place.
+ *
+ * It keeps going until the chat's own first row is in, because a compacted chat's older rows are
+ * archived rather than deleted: the live transcript runs out where the archive begins, and only the
+ * host's display read carries the rest.
  */
 export function loadEarlierHistory(conversationId: string) {
   let pending = loadingEarlier.get(conversationId)
@@ -939,56 +962,111 @@ export function loadEarlierHistory(conversationId: string) {
 
 async function loadEarlier(conversationId: string) {
   const conversation = await db.conversations.get(conversationId)
-  const olderThan = conversation?.olderThan
-  if (!conversation || !olderThan) return
+  if (!conversation?.olderThan) return
   const config = await connection(conversation)
   if (!config) return
   const sessionId = conversation.hermesSessionId
-  const list = (offset: number) => listSessionMessages(config, sessionId, { limit: PAGE, offset })
-  // Turns sent since the last load push older rows further from the newest end; skip past them,
-  // then page back to the start of the oldest turn.
-  const rows = new Map<number, SessionMessage>()
-  let offset = olderThan.offset
-  let found: number | undefined
-  let end = false
-  for (let page = 0; page <= 2 * MAX_SKIPS; page++) {
-    const batch = await list(offset)
-    for (const row of batch) if (row.id < olderThan.id) rows.set(row.id, row)
-    if (rows.size) found ??= offset
-    offset += batch.length
-    end = batch.length < PAGE
-    if (end || byRowId(rows).some(isTurnStart)) break
+  // Only the host can say whether anything was archived above the window, and its answer is kept
+  // with the chat by the read the rest of the app makes: a reach asks once, not every time.
+  let compactions = conversation.compactions
+  if (compactions === undefined) {
+    await refreshContext(conversationId)
+    compactions = (await db.conversations.get(conversationId))?.compactions
   }
-  const sorted = byRowId(rows)
-  const from = Math.max(sorted.findIndex(isTurnStart), 0)
-  const older = sorted.slice(from)
-  const local = await getMessages(conversationId)
-  const cut = local[0] && replyRowOf(local[0], sessionId) === olderThan.id ? local[0] : undefined
-  const rest =
-    cut && cut.status !== "streaming" ? await turnFrom(olderThan.id, (found ?? offset) + PAGE) : []
-  const messages = toMessages(conversationId, sessionId, [...older, ...rest])
-  const ceiling = (cut && rest.length ? local[1] : local[0])?.createdAt
-  await db.transaction("rw", db.messages, db.conversations, async () => {
-    if (cut && rest.length) await db.messages.delete(cut.id)
-    await db.messages.bulkPut(placeBefore(messages, ceiling))
-    await db.conversations.update(conversationId, {
-      olderThan:
-        older.length && (!end || sorted.slice(0, from).some(isShown))
-          ? { id: older[0].id, offset: offset - from }
-          : undefined,
+  const archive = mayHoldArchive(compactions)
+  let cursor: WindowCursor = conversation.olderThan
+  // The archive is only ever entered at its own newest end. A host that said the chat was never
+  // compacted has nothing there to read, so the edge goes; one that couldn't answer has said
+  // nothing at all, and the window stands as it is for the next reach to ask about.
+  if (cursor.kind === "archive" && !archive) {
+    if (compactions !== undefined)
+      await db.conversations.update(conversationId, { olderThan: undefined })
+    return
+  }
+  let offset = cursor.kind === "live" ? cursor.offset : 0
+  const signal = AbortSignal.timeout(READ_TIMEOUT_MS)
+  const list = (from: number) =>
+    listSessionMessages(config, sessionId, {
+      limit: STEP,
+      offset: from,
+      signal,
+      ...(cursor.kind === "archive" ? { includeCompacted: true } : {}),
     })
-  })
-
-  /** The rows from `first` to the next turn's start, paging towards the newest before `offset`. */
-  async function turnFrom(first: number, offset: number) {
+  /** The turn `cut` belongs to, read whole: a window an older version left at a page edge starts
+   *  with a reply whose turn began above it, and the live numbering's offset starts past that
+   *  start. The rows are at the newest end, so the read starts there and pages back until the next
+   *  turn's start is in. */
+  async function turnFrom(cut: number) {
     const rows = new Map<number, SessionMessage>()
-    for (let page = 0; page <= MAX_SKIPS && offset > 0; page++) {
-      offset = Math.max(0, offset - PAGE)
-      for (const row of await list(offset)) if (row.id >= first) rows.set(row.id, row)
-      if (byRowId(rows).some((row) => row.id > first && isTurnStart(row))) break
+    for (let page = 0; page <= MAX_SKIPS; page++) {
+      for (const row of await list(page * STEP)) if (row.id >= cut) rows.set(row.id, row)
+      const sorted = byRowId(rows)
+      if (sorted[0]?.id <= cut && sorted.some((row) => row.id > cut && isTurnStart(row))) break
     }
     const sorted = byRowId(rows)
-    const next = sorted.findIndex((row) => row.id > first && isTurnStart(row))
+    const next = sorted.findIndex((row) => row.id > cut && isTurnStart(row))
     return next < 0 ? sorted : sorted.slice(0, next)
+  }
+  const local = await getMessages(conversationId)
+  const cutRow = local[0]?.role === "assistant" ? replyRowOf(local[0], sessionId) : undefined
+  // A window an older version opened mid-turn starts with a reply whose turn began above it. Its
+  // turn is read whole here and laid down with the first step's rows — one `toMessages` call for
+  // both, since a turn's rows only make one reply when they are read as one run.
+  const rest = cutRow === undefined ? [] : await turnFrom(cutRow)
+  // Every row the device holds, and every row the walk adds: either numbering can answer the same
+  // row, so one set across the walk is what keeps it landing once.
+  const held = new Set<number>()
+  for (const message of local) {
+    const row =
+      message.role === "user" ? rowIdOf(message, sessionId) : replyRowOf(message, sessionId)
+    if (row !== undefined) held.add(row)
+  }
+  for (const row of rest) held.add(row.id)
+  // The window's oldest message, which each step's rows are placed above.
+  let windowFirst = local[0]
+  // The cut reply is replaced once the rows that stand for it are in, and only then.
+  let mend = rest.length ? { delete: local[0].id, ceiling: local[1]?.createdAt } : undefined
+  for (let step = 0; step < MAX_STEPS; step++) {
+    const pages: SessionMessage[][] = []
+    let end = false
+    for (let page = 0; page <= 2 * MAX_SKIPS; page++) {
+      const batch = await list(offset)
+      const kept: SessionMessage[] = []
+      for (const row of batch) {
+        if (held.has(row.id)) continue
+        held.add(row.id)
+        kept.push(row)
+      }
+      // A read counts its offset back from the newest end but returns each page oldest first, so
+      // the first page sits nearest the window and every page after it is older: the pages go in
+      // front of one another to come out in the host's order.
+      if (kept.length) pages.unshift(kept)
+      offset += batch.length
+      end = batch.length < STEP
+      if (end) break
+    }
+    // The rows the step kept, in the order the host gave them, floored below the window's own edge.
+    // The host keeps the times it gave them — carried ones included, under their fresh ids — and a
+    // host whose clock ran ahead of this device's would have newer ones still.
+    const older = pages.flat()
+    const rows = mend ? [...older, ...rest] : older
+    const messages = toMessages(conversationId, sessionId, rows)
+    const ceiling = mend ? mend.ceiling : windowFirst?.createdAt
+    const next = nextWindow(cursor, { oldest: older[0]?.id, end, offset }, archive)
+    await db.transaction("rw", db.messages, db.conversations, async () => {
+      // The cut part goes only once the rows that stand for it are in, in the same write.
+      if (older.length) {
+        if (mend) await db.messages.delete(mend.delete)
+        await db.messages.bulkPut(placeBefore(messages, ceiling))
+      }
+      await db.conversations.update(conversationId, { olderThan: next })
+    })
+    mend = undefined
+    if (!next) return
+    if (messages.length) windowFirst = messages[0]
+    const was = cursor
+    cursor = next
+    if (next.kind === "live") offset = next.offset
+    else if (was.kind === "live") offset = 0
   }
 }

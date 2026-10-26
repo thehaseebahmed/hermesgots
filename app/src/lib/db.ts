@@ -139,9 +139,17 @@ export interface Conversation {
   changedAt: number
   /**
    * Set while Hermes holds older transcript rows than this device loaded: the oldest loaded row's
-   * id, and roughly how many newer rows to skip to reach it.
+   * id and, per numbering, how far from the newest end the next read starts. Hermes numbers the
+   * live transcript per row and the display read per logical message, so the two can't share an
+   * offset; the display read is only ever entered at its own newest end, so it carries none.
+   *
+   * `kind` is absent on a cursor written before the walk named its numbering — every released build
+   * wrote that shape — and an absent kind is the live transcript's, because that is the only thing a
+   * cursor could have been then.
    */
-  olderThan?: { id: number; offset: number }
+  olderThan?:
+    | { kind?: "live"; id: number; offset: number }
+    | { kind: "archive"; id: number }
   /**
    * The session's latest model call, as the Gots plugin recorded it: its prompt tokens, the
    * model that ran it, and the window Hermes compresses against. Local only; every device reads it

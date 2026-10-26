@@ -212,6 +212,18 @@ _Avoid_: model switch, model update, fallback
 A point where Hermes compressed a chat's context — in place under the same session, the default, or by ending the session and continuing in a child. The host records when; the thread draws a divider above the first message written after it, and above the first message a device holds where a compaction took away everything that device can load.
 _Avoid_: compression event, summary
 
+**Carried copy**:
+A turn a compaction kept, written live under a fresh row id with its text and times untouched while the original became an archived row.
+_Avoid_: copied turn, re-emitted message, duplicate
+
+**Archived row**:
+A row a compaction left behind: off the chat's live transcript, drawn only once the reader reaches back far enough for it.
+_Avoid_: old row, compacted message
+
+**Live window**:
+The rows written since the last compaction, which the host counts as the chat's own and a device holds without reaching back.
+_Avoid_: recent rows, first page
+
 **Subagent**:
 An agent a bot's turn sets to work on part of it, with its own session and its own sub-thread, whose work outlives the turn that started it.
 _Avoid_: child, delegate, worker, sub-agent

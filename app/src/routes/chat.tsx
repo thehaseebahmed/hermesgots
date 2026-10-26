@@ -97,6 +97,7 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
   useMessageScroller,
+  useMessageScrollerScrollable,
 } from "@/components/ui/message-scroller"
 import { Spinner } from "@/components/ui/spinner"
 import {
@@ -109,6 +110,7 @@ import {
   steerText,
   stopMessage,
 } from "@/lib/chat"
+import { windowKey } from "@/lib/history-window"
 import {
   DEFAULT_SETTINGS,
   type Attachment,
@@ -312,6 +314,63 @@ function FollowOnSend({ lastUserId }: { lastUserId?: string }) {
   return null
 }
 
+/** Steps one edge gets before the reader has to leave the top and come back. */
+const REACH_TRIES = 2
+
+/**
+ * The thread's top is the request for its older rows: a compacted chat's live transcript starts at
+ * the compaction's summary, and the rows it archived are only in the host's display read, so the
+ * window grows there and nowhere else (ADR 0058). A chat whose whole thread fits its pane asks at
+ * once, since its top is on screen; one taller than its pane asks when the reader reaches the top.
+ */
+function LoadOlderWindow({
+  cursor,
+  enabled,
+  loading,
+  onLoad,
+}: {
+  /** The window's edge, which moves as rows land: undefined once the chat's first row is in. */
+  cursor?: string
+  /** Nothing to ask while the chat's own window is still landing, or a step is already running. */
+  enabled: boolean
+  loading: boolean
+  onLoad: () => void
+}) {
+  const { start, end } = useMessageScrollerScrollable()
+  // The scroller reports its edges as what lies beyond them: `start` is true while anything sits
+  // above the pane, `end` likewise below — so a thread that fits its pane is at its top already.
+  const atTop = !start
+  const fits = atTop && !end
+  // Whether the thread has ever been away from its top: a chat's arrival, placed at its newest row,
+  // is not the reader reaching for anything.
+  const leftTop = useRef(false)
+  // Steps asked for at one edge. A step that moved nothing isn't asked for again until the reader
+  // leaves the top and returns; one that failed gets a second try, so a blip can't strand the
+  // archive behind an edge that never moves.
+  const tried = useRef<{ edge?: string; n: number }>({ n: 0 })
+  useEffect(() => {
+    if (!start) return
+    leftTop.current = true
+    tried.current = { n: 0 }
+  }, [start])
+  // The edges are reported as the scroller measures itself, and a chat too short to scroll never
+  // reports them at all — so nothing is asked until the pane has been laid out once.
+  const [measured, setMeasured] = useState(false)
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setMeasured(true))
+    return () => cancelAnimationFrame(frame)
+  }, [])
+  const reached = measured && (fits || (atTop && leftTop.current))
+  useEffect(() => {
+    if (!enabled || loading || !cursor || !reached) return
+    if (tried.current.edge !== cursor) tried.current = { edge: cursor, n: 0 }
+    if (tried.current.n >= REACH_TRIES) return
+    tried.current.n += 1
+    onLoad()
+  }, [enabled, loading, cursor, reached, onLoad])
+  return null
+}
+
 export function ChatPage({
   chatId,
   paneThread,
@@ -373,6 +432,18 @@ export function ChatPage({
   const [pipelineOpen, setPipelineOpen] = useState(false)
   const [outputsOpen, setOutputsOpen] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
+  // The window's edge as one value the reach watches: the oldest row this device holds, and which
+  // numbering it was found in — each counts its own rows, so both are part of the edge.
+  const cursor = conversation?.olderThan ? windowKey(conversation.olderThan) : undefined
+  const loadOlder = useCallback(() => {
+    if (!id) return
+    setLoadingEarlier(true)
+    loadEarlierHistory(id)
+      .catch((error) =>
+        toast.error(error instanceof Error ? error.message : "Couldn't load more."),
+      )
+      .finally(() => setLoadingEarlier(false))
+  }, [id])
   const [historyMissing, setHistoryMissing] = useState<string>()
   const readyRef = useRef<{ id?: string }>(undefined)
 
@@ -1135,24 +1206,10 @@ export function ChatPage({
                   cut ? "w-full justify-end gap-6 px-4 pt-32 pb-6" : "w-full gap-6 px-4 pt-32 pb-6"
                 }
               >
-                {!cut && conversation?.olderThan && (
-                  <Button
-                    variant="outline"
-                    className="min-h-11 self-center rounded-full"
-                    disabled={loadingEarlier}
-                    onClick={() => {
-                      setLoadingEarlier(true)
-                      loadEarlierHistory(conversation.id)
-                        .catch((error) =>
-                          toast.error(
-                            error instanceof Error ? error.message : "Couldn't load more.",
-                          ),
-                        )
-                        .finally(() => setLoadingEarlier(false))
-                    }}
-                  >
-                    Load earlier messages
-                  </Button>
+                {!cut && loadingEarlier && (
+                  <div className="flex shrink-0 justify-center py-2" aria-hidden>
+                    <Spinner className="size-4 text-muted-foreground" />
+                  </div>
                 )}
                 <AgentsContext.Provider value={agentsSource}>
                   {drawn.map((entry) => {
@@ -1208,6 +1265,12 @@ export function ChatPage({
             <MessageScrollerButton />
             <FollowAfterApproval pending={Boolean(awaitingApproval || awaitingClarify)} />
             <FollowOnSend lastUserId={thread!.findLast((m) => m.role === "user")?.id} />
+            <LoadOlderWindow
+              cursor={cursor}
+              enabled={answered && !cut}
+              loading={loadingEarlier}
+              onLoad={loadOlder}
+            />
           </MessageScroller>
         </MessageScrollerProvider>
       ) : loadingHistory ? (
