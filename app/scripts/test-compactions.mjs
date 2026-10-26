@@ -38,8 +38,16 @@ test("several in one gap are one divider", () => {
   assert.deepEqual(marked(thread, [{ at: 120 }, { at: 130 }]), { before: ["u2"], trailing: false })
 })
 
-test("one before every loaded message marks nothing", () => {
-  assert.deepEqual(marked(turn(1, 100), [{ at: 50 }]), { before: [], trailing: false })
+test("one before every loaded message stands above the first", () => {
+  // What a device that never saw those messages has: Hermes keeps the rows a compaction took away
+  // off the transcript, so the top of what it can load is where the compaction happened.
+  assert.deepEqual(marked(turn(1, 100), [{ at: 50 }]), { before: ["u1"], trailing: false })
+})
+
+test("several before every loaded message are one divider, the first's", () => {
+  const thread = turn(1, 100)
+  assert.deepEqual(marked(thread, [{ at: 20 }, { at: 50 }]), { before: ["u1"], trailing: false })
+  assert.deepEqual(compactionMarks(thread, [{ at: 20 }, { at: 50 }]).before.get("u1"), { at: 20 })
 })
 
 test("no compactions, or none known, mark nothing", () => {
