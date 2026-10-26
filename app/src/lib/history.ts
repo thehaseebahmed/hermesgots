@@ -47,6 +47,16 @@ const MAX_DETAIL = 4000
 
 const clip = (text: string) => (text.length > MAX_DETAIL ? `${text.slice(0, MAX_DETAIL)}…` : text)
 
+/** One line: whitespace and newlines collapsed to single spaces, as Hermes's `_oneline` does. */
+const oneline = (text: string) => text.split(/\s+/).filter(Boolean).join(" ")
+
+/** Tail-truncate with `...`, never past `limit`, as Hermes's `_tail_trunc` does. */
+const tailTrunc = (text: string, limit: number) =>
+  text.length <= limit ? text : limit <= 3 ? ".".repeat(limit) : `${text.slice(0, limit - 3)}...`
+
+/** How much of each goal a batch preview shows, matching `_preview_delegate_task`'s per-goal cut. */
+const GOAL_PREVIEW_CHARS = 40
+
 function parseArgs(value: unknown): unknown {
   if (typeof value !== "string") return value
   try {
@@ -80,6 +90,25 @@ function argsLabel(name: string, args: unknown) {
   if (name === DELEGATE_TOOL) {
     const control = controlWords(record)
     if (control) return control
+    // A batch names its goals in `tasks`, and Hermes previews it `"N tasks: goal1 | goal2"`
+    // (`_preview_delegate_task` in display.py) — each goal one line, tail-truncated. Left to the
+    // arguments fallback the label was the raw JSON, which a real fan-out pushes past MAX_DETAIL:
+    // clipped, its unfinished `tasks` array no longer proved a spawn, so the call drew as an ordinary
+    // row and its cards never showed (the plugin's own list still counted them running).
+    if (Array.isArray(record.tasks) && record.tasks.length) {
+      const goals = record.tasks
+        .filter(
+          (task): task is Record<string, unknown> => Boolean(task) && typeof task === "object",
+        )
+        .map((task) => {
+          const goal =
+            task.goal === undefined || task.goal === null ? "?" : oneline(String(task.goal))
+          return tailTrunc(goal || "?", GOAL_PREVIEW_CHARS)
+        })
+      return goals.length
+        ? `${goals.length} ${goals.length === 1 ? "task" : "tasks"}: ${goals.join(" | ")}`
+        : `${record.tasks.length} parallel tasks`
+    }
   }
   const key = primaryArg(name) ?? FALLBACK_ARGS.find((k) => k in record)
   let value = key ? record[key] : undefined

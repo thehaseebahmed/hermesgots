@@ -8,7 +8,7 @@ import test from "node:test"
 
 import { AgentPopup } from "@/components/chat/agent-card"
 import { MessageItem } from "@/components/chat/message-item"
-import { AgentsContext, CARD_WINDOW_S } from "@/lib/agents"
+import { AgentsContext, agentsOf, CARD_WINDOW_S } from "@/lib/agents"
 import type { Message, ToolEvent } from "@/lib/db"
 import type { DelegatedAgent, HermesConfig, SessionMessage } from "@/lib/hermes"
 import { toMessages } from "@/lib/history"
@@ -167,8 +167,8 @@ test("a goal that opens on a control word keeps its card", async () => {
 test("the transcript stamps what each call did, and words a control call as it streamed", () => {
   // The derivation the thread reads: a control call's arguments, parsed where they are in hand, give
   // it the action it did and the words Hermes previewed it with — never `{"action":"list"}`. A
-  // spawn's arguments are its own, so a batch keeps the envelope its label fell back to, and the one
-  // rule still reads it as the spawn it was.
+  // batch is worded as Hermes previews it too ("N tasks: goal1 | goal2"), so a fan-out's long
+  // arguments never stand in as its label — the one rule reads it as the spawn it was.
   const [reply] = toMessages("c-1", "s-1", [
     {
       id: 1,
@@ -205,7 +205,7 @@ test("the transcript stamps what each call did, and words a control call as it s
       ["list", "list"],
       ["steer sub-1", "steer"],
       [GOAL, undefined],
-      ['{"tasks":[{"goal":"read the parser"}]}', undefined],
+      ["1 task: read the parser", undefined],
     ],
     "each call's words and its stamped action",
   )
@@ -217,6 +217,47 @@ test("the transcript stamps what each call did, and words a control call as it s
   // A control row stored before the stamp reads the same action from its label alone.
   assert.equal(controlAction({ ...tools[0], action: undefined }), "list")
   assert.equal(controlAction({ ...tools[1], action: undefined }), "steer")
+})
+
+test("a fan-out too long for its arguments to survive as a label still draws its cards", async () => {
+  // A real review fan-out — 7 subagents, each briefed at length — is 26k chars of arguments in the
+  // session this came from. Left as the raw JSON, its label was clipped at MAX_DETAIL (4000), the
+  // unfinished `tasks` array read as no spawn, and the call drew as an ordinary row: no cards for
+  // any of the 7, while the plugin's own list still counted them running. Wording a batch as Hermes
+  // previews it keeps the label short, so it never clips and always proves the spawn it was.
+  const goals = [
+    "Review this diff for CODE REUSE problems only.",
+    "Review this diff for CODE QUALITY problems only.",
+    "Review this diff for EFFICIENCY problems only.",
+    "Review this diff for ALTITUDE problems only.",
+    "You are Comment Sicko. Read the scope below, then report.",
+    "Review this diff along the STANDARDS axis.",
+    "Review this diff along the SPEC axis.",
+  ]
+  const args = JSON.stringify({
+    tasks: goals.map((goal) => ({ goal, context: "x".repeat(2000) })),
+  })
+  assert.ok(args.length > 4000, "the arguments are long enough that a JSON label would clip")
+  const [reply] = toMessages("c-1", "s-1", [
+    {
+      id: 1,
+      role: "assistant",
+      content: null,
+      timestamp: STARTED,
+      tool_calls: [{ id: "c-batch", function: { name: DELEGATE_TOOL, arguments: args } }],
+    },
+  ])
+  const tool = (reply.tools ?? [])[0]
+  assert.equal(spawnedAgent(tool), true, "a real-sized batch proves a spawn")
+  assert.doesNotMatch(tool.label ?? "", /^\{/, "and its label is words, not clipped JSON")
+  assert.equal(
+    agentsOf(
+      tool,
+      goals.map((goal, i) => ({ ...agent, id: `child-${i}`, goal })),
+    ).length,
+    goals.length,
+    "every agent the fan-out started finds its card",
+  )
 })
 
 /** A row of the child session's own transcript, as Hermes wrote it. */
