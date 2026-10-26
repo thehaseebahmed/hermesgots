@@ -67,7 +67,7 @@ def read(home: Path, session_id: str) -> Optional[List[Dict[str, Any]]]:
                 ):
                     break
                 if isinstance(row["parent_ended"], (int, float)) and row["parent_ended"] > 0:
-                    found.append({"at": int(row["parent_ended"] * 1000), "session": parent_id})
+                    found.append({"at": _ms(row["parent_ended"]), "session": parent_id})
                 current = parent_id
                 walked.append(current)
             found.extend(_in_place(conn, lineage))
@@ -79,12 +79,26 @@ def read(home: Path, session_id: str) -> Optional[List[Dict[str, Any]]]:
     return [{"at": item["at"], **sizes.get(item.get("session") or "", {})} for item in found]
 
 
+def _ms(seconds: float) -> int:
+    """A time in ms the way the app turns a row's own timestamp into one (history.ts: Math.round).
+
+    The mark has to be the row's ms exactly, not a truncated fraction of it: the thread keeps the
+    rows the compaction took away when it holds them, and a mark a millisecond under one of those
+    still reads as "written after the compaction", which drops the divider one row too early.
+    """
+    return int(seconds * 1000 + 0.5)
+
+
 def _in_place(conn: sqlite3.Connection, lineage: List[str]) -> List[Dict[str, Any]]:
     """Each in-place compaction in those sessions' transcripts, as ``{ at }`` in ms.
 
-    The mark sits at the last row the compaction took away, so the thread's divider lands above the
-    summary — the first thing written after it. A summary with nothing before it has only its own
-    time to stand on.
+    ``at`` is the summary row's own time — the moment the compaction ran, which is also the row
+    the thread's divider must stand above: the first message written after it. So every device
+    draws the same line, wherever it loaded the chat from. The turns the compaction carried run
+    right up to that moment (their originals hidden, their copies live) and the summary itself is
+    written at it, so all of them sit above the line and the first turn afterwards sits below.
+    Dating the mark to the last row the compaction archived instead would drop the divider inside
+    the carried turns, minutes of chat before the context was actually compacted.
     """
     found: List[Dict[str, Any]] = []
     table = conn.execute(
@@ -95,19 +109,14 @@ def _in_place(conn: sqlite3.Connection, lineage: List[str]) -> List[Dict[str, An
         return found
     for session in lineage:
         rows = conn.execute(
-            """SELECT summary.timestamp AS at,
-                      (SELECT MAX(older.timestamp) FROM messages older
-                        WHERE older.session_id = summary.session_id
-                          AND older.id < summary.id AND older.compacted = 1) AS before
-               FROM messages summary
-               WHERE summary.session_id = ? AND summary._compressed_summary = 1
-               ORDER BY summary.id""",
+            "SELECT timestamp FROM messages WHERE session_id = ? AND _compressed_summary = 1"
+            " ORDER BY id",
             (session,),
         ).fetchall()
         for row in rows:
-            when = row["before"] if row["before"] is not None else row["at"]
+            when = row[0]
             if isinstance(when, (int, float)) and when > 0:
-                found.append({"at": int(when * 1000)})
+                found.append({"at": _ms(when)})
     return found
 
 

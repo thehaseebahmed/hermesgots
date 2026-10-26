@@ -112,9 +112,48 @@ class CompactionsTest(unittest.TestCase):
                 (4, "s1", "assistant", 600.0, 1, 0, 0),
             ],
         )
-        # At the last row the compaction took away, so the divider lands above the summary — the
-        # first thing written after it.
-        self.assertEqual(compactions.read(self.home, "s1"), [{"at": 110_000}])
+        # The mark is the summary's own time — the moment the compaction ran — so the divider
+        # lands above the first turn written after it, with the summary and everything older on
+        # the side that was compacted, on any device.
+        self.assertEqual(compactions.read(self.home, "s1"), [{"at": 500_000}])
+
+    def test_a_mark_is_the_rows_time_as_the_app_rounds_it(self) -> None:
+        # The app turns a row's own timestamp into ms with Math.round (history.ts), and the mark
+        # has to be the summary row's time to that same millisecond: a truncated mark sits under
+        # the summary's own ms and flips it across the divider, a row early or late. Caught on a
+        # real store, where half the summaries would land on a fractional ms.
+        store(
+            self.home,
+            [("s1", None, None, None, None, None)],
+            [
+                (1, "s1", "user", 5.0, 0, 1, 0),
+                (2, "s1", "assistant", 6.0009, 1, 0, 1),
+            ],
+        )
+        self.assertEqual(
+            compactions.read(self.home, "s1"),
+            [{"at": 6001}],  # 6.0009 s is 6000.9 ms: 6001 rounded, 6000 truncated
+        )
+
+    def test_a_mark_is_the_compaction_moment_not_the_end_of_the_archived_rows(self) -> None:
+        # A real store keeps the turns a compaction carried live — its originals hidden rather than
+        # archived (`active = 0`, `compacted = 0`), their copies under fresh ids — and those run
+        # right up to the moment the compaction happened. Dating the mark to the last archived row
+        # would drop the divider minutes early, inside the turns it carried.
+        store(
+            self.home,
+            [("s1", None, None, None, None, None)],
+            [
+                (1, "s1", "user", 100.0, 0, 1, 0),  # archived: what was summarized away
+                (2, "s1", "assistant", 480.0, 0, 0, 0),  # carried original, hidden
+                (3, "s1", "user", 490.0, 0, 0, 0),  # carried original, hidden
+                (4, "s1", "assistant", 480.0, 1, 0, 0),  # its copy, live
+                (5, "s1", "user", 490.0, 1, 0, 0),  # its copy, live
+                (6, "s1", "user", 500.0, 1, 0, 1),  # the summary: the compaction itself
+                (7, "s1", "assistant", 600.0, 1, 0, 0),  # first turn written after it
+            ],
+        )
+        self.assertEqual(compactions.read(self.home, "s1"), [{"at": 500_000}])
 
     def test_each_in_place_compaction_is_one_mark_oldest_first(self) -> None:
         # A second compaction archives the first summary with everything else, so its own summary is
@@ -132,7 +171,7 @@ class CompactionsTest(unittest.TestCase):
                 (7, "s1", "assistant", 900.0, 1, 0, 0),
             ],
         )
-        self.assertEqual(compactions.read(self.home, "s1"), [{"at": 110_000}, {"at": 700_000}])
+        self.assertEqual(compactions.read(self.home, "s1"), [{"at": 500_000}, {"at": 800_000}])
 
     def test_in_place_marks_and_a_rotation_merge_oldest_first(self) -> None:
         # A host that rotated once and then compacted in place: the lineage's rotation and the
@@ -150,7 +189,7 @@ class CompactionsTest(unittest.TestCase):
                 (4, "s2", "assistant", 800.0, 1, 0, 0),
             ],
         )
-        self.assertEqual(compactions.read(self.home, "s2"), [{"at": 100_000}, {"at": 300_000}])
+        self.assertEqual(compactions.read(self.home, "s2"), [{"at": 100_000}, {"at": 700_000}])
 
     def test_a_session_with_no_compaction_marks_nothing(self) -> None:
         store(
