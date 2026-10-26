@@ -132,7 +132,7 @@ export const FLOWS = {
   "history-generations": {
     script: "e2e/history-generations.mjs",
     about:
-      "A session compacted while this device already showed its turns keeps each of them shown once",
+      "A session compacted while this device already showed its turns keeps each of them shown once, and the compaction's own note draws nothing",
   },
   "question-from-push": {
     script: "e2e/question-from-push.mjs",

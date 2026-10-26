@@ -5461,7 +5461,8 @@ http
           content:
             "[Your active task list was preserved across context compression]\n" +
             "Reload the skills listed below before acting on these tasks.",
-          display_kind: "hidden",
+          // The host ships this row as a plain `user` row: its synthetic flag never reaches the
+          // store, so no `display_kind` marks it and the app must read the seam off the text.
         },
         ...copies,
       ])

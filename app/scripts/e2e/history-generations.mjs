@@ -117,4 +117,10 @@ await flow("history-generations", async ({ page, seed, until, shot }) => {
   for (const text of ["first turn's work", "second turn's work"])
     assert.equal(drawn.split(text).length - 1, 1, `"${text}" is drawn once: ${drawn.slice(-400)}`)
   pass("a compaction the device already showed leaves its turns shown once")
+  // The boundary row compression writes is the host's own bookkeeping: it rides a user row, but it
+  // is nobody's message, so the thread draws nothing of it — a user bubble of it reads as if the
+  // user had typed the host's notes themselves.
+  const note = "[Your active task list was preserved across context compression]"
+  assert.ok(!drawn.includes(note), `the compaction's task-list note draws no message: ${drawn.slice(-600)}`)
+  pass("the compaction's own note draws nothing in the thread")
 })

@@ -214,6 +214,62 @@ function afterNotice(fragment: string, next: string, notice: string) {
 }
 
 /**
+ * The seam a compaction leaves in the transcript, written into `user` rows for the model: the
+ * restatement's header, the preserved task snapshot, the pruned-skills reload notice. Each pinned
+ * here word for word from the host, because the match is textual — the host's own
+ * `_strip_stale_todo_snapshot` finds its header in content alone, the synthetic-row flags never
+ * crossing the store:
+ * - `[STILL IN PROGRESS …]` — `agent/context_compressor.py` `_INFLIGHT_TASK_REPLAY_HEADER`;
+ * - `[Your active task list …]` — `tools/todo_tool.py` `TODO_INJECTION_HEADER`;
+ * - `[Skills pruned …]` — `agent/conversation_compression.py` `_PRUNED_SKILL_RELOAD_NOTICE_HEADER`.
+ */
+const REPLAY_HEADER =
+  "[STILL IN PROGRESS — this is the active request, restated after the compaction boundary because it was not finished yet. Continue it; do not start over.]"
+const TASK_SNAPSHOT_HEADER = "[Your active task list was preserved across context compression]"
+const RELOAD_NOTICE_HEADER =
+  "[Skills pruned during compression — reload before acting on these tasks]"
+
+/** Where a seam header sits on a line of its own in `content` — what makes the cut the host's, not
+ * a message that merely quotes the words — or -1. */
+function seamAt(content: string, header: string) {
+  const at = content.indexOf(header)
+  return at > 0 && content[at - 1] !== "\n" ? -1 : at
+}
+
+/** What of a seam row's text the thread draws: the host's notes cut, what the user typed kept. */
+function seamText(content: string) {
+  // The task snapshot trails the row's real text and the reload notice trails the snapshot's own
+  // header, so everything from the snapshot's line down is the host's — cut where the host cuts.
+  const snapshot = seamAt(content, TASK_SNAPSHOT_HEADER)
+  let text = snapshot < 0 ? content : content.slice(0, snapshot).trimEnd()
+  // The salvage path keeps only the notice, as the whole content of its row.
+  if (text.trimStart().startsWith(RELOAD_NOTICE_HEADER)) return ""
+  // The restatement leads its row; what it carries below the header is the request itself.
+  const restated = text.trimStart()
+  if (restated.startsWith(REPLAY_HEADER)) return restated.slice(REPLAY_HEADER.length).trimStart()
+  return text
+}
+
+/** What of a user row's content the thread draws: the seam stripped, and an untyped row only — a
+ * typed row is the timeline's own, and content Hermes hands over in parts is left as it stands. */
+function seamDrawnContent(row: SessionMessage) {
+  if (row.display_kind || typeof row.content !== "string") return row.content ?? ""
+  return seamText(row.content)
+}
+
+/**
+ * Whether a user row carries nothing but the seam's bookkeeping. Like a notice it is the model's
+ * input, never the user's message: it draws nothing — so it closes no reply, and, a turn starting
+ * at the user's own message, it starts no turn either.
+ */
+const isSeamScaffolding = (row: SessionMessage) =>
+  row.role === "user" &&
+  !row.display_kind &&
+  typeof row.content === "string" &&
+  row.content.trim() !== "" &&
+  seamText(row.content).trim() === ""
+
+/**
  * Folds each turn's assistant, tool-call and tool rows into one reply, as streaming shows it. With
  * `live` (a turn still running), a call without its result row stays `running`.
  */
@@ -268,11 +324,14 @@ export function toMessages(
       // A subagent's delivery is bookkeeping, not a message: the thread draws nothing for it, so it
       // closes no reply and starts no turn, and its finding is read in the subagent's sub-thread.
       if (isSubagentResult(row)) continue
+      // A row carrying only the compaction seam's notes is bookkeeping the same way; one carrying
+      // the restated request goes on to draw that request as the user's own, headers cut.
+      if (isSeamScaffolding(row)) continue
       reply = undefined
       // The wake run's input is the model's own, never the user's: it draws no message of its own,
       // and the reply it closes is what makes the wake turn's answer a message of its own.
       if (isWakePrompt(row)) continue
-      const { text, attachments } = splitAttachments(row.content ?? "")
+      const { text, attachments } = splitAttachments(seamDrawnContent(row))
       messages.push({
         id,
         conversationId,
@@ -622,7 +681,8 @@ const isTurnStart = (row: SessionMessage) =>
   row.display_kind !== "hidden" &&
   !isSteer(row) &&
   !isNotice(row) &&
-  !isSubagentResult(row)
+  !isSubagentResult(row) &&
+  !isSeamScaffolding(row)
 
 const isStreaming = (messages: Message[]) => messages.some((m) => m.status === "streaming")
 
