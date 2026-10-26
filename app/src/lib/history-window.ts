@@ -40,17 +40,18 @@ export function nextWindow(
   archive: boolean,
 ): WindowCursor | undefined {
   const live = (id: number, offset: number): WindowCursor => ({ kind: "live", id, offset })
+  // An absent kind is the live transcript's: it is what every released build wrote, and the archive
+  // is the one numbering that has to be named to be walked.
+  const inArchive = cursor.kind === "archive"
   if (step.oldest === undefined) {
     // Every row it read is one the device holds. A numbering with more to give moves on without
     // claiming an edge it never reached.
-    if (!step.end) return cursor.kind === "archive" ? cursor : live(cursor.id, step.offset)
-    if (cursor.kind === "archive" || !archive) return undefined
+    if (!step.end) return inArchive ? cursor : live(cursor.id, step.offset)
+    if (inArchive || !archive) return undefined
     return { kind: "archive", id: cursor.id }
   }
   if (!step.end)
-    return cursor.kind === "archive"
-      ? { kind: "archive", id: step.oldest }
-      : live(step.oldest, step.offset)
-  if (cursor.kind === "live" && archive) return { kind: "archive", id: step.oldest }
+    return inArchive ? { kind: "archive", id: step.oldest } : live(step.oldest, step.offset)
+  if (!inArchive && archive) return { kind: "archive", id: step.oldest }
   return undefined
 }

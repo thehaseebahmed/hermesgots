@@ -56,6 +56,16 @@ test("a window with no edge left is not the same as one that never had rows", ()
   assert.deepEqual(nextWindow(live(700, 500), step({ end: true }), true), archived(700))
 })
 
+test("a cursor stored before the walk named its numbering still hands over to the archive", () => {
+  // Every released build wrote `{ id, offset }`. Upgrade a device holding one and the live walk must
+  // still find the archive where it runs out, or the very chats this feature is for stay sealed.
+  const stored = { id: 500, offset: 300 }
+  assert.deepEqual(nextWindow(stored, step({ oldest: 800, offset: 150 }), true), live(800, 150))
+  assert.deepEqual(nextWindow(stored, step({ oldest: 400, end: true }), true), archived(400))
+  assert.equal(nextWindow(stored, step({ oldest: 400, end: true }), false), undefined)
+  assert.equal(windowKey(stored), "500:300")
+})
+
 test("the key the screen watches moves with whichever numbering moved", () => {
   assert.equal(windowKey(live(9, 40)), "9:40")
   assert.equal(windowKey(archived(9)), "9:archive")
