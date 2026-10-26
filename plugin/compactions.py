@@ -41,6 +41,7 @@ def read(home: Path, session_id: str) -> Optional[List[Dict[str, Any]]]:
         return []
     rotated: List[Dict[str, Any]] = []
     walked = [session_id]
+    continued: Dict[str, float] = {}
     try:
         with closing(conn):
             current = session_id
@@ -66,9 +67,12 @@ def read(home: Path, session_id: str) -> Optional[List[Dict[str, Any]]]:
                     break
                 if isinstance(row["parent_ended"], (int, float)) and row["parent_ended"] > 0:
                     rotated.append({"at": _ms(row["parent_ended"]), "session": parent_id})
+                    # The summary this rotation published into `current` was written before the
+                    # parent was closed, so anything at or before that moment in the child is it.
+                    continued[current] = row["parent_ended"]
                 current = parent_id
                 walked.append(current)
-            in_place = _in_place(conn, walked)
+            in_place = _in_place(conn, walked, continued)
     except sqlite3.Error:
         logger.debug("memento: couldn't read a chat's compactions", exc_info=True)
         return None
@@ -88,7 +92,9 @@ def _ms(seconds: float) -> int:
     return int(seconds * 1000 + 0.5)
 
 
-def _in_place(conn: sqlite3.Connection, walked: List[str]) -> List[Dict[str, Any]]:
+def _in_place(
+    conn: sqlite3.Connection, walked: List[str], continued: Dict[str, float]
+) -> List[Dict[str, Any]]:
     """Each in-place compaction in those sessions' transcripts, as ``{ at }`` in ms.
 
     ``at`` is the summary row's own time — the moment the compaction ran, which is also the row
@@ -99,6 +105,14 @@ def _in_place(conn: sqlite3.Connection, walked: List[str]) -> List[Dict[str, Any
     Dating the mark to the last row the compaction archived instead would drop the divider inside
     the carried turns, minutes of chat before the context was actually compacted.
 
+    A rotation publishes its own summary into the child it hands off to, as one of that child's
+    first rows and flagged the same way (``hermes_state_compression.py`` inserts the child's rows
+    and only then ends the parent). That summary is the rotation ``continued`` names, which the
+    walk already marked with the size only it carries, so a row in one of those sessions at or
+    before the moment the parent ended is skipped: counting it again would split one compaction in
+    two and cost the divider its size. A later compaction in the same child is after that moment
+    and still counts.
+
     Best effort on its own: a transcript this read can't answer — a store from before in-place
     compression flagged its rows, or one too busy to open — costs these marks and never the
     rotation ones the walk already collected.
@@ -108,14 +122,20 @@ def _in_place(conn: sqlite3.Connection, walked: List[str]) -> List[Dict[str, Any
         if "_compressed_summary" not in columns:
             return []
         rows = conn.execute(
-            "SELECT timestamp FROM messages WHERE session_id IN ({}) AND _compressed_summary = 1"
+            "SELECT id, session_id, timestamp FROM messages"
+            " WHERE session_id IN ({}) AND _compressed_summary = 1"
             " ORDER BY id".format(",".join("?" * len(walked))),
             walked,
         ).fetchall()
     except sqlite3.Error:
         logger.warning("memento: couldn't read a chat's in-place compactions", exc_info=True)
         return []
-    return [{"at": _ms(row[0])} for row in rows if isinstance(row[0], (int, float)) and row[0] > 0]
+    return [
+        {"at": _ms(row["timestamp"])}
+        for row in rows
+        if isinstance(row["timestamp"], (int, float))
+        and row["timestamp"] > continued.get(row["session_id"], 0.0)
+    ]
 
 
 def _sizes(home: Path, sessions: List[str]) -> Dict[str, Dict[str, int]]:

@@ -2404,10 +2404,16 @@ row is the summary, so it could name the first row written after it outright.
   duplication predates this branch, blame `02d3925c`). A single `_lineage()` in `sessions.py`
   returning the walked path would serve both callers and keep the fork rule in one place — worth
   doing the next time that walk moves, not from a cleanup pass over an unrelated change.
-- A rotated chat may report its compaction twice (once from the parent's `ended_at`, once from the
-  child's own summary row, which Hermes flags). The app collapses two marks in one gap to a single
-  divider, so the cost is bytes rather than pixels, and no store reachable here has a rotated chat
-  to confirm it on — left alone rather than fixed blind.
+- A rotated chat reports its compaction once, not twice: the child a rotation hands off to carries
+  the rotation's own summary, flagged `_compressed_summary` like an in-place one, and reading it as
+  a second compaction was believed to cost bytes rather than pixels (two marks in one gap collapse
+  to one divider). It cost pixels. The app keeps the *first* mark of a row, the summary row is
+  written before the parent is closed (`hermes_state_compression.py` inserts the child's rows, then
+  ends the parent), so the size-less in-place mark sorted ahead of the rotation mark and won the
+  row: a rotated chat's divider went from `Compaction · 168k of 200k (84%)` to a bare `Compaction`.
+  Fixed in the plugin — a summary in a session the walk continued into counts only after the moment
+  its parent ended — with `test_a_rotation_summary_is_that_rotation_not_one_more` and the fixture
+  case in `test_in_place_marks_and_a_rotation_merge_oldest_first` holding both sides.
 
 ---
 

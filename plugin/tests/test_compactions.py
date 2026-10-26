@@ -223,6 +223,27 @@ class CompactionsTest(unittest.TestCase):
         )
         self.assertEqual(compactions.read(self.home, "s2"), [{"at": 100_000}, {"at": 700_000}])
 
+    def test_a_rotation_summary_is_that_rotation_not_one_more(self) -> None:
+        # A rotation publishes its summary into the child as one of its first rows, flagged
+        # `_compressed_summary` (hermes_state_compression.py inserts the child's rows at :452 and
+        # ends the parent at :470). The walk already counts that rotation, so reading the row as a
+        # second compaction splits one compaction in two — and the divider, which keeps the first
+        # mark of a row, loses the size only the rotation's own mark carries.
+        store(
+            self.home,
+            [
+                ("s1", None, "compression", 100.0, None, None),
+                ("s2", "s1", None, None, None, None),
+            ],
+            [
+                message(1, 90.0, session="s2", summary=1),  # what the rotation published
+                message(2, 95.0, session="s2", role="assistant"),
+                message(3, 700.0, session="s2", summary=1),  # a later in-place compaction, its own
+                message(4, 800.0, session="s2", role="assistant"),
+            ],
+        )
+        self.assertEqual(compactions.read(self.home, "s2"), [{"at": 100_000}, {"at": 700_000}])
+
     def test_a_live_row_with_no_summary_flag_is_not_a_mark(self) -> None:
         store(
             self.home,
