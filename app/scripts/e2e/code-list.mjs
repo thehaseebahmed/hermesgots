@@ -29,6 +29,13 @@ const countIn = async (page, label) => {
 
 const dotsIn = (row) => row.locator("[data-unread]").count()
 
+/** Through the store's own writer, so the list re-draws on the mark. */
+const seedMark = (page, id, at) =>
+  page.evaluate(async (seed) => {
+    const { markRead } = await import("/src/lib/read-marks.ts")
+    markRead(seed.id, seed.at)
+  }, { id, at })
+
 await flow("code-list", async ({ page, seed, shot, until }) => {
   const now = Date.now()
   await seed([
@@ -73,10 +80,7 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
 
   // A closed row can still dot: read before its own resolve moved the activity it measures against,
   // so the store this device holds is written through the app's own writer and the list re-draws.
-  await page.evaluate(async () => {
-    const { markRead } = await import("/src/lib/read-marks.ts")
-    markRead("cl-resolved", Date.now() - 30_000)
-  })
+  await seedMark(page, "cl-resolved", Date.now() - 30_000)
   const closed = group(page, "Closed")
   assert.equal(await closed.getByText("Finished work").isVisible(), false, "Closed starts collapsed")
   await closed.locator("h2 button").click()
@@ -124,14 +128,14 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   // the list has changed route, so counting its dots here would count nothing at all.
   const idleRows = group(page, "Idle")
   const target = idleRows.locator("li").filter({ hasText: "Another idle" })
-  const dot = target.locator("[data-unread]")
   await target.locator("a").first().click()
   await page.waitForURL("**/c/cl-idle2", { timeout: 10_000 })
   await until(async () => {
-    const marks = await page.evaluate(() =>
-      JSON.parse(localStorage.getItem("memento:read-marks") ?? "{}"),
-    )
-    return (marks["cl-idle2"] ?? 0) > 0
+    const at = await page.evaluate(async (id) => {
+      const { readMark } = await import("/src/lib/read-marks.ts")
+      return readMark(id) ?? 0
+    }, "cl-idle2")
+    return at > 0
   }, 5_000, "the mark the thread's own render wrote")
 
   // A thread on screen keeps re-marking its own activity, so the next row is opened to hold the
@@ -143,9 +147,9 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
     const { db } = await import("/src/lib/db.ts")
     await db.conversations.update("cl-idle2", { updatedAt: Date.now() })
   })
-  await until(async () => (await dot.count()) === 1, 10_000,
+  await until(async () => (await dotsIn(target)) === 1, 10_000,
     "the dot once activity lands past the mark")
-  const dotBox = await dot.boundingBox()
+  const dotBox = await target.locator("[data-unread]").boundingBox()
   const iconBox = await target.locator("span.size-10").boundingBox()
   assert.ok(dotBox && iconBox, "both boxes measured")
   assert.ok(dotBox.x + dotBox.width / 2 > iconBox.x + iconBox.width / 2,
@@ -158,7 +162,7 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
 
   await target.locator("a").first().click()
   await page.waitForURL("**/c/cl-idle2", { timeout: 10_000 })
-  await until(async () => (await dot.count()) === 0, 5_000,
+  await until(async () => (await dotsIn(target)) === 0, 5_000,
     "the dot to clear once the thread renders")
   pass("the dot sits at the icon's corner, needs a mark to be against, clears when read and returns with new activity")
 
@@ -243,10 +247,7 @@ for (const [width, dark] of VARIANTS) {
       // One row carries a mark older than its own activity: the dot measures against a mark, so
       // this device's store is written through the app's own writer and the list re-draws on it
       // (ADR 0055).
-      await page.evaluate(async () => {
-        const { markRead } = await import("/src/lib/read-marks.ts")
-        markRead("clv-idle-3", Date.now() - 60_000)
-      })
+      await seedMark(page, "clv-idle-3", Date.now() - 60_000)
       await page.evaluate(async () => {
         const { db } = await import("/src/lib/db.ts")
         await db.messages.put({

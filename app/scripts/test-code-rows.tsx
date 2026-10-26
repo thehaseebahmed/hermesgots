@@ -203,7 +203,7 @@ test("a dot needs a read mark to measure against, and a read mark clears it", as
   })
 })
 
-test("a closed session this device never opened is not dotted, and one read before it closing is", async () => {
+test("a closed session never opened here is not dotted, one read before it closed is dotted", async () => {
   await drawRow(conversation("closed-never-opened", { resolvedAt: 300 }), {
     body: async () => {
       assert.equal(dot(), null, "Resolved with no mark here: nothing to compare against")
@@ -223,6 +223,8 @@ test("a mark never moves back, and the oldest drop once the store is full", () =
   markRead("mono", 100)
   markRead("mono", 50)
   assert.equal(store()["mono"], 100, "an older moment never moves a mark back")
+  markRead("not-a-moment", 0)
+  assert.equal(store()["not-a-moment"], undefined, "a moment that is not one writes no mark at all")
   for (let i = 0; i < 500; i++) markRead(`bulk-${i}`, 1_000 + i)
   assert.equal(Object.keys(store()).length, 500, "the store holds only its cap")
   assert.equal(store()["mono"], undefined, "the oldest mark drops once it is full")

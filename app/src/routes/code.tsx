@@ -126,10 +126,7 @@ const CODE_SORTS: Record<CodeSort, string> = {
 /** The Code list's order over each group, kept on this device (unset: created). */
 function useCodeSort(): [CodeSort, (sort: CodeSort) => void] {
   const sort = useLiveQuery(async () => (await getSettings()).codeSort, []) ?? "created"
-  return [
-    sort,
-    (codeSort) => void saveSettings({ codeSort }).catch(quietly("Saving the sort order")),
-  ]
+  return [sort, (codeSort) => void saveSettings({ codeSort }).catch(quietly("Saving the sort order"))]
 }
 
 function CodeList({ pane }: { pane?: FeaturePane }) {

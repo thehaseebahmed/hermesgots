@@ -68,5 +68,8 @@ export function forgetRead(sessionId: string) {
   persist(next)
 }
 
+/** This device's mark for one session, for a caller that wants the moment itself. */
+export const readMark = (sessionId: string): number | undefined => marks.get()[sessionId]
+
 /** Re-renders whatever draws the dots when a mark moves. */
 export const useReadMarks = marks.use
