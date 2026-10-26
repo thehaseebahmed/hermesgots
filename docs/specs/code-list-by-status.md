@@ -15,7 +15,7 @@ blocked on it, since `waiting_for_approval` is the run not running. Everything e
 settled stands.
 
 **Revised 2026-10-25 — the dot needs a mark.** Decision 5's "no mark means unread" inverts (ADR
-0055): the dot shows only where this device holds a read mark and the session's last activity is
+0056): the dot shows only where this device holds a read mark and the session's last activity is
 newer than it, so a session this device has never opened draws no dot at all. The mark stays local,
 is still written by rendering the thread, and the comparison against last activity is unchanged;
 what goes is joining an absent mark to that comparison at zero. Everything else this spec settled
@@ -103,7 +103,7 @@ of the row is that thread's last activity rather than its last turn's end.
 | `app/scripts/e2e/`, `app/scripts/e2e/cli.mjs` | The flow that proves grouping, colour and the dot |
 | `docs/e2e-flow-audit.md` | Its row and verdict |
 | `docs/adr/0046-the-code-list-is-arranged-by-status-and-a-dot-marks-what-this-device-hasnt-read.md` | The decision |
-| `docs/adr/0055-a-code-rows-dot-needs-a-read-mark-before-it-can-show.md` | The dot's one overturned sentence: no mark, no dot |
+| `docs/adr/0056-a-code-rows-dot-needs-a-read-mark-before-it-can-show.md` | The dot's one overturned sentence: no mark, no dot |
 | `GLOSSARY.md` | **Last activity**, **Read mark**, and Session state's waiting amended |
 | `AGENTS.md` | The checks-run-as-working line corrected |
 

@@ -1,7 +1,7 @@
 /**
  * The moments this device last rendered each session's thread — its **read mark** (GLOSSARY) — held
  * here on this device alone: never synced, never in the chat's fields (ADR 0046). What a mark means
- * to the Code row's dot is `isUnread` (session-work.ts, ADR 0055). One subscribe-able snapshot, so
+ * to the Code row's dot is `isUnread` (session-work.ts, ADR 0056). One subscribe-able snapshot, so
  * a list holding rows re-draws the moment a mark moves.
  */
 

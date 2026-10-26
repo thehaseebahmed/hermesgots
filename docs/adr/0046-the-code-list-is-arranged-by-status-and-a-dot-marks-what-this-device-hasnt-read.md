@@ -1,6 +1,6 @@
 # The Code list is arranged by status, and a dot marks what this device hasn't read
 
-**Superseded in its dot sentence by [ADR 0055](./0055-a-code-rows-dot-needs-a-read-mark-before-it-can-show.md)**:
+**Superseded in its dot sentence by [ADR 0056](./0056-a-code-rows-dot-needs-a-read-mark-before-it-can-show.md)**:
 a session never opened here no longer shows the dot — the dot needs a read mark first. What this
 record decides about the mark, its being device-local, the comparison and the dot's place stands.
 

@@ -246,7 +246,7 @@ for (const [width, dark] of VARIANTS) {
         `the waiting group at ${look}`)
       // One row carries a mark older than its own activity: the dot measures against a mark, so
       // this device's store is written through the app's own writer and the list re-draws on it
-      // (ADR 0055).
+      // (ADR 0056).
       await seedMark(page, "clv-idle-3", Date.now() - 60_000)
       await page.evaluate(async () => {
         const { db } = await import("/src/lib/db.ts")
