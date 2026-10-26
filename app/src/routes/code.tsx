@@ -126,7 +126,10 @@ const CODE_SORTS: Record<CodeSort, string> = {
 /** The Code list's order over each group, kept on this device (unset: created). */
 function useCodeSort(): [CodeSort, (sort: CodeSort) => void] {
   const sort = useLiveQuery(async () => (await getSettings()).codeSort, []) ?? "created"
-  return [sort, (codeSort) => void saveSettings({ codeSort }).catch(quietly("Saving the sort order"))]
+  return [
+    sort,
+    (codeSort) => void saveSettings({ codeSort }).catch(quietly("Saving the sort order")),
+  ]
 }
 
 function CodeList({ pane }: { pane?: FeaturePane }) {
@@ -477,10 +480,14 @@ export function SessionItem({
   now: number
   /** Why the server says the session waits on the user, if it does. */
   waiting?: WaitingReason
-  /** This device's read mark for the session, if it has one; newer activity dots the row. */
+  /**
+   * This device's read mark for the session: newer activity dots the row, and one with no mark
+   * shows no dot.
+   */
   mark?: number
 }) {
   const { c: session, state, prTick, project } = row
+  const activity = lastActivityAt(session)
   const removed = removedRepos(session, project)
   const draft = useDraft(session.id)
   // The line says why the row waits only while its claim is a wait: a run the host reports as
@@ -502,7 +509,7 @@ export function SessionItem({
         )
       }
       tone={rowTone(session, row)}
-      unread={isUnread(session, mark)}
+      unread={isUnread(session, mark, activity)}
       botId={botId}
       title={session.title}
       badge={
@@ -512,7 +519,7 @@ export function SessionItem({
           </Badge>
         ) : undefined
       }
-      when={formatWhen(lastActivityAt(session), now)}
+      when={formatWhen(activity, now)}
       line={line && <span className="truncate">{line}</span>}
       selected={session.id === pane?.selected}
       link={{ to: `/c/${session.id}`, replace: Boolean(pane?.open), state: { code: true } }}

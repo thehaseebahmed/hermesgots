@@ -1,10 +1,8 @@
 /**
  * The moments this device last rendered each session's thread — its **read mark** (GLOSSARY) — held
- * here on this device alone: never synced, never in the chat's fields (ADR 0046). The Code row's
- * blue dot shows while the session's last activity is newer than its mark, and only where there is
- * one: a session never opened here has no mark, so it shows nothing until the thread is rendered
- * once — in the pane or on its own page — which writes it back. One subscribe-able snapshot, so a
- * list holding rows re-draws the moment a mark moves.
+ * here on this device alone: never synced, never in the chat's fields (ADR 0046). What a mark means
+ * to the Code row's dot is `isUnread` (session-work.ts, ADR 0055). One subscribe-able snapshot, so
+ * a list holding rows re-draws the moment a mark moves.
  */
 
 import { createStore } from "@/lib/store"
@@ -19,7 +17,8 @@ const load = (): Record<string, number> => {
     if (!stored || typeof stored !== "object" || Array.isArray(stored)) return {}
     const marks: Record<string, number> = {}
     for (const [id, at] of Object.entries(stored)) {
-      if (typeof at === "number") marks[id] = at
+      // Absence is the only spelling of "no mark", so a stored zero or negative is not one.
+      if (typeof at === "number" && at > 0) marks[id] = at
     }
     return marks
   } catch {

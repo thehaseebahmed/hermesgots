@@ -239,7 +239,6 @@ test("a resolve or discard carries the time when it is the newest", () => {
 
 test("a session this device has never opened shows no dot", () => {
   assert.equal(isUnread(session({ updatedAt: 10 }), undefined), false, "no mark, so nothing to compare")
-  assert.equal(isUnread(session({ updatedAt: 10 }), 0), false, "a zero mark reads as none")
 })
 
 test("the dot shows only while activity is newer than the mark", () => {

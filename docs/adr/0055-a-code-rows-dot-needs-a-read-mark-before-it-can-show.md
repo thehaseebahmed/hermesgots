@@ -26,6 +26,10 @@ defined — activity newer than the mark dots the row, activity at or behind it 
 - Seed a mark from something the app already remembers (the pane's last-opened record, a session's
   creation here): rejected — it writes a read the reader never did, covers one session rather than
   the list, and leaves every other row dotted for the same reason.
+- Write the mark when the row is drawn rather than when the thread renders, so "read" means the
+  reader has seen the row: rejected — every list draw would write a mark per row it can see (and
+  every write re-runs the live queries over its range), and "seen the list" cannot say what this
+  device actually opened, which is the fact the mark holds. It would also need a record of its own.
 - Drop the dot from Closed only: rejected — the symptom is the absent mark, not the group; the same
   session reads differently the moment it is reopened.
 - Keep the rule and tell the reader what the dot means: rejected — no copy explains a dot that sits
@@ -33,13 +37,17 @@ defined — activity newer than the mark dots the row, activity at or behind it 
 
 ## Consequences
 
-- `isUnread` is the only code that changes: a missing (or zero) mark answers "not unread" rather
-  than joining the comparison at zero.
+- The code that changes is the rule and its store's boundary: `load()` drops anything that is not a
+  positive moment, so absence is the one spelling of "no mark", and `isUnread` answers "not
+  unread" rather than joining an absent mark to the comparison at zero.
 - A session created on another device shows no dot on this one until its thread is rendered here
   once — the list says what it holds, not what this device has missed.
 - An evicted mark (the store keeps five hundred) stops dotting its row instead of re-dotting it,
   which is the same rule read as never opened.
 - A session read before it was closed still dots the moment a resolve, a discard, a turn or a pull
   request moves its last activity past the mark: last activity's derivation is untouched.
-- The rule's own tests, the browser flow's seeded marks, `docs/specs/code-list-by-status.md`'s
-  decision 5 and edge, and `docs/e2e-flow-audit.md`'s row for `code-list` move with it.
+- Every place that states the rule moves with it: the rule's own tests, the browser flow (whose
+  seeded marks are written through `markRead`), `read-marks.ts`'s module doc, both `AGENTS.md`
+  layout rows, the glossary's **Read mark**, `docs/specs/code-list-by-status.md`'s summary,
+  decision 5 and its edge, and `docs/e2e-flow-audit.md`'s row for `code-list` with the flow's
+  own `about` string.

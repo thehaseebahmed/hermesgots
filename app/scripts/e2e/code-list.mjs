@@ -27,6 +27,9 @@ const countIn = async (page, label) => {
   return (await span.count()) ? await span.innerText() : null
 }
 
+/** The dots one row wears, so a leg asks the row rather than the whole group. */
+const dotsIn = (row) => row.locator("[data-unread]").count()
+
 await flow("code-list", async ({ page, seed, shot, until }) => {
   const now = Date.now()
   await seed([
@@ -69,18 +72,25 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   assert.equal(await countIn(page, "Idle"), "2", "the idle count, one session the fewer")
   pass("a running session sits in Working, whatever the clock says, and the empty heading appears")
 
+  // A closed row can still dot: read before its own resolve moved the activity it measures against,
+  // so the store this device holds is written through the app's own writer and the list re-draws.
+  await page.evaluate(async () => {
+    const { markRead } = await import("/src/lib/read-marks.ts")
+    markRead("cl-resolved", Date.now() - 30_000)
+  })
   const closed = group(page, "Closed")
   assert.equal(await closed.getByText("Finished work").isVisible(), false, "Closed starts collapsed")
   await closed.locator("h2 button").click()
   await until(async () => (await closed.getByText("Finished work").isVisible()), 5_000, "Closed to open")
   const glyph = async (row) =>
     (await row.locator("span.size-10 svg").first().getAttribute("class")) ?? ""
-  assert.ok((await glyph(closed.locator("li").filter({ hasText: "Finished work" }))).includes("lucide-check"),
-    "Resolved wears the check")
-  assert.ok((await glyph(closed.locator("li").filter({ hasText: "Dropped work" }))).includes("lucide-archive-x"),
-    "Discarded wears the archive")
-  assert.equal(await closed.locator("[data-unread]").count(), 0,
-    "neither closed row is dotted: this device has never opened them, so there is no mark to beat")
+  const finished = closed.locator("li").filter({ hasText: "Finished work" })
+  const dropped = closed.locator("li").filter({ hasText: "Dropped work" })
+  assert.ok((await glyph(finished)).includes("lucide-check"), "Resolved wears the check")
+  assert.ok((await glyph(dropped)).includes("lucide-archive-x"), "Discarded wears the archive")
+  await until(async () => (await dotsIn(finished)) === 1, 5_000,
+    "a closed row read before its resolve is dotted")
+  assert.equal(await dotsIn(dropped), 0, "and one this device never opened is not")
   await shot("closed")
   pass("Closed collapses by default and holds Resolved and Discarded under their own icons")
 
@@ -110,20 +120,25 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   await until(async () => (await group(page, "Idle").count()) > 0, 5_000, "the headers back")
   pass("a search drops the group headers for one flat list in the same order")
 
-  // It rides an idle session that never changes state and never opens before its turn — and the
-  // first thing it does is stay away: this device has read nothing of it, so it holds no mark its
-  // activity could be newer than (ADR 0055).
+  // The dot's own row: an idle session with nothing new in it, read once so that its mark can age.
+  // Opening the thread is what writes the mark, and the store it writes is where that is proved —
+  // the list has changed route, so counting its dots here would count nothing at all.
   const idleRows = group(page, "Idle")
   const target = idleRows.locator("li").filter({ hasText: "Another idle" })
   const dot = target.locator("[data-unread]")
-  assert.equal(await dot.count(), 0, "an unopened row wears no dot: this device holds no mark for it")
-
-  // Opening the thread is what writes the mark, so the dot has something to measure from then on.
   await target.locator("a").first().click()
   await page.waitForURL("**/c/cl-idle2", { timeout: 10_000 })
+  await until(async () => {
+    const marks = await page.evaluate(() =>
+      JSON.parse(localStorage.getItem("memento:read-marks") ?? "{}"),
+    )
+    return (marks["cl-idle2"] ?? 0) > 0
+  }, 5_000, "the mark the thread's own render wrote")
+
+  // A thread on screen keeps re-marking its own activity, so the next row is opened to hold the
+  // pane while this one's activity lands past the mark it has.
   await idleRows.locator("li").filter({ hasText: "At rest" }).locator("a").first().click()
   await page.waitForURL("**/c/cl-idle", { timeout: 10_000 })
-  assert.equal(await dot.count(), 0, "reading it is not new activity either")
 
   await page.evaluate(async () => {
     const { db } = await import("/src/lib/db.ts")
@@ -223,17 +238,16 @@ for (const [width, dark] of VARIANTS) {
           updatedAt: now - 6_000, resolvedAt: now },
       ])
 
-      // One row carries a mark older than its own activity: the dot measures against a mark, so
-      // this device's store is written before the app's modules read it (ADR 0055).
-      await page
-        .context()
-        .addInitScript(
-          (marks) => localStorage.setItem("memento:read-marks", JSON.stringify(marks)),
-          { "clv-idle-3": now - 60_000 },
-        )
       await page.goto(`${app}/code`)
       await until(async () => (await group(page, "Waiting for You").count()) > 0, 20_000,
         `the waiting group at ${look}`)
+      // One row carries a mark older than its own activity: the dot measures against a mark, so
+      // this device's store is written through the app's own writer and the list re-draws on it
+      // (ADR 0055).
+      await page.evaluate(async () => {
+        const { markRead } = await import("/src/lib/read-marks.ts")
+        markRead("clv-idle-3", Date.now() - 60_000)
+      })
       await page.evaluate(async () => {
         const { db } = await import("/src/lib/db.ts")
         await db.messages.put({
@@ -262,16 +276,12 @@ for (const [width, dark] of VARIANTS) {
         .getAttribute("class")
       assert.ok(tone?.includes("bg-warning/15"), `the waiting row is yellow at ${look}`)
       const idle = group(page, "Idle").locator("li")
-      assert.equal(
-        await idle.filter({ hasText: "At rest 0" }).locator("[data-unread]").count(),
-        0,
-        `an unopened row carries no dot at ${look}`,
-      )
-      assert.equal(
-        await idle.filter({ hasText: "At rest 3" }).locator("[data-unread]").count(),
-        1,
-        `a row read before its activity is dotted at ${look}`,
-      )
+      const rest0 = idle.filter({ hasText: "At rest 0" })
+      const rest3 = idle.filter({ hasText: "At rest 3" })
+      await rest0.waitFor()
+      await until(async () => (await dotsIn(rest3)) === 1, 5_000,
+        `a row read before its activity is dotted at ${look}`)
+      assert.equal(await dotsIn(rest0), 0, `an unopened row carries no dot at ${look}`)
 
       // The header row has to hold its published height at this width: scroll the list, and the
       // stuck heading still stops beneath the header instead of under it.
