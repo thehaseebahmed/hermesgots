@@ -1,5 +1,6 @@
-// One server's own sheet at /settings/bots/<botId>/mcps, opened by its row: Config, where its block
-// is shown and saved, and Tools, where what it offers is listed.
+// One server's own drill-in at /settings/bots/<botId>/mcps/<name>, opened by its row: Config, where
+// its block is shown and saved, and Tools, where what it offers is listed. The row's address is the
+// way in and the screen's back the way out — a detail is a page, not a sheet (ADR 0055).
 //
 // Config is everything the block holds for a server the bot's own config keeps: the transport and
 // its fields, then one field per environment value under *Environment variables*, titled with the
@@ -11,13 +12,13 @@
 //
 // Tools reads Hermes's schema cache, which connects nothing: what the server offers is there to read
 // with the server not running. Load tools asks the Host to connect that one server, list it and
-// disconnect — which is why it is a tap, not what opening the sheet does.
+// disconnect — which is why it is a tap, not what opening the page does.
 //
 // A server a Hermes plugin provides has a Config that is read, not edited: no Save, no Remove.
 // Phone and tablet, light and dark.
 import { app, assert, flow, mock, pass } from "./lib.mjs"
 
-// The secret the mock's bot already holds for github: the sheet may say it is set, never show it.
+// The secret the mock's bot already holds for github: the page may say it is set, never show it.
 const HELD = "ghp-already-found-once"
 
 const run = async ({ page, profileId, shot, until }) => {
@@ -37,22 +38,37 @@ const run = async ({ page, profileId, shot, until }) => {
     if (request.method() === "POST" && path.endsWith("/config"))
       writes.push({ path, body: JSON.parse(request.postData() ?? "{}") })
   })
-  const sheet = () => page.getByRole("dialog")
+  const detail = () => page.locator("[data-mcp-detail]")
   const openServer = async (name) => {
     await page.locator(`[data-mcp="${name}"]`).getByRole("button", { name, exact: true }).click()
-    await sheet().getByRole("heading", { name, exact: true }).waitFor({ timeout: 15_000 })
+    await page.waitForURL((url) => url.pathname === `${screen}/${name}`, { timeout: 15_000 })
+    await page.getByRole("heading", { level: 1, name, exact: true }).waitFor({ timeout: 15_000 })
+  }
+  const back = async () => {
+    // Two headers can carry a Back — the app's own and the pane's: take the pane's, the one under
+    // the title this screen was pushed with.
+    const title = decodeURIComponent(new URL(page.url()).pathname.split("/").pop() ?? "")
+    await page
+      .locator("header")
+      .filter({ has: page.getByRole("heading", { level: 1, name: title, exact: true }) })
+      .getByRole("button", { name: "Back" })
+      .click()
+    await page.waitForURL((url) => url.pathname === screen, { timeout: 15_000 })
+    await page.locator('[data-mcp="github"]').waitFor({ timeout: 15_000 })
   }
 
   try {
     await page.goto(`${app}${screen}`)
     await page.locator('[data-mcp="github"]').waitFor({ timeout: 15_000 })
 
-    // The row opens the server's own sheet, with its name for a title and its two tabs.
+    // The row drills into the server's own page, with its name for a title and its two tabs.
     await openServer("github")
-    await sheet().getByRole("tab", { name: "Config", exact: true }).waitFor({ timeout: 15_000 })
+    // The pane swaps a beat after the header, so wait for the tabs rather than sampling them.
+    const configTab = detail().getByRole("tab", { name: "Config", exact: true })
+    await configTab.waitFor({ timeout: 15_000 })
     assert.ok(
-      await sheet().getByRole("tab", { name: "Tools", exact: true }).isVisible(),
-      "the sheet offers Config and Tools",
+      await detail().getByRole("tab", { name: "Tools", exact: true }).isVisible(),
+      "the detail offers Config and Tools",
     )
 
     // Config shows the block the bot's config holds: the transport, its command and its arguments.
@@ -122,7 +138,7 @@ const run = async ({ page, profileId, shot, until }) => {
 
     // A value the form adds types its own name: the row the block holds is titled by the name it
     // already has, while Add a value has nothing to title it with until one is typed.
-    await sheet().getByRole("button", { name: "Add a value", exact: true }).click()
+    await detail().getByRole("button", { name: "Add a value", exact: true }).click()
     const added = page.locator('[data-value=""] input').first()
     assert.equal(
       await added.getAttribute("placeholder"),
@@ -165,7 +181,7 @@ const run = async ({ page, profileId, shot, until }) => {
     )
 
     // Tools reads what the server offers without connecting it: the schema cache answers at once.
-    await sheet().getByRole("tab", { name: "Tools", exact: true }).click()
+    await detail().getByRole("tab", { name: "Tools", exact: true }).click()
     await page.locator("[data-tool]").first().waitFor({ timeout: 15_000 })
     assert.equal(
       await page.locator("[data-tool]").count(),
@@ -197,13 +213,23 @@ const run = async ({ page, profileId, shot, until }) => {
       "the tools stay on the screen after a fresh read",
     )
 
-    // Closing the sheet leaves the tab as it was; the name is the way back in.
-    await page.keyboard.press("Escape")
-    await page.locator('[data-mcp="github"]').waitFor({ timeout: 15_000 })
+    // Back leaves the server's page for the list, where the name is the way in again.
+    await back()
+    if ((page.viewportSize()?.width ?? 0) >= 1024) {
+      // The pane's Back pops the address the row pushed rather than pushing a second one, so the
+      // browser's own Back leaves the list too instead of re-entering the server's page.
+      await page.goBack()
+      assert.ok(
+        !new URL(page.url()).pathname.startsWith(`${screen}/`),
+        "the pane's Back left no address behind it to return to",
+      )
+      await page.goto(`${app}${screen}`)
+      await page.locator('[data-mcp="github"]').waitFor({ timeout: 15_000 })
+    }
 
     // A server a Hermes plugin provides: its Config is read, not edited.
     await openServer("filesystem")
-    await sheet().getByRole("tab", { name: "Config", exact: true }).waitFor({ timeout: 15_000 })
+    await detail().getByRole("tab", { name: "Config", exact: true }).waitFor({ timeout: 15_000 })
     assert.equal(
       await page.locator("#mcp-config-command").isDisabled(),
       true,
@@ -230,11 +256,11 @@ const run = async ({ page, profileId, shot, until }) => {
     assert.ok(!shown.includes(TYPED), "what was typed is not shown back either")
 
     // A failed fetch the browser logs on its own (a 404 with no CORS headers) isn't the app's error.
-  assert.deepEqual(
-    errors.filter((e) => !/Failed to load resource|CORS policy/.test(e)),
-    [],
-    `no error in the console (${errors.join("; ")})`,
-  )
+    assert.deepEqual(
+      errors.filter((e) => !/Failed to load resource|CORS policy/.test(e)),
+      [],
+      `no error in the console (${errors.join("; ")})`,
+    )
   } finally {
     // The rest of the suite finds the mock's whole list, and its blocks, again.
     await fetch(`${mock}/__mock/mcp`, { method: "POST" })
@@ -251,5 +277,5 @@ for (const width of [390, 1024]) {
   }
 }
 pass(
-  "a server's row opens its own sheet with Config and Tools, Config shows the block with each value titled by its environment name and nothing else, a value the form added typing its own name, a value the bot holds standing empty and reading as set, Save writes the whole block once with arguments split into argv, Tools lists what the server offers from the cache and Load tools asks for a fresh list, and a plugin's block is read and not edited, at 390 and 1024px, light and dark",
+  "a server's row drills into its own page at its own address, with Config and Tools: Config shows the block with each value titled by its environment name and nothing else, a value the form added typing its own name, a value the bot holds standing empty and reading as set, Save writes the whole block once with arguments split into argv, Tools lists what the server offers from the cache and Load tools asks for a fresh list, a plugin's block is read and not edited, and Back returns to the list — a pushed screen on a phone and the pane beside the settings list from 1024px, light and dark",
 )

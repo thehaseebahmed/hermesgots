@@ -15,8 +15,10 @@ await flow("fallback-models", async ({ page, profileId, until, shot, held }) => 
     await picker.getByRole("textbox", { name: "Search models" }).fill(query)
     await picker.getByRole("button", { name: label }).first().click()
   }
-  // The whole field, so the heading's saving icon and the rows are read where they render.
-  const field = page.getByRole("group", { name: "Fallback providers" })
+  // The drill-in page the row opens: the rows it holds, and the aria-busy they wear while a write
+  // is on its way (ADR 0055).
+  const row1 = page.locator('[data-fallback="1"]')
+  const row2 = page.locator('[data-fallback="2"]')
   // Every fallback write the page sends, so the greying out is checked against what goes to the host
   // and not only against how the rows look.
   const writes = []
@@ -34,6 +36,11 @@ await flow("fallback-models", async ({ page, profileId, until, shot, held }) => 
   assert.deepEqual(await hosted(), [])
 
   await page.goto(`${app}/settings/bots/${profileId}/models`)
+  await page.locator('[data-setting="fallbacks"]').waitFor({ timeout: 15_000 })
+  await page.locator('[data-setting="fallbacks"]').click()
+  await page.waitForURL((url) => url.pathname === `/settings/bots/${profileId}/models/fallbacks`, {
+    timeout: 15_000,
+  })
   const add = page.getByRole("button", { name: "Add fallback" })
   await add.waitFor({ timeout: 15_000 })
 
@@ -43,31 +50,39 @@ await flow("fallback-models", async ({ page, profileId, until, shot, held }) => 
   write.hold()
   await add.click()
   await pick("gpt-5-mini", "openai/gpt-5-mini")
-  await page.locator("#fallback-1").waitFor()
-  assert.ok(await page.locator("#fallback-1").isDisabled(), "the row is greyed out while saving")
+  await row1.waitFor()
+  assert.ok(await row1.isDisabled(), "the row is greyed out while saving")
   assert.ok(
     await page.getByRole("button", { name: "Remove fallback 1" }).isDisabled(),
     "so is its remove",
   )
   assert.ok(await add.isDisabled(), "and no second pick can start")
-  assert.equal(await field.getByRole("status").count(), 1, "the heading shows a save is happening")
-  await page.waitForTimeout(300)
+  assert.equal(await row1.getAttribute("aria-busy"), "true", "the row says a save is happening")
+  await until(async () => writes.length >= 1, 5_000, "the pick's write to go out")
   assert.equal(writes.length, 1, "and only the one write went out")
   await shot("saving")
   write.release()
-  await until(async () => (await hosted()).length === 1, 10_000, "the host to record the first fallback")
-  await page.locator("#fallback-1").getByText("openrouter/openai/gpt-5-mini").waitFor()
-  assert.equal(await field.getByRole("status").count(), 0, "the heading is quiet once it landed")
+  await until(
+    async () => (await hosted()).length === 1,
+    10_000,
+    "the host to record the first fallback",
+  )
+  await row1.getByText("openrouter/openai/gpt-5-mini").waitFor()
+  assert.equal(await row1.getAttribute("aria-busy"), null, "the row is quiet once it landed")
   assert.ok(!(await add.isDisabled()), "and the rows are usable again")
 
   await add.click()
   await pick("claude-opus-4-1", "claude-opus-4-1")
-  await until(async () => (await hosted()).length === 2, 10_000, "the host to record the second fallback")
+  await until(
+    async () => (await hosted()).length === 2,
+    10_000,
+    "the host to record the second fallback",
+  )
   assert.deepEqual(await hosted(), [
     { provider: "openrouter", model: "openai/gpt-5-mini" },
     { provider: "anthropic", model: "claude-opus-4-1" },
   ])
-  await page.locator("#fallback-2").getByText("anthropic/claude-opus-4-1").waitFor()
+  await row2.getByText("anthropic/claude-opus-4-1").waitFor()
   assert.equal(writes.length, 2, "and the second pick is a write of its own")
   await shot("two")
   // Two is what a bot takes: with both recorded there is no row to add a third, and no arrow to
@@ -76,7 +91,11 @@ await flow("fallback-models", async ({ page, profileId, until, shot, held }) => 
   assert.equal(await page.getByRole("button", { name: /Move fallback/ }).count(), 0)
 
   await page.getByRole("button", { name: "Remove fallback 1" }).click()
-  await until(async () => (await hosted()).length === 1, 10_000, "the host to drop the one that was removed")
+  await until(
+    async () => (await hosted()).length === 1,
+    10_000,
+    "the host to drop the one that was removed",
+  )
   assert.deepEqual(await hosted(), [{ provider: "anthropic", model: "claude-opus-4-1" }])
   await shot("removed")
   pass("the host recorded two fallbacks in order, and the removal")

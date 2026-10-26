@@ -11,51 +11,58 @@ const run = async ({ page, profileId, shot }) => {
     if (message.type() === "error") errors.push(message.text())
   })
   const screen = `/settings/bots/${profileId}/skills`
-  const sheet = () => page.locator("[data-skill-sheet]")
+  const note = () => page.locator("[data-skill-sheet]")
+  // The note is a drill-in now: a pushed screen below 1024px, the page pane from it (ADR 0055).
   const open = async (name) => {
     await page.locator(`[data-skill="${name}"] button`).first().click()
+    await page.waitForURL(`**${screen}/${encodeURIComponent(name)}`, { timeout: 15_000 })
     await page.locator(`[data-skill-sheet="${name}"]`).waitFor({ timeout: 15_000 })
     await settled(page)
   }
   const close = async () => {
-    await page.keyboard.press("Escape")
-    await sheet().waitFor({ state: "hidden", timeout: 15_000 })
+    // Two headers can carry a Back — the app's own and the pane's: take the pane's, the one under
+    // the title this screen was pushed with.
+    const title = decodeURIComponent(new URL(page.url()).pathname.split("/").pop() ?? "")
+    await page
+      .locator("header")
+      .filter({ has: page.getByRole("heading", { level: 1, name: title, exact: true }) })
+      .getByRole("button", { name: "Back" })
+      .click()
+    await page.waitForURL(`**${screen}`, { timeout: 15_000 })
+    await note().waitFor({ state: "hidden", timeout: 15_000 })
+    await settled(page)
   }
 
   await page.goto(`${app}${screen}`)
   await page.locator('[data-skill="github-pr-workflow"]').waitFor({ timeout: 15_000 })
 
+  const column = await page.locator('[data-skill="github-pr-workflow"]').boundingBox()
+  assert.ok(column, "the row has a box on screen")
   await open("github-pr-workflow")
-  const box = await page.getByRole("dialog").last().boundingBox()
+  const box = await note().boundingBox()
   const viewport = page.viewportSize()
-  assert.ok(box && viewport, "the sheet has a box on screen")
-  const width = Math.round(box.width)
-  const height = Math.round(box.height)
-  assert.ok(box.x >= -1 && box.x + box.width <= viewport.width + 1, "the sheet is on screen")
+  assert.ok(box && viewport, "the note has a box on screen")
+  assert.ok(box.x >= -1 && box.x + box.width <= viewport.width + 1, "the note is on screen")
   if (viewport.width < LAPTOP) {
     assert.equal(
-      Math.round(box.y + box.height),
-      viewport.height,
-      "a sheet on the screen's bottom edge",
+      await page.locator("[data-skills-tab]").count(),
+      0,
+      "a phone pushed the note over the page: the page it was opened from is a screen behind it",
     )
-    assert.equal(
-      Math.round(box.x),
-      Math.round((viewport.width - width) / 2),
-      "centred as every sheet is",
-    )
-    assert.ok(width <= 640, `a sheet's width (${width}px)`)
     assert.ok(
-      height <= Math.round(viewport.height * 0.85) + 1,
-      `and no taller than the screen allows (${height}px)`,
+      Math.abs(box.x - column.x) <= 2 && Math.abs(box.width - column.width) <= 2,
+      `the pushed screen takes the whole column the row sat in (${Math.round(box.width)}px beside ${Math.round(column.width)}px at ${viewport.width}px)`,
     )
+    assert.ok(box.y + box.height <= viewport.height + 1, "and it ends within the screen")
   } else {
-    assert.equal(height, viewport.height, "the side drawer takes the height")
-    assert.equal(
-      Math.round(box.x + box.width),
-      viewport.width,
-      "and from a laptop's width, flush right",
+    const list = page.locator("[data-bot-settings-list]")
+    await list.waitFor({ timeout: 15_000 })
+    const listBox = await list.boundingBox()
+    assert.ok(listBox, "the list keeps its pane beside the note")
+    assert.ok(
+      box.x >= listBox.x + listBox.width - 1 && box.x + box.width <= viewport.width + 1,
+      `from 1024px the note is the page pane, beside the list rather than over it (list ends at ${Math.round(listBox.x + listBox.width)}, note at ${Math.round(box.x)}…${Math.round(box.x + box.width)})`,
     )
-    assert.ok(width >= 412 && width <= 549, `a drawer's width (${width}px)`)
   }
 
   assert.equal(
@@ -104,7 +111,11 @@ const run = async ({ page, profileId, shot }) => {
     /The gates pass, and the diff is the change\./,
     "a linked markdown file reads as prose too",
   )
-  assert.equal(await sheet().count(), 0, "the skill's page is the file's, not both at once")
+  assert.equal(
+    await page.locator("[data-skill-files]").count(),
+    0,
+    "the file's own view replaced the skill's body, not drawn over it",
+  )
   await shot("file")
   await page.getByRole("button", { name: "Back to the skill" }).click()
   await file.waitFor({ state: "hidden", timeout: 15_000 })
@@ -196,5 +207,5 @@ for (const width of [390, 1024]) {
   }
 }
 pass(
-  "a skill's own sheet opens from its row as a note: a properties block of the Host's origin, readiness and setup beside the SKILL.md's own frontmatter, then the file's words drawn as prose, with its linked files — a markdown one opening into the same sheet and read the same way, the header's back returning to the skill — as a bottom sheet on a phone and the side drawer from 1024px, for a built-in, a Hub skill, a plugin's and one switched off, at 390 and 1024px, light and dark",
+  "a skill's own note drills in from its row at its own address: a properties block of the Host's origin, readiness and setup beside the SKILL.md's own frontmatter, then the file's words drawn as prose, with its linked files — a markdown one opening into the same note and read the same way, the screen's back returning to the list — pushed as a full screen on a phone and drawn as the pane beside the list from 1024px, for a built-in, a Hub skill, a plugin's and one switched off, at 390 and 1024px, light and dark",
 )

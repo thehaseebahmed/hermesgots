@@ -1,10 +1,9 @@
 /**
- * A bot's Chat page, over a seeded device database and a faked host: the Gots plugin's triage model
- * under one ownership heading and the bot's Hermes's model, its default and the chain after it under
- * the other, in that order; the triage explanation as the row's subtitle with no info icon left; the
- * fallback field renamed Fallback providers; a host that withholds the model saying so under the
- * subtitle; Subagent model gone to General; and a group whose card would hold no row drawing no
- * heading at all, on this page and on General.
+ * A bot's Models page, over a seeded device database and a faked host (ADR 0055): the muted captions
+ * "Gots" and "Hermes" over the cards that follow them, every setting a title over the line saying
+ * what it is for and the value it holds in the accent colour, each value opening its pick as a bottom
+ * sheet, and Fallback providers drilling into the chain's own screen — the rows it holds, the chain a
+ * pick writes and the chain a removal writes.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -12,96 +11,92 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { MemoryRouter, Route, Routes, useParams } from "react-router"
 
 import { BotSettingsPage } from "@/components/bot-settings"
+import { botSubOf } from "@/lib/bot-subs"
 import { botTabOf } from "@/lib/bot-tabs"
 import { db } from "@/lib/db"
-import { botProfile, find, findAll, json, mount, seedSettings, text } from "./component-kit.tsx"
+import {
+  Path,
+  absent,
+  botProfile,
+  click,
+  find,
+  findAll,
+  json,
+  mount,
+  path,
+  seedSettings,
+  until,
+} from "./component-kit.tsx"
 
-/** The triage explanation, which was the info icon's tooltip and is now the row's subtitle. */
-const TRIAGE =
-  "Decides whether a message sent from Main stays there, continues a thread or starts a new one. It only makes that call, so a small, fast model is enough. Default model uses the bot's own."
+/** The triage row's purpose line, as the page words it. */
+const TRIAGE = "Whether a message from Main starts a new thread or continues one"
+
+type Choice = { provider: string; model: string }
+type Sent = { method: string; path: string; body: Record<string, unknown> | null }
 
 function LivePage() {
-  const { tab } = useParams()
+  const { tab, sub } = useParams()
   const profile = useLiveQuery(() => db.profiles.get("bot-1"), [])
   if (!profile) return null
-  return <BotSettingsPage key={profile.id} profile={profile} tab={botTabOf(tab) ?? "general"} />
+  const shown = botTabOf(tab) ?? "general"
+  return (
+    <BotSettingsPage key={profile.id} profile={profile} tab={shown} sub={botSubOf(shown, sub)} />
+  )
 }
 
 /** The page at a bot's address, as the settings route mounts it. */
-const page = (path: string) => (
-  <MemoryRouter initialEntries={[path]}>
+const page = (entry: string) => (
+  <MemoryRouter initialEntries={[entry]}>
+    <Path />
     <Routes>
-      <Route path="/settings/bots/:botId/:tab" element={<LivePage />} />
+      <Route path="/settings/bots/:botId/:tab?/:sub?" element={<LivePage />} />
     </Routes>
   </MemoryRouter>
 )
 
-/** The headings the page itself draws, in the order it draws them. */
-const headings = (scope = "") => findAll(`${scope} h2`).map((heading) => heading.textContent)
-
-/** Every setting label on the page, in order. */
-const labels = () =>
-  findAll('[data-bot-chat] [data-slot="field-label"]').map((label) => label.textContent)
-
-/** The field of a setting, found by the label a user reads above it. */
-const fieldOf = (name: string, scope = "[data-bot-chat]") =>
-  findAll(`${scope} [data-slot="field-label"]`)
-    .find((label) => label.textContent === name)
-    ?.closest('[data-slot="field"]') ?? null
-
-/** The field of a setting, found by the label that names it: what a screen reader reads. */
-const fieldNamed = (name: string, scope = "[data-bot-chat]") =>
-  findAll(`${scope} [data-slot="field"]`).find((field) => {
-    const id = field.getAttribute("aria-labelledby")
-    return id ? document.getElementById(id)?.textContent === name : false
-  }) ?? null
-
-/** The line under a setting's label saying what it is for. */
-const subtitleOf = (field: Element | null) =>
-  field?.querySelector('[data-slot="field-description"]')?.textContent ?? null
-
-/** Which settings sit under which ownership heading, in drawing order. */
-function grouped() {
-  const root = find("[data-bot-chat]")
-  const found: Record<string, string[]> = {}
-  let heading = ""
-  for (const block of Array.from(root?.children ?? [])) {
-    const title = block.querySelector("h2")?.textContent
-    if (title) {
-      heading = title
-      found[heading] = []
-      continue
-    }
-    for (const label of Array.from(block.querySelectorAll('[data-slot="field-label"]')))
-      found[heading]?.push(label.textContent ?? "")
-  }
-  return found
-}
-
-const flat = (element: Element | null) => (element?.textContent ?? "").replace(/\s+/g, " ")
-
 /**
- * A host answering the plugin's `info` (its features, and whether it lets Gots pick the model) plus
- * the three settings routes and the two reads the model pickers make.
+ * A host answering the plugin's `info` (its features, version, and whether it lets Gots pick the
+ * model), the triage and fallback routes, its model list and the write that makes a model its main
+ * one — and recording every request, so a test can read what a pick wrote.
  */
 function host({
   features = ["triage_model", "fallbacks", "host_model"],
   writers = true,
   models = ["own-model", "cheap-model"],
-}: { features?: string[]; writers?: boolean; models?: string[] } = {}) {
-  const calls: { method: string; path: string }[] = []
+  triage = null as Choice | null,
+  fallbacks = [] as Choice[],
+}: {
+  features?: string[]
+  /** Whether the host lets Gots pick the model: its `research.writers` answer. */
+  writers?: boolean
+  models?: string[]
+  triage?: Choice | null
+  fallbacks?: Choice[]
+} = {}) {
+  const calls: Sent[] = []
+  let pick = triage
+  let chain = fallbacks
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    const path = new URL(String(input)).pathname
-    calls.push({ method: init?.method ?? "GET", path })
-    if (path.endsWith("/plugins/memento/info"))
+    const url = new URL(String(input))
+    const method = (init?.method ?? "GET").toUpperCase()
+    const body = init?.body ? JSON.parse(String(init.body)) : null
+    calls.push({ method, path: url.pathname, body })
+    if (url.pathname.endsWith("/plugins/memento/info"))
       return json({
         name: "memento",
+        version: "0.81.0",
         features,
         research: { writers: { model: writers, provider: writers } },
       })
-    if (path.endsWith("/plugins/memento/triage-model")) return json({ triage_model: null })
-    if (path.endsWith("/plugins/memento/fallbacks")) return json({ fallbacks: [] })
-    if (path.endsWith("/api/model/options"))
+    if (url.pathname.endsWith("/plugins/memento/triage-model")) {
+      if (method === "POST") pick = body?.triage_model ?? null
+      return json({ triage_model: pick })
+    }
+    if (url.pathname.endsWith("/plugins/memento/fallbacks")) {
+      if (method === "POST") chain = body?.fallbacks ?? []
+      return json({ fallbacks: chain })
+    }
+    if (url.pathname.endsWith("/api/model/options"))
       return json({
         model: "own-model",
         provider: "openrouter",
@@ -115,155 +110,331 @@ function host({
           },
         ],
       })
-    if (path.endsWith("/models")) return json({ data: models.map((id) => ({ id })) })
+    if (url.pathname.endsWith("/models")) return json({ data: models.map((id) => ({ id })) })
     return json({})
   }
-  return { calls, fetch: fetch as unknown as typeof globalThis.fetch }
+  return { calls, fetch: fetch as unknown as typeof globalThis.fetch, chain: () => chain }
 }
 
 /** A bot of this test's own: its connection names a host, so no other test's answers are read. */
-async function seed(
-  name: string,
-  features: string[],
-  patch = {},
-  options: { writers?: boolean; models?: string[] } = {},
-) {
+async function seed(name: string, options: Parameters<typeof host>[0] = {}, patch = {}) {
   await seedSettings()
   await db.profiles.clear()
   await db.profiles.put(botProfile(name, patch))
-  const fake = host({ features, ...options })
-  globalThis.fetch = fake.fetch
-  return fake
+  const server = host(options)
+  globalThis.fetch = server.fetch
+  return server.calls
 }
 
-test("the Chat page is the Gots triage pick, then the model, default and fallback providers", async () => {
-  await seed("chat-groups", ["triage_model", "fallbacks", "host_model", "delegation_model"])
-  await mount(page("/settings/bots/bot-1/chat"), async () => {
-    assert.deepEqual(
-      headings("[data-bot-chat]"),
-      ["Gots Specific Settings", "Hermes Settings"],
-      "one heading per ownership, in order",
+/** What a user reads on an element, with its spacing flattened. */
+const words = (element: Element | null) => (element?.textContent ?? "").replace(/\s+/g, " ").trim()
+const chat = () => find("[data-bot-models]")
+/** Any heading the page still draws: the captions replaced them. */
+const headings = () =>
+  findAll("[data-bot-models] h1, [data-bot-models] h2, [data-bot-models] h3").map((one) =>
+    one.textContent?.trim(),
+  )
+/** A caption: the muted line standing over a card of its own. */
+const caption = (title: string) =>
+  findAll("[data-bot-models] p").find((one) => words(one) === title) ?? null
+/** The settings the page draws, in the order it draws them. */
+const rows = () =>
+  findAll("[data-bot-models] [data-setting]").map((one) => one.getAttribute("data-setting"))
+/** A setting's row, what a user reads on it, and the value it holds in the accent colour. */
+const row = (id: string) => find(`[data-bot-models] [data-setting="${id}"]`)
+const rowText = (id: string) => words(row(id))
+const accent = (id: string) => row(id)?.querySelector(".text-primary")?.textContent ?? null
+/** A model a model pick offers, in the sheet it opened. */
+const modelOption = (name: string) =>
+  findAll("[aria-pressed]").find((one) => words(one) === name) ?? null
+/** Opens a setting's pick, and waits for the sheet it opens. */
+async function openPick(id: string) {
+  await click(row(id))
+  await until(async () => Boolean(find("[aria-pressed]")), "the model pick")
+}
+/** The chain's own screen: its rows, the button that removes one, and the way to add one. */
+const chain = () => find("[data-fallbacks]")
+const chainRows = () =>
+  findAll("[data-fallbacks] [data-fallback]").map((one) => one.getAttribute("data-fallback"))
+const chainRow = (place: number) => find(`[data-fallbacks] [data-fallback="${place}"]`)
+const chainValue = (place: number) =>
+  chainRow(place)?.querySelector(".text-primary")?.textContent ?? null
+const remove = (place: number) => find(`[aria-label="Remove fallback ${place}"]`)
+const addFallback = () =>
+  findAll("[data-fallbacks] button").find((one) => words(one) === "Add fallback") ?? null
+
+test("the Models page is the Gots triage row, then the model, the default and the fallback chain", async () => {
+  await seed("chat-groups")
+  await mount(page("/settings/bots/bot-1/models"), async () => {
+    assert.deepEqual(headings(), [], "no headings: the captions name the cards")
+    assert.equal(
+      caption("Gots")?.textContent?.trim(),
+      "Gots",
+      "the triage pick is Gots's, under its own caption",
+    )
+    assert.equal(
+      caption("Hermes")?.textContent?.trim(),
+      "Hermes",
+      "the rest are the bot's Hermes's",
     )
     assert.deepEqual(
-      grouped(),
-      {
-        "Gots Specific Settings": ["Triage model"],
-        "Hermes Settings": ["Model", "Default model", "Fallback providers"],
-      },
-      "every setting under the owner it belongs to",
+      rows(),
+      ["triage-model", "model", "default-model", "fallbacks"],
+      "every setting, in the order the page draws them, under the owner it belongs to",
     )
-    assert.deepEqual(
-      labels(),
-      ["Triage model", "Model", "Default model", "Fallback providers"],
-      "and in the order the page draws them",
+    assert.ok(
+      words(chat()).indexOf("Gots") < words(chat()).indexOf("Hermes"),
+      "Gots's caption comes before the Hermes card it does not name",
     )
-    assert.doesNotMatch(text(), /Subagent model/, "Subagent model is General's, not this page's")
+    assert.doesNotMatch(
+      words(chat()),
+      /Subagent model/,
+      "Subagent model is General's, not this page's",
+    )
   })
 })
 
-test("the triage row says what the model decides, and the info icon is gone", async () => {
-  await seed("chat-triage-copy", ["triage_model", "fallbacks", "host_model"])
-  await mount(page("/settings/bots/bot-1/chat"), async () => {
-    const field = fieldNamed("Triage model")
-    assert.ok(field, "the triage field is on the page")
-    assert.equal(subtitleOf(field), TRIAGE, "the explanation is the row's subtitle, word for word")
-    assert.equal(find('[aria-label="About the triage model"]'), null, "the info icon is gone")
-    assert.equal(find('[aria-label^="About the"]'), null, "and nothing else explains it in a pop-up")
-    assert.ok(find("#triage-model"), "the picker itself is untouched")
+test("the triage row says what the model decides, and no pop-up explains it", async () => {
+  await seed("chat-triage-copy")
+  await mount(page("/settings/bots/bot-1/models"), async () => {
+    assert.equal(
+      rowText("triage-model"),
+      `Triage model${TRIAGE}Default model`,
+      "the explanation is the row's own line, word for word, over the value it holds",
+    )
+    assert.equal(accent("triage-model"), "Default model")
+    assert.equal(find('[aria-label^="About the"]'), null, "and nothing explains it in a pop-up")
   })
 })
 
-test("the fallback field is Fallback providers, saying what the chain is for", async () => {
-  await seed("chat-fallbacks", ["triage_model", "fallbacks", "host_model"])
-  await mount(page("/settings/bots/bot-1/chat"), async () => {
+test("the fallback row is Fallback providers, saying what the chain is for", async () => {
+  await seed("chat-fallbacks", { fallbacks: [{ provider: "openrouter", model: "cheap-model" }] })
+  await mount(page("/settings/bots/bot-1/models"), async () => {
     assert.equal(
-      find("#fallback-models-label")?.textContent,
-      "Fallback providers",
-      "the label a user reads",
+      rowText("fallbacks"),
+      "Fallback providersThe chain Hermes tries after the main model1 provider",
+      "the name a user reads, the line under it, and the chain's length",
     )
-    const field = fieldNamed("Fallback providers")
-    assert.ok(field, "and the name the field group answers to")
-    assert.equal(
-      subtitleOf(field),
-      "The chain Hermes tries after the main model",
-      "with its subtitle",
-    )
-    assert.doesNotMatch(text(), /Fallback models/, "the old name is nowhere on the page")
+    assert.doesNotMatch(words(chat()), /Fallback models/, "the old name is nowhere on the page")
   })
 })
 
-test("the model and default model rows say what each is for", async () => {
-  await seed("chat-subtitles", ["triage_model", "fallbacks", "host_model"])
-  await mount(page("/settings/bots/bot-1/chat"), async () => {
+test("the chain's length is what the row says, and None when it holds nothing", async () => {
+  await seed("chat-chain-none")
+  await mount(page("/settings/bots/bot-1/models"), async () => {
+    assert.equal(accent("fallbacks"), "None", "an empty chain says None")
+  })
+
+  await seed("chat-chain-two", {
+    fallbacks: [
+      { provider: "openrouter", model: "cheap-model" },
+      { provider: "openrouter", model: "own-model" },
+    ],
+  })
+  await mount(page("/settings/bots/bot-1/models"), async () => {
+    assert.equal(accent("fallbacks"), "2 providers", "and two of them say 2 providers")
+  })
+})
+
+test("the model and default model rows say what each is for, and the value it holds", async () => {
+  await seed("chat-subtitles")
+  await mount(page("/settings/bots/bot-1/models"), async () => {
     assert.equal(
-      subtitleOf(fieldOf("Model")),
-      "The model a chat runs when it has no pick of its own",
-      "the model a chat runs",
+      rowText("model"),
+      "ModelThe model a chat runs when it has no pick of its owntest/model",
+      "the model a chat runs, and the model it holds",
     )
     assert.equal(
-      subtitleOf(fieldOf("Default model")),
-      "The host's main model, on every surface",
+      rowText("default-model"),
+      "Default modelThe host's main model, on every surfaceopenrouter/own-model",
       "and the default the host runs",
     )
   })
 })
 
-test("a host that withholds the model keeps its banner under the subtitle", async () => {
-  await seed("chat-withheld", ["triage_model", "fallbacks", "host_model"], {}, { writers: false })
-  await mount(page("/settings/bots/bot-1/chat"), async () => {
-    const field = fieldOf("Triage model")
-    assert.ok(field, "the triage field is still there")
-    assert.equal(subtitleOf(field), TRIAGE, "the subtitle is unchanged")
-    const body = flat(field)
-    const subtitle = body.indexOf(TRIAGE)
-    const banner = body.indexOf("This host doesn't let Gots pick the model.")
-    assert.ok(subtitle >= 0, "the subtitle is drawn")
-    assert.ok(banner > subtitle, "the banner sits under the subtitle")
+test("the model pick marks the model the page already shows as the value", async () => {
+  await seed("chat-model-marked")
+  await mount(page("/settings/bots/bot-1/models"), async () => {
+    assert.equal(
+      accent("default-model"),
+      "openrouter/own-model",
+      "the model in force, as the page shows it",
+    )
+    await openPick("model")
+    assert.equal(
+      modelOption("own-model")?.getAttribute("aria-pressed"),
+      "true",
+      "the pick ticks the row the page is already running",
+    )
+    assert.equal(
+      modelOption("cheap-model")?.getAttribute("aria-pressed"),
+      "false",
+      "and marks no other row",
+    )
   })
 })
 
-test("a host without the triage route leaves the Chat page its Hermes group alone", async () => {
-  await seed("chat-no-triage", ["fallbacks", "host_model"])
-  await mount(page("/settings/bots/bot-1/chat"), async () => {
-    assert.deepEqual(headings("[data-bot-chat]"), ["Hermes Settings"], "no heading over an empty card")
-    assert.equal(find("#triage-model"), null, "and no triage pick")
+test("a host that withholds the model keeps the triage row and its words", async () => {
+  await seed("chat-withheld", { writers: false })
+  await mount(page("/settings/bots/bot-1/models"), async () => {
+    assert.ok(row("triage-model"), "the triage row is still there")
+    assert.ok(rowText("triage-model").includes(TRIAGE), "and its line is unchanged")
+    assert.equal(accent("triage-model"), "Default model", "over the value it holds")
   })
 })
 
-test("a group with no row draws no heading: a linked bot whose host withholds delegation", async () => {
-  await seed("chat-general-empty", ["triage_model", "fallbacks"], { hostId: "host-1" })
-  await mount(page("/settings/bots/bot-1/general"), async () => {
-    assert.deepEqual(
-      headings(),
-      ["Gots Specific Settings", "Bot Profile"],
-      "no Hermes Settings over a card with nothing in it",
-    )
-    assert.doesNotMatch(text(), /API base URL/, "a linked bot's address is its host's")
-    assert.doesNotMatch(text(), /Server key/, "and so is its key")
+test("a host without the triage route draws no Gots caption, and its Hermes card alone", async () => {
+  await seed("chat-no-triage", { features: ["fallbacks", "host_model"] })
+  await mount(page("/settings/bots/bot-1/models"), async () => {
+    assert.ok(headings().length === 0, "no heading over an empty card either")
+    assert.ok(!caption("Gots"), "no caption over a card with no row in it")
+    assert.ok(caption("Hermes"), "the Hermes card is the page's own")
+    absent('[data-setting="triage-model"]', "and no triage row")
+    assert.deepEqual(rows(), ["model", "default-model", "fallbacks"], "the rest are as they were")
   })
 })
 
-test("the Hermes heading is there once the card has a row, linked or not", async () => {
-  await seed("chat-general-delegation", ["triage_model", "fallbacks", "delegation_model"], {
-    hostId: "host-1",
+test("a host without the fallback route leaves the chain's row off the page", async () => {
+  await seed("chat-no-fallbacks", { features: ["triage_model", "host_model"] })
+  await mount(page("/settings/bots/bot-1/models"), async () => {
+    absent('[data-setting="fallbacks"]', "no fallback row from a host that records no chain")
+    assert.deepEqual(rows(), ["triage-model", "model", "default-model"], "and the rest stay")
   })
-  await mount(page("/settings/bots/bot-1/general"), async () => {
-    assert.deepEqual(
-      headings(),
-      ["Gots Specific Settings", "Bot Profile", "Hermes Settings"],
-      "the delegation row earns its heading",
-    )
-    assert.ok(fieldNamed("Subagent model", ""), "Subagent model is General's")
-  })
+})
 
-  await seed("chat-general-unlinked", ["triage_model", "fallbacks"])
-  await mount(page("/settings/bots/bot-1/general"), async () => {
-    assert.deepEqual(
-      headings(),
-      ["Gots Specific Settings", "Bot Profile", "Hermes Settings"],
-      "an unlinked bot's own address and key keep the heading",
+test("tapping Fallback providers opens the chain's own screen", async () => {
+  await seed("chat-fallbacks-drill", {
+    fallbacks: [{ provider: "openrouter", model: "cheap-model" }],
+  })
+  await mount(page("/settings/bots/bot-1/models"), async () => {
+    await click(row("fallbacks"))
+    assert.equal(
+      path(),
+      "/settings/bots/bot-1/models/fallbacks",
+      "the chain has an address of its own",
     )
-    assert.match(text(), /API base URL/)
-    assert.match(text(), /Server key/)
+    assert.ok(chain(), "and a screen of its own")
+    assert.ok(!chat(), "the page under it is not drawn")
+  })
+})
+
+test("the chain's screen lists what the host holds, each with a way to remove it", async () => {
+  await seed("chat-chain-rows", {
+    fallbacks: [
+      { provider: "openrouter", model: "cheap-model" },
+      { provider: "openrouter", model: "own-model" },
+    ],
+  })
+  await mount(page("/settings/bots/bot-1/models/fallbacks"), async () => {
+    assert.deepEqual(chainRows(), ["1", "2"], "one row per fallback, in the order it is tried")
+    assert.equal(words(chainRow(1)), "Fallback 1openrouter/cheap-model", "the first by its place")
+    assert.equal(chainValue(1), "openrouter/cheap-model", "with its model in the accent colour")
+    assert.equal(chainValue(2), "openrouter/own-model", "and the second's own")
+    assert.ok(remove(1), "each row can be removed")
+    assert.ok(remove(2))
+    assert.ok(!addFallback(), "and a full chain offers no way to add a third")
+  })
+})
+
+test("an empty chain offers the row that adds one", async () => {
+  await seed("chat-chain-add")
+  await mount(page("/settings/bots/bot-1/models/fallbacks"), async () => {
+    assert.deepEqual(chainRows(), [], "no fallbacks yet")
+    assert.ok(addFallback(), "with the way to add the first")
+  })
+})
+
+test("picking a model for a new fallback writes the chain", async () => {
+  const calls = await seed("chat-chain-pick")
+  await mount(page("/settings/bots/bot-1/models/fallbacks"), async () => {
+    await click(addFallback())
+    await until(async () => Boolean(find("[aria-pressed]")), "the model pick")
+    assert.ok(modelOption("cheap-model"), "the host's models, in a sheet")
+    await click(modelOption("cheap-model"))
+
+    const write = calls.find((one) => one.method === "POST" && one.path.endsWith("/fallbacks"))
+    assert.deepEqual(
+      write?.body,
+      { fallbacks: [{ provider: "openrouter", model: "cheap-model" }] },
+      "the chain the host is sent",
+    )
+    assert.equal(chainValue(1), "openrouter/cheap-model", "and the row the chain now holds")
+  })
+})
+
+test("removing a fallback writes the chain without it", async () => {
+  const calls = await seed("chat-chain-remove", {
+    fallbacks: [
+      { provider: "openrouter", model: "cheap-model" },
+      { provider: "openrouter", model: "own-model" },
+    ],
+  })
+  await mount(page("/settings/bots/bot-1/models/fallbacks"), async () => {
+    await click(remove(1))
+    const write = calls.find((one) => one.method === "POST" && one.path.endsWith("/fallbacks"))
+    assert.deepEqual(
+      write?.body,
+      { fallbacks: [{ provider: "openrouter", model: "own-model" }] },
+      "the chain keeps the fallback that was under it",
+    )
+    assert.equal(
+      words(chainRow(1)),
+      "Fallback 1openrouter/own-model",
+      "and the row behind it moves up",
+    )
+  })
+})
+
+test("picking a model on the Models page writes it to the bot", async () => {
+  await seed("chat-model-pick")
+  await mount(page("/settings/bots/bot-1/models"), async () => {
+    assert.equal(accent("model"), "test/model", "the model the bot runs now")
+
+    await openPick("model")
+    assert.ok(modelOption("cheap-model"), "the host's models, in a sheet")
+    await click(modelOption("cheap-model"))
+
+    assert.equal(
+      (await db.profiles.get("bot-1"))?.model,
+      "cheap-model",
+      "the pick lands on the bot",
+    )
+    await until(async () => !find("[aria-pressed]"), "the sheet to close behind the pick")
+    assert.equal(accent("model"), "cheap-model", "and the row shows the model it now runs")
+  })
+})
+
+test("picking a triage model writes it to the host", async () => {
+  const calls = await seed("chat-triage-pick")
+  await mount(page("/settings/bots/bot-1/models"), async () => {
+    await openPick("triage-model")
+    await click(modelOption("cheap-model"))
+
+    const write = calls.find(
+      (one) => one.method === "POST" && one.path.endsWith("/plugins/memento/triage-model"),
+    )
+    assert.deepEqual(
+      write?.body,
+      { triage_model: { provider: "openrouter", model: "cheap-model" } },
+      "the triage model the host is sent",
+    )
+    assert.equal(accent("triage-model"), "openrouter/cheap-model", "and the row the pick set")
+  })
+})
+
+test("picking a Default model makes it the host's main model", async () => {
+  const calls = await seed("chat-default-pick")
+  await mount(page("/settings/bots/bot-1/models"), async () => {
+    await openPick("default-model")
+    await click(modelOption("cheap-model"))
+
+    const write = calls.find(
+      (one) => one.method === "POST" && one.path.endsWith("/plugins/memento/model"),
+    )
+    assert.deepEqual(
+      write?.body,
+      { provider: "openrouter", model: "cheap-model" },
+      "the host is told which model to run everywhere",
+    )
   })
 })
