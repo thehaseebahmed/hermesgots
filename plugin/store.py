@@ -16,7 +16,12 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 41
+# 43 is not a change of its own: it is v42's block, reached again. That block shipped as v42 on this
+# branch before the ``chat_session`` index joined it, so a store already at 42 would never run it and
+# would keep table-scanning the chat list — the cost that index exists to remove. Re-running the block
+# is safe: every ALTER is PRAGMA-guarded and every index says IF NOT EXISTS, so a v42 store builds the
+# index and a v41 store reaches 43 in one pass.
+SCHEMA_VERSION = 43
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -609,6 +614,17 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    run_id TEXT
                )"""
         )
+        # v42: the batch's intent also carries the model its run is posted with (delegation.py), for
+        # the same reason it carries the text: a retry has to re-post the same bytes under the
+        # batch's key, and a pin read again at the post would be a changed payload core refuses.
+        # Additive, and NULL on a batch written before this: its retry names no model, as every
+        # wake did then.
+        batch_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(subagent_wake_batches)")
+        }
+        for column in ("provider", "model"):
+            if column not in batch_columns:
+                conn.execute(f"ALTER TABLE subagent_wake_batches ADD COLUMN {column} TEXT")
         # The watcher asks for a conversation's unconfirmed batch on every look; the partial
         # index keeps that a handful of rows on a store that has carried years of finished ones.
         conn.execute(
@@ -621,4 +637,17 @@ def _migrate(conn: sqlite3.Connection) -> None:
             """CREATE INDEX IF NOT EXISTS held_wakes
                    ON subagent_wakes (parent_id) WHERE status = 'held'"""
         )
+        # The chat list is keyed by chat id, but a run knows only its Hermes session — which an app
+        # chat keeps inside its value. The delegation sweep asks for one of those per conversation
+        # every 5 seconds, so the expression index answers it off the row that names the session
+        # instead of decoding every chat in the store (chats.by_session). A value that isn't JSON
+        # stops the index being built, and that chat list is already one `chats.read` can't read:
+        # saying so is better than refusing the migration, and the store every other reader uses.
+        try:
+            conn.execute(
+                """CREATE INDEX IF NOT EXISTS chat_session
+                       ON chats (json_extract(value, '$.hermesSessionId'))"""
+            )
+        except sqlite3.Error:
+            logger.debug("memento: the chat list carries a value that isn't JSON")
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

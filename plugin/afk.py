@@ -23,8 +23,10 @@ project's Prompt, which is how its work is carried out and is read off the proje
 a task claimed with the app closed is still told it (ADR 0027) — and its input is the issue itself,
 its title, its description verbatim and the link, so what the change is judged against is in front of
 the agent rather than something it fetches. The title and description ride in the input and not the
-instructions, so the prompt is the same tokens every turn. It carries no model, so the host's own
-runs.
+instructions, so the prompt is the same tokens every turn. Every run carries the model its session
+is pinned to: `_starting_pin` reads the profile's main model for a session that has no record yet —
+the one its record is then published with — and `chats.pin` reads its own record's pick for every
+run after that, so changing the Default model never moves a session already under way.
 
 A project that named no workflow works its task in one run: nothing is snapshotted, so the session
 records no pipeline and its run is the task's whole work. One that named a workflow runs its stages
@@ -57,6 +59,7 @@ from . import (
     delegation,
     events,
     github,
+    host_model,
     pipeline,
     prompt_builder,
     sessions,
@@ -991,18 +994,28 @@ def session_title(task: Dict[str, Any]) -> str:
     return f"#{task.get('number')} {task.get('title') or ''}".strip()
 
 
-def run_body(record: Dict[str, Any], task: Dict[str, Any], prompt: Optional[str]) -> Dict[str, Any]:
+def run_body(
+    record: Dict[str, Any],
+    task: Dict[str, Any],
+    prompt: Optional[str],
+    pinned: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
     """The ``POST /v1/runs`` request: how to work a planned issue, and the issue itself as the input.
 
     The prompt is all `prompt_builder`'s — one module holds every word the agent is told — and the
     input is `prompt_builder.afk_input`: the issue's title, description and link.
     """
     return _request(
-        record, prompt_builder.afk_prompt(record, task, prompt), prompt_builder.afk_input(task)
+        record,
+        prompt_builder.afk_prompt(record, task, prompt),
+        prompt_builder.afk_input(task),
+        pinned,
     )
 
 
-def stage_body(record: Dict[str, Any], task: Dict[str, Any]) -> Dict[str, Any]:
+def stage_body(
+    record: Dict[str, Any], task: Dict[str, Any], pinned: Optional[Dict[str, str]] = None
+) -> Dict[str, Any]:
     """The next run's request: the same session, briefed for the stage the task is in now.
 
     Every stage is one run of that session — the transcript is the work's own account of itself —
@@ -1017,16 +1030,45 @@ def stage_body(record: Dict[str, Any], task: Dict[str, Any]) -> Dict[str, Any]:
             record, task, base_branch(record) if pipeline.ships(staged) else None
         ),
         prompt_builder.stage_input(task, pipeline.stage_name(staged)),
+        pinned,
     )
 
 
-def _request(record: Dict[str, Any], instructions: str, content: str) -> Dict[str, Any]:
-    """One run of the task's session: what the agent is told, and the line that opens the turn."""
+def _request(
+    record: Dict[str, Any],
+    instructions: str,
+    content: str,
+    pinned: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    """One run of the task's session: what the agent is told, and the line that opens the turn.
+
+    ``pinned`` is the model this session keeps (``chats.pin``): naming it on the run is what keeps
+    the profile's Default model from reaching a session already under way, since the host builds the
+    agent off its file for every run it is asked for.
+    """
     return {
         "session_id": record["session_id"],
         "instructions": instructions,
         "input": [{"role": "user", "content": content}],
+        **chats.pin_fields(pinned),
     }
+
+
+def _starting_pin(hermes_home: Path) -> Optional[Dict[str, str]]:
+    """The model a new session's first run takes, and the pick its record is then published with.
+
+    A session ``start`` makes has no record of its own to read: its id is minted there, and its
+    record is written only once its run is under way, so the profile's main model is the only answer
+    — what its run would have taken with no model named at all, made explicit here so the record can
+    keep it. A file this can't read is no pin rather than a failure: a model pick is never worth
+    losing a task's start over, and a run that names no model runs the host's own, as every AFK run
+    used to.
+    """
+    try:
+        return host_model.read_main(Path(hermes_home) / "config.yaml")
+    except Exception:
+        logger.debug("memento: AFK couldn't read this home's main model", exc_info=True)
+        return None
 
 
 def base_branch(record: Dict[str, Any]) -> Optional[str]:
@@ -1038,23 +1080,27 @@ def base_branch(record: Dict[str, Any]) -> Optional[str]:
 
 
 class Start(NamedTuple):
-    """What a start copies off the project's row: the task's workflow snapshot — none for a project
-    that works one prompt run — and its Prompt."""
+    """What a start takes off the project's row: the task's workflow snapshot — none for a project
+    that works one prompt run — its Prompt, and the model its first run goes out on."""
 
     snapshot: Optional[Dict[str, Any]]
     prompt: Optional[str]
+    pinned: Optional[Dict[str, str]]
 
 
 def _begin(
     hermes_home: Path, path: Path, project_id: str, session_id: str
 ) -> Start:
-    """Writes the snapshot a staged task starts with, and answers the Prompt beside it.
+    """Writes the snapshot a staged task starts with, and answers the Prompt and the pin beside it.
 
     The project's workflow as it stands now, copied onto the task: editing or deleting the library
     entry afterwards cannot rewrite what this task ran. Written before the run is posted, so the
     build's own instructions already know where they end. The Prompt comes off the same read of the
     row — the sweep works a task with the app closed, so the Prompt written last night is the one the
-    run reads, with nothing the app sent in between.
+    run reads, with nothing the app sent in between. The pin is the model the session's first run
+    goes out on and the pick its record is then published with (``_starting_pin``), read here so
+    that the two can never disagree and ``start`` holds no local it has to carry past a block that
+    can give the claim back.
 
     A project that named no workflow snapshots nothing (ADR 0027). A task already holding its work
     keeps the snapshot it started under, since the snapshot it runs by lives on its own session's
@@ -1064,11 +1110,15 @@ def _begin(
     staged = _snapshot(hermes_home, project_id, found)
     if staged is not None:
         sessions.set_pipeline(path, session_id, staged)
-    return Start(staged, found.get("prompt"))
+    return Start(staged, found.get("prompt"), _starting_pin(hermes_home))
 
 
 def publish(
-    hermes_home: Path, session_id: str, project_id: str, task: Dict[str, Any]
+    hermes_home: Path,
+    session_id: str,
+    project_id: str,
+    task: Dict[str, Any],
+    pinned: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Writes the chat record that makes the session appear and open in the app (ADR 0013).
 
@@ -1078,6 +1128,10 @@ def publish(
     mode they change or a resolve they make afterwards has to win. The title is marked edited because
     Hermes titles a session from a slice of its opener, which here is the issue block's `Title:` line,
     and the app would otherwise replace the task's own name with that.
+
+    ``pinned`` is the model the session's first run went out on, when the host named one, written as
+    the record's ``modelChoice`` so every later run of that session — its stages, its subagents'
+    wakes — runs it too, and a change to the profile's Default model leaves it alone.
     """
     sessions.set_task(db_path(hermes_home), session_id, _held_fields(task))
     now = int(time.time() * 1000)
@@ -1090,6 +1144,7 @@ def publish(
         "mode": "auto",
         "afk": True,
         "titleEdited": True,
+        **chats.pin_fields(pinned, choice=True),
     }
     chats.merge(db_path(hermes_home), {session_id: {"at": now + 1, "value": value}})
     return value
@@ -1106,6 +1161,11 @@ async def start(
     shows with no run behind it is worse than one it never hears about. A start that never gets its
     run away gives the claim back (ADR 0015): nothing began the work, so the task returns to the
     frontier instead of sitting claimed with no session to show for it.
+
+    A new session has no model of its own yet, so its first run goes out on the profile's main model
+    and the record it publishes keeps that pick (`_starting_pin`, read by ``_begin`` and handed back
+    with the run's other ingredients): the user's Default model chooses a model for a session that
+    starts, and never one that is already running.
     """
     session_id = new_session_id()
     issue = f"{task.get('repo')}#{task.get('number')}"
@@ -1130,13 +1190,15 @@ async def start(
             _begin, hermes_home, db_path(hermes_home), project_id, session_id
         )
         record = {**record, "pipeline": began.snapshot}
-        started = await _post(adapter, hermes_home, run_body(record, task, began.prompt))
+        started = await _post(
+            adapter, hermes_home, run_body(record, task, began.prompt, began.pinned)
+        )
     except Exception as error:
         logger.warning("memento: AFK couldn't start the session for %s: %s", issue, error)
         await asyncio.to_thread(release, hermes_home, project_id, task)
         return
     try:
-        await asyncio.to_thread(publish, hermes_home, session_id, project_id, task)
+        await asyncio.to_thread(publish, hermes_home, session_id, project_id, task, began.pinned)
     except Exception:
         # The run is going and nothing else can show it: name the session, which is all a reader of
         # the log has to find it with.
@@ -1495,11 +1557,19 @@ def _start_stage(hermes_home: Path, record: Dict[str, Any]) -> None:
 async def work_stage(
     adapter: Any, hermes_home: Path, record: Dict[str, Any], task: Dict[str, Any]
 ) -> None:
-    """Posts one stage's run on the session, briefed for the stage the task is in."""
+    """Posts one stage's run on the session, briefed for the stage the task is in.
+
+    The run carries the model the session is pinned to (`chats.pin`), read back off its chat record,
+    so a session that pinned one keeps it however the profile's Default model moves. A record that
+    pins none — one published before records carried a pick, and every session that started before
+    this change — names no model, and the host runs its current main model, exactly as every run did
+    before the pin existed.
+    """
     issue = f"{task.get('repo')}#{task.get('number')}"
     name = pipeline.stage_name(pipeline.read(record.get("pipeline"))) or ""
     try:
-        started = await _post(adapter, hermes_home, stage_body(record, task))
+        pinned = await asyncio.to_thread(chats.pin, db_path(hermes_home), record["session_id"])
+        started = await _post(adapter, hermes_home, stage_body(record, task, pinned))
     except Exception as error:
         logger.warning(
             "memento: AFK couldn't start %s's \"%s\" stage for %s: %s", issue, name, record["session_id"], error

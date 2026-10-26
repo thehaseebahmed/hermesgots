@@ -133,12 +133,12 @@ def check_pick(cfg: Dict[str, Any], provider: str, model: str) -> Any:
     its validation. ValueError carrying Hermes's reason when it refuses."""
     from hermes_cli.model_switch import switch_model
 
-    current = cfg.get("model") if isinstance(cfg.get("model"), dict) else {}
+    current = _main_of(cfg)
     result = switch_model(
         raw_input=model,
-        current_provider=current.get("provider") or DEFAULT_PROVIDER,
-        current_model=current.get("default") or "",
-        current_base_url=current.get("base_url") or "",
+        current_provider=current["provider"] or DEFAULT_PROVIDER,
+        current_model=current["model"],
+        current_base_url=current["base_url"],
         is_global=True,
         explicit_provider=provider,
         user_providers=cfg.get("providers"),
@@ -240,6 +240,32 @@ def read_delegation(config_path: Path) -> Optional[Dict[str, str]]:
     return _delegation_of(_load_gateway_config(config_path=config_path) or {})
 
 
+def read_main(config_path: Path) -> Optional[Dict[str, str]]:
+    """The profile's main model in ``config_path`` — what a run that names no model would take.
+
+    The gateway builds a fresh agent off this file for every run, which is why a change to the
+    Default model reaches a session already under way. That is the bug this reads around: a session
+    with no pin of its own is told the model it is starting on, so the pick is written down with the
+    session instead of being left to whatever the file says next time.
+
+    None when the file names no model, isn't there, or names no provider — or leaves it on
+    ``auto``, which is the file saying "whichever the credentials fit". ``_delegation_of`` fills
+    that same gap with ``DEFAULT_PROVIDER``, and must not be copied here: a delegation *route* is
+    one Hermes resolves for the child, while a pin is a claim about a run already under way, and
+    naming a provider the file never chose would move that run somewhere it was never sent. So no
+    pin is the honest answer, and the run names no model — which is what every run did before the
+    pin existed.
+    """
+    if not config_path.exists():
+        return None
+    from gateway.run import _load_gateway_config
+
+    main = _main_of(_load_gateway_config(config_path=config_path) or {})
+    if not main["model"] or not main["provider"] or main["provider"] == "auto":
+        return None
+    return {"provider": main["provider"], "model": main["model"]}
+
+
 def _delegation_of(cfg: Dict[str, Any]) -> Optional[Dict[str, str]]:
     """The section's pick, as the bot's settings name it. Hermes fills a half-written section from
     the bot's own route — a model alone runs where the bot's credentials point, a provider alone
@@ -253,12 +279,28 @@ def _delegation_of(cfg: Dict[str, Any]) -> Optional[Dict[str, str]]:
     written = _named(section)
     if not written["provider"] and not written["model"]:
         return None
-    main = cfg.get("model") if isinstance(cfg.get("model"), dict) else {}
+    main = _main_of(cfg)
     provider = written["provider"]
     if not provider or provider == "auto":
-        provider = str(main.get("provider") or "").strip() or DEFAULT_PROVIDER
-    model = written["model"] or str(main.get("default") or "").strip()
+        provider = main["provider"] or DEFAULT_PROVIDER
+    model = written["model"] or main["model"]
     return {"provider": provider, "model": model} if model else None
+
+
+def _main_of(cfg: Dict[str, Any]) -> Dict[str, str]:
+    """The file's main model as it is written: ``provider``, ``default`` and ``base_url``, trimmed.
+
+    The shape every reader of it shares — ``check_pick`` seeds Hermes's route resolution with it,
+    ``read_main`` makes a pin of it and ``_delegation_of`` fills a child's half-written section from
+    it. Empty strings where the file names none, so each of those decides for itself what a missing
+    half means; they differ there on purpose.
+    """
+    main = cfg.get("model") if isinstance(cfg.get("model"), dict) else {}
+    return {
+        "provider": str(main.get("provider") or "").strip(),
+        "model": str(main.get("default") or "").strip(),
+        "base_url": str(main.get("base_url") or "").strip(),
+    }
 
 
 def _section_of(cfg: Dict[str, Any]) -> Dict[str, Any]:

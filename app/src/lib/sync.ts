@@ -572,9 +572,14 @@ async function applyChats(profileId: string, pull: [string, Entry<ChatValue>][])
     if (entry.deleted) {
       if (existing) await deleteConversation(id, { remote: true })
     } else if (entry.value) {
+      const value = entry.value
       await db.transaction("rw", db.conversations, db.tombstones, async () => {
         // Field by field, so a record that dropped one (a reopened session) clears it here too.
-        const synced = Object.fromEntries(CHAT_FIELDS.map((field) => [field, entry.value![field]]))
+        const synced = Object.fromEntries(CHAT_FIELDS.map((field) => [field, value[field]]))
+        // Except the chat's model: a record naming none has nothing to say about it, because every
+        // choice made here writes either a pick or the Default row's marker. Clearing it would lose
+        // the pin, and the next merge would carry the loss back to the plugin as well.
+        if (value.modelChoice === undefined) delete synced.modelChoice
         await db.conversations.put({
           ...(await db.conversations.get(id)),
           ...synced,

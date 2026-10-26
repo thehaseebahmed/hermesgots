@@ -14,6 +14,7 @@ import {
   type Message,
   type MessageStats,
   type MessageStatus,
+  type ModelChoice,
   type Profile,
   type ToolEvent,
   updateConversation,
@@ -60,6 +61,17 @@ import {
 } from "@/lib/history"
 import { isLive } from "@/lib/live"
 import { unknownLastTurn } from "@/lib/model-changes"
+import { botModel, hostChoice, modelInfoFor } from "@/lib/model-info"
+import {
+  chosenOf,
+  modelOf,
+  pickFields,
+  pickOf,
+  pinOf,
+  samePick,
+  storedPick,
+  wantsPin,
+} from "@/lib/model-pick"
 import { refreshMoves } from "@/lib/moves"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { appendThinking, closeRun, forgetRuns, noteRunThinking } from "@/lib/thinking"
@@ -891,19 +903,23 @@ function reattachLater(conversationId: string) {
 async function runTurn(
   turn: Turn,
   start: () => Promise<{ usage?: TurnUsage; pendingSteer?: string }>,
-): Promise<{ status: MessageStatus; sendFailed: boolean }> {
+): Promise<{ status: MessageStatus; sendFailed: boolean; reachedHost: boolean }> {
   const { draft, controller } = turn
   let usage: TurnUsage | undefined
   let pendingSteer: string | undefined
   // The turn failed before anything reached Hermes, so the message can be sent again.
   let sendFailed = false
+  // Whether Hermes saw any of it: a pin describes a turn that did.
+  let reachedHost = false
   try {
     const result = await start()
+    reachedHost = true
     usage = result.usage
     pendingSteer = result.pendingSteer
     if (pendingSteer) dropUnread(draft, pendingSteer)
     if (draft.status === "streaming") draft.status = "done"
   } catch (error) {
+    reachedHost = Boolean(draft.runId || draft.content || draft.tools.length)
     if (controller.signal.aborted) {
       draft.status = "stopped"
     } else if (draft.runId && retryable(error)) {
@@ -912,7 +928,7 @@ async function runTurn(
       draft.statusText = undefined
       await turn.close()
       reattachLater(turn.conversationId)
-      return { status: draft.status, sendFailed }
+      return { status: draft.status, sendFailed, reachedHost }
     } else {
       draft.status = "error"
       draft.statusText =
@@ -928,7 +944,7 @@ async function runTurn(
   // The plugin puts a leftover steer first in its own queue, and starts what waits there.
   if (await hostQueue(turn.config)) followHostQueue(turn.conversationId)
   else if (pendingSteer) await requeueSteer(turn.conversationId, pendingSteer)
-  return { status: draft.status, sendFailed }
+  return { status: draft.status, sendFailed, reachedHost }
 }
 
 /**
@@ -1074,15 +1090,68 @@ async function uploadAttachments(
   return saved
 }
 
-/** The chat's own pick, else the bot's default: the model in effect, before any fallback. */
-function pickOf(conversation: Conversation, profile: Profile) {
-  return conversation.modelChoice ?? profile.modelChoice
+/** A pin this device wrote for a turn, and the one way to take it back. */
+interface Pin {
+  conversation: Conversation
+  release?: () => Promise<void>
 }
 
-/** The chat's own pick, else the bot's default, else whatever the host runs. */
-function modelOf(conversation: Conversation, profile: Profile) {
-  const chosen = pickOf(conversation, profile)
-  return { model: chosen?.model ?? profile.model, provider: chosen?.provider }
+/**
+ * Fixes a chat's model at its first send, so changing the bot's Default model afterwards leaves it
+ * alone. A chat with a pick of its own — the user's, or one an earlier send pinned — has
+ * nothing to fix, and neither has Main, which follows the default for as long as it lives.
+ *
+ * The pick comes from what this device already holds, so no send waits on the host for a model; a
+ * chat neither the bot nor the last host read names a model for is asked about after its turn
+ * runs (`pinFromHost`). Answers the conversation to send with and the way to take the pin back: a
+ * pin belongs to a turn that reached Hermes, so every window that can leave the turn unsent
+ * releases it.
+ */
+async function pinModel(conversation: Conversation, profile: Profile): Promise<Pin> {
+  const pin = pinOf(conversation, botModel(profile))
+  if (!pin) return { conversation }
+  const kept = await db.transaction("rw", db.conversations, async () => {
+    const row = await db.conversations.get(conversation.id)
+    // A sync that landed meanwhile may have settled the chat: the pick it brought is the one to
+    // send with, not this one.
+    if (!row || row.main || row.modelChoice) return row?.modelChoice
+    await updateConversation(conversation.id, { modelChoice: pin })
+    return pin
+  })
+  if (!kept) return { conversation }
+  return {
+    conversation: { ...conversation, modelChoice: kept },
+    // Only the pick this call wrote is this call's to take back.
+    release: () => unpin(conversation.id, samePick(kept, pin) ? pin : undefined),
+  }
+}
+
+/**
+ * Takes back a pin written for a turn that never reached Hermes: left behind, it would hold the
+ * chat to a model the user has since set the default away from. Only the pick this device wrote,
+ * and only while the row still carries it — a pick the user made is theirs.
+ */
+async function unpin(conversationId: string, pin?: ModelChoice) {
+  if (!pin) return
+  await db.transaction("rw", db.conversations, async () => {
+    if (samePick((await db.conversations.get(conversationId))?.modelChoice, pin))
+      await updateConversation(conversationId, { modelChoice: undefined })
+  })
+}
+
+/**
+ * Pins the model a chat's first turn ran on, for the one case this device can't answer: neither the
+ * bot nor the last host read names a model. The read comes after the turn, never ahead of the
+ * message row; a host that names nothing to pin leaves the Default row's marker behind, which
+ * records the question as asked so the next send doesn't ask it again.
+ */
+async function pinFromHost(conversationId: string, profile: Profile) {
+  const host = hostChoice(await modelInfoFor(profile))
+  await db.transaction("rw", db.conversations, async () => {
+    const row = await db.conversations.get(conversationId)
+    if (!row || !wantsPin(row)) return
+    await updateConversation(conversationId, { modelChoice: storedPick(pinOf(row, host)) })
+  })
 }
 
 /**
@@ -1107,10 +1176,12 @@ async function prepareSend(
   if (!conversation) return undefined
   const profile = await profileFor(conversation.profileId)
   if (!profile) return undefined
+  // The first send is what fixes the chat's model; every send after it reads the pick it left.
+  const { conversation: pinned, release } = await pinModel(conversation, profile)
   const history = await getMessages(conversationId)
   const now = nextAt(history)
   // The pick in effect, not the profile's advertised default name, which isn't a model id.
-  const sent = pickOf(conversation, profile)
+  const sent = pickOf(pinned, profile)
   const userMessage: Message = {
     id: queuedId ?? randomId(),
     conversationId,
@@ -1133,17 +1204,33 @@ async function prepareSend(
     ...(sent?.model ? { model: sent.model } : {}),
   }
 
-  await db.transaction("rw", db.messages, db.conversations, async () => {
-    if (queuedId) await db.messages.delete(queuedId)
-    await db.messages.bulkAdd([userMessage, reply])
-    await updateConversation(conversationId, {
-      updatedAt: now,
-      ...(history.length === 0 && !conversation.titleEdited
-        ? { title: titleFrom(content || attachments[0].name) }
-        : {}),
+  try {
+    await db.transaction("rw", db.messages, db.conversations, async () => {
+      if (queuedId) await db.messages.delete(queuedId)
+      await db.messages.bulkAdd([userMessage, reply])
+      await updateConversation(conversationId, {
+        updatedAt: now,
+        ...(history.length === 0 && !conversation.titleEdited
+          ? { title: titleFrom(content || attachments[0].name) }
+          : {}),
+      })
     })
-  })
-  return { conversation, profile, history, userMessage, reply }
+  } catch (error) {
+    // A row the store refused (its quota is full, say) leaves the message where it was, so no turn
+    // ran and the pin this send took goes back with it.
+    await release?.()
+    throw error
+  }
+  return {
+    conversation: pinned,
+    profile,
+    history,
+    userMessage,
+    reply,
+    release,
+    // Nothing on the device names the model this turn will run, so it is asked about afterwards.
+    ask: wantsPin(pinned),
+  }
 }
 
 /** Stop pressed while a turn sets up: nothing has started on Hermes yet, so nothing needs stopping. */
@@ -1177,7 +1264,7 @@ export async function sendMessage(
     controllers.delete(conversationId)
     return
   }
-  const { conversation, profile, history, userMessage, reply } = prepared
+  const { conversation, profile, history, userMessage, reply, release, ask } = prepared
 
   const transcript: ChatMessage[] = history
     .filter((m) => m.status === "done" || (m.role === "assistant" && m.content))
@@ -1191,7 +1278,7 @@ export async function sendMessage(
   if (config.apiKey && unknownLastTurn(history, conversation.modelChanges))
     void refreshContext(conversationId).catch(quietly("Reading a chat's context"))
   const turn = openTurn(conversationId, config, reply, false, controller)
-  const { status, sendFailed } = await runTurn(turn, async () => {
+  const { status, sendFailed, reachedHost } = await runTurn(turn, async () => {
     // Without a key Hermes keeps no session under our id, so nothing would sync or resume.
     if (!config.apiKey) throw new HermesError("This bot has no API key. Link it in Settings.")
     // A project session works in its worktree; the plugin can't be told about it any other way.
@@ -1249,6 +1336,10 @@ export async function sendMessage(
       })
     })
   }
+  // A pin describes a turn that reached Hermes, so a turn that never did takes its own back.
+  if (!reachedHost) await release?.()
+  // Nothing on the device named the model this turn ran: the host's answer is the one to keep.
+  else if (ask) void pinFromHost(conversationId, profile).catch(quietly("Pinning a chat's model"))
   if (status !== "done") return
   // Hermes only keys the session by our id when the profile has an API key.
   const turnNumber = history.filter((m) => m.role === "user" && m.status === "done").length + 1
@@ -1390,22 +1481,35 @@ async function queueOnHost(
   attachments: Attachment[],
 ) {
   const sessionId = conversation.hermesSessionId
-  const workspace = await ensureSessionWorkspace(conversation.id, content || attachments[0].name)
-  const sent = attachments.length
-    ? await uploadAttachments(config, sessionId, attachments, true)
-    : attachments
-  const run = runRequest(config, {
-    ...modelOf(conversation, profile),
-    sessionId,
-    messages: [{ role: "user", content: await wireContent(content, sent) }],
-    workspaceInstructions: workspace?.instructions,
-  })
-  const item = await addToQueue(config, sessionId, {
-    text: content,
-    attachments: sent.map(({ name, type, size, path }) => ({ name, type, size, path })),
-    run,
-  })
-  return { item, sent }
+  // A queued turn is often a chat's first send: it fixes the chat's model as a send from here does,
+  // and the run the plugin starts carries that chat's model, not the bot's default of the moment.
+  const pin = await pinModel(conversation, profile)
+  try {
+    const workspace = await ensureSessionWorkspace(conversation.id, content || attachments[0].name)
+    const sent = attachments.length
+      ? await uploadAttachments(config, sessionId, attachments, true)
+      : attachments
+    const run = runRequest(config, {
+      ...modelOf(pin.conversation, profile),
+      sessionId,
+      messages: [{ role: "user", content: await wireContent(content, sent) }],
+      workspaceInstructions: workspace?.instructions,
+    })
+    const item = await addToQueue(config, sessionId, {
+      text: content,
+      attachments: sent.map(({ name, type, size, path }) => ({ name, type, size, path })),
+      run,
+    })
+    // The plugin has the turn; a chat with no model to pin gets the host's answer once it has run.
+    if (wantsPin(pin.conversation))
+      void pinFromHost(conversation.id, profile).catch(quietly("Pinning a chat's model"))
+    return { item, sent }
+  } catch (error) {
+    // The plugin never got the turn, so the chat pins again at its next send rather than holding a
+    // model no turn of it ever ran.
+    await pin.release?.()
+    throw error
+  }
 }
 
 /**
@@ -1464,7 +1568,11 @@ export async function sendFromMain(
     let moved: { threadId: string; created: boolean } | undefined
     try {
       const run = runRequest(host.config, {
-        ...modelOf(host.conversation, host.profile),
+        // The ask names the model Main runs on, as this device can resolve it — Main's own pick,
+        // else the bot's default, else the host's remembered model — so a thread triage opens or
+        // fills adopts it instead of following the default for ever. Nothing is named when nothing
+        // can be, and nothing is read from the host here: the send path carries no model read.
+        ...pickFields(chosenOf(host.conversation.modelChoice) ?? botModel(host.profile)),
         sessionId: host.conversation.hermesSessionId,
         messages: [{ role: "user", content: await wireContent(content, sent) }],
       })

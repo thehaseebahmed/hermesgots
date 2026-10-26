@@ -259,3 +259,42 @@ test("Undo on the card refuses once the thread has replied, and the card keeps n
     assert.equal(undoIn(card("New thread")), null, "a refused undo still drops the button")
   })
 })
+
+const PICK = { provider: "anthropic", model: "claude-sonnet-4.5" }
+
+/** The host's answer to the merge, with one chat's record newer and naming no model at all. */
+function answerWithoutPick(id: string) {
+  const answer = globalThis.fetch
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input instanceof Request ? input.url : input))
+    if (url.pathname.endsWith("/plugins/memento/chats") && init?.body) {
+      const posted = JSON.parse(String(init.body)).chats ?? {}
+      const record = posted[id]
+      if (record)
+        return json({
+          object: "memento.chats",
+          chats: {
+            ...posted,
+            [id]: { at: record.at + 1, value: { ...record.value, modelChoice: undefined } },
+          },
+        })
+    }
+    return answer(input, init)
+  }) as typeof fetch
+}
+
+test("a chat the host answers without a pick keeps the pin this device holds", async () => {
+  // A record that carries no model has nothing to say about one: only a user's own change writes
+  // the chat's pick, and a marker when they pick the Default row, so erasing it here would lose the
+  // pin for good — and push the erasure back to the plugin with it.
+  await seed([opened])
+  host([opened])
+  await db.conversations.update("t-old", { modelChoice: PICK })
+  answerWithoutPick("t-old")
+  await act(async () => void (await syncChatsOf([bot.id])))
+  assert.deepEqual(
+    (await db.conversations.get("t-old"))?.modelChoice,
+    PICK,
+    "the pin survived the merge",
+  )
+})

@@ -201,8 +201,16 @@ The permission an MCP server needs from the service it talks to. Gots starts the
 _Avoid_: authorization, OAuth, sign in, connect
 
 **Model pick**:
-The model a chat sends its turns with — the chat's own pick, else its bot's. Gots' own setting, and a wish: what runs is the host's.
+The model a chat sends its turns with: its own pick where the user made one, else its bot's default, else the host's model. It is fixed at the chat's first send — the model in effect then is written into the chat's own pick — so a Default model changed later leaves a chat already under way where it was, and a message triage moves into a thread is that thread's next send, so a thread holding no pick takes the model the moved message named. Main is the exception, following the default for as long as it lives. Gots' own setting, sent with the turn and still the host's to run.
 _Avoid_: model choice, selected model, current model
+
+**Default model**:
+The model a bot's next turns run on, set in its Chat settings: the host's own main model where the plugin can write it, else a default the bot holds itself, synced with the bot. It chooses a model for chats to come, never one already under way — a chat keeps the pick its first send fixed, and Main is the exception, following the default live. Tapping Default on a chat writes that choice down as a marker with no model in it, which is how a started chat is told to follow the default from its next send; a chat that never had it tapped pins the model in effect at its first send instead.
+_Avoid_: bot model, base model, default pick
+
+**Pin**:
+The model a chat keeps, fixed at its first send: the model in effect then — the bot's default, else the host's main model — written into the chat's own pick and read back by every turn after it, so a Default model changed later leaves that chat where it was. Once written it follows nothing: not the default, not the bot's fallback chain, and a synced record that names no model leaves it as it is. Main carries none, following the default for as long as it lives, and the plugin reads a pin back to run a session's own turns with the app closed — an AFK stage's, and a wake's.
+_Avoid_: lock, freeze, sticky model
 
 **Model change**:
 The host's record of the models a chat's calls ran on, one row per change. A thread's divider is drawn from these, wherever they name a turn; where they don't — the newest turn, or one still being written — the model this device sent it with stands until the host has recorded the call.

@@ -57,7 +57,7 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any, Collection, Dict, Iterable, Iterator, List, NamedTuple, Optional, Tuple
 
-from . import events, link, outbox, sessions
+from . import chats, events, link, outbox, sessions
 from .store import db_path, get_setting, put_setting
 
 logger = logging.getLogger(__name__)
@@ -575,9 +575,10 @@ async def _wake_root(adapter: Any, home: Path, root: str, children: List[Dict[st
     waits on its user for hours holds its batch every look, and waiting must cost nothing beyond
     the stage reads, which are store reads of their own and settle a stage's children outright.
 
-    A batch already stored for this conversation re-posts its own intent whole: the same key and
-    the same text, so the host replays the run it may already have rather than refusing a changed
-    payload under a key it remembers (``docs/specs/async-delegation.md``, ADR 0038).
+    A batch already stored for this conversation re-posts its own intent whole: the same key, the
+    same text and the same model, so the host replays the run it may already have rather than
+    refusing a changed payload under a key it remembers (``docs/specs/async-delegation.md``, ADR
+    0038).
     """
     path = db_path(home)
     now = _now_ms()
@@ -604,13 +605,14 @@ async def _wake_root(adapter: Any, home: Path, root: str, children: List[Dict[st
         logger.debug("memento: the wake for %s waits: %s", root, held)
         return 0
     if stored:
-        # The batch's text froze at its intent, so a retry re-posts it byte-for-byte under the
-        # batch's own key: core replays the run a repeated key already started and answers 409 for
-        # a changed payload, which the outbox treats as permanent — a retry that shed a vanished
-        # member would drop the whole batch. The gate above still guards the post, and what became
-        # of each member waits in its mark.
+        # The batch's text and model froze at its intent, so a retry re-posts them byte-for-byte
+        # under the batch's own key: core replays the run a repeated key already started and answers
+        # 409 for a changed payload, which the outbox treats as permanent — a retry that shed a
+        # vanished member, or named a pick the conversation has since changed, would drop the whole
+        # batch. The gate above still guards the post, and what became of each member waits in its
+        # mark.
         batch_id, members = stored["id"], stored["members"]
-        text, marks = stored["text"], stored["marks"]
+        text, marks, pinned = stored["text"], stored["marks"], stored["pinned"]
         if any(
             mark.get("next_at") is not None and mark["next_at"] > now for mark in marks.values()
         ):
@@ -627,11 +629,22 @@ async def _wake_root(adapter: Any, home: Path, root: str, children: List[Dict[st
         if not carried:
             return 0
         batch_id, members = uuid.uuid4().hex[:20], carried
-        # The intent before the post, carrying the text itself: a restart between the two re-posts
-        # the same run, not a new one.
-        await asyncio.to_thread(sessions.put_wake_batch, path, batch_id, root, members, text)
+        # The intent before the post, carrying the text and the conversation's own model: a wake is
+        # an ordinary turn of a session already under way, and the app's Default model only picks a
+        # model for a new one. Both are frozen with the intent rather than read again at the post,
+        # because the retry has to be the same request the first attempt was — and the pick comes
+        # back from the write, so a batch is one read of the conversation, not two.
+        pinned = await asyncio.to_thread(
+            sessions.put_wake_batch, path, batch_id, root, members, text
+        )
     key = f"wakeb_{batch_id}" if len(members) >= 2 else f"wake_{members[0]}"
-    body = outbox.clean_body(root, {"input": [{"role": "user", "content": text}]})
+    body = outbox.clean_body(
+        root,
+        {
+            "input": [{"role": "user", "content": text}],
+            **chats.pin_fields(pinned),
+        },
+    )
     try:
         started = await outbox.post(
             adapter,

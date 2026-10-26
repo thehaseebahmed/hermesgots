@@ -3,6 +3,7 @@ import { useEffect, useState } from "react"
 import { connectionKey } from "@/lib/connection"
 import { db, updateProfile, type ModelChoice, type Profile } from "@/lib/db"
 import { getModelInfo, getPluginFeatures, setHostModel, type ModelInfo } from "@/lib/hermes"
+import { samePick } from "@/lib/model-pick"
 
 const FRESH_MS = 60_000
 // A refresh probes every endpoint on the host, so a server whose endpoint stays empty isn't asked
@@ -56,10 +57,24 @@ async function rememberHostModel(profileId: string | undefined, info: ModelInfo 
   const seen = info?.model ? { provider: info.provider ?? "", model: info.model } : undefined
   if (!seen || !profileId) return
   const saved = await db.profiles.get(profileId)
-  const same =
-    saved?.hostModel?.provider === seen.provider && saved?.hostModel?.model === seen.model
-  if (!saved || same) return
+  if (!saved || samePick(saved.hostModel, seen)) return
   await updateProfile(profileId, { hostModel: seen })
+}
+
+/**
+ * The host's model behind a bot, from the same cache the pickers read, for the code paths that
+ * aren't a screen — a chat fixing its model after its first send, say. One call a minute however
+ * many ask: a warm entry answers without the host. It doesn't write the bot's remembered copy: that
+ * bumps the bot's clock, and this is a read.
+ */
+export function modelInfoFor({ baseUrl, apiKey }: Server) {
+  const key = connectionKey({ baseUrl, apiKey })
+  let entry = cache.get(key)
+  if (!entry || Date.now() - entry.at > FRESH_MS) {
+    entry = { at: Date.now(), info: loadModelInfo({ baseUrl, apiKey }, key) }
+    cache.set(key, entry)
+  }
+  return entry.info
 }
 
 /** The host's model and the models it's configured for, shared by every picker on its server. */
@@ -80,12 +95,8 @@ export function useModelInfo(profile?: (Server & { id?: string }) | null) {
   useEffect(() => {
     if (!baseUrl) return
     let cancelled = false
-    let entry = cache.get(key)
-    if (!entry || Date.now() - entry.at > FRESH_MS) {
-      entry = { at: Date.now(), info: loadModelInfo({ baseUrl, apiKey }, key) }
-      cache.set(key, entry)
-    }
-    void entry.info.then(async (info) => {
+    const entry = modelInfoFor({ baseUrl, apiKey })
+    void entry.then(async (info) => {
       if (!cancelled) setState({ key, info })
       await rememberHostModel(profileId, info)
     })
@@ -114,7 +125,7 @@ export function hostChoice(info: ModelInfo | null | undefined): ModelChoice | un
 
 export function botModel(
   profile: Pick<Profile, "modelChoice" | "hostModel">,
-  info: ModelInfo | null | undefined,
+  info?: ModelInfo | null,
 ): ModelChoice | undefined {
   return profile.modelChoice ?? hostChoice(info) ?? profile.hostModel
 }

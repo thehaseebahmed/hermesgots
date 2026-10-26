@@ -35,7 +35,7 @@ from typing import Any, Dict, List, Optional
 from unittest import mock
 
 import plugin
-from plugin import delegation, outbox, sessions
+from plugin import chats, delegation, outbox, sessions
 from plugin.tests._helpers import App, Context, FakeWeb, Router
 from plugin.store import SCHEMA_VERSION, connect, db_path, put_setting
 
@@ -122,6 +122,16 @@ class WakeTest(unittest.TestCase):
             (session_id, parent, self.clock, self.clock if reason else None, reason, source),
         )
         self.conn.commit()
+
+    def pinned(self, session_id: str, *, chat_id: str = "t1", at: int = 1,
+               pick: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+        """The chat record that pins ``session_id``: what the app's first send writes for a chat."""
+        pick = pick or {"provider": "deepseek", "model": "deepseek-v4-pro"}
+        chats.merge(
+            db_path(self.home),
+            {chat_id: {"at": at, "value": {"hermesSessionId": session_id, "modelChoice": pick}}},
+        )
+        return pick
 
     def child(self, session_id: str, parent: str, *, goal: Optional[str] = None,
               said: Optional[str] = None, ended: bool = True, reason: str = "agent_close",
@@ -213,6 +223,40 @@ class WakeTest(unittest.TestCase):
         self.assertTrue(text.endswith(FOOTER))
         # The mark is written after the post, so the next look — or a restarted plugin — sees it.
         self.assertEqual(set(sessions.wake_marks(db_path(self.home), ["c1"])), {"c1"})
+        self.assertNotIn(
+            "model", posted["body"], "no pick on its record: the host's own model runs the turn"
+        )
+
+    def test_a_wake_runs_on_the_conversations_own_model(self) -> None:
+        """A conversation keeps the model it was started on.
+
+        The app's Default model only picks a model for a chat that starts, and its record is where
+        the pick lives: a wake is an ordinary turn of that chat, so it must name the pick rather
+        than let the host's file decide what the conversation runs today.
+        """
+        self.chat("s")
+        self.child("c1", "s", said="done")
+        pinned = self.pinned("s")
+        self.assertEqual(self.sweep(), 1)
+        (posted,) = self.posted
+        self.assertEqual(posted["body"]["model"], pinned["model"])
+        self.assertEqual(posted["body"]["provider"], pinned["provider"])
+
+    def test_a_batchs_pick_is_read_where_its_intent_is_written(self) -> None:
+        """One open of the store answers both the intent's row and the model it froze.
+
+        The wake used to read the conversation's pick on a connection of its own and then open the
+        store again to write the intent: two opens, two thread hops, for one batch.
+        """
+        self.chat("s")
+        pinned = self.pinned("s")
+        read = sessions.put_wake_batch(db_path(self.home), "b1", "s", ["c1"], "text")
+        self.assertEqual(read, pinned, "the pick the record holds, answered with the write")
+        self.assertEqual(
+            self.sql("SELECT provider, model FROM subagent_wake_batches WHERE id = 'b1'"),
+            [(pinned["provider"], pinned["model"])],
+            "and written into the batch's intent",
+        )
 
     def test_a_wake_is_posted_once(self) -> None:
         self.chat("s")
@@ -286,6 +330,44 @@ class WakeTest(unittest.TestCase):
             {"sent"},
             "a member whose result was in the posted text is settled sent, not dropped",
         )
+
+    def test_a_batches_model_froze_at_its_intent(self) -> None:
+        """A pin that appears while a failed post waits out its backoff is not the retry's.
+
+        Core answers 409 for the same key over a changed payload and the outbox reads that as
+        permanent, so a model read again at the retry would drop a wake whose first attempt only
+        timed out. The model travels with the text for exactly that reason.
+        """
+        self.chat("s")
+        self.child("c1", "s", said="the review is done")
+        self.refuse = True
+        self.assertEqual(self.sweep(), 0)
+        first = self.posted[0]
+        self.assertNotIn("model", first["body"], "no pick when the intent was written")
+        self.pinned("s")
+        self.refuse = False
+        self.due()
+        self.assertEqual(self.sweep(), 1)
+        retry = self.posted[-1]
+        self.assertEqual(retry["key"], first["key"], "the same key carries the same payload")
+        self.assertEqual(retry["body"], first["body"], "byte-identical, so the host replays")
+
+    def test_a_stored_batch_keeps_the_model_it_froze(self) -> None:
+        """A pick that moves while a failed post waits out its backoff is not the retry's either."""
+        self.chat("s")
+        self.child("c1", "s", said="done")
+        first_pick = self.pinned("s")
+        self.refuse = True
+        self.assertEqual(self.sweep(), 0)
+        first = self.posted[0]
+        self.assertEqual(first["body"]["model"], first_pick["model"])
+        self.pinned("s", at=2, pick={"provider": "openrouter", "model": "anthropic/x"})
+        self.refuse = False
+        self.due()
+        self.assertEqual(self.sweep(), 1)
+        retry = self.posted[-1]
+        self.assertEqual(retry["key"], first["key"])
+        self.assertEqual(retry["body"], first["body"], "the frozen pick, not the record's today")
 
     def test_a_deleted_conversations_held_wakes_are_dropped_once(self) -> None:
         """A chat deleted out of the store never reaches the posting seam — ``_DELEGATIONS``
@@ -761,7 +843,7 @@ class WakeTest(unittest.TestCase):
         self.assertEqual(self.posted, [])
 
     def test_an_older_store_gains_the_wake_columns_and_keeps_its_marks(self) -> None:
-        """The v41 bump is additive: a store a v40 plugin wrote upgrades in place."""
+        """The v41 and v42 bumps are additive: a store a v40 plugin wrote upgrades in place."""
         path = db_path(self.home)
         path.parent.mkdir(parents=True, exist_ok=True)
         old = sqlite3.connect(path)
@@ -788,6 +870,12 @@ class WakeTest(unittest.TestCase):
                 "SELECT COUNT(*) FROM sqlite_master WHERE name = 'subagent_wake_batches'"
             ).fetchone()[0]
             self.assertEqual(made, 1)
+            batch = {row[1] for row in conn.execute("PRAGMA table_info(subagent_wake_batches)")}
+            self.assertLessEqual(
+                {"provider", "model"},
+                batch,
+                "a batch's intent keeps the model with the text, so its retry is the same request",
+            )
         finally:
             conn.close()
 

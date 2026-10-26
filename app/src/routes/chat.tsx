@@ -153,7 +153,8 @@ import { syncNow } from "@/lib/sync"
 import { setBotMuted, setThreadMuted } from "@/lib/push"
 import { useStagedPipeline } from "@/lib/afk-workflows"
 import { modelChanges } from "@/lib/model-changes"
-import { fullModel, hostChoice, useModelInfo } from "@/lib/model-info"
+import { botModel, fullModel, useModelInfo } from "@/lib/model-info"
+import { chosenOf, samePick, storedPick } from "@/lib/model-pick"
 import { syncContextWindow, useModelCatalog } from "@/lib/models"
 import { useDraws } from "@/lib/openui-draws"
 import {
@@ -635,14 +636,20 @@ export function ChatPage({
     const timer = window.setInterval(read, PR_PENDING_MS)
     return () => window.clearInterval(timer)
   }, [id, checksRunning])
-  const modelChoice = conversation
+  // The pick the chat's row holds, Default included, for the chat a send creates.
+  const keptModel = conversation
     ? conversation.modelChoice
     : pendingModel?.profileId === profile?.id
       ? pendingModel?.choice
       : undefined
+  // As the menu reads a pick: the Default row's marker is no pick at all.
+  const modelChoice = chosenOf(keptModel)
   const chooseModel = (choice: ModelChoice | undefined) => {
-    if (conversation) void updateConversation(conversation.id, { modelChoice: choice })
-    else setPendingModel({ profileId: profile?.id, choice })
+    const stored = storedPick(choice)
+    if (!conversation) return setPendingModel({ profileId: profile?.id, choice: stored })
+    // Re-picking the model the chat already holds would wake every query over its row for nothing.
+    if (samePick(conversation.modelChoice, stored)) return
+    void updateConversation(conversation.id, { modelChoice: stored })
   }
   // The chat's model pill: the composer's, and the plan-ready card's while a plan waits on it.
   const modelPill = (extra: { display?: "pill" | "block"; disabled?: boolean }) =>
@@ -652,8 +659,7 @@ export function ChatPage({
   // What this chat runs next: its own pick, the bot's default, else what the host last reported.
   const hostInfo = useModelInfo(profile)
   const catalog = useModelCatalog()
-  const currentModel =
-    modelChoice ?? profile?.modelChoice ?? hostChoice(hostInfo) ?? profile?.hostModel
+  const currentModel = modelChoice ?? (profile ? botModel(profile, hostInfo) : undefined)
   const usage: ContextUsage = {
     tracked,
     tokens: tracked ? live?.tokens : undefined,
@@ -980,7 +986,7 @@ export function ChatPage({
           await Promise.race([reconcileHistory(conversationId).catch(() => undefined), wait(1500)])
       } else {
         if (!profile) return
-        conversationId = (await createConversation(profile.id, { modelChoice: modelChoice })).id
+        conversationId = (await createConversation(profile.id, { modelChoice: keptModel })).id
         navigate(`/c/${conversationId}`, { replace: true, state: { quiet: true } })
       }
       if (session?.draftAt) void updateConversation(conversationId, { draftAt: undefined })
@@ -997,7 +1003,9 @@ export function ChatPage({
   const startThread = async (text: string, attachments: Attachment[] = []) => {
     if (!profile || !conversation?.main) return
     try {
-      const thread = await createConversation(profile.id, { modelChoice })
+      // A pick made in Main comes with the thread; the Default row's marker doesn't, or the thread
+      // would follow the default without ever fixing the model it started on.
+      const thread = await createConversation(profile.id, { modelChoice: chosenOf(keptModel) })
       navigate(`/c/${thread.id}`, { state: { bot: profile.id } })
       if (text.trim() || attachments.length) await sendMessage(thread.id, text, { attachments })
     } catch (error) {

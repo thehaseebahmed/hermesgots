@@ -13,6 +13,7 @@ import type {
 } from "@/lib/db"
 import { MAX_TODO_DEPTH } from "@/lib/db"
 import type { Doc } from "@/lib/merge"
+import { pickFields } from "@/lib/model-pick"
 import type { ModelUsage } from "@/lib/pricing"
 import { parsePipeline, parseStage, type AfkStage, type SessionPipeline } from "@/lib/pipeline"
 import {
@@ -1054,15 +1055,20 @@ function modelProviders(raw: unknown, current?: string): ModelProvider[] {
  * The LLM and provider behind the profile, and the models its host is configured for. Newer
  * Hermes only, so callers treat null as unknown. `refresh` has Hermes probe every custom endpoint
  * (the dashboard's Refresh Models), which a plain read only does for the current one.
+ *
+ * Bounded like every other host read, and with no way to lift that bound: a host that took the
+ * connection and went quiet must not hold what asked. The abort lands in the catch below, so a read
+ * that never answers is the same to the app as a host that names no model.
  */
 export async function getModelInfo(
   config: HermesConfig,
-  { refresh = false } = {},
+  { refresh = false }: { refresh?: boolean } = {},
 ): Promise<ModelInfo | null> {
   try {
     const query = refresh ? "?refresh=true" : ""
     const response = await request(`${serverRoot(config.baseUrl)}/api/model/options${query}`, {
       headers: headers(config),
+      signal: AbortSignal.timeout(READ_TIMEOUT_MS),
     })
     const body = await response.json()
     const text = (value: unknown) => (typeof value === "string" && value ? value : undefined)
@@ -3615,8 +3621,9 @@ const PLAN_HINT =
  * event stream drops, so a phone that sleeps mid-reply can pick it up again.
  */
 interface RunOptions {
-  model: string
-  /** With a model chosen for the chat; without it no model is sent and the host's runs. */
+  /** With a model picked for the chat; without it no model is sent and the host's model runs. */
+  model?: string
+  /** The pick's other half. The two go together or not at all, as `pickFields` holds. */
   provider?: string
   messages: ChatMessage[]
   sessionId?: string
@@ -3631,8 +3638,8 @@ export function runRequest(config: HermesConfig, options: RunOptions) {
   return {
     // A model that wasn't picked is the name Hermes advertises for the profile, which a profile
     // served at /p/<profile> doesn't recognise as its own ("ops is not a valid model ID"), so the
-    // host's model runs when none is sent.
-    ...(options.provider ? { model: options.model, provider: options.provider } : {}),
+    // host's model runs when the pick names none.
+    ...pickFields(options),
     input: keyed ? options.messages.slice(-1) : options.messages,
     instructions: [PLAN_HINT, options.workspaceInstructions].filter(Boolean).join("\n"),
     ...(keyed ? { session_id: options.sessionId } : {}),

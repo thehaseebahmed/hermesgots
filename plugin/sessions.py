@@ -30,7 +30,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple
 
-from . import approvals, events, push
+from . import approvals, chats, events, push
 from .store import connect
 
 logger = logging.getLogger(__name__)
@@ -1312,23 +1312,43 @@ def _write_marks(
 
 
 def put_wake_batch(
-    path: Path, batch_id: str, root: str, members: Iterable[str], text: str
-) -> None:
-    """Records a batch's intent — its membership and its text — before its run is posted.
+    path: Path,
+    batch_id: str,
+    root: str,
+    members: Iterable[str],
+    text: str,
+) -> Optional[Dict[str, str]]:
+    """Records a batch's intent — its membership, its text and its model — before its run is posted.
 
     The text travels with the intent because a retry under this batch's key must be byte-identical
     to the first attempt: core replays the run a repeated key already started, and answers 409 for
-    the same key over a different payload, which the outbox treats as permanent.
+    the same key over a different payload, which the outbox treats as permanent. The model travels
+    for exactly the same reason — reading the conversation's pick again at the retry would be a
+    changed body whenever that pick moved in between, and the wake would be dropped instead of
+    posted. So the pick is read here, in the call that writes the intent, and handed back for the run
+    the caller builds: one thread hop for the batch rather than two, and the pick answered off the
+    record's own row. None is a conversation that names no model: its run names none.
     """
+    pinned = chats.pin(path, root)
     conn = connect(path)
     try:
         conn.execute(
-            """INSERT INTO subagent_wake_batches (id, root, members, text, created_at)
-               VALUES (?, ?, ?, ?, ?)""",
-            (batch_id, root, json.dumps(list(members)), text, int(time.time() * 1000)),
+            """INSERT INTO subagent_wake_batches
+                   (id, root, members, text, created_at, provider, model)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                batch_id,
+                root,
+                json.dumps(list(members)),
+                text,
+                int(time.time() * 1000),
+                pinned["provider"] if pinned else None,
+                pinned["model"] if pinned else None,
+            ),
         )
     finally:
         conn.close()
+    return pinned
 
 
 def open_wake_batch(path: Path, root: str) -> Optional[Dict[str, Any]]:
@@ -1339,17 +1359,21 @@ def open_wake_batch(path: Path, root: str) -> Optional[Dict[str, Any]]:
     left to re-post, the intent is closed by deleting it, and the marks are the only record that
     outlives it. A finished intent left open would be re-read by every look for as long as the
     store lives; the marks, not the intent, are what owes a wake.
+
+    The answer carries the model frozen with the intent (``pinned``), or None for a batch written
+    before an intent could name one: its retry posts the body it always did.
     """
     if not path.exists():
         return None
     conn = connect(path)
     try:
         rows = conn.execute(
-            """SELECT id, root, members, text, created_at FROM subagent_wake_batches
+            """SELECT id, root, members, text, created_at, provider, model
+               FROM subagent_wake_batches
                WHERE root = ? AND run_id IS NULL ORDER BY created_at DESC""",
             (root,),
         ).fetchall()
-        for batch_id, batch_root, members, text, created_at in rows:
+        for batch_id, batch_root, members, text, created_at, provider, model in rows:
             ids = _batch_members(members)
             if not ids:
                 continue
@@ -1364,6 +1388,7 @@ def open_wake_batch(path: Path, root: str) -> Optional[Dict[str, Any]]:
                 "root": batch_root,
                 "members": ids,
                 "text": text,
+                "pinned": chats.pick(provider, model),
                 "marks": marks,
                 "created_at": created_at,
             }
