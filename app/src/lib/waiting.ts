@@ -6,6 +6,7 @@ import { quietly } from "@/lib/report"
 import { db } from "@/lib/db"
 import { getLiveRuns, type LiveRunStatus, type LiveRuns, type WaitingReason } from "@/lib/hermes"
 import { connectionKey, isLive, onChanges } from "@/lib/live"
+import { markResume } from "@/lib/resume-trace"
 
 export type { WaitingReason }
 
@@ -84,6 +85,8 @@ export async function readLiveRuns(server: Server): Promise<LiveRuns | undefined
 async function poll(only: Server[] = servers) {
   if (document.visibilityState !== "visible") return
   await Promise.all(only.map(readLiveRuns))
+  // One read per server went out in this pass; named so a resume can show them.
+  markResume("runs-live-end", only.length)
   notify()
 }
 

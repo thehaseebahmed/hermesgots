@@ -10,6 +10,7 @@ import {
 import { CLOCK_SLACK_MS, refreshQueue } from "@/lib/chat"
 import { FOLLOW_UP_MS, JUST_FOLLOWED_UP_MS } from "@/lib/freshness"
 import { quietly } from "@/lib/report"
+import { markResume } from "@/lib/resume-trace"
 import { refreshContext } from "@/lib/context"
 import { refreshChatProviderUsage } from "@/lib/provider-usage"
 import { refreshMoves } from "@/lib/moves"
@@ -606,6 +607,7 @@ export function reconcileHistory(conversationId: string, { changed = false } = {
         const added = await reconcile(conversationId)
         if (added === null) return 0
         caughtUp.set(conversationId, Date.now())
+        markResume("open-chat-caught-up")
         followUps(conversationId, changed || added > 0 || (await tip()) !== before)
         return added
       })

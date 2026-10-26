@@ -11,8 +11,10 @@ import { recoverInterruptedMessages } from "@/lib/chat"
 import { handBackNativeSignIn, handleBackButton } from "@/lib/native"
 import { startLive } from "@/lib/live"
 import { startPush } from "@/lib/push"
+import { startResumeTrace } from "@/lib/resume-trace"
 import { startSync } from "@/lib/sync"
 import { watchToastOffset } from "@/lib/toast"
+import { onReturn } from "@/lib/wake"
 import "@/index.css"
 
 if (!handBackNativeSignIn()) {
@@ -22,6 +24,8 @@ if (!handBackNativeSignIn()) {
   void startSync()
   startLive()
   startPush()
+  // Every return to the foreground begins the trace the resume stages mark.
+  onReturn(startResumeTrace)
 }
 
 createRoot(document.getElementById("root")!).render(

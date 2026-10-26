@@ -35,6 +35,7 @@ import {
 } from "@/lib/db"
 import { mergeDocs, type Doc, type Entry } from "@/lib/merge"
 import { syncRegistry } from "@/lib/registry"
+import { markResume } from "@/lib/resume-trace"
 import {
   generateDataKey,
   hasPasskeys,
@@ -619,6 +620,8 @@ async function mergePluginChats(profile: Profile) {
   const local = await localChats(profile.id, drafts)
   try {
     const merged = await mergeChatList(profile, local, AbortSignal.timeout(READ_TIMEOUT_MS))
+    // One mark per merge, so two bots on one server show as the two requests they are.
+    markResume("chats-merge-end", 1)
     return { local, merged }
   } catch (error) {
     noteFailure(`Syncing ${profile.name}'s chats`, error)
@@ -644,13 +647,20 @@ let again = false
 let syncedFingerprint = ""
 
 async function runSync() {
+  markResume("sync-start")
   const key = state.vault === "unlocked" ? await localKey() : undefined
   try {
     if (key) await ensureInbox(key)
     // Bots, the appearance switches and the prompt library are separate documents, so they go side
     // by side; the registry read follows, since it wants the inbox key.
-    if (key) await Promise.all([syncBots(key), syncAppearance(key), syncPrompts(key)])
-    if (key) await pullRegistry()
+    if (key) {
+      await Promise.all([syncBots(key), syncAppearance(key), syncPrompts(key)])
+      markResume("account-docs-end")
+    }
+    if (key) {
+      await pullRegistry()
+      markResume("registry-end")
+    }
     await syncChatLists(key)
     syncedFingerprint = await fingerprint()
     if (!key) return setState({ syncing: false })
@@ -659,6 +669,8 @@ async function runSync() {
     setState({ syncing: false, error: undefined, syncedAt })
   } catch (error) {
     setState({ syncing: false, error: error instanceof Error ? error.message : "Sync failed" })
+  } finally {
+    markResume("sync-end")
   }
 }
 
