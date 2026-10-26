@@ -5,7 +5,7 @@
 // keeps saying it is waiting while that runs. The flow's callback binds the host's own loopback, so
 // the URL is useless on the phone — but the browser that ends on it leaves an address carrying the
 // authorization code, and pasting that address sends it to the Host, which exchanges it and lands
-// the access. The row clears by itself once it lands: the tab's own re-read is what the list
+// the access. The row clears by itself once it lands: the page's own re-read is what the list
 // follows, and the sheet asks for it directly while it waits. A server with no Server access offers
 // no such line, and neither does one a Hermes plugin provides. Phone and tablet, light and dark.
 import { app, assert, flow, mock, pass } from "./lib.mjs"
@@ -34,7 +34,7 @@ const run = async ({ page, profileId, shot, until }) => {
   const address = () => page.getByLabel("The address to open")
 
   try {
-    // The tab lists the bot's servers, and only the one waiting on access offers the action.
+    // The page lists the bot's servers, and only the one waiting on access offers the action.
     await page.goto(`${app}${screen}`)
     await page.locator('[data-mcp="notion"]').waitFor({ timeout: 15_000 })
     // A failed row offers it too — the Host says its access can be started — and a server that isn't
@@ -131,7 +131,7 @@ const run = async ({ page, profileId, shot, until }) => {
       "both pastes went to the plugin's own callback route",
     )
     const opened = reads.length
-    await until(() => reads.length > opened, 15_000, "the tab to read the bot's servers again")
+    await until(() => reads.length > opened, 15_000, "the page to read the bot's servers again")
     assert.equal(
       await page.locator('[data-mcp="notion"]').getByText("Healthy", { exact: true }).count(),
       1,
@@ -144,9 +144,9 @@ const run = async ({ page, profileId, shot, until }) => {
     )
     await shot("granted")
 
-    // The same on a failed row, whose read the tab's own poll is not following: the access lands
+    // The same on a failed row, whose read the page's own poll is not following: the access lands
     // there too, and the row clears itself — the failed reason going with it. Every other row is
-    // answered settled first, so the tab's poll has nothing to follow and the clearing can only
+    // answered settled first, so the page's poll has nothing to follow and the clearing can only
     // come from the sheet's own read: without that, this assertion would pass on the mock's
     // connecting row and prove nothing about a host whose rows are all failed.
     await page.route("**/mcp", async (route) => {

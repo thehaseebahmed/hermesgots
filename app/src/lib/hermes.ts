@@ -2571,7 +2571,7 @@ export async function getDictationInfo(config: HermesConfig): Promise<DictationI
   const response = await request(`${pluginRoot(config.baseUrl)}/info`, { headers: headers(config) })
   const raw = (await response.json())?.dictation
   if (!raw || typeof raw !== "object")
-    return { ready: false, reason: "The Gots plugin on this bot's host is too old to dictate." }
+    return { ready: false, reason: "The Gots plugin on this bot's host is too old for speech-to-text." }
   return {
     ready: Boolean(raw.ready),
     reason: typeof raw.reason === "string" ? raw.reason : null,

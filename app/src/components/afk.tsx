@@ -615,7 +615,14 @@ function PickCountRow({
 }) {
   return (
     <div className="flex flex-col gap-2 px-1 pt-2" data-afk-picks data-pick-count={count}>
-      <h3 className="text-base">Pick count</h3>
+      <div className="flex flex-col gap-1">
+        <h3 className="text-base">Pick count</h3>
+        {/* The line saying what a pick counts, as the Coding page's Pick budget says it for the bot
+            as a whole: this count is this project's own. */}
+        <p className="text-sm text-muted-foreground">
+          How many tasks this project's AFK holds at once
+        </p>
+      </div>
       <Segmented
         label="Pick count"
         options={PICK_COUNTS.map((each) => ({ id: each, label: String(each) }))}

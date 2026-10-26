@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type ReactNode } from "react"
-import { BrainIcon, EyeIcon, InfoIcon, type LucideIcon } from "lucide-react"
+import { BrainIcon, EyeIcon, type LucideIcon } from "lucide-react"
 import {
   ArrowLeftIcon,
   ArrowUpDownIcon,
@@ -24,7 +24,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Field, FieldLabel } from "@/components/ui/field"
+import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import { Spinner } from "@/components/ui/spinner"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -652,7 +652,7 @@ function HostModelField({
   name,
   label,
   record: { pick, saving, save },
-  hint,
+  subtitle,
   children,
 }: {
   profile: Profile
@@ -663,8 +663,8 @@ function HostModelField({
     saving: boolean
     save: (pick: ModelChoice | undefined) => Promise<unknown>
   }
-  /** What the model is for, behind an info icon beside the label. */
-  hint?: string
+  /** What the setting is for, under its label: the row's subtitle. */
+  subtitle?: string
   children?: ReactNode
 }) {
   const [open, setOpen] = useState(false)
@@ -678,24 +678,9 @@ function HostModelField({
     <Field aria-labelledby={`${name}-label`} aria-busy={saving || undefined}>
       <div className="flex items-center gap-2">
         <FieldLabel id={`${name}-label`}>{label}</FieldLabel>
-        {hint && (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  aria-label={`About the ${label.toLowerCase()}`}
-                  className="-m-2 inline-flex rounded-full p-2 text-muted-foreground"
-                />
-              }
-            >
-              <InfoIcon className="size-4" aria-hidden="true" />
-            </TooltipTrigger>
-            <TooltipContent className="max-w-64">{hint}</TooltipContent>
-          </Tooltip>
-        )}
         {saving && <Spinner className="size-3.5" />}
       </div>
+      {subtitle && <FieldDescription>{subtitle}</FieldDescription>}
       {children}
       <Button
         ref={field}
@@ -732,7 +717,14 @@ function HostModelField({
  * A bot's subagent model, in its settings: the model every task it delegates runs on, which is its
  * host's own delegation model.
  */
-export function DelegationModelSetting({ profile }: { profile: Profile }) {
+export function DelegationModelSetting({
+  profile,
+  subtitle,
+}: {
+  profile: Profile
+  /** What the setting is for, under its label. */
+  subtitle?: string
+}) {
   const record = useDelegationModel(profile)
   if (!record.supported) return null
   return (
@@ -740,6 +732,7 @@ export function DelegationModelSetting({ profile }: { profile: Profile }) {
       profile={profile}
       name="delegation-model"
       label="Subagent model"
+      subtitle={subtitle}
       record={record}
     />
   )
@@ -758,7 +751,7 @@ export function TriageModelSetting({ profile }: { profile: Profile }) {
       name="triage-model"
       label="Triage model"
       record={record}
-      hint="Decides whether a message sent from Main stays there, continues a thread or starts a new one. It only makes that call, so a small, fast model is enough. Default model uses the bot's own."
+      subtitle="Decides whether a message sent from Main stays there, continues a thread or starts a new one. It only makes that call, so a small, fast model is enough. Default model uses the bot's own."
     >
       {record.withheld && (
         <Banner>
@@ -771,7 +764,7 @@ export function TriageModelSetting({ profile }: { profile: Profile }) {
 }
 
 /**
- * A bot's fallback models, in its settings: the picks its host records after the default, in the
+ * A bot's fallback providers, in its settings: the picks its host records after the default, in the
  * order it holds them. A host whose plugin can't record them shows no field at all, and a write on
  * its way greys the rows out until the host's answer lands.
  */
@@ -792,9 +785,10 @@ export function FallbackModelsSetting({ profile }: { profile: Profile }) {
   return (
     <Field aria-labelledby="fallback-models-label" aria-busy={saving || undefined}>
       <div className="flex items-center gap-2">
-        <FieldLabel id="fallback-models-label">Fallback models</FieldLabel>
+        <FieldLabel id="fallback-models-label">Fallback providers</FieldLabel>
         {saving && <Spinner className="size-3.5" />}
       </div>
+      <FieldDescription>The chain Hermes tries after the main model</FieldDescription>
       <div className="space-y-2">
         {list.map((fallback, index) => (
           <div key={index} className="flex items-center gap-1">

@@ -2,7 +2,7 @@
 // own config holds carries a Remove server, and the one a Hermes plugin provides carries none,
 // because Hermes refuses to modify that one. A removal asks for confirmation first — a cancel sends
 // nothing and leaves the server exactly where it was — and a confirmed one takes the server away and
-// leaves the tab showing what is left, without a manual refresh: the tab's own re-read of the bot's
+// leaves the page showing what is left, without a manual refresh: the page's own re-read of the bot's
 // servers is what the list follows, so the row stays gone. Phone and tablet, light and dark.
 import { app, assert, flow, mock, pass } from "./lib.mjs"
 
@@ -34,11 +34,11 @@ const run = async ({ page, profileId, shot, until }) => {
   }
 
   try {
-    // The Bot's editor carries the tab, and it opens a screen of its own.
+    // The bot's settings list carries the MCP page, and it opens a screen of its own.
     await page.goto(`${app}${editor}`)
-    const tab = page.getByRole("tab", { name: "MCP", exact: true })
-    await tab.waitFor({ timeout: 15_000 })
-    await tab.click()
+    const row = page.locator('[data-bot-page="mcps"]')
+    await row.waitFor({ timeout: 15_000 })
+    await row.click()
     await page.waitForURL(`**${screen}`, { timeout: 15_000 })
     await page.locator('[data-mcp="postgres"]').waitFor({ timeout: 15_000 })
     await shot("rows")
@@ -76,7 +76,7 @@ const run = async ({ page, profileId, shot, until }) => {
       "the server a cancel was asked about is still listed",
     )
 
-    // Confirming takes the server away for this bot, and the tab shows what is left.
+    // Confirming takes the server away for this bot, and the page shows what is left.
     await page.getByRole("button", { name: "Remove server" }).click()
     await dialog.getByText("Remove postgres?", { exact: true }).waitFor({ timeout: 15_000 })
     await dialog.getByRole("button", { name: "Remove", exact: true }).click()
@@ -94,13 +94,13 @@ const run = async ({ page, profileId, shot, until }) => {
       ["postgres"],
       "the removal named the server on the plugin's own route",
     )
-    assert.equal(await page.locator("[data-mcp]").count(), 5, "the tab shows what is left")
+    assert.equal(await page.locator("[data-mcp]").count(), 5, "the page shows what is left")
     await shot("removed")
 
-    // The tab keeps reading while a server is still connecting, and the row stays gone: the list
+    // The page keeps reading while a server is still connecting, and the row stays gone: the list
     // follows the bot's own answer rather than a row the app dropped by itself.
     const opened = reads.length
-    await until(() => reads.length > opened, 15_000, "the tab to read the bot's servers again")
+    await until(() => reads.length > opened, 15_000, "the page to read the bot's servers again")
     assert.equal(
       await page.locator('[data-mcp="postgres"]').count(),
       0,
@@ -125,5 +125,5 @@ for (const width of [390, 1024]) {
   }
 }
 pass(
-  "a removal lives on each of a Bot's own MCP servers' Config tab and on none a Hermes plugin provides, a cancel sends nothing and leaves the server, and a confirmed removal takes it away with the tab showing what is left, at 390 and 1024px, light and dark",
+  "a removal lives on each of a Bot's own MCP servers' Config tab and on none a Hermes plugin provides, a cancel sends nothing and leaves the server, and a confirmed removal takes it away with the page showing what is left, at 390 and 1024px, light and dark",
 )

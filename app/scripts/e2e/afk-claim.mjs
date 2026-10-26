@@ -4,7 +4,7 @@
 // Working block names every task it holds over a count of them against the pick count, and a reload
 // reads every count back. A GitHub refusal leaves the switch on and shows its
 // reason in the same pop-up. The bot's pick budget is written on the wire and drawn by its own
-// Coding tab, which this flow reads back. The read is the plugin's own route, so the whole thing is
+// Coding page, which this flow reads back. The read is the plugin's own route, so the whole thing is
 // covered against the mock. Phone, tablet and laptop, light and dark, with no console error.
 import { afkOn, afkRead, app, assert, flow, makeProject, mock, openAfk, pass, say } from "./lib.mjs"
 
@@ -49,7 +49,7 @@ const run = async ({ page, profileId, shot, until }) => {
   assert.equal((await botAfk()).pick_budget, 4, "and the next read answers it")
   await writeBudget(BUDGET)
 
-  // The tab the budget belongs to: the bot's own Coding tab draws the same number the wire
+  // The page the budget belongs to: the bot's own Coding page draws the same number the wire
   // answers, so the screen and the route can't drift apart.
   await page.goto(`${app}/settings/bots/${profileId}/coding`)
   const budget = page.locator("[data-pick-budget]")
@@ -57,7 +57,7 @@ const run = async ({ page, profileId, shot, until }) => {
   assert.equal(
     await budget.getAttribute("data-pick-budget"),
     String(BUDGET),
-    "the Coding tab reads the bot's budget back",
+    "the Coding page reads the bot's budget back",
   )
   await shot("coding-tab")
 

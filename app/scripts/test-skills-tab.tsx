@@ -4,8 +4,8 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-router"
 import { toast } from "sonner"
 
-import { BotEditor } from "@/components/bot-settings"
-import { botTabOf } from "@/lib/bot-tabs"
+import { BotSettingsList, BotSettingsPage } from "@/components/bot-settings"
+import { botPageOf, botTabOf, type BotTab } from "@/lib/bot-tabs"
 import { db } from "@/lib/db"
 import {
   botProfile,
@@ -63,7 +63,8 @@ const SHEETS: Record<string, Sheet> = {
       "---\nname: pr-review\nlicense: MIT\nallowed-tools:\n  - read\n  - write\n---\n# pr-review\n\nRead the diff, then say what is wrong with it.\n",
     linkedFiles: { references: ["references/checklist.md"] },
     files: {
-      "references/checklist.md": "---\ntitle: The checklist\n---\n- Every hunk read.\n- Nothing invented.\n",
+      "references/checklist.md":
+        "---\ntitle: The checklist\n---\n- Every hunk read.\n- Nothing invented.\n",
     },
     readiness_status: "available",
   },
@@ -151,7 +152,12 @@ function LiveEditor() {
   const { tab } = useParams()
   const profile = useLiveQuery(() => db.profiles.get("bot-1"), [])
   if (!profile) return null
-  return <BotEditor key={profile.id} profile={profile} tab={botTabOf(tab) ?? "general"} />
+  return (
+    <>
+      <BotSettingsList profile={profile} />
+      <BotSettingsPage key={profile.id} profile={profile} tab={botTabOf(tab) ?? "general"} />
+    </>
+  )
 }
 
 function Where() {
@@ -170,13 +176,15 @@ const editor = (path: string) => (
 
 const here = () => find("[data-here]")?.textContent
 const tabNamed = (name: string) =>
-  findAll('[role="tab"]').find((tab) => tab.textContent?.trim() === name) ?? null
+  findAll("[data-bot-page]").find(
+    (row) => botPageOf(row.getAttribute("data-bot-page") as BotTab).title === name,
+  ) ?? null
 const sections = () =>
   findAll("[data-skill-section]").map((one) => one.getAttribute("data-skill-section"))
 const headings = () => findAll("[data-skill-section] h2").map((one) => one.textContent)
 const groups = (section: string) =>
-  findAll(`[data-skill-section="${section}"] [data-skill-group]`).map(
-    (one) => one.querySelector("h3")?.textContent ?? "",
+  findAll(`[data-skill-section="${section}"] [data-skill-category]`).map(
+    (one) => one.getAttribute("data-skill-category") ?? "",
   )
 const rowNames = (section: string) =>
   findAll(`[data-skill-section="${section}"] [data-skill]`).map((one) =>
@@ -308,9 +316,9 @@ test("a row is its name over its description, with no icon and no category badge
 test("a host that can't list skills has no Skills tab, and its address lands on General", async () => {
   await seed("skills-absent", ["mcps"])
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
-    assert.equal(tabNamed("Skills"), null, "no Skills tab")
+    assert.equal(tabNamed("Skills"), null, "no Skills page")
     assert.equal(find("[data-skills-tab]"), null, "and nothing of the tab is drawn")
-    assert.equal(here(), "/settings/bots/bot-1", "the address is the bot's own")
+    assert.equal(here(), "/settings/bots/bot-1/general", "the address is General's")
     assert.match(text(), /Test connection/, "General is what is drawn")
   })
 })
@@ -393,7 +401,11 @@ test("a write the Host refuses is its own sentence, with the row as it was", asy
   }
 })
 
-const title = (name: string) => find(`[data-skill="${name}"] button[aria-haspopup="dialog"]`)
+// The tap that opens a skill's sheet: the row's own column where the Host can't switch it, and the
+// left column of two where it can.
+const title = (name: string) =>
+  find(`[data-skill="${name}"] button[aria-haspopup="dialog"]`) ??
+  find(`[data-skill="${name}"][aria-haspopup="dialog"]`)
 const sheetBody = () => find("[data-skill-sheet]")
 const sheetTitle = () => find('[role="dialog"] [data-slot="sheet-title"]')?.textContent?.trim()
 const openSheet = async (name: string) => {
@@ -687,9 +699,287 @@ test("a removal the Host refuses is its own sentence, with the row as it was", a
       assert.ok(row("pr-review"), "the skill is still the bot's")
       assert.match(row("pr-review")?.textContent ?? "", /Ready/, "and its row is as it was")
       const stored = (await db.skills.toArray()).flatMap((cached) => cached.skills)
-      assert.ok(stored.some((skill) => skill.name === "pr-review"), "the device keeps it too")
+      assert.ok(
+        stored.some((skill) => skill.name === "pr-review"),
+        "the device keeps it too",
+      )
     })
   } finally {
     toast.error = original
   }
+})
+
+/** A bot whose categories are one of three, one of one, and the rows that have none. */
+const CATEGORY: Row[] = [
+  { name: "ops-one", description: "One.", category: "ops", origin: "yours" },
+  { name: "ops-two", description: "Two.", category: "ops", origin: "yours", enabled: false },
+  { name: "ops-three", description: "Three.", category: "ops", origin: "yours", enabled: false },
+  { name: "lint", description: "Run the linters.", category: "quality", origin: "builtin" },
+  { name: "stray", description: "Came from nowhere.", category: null },
+]
+
+const CATEGORY_SHEETS: Record<string, Sheet> = {
+  "ops-one": { content: "# ops-one\n\nOne.\n", linkedFiles: null },
+  "ops-two": { content: "# ops-two\n\nTwo.\n", linkedFiles: null },
+}
+
+const categoryOf = (name: string) => find(`[data-skill-category="${name}"]`)
+const categorySwitch = (name: string) => find(`[data-skill-category="${name}"] [role="switch"]`)
+/** Waits out a header's write, so a second tap isn't taken while its switch is still disabled. */
+const headerIdle = (name: string) =>
+  until(async () => categorySwitch(name)?.hasAttribute("disabled") === false, "the header's write")
+const posts = (calls: { method: string }[]) => calls.filter((call) => call.method === "POST")
+
+test("a category's header counts what is on in it, and names a category of one", async () => {
+  await seed("skills-category", ["skills", "skills_write"], CATEGORY)
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    assert.match(categoryOf("ops")?.textContent ?? "", /1 of 3 on/, "one of its three is on")
+    assert.equal(on(categorySwitch("ops")), true, "so the category reads on")
+    assert.match(categoryOf("quality")?.textContent ?? "", /quality/, "titled by the category")
+    assert.match(categoryOf("quality")?.textContent ?? "", /lint/, "and naming its one skill")
+    assert.doesNotMatch(
+      categoryOf("quality")?.textContent ?? "",
+      / of /,
+      "with no count over a category of one",
+    )
+    assert.equal(on(categorySwitch("quality")), true, "a category of one follows its skill")
+    assert.match(categoryOf("No category")?.textContent ?? "", /No category/, "the null group too")
+    assert.match(categoryOf("No category")?.textContent ?? "", /stray/, "named by its one skill")
+  })
+})
+
+test("a category's free rows sit under its header, each a row of its own", async () => {
+  await seed("skills-category-rows", ["skills", "skills_write"], CATEGORY)
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    assert.deepEqual(groups("yours"), ["ops", "quality", "No category"], "a title per category")
+    for (const category of ["ops", "quality", "No category"]) {
+      assert.equal(
+        findAll(`[data-skill-group] [data-skill-category="${category}"]`).length,
+        1,
+        `${category} is titled once, by its own row`,
+      )
+    }
+  })
+})
+
+/** A category whose every skill is off, to watch a tap fill it. */
+const OFF: Row[] = [
+  { name: "ops-one", description: "One.", category: "ops", origin: "yours", enabled: false },
+  { name: "ops-two", description: "Two.", category: "ops", origin: "yours", enabled: false },
+  { name: "ops-three", description: "Three.", category: "ops", origin: "yours", enabled: false },
+  { name: "lint", description: "Run the linters.", category: "quality", origin: "builtin" },
+  { name: "stray", description: "Came from nowhere.", category: null },
+]
+
+/** A category holding an essential skill that is on, which no tap on the header may write. */
+const PINNED: Row[] = [
+  { name: "ops-one", description: "One.", category: "ops", origin: "yours" },
+  { name: "ops-two", description: "Two.", category: "ops", origin: "yours", enabled: false },
+  {
+    name: "hermes-agent",
+    description: "The agent's own operating manual.",
+    category: "ops",
+    origin: "builtin",
+    enabled: true,
+    switchable: false,
+  },
+]
+
+test("a category that reads on is cleared whole by a tap, and nothing beside it", async () => {
+  const calls = await seed("skills-category-clear", ["skills", "skills_write"], CATEGORY)
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    assert.equal(on(categorySwitch("ops")), true, "one of its three on reads the category on")
+    await click(categorySwitch("ops"))
+    await until(async () => posts(calls).length === 1, "the category's one write")
+    assert.deepEqual(
+      posts(calls).map((call) => [call.path, call.body]),
+      [["/api/plugins/memento/skills/ops-one/enabled", { enabled: false }]],
+      "the one row that was on, written off",
+    )
+    await until(
+      async () => /0 of 3 on/.test(categoryOf("ops")?.textContent ?? ""),
+      "the count to follow",
+    )
+    assert.equal(on(categorySwitch("ops")), false, "the category ends off, as the switch shows")
+    assert.equal(on(switchIn("lint")), true, "a category beside it is as it was")
+    assert.equal(on(switchIn("stray")), true, "and so is a row with no category")
+    await settle()
+    assert.equal(posts(calls).length, 1, "nothing outside the category was written")
+  })
+})
+
+test("a category that reads off is filled whole by a tap, and one that reads on is cleared", async () => {
+  const calls = await seed("skills-category-fill", ["skills", "skills_write"], OFF)
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    assert.equal(on(categorySwitch("ops")), false, "an all-off category reads off")
+    await click(categorySwitch("ops"))
+    await until(async () => posts(calls).length === 3, "the category's three writes")
+    assert.deepEqual(
+      posts(calls)
+        .map((call) => call.path)
+        .sort(),
+      [
+        "/api/plugins/memento/skills/ops-one/enabled",
+        "/api/plugins/memento/skills/ops-three/enabled",
+        "/api/plugins/memento/skills/ops-two/enabled",
+      ],
+      "every row in it",
+    )
+    assert.deepEqual(
+      posts(calls).map((call) => call.body),
+      [{ enabled: true }, { enabled: true }, { enabled: true }],
+      "each written on",
+    )
+    await until(
+      async () => /3 of 3 on/.test(categoryOf("ops")?.textContent ?? ""),
+      "the count to follow",
+    )
+    assert.equal(on(categorySwitch("ops")), true, "the category ends on")
+    assert.equal(on(switchIn("lint")), true, "nothing beside it moved")
+
+    await headerIdle("ops")
+    await click(categorySwitch("ops"))
+    await until(async () => posts(calls).length === 6, "the category off again")
+    assert.deepEqual(
+      posts(calls)
+        .slice(3)
+        .map((call) => call.body),
+      [{ enabled: false }, { enabled: false }, { enabled: false }],
+      "every row in it, now that every one is on",
+    )
+    await until(
+      async () => /0 of 3 on/.test(categoryOf("ops")?.textContent ?? ""),
+      "the count to follow",
+    )
+    assert.equal(on(categorySwitch("ops")), false, "an all-off category reads off")
+    await settle()
+    assert.equal(posts(calls).length, 6, "and nothing outside the category was written")
+  })
+})
+
+test("a tap on a category never writes the skill the Host can't switch", async () => {
+  const calls = await seed("skills-category-pinned", ["skills", "skills_write"], PINNED)
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    assert.match(
+      categoryOf("ops")?.textContent ?? "",
+      /2 of 3 on/,
+      "one switchable row and one pinned",
+    )
+    await click(categorySwitch("ops"))
+    await until(async () => posts(calls).length === 1, "clearing what it may")
+    assert.deepEqual(
+      posts(calls).map((call) => [call.path, call.body]),
+      [["/api/plugins/memento/skills/ops-one/enabled", { enabled: false }]],
+      "the switchable row that was on, and the essential one left alone",
+    )
+    await settle()
+    assert.equal(posts(calls).length, 1, "nothing more was written")
+    assert.ok(
+      posts(calls).every((call) => !call.path.includes("hermes-agent")),
+      "the Host's own skill is never part of a category's write",
+    )
+    assert.match(
+      categoryOf("ops")?.textContent ?? "",
+      /1 of 3 on/,
+      "and it is still on, so it still holds the category on",
+    )
+    assert.equal(on(categorySwitch("ops")), true, "the header keeps the Host's truth")
+    assert.equal(on(switchIn("ops-one")), false, "the row it could switch did move")
+    assert.equal(switchIn("hermes-agent"), null, "and the pinned row has no switch of its own")
+  })
+})
+
+test("a skill row with both targets: the left opens its sheet, the switch toggles alone", async () => {
+  const calls = await seed(
+    "skills-split",
+    ["skills", "skills_write", "skills_view"],
+    CATEGORY,
+    undefined,
+    CATEGORY_SHEETS,
+  )
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    assert.equal(
+      findAll('[data-skill="ops-one"] button').length,
+      1,
+      "the row has one tap of its own",
+    )
+    await click(switchIn("ops-one"))
+    await until(async () => posts(calls).length === 1, "the row's write")
+    assert.equal(find("[data-skill-sheet]"), null, "the switch opens nothing")
+    await click(find('[data-skill="ops-one"] button'))
+    await until(async () => sheetBody() !== null, "the skill's sheet")
+    assert.equal(sheetTitle(), "ops-one", "the left column opened it")
+  })
+})
+
+test("a category's write the Host refuses is its own sentence, and the rows stay as they were", async () => {
+  const calls = await seed(
+    "skills-category-refused",
+    ["skills", "skills_write"],
+    CATEGORY,
+    ESSENTIAL,
+  )
+  const errors: string[] = []
+  const original = toast.error
+  toast.error = ((message: string) => errors.push(String(message))) as typeof toast.error
+  try {
+    await mount(editor("/settings/bots/bot-1/skills"), async () => {
+      await drawn()
+      await click(categorySwitch("ops"))
+      await until(async () => errors.length === 1, "the toast")
+      assert.deepEqual(errors, [ESSENTIAL], "the Host's own words, nothing added")
+      await settle()
+      assert.equal(posts(calls).length, 1, "and it stops at the first refusal")
+      assert.equal(on(categorySwitch("ops")), true, "the category keeps the Host's truth")
+      assert.match(categoryOf("ops")?.textContent ?? "", /1 of 3 on/, "its line as it was")
+      assert.equal(on(switchIn("ops-two")), false, "and no row beside the refused one moved")
+    })
+  } finally {
+    toast.error = original
+  }
+})
+
+test("a Host with no write: a plain category title, and the rows still open", async () => {
+  const calls = await seed(
+    "skills-category-readonly",
+    ["skills", "skills_view"],
+    CATEGORY,
+    undefined,
+    CATEGORY_SHEETS,
+  )
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    assert.deepEqual(findAll("[role='switch']"), [], "no header's switch and no row's")
+    assert.match(
+      categoryOf("ops")?.textContent ?? "",
+      /1 of 3 on/,
+      "the category still says how much of it is on",
+    )
+    await click(row("ops-two"))
+    await until(async () => sheetBody() !== null, "the skill's sheet")
+    assert.equal(sheetTitle(), "ops-two", "the whole row is the tap")
+    assert.equal(posts(calls).length, 0, "nothing was written")
+  })
+})
+
+test("a Host with no view: the category and its rows toggle without opening anything", async () => {
+  await seed("skills-category-noview", ["skills", "skills_write"], CATEGORY)
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    assert.deepEqual(
+      findAll('[data-skill] button[aria-haspopup="dialog"]'),
+      [],
+      "no row offers a sheet",
+    )
+    assert.ok(categorySwitch("ops"), "the category keeps its switch")
+    await click(switchIn("ops-one"))
+    await until(async () => /Off/.test(row("ops-one")?.textContent ?? ""), "the row to say Off")
+    assert.equal(find("[data-skill-sheet]"), null, "and nothing opened")
+  })
 })

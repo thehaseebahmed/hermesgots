@@ -2,8 +2,9 @@ import { MinusIcon, PlusIcon } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 
+import { GroupHeading } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { PICK_BUDGET } from "@/lib/afk-picks"
 import type { Profile } from "@/lib/db"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
@@ -73,42 +74,51 @@ export function CodingTab({ profile }: { profile: Profile }) {
   }
 
   return (
-    <FieldGroup data-bot-coding>
-      <Field aria-labelledby="pick-budget-label" aria-busy={saving || undefined}>
-        <FieldLabel id="pick-budget-label">Pick budget</FieldLabel>
-        <div className="flex items-center gap-3">
-          <Button
-            type="button"
-            variant="outline"
-            className="size-11"
-            aria-label="Decrease pick budget"
-            disabled={saving || failed || shown <= PICK_BUDGET.least}
-            onClick={() => void choose(shown - 1)}
-          >
-            <MinusIcon />
-          </Button>
-          <span
-            aria-live="polite"
-            data-pick-budget={shown}
-            className="min-w-8 text-center text-lg font-medium tabular-nums"
-          >
-            {shown}
-          </span>
-          <Button
-            type="button"
-            variant="outline"
-            className="size-11"
-            aria-label="Increase pick budget"
-            disabled={saving || failed || shown >= PICK_BUDGET.most}
-            onClick={() => void choose(shown + 1)}
-          >
-            <PlusIcon />
-          </Button>
-        </div>
-        {failed && (
-          <p className="text-sm text-muted-foreground">Couldn't read this bot's pick budget.</p>
-        )}
-      </Field>
-    </FieldGroup>
+    <div className="flex flex-col gap-4" data-bot-coding>
+      <GroupHeading title="Gots Specific Settings" />
+      <div className="flex flex-col gap-2">
+        <GroupHeading title="Away From Keyboard" />
+        <FieldGroup>
+          <Field aria-labelledby="pick-budget-label" aria-busy={saving || undefined}>
+            <FieldLabel id="pick-budget-label">Pick budget</FieldLabel>
+            <FieldDescription>
+              How many tasks one bot's AFK may hold at once across all of its projects
+            </FieldDescription>
+            <div className="flex items-center gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                className="size-11"
+                aria-label="Decrease pick budget"
+                disabled={saving || failed || shown <= PICK_BUDGET.least}
+                onClick={() => void choose(shown - 1)}
+              >
+                <MinusIcon />
+              </Button>
+              <span
+                aria-live="polite"
+                data-pick-budget={shown}
+                className="min-w-8 text-center text-lg font-medium tabular-nums"
+              >
+                {shown}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                className="size-11"
+                aria-label="Increase pick budget"
+                disabled={saving || failed || shown >= PICK_BUDGET.most}
+                onClick={() => void choose(shown + 1)}
+              >
+                <PlusIcon />
+              </Button>
+            </div>
+            {failed && (
+              <p className="text-sm text-muted-foreground">Couldn't read this bot's pick budget.</p>
+            )}
+          </Field>
+        </FieldGroup>
+      </div>
+    </div>
   )
 }

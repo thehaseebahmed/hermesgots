@@ -12,7 +12,13 @@ import { toast } from "sonner"
 
 import { ItemSearch } from "@/components/item-list"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
-import { Group, linkRowClass, rowClass, RowText } from "@/components/settings-chrome"
+import {
+  Group,
+  linkRowClass,
+  rowClass,
+  RowText,
+  useHeaderAction,
+} from "@/components/settings-chrome"
 import { useCopied } from "@/lib/copied"
 import {
   AlertDialog,
@@ -79,8 +85,8 @@ const SERVER_HEIGHT = "h-[min(34rem,85dvh)]"
 const SET_PLACEHOLDER = "Set — type to replace"
 
 /**
- * A bot's MCP servers, as a tab of its Settings: Add a server on top, then the servers the bot's own
- * configuration holds, then the ones a Hermes plugin provides.
+ * A bot's MCP servers, as a page of its Settings: a + in the screen's header adds one, then the
+ * servers the bot's own configuration holds, then the ones a Hermes plugin provides.
  *
  * Every row is its name over its health — *Healthy: 78 tools* where Hermes reports a count, the
  * Host's own sentence where it failed, *Click here to authenticate* where
@@ -88,10 +94,10 @@ const SET_PLACEHOLDER = "Set — type to replace"
  * the waiting row and the way out of it are one line. Tapping the name opens the server's own sheet:
  * Config, where its block is shown and saved, and Tools, where what it offers is listed (ADR 0014).
  *
- * A heading with nothing under it is left out, so a bot with no servers shows the Add row alone. Each
- * way in is offered under its own feature: the Catalogue where the Host can browse it, the custom
- * form where it can land a block at all — a Host may have one and not the other, and a Host with
- * neither gets no Add row.
+ * A heading with nothing under it is left out, so a bot with no servers shows its lists alone and the
+ * + over them. Each way in is offered under its own feature: the Catalogue where the Host can browse
+ * it, the custom form where it can land a block at all — a Host may have one and not the other, and a
+ * Host with neither gets no +.
  */
 export function McpsTab({ profile }: { profile: Profile }) {
   const answers = useMcpFeatureAnswers(profile)
@@ -114,6 +120,26 @@ export function McpsTab({ profile }: { profile: Profile }) {
   // A sheet only exists where the Host advertises a tab for it, so a row whose name could open
   // nothing keeps its name plain.
   const sheetOpenable = answers.config === "yes" || answers.tools === "yes"
+  // The way in is the screen header's +, which exists only while this page is the one on screen.
+  // Its handler is the sheet's state setter — stable across renders — so the header drawing it from
+  // a ref never has to follow the page's own renders. The gate is the Add row's own: a Host without
+  // `mcps_add` has nothing to offer behind it.
+  useHeaderAction(
+    "mcp-add",
+    answers.add === "yes" ? (
+      <Button
+        variant="outline"
+        size="icon-lg"
+        className="size-11 rounded-full"
+        aria-label="Add a server"
+        title="Add a server"
+        data-mcp-add
+        onClick={() => setSheet({ kind: "add" })}
+      >
+        <PlusIcon />
+      </Button>
+    ) : null,
+  )
 
   async function confirmRemove(name: string) {
     setBusy(true)
@@ -133,22 +159,6 @@ export function McpsTab({ profile }: { profile: Profile }) {
 
   return (
     <div className="flex flex-col gap-4" data-mcp-tab>
-      {answers.add === "yes" && (
-        <Group>
-          <button
-            type="button"
-            className={linkRowClass}
-            aria-haspopup="dialog"
-            data-mcp-add
-            onClick={() => setSheet({ kind: "add" })}
-          >
-            <PlusIcon className="size-5 shrink-0 text-muted-foreground" />
-            <RowText title="Add a server" />
-            <ChevronRightIcon className="size-5 shrink-0 text-muted-foreground" />
-          </button>
-        </Group>
-      )}
-
       <ServerSection
         title="Your servers"
         section="config"
@@ -872,7 +882,7 @@ function ToolsTab({ profile, server }: { profile: McpServerConfig; server: McpSe
   )
 }
 
-/** The Add row's two ways in: Hermes's Catalogue, or a server typed in by hand. */
+/** The +'s two ways in: Hermes's Catalogue, or a server typed in by hand. */
 function AddServerSheet({
   open,
   onOpenChange,

@@ -1,6 +1,7 @@
-// Adding a server Hermes's Catalogue doesn't offer: the Add action's sheet offers Custom server, a
-// form of the name Hermes will know it by and the transport it runs — an address for an http server,
-// a command and one line of arguments for a stdio one, plus the environment values it declares.
+// Adding a server Hermes's Catalogue doesn't offer: the + in the screen's header opens the Add sheet,
+// whose Custom server is a form of the name Hermes will know it by and the transport it runs — an
+// address for an http server, a command and one line of arguments for a stdio one, plus the
+// environment values it declares.
 //
 // The name is the one thing the user decides that Hermes can refuse: it has to be a name Hermes takes
 // and one this bot doesn't already have, and the refusal the Host answers with is what the form says

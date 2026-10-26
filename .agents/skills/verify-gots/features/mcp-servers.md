@@ -1,21 +1,22 @@
 # MCP servers
 
-A Bot's editor has an MCP tab where its MCP servers live, as its Host reports them: Add a server on
-top, the servers the bot's own config holds under *Your servers*, and ones a Hermes plugin provides
-under *From plugins*. Each row is a name over its health — a tool count, `Off`, `Connecting…`, the
-Host's own failure text, `Click here to authenticate` — and no badge. A row opens the server's own
-sheet (Config and Tools); a waiting row's health line is the tap that starts Server access.
+A Bot's MCP page — under Hermes Settings in its settings list — holds its MCP servers, as its Host
+reports them: a `+` in the page's header adds one, the servers the bot's own config holds under *Your
+servers*, and ones a Hermes plugin provides under *From plugins*. Each row is a name over its health
+— a tool count, `Off`, `Connecting…`, the Host's own failure text, `Click here to authenticate` — and
+no badge. A row opens the server's own sheet (Config and Tools); a waiting row's health line is the
+tap that starts Server access.
 
 ## Sub-features
 
-- `mcps-rows` — the tab lists Add a server, *Your servers* and *From plugins*, each row its name over
-  its health, at phone and tablet widths (`mcps`).
-- `mcps-gate` — a bot whose plugin doesn't advertise `mcps` has no MCP tab (its URL lands back on
-  General), and features offered apart are offered apart (`mcps-gate`).
+- `mcps-rows` — the page lists *Your servers* and *From plugins* under the `+` in its header, each
+  row its name over its health, at phone and tablet widths (`mcps`).
+- `mcps-gate` — a bot whose plugin doesn't advertise `mcps` has no MCP page on its settings list (its
+  URL lands back on General), and features offered apart are offered apart (`mcps-gate`).
 - `mcps-toggle` — a switch flips a server off and back on, and the row's health follows (`mcps`).
 - `mcps-remove` — Remove is offered in a server's Config tab only for the bot's own config's servers,
   asks first, and leaves the list showing what is left (`mcps-remove`).
-- `mcps-catalogue` — Add a server opens Hermes's Catalogue with only the entries this bot doesn't
+- `mcps-catalogue` — the header's `+` opens Hermes's Catalogue with only the entries this bot doesn't
   have; a search narrows it (`mcps-catalogue`).
 - `mcps-add` — an entry that declares values opens its form (required starred, secret masked, a
   default pinned); a refused add leaves nothing half-added (`mcps-add`).
@@ -28,9 +29,10 @@ sheet (Config and Tools); a waiting row's health line is the tap that starts Ser
 
 ## How to get to it (user POV)
 
-- Settings → a Bot → the **MCP** tab: `/settings/bots/<botId>/mcps` (each tab is its own history
-  entry; back returns to General).
-- `Add a server` at the top of the tab; a row's switch; a row itself opening the server's sheet.
+- Settings → a Bot → the **MCP** row of its settings list, under *Hermes Settings*:
+  `/settings/bots/<botId>/mcps` (each page is its own history entry; back returns to the list, and
+  from there to the menu).
+- The `+` in the page's header; a row's switch; a row itself opening the server's sheet.
 - The health line of a row waiting on Server access.
 
 ## Driving it with the e2e flows
@@ -43,21 +45,23 @@ Preconditions:
 - The flows run at phone (390) and tablet (1024) widths, light and dark, where the journey claims
   them.
 
-- **Rows and health.** Open the tab. Run `pnpm e2e mcps --shots "$GOTS_VERIFY_ARTIFACTS/<run-id>"`
-  (from `app/`). The panel (`[data-mcp-tab]`) shows `Add a server` on top, then the two headings with
-  the right servers under each; every row reads `name` over its exact health line (e.g.
+- **Rows and health.** Open the page from the list's MCP row. Run
+  `pnpm e2e mcps --shots "$GOTS_VERIFY_ARTIFACTS/<run-id>"` (from `app/`). The panel
+  (`[data-mcp-tab]`) is the page itself, its header carrying the `+` (`[data-mcp-add]`), then the two
+  headings with the right servers under each; every row reads `name` over its exact health line (e.g.
   `github` / `Healthy: 78 tools`) and wears no badge.
 - **Toggle.** Flip a server's switch off and back on. The same flow: the write lands on the Host and
   the row's health follows — read back from the Host, not only from the switch.
-- **Gating.** Run `pnpm e2e mcps-gate`. A bot whose plugin answers without `mcps` has no MCP tab and
+- **Gating.** Run `pnpm e2e mcps-gate`. A bot whose plugin answers without `mcps` has no MCP page and
   its URL returns to General; a plugin listing servers without `mcps_write` shows no switches. No
   console error either way (the flow collects them and fails on any).
 - **Remove.** Run `pnpm e2e mcps-remove`. Remove lives in the Config tab of a server the bot's own
   config holds, and on none a plugin provides; a cancel sends nothing; a confirmed removal takes the
   server away and the list shows what is left.
-- **Catalogue.** Run `pnpm e2e mcps-catalogue`. Add a server → Catalogue lists only entries the bot
-  doesn't have (no `Added` badge); search narrows by name and by Hermes's own description; a tap adds
-  an entry that declares nothing to fill.
+- **Catalogue.** Run `pnpm e2e mcps-catalogue`. The header's `+`, then Catalogue, lists only the
+  entries the bot doesn't have (no `Added` badge); search narrows by name and by Hermes's own
+  description, a search that matches nothing says so, and nothing is added — the bot's own servers
+  are left as they were.
 - **Declared values.** Run `pnpm e2e mcps-add`. The form titles each value by its name, subtitles it
   by its prompt, stars required ones, masks secrets, pins a manifest default, shows `Set` for a value
   the bot holds empty, and refuses the add until required values are given.
@@ -74,11 +78,11 @@ Preconditions:
 
 ## Gotchas
 
-- The tab exists only where the plugin's `info` advertises `mcps`; a bot whose Hermes is too old
-  lands back on General. Don't read a missing tab as a bug in the tab.
+- The page exists only where the plugin's `info` advertises `mcps`; a bot whose Hermes is too old
+  lands back on General. Don't read a missing page as a bug in the page.
 - Each control is gated on its own feature (`mcps_write`, `mcps_remove`, `mcps_catalogue`,
   `mcps_add`, `mcps_access`, `mcps_config`, `mcps_tools`): a host may offer one without another, so
-  assert the control's own gate, not the tab's.
+  assert the control's own gate, not the page's.
 - `get_mcp_status` reports `0` for a server never spawned, which is *not* a tool count: `Healthy`
   with no count is correct there.
 - The mock holds removed servers aside (`mcpRemoved`); `POST /__mock/mcp` with the mock's key puts
