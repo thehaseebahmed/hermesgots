@@ -117,8 +117,9 @@ of the row is that thread's last activity rather than its last turn's end.
   difference from running is the second line's words, not the colour.
 - **A merged pull request on a session nobody resolved** — grey, and in Idle or Working like any
   other session; green never means "merged".
-- **Activity arriving while the list is open** — the dot appears live and the time moves, without a
-  reload and without a Dexie write (read marks are local, last activity is derived).
+- **Activity arriving while the list is open** — the dot appears live on a row this device has read
+  at least once, and the time moves, without a reload and without a Dexie write (read marks are
+  local, last activity is derived).
 - **Opening a thread in the pane** — the mark is written where the thread is rendered, so pane and
   page behave as one rule and a second device keeps its own dot.
 - **A session this device has never opened** — no mark, so no dot; creating a session lands on it,

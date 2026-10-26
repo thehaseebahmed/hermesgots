@@ -38,8 +38,9 @@ defined — activity newer than the mark dots the row, activity at or behind it 
 ## Consequences
 
 - The code that changes is the rule and its store's boundary: `load()` drops anything that is not a
-  positive moment, so absence is the one spelling of "no mark", and `isUnread` answers "not
-  unread" rather than joining an absent mark to the comparison at zero.
+  positive moment and `markRead`'s monotonic guard never writes one, so absence is the one spelling
+  of "no mark" — `isUnread` only has to test for it, and answers "not unread" rather than joining an
+  absent mark to the comparison at zero.
 - A session created on another device shows no dot on this one until its thread is rendered here
   once — the list says what it holds, not what this device has missed.
 - An evicted mark (the store keeps five hundred) stops dotting its row instead of re-dotting it,
