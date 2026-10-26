@@ -168,6 +168,11 @@ export const FLOWS = {
     about:
       "A question replaces the composer while the subagent a turn dispatched still runs, then the result lands as the bot's message and the wake turn streams",
   },
+  "wake-window": {
+    script: "e2e/wake-window.mjs",
+    about:
+      "A chat whose turn and subagents have both ended keeps reading working through the whole window its wake turn is owed, and settles only once the wake has run",
+  },
   mcps: {
     script: "e2e/mcps.mjs",
     about:

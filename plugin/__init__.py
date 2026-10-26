@@ -1620,6 +1620,13 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except Exception:
             logger.debug("memento: reading live subagents failed", exc_info=True)
             subagents = {}
+        try:
+            # The wakes still owed, so a session never reads at rest between its last subagent
+            # ending and the wake turn starting; see delegation.waking_sessions.
+            wakes = await asyncio.to_thread(delegation.waking_sessions, home)
+        except Exception:
+            logger.debug("memento: reading owed wakes failed", exc_info=True)
+            wakes = {}
         return web.json_response(
             {
                 "object": "memento.runs",
@@ -1627,6 +1634,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 "run_ids": run_ids,
                 "waiting": waiting,
                 "subagents": subagents,
+                "waking": wakes,
             }
         )
 

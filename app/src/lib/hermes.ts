@@ -3441,6 +3441,8 @@ export interface LiveRuns {
   waiting: Record<string, WaitingReason & { project?: string }>
   /** How many subagents each session still runs (0.79). */
   subagents: Record<string, number>
+  /** How many finished subagents each session's wake turn is still owed (0.83). */
+  waking: Record<string, number>
 }
 
 /** The server's runs in flight and what waits on the user. Needs the Gots plugin. */
@@ -3490,7 +3492,10 @@ export async function getLiveRuns(config: HermesConfig, signal?: AbortSignal): P
   const subagents: Record<string, number> = {}
   for (const [id, count] of Object.entries(object(body?.subagents)))
     if (typeof count === "number" && count > 0) subagents[id] = count
-  return { sessions, runIds, waiting, subagents }
+  const waking: Record<string, number> = {}
+  for (const [id, count] of Object.entries(object(body?.waking)))
+    if (typeof count === "number" && count > 0) waking[id] = count
+  return { sessions, runIds, waiting, subagents, waking }
 }
 
 /** Answers the agent's questions. Needs the Gots plugin, which serves the clarify tool on runs. */
