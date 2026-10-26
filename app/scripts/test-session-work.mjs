@@ -237,16 +237,16 @@ test("a resolve or discard carries the time when it is the newest", () => {
 })
 
 
-test("a session this device has never opened is unread", () => {
-  assert.equal(isUnread(session({ updatedAt: 10 }), undefined), true, "no mark at all")
-  assert.equal(isUnread(session({ updatedAt: 10 }), 0), true, "a zero mark reads as none")
+test("a session this device has never opened shows no dot", () => {
+  const activity = lastActivityAt(session({ updatedAt: 10 }))
+  assert.equal(isUnread(activity, undefined), false, "no mark, so nothing to compare")
 })
 
 test("the dot shows only while activity is newer than the mark", () => {
-  const seen = session({ updatedAt: 40, prs: [pr("open", "success", 35)] })
-  assert.equal(isUnread(seen, 50), false, "the thread rendered after everything")
-  assert.equal(isUnread(seen, 40), false, "the moment the last activity landed counts as read")
-  assert.equal(isUnread(seen, 30), true, "something landed since")
+  const activity = lastActivityAt(session({ updatedAt: 40, prs: [pr("open", "success", 35)] }))
+  assert.equal(isUnread(activity, 50), false, "the thread rendered after everything")
+  assert.equal(isUnread(activity, 40), false, "the moment the last activity landed counts as read")
+  assert.equal(isUnread(activity, 30), true, "something landed since")
 })
 
 

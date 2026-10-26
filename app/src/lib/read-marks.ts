@@ -1,9 +1,8 @@
 /**
  * The moments this device last rendered each session's thread — its **read mark** (GLOSSARY) — held
- * here on this device alone: never synced, never in the chat's fields (ADR 0046). The Code row's
- * blue dot shows while the session's last activity is newer than its mark (a session never opened
- * here has none, so it shows), and rendering the thread — in the pane or on its own page — writes
- * it back. One subscribe-able snapshot, so a list holding rows re-draws the moment a mark moves.
+ * here on this device alone: never synced, never in the chat's fields (ADR 0046). What a mark means
+ * to the Code row's dot is `isUnread` (session-work.ts, ADR 0056). One subscribe-able snapshot, so
+ * a list holding rows re-draws the moment a mark moves.
  */
 
 import { createStore } from "@/lib/store"
@@ -12,13 +11,15 @@ const KEY = "memento:read-marks"
 /** The store only ever grows: the oldest marks drop past this many. */
 const KEEP = 500
 
+const isMark = (at: unknown): at is number => typeof at === "number" && at > 0
+
 const load = (): Record<string, number> => {
   try {
     const stored: unknown = JSON.parse(localStorage.getItem(KEY) ?? "{}")
     if (!stored || typeof stored !== "object" || Array.isArray(stored)) return {}
     const marks: Record<string, number> = {}
     for (const [id, at] of Object.entries(stored)) {
-      if (typeof at === "number") marks[id] = at
+      if (isMark(at)) marks[id] = at
     }
     return marks
   } catch {
@@ -38,10 +39,11 @@ const persist = (next: Record<string, number>) => {
 }
 
 /**
- * The thread has rendered on this device as of `at`: what clears its row's dot. Monotonic — a
- * mark never moves back — and the oldest marks drop once the store is full, so a device that
- * reads everything cannot grow it without bound. An evicted mark reads as never opened: its row
- * dots again until the thread is opened once more.
+ * The thread has rendered on this device as of `at`: what its row's dot measures against, and what
+ * has to exist before that dot can show at all. Monotonic — a mark never moves back — and the
+ * oldest marks drop once the store is full, so a device that reads everything cannot grow it
+ * without bound. An evicted mark reads as never opened: its row loses its dot until the thread is
+ * opened once more.
  */
 export function markRead(sessionId: string, at = Date.now()) {
   const current = marks.get()
@@ -65,6 +67,9 @@ export function forgetRead(sessionId: string) {
   marks.set(next)
   persist(next)
 }
+
+/** This device's mark for one session, for a caller that wants the moment itself. */
+export const readMark = (sessionId: string): number | undefined => marks.get()[sessionId]
 
 /** Re-renders whatever draws the dots when a mark moves. */
 export const useReadMarks = marks.use

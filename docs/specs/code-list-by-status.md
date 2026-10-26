@@ -14,6 +14,13 @@ checks running or failing — and an approval or a question still reads as a wai
 blocked on it, since `waiting_for_approval` is the run not running. Everything else this spec
 settled stands.
 
+**Revised 2026-10-25 — the dot needs a mark.** Decision 5's "no mark means unread" inverts (ADR
+0056): the dot shows only where this device holds a read mark and the session's last activity is
+newer than it, so a session this device has never opened draws no dot at all. The mark stays local,
+is still written by rendering the thread, and the comparison against last activity is unchanged;
+what goes is joining an absent mark to that comparison at zero. Everything else this spec settled
+stands.
+
 ## Goal
 
 The Code list arranges itself by session state instead of by when a session was last touched, so the
@@ -24,7 +31,8 @@ their icon. The row's round state icon carries the colour that says what is need
 wait on the human or a pull request's checks, green for Resolved and an open pull request needing
 nothing, grey for everything at rest), while the glyph inside keeps saying why. A blue dot at the
 icon's top-right marks a session whose thread has had activity since this device last rendered it,
-and the time at the end of the row is that thread's last activity rather than its last turn's end.
+and never a session this device has not opened, which has no "since" to be after; the time at the end
+of the row is that thread's last activity rather than its last turn's end.
 
 ## What this is not
 
@@ -64,8 +72,9 @@ and the time at the end of the row is that thread's last activity rather than it
    spinner working, code idle, check resolved, archive-x discarded, lock for a removed repository.
 5. **The dot is a read mark comparison, not a count.** Blue, in the info tone, at the icon's
    top-right corner: shown when last activity is newer than the moment this client last rendered the
-   thread — no mark means unread — live while the list is on screen, on any row including inside the
-   collapsed Closed group, and written back by rendering the thread in the pane or on its own page.
+   thread, and only where there is such a moment — no mark means no dot, never unread — live while
+   the list is on screen, on any row including inside the collapsed Closed group, and written back
+   by rendering the thread in the pane or on its own page.
 6. **Last activity is derived, never stored.** The newest of the turn's end, the pull request's
    timestamps and the resolve/discard timestamps, worked out where it is drawn: no field joins sync,
    no Dexie write, and the trailing time keeps its format.
@@ -94,6 +103,7 @@ and the time at the end of the row is that thread's last activity rather than it
 | `app/scripts/e2e/`, `app/scripts/e2e/cli.mjs` | The flow that proves grouping, colour and the dot |
 | `docs/e2e-flow-audit.md` | Its row and verdict |
 | `docs/adr/0046-the-code-list-is-arranged-by-status-and-a-dot-marks-what-this-device-hasnt-read.md` | The decision |
+| `docs/adr/0056-a-code-rows-dot-needs-a-read-mark-before-it-can-show.md` | The dot's one overturned sentence: no mark, no dot |
 | `GLOSSARY.md` | **Last activity**, **Read mark**, and Session state's waiting amended |
 | `AGENTS.md` | The checks-run-as-working line corrected |
 
@@ -107,12 +117,13 @@ and the time at the end of the row is that thread's last activity rather than it
   difference from running is the second line's words, not the colour.
 - **A merged pull request on a session nobody resolved** — grey, and in Idle or Working like any
   other session; green never means "merged".
-- **Activity arriving while the list is open** — the dot appears live and the time moves, without a
-  reload and without a Dexie write (read marks are local, last activity is derived).
+- **Activity arriving while the list is open** — the dot appears live on a row this device has read
+  at least once, and the time moves, without a reload and without a Dexie write (read marks are
+  local, last activity is derived).
 - **Opening a thread in the pane** — the mark is written where the thread is rendered, so pane and
   page behave as one rule and a second device keeps its own dot.
-- **A session this device has never opened** — no mark, so the dot shows; creating a session lands
-  on it, which writes the baseline.
+- **A session this device has never opened** — no mark, so no dot; creating a session lands on it,
+  which writes the baseline, and any session's mark arrives the first time its thread renders here.
 - **Searching with the dropdown on title A–Z** — headers drop and the flat results run A–Z; the same
   choice governs grouped and filtered views.
 - **390px** — the four groups, colours and dot all hold at phone width; nothing here is

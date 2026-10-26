@@ -81,6 +81,8 @@ function icon() {
   }
 }
 
+const dot = () => document.querySelector("[data-unread]")
+
 const toneHas = (tone: string[], token: string) =>
   assert.ok(tone.includes(token), `the icon wears ${token}, wears ${tone.join(" ")}`)
 const glyphIs = (glyphClass: string, name: string) =>
@@ -176,35 +178,41 @@ test("the second line says why the row waits only while the row waits", async ()
   })
 })
 
-test("a session this device hasn't read wears the dot, and a read mark clears it", async () => {
-  await drawRow(conversation("unread"), {
+test("a dot needs a read mark to measure against, and a read mark clears it", async () => {
+  await drawRow(conversation("never-opened"), {
     body: async () => {
-      const dot = document.querySelector("[data-unread]")
-      assert.ok(dot, "never opened here, so unread")
-      const circle = icon().circle
-      assert.equal(dot.parentElement, circle.parentElement, "the dot sits on the icon's own wrapper")
-      assert.ok([...(dot as HTMLElement).classList].includes("bg-info"), "the dot is the blue one")
-      assert.match(document.body.textContent ?? "", /New activity/, "the dot is said in words too")
+      assert.equal(dot(), null, "never opened here: no reference of when it was last read")
     },
   })
   await drawRow(conversation("read"), {
     mark: Date.now(),
     body: async () => {
-      assert.equal(document.querySelector("[data-unread]"), null, "read: the dot is gone")
+      assert.equal(dot(), null, "read: the dot is gone")
     },
   })
   await drawRow(conversation("older", { updatedAt: Date.now() }), {
     mark: Date.now() - 60_000,
     body: async () => {
-      assert.ok(document.querySelector("[data-unread]"), "activity landed since the mark")
+      const drawn = dot()
+      assert.ok(drawn, "activity landed since the mark")
+      const circle = icon().circle
+      assert.equal(drawn.parentElement, circle.parentElement, "the dot sits on the icon's own wrapper")
+      assert.ok([...(drawn as HTMLElement).classList].includes("bg-info"), "the dot is the blue one")
+      assert.match(document.body.textContent ?? "", /New activity/, "the dot is said in words too")
     },
   })
 })
 
-test("a closed session with new activity is dotted too", async () => {
-  await drawRow(conversation("closed-new", { resolvedAt: 300 }), {
+test("a closed session never opened here is not dotted, one read before it closed is dotted", async () => {
+  await drawRow(conversation("closed-never-opened", { resolvedAt: 300 }), {
     body: async () => {
-      assert.ok(document.querySelector("[data-unread]"), "Resolved still tells this device it is new")
+      assert.equal(dot(), null, "Resolved with no mark here: nothing to compare against")
+    },
+  })
+  await drawRow(conversation("closed-read", { resolvedAt: 300 }), {
+    mark: 250,
+    body: async () => {
+      assert.ok(dot(), "Resolved after the mark, so it is new")
     },
   })
 })
@@ -215,6 +223,8 @@ test("a mark never moves back, and the oldest drop once the store is full", () =
   markRead("mono", 100)
   markRead("mono", 50)
   assert.equal(store()["mono"], 100, "an older moment never moves a mark back")
+  markRead("not-a-moment", 0)
+  assert.equal(store()["not-a-moment"], undefined, "a moment that is not one writes no mark at all")
   for (let i = 0; i < 500; i++) markRead(`bulk-${i}`, 1_000 + i)
   assert.equal(Object.keys(store()).length, 500, "the store holds only its cap")
   assert.equal(store()["mono"], undefined, "the oldest mark drops once it is full")

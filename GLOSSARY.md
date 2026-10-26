@@ -61,7 +61,7 @@ The most recent event a session has seen — a turn ending, its pull request mov
 _Avoid_: updated at, updatedAt, last update
 
 **Read mark**:
-When a device last had a session's thread rendered on it. It stays on that device, is never synced, and a session with anything newer has not been read there.
+When a device last had a session's thread rendered on it. It stays on that device, is never synced, and a session with anything newer than its mark has not been read there — one this device has never opened has no mark at all, so nothing about it is called unread.
 _Avoid_: last seen, read receipt, unread count
 
 **Question**:

@@ -1,5 +1,12 @@
 # The Code list is arranged by status, and a dot marks what this device hasn't read
 
+**Superseded in its dot sentence by [ADR 0056](./0056-a-code-rows-dot-needs-a-read-mark-before-it-can-show.md)**:
+a session never opened here no longer shows the dot — the dot needs a read mark first. What this
+record decides about the mark, its being device-local, the comparison and the dot's place stands.
+
+**Superseded in its membership ordering by [ADR 0053](./0053-a-run-in-flight-is-the-code-lists-primary-claim.md)**:
+a run in flight claims the row before any wait on the human.
+
 The Code screen listed sessions in date buckets — *Waiting on you*, *Working*, then *Today* down to
 *Earlier*, with *Closed* at the foot — so recency decided the order and a session waiting on the
 user sank under sessions that merely happened lately. The list is now four groups in a fixed order,
