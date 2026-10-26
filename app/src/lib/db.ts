@@ -139,11 +139,13 @@ export interface Conversation {
   changedAt: number
   /**
    * Set while Hermes holds older transcript rows than this device loaded: the oldest loaded row's
-   * id, and roughly how many newer rows to skip to reach it. `archived` says the walk is in the
-   * host's display read, whose numbering also counts the rows a compaction archived, so `offset`
-   * is not the live transcript's and the row id is what marks the window's edge.
+   * id and, per numbering, how far from the newest end the next read starts. Hermes numbers the
+   * live transcript per row and the display read per logical message, so the two can't share an
+   * offset; the display read is only entered at its own newest end, so it carries none.
    */
-  olderThan?: { id: number; offset: number; archived?: boolean }
+  olderThan?:
+    | { kind: "live"; id: number; offset: number }
+    | { kind: "archive"; id: number }
   /**
    * The session's latest model call, as the Gots plugin recorded it: its prompt tokens, the
    * model that ran it, and the window Hermes compresses against. Local only; every device reads it

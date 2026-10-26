@@ -23,14 +23,19 @@ of a real store says so: the display read orders by `display_order`, which parts
 the moment a compaction re-emits a carried turn under a fresh one, so a chat of 3133 rows has an
 archived row above the window holding an id newer than the window's own. Under the id rule that row
 and its neighbour were dropped and never fetched again — a turn missing its reply, in the middle of
-the conversation. `olderThan` therefore stays what it was for the cheap read — the oldest row's id
-and roughly how many rows to skip — and the archived walk ignores its id, restarts at offset 0 on
-each visit and counts itself in memory for the length of one visit.
+the conversation. So `olderThan` names which numbering the edge was found in — the live transcript,
+whose offset counts its own rows, or the display read, which counts logical messages and is only
+ever entered at its own newest end — and the archived walk ignores the id, counts itself in memory
+for the length of one visit, and leaves no offset behind that a later read could mistrust.
 
 The same rule set the sort: a step does not re-sort its rows by id, because the host's order *is* the
 order — an id sort inverts whole stretches of a compacted chat — and it does not trim the page to a
 turn start, because a drain runs to the chat's first row, where every turn is whole anyway. A page
-that comes back short is the end.
+that comes back short is the end. Pages go in front of one another rather than behind: the read
+counts its offset back from the newest end but returns each page oldest first, so the page read first
+sits nearest the window and every page after it is older. Stacking them instead reverses the archive
+block by block, which no single-page chat can show — `pnpm e2e chat-archive` therefore seeds more
+rows above the seam than one page carries and asserts the order they come back in.
 
 The chat's `compactions` list says whether there is more: an empty list is the host saying the chat
 was never compacted, so a short live page is the start and the cursor clears. The walk won't guess
@@ -40,8 +45,12 @@ archived step runs. The probe it replaces was the cheaper design and it was wron
 uncompacted chat the archived step read the whole transcript back and answered every row the device
 already held, so the walk had to earn the same answer with a second dedupe against rows it had just
 written. Asking costs one bounded request, on the one path where the answer matters, and the device
-stays off it entirely until the reader reaches the top of a chat that has an archive. A host that
-can't answer is not an answer: nothing is read, the cursor clears, and the next open asks again.
+stays off it entirely until the reader reaches the top of a chat that has an archive. An answer and a
+silence are not the same thing: a host that said the chat was never compacted clears the edge, and a
+host that couldn't answer at all leaves the window where it was, because clearing on a failed read
+would make the archive unreachable for good — nothing re-arms an edge that a reach threw away. The
+reach also tries an unchanged edge twice before the reader has to leave the top and come back, so one
+blip doesn't strand the archive behind an edge that never moves.
 
 Archived rows are then kept on the device with the chat, like every other message, and nothing
 evicts them; a chat the reader never reaches back into costs nothing.
@@ -102,8 +111,9 @@ compactions happened as the rows above arrive.
 
 ## Consequences
 
-- `loadEarlier` grows the archive step; `PAGE` stays 50 for the live numbering and an archived step
-  asks for the host's cap of 500. Archived rows go through `toMessages` like live ones, so
+- `loadEarlier` grows the archive step, and both numberings read the host's page cap of 500 — the
+  live numbering included, since a step has no reason to ask for less than the window it is walking.
+  Archived rows go through `toMessages` like live ones, so
   `hermesRowId` and `hermesAt` are filled and `compactionMarks` places dividers against the host's
   clock unchanged — one divider per compaction, with several in one gap still drawing one.
 - Every message of a chat now lives on the device once the archive is in, and the thread's live
@@ -116,10 +126,11 @@ compactions happened as the rows above arrive.
   what only a browser can say is that nothing of the archive is on the device before the reader
   reaches the pane's top and all of it is after, which is a scroll offset and a thread's height — no
   DOM without layout has either, so the flow gets its row in `docs/e2e-flow-audit.md`.
-- The proof on real data is a script over a copy of `state.db`, not a fixture: the largest compacted
-  chat in this host's store (3133 rows, 296 live) opens on its 296 rows, reaches once for the 1982
-  archived rows above them in four pages, and ends with all 2278 display rows — none missing, none
-  held twice, and the five dividers its six compactions draw anchored on the same messages a device
-  holding the chat whole draws them on.
+- The proof on real data was run as a script over a copy of `state.db`, not a fixture: the largest
+  compacted chat in this host's store (3133 rows, 296 live) opens on its 296 rows, reaches once for
+  the 1982 archived rows above them in four pages, and ends with all 2278 display rows — none
+  missing, none held twice, and the five dividers its six compactions draw anchored on the same
+  messages a device holding the chat whole draws them on. The script reads a copied store, so it
+  isn't committed; the flow above is what CI runs.
 - The paging rule and the walk are a pure rule over `history.ts`'s helpers, driven by a `node --test`
   script; the draw over a seeded database is a component test.

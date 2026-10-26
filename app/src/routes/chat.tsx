@@ -110,6 +110,7 @@ import {
   steerText,
   stopMessage,
 } from "@/lib/chat"
+import { windowKey } from "@/lib/history-window"
 import {
   DEFAULT_SETTINGS,
   type Attachment,
@@ -313,6 +314,9 @@ function FollowOnSend({ lastUserId }: { lastUserId?: string }) {
   return null
 }
 
+/** Steps one edge gets before the reader has to leave the top and come back. */
+const REACH_TRIES = 2
+
 /**
  * The thread's top is the request for its older rows: a compacted chat's live transcript starts at
  * the compaction's summary, and the rows it archived are only in the host's display read, so the
@@ -334,14 +338,20 @@ function LoadOlderWindow({
 }) {
   const { start, end } = useMessageScrollerScrollable()
   // The scroller reports its edges as what lies beyond them: `start` is true while anything sits
-  // above the pane — the reader is away from the thread's oldest row — and `end` likewise below.
+  // above the pane, `end` likewise below — so a thread that fits its pane is at its top already.
   const atTop = !start
-  const fits = !start && !end
+  const fits = atTop && !end
   // Whether the thread has ever been away from its top: a chat's arrival, placed at its newest row,
   // is not the reader reaching for anything.
   const leftTop = useRef(false)
+  // Steps asked for at one edge. A step that moved nothing isn't asked for again until the reader
+  // leaves the top and returns; one that failed gets a second try, so a blip can't strand the
+  // archive behind an edge that never moves.
+  const tried = useRef<{ edge?: string; n: number }>({ n: 0 })
   useEffect(() => {
-    if (start) leftTop.current = true
+    if (!start) return
+    leftTop.current = true
+    tried.current = { n: 0 }
   }, [start])
   // The edges are reported as the scroller measures itself, and a chat too short to scroll never
   // reports them at all — so nothing is asked until the pane has been laid out once.
@@ -350,15 +360,12 @@ function LoadOlderWindow({
     const frame = requestAnimationFrame(() => setMeasured(true))
     return () => cancelAnimationFrame(frame)
   }, [])
-  // A step that changed nothing is not asked for again until the reader leaves the top and returns.
-  const tried = useRef<string | undefined>(undefined)
+  const reached = measured && (fits || (atTop && leftTop.current))
   useEffect(() => {
-    if (start) tried.current = undefined
-  }, [start])
-  const reached = measured && atTop && (leftTop.current || fits)
-  useEffect(() => {
-    if (!enabled || loading || !cursor || !reached || tried.current === cursor) return
-    tried.current = cursor
+    if (!enabled || loading || !cursor || !reached) return
+    if (tried.current.edge !== cursor) tried.current = { edge: cursor, n: 0 }
+    if (tried.current.n >= REACH_TRIES) return
+    tried.current.n += 1
     onLoad()
   }, [enabled, loading, cursor, reached, onLoad])
   return null
@@ -426,10 +433,8 @@ export function ChatPage({
   const [outputsOpen, setOutputsOpen] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
   // The window's edge as one value the reach watches: the oldest row this device holds, and which
-  // numbering it was found in — the archive counts its own rows, so the flag is part of the edge.
-  const cursor = conversation?.olderThan
-    ? `${conversation.olderThan.id}:${conversation.olderThan.archived ? "a" : "l"}`
-    : undefined
+  // numbering it was found in — each counts its own rows, so both are part of the edge.
+  const cursor = conversation?.olderThan ? windowKey(conversation.olderThan) : undefined
   const loadOlder = useCallback(() => {
     if (!id) return
     setLoadingEarlier(true)

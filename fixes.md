@@ -2419,3 +2419,48 @@ row is the summary, so it could name the first row written after it outright.
 
 Found by the four review passes on the Compaction divider change. The defect they turned up (the
 column probe above) is fixed on the branch; the two entries above do not block the pull request.
+
+---
+
+# Deferred: what the review pass on the archive drain left
+
+Three passes ran over `feat(chat): load a compacted chat's archive at the thread's top`
+(simplify-code's four lenses, `/no-comments`, and `/code-review`'s two). What they found is applied on
+the branch, with the three exceptions below.
+
+The constant was the multi-page drain. Four lenses independently read `pages.push(kept)` as stacking
+pages newest-first, and they were right: each page of a display read is returned oldest-first, so the
+page read first sits nearest the window and every page after it is older. The archived stretch came
+back reversed in blocks of 500. Nothing caught it because the flow that walks the archive seeded fewer
+rows above the seam than one page carries: the mock now writes 600 rows above it, and the flow asserts
+the order they come back in — which fails on `push` and passes on `unshift`.
+
+## A reply the device streamed, and the walk that replaces it
+
+`held` is built from the rows this device's messages name (`hermesRowId`). A reply that is still
+streaming names no row, so a reach running while a turn is in flight can write a second copy of it —
+which is why the edge is armed on a chat's first catch-up only, and why `test-subagent-result.tsx`
+turns red if that arming widens to every catch-up. The deeper fix is for `held` to know the row an
+in-flight reply stands in for, which wants a streaming reply to carry the row it will become; the host
+doesn't send one, and inferring it from the turn's position is the content matching ADR 0058 rejects.
+Cost: a reach during a streaming turn can duplicate its reply, and the catch-up that follows replaces
+it. Suggested fix: none here — it wants the host to name the row.
+
+## `loadEarlier` is still one long function
+
+It carries the ask, the two numberings, the page loop, the cut-turn mend and the write. Splitting it
+into `walk` / `mend` / `write` was the loudest quality finding, and the split that reads well is the
+one that takes the cursor as a value and returns the next — which is `history-window.ts`, and it is
+done. What is left is a loop over that rule, and each of its three behaviours has a test that fails
+without it; splitting further would trade one long function for four that each take six arguments.
+
+## The two flows still carry their own helpers
+
+`startRun` and `runStatus` are byte-identical in `chat-archive.mjs` and `history-pages.mjs` and belong
+in `lib.mjs` beside `setUpBot`. Not applied because both flows pass, and moving them means editing two
+green browser flows in the same pass that rewrote the walk they exercise; `thread` differs between the
+two by the fields it reads, so the shared half is smaller than it looks.
+
+---
+
+Found by the review pass on the archive drain (ADR 0058). None of it blocks the pull request.

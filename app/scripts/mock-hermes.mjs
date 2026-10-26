@@ -5376,6 +5376,26 @@ http
       PRS_FAIL = !!fail
       return json(res, 200, { ok: true })
     }
+    // Dev only: POST { session_id, rows, from } appends plain turns to a session's transcript, so a
+    // flow can build a chat longer than one host page without running each of its turns.
+    if (url.pathname === "/__mock/rows" && req.method === "POST") {
+      const { session_id: sessionId, rows = 600, from = 1 } = await readBody(req)
+      // A session the app hasn't opened yet has no transcript to append to; it starts empty.
+      const stored = transcripts.get(sessionId) ?? []
+      transcripts.set(sessionId, stored)
+      const base = stored.at(-1)?.timestamp ?? Date.now() / 1000
+      for (let i = 0; i < rows; i++) {
+        const n = from + i
+        stored.push({
+          id: ++lastRowId,
+          session_id: sessionId,
+          timestamp: base + (i + 1) / 1000,
+          role: i % 2 ? "assistant" : "user",
+          content: `Bulk ${n}: the archive's own order.`,
+        })
+      }
+      return json(res, 200, { ok: true, total: stored.length })
+    }
     // Dev only: POST { session_id, rows } compacts a session in place the way Hermes's does. What it
     // carried is re-emitted under fresh row ids with its payloads and timestamps untouched, behind the
     // task-list notice row compression writes at the boundary, and the rows before the tail are
@@ -5389,8 +5409,9 @@ http
       const tail = stored.slice(-Math.max(1, rows))
       const carried = new Set(tail)
       // A compaction rewrites the clock behind its seam: the rows it keeps live hold the times they
-      // had, and the ones it archives are stamped earlier still, so a device reading them back in
-      // the host's order finds the whole conversation oldest first.
+      // had, and the ones it archives are stamped with one earlier time, as a host whose archived
+      // clock can't be trusted leaves them. The device floors them below the window itself, so the
+      // order they come back in is the order the walk gave them — which is what a flow reads.
       const floor = Math.min(...stored.map((row) => row.timestamp)) - 60
       const archived = stored.map((row) =>
         carried.has(row)

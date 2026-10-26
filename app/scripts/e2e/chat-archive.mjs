@@ -8,6 +8,9 @@ import { app, assert, flow, mock, pass, runId } from "./lib.mjs"
 
 const auth = { Authorization: "Bearer mock-key", "Content-Type": "application/json" }
 
+/** Turns written straight to the host's transcript, so the archive spans more than one page. */
+const BULK = 300
+
 /** Starts a turn straight on the host, as another device would. */
 async function startRun(sessionId, input) {
   const res = await fetch(`${mock}/v1/runs`, {
@@ -22,14 +25,6 @@ async function startRun(sessionId, input) {
 async function runStatus(id) {
   const res = await fetch(`${mock}/v1/runs/${id}`, { headers: auth })
   return (await res.json()).status
-}
-
-/** The chat's live transcript, as the host counts it: the archived rows aren't in it. */
-async function transcript(sessionId) {
-  const res = await fetch(`${mock}/api/sessions/${sessionId}/messages?order=latest&limit=500`, {
-    headers: auth,
-  })
-  return (await res.json()).data
 }
 
 /** What this device holds of the chat, oldest first. */
@@ -68,30 +63,40 @@ await flow(
       chatId,
     )
 
+    // The far history first, so the turns named below sit nearest the seam: more rows above it than
+    // one page of the host's display read carries, so the reach has to walk several pages and put
+    // them back in the host's order rather than its own read order.
+    const bulk = await fetch(`${mock}/__mock/rows`, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ session_id: sessionId, rows: 2 * BULK, from: 1 }),
+    })
+    assert.equal(bulk.status, 200, "the chat holds more turns than one page")
     // Another device wrote the whole conversation; this one has never opened it.
-    const names = ["first", "second", "third", "fourth", "fifth", "sixth"]
-    for (const name of names) {
+    const names = ["first", "second", "third"]
+    // The turns the compaction will carry forward, enough of them that the live window is taller than
+    // a phone's pane — so the archive above it waits for the reader rather than landing on open.
+    const carried = ["fourth", "fifth", "sixth", "seventh", "eighth", "ninth"]
+    for (const name of [...names, ...carried]) {
       const run = await startRun(sessionId, long(name))
       await until(async () => (await runStatus(run)) === "completed", 30_000, `"${name}" to end`)
     }
-    const done = await transcript(sessionId)
-    const starts = done.flatMap((row, i) => (row.role === "user" ? [i] : []))
-    // The host compacts in place, carrying the newest two turns forward under fresh row ids: the
-    // four before them are archived, and the carried originals are superseded.
+    // The host compacts in place, carrying the newest turns forward under fresh row ids: the rest
+    // are archived, and the carried originals are superseded.
     const compacted = await fetch(`${mock}/__mock/compact`, {
       method: "POST",
       headers: auth,
-      body: JSON.stringify({ session_id: sessionId, rows: done.length - starts[starts.length - 2] }),
+      body: JSON.stringify({ session_id: sessionId, rows: 2 * carried.length }),
     })
     assert.equal(compacted.status, 200, "the host compacts the chat")
-    const after = await startRun(sessionId, long("seventh"))
+    const after = await startRun(sessionId, long("tenth"))
     await until(async () => (await runStatus(after)) === "completed", 30_000, "the newest turn")
 
     // The chat opens on its live window: the carried turns and the one written since.
     await page.goto(`${app}/c/${chatId}`)
-    await until(async () => count(await thread(page, chatId), "fifth") === 1, 20_000, "the window")
+    await until(async () => count(await thread(page, chatId), "ninth") === 1, 20_000, "the window")
     const window = await thread(page, chatId)
-    for (const name of ["first", "second", "third", "fourth"])
+    for (const name of names)
       assert.equal(count(window, name), 0, `"${name}" waits above the window, off the device`)
     assert.ok(await hasMore(page, chatId), "the host still holds rows above it")
     await shot("window")
@@ -112,10 +117,22 @@ await flow(
     await page.getByText("first").first().waitFor({ timeout: 10_000 })
 
     const whole = await thread(page, chatId)
-    for (const name of [...names, "seventh"])
+    for (const name of [...names, ...carried, "tenth"])
       assert.equal(count(whole, name), 1, `"${name}" is held once, not twice`)
+    // Everything above the seam came back in the host's order. The archive spans more pages than
+    // one read answers, so a walk that stacks its pages, rather than putting each in front of the
+    // last, shows up here as a reversed stretch.
+    const bulkOrder = whole
+      .filter((m) => m.text.startsWith("Bulk "))
+      .map((m) => Number(m.text.slice(5, m.text.indexOf(":"))))
+    assert.equal(bulkOrder.length, 2 * BULK, "every archived turn is on the device")
+    assert.deepEqual(
+      [...bulkOrder].sort((a, b) => a - b),
+      bulkOrder,
+      "the archive is in the host's order, not the walk's read order",
+    )
     assert.equal(await hasMore(page, chatId), false, "the window reaches the chat's first row")
-    pass("reaching the top brings the archived turns back, each once")
+    pass("reaching the top brings the archived turns back, each once, in the host's order")
 
     // The pane took the rows above it: it moved down the thread rather than staying where it was.
     const later = await page.evaluate(() => {
@@ -134,7 +151,7 @@ await flow(
     const page1 = await drawn(page)
     const divider = page1.indexOf("Compaction")
     assert.ok(
-      divider > page1.indexOf("sixth") && divider < page1.indexOf("seventh"),
+      divider > page1.indexOf("sixth") && divider < page1.indexOf("tenth"),
       "the compaction's divider sits between the turns it carried and the one after it",
     )
     assert.ok(
