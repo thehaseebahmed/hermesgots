@@ -59,7 +59,6 @@ import {
   patchStats,
   reconcileHistory,
 } from "@/lib/history"
-import { isLive } from "@/lib/live"
 import { unknownLastTurn } from "@/lib/model-changes"
 import { botModel, hostChoice, modelInfoFor } from "@/lib/model-info"
 import {
@@ -117,8 +116,13 @@ const STREAM_POLL_MS = 10_000
 const PLUGIN_SETTLE_MS = 1500
 /** Hermes upgrades a placeholder title on later turns, up to the third. */
 const TITLED_TURNS = 3
-/** Hermes titles with a model call in the background, which can land after the reply ends. */
-const TITLE_CHECKS_MS = [0, 3000, 10000]
+/**
+ * When after a turn the host's title is read again while the chat still holds another one: Hermes
+ * titles with a model call in the background, which can land whenever — a slow call, a busy host —
+ * and the host's own `title` event only reaches a device that is listening when it fires. So the
+ * checks run whether or not the server streams its changes, and reach well past the reply.
+ */
+const TITLE_CHECKS_MS = [0, 3000, 10_000, 30_000, 90_000]
 /** A reply whose connection gave up is followed again after these waits, the last one repeating. */
 const REATTACH_MS = [2_000, 5_000, 15_000, 30_000, 60_000]
 const controllers = new Map<string, AbortController>()
@@ -134,14 +138,18 @@ function titleFrom(text: string) {
   return line.length > 48 ? `${line.slice(0, 47).trimEnd()}…` : line || "New chat"
 }
 
-/** Swaps the first-line title for the one Hermes generated, unless the user renamed the chat. */
+/**
+ * Swaps the first-line title for the one Hermes generated, unless the user renamed the chat. The
+ * ladder runs however the server delivers its changes: a live stream's `title` event is announced
+ * where it is listened for, so a device that was away when one fired would keep its placeholder
+ * forever without these checks.
+ */
 async function syncTitle(conversationId: string, config: HermesConfig, sessionId: string) {
+  const started = Date.now()
   for (const delay of TITLE_CHECKS_MS) {
-    if (delay) {
-      // A server that streams its changes says when the title lands.
-      if (isLive(config)) return
-      await new Promise((resolve) => window.setTimeout(resolve, delay))
-    }
+    // Offsets from the turn, not waits between the checks: read at 0, 3, 10, 30 and 90 seconds.
+    const wait = started + delay - Date.now()
+    if (wait > 0) await new Promise((resolve) => window.setTimeout(resolve, wait))
     const title = await getSessionTitle(config, sessionId)
     const conversation = await db.conversations.get(conversationId)
     if (!conversation || conversation.titleEdited) return

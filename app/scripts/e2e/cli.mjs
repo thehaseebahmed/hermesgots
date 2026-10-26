@@ -35,6 +35,12 @@ export const FLOWS = {
     script: "e2e/chat-message.mjs",
     about: "Start a new chat, send a message, get the whole reply and find it in Recents",
   },
+  "chat-title": {
+    script: "e2e/chat-title.mjs",
+    about:
+      "A chat the user never renamed takes the title Hermes gave its session — a title landing a moment later, one landing after the turn's checks are over, and one that landed while the change stream was closed",
+    alsoPolling: true,
+  },
   "thinking-line": {
     script: "e2e/thinking-line.mjs",
     about:

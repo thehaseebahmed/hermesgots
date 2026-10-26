@@ -21,11 +21,13 @@ logger = logging.getLogger(__name__)
 
 # How often a stream looks for changes made in other processes, how often it pings so proxies and
 # tunnels keep it open (Cloudflare cuts a quiet one at 100 s, nginx at 60 s), how often it looks at
-# cron, and how long after a turn it watches for Hermes's background title.
+# cron, how often a watched session's title is read, and how long after a session moves it is
+# watched: Hermes titles a chat in the background, at its own pace.
 TICK_SECONDS = 2
 PING_SECONDS = 20
 CRON_SECONDS = 4
 TITLE_WATCH_SECONDS = 90
+TITLE_TICK_SECONDS = 2
 CRON_JOB_FIELDS = (
     "id",
     "name",
@@ -40,6 +42,15 @@ CRON_JOB_FIELDS = (
 
 # One fingerprint per profile, shared by every stream open on it: [read at, fingerprint].
 _cron: Dict[str, List[Any]] = {}
+
+# One title watch per store path: {session_id: [title last seen, watched until]}, and the task
+# reading them. The watch lives outside any one connection on purpose — a watcher inside a
+# connection lost the title the moment the device backgrounded the app, and the event it sent was
+# never logged, so nothing carried it back. The change is noted into the events ledger instead:
+# every open stream sends it within a tick, and a device that was away reads it back from its own
+# cursor when it returns.
+_watches: Dict[str, Dict[str, List[Any]]] = {}
+_watchers: Dict[str, Any] = {}
 
 
 def _cron_mark() -> Any:
@@ -66,6 +77,63 @@ async def cron_mark(profile: str) -> Any:
     mark = await asyncio.to_thread(_cron_mark)
     _cron[profile] = [now, mark]
     return mark
+
+
+async def _title_of(db: Any, session_id: str) -> Optional[str]:
+    """The session's title, or None when it couldn't be read — which is not a title change."""
+    get = getattr(db, "get_session_title", None)
+    if not callable(get):
+        return None
+    try:
+        return await asyncio.to_thread(get, session_id)
+    except Exception:
+        return None
+
+
+async def _watch_titles(path: Path, db: Any) -> None:
+    """Reads every session watched on this store until none is, noting the titles that changed."""
+    key = str(path)
+    try:
+        while True:
+            watches = _watches.get(key) or {}
+            now = time.monotonic()
+            for session_id in [one for one, watch in list(watches.items()) if now > watch[1]]:
+                del watches[session_id]
+            if not watches:
+                _watches.pop(key, None)
+                return
+            for session_id in list(watches):
+                watch = watches.get(session_id)
+                if watch is None:
+                    continue
+                title = await _title_of(db, session_id)
+                if title is None:
+                    continue
+                if watch[0] is None:
+                    watch[0] = title
+                elif title != watch[0]:
+                    watch[0] = title
+                    events.note("title", session_id, path, True)
+            await asyncio.sleep(TITLE_TICK_SECONDS)
+    finally:
+        _watchers.pop(key, None)
+        # A watch that arrived as the task was leaving is still owed its reader.
+        if any(time.monotonic() <= watch[1] for watch in (_watches.get(key) or {}).values()):
+            _watchers[key] = asyncio.ensure_future(_watch_titles(path, db))
+
+
+async def watch_title(path: Path, db: Any, session_id: str) -> None:
+    """Watches a session's title for a while after the session moves, so the change is noted."""
+    key = str(path)
+    watches = _watches.setdefault(key, {})
+    until = time.monotonic() + TITLE_WATCH_SECONDS
+    watching = watches.get(session_id)
+    if watching is None:
+        watches[session_id] = [None, until]
+    else:
+        watching[1] = until
+    if _watchers.get(key) is None or _watchers[key].done():
+        _watchers[key] = asyncio.ensure_future(_watch_titles(path, db))
 
 
 def sse_headers(adapter: Any, request: Any) -> Dict[str, str]:
@@ -99,8 +167,6 @@ async def serve(
     wake = asyncio.Event()
     events.subscribe(loop, wake)
     chat_sessions: Dict[str, str] = {}
-    # Chat session -> [title last seen, watched until].
-    titles: Dict[str, List[Any]] = {}
 
     async def send(kind: str, data: Dict[str, Any]) -> None:
         await response.write(f"event: {kind}\ndata: {json.dumps(data)}\n\n".encode())
@@ -115,15 +181,6 @@ async def serve(
                 logger.debug("memento: couldn't follow session %s", session_id, exc_info=True)
                 return session_id
         return chat_sessions[session_id]
-
-    async def title_of(session_id: str) -> Any:
-        get = getattr(db, "get_session_title", None)
-        if not callable(get):
-            return None
-        try:
-            return await asyncio.to_thread(get, session_id)
-        except Exception:
-            return None
 
     # A device with a stream open has the app on screen, so it isn't sent pushes.
     presence = push.watching(path, device) if device else None
@@ -164,17 +221,9 @@ async def serve(
                 for kind, session_id in changed:
                     await send(kind, {"cursor": cursor, **({"session_id": session_id} if session_id else {})})
                     if kind == "session" and session_id:
-                        watch = titles.get(session_id) or [await title_of(session_id), 0.0]
-                        watch[1] = loop.time() + TITLE_WATCH_SECONDS
-                        titles[session_id] = watch
-            for session_id, watch in list(titles.items()):
-                if loop.time() > watch[1]:
-                    del titles[session_id]
-                    continue
-                title = await title_of(session_id)
-                if title != watch[0]:
-                    watch[0] = title
-                    await send("title", {"session_id": session_id})
+                        # A session that moved is one Hermes may title in the background; the
+                        # watcher notes the change for every device, wherever it is listening.
+                        await watch_title(path, db, session_id)
             if loop.time() - cron_checked >= CRON_SECONDS:
                 cron_checked = loop.time()
                 try:

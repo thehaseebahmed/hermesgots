@@ -44,7 +44,11 @@
 // While a repo is being added, a new session's workspace is refused, and a session whose repo
 // was removed is refused with the reason, which the workspace also reports as `blocked`.
 // Chats are titled like Hermes does: a slice of the opener at once, a "model" title a moment later,
-// readable on GET /api/sessions/{id}. Sessions are keyed by X-Hermes-Session-Id when a key is sent,
+// readable on GET /api/sessions/{id}. POST /__mock/title-delay { ms } moves that landing (2000 by
+// default); it is noted into the events ledger like the plugin's watcher notes it (stream.py), so a
+// stream that was away replays it from its cursor. POST /__mock/events closes the open change
+// streams, as a connection dying does; a flow holds the next one back with page.route.
+// Sessions are keyed by X-Hermes-Session-Id when a key is sent,
 // and their transcripts page back from GET /api/sessions/{id}/messages?order=latest&limit&offset.
 // Say "plan" and the agent keeps a todo list with its todo_list tool as it works, which the plugin's
 // GET /api/plugins/memento/sessions/{id}/todos reads back from a keyed session's transcript.
@@ -175,6 +179,9 @@ const PORT = Number(process.env.PORT ?? 8642)
 const pendingApprovals = new Map()
 const pendingClarifies = new Map()
 const chatTitles = new Map()
+/** How long after a chat's opener Hermes's background title lands (POST /__mock/title-delay). */
+const TITLE_DELAY_MS = 2000
+let titleDelayMs = TITLE_DELAY_MS
 /** Sessions the Gots plugin has labelled, which then report `source: "Gots"` (`"Gots Code"` for a project session). */
 const labelledSessions = new Map()
 /** The plugin's chat list: id -> { at, deleted?, value? }. */
@@ -1658,8 +1665,10 @@ function titleChat(req, opener) {
     words.length > 1 ? words.join(" ").replace(/^./, (c) => c.toUpperCase()) : "Friendly greeting"
   setTimeout(() => {
     chatTitles.set(sessionId, title)
+    // The plugin's watcher notes this into its events ledger (stream.py), so every open stream
+    // sends it within a tick and a device that was away reads it back from its own cursor.
     noteEvent("title", sessionId)
-  }, 2000)
+  }, titleDelayMs)
 }
 
 // A running turn's steer delivery by session, which Hermes makes after each tool result.
@@ -3118,6 +3127,7 @@ function checkedPick(entry, label) {
 // Whether a refresh has probed the custom endpoint in /api/model/options.
 let customProbed = false
 const eventLogs = new Map()
+/** Open change streams, each `{ flush, end }`; POST /__mock/events ends them all. */
 const eventStreams = new Set()
 function logOf(profile) {
   if (!eventLogs.has(profile)) eventLogs.set(profile, { rows: [], seq: 0 })
@@ -3142,7 +3152,7 @@ function noteEvent(kind, sessionId, profile) {
     log.rows.push({ id: ++log.seq, kind, session_id: chatSession })
     if (log.rows.length > 2000) log.rows.shift()
   }
-  for (const stream of eventStreams) stream()
+  for (const stream of eventStreams) stream.flush()
 }
 
 function streamEvents(req, res, profile, since) {
@@ -3164,11 +3174,18 @@ function streamEvents(req, res, profile, since) {
       send(row.kind, { cursor, ...(row.session_id ? { session_id: row.session_id } : {}) })
     }
   }
-  eventStreams.add(flush)
+  const stream = {
+    flush,
+    end: () => {
+      eventStreams.delete(stream)
+      res.end()
+    },
+  }
+  eventStreams.add(stream)
   const ping = setInterval(() => res.write(": ping\n\n"), 20_000)
   req.on("close", () => {
     clearInterval(ping)
-    eventStreams.delete(flush)
+    eventStreams.delete(stream)
   })
   flush()
 }
@@ -5374,6 +5391,21 @@ http
     if (url.pathname === "/__mock/prs" && req.method === "POST") {
       const { fail } = await readBody(req)
       PRS_FAIL = !!fail
+      return json(res, 200, { ok: true })
+    }
+    // Dev only: POST { ms } sets how long after a chat's opener Hermes's background title lands
+    // (2000 by default), for a flow whose chat must meet a title that lands late.
+    if (url.pathname === "/__mock/title-delay" && req.method === "POST") {
+      const { ms } = await readBody(req)
+      const wait = Number(ms)
+      titleDelayMs = Number.isFinite(wait) && wait >= 0 ? wait : TITLE_DELAY_MS
+      return json(res, 200, { ok: true, ms: titleDelayMs })
+    }
+    // Dev only: POST closes every open change stream, as a connection dying does. The changes are
+    // logged all the same, so a stream that opens again replays them from the client's own cursor;
+    // a flow holds the next one back with page.route to keep one from opening at all.
+    if (url.pathname === "/__mock/events" && req.method === "POST") {
+      for (const open of [...eventStreams]) open.end()
       return json(res, 200, { ok: true })
     }
     // Dev only: POST { session_id, rows, from } appends plain turns to a session's transcript, so a
