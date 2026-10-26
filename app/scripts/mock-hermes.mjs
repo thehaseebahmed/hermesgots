@@ -90,7 +90,10 @@
 // closes them and removes the trees like …/workspace/remove. MOCK_PRS_FAIL=1 (or
 // POST /__mock/prs { fail }) is a host that can't reach GitHub: …/prs answers an error rather than
 // a list, so the app keeps the pull requests it already knows. GET /api/plugins/memento/runs/live lists the sessions with
-// a run in flight, and why each one waiting on the user waits. …/sessions/{id}/queue holds what
+// a run in flight, why each one waiting on the user waits, and which are still owed the wake turn of
+// a finished subagent (`waking`, keyed like the runs — the window between the turn ending and the
+// wake starting that the app must never read as the session at rest); POST /__mock/wake { delay }
+// holds that wake back so a flow can watch the window. …/sessions/{id}/queue holds what
 // the app queued and starts it when the session's run ends, like plugin/outbox.py. The agent asks the user questions
 // with Hermes's clarify tool, which the plugin serves on runs: say "ask" for one, or "ask five" for
 // five (plan mode asks before planning), the run carries
@@ -2998,6 +3001,12 @@ async function streamCompletion(req, res, body) {
 // MOCK_STALL_EVENTS_MS detaches a stream's listener after that long: the run and its keepalives
 // carry on, but no further events reach the client, like a server whose event fan-out went quiet.
 const runs = new Map()
+// Sessions a finished subagent still owes a wake turn to — `waking` on runs/live, what the plugin
+// reports between a turn ending and its wake turn starting, so no screen reads the session at rest
+// in that window. The delay widens the window on demand (POST /__mock/wake): the real plugin's
+// detection, post and run admission take seconds of their own, long enough for a flow to watch.
+const wakePending = new Map()
+let wakeDelayMs = Number(process.env.MOCK_WAKE_DELAY_MS ?? 0)
 const PLUGIN_VERSION = process.env.MOCK_PLUGIN_VERSION || "0.29.1"
 const DICTATION = process.env.MOCK_DICTATION ?? "on"
 let DICTATION_TIDY = process.env.MOCK_DICTATION_TIDY ?? "ok"
@@ -3402,6 +3411,12 @@ function startRun(req, body, options = {}) {
     }
     // A hard stop drops an unread steer, as on Hermes; otherwise it goes back to the client.
     if (run.stopped) run.pendingSteer = undefined
+    // The wake window: the turn is over while its finished subagent's wake turn has yet to start,
+    // so runs/live owes the session a wake for as long as the delay holds — what the plugin reports
+    // for the seconds its sweep, post and run admission take. Answered before the change events go
+    // out, so a client that reacts to the run ending reads the owed wake in the same answer.
+    const owed = Boolean(wake) && wakeDelayMs > 0
+    if (owed) wakePending.set(run.sessionId, (wakePending.get(run.sessionId) ?? 0) + 1)
     noteEvent("session", run.sessionId)
     noteEvent("runs", run.sessionId)
     push(`run.${run.status}`, {
@@ -3416,15 +3431,25 @@ function startRun(req, body, options = {}) {
     // The plugin's wake loop posts a finished subagent's notification back as a turn of the chat,
     // once the turn that dispatched it has ended (#467): a run of its own, so its answer is a
     // message of its own rather than the tail of this one.
-    if (wake)
-      startRun(
-        {
-          url: req.url,
-          headers: { ...req.headers, "idempotency-key": `wake_${wake.child}` },
-        },
-        { session_id: run.sessionId, input: [{ role: "user", content: wake.text }] },
-        { wake: true },
-      )
+    if (wake) {
+      const post = () => {
+        if (owed) {
+          const left = (wakePending.get(run.sessionId) ?? 1) - 1
+          if (left > 0) wakePending.set(run.sessionId, left)
+          else wakePending.delete(run.sessionId)
+        }
+        startRun(
+          {
+            url: req.url,
+            headers: { ...req.headers, "idempotency-key": `wake_${wake.child}` },
+          },
+          { session_id: run.sessionId, input: [{ role: "user", content: wake.text }] },
+          { wake: true },
+        )
+      }
+      if (owed) setTimeout(post, wakeDelayMs)
+      else post()
+    }
     setTimeout(() => pumpQueue(run.sessionId), 300)
   })
   return run
@@ -5225,7 +5250,21 @@ http
         const name = record && mockProjects().find((p) => p.id === record.project_id)?.name
         if (name) reason.project = name
       }
-      return json(res, 200, { object: "memento.runs", sessions, run_ids, waiting })
+      // What is still owed a wake turn: the turn over and the wake not yet posted (`waking`), keyed
+      // like the runs above.
+      const waking = {}
+      for (const [id, count] of wakePending) {
+        if (count > 0) waking[ROOT_RUN_IDS ? chatSessionOf(id) : id] = count
+      }
+      return json(res, 200, { object: "memento.runs", sessions, run_ids, waiting, waking })
+    }
+    // Dev only: POST { delay } is how long runs/live keeps naming an owed wake before the mock
+    // posts the wake turn — the plugin's sweep and post, held open long enough for a flow to watch
+    // the window. 0 (the default) posts at once, as the mock always did.
+    if (url.pathname === "/__mock/wake" && req.method === "POST") {
+      const { delay = 0 } = await readBody(req)
+      wakeDelayMs = Number(delay) || 0
+      return json(res, 200, { ok: true, delay: wakeDelayMs })
     }
     // Dev only: POST { project_id, reason } makes the project's claimed task stalled — its session
     // waiting with that reason, the way a failed run or a restart leaves it — { pipeline, pr } moves

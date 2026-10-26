@@ -45,6 +45,9 @@ let found: Found = {}
 let running: Record<string, LiveRunStatus> = {}
 // The subagents each session still runs, merged across every bot's server like `running`.
 let subagents: Record<string, number> = {}
+// The sessions still owed a wake turn — a finished subagent the host hasn't resumed the chat for
+// yet — merged the same way, so no screen reads a session at rest in that window.
+let waking: Record<string, number> = {}
 let servers: Server[] = []
 const listeners = new Set<() => void>()
 let timer: number | undefined
@@ -58,6 +61,7 @@ function notify() {
   )
   running = Object.assign({}, ...[...answers.values()].map((answer) => answer.sessions))
   subagents = Object.assign({}, ...[...answers.values()].map((answer) => answer.subagents))
+  waking = Object.assign({}, ...[...answers.values()].map((answer) => answer.waking))
   listeners.forEach((listener) => listener())
 }
 
@@ -164,6 +168,17 @@ export function useAllLiveRuns() {
 export function useLiveSubagents(): Record<string, number> {
   useWaiting()
   return useSyncExternalStore(subscribe, () => subagents)
+}
+
+/**
+ * How many finished subagents each session's wake turn is still owed, by Hermes session id, from the
+ * same shared poll: between a subagent ending and its wake turn starting there is no live run and no
+ * running subagent, and a session that reads at rest there reads as stalled exactly when the bot is
+ * about to resume. A plugin that predates the field leaves every session as it was. Needs the plugin.
+ */
+export function useLiveWaking(): Record<string, number> {
+  useWaiting()
+  return useSyncExternalStore(subscribe, () => waking)
 }
 
 /** A session's run in flight on its server, from the shared poll's last answer. */

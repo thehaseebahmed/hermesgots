@@ -58,6 +58,38 @@ test("a resolved or discarded session reads as it did, unless something of it st
   )
 })
 
+test("a wake owed by finished subagents reads working until the wake run starts", () => {
+  // The window the plugin posts the wake run in: no live turn, no subagent still running, but the
+  // host owes the session a run. It must never collapse to idle — that is the stall the user sees.
+  assert.equal(sessionState(session({ waking: 1 })), "working")
+  assert.equal(sessionState(session({ subagents: 0, waking: 1 })), "working")
+  assert.equal(threadState({ waking: 1 }), "working")
+  assert.deepEqual(sessionGroup(session(), undefined, undefined, 0, 1), {
+    state: "working",
+    prTick: false,
+  })
+  assert.equal(
+    group(session(), undefined, undefined, 0, 1),
+    "working",
+    "the Code list's group reads the same fact",
+  )
+})
+
+test("a wake owed reads behind what wants the user, like the subagents do", () => {
+  assert.equal(sessionState(session({ waking: 1, local: { waiting: true } })), "waiting")
+  assert.equal(sessionState(session({ waking: 1, live: "waiting_for_approval" })), "waiting")
+  assert.equal(threadState({ waking: 1, waiting: true }), "waiting")
+})
+
+test("a closed session stays closed while a wake is owed, as one whose subagents still run", () => {
+  assert.equal(sessionState(session({ resolvedAt: 5, waking: 1 })), "resolved")
+  assert.equal(sessionState(session({ discardedAt: 5, waking: 1 })), "discarded")
+})
+
+test("a wake the host has settled stops the working it owed", () => {
+  assert.equal(sessionState(session({ waking: 0 })), "idle", "the wake run is listed; nothing is owed")
+})
+
 test("a thread's pill reads working while its subagents run", () => {
   assert.equal(threadState({ subagents: 1 }), "working")
   assert.equal(threadState({ streaming: true }), "working")

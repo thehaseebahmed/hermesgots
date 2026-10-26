@@ -799,6 +799,70 @@ class WakeTest(unittest.TestCase):
         self.assertEqual(self.sweep(), 1)
         self.assertEqual(self.posted[0]["body"]["session_id"], "s")
 
+    # What ``runs/live`` reports so the app never reads a session at rest between its last subagent
+    # ending and the wake turn starting: the owed wakes themselves, read before any sweep posts them.
+
+    def owed(self) -> Dict[str, int]:
+        return delegation.waking_sessions(self.home)
+
+    def test_a_finished_subagent_is_owed_before_any_sweep_posts_it(self) -> None:
+        self.chat("s")
+        self.child("c1", "s", said="done")
+        self.assertEqual(self.owed(), {"s": 1}, "the fact must exist before the sweep acts on it")
+
+    def test_a_posted_wake_stops_being_owed(self) -> None:
+        self.chat("s")
+        self.child("c1", "s", said="done")
+        self.assertEqual(self.sweep(), 1)
+        self.assertEqual(self.owed(), {}, "the wake turn is posted; the session reads its run instead")
+
+    def test_a_held_wake_is_still_owed(self) -> None:
+        # Held is a wake waiting to post — behind a question, a turn or a backoff — never one
+        # settled: the session must keep reading working until the run really starts.
+        self.chat("s")
+        self.child("c1", "s", said="done")
+        sessions.hold_wakes(db_path(self.home), "s", ["c1"], "the conversation is waiting on its user")
+        self.assertEqual(self.owed(), {"s": 1})
+
+    def test_a_dropped_wake_is_not_owed(self) -> None:
+        self.chat("s")
+        self.child("c1", "s", said="done")
+        sessions.drop_wakes(db_path(self.home), "s", ["c1"], delegation.DROP_STALE)
+        self.assertEqual(self.owed(), {})
+
+    def test_a_subagent_still_running_is_never_owed(self) -> None:
+        self.chat("s")
+        self.child("c1", "s", said="working", ended=False)
+        self.assertEqual(self.owed(), {}, "the live-subagent count is what reports this one")
+
+    def test_a_child_that_ended_before_the_watch_is_not_owed(self) -> None:
+        # The watermark's own rule: history is not a backlog of turns to fire, so there is no
+        # wake owed and the app must not be told there is one.
+        self.chat("s")
+        self.child("c1", "s", said="done")
+        delegation.watch_since(db_path(self.home))
+        self.conn.execute("UPDATE sessions SET ended_at = ? WHERE id = 'c1'", (time.time() - 60,))
+        self.conn.commit()
+        self.assertEqual(self.owed(), {})
+
+    def test_a_stale_end_is_dropped_by_the_next_sweep_and_never_reported(self) -> None:
+        # A child that ended over 48 hours ago is dropped as stale; until the sweep settles it the
+        # owed read must agree with what the sweep will do rather than claim work forever.
+        put_setting(db_path(self.home), delegation.WAKE_SINCE_KEY, int((time.time() - 50 * 3600) * 1000))
+        self.chat("s")
+        self.child("c1", "s", said="done")
+        self.conn.execute(
+            "UPDATE sessions SET ended_at = ? WHERE id = 'c1'", (time.time() - 49 * 3600,)
+        )
+        self.conn.commit()
+        self.assertEqual(self.owed(), {})
+
+    def test_an_owed_wake_is_keyed_by_the_chat_the_app_knows(self) -> None:
+        self.chat("s", reason="compression")
+        self.chat("s2", parent="s")
+        self.child("c1", "s2", said="done")
+        self.assertEqual(self.owed(), {"s": 1})
+
 
 class Registry:
     """Core's live-subagent registry, which a stop goes through."""
@@ -985,6 +1049,104 @@ class StopRouteTest(unittest.TestCase):
         request.match_info, request.headers = {}, {}
         answer = asyncio.run(info(request))
         self.assertIn("subagents_stop_all", answer["payload"]["features"])
+
+
+class RunsLiveRouteTest(unittest.TestCase):
+    """``runs/live`` carrying the owed wakes: the field the app's session state reads.
+
+    The handler's own wiring, against the fixture it really reads — a conversation whose subagent
+    ended and hasn't been settled. The function behind it is pinned in ``WakeTest``; what is pinned
+    here is that the field reaches the payload the app polls, always present so an app can tell an
+    old plugin's silence from nothing being owed.
+    """
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self.tmp.name)
+        self.addCleanup(self.tmp.cleanup)
+        registry = ModuleType("tools.delegate_tool_registry")
+        registry.interrupt_subagent = lambda agent_id: agent_id in []
+        registry._active_subagents = {}
+        constants = ModuleType("hermes_constants")
+        constants.get_hermes_home = lambda: str(self.home)
+        tools = ModuleType("tools")
+        tools.delegate_tool_registry = registry
+        aiohttp = ModuleType("aiohttp")
+        aiohttp.web = FakeWeb()
+        planted = {
+            "tools": tools,
+            "tools.delegate_tool_registry": registry,
+            "hermes_constants": constants,
+            "aiohttp": aiohttp,
+            "aiohttp.web": aiohttp.web,
+        }
+        wiring = mock.patch.dict(sys.modules, planted)
+        wiring.start()
+        self.addCleanup(wiring.stop)
+        held = getattr(sessions, "adapter", None)
+        self.addCleanup(setattr, sessions, "adapter", held)
+
+        self.adapter = Adapter()
+        self.app = App()
+        context = Context()
+        plugin.register(context)
+        context.platforms["api_server"](self.app, self.adapter)
+
+    def route(self, path: str) -> Any:
+        for _method, registered, handler in self.app.router.added:
+            if registered == path:
+                return handler
+        raise AssertionError(f"the plugin registered no {path}")
+
+    def fixture(self, child: bool = True) -> None:
+        """A conversation ``s`` in Hermes's store, with a finished subagent under it when asked."""
+        conn = sqlite3.connect(self.home / "state.db")
+        conn.execute(
+            "CREATE TABLE sessions (id TEXT PRIMARY KEY, model TEXT, model_config TEXT,"
+            " parent_session_id TEXT, started_at REAL, ended_at REAL, end_reason TEXT,"
+            " tool_call_count INTEGER DEFAULT 0, api_call_count INTEGER DEFAULT 0, source TEXT)"
+        )
+        conn.execute(
+            "CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT,"
+            " role TEXT, content TEXT, tool_calls TEXT, finish_reason TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO sessions (id, model, source) VALUES ('s', 'm', 'api_server')"
+        )
+        if child:
+            # Ended after the watermark the store first stamps (as every real child ends after the
+            # watcher began): the fixture writes before the read asks, so the end sits just ahead.
+            conn.execute(
+                "INSERT INTO sessions (id, model, model_config, parent_session_id, started_at,"
+                " ended_at, end_reason, source)"
+                " VALUES ('c1', 'anthropic/claude-sonnet-4', '{\"_delegate_from\": \"s\"}', 's',"
+                " ?, ?, 'agent_close', 'subagent')",
+                (time.time() - 9, time.time() + 9),
+            )
+        conn.commit()
+        conn.close()
+
+    def live(self) -> Dict[str, Any]:
+        handler = self.route(plugin.PREFIX + "/runs/live")
+        request = FakeWeb.Request()
+        request.match_info, request.headers = {}, {}
+        answer = asyncio.run(handler(request))
+        self.assertEqual(answer["status"], 200)
+        return answer["payload"]
+
+    def test_runs_live_names_the_wake_a_finished_subagent_owes(self) -> None:
+        self.fixture()
+        self.assertEqual(self.live()["waking"], {"s": 1})
+
+    def test_runs_live_says_nothing_is_owed_once_the_wake_has_settled(self) -> None:
+        self.fixture()
+        sessions.mark_wakes(db_path(self.home), "s", ["c1"], "run-9")
+        self.assertEqual(self.live()["waking"], {})
+
+    def test_runs_live_carries_the_field_even_with_no_delegation_at_all(self) -> None:
+        # Always present: an app can't tell this plugin's silence from nothing being owed.
+        self.fixture(child=False)
+        self.assertEqual(self.live()["waking"], {})
 
 
 if __name__ == "__main__":

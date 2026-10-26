@@ -17,7 +17,7 @@ import {
 import { useXLarge } from "@/lib/media"
 import { byName } from "@/lib/compare"
 import { threadState, type ThreadState } from "@/lib/session-work"
-import { useLiveSubagents, useWaiting, type WaitingReason } from "@/lib/waiting"
+import { useLiveSubagents, useLiveWaking, useWaiting, type WaitingReason } from "@/lib/waiting"
 
 /** How many of a bot's newest threads its screen lists, and Main draws as cards. */
 const THREADS = 50
@@ -73,6 +73,7 @@ async function latestLine(conversationId: string) {
 export function useThreads(profileId: string | undefined): Thread[] | undefined {
   const live = useWaiting()
   const subagents = useLiveSubagents()
+  const wakes = useLiveWaking()
   const answer = useLiveQuery(async () => {
     if (!profileId) return { profileId, rows: [] }
     const chats = await db.conversations
@@ -142,10 +143,11 @@ export function useThreads(profileId: string | undefined): Thread[] | undefined 
         streaming,
         failed,
         subagents: subagents[chat.hermesSessionId],
+        waking: wakes[chat.hermesSessionId],
       })
       return { chat, opener, last, replies, state, reason }
     })
-  }, [answer, profileId, live, subagents])
+  }, [answer, profileId, live, subagents, wakes])
 }
 
 export interface BotSummary {

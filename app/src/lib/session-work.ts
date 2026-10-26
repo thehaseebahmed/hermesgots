@@ -13,6 +13,11 @@
  * is, and every screen reads it off the poll it already makes rather than a read per session. A
  * question or an approval still comes first over those, since that is what wants the user.
  *
+ * `waking` is the seam between the two halves: a subagent has ended and its wake turn has not
+ * started yet, so nothing runs and nothing streams for a beat. The host reports the owed wake
+ * (`runs/live`'s `waking`) so that beat still reads working — reading it as idle is what made a
+ * session look stalled exactly when the bot was about to resume.
+ *
  * One facts object and one ladder: a thread's pill is this answer with no session of its own to be
  * resolved or discarded, so the two can't drift.
  *
@@ -48,6 +53,8 @@ export interface SessionFacts {
   local?: LocalTurn
   /** How many of the session's subagents the host still holds at work. */
   subagents?: number
+  /** How many of its finished subagents the host still owes the session a wake turn for. */
+  waking?: number
 }
 
 /** The facts a thread's pill is read from: a reply's own, and the subagents it left working. */
@@ -60,15 +67,23 @@ export interface ThreadFacts {
   failed?: boolean
   /** How many of the thread's subagents the host still holds at work. */
   subagents?: number
+  /** How many of its finished subagents the host still owes the thread a wake turn for. */
+  waking?: number
 }
 
-const working = (subagents?: number) => (subagents ?? 0) > 0
+const working = (...counts: (number | undefined)[]) => counts.some((count) => (count ?? 0) > 0)
 
 /**
  * Where a session stands. The session's own run is the first rung: while it runs the session is
  * working, and nothing settled or waiting behind it is read. Then a discarded or resolved one says
- * so, then what wants the user, then the subagents its turn left running (a reply streaming here has
- * already been read at the top), then nothing at all.
+ * so, then what wants the user, then the subagents its turn left running and the wake turn its
+ * finished subagents are still owed (a reply streaming here has already been read at the top),
+ * then nothing at all.
+ *
+ * The wake is owed in the window between a subagent ending and its wake turn starting: no live run,
+ * no running subagent, and the bot about to resume. Reading that as idle is what made a session
+ * appear to stall exactly when it was about to carry on, which is why the host reports it beside
+ * the subagents (`runs/live`'s `waking`) rather than the app guessing it from a clock.
  */
 export function sessionState(facts: SessionFacts): SessionState {
   if (runInFlight(facts.live, facts.local)) return "working"
@@ -76,7 +91,7 @@ export function sessionState(facts: SessionFacts): SessionState {
   if (facts.resolvedAt) return "resolved"
   if (facts.local?.waiting || facts.live === "waiting_for_approval" || facts.planPending)
     return "waiting"
-  if (working(facts.subagents)) return "working"
+  if (working(facts.subagents, facts.waking)) return "working"
   return "idle"
 }
 
@@ -137,8 +152,9 @@ export function sessionGroup(
   live?: LiveTurn,
   local?: LocalTurn,
   subagents?: number,
+  waking?: number,
 ): SessionClaim {
-  const state = sessionState({ ...conversation, live, local, subagents })
+  const state = sessionState({ ...conversation, live, local, subagents, waking })
   if (state === "working") return { state, prTick: false }
   if (state === "resolved" || state === "discarded") return { state, prTick: false }
   // An answer to ask outranks every pull request: the alert glyph is the question, not the arrow.
@@ -201,6 +217,7 @@ export function threadState(thread: ThreadFacts): ThreadState {
   const state = sessionState({
     local: { streaming: thread.streaming, waiting: thread.waiting },
     subagents: thread.subagents,
+    waking: thread.waking,
   })
   if (state === "working" || state === "waiting") return state
   return thread.failed ? "failed" : "idle"

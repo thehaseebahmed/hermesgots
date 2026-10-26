@@ -55,7 +55,7 @@ import time
 import uuid
 from contextlib import closing
 from pathlib import Path
-from typing import Any, Collection, Dict, Iterable, List, NamedTuple, Optional, Tuple
+from typing import Any, Collection, Dict, Iterable, Iterator, List, NamedTuple, Optional, Tuple
 
 from . import events, link, outbox, sessions
 from .store import db_path, get_setting, put_setting
@@ -468,28 +468,75 @@ async def _unwoken(home: Path, path: Path, since: int) -> List[Dict[str, Any]]:
     wake is owed again once its wait passes, so a gate that clears and a backoff that expires are
     both simply the next look's work.
     """
-    unmarked: List[Dict[str, Any]] = []
     now = _now_ms()
+
+    def due() -> List[Dict[str, Any]]:
+        return [
+            row
+            for row, mark in _ended_wakes(home, path, since)
+            if mark is None
+            or (
+                mark["status"] not in sessions.SETTLED_WAKES
+                and not (mark["next_at"] is not None and mark["next_at"] > now)
+            )
+        ]
+
+    return await asyncio.to_thread(due)
+
+
+def _ended_wakes(
+    home: Path, path: Path, since: int
+) -> Iterator[Tuple[Dict[str, Any], Optional[Dict[str, Any]]]]:
+    """Every ended delegation past the watermark, page by page, paired with its wake mark.
+
+    The one read the two consumers of owed wakes take — ``_unwoken`` (what the sweep posts this
+    look) and ``waking_sessions`` (what ``runs/live`` reports until the wake turn starts) — so their
+    view of settled can never drift. A page walks on while every mark in it has settled: a child
+    whose post failed must not be pushed out of the window by newer, settled ends.
+    """
     for page in range(WAKE_PAGES):
         batch = [
             row
-            for row in await asyncio.to_thread(pending, home, since, page * WAKE_LIMIT)
+            for row in pending(home, since, page * WAKE_LIMIT)
             if (row["ended_at"] or 0) * 1000 >= since
         ]
         if not batch:
-            break
-        marks = await asyncio.to_thread(sessions.wake_marks, path, [row["id"] for row in batch])
+            return
+        marks = sessions.wake_marks(path, [row["id"] for row in batch])
         for row in batch:
-            mark = marks.get(row["id"])
-            if mark is not None and (
-                mark["status"] in sessions.SETTLED_WAKES
-                or (mark["next_at"] is not None and mark["next_at"] > now)
-            ):
-                continue
-            unmarked.append(row)
+            yield row, marks.get(row["id"])
         if len(batch) < WAKE_LIMIT:
-            break
-    return unmarked
+            return
+
+
+def waking_sessions(hermes_home: Path) -> Dict[str, int]:
+    """How many finished subagents each conversation's wake is still owed for, by the session the
+    app knows the chat as — the ``waking`` map ``runs/live`` carries.
+
+    The gap this closes: between a subagent ending and its wake turn starting there is a moment with
+    no live run and no running subagent, and the app read exactly that as the session at rest — the
+    stall a reader sees when the bot is about to resume. The sweep is what settles every end
+    (posting it, holding it behind a gate or a backoff, dropping it), so "not settled" is precisely
+    "this conversation is still owed its run": an unmarked end the next look will act on, or a held
+    one it is waiting to post. Sent and dropped read as nothing owed — the posted run reads as the
+    session's own run from the same poll.
+
+    Keyed like ``live_sessions`` (``sessions.chat_session``), so one poll answers every screen with
+    no read per session, and cheap as the sweep's own read: a page or two of ``state.db``.
+    """
+    path = db_path(hermes_home)
+    since = watch_since(path)
+    now = _now_ms()
+    roots: Dict[str, str] = {}
+    found: Dict[str, int] = {}
+    for row, mark in _ended_wakes(hermes_home, path, since):
+        if mark is not None and mark["status"] in sessions.SETTLED_WAKES:
+            continue
+        if (row["ended_at"] or 0) * 1000 < now - WAKE_MAX_AGE_MS:
+            continue
+        root = sessions.chat_session(hermes_home, row["parent_id"], roots)
+        found[root] = found.get(root, 0) + 1
+    return found
 
 
 async def _wakeable(

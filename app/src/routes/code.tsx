@@ -48,6 +48,7 @@ import {
   reasonText,
   useAllLiveRuns,
   useLiveSubagents,
+  useLiveWaking,
   useWaiting,
   type WaitingReason,
 } from "@/lib/waiting"
@@ -136,6 +137,7 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
   const listed = useProjectSessions()
   const live = useAllLiveRuns()
   const subagents = useLiveSubagents()
+  const wakes = useLiveWaking()
   const waits = useWaiting()
   const lists = useAllProjects()
   const changes = useAnyChange("projects")
@@ -193,6 +195,7 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
             waiting: listed?.local[c.id]?.waiting || serverWaits(c),
           },
           subagents[c.hermesSessionId],
+          wakes[c.hermesSessionId],
         ),
       },
     ]
