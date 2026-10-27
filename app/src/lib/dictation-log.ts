@@ -160,13 +160,19 @@ export function wordsLabel(words: number): string {
   return `${spelledCount(words)} ${words === 1 ? "word" : "words"}`
 }
 
+/** The words as heard that can be kept: trimmed, and nothing at all where there are none. */
+export function heardOf(value: unknown): string | undefined {
+  const heard = typeof value === "string" ? value.trim() : ""
+  return heard || undefined
+}
+
 /** The texts one take draws, as the sheet sets them apart: { heard }, { tidied } or both (ADR 0062). */
 export function textsOf(row: { text: string; heard?: string }): {
   heard?: string
   tidied?: string
 } {
   const tidied = row.text.trim()
-  const heard = row.heard?.trim()
+  const heard = heardOf(row.heard)
   if (!heard) return { tidied }
   if (heard === tidied) return { heard }
   return { heard, tidied }

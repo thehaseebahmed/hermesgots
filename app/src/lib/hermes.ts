@@ -1,4 +1,5 @@
 import { connectionKey } from "@/lib/connection"
+import { heardOf } from "@/lib/dictation-log"
 import { READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
 import type {
   ApprovalChoice,
@@ -3837,7 +3838,7 @@ function dictationRow(value: unknown): HostDictation | null {
   const row = value as Partial<HostDictation> | null
   if (!row || typeof row.id !== "string" || !row.id || typeof row.text !== "string") return null
   const at = finite(row.at) ?? 0
-  const heard = typeof row.heard === "string" ? row.heard.trim() : ""
+  const heard = heardOf(row.heard)
   return {
     id: row.id,
     text: row.text,

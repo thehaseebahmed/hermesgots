@@ -13,6 +13,7 @@ import {
   pooledRate,
   spokenOf,
   sumTotals,
+  heardOf,
   textsOf,
   toUpsert,
   wordsLabel,
@@ -167,6 +168,13 @@ test("a take's texts are set apart only where the cleanup changed them", () => {
     { heard: "As it is." },
     "the two are compared as they are read, not as they were stored",
   )
+})
+
+test("the words as heard are kept trimmed, and a blank is nothing at all", () => {
+  assert.equal(heardOf("  um, draft the reply  "), "um, draft the reply")
+  assert.equal(heardOf("   "), undefined, "a blank leaves the row as one text")
+  assert.equal(heardOf(undefined), undefined)
+  assert.equal(heardOf(null), undefined, "a host that sent no words sent no words")
 })
 
 test("the rate is pooled over the totals, not averaged over takes", () => {

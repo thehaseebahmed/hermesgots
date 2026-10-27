@@ -13,6 +13,7 @@ import {
   clearedAway,
   countWords,
   fingerprintOf,
+  heardOf,
   orderOf,
   sumTotals,
   toUpsert,
@@ -63,7 +64,7 @@ function stored(row: RowFields): DictationRecord {
 }
 
 function entryOf(connection: string, text: string, ms: number, heard?: string): DictationRecord {
-  const asHeard = heard?.trim()
+  const asHeard = heardOf(heard)
   return stored({
     id: randomId(),
     connection,
@@ -179,7 +180,12 @@ async function askStats(config: HermesConfig, key: string): Promise<HostAnswer |
  * copy is fired without being awaited, so a host that is away — or too old to have the routes —
  * costs the take nothing, and a take the host never confirmed is posted again at the next reconcile.
  */
-export async function writeDictation(config: HermesConfig, text: string, ms: number, heard?: string) {
+export async function writeDictation(
+  config: HermesConfig,
+  text: string,
+  ms: number,
+  heard?: string,
+) {
   const trimmed = text.trim()
   if (!trimmed) return
   const row = entryOf(connectionKey(config), trimmed, ms, heard)
