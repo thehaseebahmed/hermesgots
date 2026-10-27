@@ -173,12 +173,7 @@ class Withheld(Exception):
 def read_model(path: Path) -> Optional[Dict[str, str]]:
     """The triage model this bot's host holds, or None when the bot's own model decides."""
     held = get_setting(path, MODEL_KEY)
-    if not isinstance(held, dict):
-        return None
-    provider, model = held.get("provider"), held.get("model")
-    if isinstance(provider, str) and isinstance(model, str) and provider and model:
-        return {"provider": provider, "model": model}
-    return None
+    return chats.pick(held.get("provider"), held.get("model")) if isinstance(held, dict) else None
 
 
 def set_model(
@@ -307,12 +302,9 @@ def start_thread(
     """
     # The run goes out on the model it names, so the thread says so too.
     run = body if isinstance(body, dict) else {}
-    choice = (
-        {"provider": run["provider"], "model": run["model"]}
-        if isinstance(run.get("model"), str) and isinstance(run.get("provider"), str)
-        else None
+    chat_id, session_id = open_thread(
+        path, profile_id, chats.pick(run.get("provider"), run.get("model"))
     )
-    chat_id, session_id = open_thread(path, profile_id, choice)
     try:
         item = outbox.add(path, session_id, profile, text, files, outbox.clean_body(session_id, body))
     except Exception:
@@ -343,18 +335,33 @@ async def deliver(
     stays in Main. Raises ``ValueError`` for a run body the queue refuses.
     """
     thread = found["session_id"]
-    # The thread runs on its own model, not Main's.
     run_body = body
+    new_pick = None
     if isinstance(run_body, dict):
+        held = found.get("model_choice")
+        held = held if isinstance(held, dict) else {}
+        kept = chats.pick(held.get("provider"), held.get("model"))
+        sent = chats.pick(run_body.get("provider"), run_body.get("model"))
         run_body = {k: v for k, v in run_body.items() if k not in ("model", "provider")}
-        choice = found.get("model_choice")
-        if isinstance(choice, dict) and choice.get("model") and choice.get("provider"):
-            run_body["model"], run_body["provider"] = choice["model"], choice["provider"]
+        # The thread's own pick wins; Main's is never sent to a thread that already has one.
+        chosen = kept or sent
+        if chosen:
+            run_body.update(chats.pin_fields(chosen))
+        new_pick = chosen if chosen and not kept else None
     run = outbox.clean_body(thread, run_body)
     runs = outbox.session_runs(adapter, await outbox.session_ids(adapter, thread))
     resumed = (await asyncio.to_thread(outbox.read, path, thread))["resumed_at"]
     if outbox.state(runs, resumed) == "paused":
         return None
+    if new_pick:
+        # Past the gate, because this message does reach the thread: a thread that has never pinned
+        # takes this send's model as its own — a triaged message is that thread's next send — and
+        # stops following the profile's Default from here on. A store this can't write is still
+        # worth the message: the run goes, it just won't pin.
+        try:
+            await asyncio.to_thread(chats.set_choice, path, found["thread"], new_pick)
+        except Exception:
+            logger.debug("memento: triage couldn't pin %s", found["thread"], exc_info=True)
     item = await asyncio.to_thread(outbox.add, path, thread, profile, text, files, run)
     steered = None
     if steer:

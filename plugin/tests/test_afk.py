@@ -2259,11 +2259,107 @@ class SessionTests(unittest.TestCase):
         )
 
     def test_the_run_is_the_sessions_own_and_starts_on_the_hosts_answer(self) -> None:
-        self.start()
+        with patch.object(
+            afk.host_model,
+            "read_main",
+            return_value={"provider": "openrouter", "model": "anthropic/claude-sonnet-4.5"},
+        ):
+            self.start()
         posted = self.posted[0]
         self.assertEqual(posted["path"], "/v1/runs")
         self.assertEqual(posted["body"]["session_id"], self.ensured[0][0])
-        self.assertNotIn("model", posted["body"], "no model picked: the host's own runs")
+        self.assertEqual(
+            (posted["body"]["provider"], posted["body"]["model"]),
+            ("openrouter", "anthropic/claude-sonnet-4.5"),
+            "a session that has no model yet starts on the profile's own",
+        )
+        record = next(iter(self.chats().values()))["value"]
+        self.assertEqual(
+            record["modelChoice"],
+            {"provider": "openrouter", "model": "anthropic/claude-sonnet-4.5"},
+            "the record pins what the first run took, so the next run keeps it",
+        )
+
+    def test_a_host_that_names_no_model_posts_none(self) -> None:
+        # Nothing to pin: the run names no model, exactly as every AFK run did before.
+        with patch.object(afk.host_model, "read_main", return_value=None):
+            self.start()
+        self.assertNotIn("model", self.posted[0]["body"])
+        self.assertNotIn(
+            "modelChoice", next(iter(self.chats().values()))["value"], "and the record pins none"
+        )
+
+    def test_a_new_sessions_pin_is_the_profiles_not_a_record_left_at_its_id(self) -> None:
+        """``start`` mints the session id, so no record of this session's can exist when the pin is
+        read: the profile's main model is the only answer.
+        """
+        chats.merge(
+            db_path(self.home),
+            {
+                "left-behind": {
+                    "at": 1,
+                    "value": {
+                        "hermesSessionId": "memento-afk-fixed",
+                        "modelChoice": {"provider": "deepseek", "model": "deepseek-v4-pro"},
+                    },
+                }
+            },
+        )
+        with patch.object(afk, "new_session_id", return_value="memento-afk-fixed"), patch.object(
+            afk.host_model,
+            "read_main",
+            return_value={"provider": "openrouter", "model": "anthropic/claude-sonnet-4.5"},
+        ):
+            self.start()
+        self.assertEqual(
+            (self.posted[0]["body"]["provider"], self.posted[0]["body"]["model"]),
+            ("openrouter", "anthropic/claude-sonnet-4.5"),
+            "a session that is starting runs the profile's model, whatever else names its id",
+        )
+        self.assertEqual(
+            self.chats()["memento-afk-fixed"]["value"]["modelChoice"],
+            {"provider": "openrouter", "model": "anthropic/claude-sonnet-4.5"},
+            "and its record keeps the pick its run went out on",
+        )
+
+    def test_begin_hands_back_the_pin_beside_the_prompt_and_the_snapshot(self) -> None:
+        """The pin comes out of ``_begin`` with the rest of what a start takes off the project.
+
+        Held as a local in ``start`` — as it was — it had to survive two blocks that can give the
+        claim back, and only the fact that every failure there returns first kept it bound.
+        """
+        with patch.object(
+            afk.host_model,
+            "read_main",
+            return_value={"provider": "openrouter", "model": "anthropic/claude-sonnet-4.5"},
+        ):
+            began = afk._begin(self.home, db_path(self.home), "p1", "memento-afk-1")
+        self.assertEqual(
+            began.pinned, {"provider": "openrouter", "model": "anthropic/claude-sonnet-4.5"}
+        )
+        self.assertIn("snapshot", began._fields, "the snapshot's still here")
+        self.assertIn("prompt", began._fields, "and the Prompt")
+
+    def test_the_pin_is_read_once_for_the_run_and_the_record(self) -> None:
+        """One read answers both, so the run and the record it publishes can never disagree."""
+        calls: List[Any] = []
+
+        def read_main(config: Any) -> Dict[str, str]:
+            calls.append(config)
+            return {"provider": "openrouter", "model": "anthropic/claude-sonnet-4.5"}
+
+        with patch.object(afk.host_model, "read_main", side_effect=read_main):
+            self.start()
+        self.assertEqual(len(calls), 1, "one read, not one per seam")
+        self.assertEqual(
+            (self.posted[0]["body"]["provider"], self.posted[0]["body"]["model"]),
+            ("openrouter", "anthropic/claude-sonnet-4.5"),
+        )
+        self.assertEqual(
+            next(iter(self.chats().values()))["value"]["modelChoice"],
+            {"provider": "openrouter", "model": "anthropic/claude-sonnet-4.5"},
+            "the record keeps the pick the run went out on",
+        )
 
     def test_a_key_in_the_homes_own_env_is_the_one_the_run_is_posted_with(self) -> None:
         self.home.joinpath(".env").write_text("API_SERVER_KEY=home-key\n")
@@ -3056,10 +3152,31 @@ class StageRunTests(unittest.TestCase):
         return self.posted[0]["body"]
 
     def test_it_posts_the_stages_run_on_the_same_session(self) -> None:
+        # The session was published with the model it started on, and a stage is the same session:
+        # its run carries that pick, not whatever the profile's Default model is now.
+        chats.merge(
+            db_path(self.home),
+            {
+                self.record["session_id"]: {
+                    "at": 1,
+                    "value": {
+                        "hermesSessionId": self.record["session_id"],
+                        "modelChoice": {"provider": "deepseek", "model": "deepseek-v4-pro"},
+                    },
+                }
+            },
+        )
         body = self.run_stage()
         self.assertEqual(body["session_id"], self.record["session_id"])
         self.assertEqual(self.posted[0]["path"], "/v1/runs")
-        self.assertNotIn("model", body, "the host's own model runs it")
+        self.assertEqual(
+            (body["provider"], body["model"]),
+            ("deepseek", "deepseek-v4-pro"),
+            "the stage keeps the model its session was pinned to",
+        )
+
+    def test_a_session_published_with_no_pick_posts_no_model(self) -> None:
+        self.assertNotIn("model", self.run_stage(), "a record that pins none leaves it to the host")
 
     def test_its_input_is_one_line_naming_the_stage_and_the_issue(self) -> None:
         body = self.run_stage()

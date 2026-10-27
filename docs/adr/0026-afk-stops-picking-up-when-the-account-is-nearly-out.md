@@ -1,5 +1,10 @@
 # AFK stops picking tasks up when the account is nearly out
 
+**Superseded in part by [ADR 0059](./0059-a-chats-model-is-fixed-at-its-first-send.md)**: a run of an
+AFK session with a record carries that session's pinned model, and so does each of its stages, so "AFK's
+runs carry no model" below holds only for a session that has no record yet — its first run takes the
+profile's main model, which is what its record is then published with. Everything else here stands.
+
 An AFK run carries no model, so it spends the bot's own provider account — `config.yaml`'s
 `model.provider`, and its `model.default` — like any other turn of the profile. A workflow with a
 loop can spend a great deal of it while nobody is watching, and until now nothing in AFK knew the

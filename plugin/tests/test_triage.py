@@ -501,6 +501,92 @@ class DeliveryTests(unittest.TestCase):
         self.assertIsNone(self.deliver(steer=True))
         self.assertEqual(outbox.read(self.path, "s1")["items"], [])
 
+    def test_a_thread_that_never_takes_the_message_is_not_pinned_by_it(self):
+        """A stopped thread leaves the message in Main: nothing happened in that thread, no pin."""
+        chats.merge(self.path, {"t1": {"at": 1, "value": {"hermesSessionId": "s1"}}})
+        self.adapter.run("r1", "cancelled", 1)
+        self.assertIsNone(self.deliver(steer=False))
+        self.assertIsNone(chats.choice(chats.by_session(self.path, "s1")))
+
+    def test_a_thread_runs_on_its_own_model_though_the_message_came_from_main(self):
+        """A thread runs on its own model though the message was sent on Main's.
+
+        The queued run is re-bound to the thread's pick, so a thread never moves with the profile's
+        Default model.
+        """
+        self.adapter.run("r1", "running", 1)
+        self.found["model_choice"] = {"provider": "deepseek", "model": "deepseek-v4-pro"}
+        self.deliver(steer=False)
+        self.adapter.run("r1", "completed", 1)
+        asyncio.run(outbox.tick(self.adapter, "s1", None, self.path))
+        path, request = self.posted[-1]
+        self.assertEqual(path, "/v1/runs")
+        self.assertEqual(
+            (request["provider"], request["model"]),
+            ("deepseek", "deepseek-v4-pro"),
+            "the thread's own model, not the one the message was sent on",
+        )
+
+    def test_a_thread_with_no_pick_takes_the_model_its_next_send_names(self):
+        """A triaged message is that thread's next send, so it pins there.
+
+        The run names Main's model; a thread that has never pinned keeps it as its own pick, so it
+        stops following the profile's Default from here on. A thread that already pinned keeps its
+        own — see ``test_a_thread_that_already_pinned_keeps_its_own_model``.
+        """
+        chats.merge(self.path, {"t1": {"at": 1, "value": {"hermesSessionId": "s1"}}})
+        self.adapter.run("r1", "running", 1)
+        self.deliver(steer=False)
+        self.adapter.run("r1", "completed", 1)
+        asyncio.run(outbox.tick(self.adapter, "s1", None, self.path))
+        path, request = self.posted[-1]
+        self.assertEqual(
+            (request["provider"], request["model"]),
+            ("p", "m"),
+            "the thread runs the model this send named",
+        )
+        self.assertEqual(
+            chats.choice(chats.by_session(self.path, "s1")),
+            {"provider": "p", "model": "m"},
+            "and its record keeps that pick, so the next send doesn't follow the default",
+        )
+
+    def test_a_thread_that_already_pinned_keeps_its_own_model(self):
+        """Main's model never overwrites a pick a thread already holds."""
+        pinned = {"provider": "deepseek", "model": "deepseek-v4-pro"}
+        chats.merge(
+            self.path,
+            {"t1": {"at": 1, "value": {"hermesSessionId": "s1", "modelChoice": pinned}}},
+        )
+        self.found["model_choice"] = pinned
+        self.adapter.run("r1", "running", 1)
+        self.deliver(steer=False)
+        self.adapter.run("r1", "completed", 1)
+        asyncio.run(outbox.tick(self.adapter, "s1", None, self.path))
+        path, request = self.posted[-1]
+        self.assertEqual((request["provider"], request["model"]), ("deepseek", "deepseek-v4-pro"))
+        self.assertEqual(
+            chats.choice(chats.by_session(self.path, "s1")), pinned, "its own pick, left alone"
+        )
+
+    def test_a_body_naming_half_a_pick_pins_nothing(self):
+        """A run told a model with no provider is refused, not guessed at: so is a thread's pin."""
+        chats.merge(self.path, {"t1": {"at": 1, "value": {"hermesSessionId": "s1"}}})
+        self.body = {
+            "model": "m",
+            "input": [{"role": "user", "content": "more"}],
+            "session_id": "main",
+        }
+        self.adapter.run("r1", "running", 1)
+        self.deliver(steer=False)
+        self.adapter.run("r1", "completed", 1)
+        asyncio.run(outbox.tick(self.adapter, "s1", None, self.path))
+        path, request = self.posted[-1]
+        self.assertNotIn("provider", request)
+        self.assertIsNone(
+            chats.choice(chats.by_session(self.path, "s1")), "no half pick on the record either"
+        )
+
     def test_a_queued_message_reaches_its_thread_with_no_app_connected(self):
         self.adapter.run("r1", "running", 1)
         delivered = self.deliver(steer=False)

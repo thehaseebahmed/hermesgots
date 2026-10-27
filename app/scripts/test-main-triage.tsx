@@ -11,7 +11,7 @@ import { MemoryRouter } from "react-router"
 
 import { MovedMarker } from "@/components/chat/moved-marker"
 import { sendFromMain, settleTriaging, stopMessage } from "@/lib/chat"
-import { db, mainThreadId, type Message } from "@/lib/db"
+import { db, mainThreadId, type Message, type Profile } from "@/lib/db"
 import { moveMarks } from "@/lib/move-marks"
 import { refreshMoves, undoMove } from "@/lib/moves"
 import { TRIAGE_MS } from "@/lib/freshness"
@@ -87,8 +87,11 @@ function host(name: string, triage: Answer, features: string[] = ["queue", "tria
   return seen
 }
 
-async function seed(name: string, extra: { main?: boolean } = { main: true }) {
-  const bot = botProfile(name)
+async function seed(
+  name: string,
+  extra: { main?: boolean; bot?: Partial<Profile> } = { main: true },
+) {
+  const bot = botProfile(name, extra.bot)
   await seedSettings({ developer: true, botThreads: true })
   await db.profiles.clear()
   await db.profiles.put(bot)
@@ -244,6 +247,61 @@ test("a message the host opened a new thread for never enters Main", async () =>
   assert.deepEqual(await sendFromMain(MAIN, "plan my move"), { threadId: "n1", created: true })
   assert.equal(runsFor(seen, MAIN_SESSION).length, 0, "Main's session never starts a run")
   assert.deepEqual(await messagesOf(MAIN), [])
+})
+
+/** The run a triage ask carries, as the host reads it for the thread the message lands in. */
+const namedInAsk = (seen: { path: string; body: any }[]) => triaged(seen)[0]?.body.body
+
+test("the triage ask names a bot's own default model, both halves", async () => {
+  const chosen = { provider: "anthropic", model: "claude-sonnet-4.5" }
+  await seed("route-model-bot", { main: true, bot: { modelChoice: chosen } })
+  const seen = host("route-model-bot", "new")
+  assert.deepEqual(await sendFromMain(MAIN, "plan my move"), { threadId: "n1", created: true })
+  const run = namedInAsk(seen)
+  assert.deepEqual([run.model, run.provider], [chosen.model, chosen.provider])
+})
+
+test("a bot with no default names the host's remembered model, both halves", async () => {
+  const remembered = { provider: "openrouter", model: "openai/gpt-5" }
+  await seed("route-model-host", { main: true, bot: { hostModel: remembered } })
+  const seen = host("route-model-host", "thread")
+  assert.deepEqual(await sendFromMain(MAIN, "more on Lisbon"), {
+    threadId: "t1",
+    created: false,
+  })
+  const run = namedInAsk(seen)
+  assert.deepEqual([run.model, run.provider], [remembered.model, remembered.provider])
+})
+
+test("a Main that holds a pick of its own names that, not the bot's default", async () => {
+  const mainPick = { provider: "openai", model: "gpt-5" }
+  const botDefault = { provider: "anthropic", model: "claude-sonnet-4.5" }
+  await seed("route-model-main", {
+    main: true,
+    bot: { modelChoice: botDefault },
+  })
+  await db.conversations.update(MAIN, { modelChoice: mainPick })
+  const seen = host("route-model-main", "thread")
+  assert.deepEqual(await sendFromMain(MAIN, "more on Lisbon"), {
+    threadId: "t1",
+    created: false,
+  })
+  const run = namedInAsk(seen)
+  assert.deepEqual([run.model, run.provider], [mainPick.model, mainPick.provider])
+})
+
+test("a device that can name no model names none, and asks the host nothing", async () => {
+  await seed("route-model-none")
+  const seen = host("route-model-none", "new")
+  assert.deepEqual(await sendFromMain(MAIN, "plan my move"), { threadId: "n1", created: true })
+  const run = namedInAsk(seen)
+  assert.equal("model" in run, false)
+  assert.equal("provider" in run, false)
+  assert.equal(
+    seen.some((r) => r.path.endsWith("/models")),
+    false,
+    "no model read on the send path",
+  )
 })
 
 test("a message with files is triaged with them saved on the host first", async () => {
