@@ -3,13 +3,23 @@ import test from "node:test"
 
 import { compactionMarks } from "../src/lib/compactions.ts"
 
-const message = (id, role, createdAt) => ({
+const message = (id, role, createdAt, extra = {}) => ({
   id,
   conversationId: "c1",
   role,
   content: "",
   status: "done",
   createdAt,
+  ...extra,
+})
+
+/** A reply that draws a compaction inside itself: the seam the thread splits it at. */
+const seam = (row, at) => ({
+  id: `h-c1-${row}`,
+  row,
+  contentOffset: 0,
+  toolsBefore: 0,
+  at,
 })
 
 const turn = (n, at) => [message(`u${n}`, "user", at), message(`a${n}`, "assistant", at + 1)]
@@ -71,4 +81,26 @@ test("each divider carries the compaction it marks, the first of a gap", () => {
   assert.deepEqual(head.before.get("u1"), { at: 20 })
   const last = compactionMarks(thread, [{ at: 500, tokens: 7 }])
   assert.deepEqual(last.trailing, { at: 500, tokens: 7 })
+})
+
+test("one a reply draws inside itself draws nothing between turns", () => {
+  // The seam names the row its summary became, so the divider is the reply's own and not this one's.
+  const thread = [
+    ...turn(1, 100),
+    message("u2", "user", 200),
+    message("a2", "assistant", 210, { seams: [seam(7, 205)] }),
+  ]
+  assert.deepEqual(marked(thread, [{ at: 300, row: 7 }]), { before: [], trailing: false })
+})
+
+test("one the record has no row for is matched to its seam by time", () => {
+  // A compaction made before the plugin named a row: the seam's time is all there is.
+  const thread = [
+    ...turn(1, 100),
+    message("u2", "user", 200),
+    message("a2", "assistant", 210, { seams: [seam(7, 205)] }),
+  ]
+  assert.deepEqual(marked(thread, [{ at: 205 }]), { before: [], trailing: false })
+  // A time further off than the host's own clock can drift is not that compaction.
+  assert.deepEqual(marked(thread, [{ at: 5_000 }]), { before: [], trailing: true })
 })

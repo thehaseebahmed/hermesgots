@@ -40,8 +40,8 @@ const BACKGROUND_NOTICE =
 /** The one header that speaks for several processes at once. */
 const BACKGROUND_BATCH = /^\[IMPORTANT: \d+ background processes completed\./
 
-/** An item of the host's snapshot — `- [>] 4. Wire it (in_progress)`, two spaces per depth. */
-const SNAPSHOT_ITEM = new RegExp(`\\n[ \\t]*- \\[[${SNAPSHOT_MARKERS.join("")}]\\] \\d+\\. `)
+/** An item of the host's snapshot — `- [>] plugin. Store table (in_progress)`, two spaces a depth. */
+const SNAPSHOT_ITEM = new RegExp(`\\n[ \\t]*- \\[[${SNAPSHOT_MARKERS.join("")}]\\] \\S+\\. `)
 
 type SeamRow = { role?: string; content?: string | null; display_kind?: string | null }
 
@@ -70,6 +70,58 @@ function isReloadNoticeOnly(text: string): boolean {
   )
 }
 
+/** `agent/context_compressor.py` `SUMMARY_PREFIX`: the summary's first words. */
+export const SUMMARY_HEADER = "[CONTEXT COMPACTION — REFERENCE ONLY]"
+
+/** `agent/context_compressor.py` `_MERGED_PRIOR_CONTEXT_HEADER`: a summary merged into a reply. */
+export const PRIOR_CONTEXT_HEADER = "[PRIOR CONTEXT — for reference only; not a new message]"
+
+/**
+ * `agent/context_compressor.py` `_MERGED_SUMMARY_DELIMITER`: where a merged summary begins, the row's
+ * own words kept as delimited reference above it.
+ */
+export const MERGED_SUMMARY_DELIMITER = "[END OF PRIOR CONTEXT — COMPACTION SUMMARY BELOW]"
+
+/** `agent/context_compressor.py` `LEGACY_SUMMARY_PREFIX`: the words an older Hermes opened one with. */
+export const LEGACY_SUMMARY_HEADER = "[CONTEXT SUMMARY]:"
+
+const SUMMARY_HEADERS = [SUMMARY_HEADER, PRIOR_CONTEXT_HEADER, LEGACY_SUMMARY_HEADER]
+
+/** `agent/context_compressor.py` `_SUMMARY_END_MARKER`: the line every summary ends on. */
+export const SUMMARY_END =
+  "--- END OF CONTEXT SUMMARY — respond to the message below, not the summary above ---"
+
+/**
+ * A compaction summary read off its text: opened by one of the host's headers and closed by its end
+ * line. `after` is whatever the host wrote below that line into the same row — the user's message it
+ * folded in, or a restated request — and empty for a summary on its own. `alone` says nothing of
+ * anyone's came below it: a summary that restates the request draws no text either, since the
+ * restatement is the host's note and not the user's words. Undefined for anything else.
+ */
+export function summaryOf(text: string): { after: string; alone: boolean } | undefined {
+  const head = text.trimStart()
+  if (!SUMMARY_HEADERS.some((header) => head.startsWith(header))) return undefined
+  const end = lineAt(head, SUMMARY_END)
+  if (end < 0) return undefined
+  const after = head.slice(end + SUMMARY_END.length).trim()
+  // A summary merged into a carried row puts that row's own words above its delimiter, inside the
+  // prior-context block: they are the reply's, and drawn from here rather than lost with the summary.
+  const merged = head.startsWith(PRIOR_CONTEXT_HEADER) ? mergedPrior(head) : undefined
+  const drawn = merged === undefined ? after : merged
+  return { after: drawn, alone: drawn === "" || drawn.startsWith(REPLAY_HEADER) }
+}
+
+/** What a merged row kept of its own above the delimiter, empty where it kept nothing. */
+function mergedPrior(head: string): string {
+  const at = head.indexOf(MERGED_SUMMARY_DELIMITER)
+  if (at < 0) return ""
+  return head.slice(PRIOR_CONTEXT_HEADER.length, at).trim()
+}
+
+/** Whether a row restates the in-flight request: Hermes writes it after the work it carried forward. */
+export const isRestatement = (row: SeamRow) =>
+  row.role === "user" && (row.content ?? "").trimStart().startsWith(REPLAY_HEADER)
+
 /** The request a restated row leads with, or undefined where it leads with anything else. */
 function restatedRequest(text: string): string | undefined {
   return text.startsWith(REPLAY_HEADER) ? text.slice(REPLAY_HEADER.length).trimStart() : undefined
@@ -83,6 +135,8 @@ function carriesRestatement(text: string): boolean {
 
 /** What of a seam row's text the thread draws: the host's notes cut, what the user typed kept. */
 export function seamText(content: string): string {
+  const summary = summaryOf(content)
+  if (summary) return summary.alone ? "" : seamText(summary.after)
   const text = cutSnapshot(content)
   const head = text.trimStart()
   if (isReloadNoticeOnly(head) || carriesRestatement(head)) return ""

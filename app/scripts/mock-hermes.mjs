@@ -5575,9 +5575,24 @@ http
           ? { ...row, archived: true, superseded: true }
           : { ...row, archived: true, timestamp: floor },
       )
+      // The summary opens the live context, stamped with the moment the compaction ran; Hermes
+      // flags it `_compressed_summary`, which the API strips, so the plugin's mark names its row.
+      const summary = {
+        id: ++lastRowId,
+        session_id: sessionId,
+        timestamp: Date.now() / 1000,
+        role: "user",
+        content: [
+          "[CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were compacted into the summary below.",
+          "The mock's summary of what came before.",
+          "",
+          "--- END OF CONTEXT SUMMARY — respond to the message below, not the summary above ---",
+        ].join("\n"),
+      }
       const copies = tail.map((row) => ({ ...row, id: ++lastRowId }))
       transcripts.set(sessionId, [
         ...archived,
+        summary,
         {
           id: ++lastRowId,
           session_id: sessionId,
@@ -5598,7 +5613,7 @@ http
       ])
       compactions.set(sessionId, [
         ...(compactions.get(sessionId) ?? []),
-        { at: Date.now() },
+        { at: Math.round(summary.timestamp * 1000), row: summary.id },
       ])
       return json(res, 200, { ok: true, rows: copies.length, archived: archived.length })
     }

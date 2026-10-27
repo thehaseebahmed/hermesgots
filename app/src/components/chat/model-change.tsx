@@ -58,13 +58,17 @@ export function ModelChange({ model }: { model: string }) {
 }
 
 /** How full the context was when the host compacted it, where the host recorded it. */
-function size({ tokens, window }: Compaction) {
+function size({ tokens, window }: Pick<Compaction, "tokens" | "window">) {
   if (!tokens) return ""
   if (!window) return ` · ${formatTokens(tokens)}`
   return ` · ${formatTokens(tokens)} of ${formatTokens(window)} (${Math.round((tokens / window) * 100)}%)`
 }
 
-export function Compacted({ compaction }: { compaction: Compaction }) {
-  const text = `Compaction${size(compaction)}`
+/**
+ * What the host recorded about a compaction. An in-place mark carries no size, so a divider drawn
+ * inside a reply reads from this alone; one the record doesn't name is the same divider, or none.
+ */
+export function Compacted({ compaction }: { compaction?: Pick<Compaction, "tokens" | "window"> }) {
+  const text = `Compaction${size(compaction ?? {})}`
   return <Divider label={text} text={text} />
 }

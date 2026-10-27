@@ -100,8 +100,8 @@ async function readContext(conversationId: string): Promise<void> {
   // The host omits the list when it couldn't read it: unknown is not "no changes", so a missing
   // list keeps the dividers we have rather than clearing them.
   const changesMoved = changes !== undefined && !sameChanges(conversation.modelChanges, changes)
-  // The same for compactions: only a list the host sent can replace the one held, and one more or
-  // fewer is the only way it moves.
+  // The same for compactions: only a list the host sent can replace the one held, and it moves when a
+  // record is added, dropped, or gains a field — the summary row's id arriving is such a move.
   const compacted = live.compactions
   const compactedMoved =
     compacted !== undefined && !sameCompactions(conversation.compactions, compacted)
@@ -119,7 +119,10 @@ function sameCompactions(before: Compaction[] | undefined, after: Compaction[]) 
     (before?.length ?? 0) === after.length &&
     (before ?? []).every(
       (c, i) =>
-        c.at === after[i].at && c.tokens === after[i].tokens && c.window === after[i].window,
+        c.at === after[i].at &&
+        c.tokens === after[i].tokens &&
+        c.window === after[i].window &&
+        c.row === after[i].row,
     )
   )
 }

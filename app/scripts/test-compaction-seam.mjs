@@ -6,11 +6,16 @@ import test from "node:test"
 
 import {
   isSeamScaffolding,
+  MERGED_SUMMARY_DELIMITER,
+  PRIOR_CONTEXT_HEADER,
   RELOAD_NOTICE_BODY,
   RELOAD_NOTICE_HEADER,
   REPLAY_HEADER,
   seamDrawnContent,
   seamText,
+  SUMMARY_END,
+  SUMMARY_HEADER,
+  summaryOf,
   TASK_SNAPSHOT_HEADER,
 } from "../src/lib/compaction-seam.ts"
 
@@ -94,14 +99,18 @@ test("the mock writes the host's own words, not a paraphrase of them", () => {
 
 test("the host's process notices draw nothing, and a message about one stays the user's", () => {
   const notices = [
-    '[IMPORTANT: Background process gp-7f2a completed (exit code 0).\nIts output is in the run log.]',
+    "[IMPORTANT: Background process gp-7f2a completed (exit code 0).\nIts output is in the run log.]",
     '[IMPORTANT: Background process gp-7f2a matched watch pattern "ERROR".\nSomething failed.]',
     "[Background process gp-7f2a heartbeat #3 — still running after 10 minutes.]",
     "[IMPORTANT: 2 background processes completed. Treat these results as one batch and give one " +
       "consolidated response; preserve failures and actionable results.]",
   ]
   for (const notice of notices) {
-    assert.equal(seamText(notice), "", `the host's own notice draws nothing: ${notice.slice(0, 40)}…`)
+    assert.equal(
+      seamText(notice),
+      "",
+      `the host's own notice draws nothing: ${notice.slice(0, 40)}…`,
+    )
     assert.ok(isSeamScaffolding(row(notice)), "and its row is no message")
   }
   const mine = "[IMPORTANT: my background process keeps dying — read the log before you answer.]"
@@ -117,4 +126,48 @@ test("a compaction's summary carrying the restatement draws nothing", () => {
   ].join("\n")
   assert.equal(seamText(carrier), "", "the summary is the host's, the whole of it")
   assert.ok(isSeamScaffolding(row(carrier)), "and the row is no message")
+})
+
+test("a summary is alone unless the host folded a message under its end line", () => {
+  const alone = summaryOf(`${SUMMARY_HEADER} Earlier turns were compacted.\n${SUMMARY_END}`)
+  assert.deepEqual(alone, { after: "", alone: true })
+  const merged = summaryOf(
+    `${SUMMARY_HEADER} Earlier turns.\n${SUMMARY_END}\n\nWhat about the plan?`,
+  )
+  assert.deepEqual(merged, { after: "What about the plan?", alone: false })
+  // A restatement under the summary is the host's own note, not the user's words.
+  const restated = summaryOf(
+    `${SUMMARY_HEADER} Earlier turns.\n${SUMMARY_END}\n\n${REPLAY_HEADER}\nGo on.`,
+  )
+  assert.deepEqual(restated, { after: `${REPLAY_HEADER}\nGo on.`, alone: true })
+})
+
+test("a header with no end line, or one quoted mid-sentence, is not a summary", () => {
+  assert.equal(summaryOf(`${SUMMARY_HEADER} and then the run stopped`), undefined)
+  assert.equal(summaryOf(`I saw ${SUMMARY_HEADER} in a log once`), undefined)
+})
+test("a summary merged into a carried row keeps the row's own words above its delimiter", () => {
+  // `_merge_summary_into_tail_row`: the old tail content goes between the prior-context header and
+  // the delimiter, the end marker last, so the words worth drawing are neither "after the summary"
+  // nor part of it.
+  const merged = [
+    PRIOR_CONTEXT_HEADER,
+    "Work before the compaction.",
+    "",
+    MERGED_SUMMARY_DELIMITER,
+    "",
+    `${SUMMARY_HEADER} Earlier turns were compacted.`,
+    "",
+    SUMMARY_END,
+  ].join("\n")
+  assert.deepEqual(summaryOf(merged), { after: "Work before the compaction.", alone: false })
+  assert.equal(seamText(merged), "Work before the compaction.", "the reply keeps its own words")
+  const nothingKept = [
+    PRIOR_CONTEXT_HEADER,
+    MERGED_SUMMARY_DELIMITER,
+    "",
+    SUMMARY_HEADER,
+    SUMMARY_END,
+  ].join("\n")
+  assert.deepEqual(summaryOf(nothingKept), { after: "", alone: true })
 })

@@ -440,9 +440,7 @@ export function ChatPage({
     if (!id) return
     setLoadingEarlier(true)
     loadEarlierHistory(id)
-      .catch((error) =>
-        toast.error(error instanceof Error ? error.message : "Couldn't load more."),
-      )
+      .catch((error) => toast.error(error instanceof Error ? error.message : "Couldn't load more."))
       .finally(() => setLoadingEarlier(false))
   }, [id])
   const [historyMissing, setHistoryMissing] = useState<string>()
@@ -530,7 +528,8 @@ export function ChatPage({
     () => modelChanges(thread ?? [], conversation?.modelChanges),
     [thread, conversation?.modelChanges],
   )
-  // Where the host compacted this chat's context: the first message after each carries a divider above it.
+  // Where the host compacted this chat's context: the first message after each carries a divider above
+  // it. One that fell inside a reply is drawn in the reply, where it happened, and not by this.
   const compacted = useMemo(
     () => compactionMarks(thread ?? [], conversation?.compactions),
     [thread, conversation?.compactions],
@@ -1254,6 +1253,11 @@ export function ChatPage({
                           onShowSubagents={showSubagents}
                           subagentsInline={message.id === lastId && drawsInline}
                           blocks={draws.get(message.id)}
+                          // Only a row that draws a seam reads these: a new array on every
+                          // conversation write would wake every row's memo.
+                          compactions={
+                            message.seams?.length ? conversation?.compactions : undefined
+                          }
                         />
                       </MessageScrollerItem>
                     )

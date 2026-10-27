@@ -54,6 +54,7 @@ import { refreshChatProviderUsage } from "@/lib/provider-usage"
 import {
   foldTranscriptDetails,
   liveTurn,
+  summaryRowsOf,
   noteFollowUps,
   patchStats,
   reconcileHistory,
@@ -544,6 +545,7 @@ function transcriptOf(turn: Turn, signal: AbortSignal) {
         source.conversation.hermesSessionId,
         source.user.content,
         signal,
+        summaryRowsOf(source.conversation.compactions),
       )
     } while (read.again)
     return reply
@@ -609,6 +611,7 @@ async function transcriptReader(turn: Turn) {
     draft.reasoningRuns = reply.reasoningRuns
     forgetRuns(draft.id)
     if (reply.content) draft.content = reply.content
+    if (reply.seams?.length) draft.seams = reply.seams
     touch()
   }
 }
