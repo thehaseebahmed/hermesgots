@@ -1,5 +1,8 @@
 # A working row waves and the status line types itself
 
+**Status:** designed, not started. Its tickets are #639 and #640. Nothing here starts until pull
+request #641 — this spec, ADR 0061 and the glossary — merges; gate #642 is the issue that merge closes.
+
 ## Problem Statement
 
 A reply says it is working with a spinner — the same turning ring on the thought row while its
