@@ -525,6 +525,24 @@ test("two calls back to back draw one row above them, holding every stretch", as
     assert.ok(second >= 0, "and the one the second call broke")
     assert.ok(first < second, "in the order they arrived")
     assert.equal(body.match(/first call printed/g)?.length, 1, "each stretch once, not once a row")
+
+    const text = leafWith(box, "I ran both, then answered.")
+    assert.ok(text, "the reply's own words are in that turn")
+    assert.match(
+      rows[0].closest("[data-slot=thinking-line]")?.className ?? "",
+      /\bmb-0\b/,
+      "the row drops the gap under it, so the group meets it",
+    )
+    assert.doesNotMatch(
+      text.closest("[data-slot=markdown]")?.className ?? "",
+      /\bmb-0\b/,
+      "the reply's words keep the gap that stands them off the work",
+    )
+    assert.match(
+      text.closest("[data-slot=message-content]")?.className ?? "",
+      /\bspace-y-3\b/,
+      "and the reply spaces its parts itself, so a part dropping one leaves them touching",
+    )
   })
 })
 

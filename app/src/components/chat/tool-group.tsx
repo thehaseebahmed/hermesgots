@@ -19,7 +19,7 @@ import {
 
 import { StepRail } from "@/components/chat/step-rail"
 import { Details } from "@/components/chat/tool-card"
-import { WorkRow } from "@/components/chat/work-row"
+import { WorkRow, WORK_LABEL_DENT } from "@/components/chat/work-row"
 import { Button } from "@/components/ui/button"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { usePopupDrawer, usePopupForm } from "@/lib/popup-form"
@@ -36,6 +36,7 @@ import {
   type Kind,
   type KindId,
 } from "@/lib/tools"
+import { cn } from "@/lib/utils"
 
 function useElapsed(tool: ToolEvent) {
   const [now, setNow] = useState(() => Date.now())
@@ -92,8 +93,10 @@ function useFittingPhrases(parts: string[], deps: unknown[] = []) {
         taken += child.getBoundingClientRect().width
         siblings++
       }
-      // The row's gap-2 sits between every item, the text included.
-      const room = button.clientWidth - taken - siblings * 8
+      // The row's gap sits between every item, the text included, so each sibling past the label
+      // costs its own width and one gap: `clientWidth` counts the padding the words never get.
+      const gap = parseFloat(getComputedStyle(button).columnGap) || 0
+      const room = button.clientWidth - taken - siblings * gap
       for (let count = parts.length; count > 1; count--) {
         measure.textContent = summary(parts, count)
         if (measure.offsetWidth <= room) return setShown(count)
@@ -326,7 +329,7 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
         </span>
       </WorkRow>
       {failed && (
-        <p className="-mt-2 truncate pb-1 pl-6 text-sm text-destructive">
+        <p className={cn(WORK_LABEL_DENT, "truncate pb-1 text-sm text-destructive")}>
           {failures.length === 1 ? whyFailed(failures[0]) : `${failures.length} calls failed`}
         </p>
       )}
