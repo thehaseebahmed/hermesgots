@@ -426,7 +426,7 @@ _Avoid_: carousel, thumbnails, media strip, lightbox
 
 **Speech-to-text**:
 Speaking a message into Gots instead of typing it. Its voice bar holds the composer's place while it runs, and its words land in the composer when it ends.
-_Avoid_: dictation, voice input, transcription, STT, voice typing, speed-to-text
+_Avoid_: voice input, transcription, STT, voice typing, speed-to-text
 
 **Voice bar**:
 The strip that holds the composer's place during speech-to-text: how long it has been going, how loud the room is, and Stop, Send and Cancel.
@@ -435,6 +435,10 @@ _Avoid_: recorder, overlay, dictation sheet, mic sheet
 **Take**:
 One speech-to-text run as the app holds it — from the tap that starts it to the write that lands its words — one at a time per bot.
 _Avoid_: session, stream, job, recording
+
+**Dictation**:
+One finished take as the log keeps it: the words as they landed in the composer, the bot that heard them, when, how many words and how long they took to say. It is kept on that bot's host and mirrored on the device, which is what the Dictation screen's History lists by month and its Stats count.
+_Avoid_: recording, transcript, entry, voice note
 
 **Piece**:
 The unit a take uploads: one stretch of its recording, cut at a pause or at its length cap, transcribed by the host while the rest is still being spoken.
