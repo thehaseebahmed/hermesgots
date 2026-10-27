@@ -49,6 +49,12 @@ function wordsLabel(words: number) {
   return `${spelledCount(words)} ${words === 1 ? "word" : "words"}`
 }
 
+/** How long the words took to say, to a tenth of a second under a minute. */
+function spokenLabel(ms: number) {
+  const seconds = ms / 1000
+  return `${seconds < 60 ? seconds.toFixed(1) : Math.round(seconds)}s spoken`
+}
+
 export function DictationSettings() {
   const profiles = useLiveQuery(listProfiles, [])
   const [confirmed, setConfirmed] = useState(false)
@@ -255,7 +261,9 @@ function EntrySheet({
             {row.text}
           </p>
           <p className="text-sm text-muted-foreground">
-            {[bot, wordsLabel(row.words), clockOf(row.at)].filter(Boolean).join(" · ")}
+            {[bot, clockOf(row.at), wordsLabel(row.words), spokenLabel(row.ms)]
+              .filter(Boolean)
+              .join(" · ")}
           </p>
           <div className="flex flex-col gap-2">
             <Button variant="outline" className="h-11" data-dictation-copy onClick={() => void copy()}>

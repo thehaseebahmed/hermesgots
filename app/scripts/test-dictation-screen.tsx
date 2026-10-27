@@ -222,6 +222,11 @@ test("a row opens its dictation whole, a Copy that copies it", async () => {
     await click(rows()[0] ?? null)
     await until(async () => Boolean(sheet()), "the dictation's sheet")
     assert.equal(sheet()?.textContent, text, "the sheet holds every word, the line break included")
+    assert.match(
+      find("[data-dictation-text]")?.parentElement?.textContent ?? "",
+      /6\.0s spoken/,
+      "the sheet says how long those words took to say",
+    )
     await click(copyButton())
     await until(async () => copied.length === 1, "the copy")
     assert.deepEqual(copied, [text], "the whole dictation is what went to the clipboard")
