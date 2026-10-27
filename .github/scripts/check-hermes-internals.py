@@ -50,6 +50,13 @@ ANCHORS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
     (("tools/process_registry_notifications.py",), "The subagent did not complete successfully (status="),
     # The nudge a truncated child's transcript is recognized by, on both sides.
     (("agent/context_compressor.py",), "You've reached the maximum number of tool-calling iterations allowed"),
+    # The status markers the app's snapshot check reads an item line by.
+    (("tools/todo_tool.py",), '_STATUS_MARKERS = {"completed": "[x]"'),
+    # The process notices the app draws nothing of, told from a message that names one.
+    (("tools/process_registry_notifications.py",), "[IMPORTANT: Background process "),
+    (("tools/process_registry_notifications.py",), "matched watch pattern"),
+    (("tools/process_registry_notifications.py",), "heartbeat #"),
+    (("tools/process_registry_notifications.py",), "background processes completed."),
 )
 
 # Hermes's own constants, read out of the checkout as they are: they are what the plugin's copies are
@@ -57,11 +64,17 @@ ANCHORS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
 FOOTER_REL = "gateway/run_notifications.py"
 NUDGE_REL = "agent/context_compressor.py"
 NOTICE_REL = "tools/process_registry_notifications.py"
+REPLAY_REL = "agent/context_compressor.py"
+TODO_REL = "tools/todo_tool.py"
+RELOAD_REL = "agent/conversation_compression.py"
 
 CONSTANTS: Tuple[Tuple[str, str, str, str], ...] = (
     (FOOTER_REL, "INTERNAL_NOTIFICATION_FOOTER", "footer", "the machine-provenance footer"),
     (NUDGE_REL, "MAX_ITERATIONS_SUMMARY_REQUEST", "nudge", "the iteration nudge"),
     (NOTICE_REL, "_TRUNCATED_SUMMARY_NOTE", "note", "the truncation note"),
+    (REPLAY_REL, "_INFLIGHT_TASK_REPLAY_HEADER", "replay", "the restatement's header"),
+    (TODO_REL, "TODO_INJECTION_HEADER", "snapshot", "the preserved task list's header"),
+    (RELOAD_REL, "_PRUNED_SKILL_RELOAD_NOTICE_HEADER", "reload", "the reload notice's header"),
 )
 
 # The plugin's copies. Each is compared, character for character, with the value the checkout holds
@@ -76,6 +89,17 @@ COPIES: Tuple[Tuple[str, str, str], ...] = (
     ("ITERATION_NUDGE", "nudge", "the iteration nudge a child's transcript is recognized by"),
 )
 
+APP_SEAM_REL = "app/src/lib/compaction-seam.ts"
+
+# `whole` is how much of the host's text the app's copy carries: the three headers word for word, the
+# notice's body as the opening that tells it from a message quoting the header.
+APP_COPIES: Tuple[Tuple[str, str, str, bool], ...] = (
+    ("REPLAY_HEADER", "replay", "the restatement's header", True),
+    ("TASK_SNAPSHOT_HEADER", "snapshot", "the preserved task list's header", True),
+    ("RELOAD_NOTICE_HEADER", "reload", "the reload notice's header", True),
+    ("RELOAD_NOTICE_BODY", "reloadBody", "the notice's own opening", False),
+)
+
 # The plugin's own half of the names above: a rename here would leave the checks below passing while
 # the plugin stopped reading what they guard.
 PLUGIN_NAMES: Tuple[Tuple[str, str], ...] = (
@@ -84,7 +108,9 @@ PLUGIN_NAMES: Tuple[Tuple[str, str], ...] = (
     ("interrupt_subagent", "core's per-child stop"),
 )
 
-TOTAL = len(ANCHORS) + len(CONSTANTS) + len(COPIES) + len(PLUGIN_NAMES)
+TOTAL = (
+    len(ANCHORS) + len(CONSTANTS) + len(COPIES) + len(APP_COPIES) + len(PLUGIN_NAMES) + 1
+)
 
 _OPENING = re.compile(r"(?:[rRbBuUfF]{0,2})('''|\"\"\"|'|\")")
 _SPACE = " \t\r\n\f\v"
@@ -191,6 +217,43 @@ def _constant(src: str, name: str) -> Optional[str]:
     return "".join(parts) or None
 
 
+def _ts_constant(src: str, name: str) -> Optional[str]:
+    """The text an exported ``const NAME = "..."`` carries, wrapped below the ``=`` or not."""
+    match = re.search(r"(?m)^export const " + re.escape(name) + r"\s*=\s*", src)
+    if not match:
+        return None
+    pos = match.end()
+    while pos < len(src) and src[pos] in _SPACE:
+        pos += 1
+    piece = _read_string(src, pos)
+    return piece[0] if piece else None
+
+
+def _ts_strings(src: str, name: str) -> Optional[List[str]]:
+    """The strings an exported ``const NAME = ["a", "b"]`` holds."""
+    match = re.search(r"(?m)^export const " + re.escape(name) + r"\s*=\s*\[", src)
+    if not match:
+        return None
+    end = src.find("]", match.end())
+    if end < 0:
+        return None
+    body, pos, out = src[match.end():end], 0, []
+    while True:
+        while pos < len(body) and body[pos] not in "\"'":
+            pos += 1
+        piece = _read_string(body, pos)
+        if piece is None:
+            return out or None
+        text, pos = piece
+        out.append(text)
+
+
+def _todo_markers(src: str) -> Optional[List[str]]:
+    """The bracket characters a task item's status is printed in, one per marker."""
+    found = re.findall(r'"\w+": "\[([^\]])\]"', src)
+    return found or None
+
+
 def _status_mark(src: str) -> Optional[str]:
     """The Status line's truncation suffix, which core appends inline rather than naming."""
     match = re.search(r'"(\s*\[TRUNCATED:[^"\n]*max_iterations[^"\n]*\])"', src)
@@ -295,6 +358,14 @@ def main(argv: List[str]) -> int:
     derive("mark", NOTICE_REL, notice, _status_mark, "the Status line's truncation mark")
     for rel, name, key, what in CONSTANTS:
         derive(key, rel, sourced(rel), lambda src, name=name: _constant(src, name), what)
+    derive(
+        "reloadBody",
+        RELOAD_REL,
+        sourced(RELOAD_REL),
+        lambda src: _joined(src, '"The task list above crossed'),
+        "the reload notice's own opening",
+    )
+    derive("markers", TODO_REL, sourced(TODO_REL), _todo_markers, "the status markers an item prints")
 
     # The plugin side: the same names, and the same sentences.
     delegation = plugin / "delegation.py"
@@ -322,6 +393,55 @@ def main(argv: List[str]) -> int:
                 failures.append(
                     f"plugin:delegation.py: {constant} ({what}) is not what hermes:{rel} writes — "
                     f"hermes {expected!r} plugin {value!r}"
+                )
+
+    seam = read(plugin.parent / APP_SEAM_REL)
+    if seam is None:
+        failures.append(f"app:{APP_SEAM_REL}: missing file")
+    else:
+
+        def app_pair(constant: str, key: str, what: str) -> Optional[Tuple[str, str, str]]:
+            """The app's copy, the host's text and the file it came from: ``None`` once reported."""
+            value = _ts_constant(seam, constant)
+            if value is None:
+                failures.append(f"app:{APP_SEAM_REL}: missing constant {constant} ({what})")
+                return None
+            if key not in derived:
+                failures.append(
+                    f"app:{APP_SEAM_REL}: {constant} ({what}) compares against unknown check {key!r}"
+                )
+                return None
+            expected, rel = derived[key]
+            return value, expected, rel
+
+        for constant, key, what, whole in APP_COPIES:
+            pair = app_pair(constant, key, what)
+            if not pair:
+                continue
+            value, expected, rel = pair
+            held = _canonical(value) == _canonical(expected) if whole else (
+                _canonical(expected).startswith(_canonical(value))
+            )
+            if not held:
+                failures.append(
+                    f"app:{APP_SEAM_REL}: {constant} ({what}) "
+                    f"{'is not' if whole else 'does not open'} what hermes:{rel} writes — "
+                    f"hermes {expected!r} app {value!r}"
+                )
+
+        marks = _ts_strings(seam, "SNAPSHOT_MARKERS")
+        if marks is None:
+            failures.append(f"app:{APP_SEAM_REL}: missing SNAPSHOT_MARKERS (an item's status markers)")
+        elif "markers" not in derived:
+            failures.append(
+                f"app:{APP_SEAM_REL}: SNAPSHOT_MARKERS compares against unknown check 'markers'"
+            )
+        else:
+            expected_marks, rel = derived["markers"]
+            if sorted(marks) != sorted(list(expected_marks) + ["?"]):
+                failures.append(
+                    f"app:{APP_SEAM_REL}: SNAPSHOT_MARKERS (an item's status markers) is not what "
+                    f"hermes:{rel} prints — hermes {sorted(expected_marks)!r} app {sorted(marks)!r}"
                 )
 
     if failures:

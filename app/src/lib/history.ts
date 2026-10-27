@@ -19,6 +19,7 @@ import { actionOf, batchWords, controlWords, DELEGATE_TOOL, spawnStamp } from "@
 import { labelComparable, primaryArg, TODO_TOOLS } from "@/lib/tool-preview"
 import { isSubagentResult } from "@/lib/subagent-results.ts"
 import { isWakePrompt } from "@/lib/wake-prompt.ts"
+import { isSeamScaffolding, seamDrawnContent, seamText } from "@/lib/compaction-seam"
 import { mayHoldArchive, nextWindow, type WindowCursor } from "@/lib/history-window"
 
 /**
@@ -213,6 +214,8 @@ function afterNotice(fragment: string, next: string, notice: string) {
   return fragment + gap + part
 }
 
+const dropsFromThread = (row: SessionMessage) => isSubagentResult(row) || isSeamScaffolding(row)
+
 /**
  * Folds each turn's assistant, tool-call and tool rows into one reply, as streaming shows it. With
  * `live` (a turn still running), a call without its result row stays `running`.
@@ -265,14 +268,14 @@ export function toMessages(
       continue
     }
     if (row.role === "user") {
-      // A subagent's delivery is bookkeeping, not a message: the thread draws nothing for it, so it
-      // closes no reply and starts no turn, and its finding is read in the subagent's sub-thread.
-      if (isSubagentResult(row)) continue
+      // A subagent's finding is read in the sub-thread a tap opens, and a compaction's notes are the
+      // model's own input: neither is a message here, so neither closes a reply or starts a turn.
+      if (dropsFromThread(row)) continue
       reply = undefined
       // The wake run's input is the model's own, never the user's: it draws no message of its own,
       // and the reply it closes is what makes the wake turn's answer a message of its own.
       if (isWakePrompt(row)) continue
-      const { text, attachments } = splitAttachments(row.content ?? "")
+      const { text, attachments } = splitAttachments(seamDrawnContent(row))
       messages.push({
         id,
         conversationId,
@@ -518,9 +521,11 @@ export async function liveTurn(
     })
     for (const row of batch) rows.set(row.id, row)
     const sorted = [...rows.values()].sort((a, b) => a.id - b.id)
-    // The row carries the attachments' lines after the text the user typed.
+    // The row carries the attachments' lines after the text the user typed, and a compaction
+    // restates the request under its header: both are the same turn.
     const start = sorted.findLastIndex(
-      (row) => isTurnStart(row) && splitAttachments(row.content ?? "").text === userContent,
+      (row) =>
+        isTurnStart(row) && splitAttachments(seamText(row.content ?? "")).text === userContent,
     )
     if (start >= 0)
       return toMessages("", sessionId, sorted.slice(start), { live: true }).find(
@@ -622,7 +627,7 @@ const isTurnStart = (row: SessionMessage) =>
   row.display_kind !== "hidden" &&
   !isSteer(row) &&
   !isNotice(row) &&
-  !isSubagentResult(row)
+  !dropsFromThread(row)
 
 const isStreaming = (messages: Message[]) => messages.some((m) => m.status === "streaming")
 
@@ -753,6 +758,17 @@ async function runningOnHost(config: HermesConfig, sessionId: string) {
   return Boolean((await readLiveRuns(config))?.runIds[sessionId])
 }
 
+/**
+ * A message this device drew for the seam outlives the fold that stopped drawing it, and no turn above
+ * ever visits it: dropped here, on the catch-up that runs whether or not the host has written since.
+ */
+async function scrubSeamBubbles(local: Message[], sessionId: string) {
+  const stale = local.filter(
+    (m) => m.role === "user" && rowIdOf(m, sessionId) !== undefined && isSeamScaffolding(m),
+  )
+  if (stale.length) await db.messages.bulkDelete(stale.map((m) => m.id))
+}
+
 async function reconcile(conversationId: string) {
   const conversation = await db.conversations.get(conversationId)
   if (!conversation) return 0
@@ -762,6 +778,7 @@ async function reconcile(conversationId: string) {
   // The streaming reply catches up when it ends.
   if (isStreaming(local)) return null
   const sessionId = conversation.hermesSessionId
+  await scrubSeamBubbles(local, sessionId)
   const tip = local.length ? conversation.hermesTip : undefined
   if (tip !== undefined) {
     const [newest] = await listSessionMessages(config, sessionId, { limit: 1, offset: 0 })
@@ -835,6 +852,14 @@ async function reconcile(conversationId: string) {
           writes.push({ ...reply, createdAt, ...mergedRuns(reply, local) })
           floor = createdAt + 1
         }
+        // A device that drew the seam row before the fold read it keeps that text: the row folds to
+        // the user's request now, so the message follows the fold rather than staying as it was.
+        if (seen.content !== user.content)
+          writes.push({
+            ...seen,
+            content: user.content,
+            ...(user.attachments?.length ? { attachments: user.attachments } : {}),
+          })
         continue
       }
       const at = user.hermesRowId !== undefined ? hostAt.get(user.hermesRowId) : undefined

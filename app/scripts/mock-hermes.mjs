@@ -5458,10 +5458,16 @@ http
           session_id: sessionId,
           timestamp: Date.now() / 1000,
           role: "user",
-          content:
-            "[Your active task list was preserved across context compression]\n" +
-            "Reload the skills listed below before acting on these tasks.",
-          display_kind: "hidden",
+          // The host ships this row as a plain `user` row: its synthetic flag never reaches the
+          // store, so no `display_kind` marks it and the app must read the seam off the text.
+          content: [
+            "[Your active task list was preserved across context compression]",
+            "- [>] 4. Compaction note row (in_progress)",
+            "",
+            "[Skills pruned during compression — reload before acting on these tasks]",
+            "The task list above crossed the compression boundary verbatim, but the skill " +
+              "instructions that governed it were pruned.",
+          ].join("\n"),
         },
         ...copies,
       ])

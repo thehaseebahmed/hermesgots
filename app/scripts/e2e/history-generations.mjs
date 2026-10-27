@@ -3,6 +3,11 @@
 // end up with each turn once — the whole sequence showing twice is what a user sees as their messages
 // repeating, with the carried turns landing around the messages they sent since.
 import { app, assert, flow, mock, pass, runId } from "./lib.mjs"
+import {
+  RELOAD_NOTICE_BODY,
+  RELOAD_NOTICE_HEADER,
+  TASK_SNAPSHOT_HEADER,
+} from "../../src/lib/compaction-seam.ts"
 
 const auth = { Authorization: "Bearer mock-key", "Content-Type": "application/json" }
 
@@ -117,4 +122,11 @@ await flow("history-generations", async ({ page, seed, until, shot }) => {
   for (const text of ["first turn's work", "second turn's work"])
     assert.equal(drawn.split(text).length - 1, 1, `"${text}" is drawn once: ${drawn.slice(-400)}`)
   pass("a compaction the device already showed leaves its turns shown once")
+  // Read off the thread the fold wrote, not the DOM: a redraw a paint late would pass by accident.
+  for (const note of [TASK_SNAPSHOT_HEADER, RELOAD_NOTICE_HEADER, RELOAD_NOTICE_BODY])
+    assert.ok(
+      !after.some((m) => m.text.includes(note)),
+      `the compaction's own note draws no message: ${summary}`,
+    )
+  pass("the compaction's own notes draw nothing in the thread")
 })

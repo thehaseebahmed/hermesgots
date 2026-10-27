@@ -1287,6 +1287,59 @@ The constant also now lives in three places: the component, the browser flow's a
 - Why it is risky: moving the list into a portal changes focus retention and the
   `aria-controls`/`aria-activedescendant` wiring the inline element gets for free.
 
+### 2. The note a compaction writes into the transcript renders as the user's own message
+
+**Applied since.** The fold reads the three headers Hermes writes at the boundary off a `user` row's
+text, and each counts only with the payload the host writes under it — an item line, the notice's
+body, the restated request — so a message quoting the host's words stays the user's. A row carrying
+nothing but those notes draws nothing, closes nothing and starts no turn; a row restating the
+in-flight request draws only that request. A device that had already drawn the bubble keeps it no
+longer: catch-up drops a message held for a row that folds to nothing and rewrites one that drew a
+restatement's header. The rule is `app/src/lib/compaction-seam.ts`, its sentences and the markers its
+snapshot items are read by both pinned and both held to Hermes's own constants by
+`hermes-internals-drift.yml`; `scripts/test-compaction-seam.mjs` drives it, `test-compaction-seam.tsx`
+the fold and that repair, and `history-generations` asserts both notes draw nothing in a browser. One
+residual is left: a user who types the whole of the host's prose *and* its payload loses that message,
+or who pastes a snapshot with text of their own below it, which is the cost of matching text where
+Hermes stores no flag.
+
+Hermes marks the seam a compaction leaves with a row addressed to the model — "the active task list was
+preserved", "still in progress" — stored as a `user` row. `isNotice` (`app/src/lib/history.ts:192`)
+recognises only the `[System:` form, so a turn-start row like this one is neither skipped nor folded:
+`toMessages` maps it to a user message and the thread draws it in a user bubble, exactly as the
+reporter's screenshot shows between the two copies of the same turn sequence. It is not text the user
+typed, and it is the one row in the thread that no device ever sent.
+
+- Cost: a long chat that has been compacted shows a message in the user's own voice that they never
+  wrote, at the seam where their turns were carried across — and, because it starts a turn, it can
+  also take a reply's place in the thread's ordering until a real turn follows it.
+- Suggested fix: widen the notice rule to the shapes Hermes writes for a session-internal seam (the
+  `[System:` rows it already knows, and the task-list preservation note), keeping it a predicate over
+  the row's text so nothing else changes; `history-generations` then asserts the marker is not drawn
+  as a user message, which is the case a compaction flow can hold.
+- Why it is risky: it decides what a user is allowed to see of Hermes's own bookkeeping, and the
+  widening has to be exact — a rule loose enough to catch the note could swallow a message a user
+  really began with a bracket. The flow's mock would have to emit Hermes's real wording rather than a
+  paraphrase, since the match is textual.
+
+### 3. A restatement can draw the request it restates a second time
+
+The host drops the restated row's timestamp on purpose, so `carried` — the pairing added for the
+re-emitted compaction rows, which matches a copy to the turn it repeats by time — cannot recognise it.
+When the device already holds the original request's row and the transcript also carries the
+restatement, both fold to a message and the thread draws the same request twice.
+
+- Cost: a chat compacted while a turn was in flight shows that turn's request as two consecutive user
+  messages. It is smaller than what it replaces (the restated row drew the whole note, header and
+  all), and it is not this branch's doing: the copy existed as a note before, and only its text is
+  better now.
+- Suggested fix: pair a restatement to the message it repeats by the request it carries, limited to rows
+  that open with the replay header — so a user who sends the same words twice is untouched — and drop
+  the copy rather than the original.
+- Why it is not applied here: no repro beyond a hand-built pairing, and a pairing rule that guesses
+  wrong deletes a message the user sent, which is the failure this branch exists to stop. It wants its
+  own change and its own red loop against a real transcript.
+
 ## Not entries
 
 - **The e2e restates the layout numbers** (`288`, `520 * 0.5` against `SCREEN_SHARE = 0.45`), so the
@@ -1509,7 +1562,8 @@ The diagnosis of the duplicated and misplaced turns in a long chat separated two
 fixed on the branch that recorded it: Hermes's compaction re-emits the carried tail under fresh row
 ids, and catch-up adopted each copy as a new turn, so a turn the device already had was appended
 again. The other is how a message reaches the middle of a turn at all — a plain send while a reply is
-live is stored as a *steer*, and the composer decides which it is from one local flag.
+live is stored as a *steer*, and the composer decides which it is from one local flag. One of the two
+findings below is applied since; what it cost while it stood is kept with it.
 
 ## Risky
 
@@ -1546,27 +1600,6 @@ report.
   "the run is live" from "the user asked to steer". No flow sends while a stop is taking effect, so
   one has to be written with it.
 
-### 2. The note a compaction writes into the transcript renders as the user's own message
-
-Hermes marks the seam a compaction leaves with a row addressed to the model — "the active task list was
-preserved", "still in progress" — stored as a `user` row. `isNotice` (`app/src/lib/history.ts:192`)
-recognises only the `[System:` form, so a turn-start row like this one is neither skipped nor folded:
-`toMessages` maps it to a user message and the thread draws it in a user bubble, exactly as the
-reporter's screenshot shows between the two copies of the same turn sequence. It is not text the user
-typed, and it is the one row in the thread that no device ever sent.
-
-- Cost: a long chat that has been compacted shows a message in the user's own voice that they never
-  wrote, at the seam where their turns were carried across — and, because it starts a turn, it can
-  also take a reply's place in the thread's ordering until a real turn follows it.
-- Suggested fix: widen the notice rule to the shapes Hermes writes for a session-internal seam (the
-  `[System:` rows it already knows, and the task-list preservation note), keeping it a predicate over
-  the row's text so nothing else changes; `history-generations` then asserts the marker is not drawn
-  as a user message, which is the case a compaction flow can hold.
-- Why it is risky: it decides what a user is allowed to see of Hermes's own bookkeeping, and the
-  widening has to be exact — a rule loose enough to catch the note could swallow a message a user
-  really began with a bracket. The flow's mock would have to emit Hermes's real wording rather than a
-  paraphrase, since the match is textual.
-
 ## Not entries
 
 - **A carried row Hermes didn't stamp with a time** (`history.ts:706`, `:737`) is added as it always
@@ -1579,14 +1612,15 @@ typed, and it is the one row in the thread that no device ever sent.
 
 Found while diagnosing the duplicated and misplaced turns in a long chat, against the reporter's own
 transcript (its rows carry the re-emitted compaction generations). The duplication is fixed on that
-branch; the two below are not, and the steer-as-a-plain-send model the first sits inside is the user's
-setting rather than a defect. Both came out of reading the same transcript and a review of the fix
-rather than from a repro of their own: what is verified is the shape above — one local status decides
-the send's kind and a stop leaves it set, and a seam row Hermes writes as a `user` note is drawn as the
-user's message — read in the tree and matched against the transcript and the reporter's screenshot. The
-four chat flows (`chat-message`, `reattach`, `history-pages` and the branch's new `history-generations`)
-all pass, and none of them stops a reply and sends in the same breath, or asserts what a compaction's
-seam row looks like.
+branch, the seam note since (above), the second copy a restatement can draw still to do; the steer
+below is not, and the steer-as-a-plain-send model it sits inside is the user's setting rather than a
+defect. They came out of reading the same transcript and a review of the fix rather than from a repro
+of their own: what is verified is the shape above —
+one local status decides the send's kind and a stop leaves it set — read in the tree and matched
+against the transcript and the reporter's screenshot. The four chat flows (`chat-message`,
+`reattach`, `history-pages` and the branch's new `history-generations`) all pass, and none of them
+stops a reply and sends in the same breath; what a compaction's seam row draws is asserted by
+`history-generations` since the note fix.
 
 # Deferred from the code review on the MCP tab
 
