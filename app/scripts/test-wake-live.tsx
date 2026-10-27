@@ -101,3 +101,13 @@ test("a later turn of another device does not become this turn's reply", async (
   const reply = await liveTurn(server, "s", REQUEST)
   assert.equal(reply?.content, "This turn's work")
 })
+
+test("a turn with no reply written yet reads as nothing, not as the next turn's reply", async () => {
+  next = 0
+  serve([
+    row("user", REQUEST),
+    row("user", "Sent from another device"),
+    ...withCall("patch", "That turn's work"),
+  ])
+  assert.equal(await liveTurn(server, "s", REQUEST), undefined)
+})
