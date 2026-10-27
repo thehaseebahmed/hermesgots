@@ -1,15 +1,10 @@
 // The agent's todo list shows above the composer while the reply that wrote it still runs, whether
 // the app follows the run's events or (a Hermes whose events stream the browser can't read) the
 // transcript.
-import { app, assert, flow, pass } from "./lib.mjs"
+import { assert, flow, pass } from "./lib.mjs"
 
-await flow("todos", async ({ page, until, shot }) => {
-  const chatId = await page.evaluate(async () => {
-    const { db, createConversation } = await import("/src/lib/db.ts")
-    const profile = (await db.profiles.toArray())[0]
-    return (await createConversation(profile.id, { title: "Todos" })).id
-  })
-  await page.goto(`${app}/c/${chatId}`)
+await flow("todos", async ({ page, newChat, until, shot }) => {
+  const chatId = await newChat({ title: "Todos" })
   await page.evaluate(async (id) => {
     const { sendMessage } = await import("/src/lib/chat.ts")
     void sendMessage(id, "plan where the disk space went")

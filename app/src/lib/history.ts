@@ -1,12 +1,5 @@
 import { serverConfig } from "@/lib/connection"
-import {
-  db,
-  getMessages,
-  updateConversation,
-  type Conversation,
-  type Message,
-  type ToolEvent,
-} from "@/lib/db"
+import { db, getMessages, type Conversation, type Message, type ToolEvent } from "@/lib/db"
 import { CLOCK_SLACK_MS, refreshQueue } from "@/lib/chat"
 import { FOLLOW_UP_MS, JUST_FOLLOWED_UP_MS, READ_TIMEOUT_MS } from "@/lib/freshness"
 import { quietly } from "@/lib/report"
@@ -16,12 +9,8 @@ import { refreshChatProviderUsage } from "@/lib/provider-usage"
 import { refreshMoves } from "@/lib/moves"
 import { refreshTodos } from "@/lib/todos"
 import { refreshLibrary, refreshPrs, refreshWorkspace } from "@/lib/workspace"
-import {
-  getSessionTitle,
-  listSessionMessages,
-  type HermesConfig,
-  type SessionMessage,
-} from "@/lib/hermes"
+import { listSessionMessages, type HermesConfig, type SessionMessage } from "@/lib/hermes"
+import { takeHostTitle } from "@/lib/title"
 import { splitAttachments } from "@/lib/attachment-text"
 import { appendThinking, carrySpans } from "@/lib/thinking"
 import { readLiveRuns } from "@/lib/waiting"
@@ -551,17 +540,15 @@ async function connection(conversation: Conversation) {
 const reconciling = new Map<string, Promise<number>>()
 
 /**
- * Pulls Hermes's auto-generated session title into the chat, the same way `syncTitle` in
- * `chat.ts` does after a local turn. A long-running turn (a code session) may finish on
- * Hermes after the app closed; without this, the first-line slice stays forever.
+ * Pulls Hermes's auto-generated session title into the chat, as a turn's own checks and the live
+ * stream do. A long-running turn (a code session) may finish on Hermes after the app closed;
+ * without this, the first-line slice stays forever.
  */
 async function refreshTitle(conversationId: string) {
   const conversation = await db.conversations.get(conversationId)
   if (!conversation || conversation.titleEdited) return
   const config = await connection(conversation)
-  if (!config) return
-  const title = await getSessionTitle(config, conversation.hermesSessionId)
-  if (title && title !== conversation.title) await updateConversation(conversationId, { title })
+  if (config) await takeHostTitle(conversationId, config, conversation.hermesSessionId)
 }
 
 const followedUp = new Map<string, number>()

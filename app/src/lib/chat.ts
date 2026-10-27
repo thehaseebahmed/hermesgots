@@ -25,7 +25,6 @@ import {
   followRun,
   getRun,
   getQueue,
-  getSessionTitle,
   hasPluginFeature,
   triageMessage,
   HermesError,
@@ -59,7 +58,6 @@ import {
   patchStats,
   reconcileHistory,
 } from "@/lib/history"
-import { isLive } from "@/lib/live"
 import { unknownLastTurn } from "@/lib/model-changes"
 import { botModel, hostChoice, modelInfoFor } from "@/lib/model-info"
 import {
@@ -73,6 +71,7 @@ import {
   wantsPin,
 } from "@/lib/model-pick"
 import { refreshMoves } from "@/lib/moves"
+import { takeHostTitle } from "@/lib/title"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { appendThinking, closeRun, forgetRuns, noteRunThinking } from "@/lib/thinking"
 import { quietly } from "@/lib/report"
@@ -117,8 +116,13 @@ const STREAM_POLL_MS = 10_000
 const PLUGIN_SETTLE_MS = 1500
 /** Hermes upgrades a placeholder title on later turns, up to the third. */
 const TITLED_TURNS = 3
-/** Hermes titles with a model call in the background, which can land after the reply ends. */
-const TITLE_CHECKS_MS = [0, 3000, 10000]
+/**
+ * When after a turn the host's title is read again while the chat still holds another one: Hermes
+ * titles with a model call in the background, which can land whenever — a slow call, a busy host.
+ * The checks run whatever the host streams: a plugin too old to log its `title` events sends them
+ * only to the streams open at that moment, so a device that was away has nothing to replay.
+ */
+const TITLE_RECHECKS_MS = [3000, 10_000, 30_000, 90_000]
 /** A reply whose connection gave up is followed again after these waits, the last one repeating. */
 const REATTACH_MS = [2_000, 5_000, 15_000, 30_000, 60_000]
 const controllers = new Map<string, AbortController>()
@@ -134,18 +138,14 @@ function titleFrom(text: string) {
   return line.length > 48 ? `${line.slice(0, 47).trimEnd()}…` : line || "New chat"
 }
 
-/** Swaps the first-line title for the one Hermes generated, unless the user renamed the chat. */
 async function syncTitle(conversationId: string, config: HermesConfig, sessionId: string) {
-  for (const delay of TITLE_CHECKS_MS) {
-    if (delay) {
-      // A server that streams its changes says when the title lands.
-      if (isLive(config)) return
-      await new Promise((resolve) => window.setTimeout(resolve, delay))
-    }
-    const title = await getSessionTitle(config, sessionId)
-    const conversation = await db.conversations.get(conversationId)
-    if (!conversation || conversation.titleEdited) return
-    if (title && title !== conversation.title) await updateConversation(conversationId, { title })
+  if (await takeHostTitle(conversationId, config, sessionId)) return
+  const started = Date.now()
+  for (const delay of TITLE_RECHECKS_MS) {
+    // Offsets from the turn, not waits between the checks.
+    const wait = started + delay - Date.now()
+    if (wait > 0) await new Promise((resolve) => window.setTimeout(resolve, wait))
+    if (await takeHostTitle(conversationId, config, sessionId)) return
   }
 }
 

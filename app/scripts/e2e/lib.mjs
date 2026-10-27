@@ -8,6 +8,8 @@ import { statfsSync } from "node:fs"
 export { assert }
 export const app = process.env.APP_URL ?? "http://127.0.0.1:15173"
 export const mock = process.env.MOCK_URL ?? "http://127.0.0.1:18642"
+/** The Gots plugin's change stream, as the app opens it. */
+export const eventsUrl = /\/events(?:\?|$)/
 const shots = process.env.SHOTS_DIR
 const headed = process.env.E2E_HEADED === "1"
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? "playwright")
@@ -79,7 +81,7 @@ export async function settleNav(page) {
   const cdp = await page.context().newCDPSession(page)
   await cdp.send("Network.enable")
   await cdp.send("Network.setCacheDisabled", { cacheDisabled: true })
-  const streams = /\/events(?:\?|$)/
+  const streams = eventsUrl
   // What must land before the next navigation is the module graph — code the page asked for. A
   // bot's picture, a host probe or an API read is not part of it, and several of those never settle
   // client-side at all, so waiting on one burns the whole cap and delays every case for nothing.
@@ -369,6 +371,19 @@ function helpers(page) {
         )
       }, chats)
     },
+    /**
+     * Starts a chat of its own and opens it, so a flow never sends into whichever one the app
+     * restored; `{ title }` names it, and its id is the answer.
+     */
+    async newChat({ title } = {}) {
+      const id = await page.evaluate(async (named) => {
+        const { createConversation, db } = await import("/src/lib/db.ts")
+        const profile = (await db.profiles.toArray())[0]
+        return (await createConversation(profile.id, named ? { title: named } : undefined)).id
+      }, title ?? null)
+      await page.goto(`${app}/c/${id}`)
+      return id
+    },
     /** Types into the composer and sends. */
     async send(text) {
       await composer.fill(text)
@@ -484,16 +499,15 @@ export const mockAuth = {
   Authorization: "Bearer mock-key",
 }
 
+/** Posts to one of the mock's own routes, as a flow sets a host's state up. */
+export const mockPost = (path, body = {}) =>
+  fetch(`${mock}${path}`, { method: "POST", headers: mockAuth, body: JSON.stringify(body) })
+
 /**
  * Compresses a chat on the mock: Hermes rotates `session` onto `child`, as it does mid-run, and
  * keys what comes after on the child. Answers the mock's response, so a flow can assert it took.
  */
-export const compress = (session, child) =>
-  fetch(`${mock}/__mock/compress`, {
-    method: "POST",
-    headers: mockAuth,
-    body: JSON.stringify({ session, child }),
-  })
+export const compress = (session, child) => mockPost("/__mock/compress", { session, child })
 
 /**
  * Creates a project on the mock and waits for the clone to land, so its screen offers the options

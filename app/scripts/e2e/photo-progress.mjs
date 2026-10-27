@@ -1,14 +1,9 @@
 // A message sent with a photo shows the reply's progress (its tool calls) while it runs, on a Hermes
 // whose events stream the browser can't read, so the app follows the turn in the transcript.
-import { app, assert, flow, pass } from "./lib.mjs"
+import { assert, flow, pass } from "./lib.mjs"
 
-await flow("photo-progress", async ({ page, until, shot }) => {
-  const chatId = await page.evaluate(async () => {
-    const { db, createConversation } = await import("/src/lib/db.ts")
-    const profile = (await db.profiles.toArray())[0]
-    return (await createConversation(profile.id, { title: "Photo" })).id
-  })
-  await page.goto(`${app}/c/${chatId}`)
+await flow("photo-progress", async ({ page, newChat, until, shot }) => {
+  const chatId = await newChat({ title: "Photo" })
   await page.evaluate(async (id) => {
     const { prepareAttachment } = await import("/src/lib/attachments.ts")
     const { sendMessage } = await import("/src/lib/chat.ts")

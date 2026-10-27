@@ -1290,11 +1290,12 @@ export async function checkHealth(config: HermesConfig, signal?: AbortSignal) {
 export async function getSessionTitle(
   config: HermesConfig,
   sessionId: string,
+  signal?: AbortSignal,
 ): Promise<string | undefined> {
   try {
     const response = await request(
       `${serverRoot(config.baseUrl)}/api/sessions/${encodeURIComponent(sessionId)}`,
-      { headers: headers(config) },
+      { headers: headers(config), signal },
     )
     const body = await response.json()
     const title = body?.session?.title

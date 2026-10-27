@@ -5,16 +5,11 @@ import { MISSING_ROUTE_MS } from "@/lib/freshness"
 import { quietly } from "@/lib/report"
 import { connectionKey, serverConfig } from "@/lib/connection"
 import { cooldown } from "@/lib/cooldown"
-import { db, getSettings, updateConversation, type Profile } from "@/lib/db"
-import {
-  followEvents,
-  getPluginFeatures,
-  getSessionTitle,
-  HermesError,
-  type HermesConfig,
-} from "@/lib/hermes"
+import { db, getSettings, type Profile } from "@/lib/db"
+import { followEvents, getPluginFeatures, HermesError, type HermesConfig } from "@/lib/hermes"
 import { reconcileHistory } from "@/lib/history"
 import { markResume } from "@/lib/resume-trace"
+import { takeHostTitle } from "@/lib/title"
 import { syncChatsOf, syncNow } from "@/lib/sync"
 
 /**
@@ -191,14 +186,8 @@ function catchUpAll(key: string) {
 
 async function applyTitle(key: string, sessionId: unknown) {
   for (const chat of await chatsFor(key, sessionId)) {
-    if (chat.titleEdited) continue
     const bot = profiles.find((p) => p.id === chat.profileId)
-    if (!bot) continue
-    const title = await getSessionTitle(bot, chat.hermesSessionId)
-    const current = await db.conversations.get(chat.id)
-    if (title && current && !current.titleEdited && current.title !== title) {
-      await updateConversation(chat.id, { title })
-    }
+    if (bot) await takeHostTitle(chat.id, bot, chat.hermesSessionId)
   }
 }
 
