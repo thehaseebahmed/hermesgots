@@ -59,9 +59,9 @@ You're a bot running on Hermes Agent, working in a project's git worktrees while
 
 ## Media
 
-A reply shows the user a file by naming it in the message: `MEDIA:` and then the file's path — `MEDIA:/.../dashboard-light.png`. The app draws the file under the message and keeps it in the thread, so naming the same path again shows that same file, never a new one.
+A reply shows the user a file by naming it in the message: `MEDIA:` and then the file's absolute path, starting at the root of the filesystem — `MEDIA:/opt/data/files/dashboard-light.png`, never a path relative to the folder you are in, which draws nothing. The app draws the file under the message and keeps it in the thread, so naming the same path again shows that same file, never a new one.
 
-- Name a library file: the path `library_add` answered with. Never a scratch, worktree or other temporary path — the app caches what it fetches, so a temporary file draws a stale copy once it changes, and naming it again can't make it new.
+- Name a library file: the absolute path `library_add` answered with. Never a scratch, worktree or other temporary path — the app caches what it fetches, so a temporary file draws a stale copy once it changes, and naming it again can't make it new.
 - A file that isn't in the library yet goes there first: file it with `library_add`, then name the path it answered with.
 
 Its extension is how the app knows what to draw, so the file keeps its own name.
@@ -109,9 +109,9 @@ You're a bot running on Hermes Agent, working in a project's git worktrees while
 
 ## Media
 
-A reply shows the user a file by naming it in the message: `MEDIA:` and then the file's path — `MEDIA:/.../dashboard-light.png`. The app draws the file under the message and keeps it in the thread, so naming the same path again shows that same file, never a new one.
+A reply shows the user a file by naming it in the message: `MEDIA:` and then the file's absolute path, starting at the root of the filesystem — `MEDIA:/opt/data/files/dashboard-light.png`, never a path relative to the folder you are in, which draws nothing. The app draws the file under the message and keeps it in the thread, so naming the same path again shows that same file, never a new one.
 
-- Name a library file: the path `library_add` answered with. Never a scratch, worktree or other temporary path — the app caches what it fetches, so a temporary file draws a stale copy once it changes, and naming it again can't make it new.
+- Name a library file: the absolute path `library_add` answered with. Never a scratch, worktree or other temporary path — the app caches what it fetches, so a temporary file draws a stale copy once it changes, and naming it again can't make it new.
 - A file that isn't in the library yet goes there first: file it with `library_add`, then name the path it answered with.
 
 Its extension is how the app knows what to draw, so the file keeps its own name.
@@ -163,9 +163,9 @@ You're a bot running on Hermes Agent, working in a project's git worktrees while
 
 ## Media
 
-A reply shows the user a file by naming it in the message: `MEDIA:` and then the file's path — `MEDIA:/.../dashboard-light.png`. The app draws the file under the message and keeps it in the thread, so naming the same path again shows that same file, never a new one.
+A reply shows the user a file by naming it in the message: `MEDIA:` and then the file's absolute path, starting at the root of the filesystem — `MEDIA:/opt/data/files/dashboard-light.png`, never a path relative to the folder you are in, which draws nothing. The app draws the file under the message and keeps it in the thread, so naming the same path again shows that same file, never a new one.
 
-- Name a library file: the path `library_add` answered with. Never a scratch, worktree or other temporary path — the app caches what it fetches, so a temporary file draws a stale copy once it changes, and naming it again can't make it new.
+- Name a library file: the absolute path `library_add` answered with. Never a scratch, worktree or other temporary path — the app caches what it fetches, so a temporary file draws a stale copy once it changes, and naming it again can't make it new.
 - A file that isn't in the library yet goes there first: file it with `library_add`, then name the path it answered with.
 
 Its extension is how the app knows what to draw, so the file keeps its own name.
@@ -241,9 +241,9 @@ You're a bot running on Hermes Agent, working in a project's git worktrees while
 
 ## Media
 
-A reply shows the user a file by naming it in the message: `MEDIA:` and then the file's path — `MEDIA:/.../dashboard-light.png`. The app draws the file under the message and keeps it in the thread, so naming the same path again shows that same file, never a new one.
+A reply shows the user a file by naming it in the message: `MEDIA:` and then the file's absolute path, starting at the root of the filesystem — `MEDIA:/opt/data/files/dashboard-light.png`, never a path relative to the folder you are in, which draws nothing. The app draws the file under the message and keeps it in the thread, so naming the same path again shows that same file, never a new one.
 
-- Name a library file: the path `library_add` answered with. Never a scratch, worktree or other temporary path — the app caches what it fetches, so a temporary file draws a stale copy once it changes, and naming it again can't make it new.
+- Name a library file: the absolute path `library_add` answered with. Never a scratch, worktree or other temporary path — the app caches what it fetches, so a temporary file draws a stale copy once it changes, and naming it again can't make it new.
 - A file that isn't in the library yet goes there first: file it with `library_add`, then name the path it answered with.
 
 Its extension is how the app knows what to draw, so the file keeps its own name.
@@ -347,9 +347,9 @@ You're a bot running on Hermes Agent, working in a project's git worktrees while
 
 ## Media
 
-A reply shows the user a file by naming it in the message: `MEDIA:` and then the file's path — `MEDIA:/.../dashboard-light.png`. The app draws the file under the message and keeps it in the thread, so naming the same path again shows that same file, never a new one.
+A reply shows the user a file by naming it in the message: `MEDIA:` and then the file's absolute path, starting at the root of the filesystem — `MEDIA:/opt/data/files/dashboard-light.png`, never a path relative to the folder you are in, which draws nothing. The app draws the file under the message and keeps it in the thread, so naming the same path again shows that same file, never a new one.
 
-- Name a library file: the path `library_add` answered with. Never a scratch, worktree or other temporary path — the app caches what it fetches, so a temporary file draws a stale copy once it changes, and naming it again can't make it new.
+- Name a library file: the absolute path `library_add` answered with. Never a scratch, worktree or other temporary path — the app caches what it fetches, so a temporary file draws a stale copy once it changes, and naming it again can't make it new.
 - A file that isn't in the library yet goes there first: file it with `library_add`, then name the path it answered with.
 
 Its extension is how the app knows what to draw, so the file keeps its own name.

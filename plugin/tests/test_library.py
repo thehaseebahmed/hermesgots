@@ -377,6 +377,8 @@ class InstructionsTest(unittest.TestCase):
         self.assertIn("`MEDIA:`", text, "the marker is told literally")
         self.assertIn("library file", text, "and the only place a file may come from")
         media = text.split("## Media")[1]
+        self.assertIn("absolute path", media, "the path starts at the filesystem root")
+        self.assertIn("never a path relative to the folder you are in", media)
         self.assertIn("Never a scratch, worktree or other temporary path", media)
         self.assertIn("caches what it fetches", media, "the reason: a temp path draws a stale copy")
 
