@@ -230,21 +230,22 @@ export const summaryRowsOf = (compactions?: { row?: number }[]): SummaryRows | u
 }
 
 /**
- * Whether a row is a compaction's summary, and of which kind: `alone` draws nothing and marks where
- * the compaction happened; `merged` is a summary the host folded the user's next message into, which
- * draws that message. The host writes either as a user or an assistant row, never a tool's. The text
- * is read first: it is the whole record for a session the plugin never named a row in, and the flag
- * only ever repeats it, so a summary sits in neither the user's words nor the reply's.
+ * A row's compaction summary, if it is one: `alone` draws nothing and marks where the compaction
+ * happened, `merged` is a summary the host folded the user's next message into, which draws that
+ * message, and `after` is whatever the host wrote below it. The host writes either as a user or an
+ * assistant row, never a tool's. The text is read first: it is the whole record for a session the
+ * plugin never named a row in, and the flag only ever repeats it, so a summary sits in neither the
+ * user's words nor the reply's.
  */
-function summaryKind(row: SessionMessage, summaries?: SummaryRows) {
+function summaryOfRow(row: SessionMessage, summaries?: SummaryRows) {
   if (row.role !== "user" && row.role !== "assistant") return undefined
   const summary = summaryOf(row.content ?? "")
-  if (summary) return summary.alone ? "alone" : "merged"
-  return summaries?.has(row.id) ? "alone" : undefined
+  if (summary) return { kind: summary.alone ? "alone" : "merged", after: summary.after }
+  return summaries?.has(row.id) ? { kind: "alone" as const, after: "" } : undefined
 }
 
 const isSummaryRow = (row: SessionMessage, summaries?: SummaryRows) =>
-  summaryKind(row, summaries) === "alone"
+  summaryOfRow(row, summaries)?.kind === "alone"
 
 const dropsFromThread = (row: SessionMessage, summaries?: SummaryRows) =>
   isSubagentResult(row) || isSeamScaffolding(row) || isSummaryRow(row, summaries)
@@ -257,7 +258,7 @@ const dropsFromThread = (row: SessionMessage, summaries?: SummaryRows) =>
  * open its turn, and the summary moves down to just before the first row written after it — which is
  * where the compaction really happened, mid-reply or between turns. Idempotent.
  */
-export function seamOrder(rows: SessionMessage[], summaries?: SummaryRows) {
+function seamOrder(rows: SessionMessage[], summaries?: SummaryRows) {
   // Most transcripts hold no compaction at all: the scan that finds one is also the check that
   // leaves them as they came, rather than copying every read for nothing.
   if (!rows.some((row) => isSummaryRow(row, summaries))) return rows
@@ -271,7 +272,7 @@ export function seamOrder(rows: SessionMessage[], summaries?: SummaryRows) {
     let at = s
     for (let r = s + 1; r < out.length; r++) {
       const row = out[r]
-      if (summaryKind(row, summaries)) break
+      if (summaryOfRow(row, summaries)) break
       // Rows the thread draws nothing of, and steers, are part of the carried work, not a turn.
       if (row.role !== "user" || isNotice(row) || dropsFromThread(row, summaries) || isSteer(row))
         continue
@@ -289,7 +290,7 @@ export function seamOrder(rows: SessionMessage[], summaries?: SummaryRows) {
     let next = at + 1
     while (
       next < out.length &&
-      !summaryKind(out[next], summaries) &&
+      !summaryOfRow(out[next], summaries) &&
       out[next].timestamp &&
       out[next].timestamp! <= time
     )
@@ -337,8 +338,10 @@ export function toMessages(
     if (row.display_kind === "hidden" || row.role === "system") continue
     // The summary is the model's handoff, not the reply's words or the user's message. Inside a
     // reply it is where the compaction happened, so the reply is drawn split there.
-    const kind = summaryKind(row, summaries)
-    if (kind === "alone") {
+    const summary = summaryOfRow(row, summaries)
+    // The row's own time, on this device's clock: a summary with none is the moment it was read.
+    const createdAt = Math.round((row.timestamp ?? 0) * 1000) || Date.now()
+    if (summary?.kind === "alone") {
       // Inside a reply, even one that has drawn nothing yet, it splits the reply where it fell.
       if (reply)
         reply.seams = [
@@ -348,7 +351,7 @@ export function toMessages(
             row: row.id,
             contentOffset: reply.content.length,
             toolsBefore: reply.tools?.length ?? 0,
-            at: Math.round((row.timestamp ?? 0) * 1000),
+            at: createdAt,
           },
         ]
       // Its calls are the reply's own, made after the compaction: only the summary's words go.
@@ -356,13 +359,12 @@ export function toMessages(
       row = { ...row, content: "" }
     }
     // A reply the host folded a summary into keeps only its own words.
-    if (kind === "merged" && row.role === "assistant")
-      row = { ...row, content: summaryOf(row.content ?? "")!.after }
+    if (summary?.kind === "merged" && row.role === "assistant")
+      row = { ...row, content: summary.after }
     if (isNotice(row)) {
       if (reply) notice = row.content ?? ""
       continue
     }
-    const createdAt = Math.round((row.timestamp ?? 0) * 1000) || Date.now()
     const id = `h-${sessionId}-${row.id}`
     if (isSteer(row)) {
       reply ??= newReply(id, createdAt)
@@ -380,7 +382,7 @@ export function toMessages(
     if (row.role === "user") {
       // A subagent's finding is read in the sub-thread a tap opens, and a compaction's notes are the
       // model's own input: neither is a message here, so neither closes a reply or starts a turn.
-      if (dropsFromThread(row)) continue
+      if (dropsFromThread(row, summaries)) continue
       reply = undefined
       // The wake run's input is the model's own, never the user's: it draws no message of its own,
       // and the reply it closes is what makes the wake turn's answer a message of its own.
@@ -667,15 +669,11 @@ export async function liveTurn(
       start < 0 &&
       summary >= 0 &&
       !sorted.some((row, i) => i > summary && isTurnStart(row, summaries))
-    const turn =
-      // Past the last page the turn is read from its request, as it was before the summary mattered.
-      carriedAbove && batch.length === PAGE && page < MAX_SKIPS
-        ? undefined
-        : start >= 0
-          ? sorted.slice(start)
-          : resumed
-            ? sorted.slice(summary + 1)
-            : undefined
+    // Past the last page the turn is read from its request, as it was before the summary mattered.
+    if (carriedAbove && batch.length === PAGE && page < MAX_SKIPS) continue
+    let turn: SessionMessage[] | undefined
+    if (start >= 0) turn = sorted.slice(start)
+    else if (resumed) turn = sorted.slice(summary + 1)
     if (turn)
       return toMessages("", sessionId, turn, { live: true, summaries }).find(
         (m) => m.role === "assistant",
@@ -798,7 +796,12 @@ const isShown = (row: SessionMessage) => row.display_kind !== "hidden" && row.ro
  * whole turns: a reply is named after its first row, so one cut by the page edge would load again,
  * whole and under another id, once its start was read, and show twice.
  */
-async function fetchTail(config: HermesConfig, sessionId: string, tip?: number) {
+async function fetchTail(
+  config: HermesConfig,
+  sessionId: string,
+  tip: number | undefined,
+  summaries: SummaryRows | undefined,
+) {
   const rows = new Map<number, SessionMessage>()
   for (let page = 0; page <= MAX_SKIPS; page++) {
     const batch = await listSessionMessages(config, sessionId, { limit: PAGE, offset: page * PAGE })
@@ -806,8 +809,8 @@ async function fetchTail(config: HermesConfig, sessionId: string, tip?: number) 
     const sorted = byRowId(rows)
     const start =
       tip === undefined
-        ? sorted.findIndex((row) => isTurnStart(row))
-        : sorted.findLastIndex((row) => row.id <= tip && isTurnStart(row))
+        ? sorted.findIndex((row) => isTurnStart(row, summaries))
+        : sorted.findLastIndex((row) => row.id <= tip && isTurnStart(row, summaries))
     const end = batch.length < PAGE
     if (start >= 0 || end) {
       const from = Math.max(start, 0)
@@ -925,16 +928,11 @@ async function reconcile(conversationId: string) {
     const [newest] = await listSessionMessages(config, sessionId, { limit: 1, offset: 0 })
     if (!newest || newest.id === tip) return 0
   }
-  const { rows, full } = await fetchTail(config, sessionId, tip)
+  const summaries = summaryRowsOf(conversation.compactions)
+  const { rows, full } = await fetchTail(config, sessionId, tip, summaries)
   if (!rows.length) return 0
   const live = awaitingResults(rows) && (await runningOnHost(config, sessionId))
-  const turns = turnsOf(
-    conversationId,
-    sessionId,
-    rows,
-    live,
-    summaryRowsOf(conversation.compactions),
-  )
+  const turns = turnsOf(conversationId, sessionId, rows, live, summaries)
   return await db.transaction("rw", db.messages, db.conversations, async () => {
     const current = await getMessages(conversationId)
     if (isStreaming(current)) return null
@@ -1164,15 +1162,17 @@ async function loadEarlier(conversationId: string) {
    *  with a reply whose turn began above it, and the live numbering's offset starts past that
    *  start. The rows are at the newest end, so the read starts there and pages back until the next
    *  turn's start is in. */
+  const summaries = summaryRowsOf(compactions)
   async function turnFrom(cut: number) {
     const rows = new Map<number, SessionMessage>()
     for (let page = 0; page <= MAX_SKIPS; page++) {
       for (const row of await list(page * STEP)) if (row.id >= cut) rows.set(row.id, row)
       const sorted = byRowId(rows)
-      if (sorted[0]?.id <= cut && sorted.some((row) => row.id > cut && isTurnStart(row))) break
+      if (sorted[0]?.id <= cut && sorted.some((row) => row.id > cut && isTurnStart(row, summaries)))
+        break
     }
     const sorted = byRowId(rows)
-    const next = sorted.findIndex((row) => row.id > cut && isTurnStart(row))
+    const next = sorted.findIndex((row) => row.id > cut && isTurnStart(row, summaries))
     return next < 0 ? sorted : sorted.slice(0, next)
   }
   const local = await getMessages(conversationId)
@@ -1218,9 +1218,7 @@ async function loadEarlier(conversationId: string) {
     // host whose clock ran ahead of this device's would have newer ones still.
     const older = pages.flat()
     const rows = mend ? [...older, ...rest] : older
-    const messages = toMessages(conversationId, sessionId, rows, {
-      summaries: summaryRowsOf(compactions),
-    })
+    const messages = toMessages(conversationId, sessionId, rows, { summaries })
     const ceiling = mend ? mend.ceiling : windowFirst?.createdAt
     const next = nextWindow(cursor, { oldest: older[0]?.id, end, offset }, archive)
     await db.transaction("rw", db.messages, db.conversations, async () => {

@@ -40,7 +40,7 @@ const BACKGROUND_NOTICE =
 /** The one header that speaks for several processes at once. */
 const BACKGROUND_BATCH = /^\[IMPORTANT: \d+ background processes completed\./
 
-/** An item of the host's snapshot — `- [>] 4. Wire it (in_progress)`, two spaces per depth. */
+/** An item of the host's snapshot — `- [>] plugin. Store table (in_progress)`, two spaces a depth. */
 const SNAPSHOT_ITEM = new RegExp(`\\n[ \\t]*- \\[[${SNAPSHOT_MARKERS.join("")}]\\] \\S+\\. `)
 
 type SeamRow = { role?: string; content?: string | null; display_kind?: string | null }

@@ -1253,9 +1253,7 @@ export function ChatPage({
                           onShowSubagents={showSubagents}
                           subagentsInline={message.id === lastId && drawsInline}
                           blocks={draws.get(message.id)}
-                          compactions={
-                            message.seams?.length ? conversation?.compactions : undefined
-                          }
+                          compactions={conversation?.compactions}
                         />
                       </MessageScrollerItem>
                     )
