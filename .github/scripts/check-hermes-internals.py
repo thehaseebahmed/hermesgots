@@ -7,10 +7,7 @@ intro, the batch header, the truncation note and its Status-line mark, the itera
 machine-provenance footer are Hermes's sentences, composed here rather than imported, and three of
 its internals are read by name (``_active_subagents``, ``_run_statuses``, ``interrupt_subagent``).
 Hermes renames and rewrites them without knowing this plugin exists, so this check says so on the
-next pull request, or on the weekly run, instead of on a user's wake. The app's compaction seam is
-the same bet in the other half of the repo: three sentences Hermes writes into ``user`` rows at a
-compression boundary with no flag to mark them, matched off the row's text by
-``app/src/lib/compaction-seam.ts``, and the item-line shape its snapshot is recognised by.
+next pull request, or on the weekly run, instead of on a user's wake.
 
 Everything here reads source text — a substring of a Hermes file, a module-level string constant, or
 the same on the plugin side — so it runs against any checkout with no host and no network. The
@@ -70,8 +67,6 @@ CONSTANTS: Tuple[Tuple[str, str, str, str], ...] = (
     (FOOTER_REL, "INTERNAL_NOTIFICATION_FOOTER", "footer", "the machine-provenance footer"),
     (NUDGE_REL, "MAX_ITERATIONS_SUMMARY_REQUEST", "nudge", "the iteration nudge"),
     (NOTICE_REL, "_TRUNCATED_SUMMARY_NOTE", "note", "the truncation note"),
-    # The compaction seam the app reads off a `user` row's text: no flag crosses the store, so these
-    # sentences are what the fold matches, and what a reworded Hermes has to fail on.
     (REPLAY_REL, "_INFLIGHT_TASK_REPLAY_HEADER", "replay", "the restatement's header"),
     (TODO_REL, "TODO_INJECTION_HEADER", "snapshot", "the preserved task list's header"),
     (RELOAD_REL, "_PRUNED_SKILL_RELOAD_NOTICE_HEADER", "reload", "the reload notice's header"),
@@ -89,9 +84,6 @@ COPIES: Tuple[Tuple[str, str, str], ...] = (
     ("ITERATION_NUDGE", "nudge", "the iteration nudge a child's transcript is recognized by"),
 )
 
-# The app's copies of the same sentences, in one module of its own (`app/src/lib/compaction-seam.ts`):
-# the fold matches them off the row's text because Hermes stores no flag, so a sentence Hermes rewords
-# has to fail here rather than on a transcript that draws the host's notes as the user's message.
 APP_SEAM_REL = "app/src/lib/compaction-seam.ts"
 APP_COPIES: Tuple[Tuple[str, str, str], ...] = (
     ("REPLAY_HEADER", "replay", "the restatement's header"),
@@ -99,8 +91,6 @@ APP_COPIES: Tuple[Tuple[str, str, str], ...] = (
     ("RELOAD_NOTICE_HEADER", "reload", "the reload notice's header"),
 )
 
-# Compared as an opening rather than whole: the app keys on the notice's first sentence to tell the
-# notice from a message quoting its header, and that is as much of the body as the rule needs.
 APP_OPENINGS: Tuple[Tuple[str, str, str], ...] = (
     ("RELOAD_NOTICE_BODY", "reloadBody", "the notice's own opening"),
 )
@@ -221,11 +211,7 @@ def _constant(src: str, name: str) -> Optional[str]:
 
 
 def _ts_constant(src: str, name: str) -> Optional[str]:
-    """The text an exported ``const NAME = "..."`` carries, whether or not it wraps below the ``=``.
-
-    TypeScript spells a long sentence as one literal, which Prettier moves onto the line after the
-    assignment; there is no implicit concatenation to join the way Python has one.
-    """
+    """The text an exported ``const NAME = "..."`` carries, wrapped below the ``=`` or not."""
     match = re.search(r"(?m)^export const " + re.escape(name) + r"\s*=\s*", src)
     if not match:
         return None
@@ -376,7 +362,6 @@ def main(argv: List[str]) -> int:
                     f"hermes {expected!r} plugin {value!r}"
                 )
 
-    # The app side: the compaction seam, in its own module beside the plugin.
     seam = read(plugin.parent / APP_SEAM_REL)
     if seam is None:
         failures.append(f"app:{APP_SEAM_REL}: missing file")

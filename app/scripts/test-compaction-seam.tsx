@@ -1,10 +1,4 @@
-/**
- * A compaction's seam, as the thread draws it: the `user` row Hermes writes at the boundary carries
- * its own bookkeeping — the restated request, the preserved task list, the pruned-skills reload
- * notice — and only the request is the user's message. The rule itself is driven in
- * `test-compaction-seam.mjs`; what this file holds is the fold over it, and the chat that drew the
- * seam before the fold read it.
- */
+// The fold over the seam rule, and the chat that drew the seam before the fold read it.
 import assert from "node:assert/strict"
 import test from "node:test"
 
@@ -22,10 +16,9 @@ import { botProfile, json, seedChat } from "./component-kit.tsx"
 const SESSION = "seam-session"
 const AT = 1_760_000_000
 
-/** The request, as the user typed it: the one thing of the seam row the thread draws. */
 const REQUEST = "Discuss the plan first before implementing."
 
-/** The host's snapshot as `TodoStore.format_for_injection` writes it: a header, then its items. */
+/** The snapshot as `format_for_injection` writes it: a header, then its items. */
 const SNAPSHOT = [
   TASK_SNAPSHOT_HEADER,
   "- [>] 4. Wire waiting.ts and threads.ts (in_progress)",
@@ -37,7 +30,6 @@ const NOTICE = [
   `${RELOAD_NOTICE_BODY} verbatim, but the skill instructions that governed it were pruned.`,
 ].join("\n")
 
-/** A `user` row as the host writes it at the boundary. */
 const seamRow = (content: string, id = 51): SessionMessage => ({
   id,
   role: "user",
@@ -45,7 +37,6 @@ const seamRow = (content: string, id = 51): SessionMessage => ({
   content,
 })
 
-/** An `assistant` row of the run crossing the boundary. */
 const replyRow = (content: string, id: number): SessionMessage => ({
   id,
   role: "assistant",
@@ -53,7 +44,7 @@ const replyRow = (content: string, id: number): SessionMessage => ({
   timestamp: AT,
 })
 
-/** The thread these rows fold to, once, readable in a failure. */
+/** What these rows fold to, computed once per assertion. */
 const drawn = (rows: SessionMessage[]) =>
   toMessages("c-1", SESSION, rows).map((m) => `${m.role}: ${m.content}`)
 
@@ -87,8 +78,6 @@ test("a row carrying only the host's notes draws nothing, and leaves the reply w
 })
 
 test("a header with nothing under it is the user's own message", () => {
-  // Reporting this bug by pasting the note is the likeliest way a header arrives without its payload,
-  // and the host never writes one that way: the message must survive whole.
   for (const header of [REPLAY_HEADER, TASK_SNAPSHOT_HEADER, RELOAD_NOTICE_HEADER])
     assert.deepEqual(
       drawn([seamRow(header, 46)]),

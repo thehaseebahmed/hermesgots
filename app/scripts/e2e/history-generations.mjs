@@ -3,8 +3,6 @@
 // end up with each turn once — the whole sequence showing twice is what a user sees as their messages
 // repeating, with the carried turns landing around the messages they sent since.
 import { app, assert, flow, mock, pass, runId } from "./lib.mjs"
-// The sentences the host writes at the boundary are the app's own pins, imported rather than
-// restated: a second copy here could drift from the one the fold reads and still pass.
 import {
   RELOAD_NOTICE_BODY,
   RELOAD_NOTICE_HEADER,
@@ -124,10 +122,7 @@ await flow("history-generations", async ({ page, seed, until, shot }) => {
   for (const text of ["first turn's work", "second turn's work"])
     assert.equal(drawn.split(text).length - 1, 1, `"${text}" is drawn once: ${drawn.slice(-400)}`)
   pass("a compaction the device already showed leaves its turns shown once")
-  // The boundary row compression writes is the host's own bookkeeping: it rides a user row, but it
-  // is nobody's message, so the thread draws nothing of it — a user bubble of it reads as if the
-  // user had typed the host's notes themselves. Read off the thread the fold wrote rather than the
-  // DOM: dropping the note is the fold's work, and a redraw one paint late would pass by accident.
+  // Read off the thread the fold wrote, not the DOM: a redraw a paint late would pass by accident.
   for (const note of [TASK_SNAPSHOT_HEADER, RELOAD_NOTICE_HEADER, RELOAD_NOTICE_BODY])
     assert.ok(
       !after.some((m) => m.text.includes(note)),

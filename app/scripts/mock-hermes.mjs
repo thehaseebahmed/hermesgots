@@ -5458,10 +5458,8 @@ http
           session_id: sessionId,
           timestamp: Date.now() / 1000,
           role: "user",
-          // The row Hermes writes at a compaction boundary, in its own words: the preserved task
-          // list, then the pruned-skills reload notice. It ships as a plain `user` row — its
-          // synthetic flag never reaches the store, so no `display_kind` marks it and the app has to
-          // read the seam off the text.
+          // The host ships this row as a plain `user` row: its synthetic flag never reaches the
+          // store, so no `display_kind` marks it and the app must read the seam off the text.
           content: [
             "[Your active task list was preserved across context compression]",
             "- [>] 4. Compaction note row (in_progress)",

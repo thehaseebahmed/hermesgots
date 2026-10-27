@@ -2,9 +2,9 @@ name: Hermes internals drift
 
 # The wake text is a copy of Hermes's own completion notice, the plugin reads three of Hermes's
 # internals by name (the live-subagent registry, the API server's run table, the per-child stop), and
-# the app matches the sentences Hermes writes into a `user` row at a compaction boundary. Hermes moves
-# them on its own schedule; this fails when it does, on the release users install and on main, so the
-# copy is updated before a wake quotes text core no longer writes or a chat draws it as a message.
+# the app matches the sentences Hermes writes into a `user` row at a compaction boundary. Hermes
+# moves them on its own schedule; this fails when it does, on the release users install and on main,
+# so the copy is updated before a wake quotes text core no longer writes.
 on:
   pull_request:
     paths:

@@ -5,9 +5,7 @@
  * restated under a header, the preserved task list, the pruned-skills reload notice — and stores no
  * flag that says so. Its own readers find them by their text as well (`_strip_stale_todo_snapshot`,
  * the replay header `_has_merged_inflight_replay` looks for after the summary's end marker), so the
- * app matches the same sentences, pinned word for word below:
- * `.github/scripts/check-hermes-internals.py` holds each of them to the host's own constant on every
- * pull request, and weekly.
+ * app matches the same sentences, pinned word for word below.
  *
  * A header on its own is never the seam — a message may quote the host's words, and it must stay
  * the user's — so each cut needs the payload the host writes under its header: an item line, the
@@ -25,9 +23,7 @@ export const REPLAY_HEADER =
 export const TASK_SNAPSHOT_HEADER =
   "[Your active task list was preserved across context compression]"
 
-/**
- * `agent/conversation_compression.py` `_PRUNED_SKILL_RELOAD_NOTICE_HEADER`: the notice's first line.
- */
+/** `agent/conversation_compression.py` `_PRUNED_SKILL_RELOAD_NOTICE_HEADER`: its first line. */
 export const RELOAD_NOTICE_HEADER =
   "[Skills pruned during compression — reload before acting on these tasks]"
 
@@ -37,8 +33,7 @@ export const RELOAD_NOTICE_BODY = "The task list above crossed the compression b
 /** An item of the host's snapshot — `- [>] 4. Wire it (in_progress)`, two spaces per depth. */
 const SNAPSHOT_ITEM = /\n[ \t]*- \[[x>~? ]\] \d+\. /
 
-/** The fields of a row the seam reads. */
-export type SeamRow = { role?: string; content?: string | null; display_kind?: string | null }
+type SeamRow = { role?: string; content?: string | null; display_kind?: string | null }
 
 /** Where `header` opens a line of `content`, at or after `from`: -1 where it opens none. */
 function lineAt(content: string, header: string, from = 0): number {
@@ -50,24 +45,32 @@ function lineAt(content: string, header: string, from = 0): number {
   return -1
 }
 
+/** `content` without the host's task snapshot and everything it carries below it. */
+function cutSnapshot(content: string): string {
+  const at = lineAt(content, TASK_SNAPSHOT_HEADER)
+  if (at < 0 || !SNAPSHOT_ITEM.test(content.slice(at))) return content
+  return content.slice(0, at).trimEnd()
+}
+
+/** Whether the text is the reload notice alone, as the salvage path writes its row. */
+function isReloadNoticeOnly(text: string): boolean {
+  return (
+    text.startsWith(RELOAD_NOTICE_HEADER) &&
+    text.slice(RELOAD_NOTICE_HEADER.length).trimStart().startsWith(RELOAD_NOTICE_BODY)
+  )
+}
+
+/** The request a restated row leads with, or undefined where it leads with anything else. */
+function restatedRequest(text: string): string | undefined {
+  return text.startsWith(REPLAY_HEADER) ? text.slice(REPLAY_HEADER.length).trimStart() : undefined
+}
+
 /** What of a seam row's text the thread draws: the host's notes cut, what the user typed kept. */
 export function seamText(content: string): string {
-  // The snapshot trails the row's real text, the reload notice trails the snapshot, and everything
-  // from the snapshot's line down is the host's — cut there, the way the host's own reader does.
-  const snapshot = lineAt(content, TASK_SNAPSHOT_HEADER)
-  const cut = snapshot >= 0 && SNAPSHOT_ITEM.test(content.slice(snapshot)) ? snapshot : -1
-  const text = cut < 0 ? content : content.slice(0, cut).trimEnd()
+  const text = cutSnapshot(content)
   const head = text.trimStart()
-  // The salvage path keeps the notice alone, as its row's whole content.
-  if (
-    head.startsWith(RELOAD_NOTICE_HEADER) &&
-    head.slice(RELOAD_NOTICE_HEADER.length).trimStart().startsWith(RELOAD_NOTICE_BODY)
-  )
-    return ""
-  // The restatement leads its row and carries the request under it: the request is the message.
-  return head.startsWith(REPLAY_HEADER)
-    ? head.slice(REPLAY_HEADER.length).trimStart() || text
-    : text
+  if (isReloadNoticeOnly(head)) return ""
+  return restatedRequest(head) || text
 }
 
 /**

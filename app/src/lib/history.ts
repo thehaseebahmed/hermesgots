@@ -214,7 +214,6 @@ function afterNotice(fragment: string, next: string, notice: string) {
   return fragment + gap + part
 }
 
-/** A row the thread draws nothing for: a subagent's delivery, or a compaction's own notes. */
 const dropsFromThread = (row: SessionMessage) => isSubagentResult(row) || isSeamScaffolding(row)
 
 /**
@@ -269,9 +268,7 @@ export function toMessages(
       continue
     }
     if (row.role === "user") {
-      // A subagent's delivery and a compaction's own notes are bookkeeping, not messages: the thread
-      // draws nothing for them, so they close no reply and start no turn. A row carrying the restated
-      // request goes on to draw that request as the user's own, its header cut.
+      // The host's own bookkeeping draws nothing, closes no reply and starts no turn.
       if (dropsFromThread(row)) continue
       reply = undefined
       // The wake run's input is the model's own, never the user's: it draws no message of its own,

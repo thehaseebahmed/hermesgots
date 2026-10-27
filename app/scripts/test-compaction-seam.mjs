@@ -1,12 +1,5 @@
-/**
- * The seam a compaction leaves in a transcript, as a pure rule: the host writes its own bookkeeping
- * into `user` rows at the boundary — the restated request, the preserved task list, the pruned-skills
- * reload notice — and none of it is the user's message.
- *
- * The rule is textual, so its two failures are opposite: a note drawn as the user's message, and the
- * user's own words cut away. Each header here is the shape Hermes writes, with the payload under it,
- * and each case says which side of that line it is on.
- */
+// The rule is textual, so its two failures are opposite: a note drawn as the user's message, and
+// the user's own words cut away. Each case says which side of that line it is on.
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
@@ -23,7 +16,7 @@ import {
 
 const REQUEST = "Discuss the plan first before implementing."
 
-/** The host's snapshot as `TodoStore.format_for_injection` writes it: a header, then its items. */
+/** The snapshot as `format_for_injection` writes it: a header, then its items. */
 const SNAPSHOT = [
   TASK_SNAPSHOT_HEADER,
   "- [>] 4. Wire waiting.ts and threads.ts (in_progress)",
