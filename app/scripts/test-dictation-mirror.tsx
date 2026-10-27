@@ -339,7 +339,11 @@ test("a take is written with the words its host heard, on the device and on the 
   assert.equal(written?.heard, "um tidy words", "trimmed, as the words that landed are")
 
   await until(async () => server.posts.length === 1, "the post")
-  assert.equal(server.posts[0]?.heard, "um tidy words", "the host is told the words as it heard them")
+  assert.equal(
+    server.posts[0]?.heard,
+    "um tidy words",
+    "the host is told the words as it heard them",
+  )
   assert.equal(server.posts[0]?.text, "Tidy words.", "and the ones that landed, as before")
 })
 
