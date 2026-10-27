@@ -8,7 +8,7 @@ from __future__ import annotations
 import sqlite3
 import unittest
 
-from plugin import dictations
+from plugin import dictations, store
 from plugin.store import connect, db_path, now_ms
 from plugin.tests._helpers import temp_hermes_home
 
@@ -38,6 +38,29 @@ class DictationsTest(unittest.TestCase):
 
     def test_the_words_are_counted_when_the_body_names_none(self) -> None:
         self.assertEqual(self.add(text="one two  three\nfour")["words"], 4)
+
+    def test_the_words_as_heard_are_kept_beside_the_words_that_landed(self) -> None:
+        found = self.add(text="Clean words.", heard=" um clean words ")
+        self.assertEqual(found["text"], "Clean words.")
+        self.assertEqual(found["heard"], "um clean words", "stored trimmed, as the words are")
+        self.assertEqual(found["words"], 2, "the count stays the landed words")
+        self.assertEqual(dictations.rows(self.path, "bot-a")[0]["heard"], "um clean words")
+
+    def test_a_take_kept_without_heard_answers_without_the_key(self) -> None:
+        found = self.add(text="only the landed words")
+        self.assertNotIn("heard", found, "a row from before the field reads as one that has none")
+        self.assertNotIn("heard", dictations.rows(self.path, "bot-a")[0])
+
+    def test_a_heard_the_host_cannot_keep_is_dropped_and_the_row_is_written(self) -> None:
+        for heard in (42, [], "", "   ", "x" * (dictations.MAX_TEXT + 1)):
+            with self.subTest(heard=heard):
+                found = self.add(text="the words that matter", heard=heard)
+                self.assertNotIn("heard", found)
+                self.assertEqual(found["text"], "the words that matter")
+
+    def test_the_heard_text_can_be_as_long_as_the_words_themselves(self) -> None:
+        heard = "x" * dictations.MAX_TEXT
+        self.assertEqual(self.add(text="kept", heard=heard)["heard"], heard)
 
     def test_a_rewritten_entry_leaves_the_first_in_place(self) -> None:
         self.add(text="as heard")
@@ -282,6 +305,11 @@ class OldShapeStoreTest(unittest.TestCase):
             [row["text"] for row in dictations.rows(self.path, "bot-a")],
             ["kept through the rebuild"],
         )
+        self.assertNotIn(
+            "heard",
+            dictations.rows(self.path, "bot-a")[0],
+            "a take kept before the field reads as one with no words as heard",
+        )
 
     def test_an_id_two_profiles_share_is_stored_for_both_after_the_rebuild(self) -> None:
         connect(self.path).close()
@@ -298,12 +326,14 @@ class OldShapeStoreTest(unittest.TestCase):
         try:
             tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
             version = conn.execute("PRAGMA user_version").fetchone()[0]
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(dictations)")}
         finally:
             conn.close()
         self.assertIn("dictation_read", tables)
         self.assertNotIn("dictation_order", tables, "the index the page sorted every time is gone")
         self.assertNotIn("dictations_v44", tables)
-        self.assertEqual(version, 47)
+        self.assertIn("heard", columns, "a store rebuilt on the way here still gains the field")
+        self.assertEqual(version, store.SCHEMA_VERSION)
 
 
 if __name__ == "__main__":

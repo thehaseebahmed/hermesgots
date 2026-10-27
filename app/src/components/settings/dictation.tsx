@@ -223,7 +223,10 @@ function HistoryTab({ profiles }: { profiles: Profile[] }) {
   )
 }
 
-/** One dictation, whole: its words, what it was, a Copy and a way to delete it. */
+/**
+ * One dictation, whole: the words as the host heard them under **Heard**, the tidied text under
+ * **Tidied** where the cleanup changed anything, what it was, a Copy and a way to delete it (ADR 0062).
+ */
 function EntrySheet({
   row,
   bot,
@@ -236,6 +239,10 @@ function EntrySheet({
   onDelete: () => void
 }) {
   const { copied, noteCopied } = useCopied()
+  const heard = row.heard?.trim() || undefined
+  // What the cleanup changed, if anything: a take it left alone lands as the words the host heard, so
+  // it reads as one block rather than the same text twice (ADR 0062).
+  const tidied = heard !== undefined && heard !== row.text
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(row.text)
@@ -251,9 +258,24 @@ function EntrySheet({
           <PopupTitle>{clockOf(row.at)}</PopupTitle>
         </PopupHeader>
         <div className="flex min-h-0 flex-col gap-4 overflow-y-auto px-4 pb-4">
-          <p className="text-base whitespace-pre-wrap" data-dictation-text>
-            {row.text}
-          </p>
+          {heard && (
+            <p className="text-base whitespace-pre-wrap" data-dictation-heard>
+              <span className="mb-1.5 block text-[13px] font-medium text-muted-foreground">
+                Heard
+              </span>
+              {heard}
+            </p>
+          )}
+          {heard && !tidied ? null : (
+            <p className="text-base whitespace-pre-wrap" data-dictation-text>
+              {tidied && (
+                <span className="mb-1.5 block text-[13px] font-medium text-muted-foreground">
+                  Tidied
+                </span>
+              )}
+              {row.text}
+            </p>
+          )}
           <p className="text-sm text-muted-foreground">
             {[bot, wordsLabel(row.words), spokenLabel(row.ms)].filter(Boolean).join(" · ")}
           </p>

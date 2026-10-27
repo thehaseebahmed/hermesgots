@@ -3817,6 +3817,8 @@ function dictationRoot(config: HermesConfig, entryId?: string) {
 export interface HostDictation {
   id: string
   text: string
+  /** The words as the host heard them, before Cleanup: absent where this host kept none (ADR 0062). */
+  heard?: string
   words: number
   ms: number
   at: number
@@ -3835,9 +3837,11 @@ function dictationRow(value: unknown): HostDictation | null {
   const row = value as Partial<HostDictation> | null
   if (!row || typeof row.id !== "string" || !row.id || typeof row.text !== "string") return null
   const at = finite(row.at) ?? 0
+  const heard = typeof row.heard === "string" && row.heard.trim() ? row.heard : undefined
   return {
     id: row.id,
     text: row.text,
+    ...(heard === undefined ? {} : { heard }),
     words: finite(row.words) ?? 0,
     ms: finite(row.ms) ?? 0,
     at,

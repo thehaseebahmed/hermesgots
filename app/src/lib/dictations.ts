@@ -62,12 +62,35 @@ function stored(row: RowFields): DictationRecord {
   return { ...row, loggedAt: orderOf(row) }
 }
 
-function entryOf(connection: string, text: string, ms: number, at = Date.now()): DictationRecord {
-  return stored({ id: randomId(), connection, text, words: countWords(text), ms, at, posted: false })
+function entryOf(
+  connection: string,
+  text: string,
+  ms: number,
+  heard?: string,
+  at = Date.now(),
+): DictationRecord {
+  const asHeard = heard?.trim()
+  return stored({
+    id: randomId(),
+    connection,
+    text,
+    ...(asHeard ? { heard: asHeard } : {}),
+    words: countWords(text),
+    ms,
+    at,
+    posted: false,
+  })
 }
 
 function hostOf(row: DictationRecord): DictationWrite {
-  return { id: row.id, text: row.text, words: row.words, ms: row.ms, at: row.at }
+  return {
+    id: row.id,
+    text: row.text,
+    ...(row.heard ? { heard: row.heard } : {}),
+    words: row.words,
+    ms: row.ms,
+    at: row.at,
+  }
 }
 
 /** Refusals about the take itself: the same words would be refused on every open, so they are final. */
@@ -158,11 +181,14 @@ async function askStats(config: HermesConfig, key: string): Promise<HostAnswer |
  * Writes one dictation at the moment a take's words land. The mirror takes it first and the host's
  * copy is fired without being awaited, so a host that is away — or too old to have the routes —
  * costs the take nothing, and a take the host never confirmed is posted again at the next reconcile.
+ *
+ * `heard` is the same take as the host's speech model wrote it, before Cleanup: the words that landed
+ * and the words as heard are both kept, since what the cleanup did is worth seeing (ADR 0062).
  */
-export async function writeDictation(config: HermesConfig, text: string, ms: number) {
+export async function writeDictation(config: HermesConfig, text: string, ms: number, heard?: string) {
   const trimmed = text.trim()
   if (!trimmed) return
-  const row = entryOf(connectionKey(config), trimmed, ms)
+  const row = entryOf(connectionKey(config), trimmed, ms, heard)
   await db.dictationLog.put(row).catch(quietly("Logging a dictation on this device"))
   void post(config, row)
     .then((posting) => applyPostings([posting]))

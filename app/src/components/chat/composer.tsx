@@ -194,9 +194,9 @@ export function Composer({
     joinText(botName, dictationHint ?? ""),
     draftKey,
     dictationWords,
-    (heard, spokenMs) => {
-      placeHeard.current(heard)
-      void writeDictation(connection, heard, spokenMs)
+    (text, spokenMs, heard) => {
+      placeHeard.current(text)
+      void writeDictation(connection, text, spokenMs, heard)
     },
   )
   const canDictate = dictationInfo?.status === "ready" && canRecord()

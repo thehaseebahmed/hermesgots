@@ -355,8 +355,12 @@ export function useChunkedDictation(
   hint: string,
   key?: string,
   vocabulary: string[] = [],
-  /** The take's words, once they are final: where they landed and how long they took to say. */
-  onCommitted?: (text: string, spokenMs: number) => void,
+  /**
+   * The take's words, once they are final: where they landed, how long they took to say, and the same
+   * take as the host heard it before Cleanup, which differs from the landed words by exactly what the
+   * cleanup did (ADR 0062).
+   */
+  onCommitted?: (text: string, spokenMs: number, heard: string) => void,
 ) {
   const [status, setStatus] = useState<DictationStatus>("idle")
   const [levels, setLevels] = useState<number[] | null>(null)
@@ -625,11 +629,11 @@ export function useChunkedDictation(
   }, [])
 
   const land = useCallback(
-    (current: Session, text: string) => {
+    (current: Session, text: string, heard = text) => {
       forget(current)
       session.current = null
       showIdle()
-      if (text) latest.current.onCommitted?.(text, spokenLong(current.pieces))
+      if (text) latest.current.onCommitted?.(text, spokenLong(current.pieces), heard)
       return text
     },
     [showIdle],
@@ -648,10 +652,13 @@ export function useChunkedDictation(
           : await within(draining, Math.max(0, deadline - Date.now()))
       if (session.current !== current) return null
       if (done) {
+        // The take as the host heard it, which is what the cleanup is given and what the row keeps
+        // beside the tidied text: the two differ by exactly what the cleanup did (ADR 0062).
+        const heard = takeText(current.pieces)
         const budget = deadline === undefined ? TIDY_MS : deadline - Date.now()
-        const text = await tidy(current, takeText(current.pieces), budget)
+        const text = await tidy(current, heard, budget)
         if (session.current !== current) return null
-        return land(current, text)
+        return land(current, text, heard)
       }
       if (done === undefined && deadline !== undefined) {
         stopInflight(current)
@@ -663,7 +670,8 @@ export function useChunkedDictation(
         const ms = spokenLong(heard)
         current.pieces = current.pieces.filter((piece) => piece.text === null)
         save(current, true)
-        if (text) latest.current.onCommitted?.(text, ms)
+        // Nothing tidied these words, so they are the take as heard as well as what lands.
+        if (text) latest.current.onCommitted?.(text, ms, text)
       }
       showFailure(
         current.error !== null
