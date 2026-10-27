@@ -72,7 +72,6 @@ import {
 } from "@/lib/model-pick"
 import { refreshMoves } from "@/lib/moves"
 import { takeHostTitle } from "@/lib/title"
-import { isLive } from "@/lib/live"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { appendThinking, closeRun, forgetRuns, noteRunThinking } from "@/lib/thinking"
 import { quietly } from "@/lib/report"
@@ -120,8 +119,8 @@ const TITLED_TURNS = 3
 /**
  * When after a turn the host's title is read again while the chat still holds another one: Hermes
  * titles with a model call in the background, which can land whenever — a slow call, a busy host.
- * A device with a stream open is told by the host's own `title` event, so the checks are the path
- * for one that isn't listening: the app put away, a host too old to stream them.
+ * The checks run whatever the host streams: a plugin too old to log its `title` events sends them
+ * only to the streams open at that moment, so a device that was away has nothing to replay.
  */
 const TITLE_RECHECKS_MS = [3000, 10_000, 30_000, 90_000]
 /** A reply whose connection gave up is followed again after these waits, the last one repeating. */
@@ -143,7 +142,6 @@ async function syncTitle(conversationId: string, config: HermesConfig, sessionId
   if (await takeHostTitle(conversationId, config, sessionId)) return
   const started = Date.now()
   for (const delay of TITLE_RECHECKS_MS) {
-    if (isLive(config)) return
     // Offsets from the turn, not waits between the checks.
     const wait = started + delay - Date.now()
     if (wait > 0) await new Promise((resolve) => window.setTimeout(resolve, wait))
