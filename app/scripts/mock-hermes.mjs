@@ -564,6 +564,9 @@ const RESEARCH = process.env.MOCK_RESEARCH !== "0"
 const RESEARCH_WRITERS = process.env.MOCK_RESEARCH_WRITERS !== "off"
 // The meetings feature (mock-meetings.mjs); MOCK_MEETINGS=0 serves a plugin from before it.
 const MEETINGS = process.env.MOCK_MEETINGS !== "0"
+// The dictation log (plugin/dictations.py): MOCK_DICTATIONS=0 is a plugin from before it, so its
+// routes 404 and `dictations` is missing from the features — the screen then has no host copy.
+const DICTATIONS = process.env.MOCK_DICTATIONS !== "0"
 // A bot's MCP servers, as the plugin's read reports them: each with Gots' own state word, the source
 // it comes from, and the Host's own reason on a failed one. Every word the screen renders has a row.
 // MOCK_MCP=off is a Hermes whose plugin can't offer them at all: no route and no `mcps` feature.
@@ -3083,6 +3086,46 @@ const TRIAGE = process.env.MOCK_TRIAGE ?? "stay"
 let PRS_FAIL = process.env.MOCK_PRS_FAIL === "1"
 const dictationClips = []
 const dictationCleanups = []
+// The host's dictation log, seeded with two takes so the Dictation screen has a history to draw: what
+// a real host counts for itself is the words and the spoken span of each, and the fingerprint beside
+// them (ADR 0060).
+const DICTATION_CLEARED_AT = { at: 0 }
+// Each row carries two clocks, as the host's table does: `seenAt` is when this host heard the take,
+// which is what it orders and pages by, and `at` is when the device said it was said, kept for what
+// the screen draws (ADR 0060).
+const dictationLog = [
+  {
+    id: "dict-mock-1",
+    text: "Remind me to send the invoice to Nadia before the call.",
+    words: 11,
+    ms: 4_200,
+    at: Date.now() - 3 * 60 * 60 * 1000,
+    seenAt: Date.now() - 3 * 60 * 60 * 1000,
+  },
+  {
+    id: "dict-mock-2",
+    text: "Add a Dictation screen under Appearance, with three tabs.",
+    words: 9,
+    ms: 3_600,
+    at: Date.now() - 26 * 24 * 60 * 60 * 1000,
+    seenAt: Date.now() - 26 * 24 * 60 * 60 * 1000,
+  },
+]
+
+/** The log in the order a host reads it: newest heard first, an id breaking a shared millisecond. */
+const dictationOrder = (one, two) => two.seenAt - one.seenAt || (one.id < two.id ? 1 : -1)
+
+function dictationStats() {
+  const rows = [...dictationLog].sort(dictationOrder)
+  return {
+    words: rows.reduce((total, row) => total + row.words, 0),
+    ms: rows.reduce((total, row) => total + row.ms, 0),
+    count: rows.length,
+    newest: rows[0]?.seenAt ?? null,
+    oldest: rows.at(-1)?.seenAt ?? null,
+    clearedAt: DICTATION_CLEARED_AT.at,
+  }
+}
 const EVENTS = process.env.MOCK_NO_EVENTS !== "1"
 const RUNS = process.env.MOCK_NO_RUNS !== "1"
 const RUN_BACKLOG = Number(process.env.MOCK_RUN_BACKLOG ?? 1000)
@@ -3658,6 +3701,7 @@ http
           ...(SKILLS ? ["skills", "skills_write", "skills_remove", "skills_view"] : []),
           "queue",
           "dictation",
+          ...(DICTATIONS ? ["dictations"] : []),
           "speech_model",
           "afk",
           "afk_switch",
@@ -4937,6 +4981,80 @@ http
         text: tidyWhole(text),
         cleaned: true,
         ms: TIDY_MS,
+      })
+    }
+    // The dictation log a bot's host keeps (plugin/dictations.py): a write at commit, the totals and
+    // fingerprint a device reconciles against, a page of the log, and the two ways of taking it away.
+    if (PLUGIN && !profile && DICTATIONS && url.pathname === "/api/plugins/memento/dictations/stats") {
+      if (req.method !== "GET") return json(res, 405, { error: { message: "GET only." } })
+      return json(res, 200, { object: "memento.dictations.stats", stats: dictationStats() })
+    }
+    if (PLUGIN && !profile && DICTATIONS && url.pathname === "/api/plugins/memento/dictations") {
+      if (req.method === "GET") {
+        const before = Number(url.searchParams.get("before") ?? 0)
+        const beforeId = url.searchParams.get("before_id") ?? ""
+        const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit") ?? 20)))
+        const dictations = [...dictationLog]
+          .sort(dictationOrder)
+          .filter(
+            (row) =>
+              !before ||
+              row.seenAt < before ||
+              (row.seenAt === before && row.id < beforeId),
+          )
+          .slice(0, limit)
+        return json(res, 200, { object: "memento.dictations", dictations })
+      }
+      if (req.method === "DELETE") {
+        dictationLog.length = 0
+        DICTATION_CLEARED_AT.at = Date.now()
+        return json(res, 200, {
+          object: "memento.dictations.cleared",
+          removed: true,
+          stats: dictationStats(),
+        })
+      }
+      if (req.method === "POST") {
+        const body = await readBody(req).catch(() => ({}))
+        const id = typeof body.id === "string" ? body.id.trim() : ""
+        if (!id) return json(res, 400, { error: { message: "A dictation needs an id." } })
+        const text = typeof body.text === "string" ? body.text : ""
+        if (!text.trim())
+          return json(res, 400, { error: { message: "A dictation needs its words." } })
+        if (text.length > 20000)
+          return json(res, 413, { error: { message: "That dictation is too long to keep." } })
+        // Two clocks: this host's, stamped as the take lands and what the log is ordered by, and the
+        // device's, kept unless it claims a time after the host heard it.
+        const seenAt = Date.now()
+        const asked = Number(body.at) || seenAt
+        const row = {
+          id,
+          text,
+          words: Number(body.words) || text.trim().split(/\s+/).length,
+          ms: Number(body.ms) || 0,
+          at: Math.min(asked, seenAt),
+          seenAt,
+        }
+        const held = dictationLog.find((one) => one.id === id)
+        if (held) return json(res, 201, { object: "memento.dictation", dictation: held })
+        dictationLog.push(row)
+        return json(res, 201, { object: "memento.dictation", dictation: row })
+      }
+    }
+    if (
+      PLUGIN &&
+      !profile &&
+      DICTATIONS &&
+      req.method === "DELETE" &&
+      url.pathname.startsWith("/api/plugins/memento/dictations/")
+    ) {
+      const id = decodeURIComponent(url.pathname.slice("/api/plugins/memento/dictations/".length))
+      const at = dictationLog.findIndex((row) => row.id === id)
+      if (at >= 0) dictationLog.splice(at, 1)
+      return json(res, 200, {
+        object: "memento.dictation.removed",
+        removed: at >= 0,
+        stats: dictationStats(),
       })
     }
     if (

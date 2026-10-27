@@ -68,8 +68,9 @@ import {
  */
 
 /**
- * What each device keeps for itself: the registry's copies, and what it looks up from models.dev,
- * which a newer lookup here mustn't push over a rename made on another device.
+ * What each device keeps for itself: the registry's copies, what it looks up from models.dev, and the
+ * speech model its own host reported — none of which a newer lookup here may push over a rename made
+ * on another device.
  */
 const LOCAL_BOT_FIELDS = [
   "disabled",
@@ -78,6 +79,7 @@ const LOCAL_BOT_FIELDS = [
   "contextWindow",
   "contextModel",
   "imageInput",
+  "speechModel",
 ] as const
 type BotValue = Omit<Profile, "id" | "updatedAt" | (typeof LOCAL_BOT_FIELDS)[number]>
 const CHAT_FIELDS = [

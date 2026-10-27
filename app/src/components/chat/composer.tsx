@@ -43,6 +43,7 @@ import {
   useDictationInfo,
   type DictationAvailability,
 } from "@/lib/dictation"
+import { writeDictation } from "@/lib/dictations"
 import {
   SEND_COMMANDS,
   isSendMode,
@@ -193,7 +194,10 @@ export function Composer({
     joinText(botName, dictationHint ?? ""),
     draftKey,
     dictationWords,
-    (heard) => placeHeard.current(heard),
+    (heard, spokenMs) => {
+      placeHeard.current(heard)
+      void writeDictation(connection, heard, spokenMs)
+    },
   )
   const canDictate = dictationInfo?.status === "ready" && canRecord()
   // Where the cursor was when dictation started, and whether the clip goes into the text or is sent.
@@ -390,8 +394,7 @@ export function Composer({
 
   const endDictation = async (send: boolean) => {
     dictationSends.current = send
-    const heard = await dictation.finish(send ? SEND_WAIT_MS : STOP_WAIT_MS)
-    if (heard) placeDictation(heard)
+    await dictation.finish(send ? SEND_WAIT_MS : STOP_WAIT_MS)
   }
 
   placeHeard.current = placeDictation
@@ -399,8 +402,7 @@ export function Composer({
   const retryDictation = async () => {
     dictationAt.current ??= dictation.anchor()
     try {
-      const heard = await dictation.retry()
-      if (heard) placeDictation(heard)
+      await dictation.retry()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't start the microphone.")
     }
