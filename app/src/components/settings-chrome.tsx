@@ -140,7 +140,6 @@ export function RowText({ title, subtitle }: { title: ReactNode; subtitle?: Reac
   )
 }
 
-/** A row that opens a pop-up of its own: the row chrome, and the open state the sheet takes. */
 /** A row that goes somewhere: one composition for the Settings menu and every screen that lists bots. */
 export function LinkRow({
   to,
@@ -173,6 +172,7 @@ export function LinkRow({
   )
 }
 
+/** A row that opens a pop-up of its own: the row chrome, and the open state the sheet takes. */
 export function SheetRow({
   icon: Icon,
   title,

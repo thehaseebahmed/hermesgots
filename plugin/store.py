@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -22,9 +23,11 @@ logger = logging.getLogger(__name__)
 # would keep table-scanning the chat list — the cost that index exists to remove. Re-running the block
 # is safe: every ALTER is PRAGMA-guarded and every index says IF NOT EXISTS, so a v42 store builds the
 # index and a v41 store reaches 43 in one pass.
-# 44 adds the dictation log and the clock a clear stamps (ADR 0060): two new tables, which is why
-# nothing in the block below has to be PRAGMA-guarded to reach it.
-SCHEMA_VERSION = 46
+# 44 adds the dictation log and the clock a clear stamps (ADR 0060), both new tables. 45 rebuilds the
+# log keyed per profile, and 46 adds the clock its reads order on, so both of those are PRAGMA-guarded
+# or `IF NOT EXISTS`: a store already carrying them has to reach 47 without re-running either. 47
+# replaces the log's index with the one every read asks for.
+SCHEMA_VERSION = 47
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -83,6 +86,18 @@ def put_setting(path: Path, key: str, value: Optional[Any]) -> None:
         conn.close()
 
 
+def open_rows(path: Path) -> sqlite3.Connection:
+    """A store's connection, with rows a reader can name a column on."""
+    conn = connect(path)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def now_ms() -> int:
+    """The host's clock, in the unit the log is stamped in."""
+    return int(time.time() * 1000)
+
+
 def _version(conn: sqlite3.Connection) -> int:
     return conn.execute("PRAGMA user_version").fetchone()[0]
 
@@ -117,6 +132,18 @@ def _carry_hold(conn: sqlite3.Connection, row: Any) -> None:
             stalled_at,
         ),
     )
+
+
+# A finished take, as both the first create and the rebuild need it.
+CREATE_DICTATIONS = """CREATE TABLE IF NOT EXISTS dictations (
+                   id TEXT NOT NULL,
+                   profile TEXT NOT NULL DEFAULT '',
+                   text TEXT NOT NULL,
+                   words INTEGER NOT NULL DEFAULT 0,
+                   ms INTEGER NOT NULL DEFAULT 0,
+                   at INTEGER NOT NULL,
+                   PRIMARY KEY (profile, id)
+               )"""
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -656,21 +683,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
         # v44: a bot's dictations — one row per finished take, written by the app when its words
         # landed — and the clock its last clear stamped, which is how a device's mirror learns that
         # its rows above the stamp are gone without comparing ids (dictations.py, ADR 0060).
-        conn.execute(
-            """CREATE TABLE IF NOT EXISTS dictations (
-                   id TEXT NOT NULL,
-                   profile TEXT NOT NULL DEFAULT '',
-                   text TEXT NOT NULL,
-                   words INTEGER NOT NULL DEFAULT 0,
-                   ms INTEGER NOT NULL DEFAULT 0,
-                   at INTEGER NOT NULL,
-                   PRIMARY KEY (profile, id)
-               )"""
-        )
-        # Every read is one profile's newest first, and the page below asks for `at` under a bound.
-        conn.execute(
-            """CREATE INDEX IF NOT EXISTS dictation_time ON dictations (profile, at)"""
-        )
+        conn.execute(CREATE_DICTATIONS)
         conn.execute(
             """CREATE TABLE IF NOT EXISTS dictation_state (
                    profile TEXT PRIMARY KEY,
@@ -684,28 +697,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
         columns = {row[1] for row in conn.execute("PRAGMA table_info(dictations)")}
         if "device" in columns:
             conn.execute("ALTER TABLE dictations RENAME TO dictations_v44")
-            conn.execute(
-                """CREATE TABLE dictations (
-                       id TEXT NOT NULL,
-                       profile TEXT NOT NULL DEFAULT '',
-                       text TEXT NOT NULL,
-                       words INTEGER NOT NULL DEFAULT 0,
-                       ms INTEGER NOT NULL DEFAULT 0,
-                       at INTEGER NOT NULL,
-                       PRIMARY KEY (profile, id)
-                   )"""
-            )
+            conn.execute(CREATE_DICTATIONS)
             # `id` was unique in the old shape, so no row can collide with another on the way in.
             conn.execute(
                 """INSERT OR IGNORE INTO dictations (id, profile, text, words, ms, at)
                        SELECT id, profile, text, words, ms, at FROM dictations_v44"""
             )
-            # Dropping the old table takes its `dictation_time` index with it; the one below is built
-            # again on the shape a page read asks for.
             conn.execute("DROP TABLE dictations_v44")
-            conn.execute(
-                "CREATE INDEX IF NOT EXISTS dictation_time ON dictations (profile, at)"
-            )
         # v46: the log's clock is the host's (dictations.py, ADR 0060). `at` is when the words were
         # said, which a device's clock decides and a wrong one misplaces; the order, the pages and the
         # fingerprint read `seen_at`, stamped when the row landed. Rows written before this are
@@ -717,9 +715,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
         if "seen_at" not in dictation_columns:
             conn.execute("ALTER TABLE dictations ADD COLUMN seen_at INTEGER NOT NULL DEFAULT 0")
             conn.execute("UPDATE dictations SET seen_at = at")
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS dictation_order ON dictations (profile, seen_at)"
-        )
         # The page no longer reads `at`, so its index would only cost every write.
         conn.execute("DROP INDEX IF EXISTS dictation_time")
+        # v47: one index for all three reads of the log. A page is ordered by `(seen_at, id)`, which
+        # `(profile, seen_at)` could only answer by sorting every row of the profile to hand back 50;
+        # the totals add two integers off the same rows and fetched each row's words to do it. With
+        # the id and the two counts in the key, the page walks the index in order and the totals are
+        # a covering read: one B-tree, and nothing sorted.
+        conn.execute("DROP INDEX IF EXISTS dictation_order")
+        conn.execute(
+            """CREATE INDEX IF NOT EXISTS dictation_read
+                   ON dictations (profile, seen_at, id, words, ms)"""
+        )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

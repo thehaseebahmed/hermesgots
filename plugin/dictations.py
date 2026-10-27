@@ -14,11 +14,11 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
-from .store import connect
+from .store import now_ms, open_rows
 
 logger = logging.getLogger(__name__)
 
@@ -35,18 +35,20 @@ class DictationLogError(Exception):
         self.status = status
 
 
-def _now() -> int:
-    return int(time.time() * 1000)
-
-
 def _profile(value: Optional[str]) -> str:
     return (value or "").strip()
 
 
-def _open(path: Path) -> sqlite3.Connection:
-    conn = connect(path)
-    conn.row_factory = sqlite3.Row
-    return conn
+@contextmanager
+def _transaction(conn: sqlite3.Connection) -> Iterator[None]:
+    """One write, committed or rolled back whole: a close alone leaves the rollback implicit."""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        yield
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    conn.execute("COMMIT")
 
 
 def _whole(value: Any, field: str, default: Optional[int] = None) -> int:
@@ -89,38 +91,44 @@ def record(path: Path, profile: Optional[str], body: Dict[str, Any]) -> Dict[str
         "text": text,
         "words": _whole(body.get("words"), "words", count_words(text)),
         "ms": _whole(body.get("ms"), "ms", 0),
-        "at": _whole(body.get("at"), "at", _now()),
+        "at": _whole(body.get("at"), "at", now_ms()),
     }
-    conn = _open(path)
+    name = _profile(profile)
+    conn = open_rows(path)
     try:
-        conn.execute("BEGIN IMMEDIATE")
-        # The log's clock is the host's: `seen_at` is when the row arrived, and it is what the order,
-        # the pages and the fingerprint read (ADR 0060). A take cannot have been said after the host
-        # heard it, so a device clock running into the future is clamped to the moment it landed
-        # rather than trusted — nothing in the log then claims a time ahead of this machine's.
-        seen_at = _now()
-        if row["at"] > seen_at:
-            row["at"] = seen_at
-        # A retry of the same entry finds the row it wrote and changes nothing, which is what makes
-        # the app's write safe to fire again after a dropped connection.
-        conn.execute(
-            "INSERT OR IGNORE INTO dictations (id, profile, text, words, ms, at, seen_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (
-                row["id"],
-                _profile(profile),
-                row["text"],
-                row["words"],
-                row["ms"],
-                row["at"],
-                seen_at,
-            ),
-        )
-        found = conn.execute(
-            f"SELECT {', '.join(FIELDS)} FROM dictations WHERE id = ? AND profile = ?",
-            (row["id"], _profile(profile)),
-        ).fetchone()
-        conn.execute("COMMIT")
+        with _transaction(conn):
+            # The log's clock is the host's: `seen_at` is when the row arrived, and it is what the
+            # order, the pages and the fingerprint read (ADR 0060). A take cannot have been said after
+            # the host heard it, so a device clock running into the future is clamped to the moment it
+            # landed rather than trusted — nothing in the log then claims a time ahead of this machine's.
+            # It is also held above this profile's last clear: a device reads a row at or below that
+            # stamp as one the clear took away, so a take landing in the stamp's own millisecond would
+            # be dropped by every mirror that has not seen it yet.
+            cleared = conn.execute(
+                "SELECT cleared_at FROM dictation_state WHERE profile = ?", (name,)
+            ).fetchone()
+            seen_at = max(now_ms(), int(cleared["cleared_at"]) + 1) if cleared is not None else now_ms()
+            if row["at"] > seen_at:
+                row["at"] = seen_at
+            # A retry of the same entry finds the row it wrote and changes nothing, which is what makes
+            # the app's write safe to fire again after a dropped connection.
+            conn.execute(
+                "INSERT OR IGNORE INTO dictations (id, profile, text, words, ms, at, seen_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    row["id"],
+                    name,
+                    row["text"],
+                    row["words"],
+                    row["ms"],
+                    row["at"],
+                    seen_at,
+                ),
+            )
+            found = conn.execute(
+                f"SELECT {', '.join(FIELDS)} FROM dictations WHERE id = ? AND profile = ?",
+                (row["id"], name),
+            ).fetchone()
     finally:
         conn.close()
     if found is None:
@@ -155,7 +163,7 @@ def rows(
         args.append(int(before))
     sql += " ORDER BY seen_at DESC, id DESC LIMIT ?"
     args.append(page)
-    conn = _open(path)
+    conn = open_rows(path)
     try:
         found = conn.execute(sql, args).fetchall()
     finally:
@@ -167,7 +175,7 @@ def remove(path: Path, profile: Optional[str], entry_id: str) -> bool:
     """Deletes one dictation; whether there was one to delete."""
     if not path.exists():
         return False
-    conn = _open(path)
+    conn = open_rows(path)
     try:
         found = conn.execute(
             "DELETE FROM dictations WHERE id = ? AND profile = ?",
@@ -178,63 +186,62 @@ def remove(path: Path, profile: Optional[str], entry_id: str) -> bool:
         conn.close()
 
 
-def stamp(path: Path, profile: Optional[str]) -> int:
-    """When this profile's log was last cleared, or 0 where it never was."""
-    if not path.exists():
-        return 0
-    conn = _open(path)
-    try:
-        found = conn.execute(
-            "SELECT cleared_at FROM dictation_state WHERE profile = ?", (_profile(profile),)
-        ).fetchone()
-    finally:
-        conn.close()
-    return int(found["cleared_at"]) if found is not None else 0
+def _totals(conn: sqlite3.Connection, profile: str) -> Dict[str, Any]:
+    """One profile's totals and clear stamp, off a connection a caller already holds.
 
-
-def clear(path: Path, profile: Optional[str]) -> Dict[str, Any]:
-    """Takes this profile's whole log away and stamps the clock it went at."""
-    at = _now()
-    conn = _open(path)
-    try:
-        conn.execute("BEGIN IMMEDIATE")
-        try:
-            conn.execute("DELETE FROM dictations WHERE profile = ?", (_profile(profile),))
-            conn.execute(
-                "INSERT OR REPLACE INTO dictation_state (profile, cleared_at) VALUES (?, ?)",
-                (_profile(profile), at),
-            )
-            conn.execute("COMMIT")
-        except BaseException:
-            conn.execute("ROLLBACK")
-            raise
-    finally:
-        conn.close()
-    return stats(path, profile)
-
-
-def stats(path: Path, profile: Optional[str]) -> Dict[str, Any]:
-    """The profile's totals, and the fingerprint a device's mirror is reconciled against."""
-    empty = {"words": 0, "ms": 0, "count": 0, "newest": None, "oldest": None, "clearedAt": 0}
-    if not path.exists():
-        return empty
-    conn = _open(path)
-    try:
-        found = conn.execute(
-            "SELECT COUNT(*) AS count, COALESCE(SUM(words), 0) AS words, COALESCE(SUM(ms), 0) AS ms, "
-            "MAX(seen_at) AS newest, MIN(seen_at) AS oldest FROM dictations WHERE profile = ?",
-            (_profile(profile),),
-        ).fetchone()
-    finally:
-        conn.close()
-    cleared = stamp(path, profile)
+    Both reads are on the same store, so a caller that has just written to it — or is about to answer
+    with what a clear left — opens it once rather than once per question.
+    """
+    found = conn.execute(
+        "SELECT COUNT(*) AS count, COALESCE(SUM(words), 0) AS words, COALESCE(SUM(ms), 0) AS ms, "
+        "MAX(seen_at) AS newest, MIN(seen_at) AS oldest FROM dictations WHERE profile = ?",
+        (profile,),
+    ).fetchone()
+    cleared = conn.execute(
+        "SELECT cleared_at FROM dictation_state WHERE profile = ?", (profile,)
+    ).fetchone()
+    totals = {
+        "words": 0,
+        "ms": 0,
+        "count": 0,
+        "newest": None,
+        "oldest": None,
+        "clearedAt": int(cleared["cleared_at"]) if cleared is not None else 0,
+    }
     if found is None:
-        return {**empty, "clearedAt": cleared}
+        return totals
     return {
+        **totals,
         "words": int(found["words"]),
         "ms": int(found["ms"]),
         "count": int(found["count"]),
         "newest": found["newest"],
         "oldest": found["oldest"],
-        "clearedAt": cleared,
     }
+
+
+def clear(path: Path, profile: Optional[str]) -> Dict[str, Any]:
+    """Takes this profile's whole log away, stamps the clock it went at, and answers what is left."""
+    name = _profile(profile)
+    conn = open_rows(path)
+    try:
+        with _transaction(conn):
+            conn.execute("DELETE FROM dictations WHERE profile = ?", (name,))
+            conn.execute(
+                "INSERT OR REPLACE INTO dictation_state (profile, cleared_at) VALUES (?, ?)",
+                (name, now_ms()),
+            )
+        return _totals(conn, name)
+    finally:
+        conn.close()
+
+
+def stats(path: Path, profile: Optional[str]) -> Dict[str, Any]:
+    """The profile's totals, and the fingerprint a device's mirror is reconciled against."""
+    if not path.exists():
+        return {"words": 0, "ms": 0, "count": 0, "newest": None, "oldest": None, "clearedAt": 0}
+    conn = open_rows(path)
+    try:
+        return _totals(conn, _profile(profile))
+    finally:
+        conn.close()

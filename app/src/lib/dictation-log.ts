@@ -79,10 +79,7 @@ export function orderOf(row: { at: number; seenAt?: number }): number {
 }
 
 /** A mirror's side of that comparison, from the rows it holds for one bot. */
-export function fingerprintOf(
-  rows: { at: number; seenAt?: number }[],
-  clearedAt = 0,
-): Fingerprint {
+export function fingerprintOf(rows: { at: number; seenAt?: number }[], clearedAt = 0): Fingerprint {
   let newest: number | null = null
   let oldest: number | null = null
   for (const row of rows) {

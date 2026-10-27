@@ -84,7 +84,10 @@ on each open, and the last stats answer per bot is cached so the menu row draws 
   drop also needs a read that agrees with the host's own count, so a host still catching up — or a
   proxy in front of one — cannot cost a take both sides hold. A device upgraded from a build that kept
   no posted mark settles its whole log in one write when the mirror already says what its host says,
-  rather than one POST per take the host already holds, and a backlog is handed over a few at a time.
+  rather than one POST per take the host already holds, and a backlog is handed over four at a time
+  and written once when it is done, so an upgrade's queue wakes the screen's queries once rather than
+  once per take. A delete takes only the row the bot it names holds: the mirror is keyed by the host's
+  id alone, so a row filed under another bot is left where it is.
 - **A take its host refuses is kept, not retried.** A 400 or a 413 on the words is the host reading
   them and saying no, so the row is marked on the device and never posted again; the words stay in
   the mirror, so History still shows what was said.
@@ -94,6 +97,8 @@ on each open, and the last stats answer per bot is cached so the menu row draws 
 - **Clearing is one action over every bot**, on the screen's header, behind a confirmation, each host
   stamping its own `clearedAt`. Only the bots whose host confirmed are cleared on the device: a host
   that refused keeps what the mirror holds, so a half-done clear cannot undo itself on the next open.
+  A clear answers with the totals it leaves behind, and those are the ones cached — an empty log, at
+  that stamp — so the menu row and the stats card have an answer without reading the host again.
 - **A bot that cannot answer contributes nothing to the totals**, and a bot whose host cannot dictate
   is still listed in Bots, with the host's own reason in place of a status.
 - **A bot's row says what its host hears on**, `On · <model>` or `Off`, `Checking…` until the read
@@ -127,13 +132,16 @@ on each open, and the last stats answer per bot is cached so the menu row draws 
   lacked handed over once and kept, a take a host refused marked and never asked about again, a read
   that contradicts the host's count taking nothing away, a take whose host never answered surviving the
   open and being handed over by the next one, a take written on a clock that says 1970 placed where its
-  host heard it, and sixty takes at one instant all read through the walk.
+  host heard it, sixty takes at one instant all read through the walk, a backlog written once rather
+  than once per take, a clear keeping the totals its host answered with, and a delete leaving another
+  bot's row of the same id alone.
 - Plugin (`plugin/tests/test_dictations.py`): a write, a paged read whose cursor carries the id, a
   delete, a clear that stamps `clearedAt`, stats that answer only their own profile, an id that belongs
   to each profile on its own, a take that lands after a clear kept and ordered after it, sixty takes at
-  one instant all reachable, a clock in the future clamped to when the take arrived, a store without
-  the host's clock backfilled from the device's, a body that names no text being refused, and a
-  store in the old shape whose rows and index survive the rebuild with an id two profiles can share.
+  one instant all reachable, a clock in the future clamped to when the take arrived, a take landing
+  above the clear that preceded it, a store without the host's clock backfilled from the device's, the
+  index a page is read through and the totals covered by, a body that names no text being refused, and
+  a store in the old shape whose rows and index survive the rebuild with an id two profiles can share.
 - No browser flow: every claim here is reachable from a component with a faked HTTP boundary.
 
 ## Out of Scope

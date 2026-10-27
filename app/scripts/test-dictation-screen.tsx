@@ -18,7 +18,20 @@ import { Screen } from "@/components/settings-chrome"
 import { connectionKey } from "@/lib/connection"
 import { spelledCount, monthLabel } from "@/lib/dictation-log"
 import { db } from "@/lib/db"
-import { botProfile, click, find, findAll, json, mount, seedSettings, text, until } from "./component-kit.tsx"
+import {
+  botProfile,
+  click,
+  dictationPage,
+  dictationTotals,
+  find,
+  findAll,
+  json,
+  mount,
+  seedSettings,
+  text,
+  until,
+} from "./component-kit.tsx"
+import { orderOf } from "@/lib/dictation-log"
 
 const at = (year: number, month: number, day: number, hour = 9) =>
   new Date(year, month - 1, day, hour).getTime()
@@ -48,7 +61,7 @@ type Hosted = {
 }
 
 /** When a host heard a row: its own stamp, or the take's where the fixture does not set one. */
-const seen = (row: Hosted) => row.seenAt ?? row.at
+const seen = orderOf
 
 /** One bot as its host answers for it: what it advertises, and what its log holds. */
 type Bot = {
@@ -70,18 +83,8 @@ type Bot = {
   fails?: boolean
 }
 
-/** What a host says about its own log: the totals and the fingerprint beside them. */
-function statsOf(bot: Bot) {
-  const rows = [...(bot.rows ?? [])].sort((one, two) => seen(two) - seen(one))
-  return {
-    words: rows.reduce((total, row) => total + row.words, 0),
-    ms: rows.reduce((total, row) => total + row.ms, 0),
-    count: rows.length,
-    newest: rows[0] ? seen(rows[0]) : null,
-    oldest: rows.at(-1) ? seen(rows.at(-1)) : null,
-    clearedAt: bot.clearedAt ?? 0,
-  }
-}
+/** What a host says about its own log, off the rule the app compares a mirror with. */
+const statsOf = (bot: Bot) => dictationTotals(bot.rows ?? [], bot.clearedAt ?? 0)
 
 const pluginPath = "/api/plugins/memento"
 
@@ -133,20 +136,13 @@ function host(bots: Bot[]) {
         bot.rows = [stored, ...(bot.rows ?? []).filter((row) => row.id !== body.id)]
         return json({ dictation: stored }, 201)
       }
-      const before = url.searchParams.get("before")
-      const beforeId = url.searchParams.get("before_id")
-      const limit = Number(url.searchParams.get("limit") ?? 50)
-      const rows = [...(bot.rows ?? [])]
-        .sort((one, two) => seen(two) - seen(one) || (one.id < two.id ? 1 : -1))
-        .filter(
-          (row) =>
-            before === null ||
-            beforeId === null ||
-            seen(row) < Number(before) ||
-            (seen(row) === Number(before) && row.id < beforeId),
-        )
-        .slice(0, limit)
-      return json({ dictations: rows })
+      return json({
+        dictations: dictationPage(bot.rows ?? [], {
+          before: url.searchParams.get("before"),
+          beforeId: url.searchParams.get("before_id"),
+          limit: url.searchParams.get("limit"),
+        }),
+      })
     }
     if (url.pathname.includes(`${pluginPath}/dictations/`)) {
       calls.push({ path: url.pathname, method })

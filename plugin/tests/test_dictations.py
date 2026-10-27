@@ -9,7 +9,7 @@ import sqlite3
 import unittest
 
 from plugin import dictations
-from plugin.store import connect, db_path
+from plugin.store import connect, db_path, now_ms
 from plugin.tests._helpers import temp_hermes_home
 
 
@@ -63,6 +63,40 @@ class DictationsTest(unittest.TestCase):
         self.assertEqual(found["at"], 5)
         self.assertGreater(found["seenAt"], stamped)
         self.assertEqual([row["id"] for row in dictations.rows(self.path, "bot-a")], ["late"])
+
+    def test_a_take_lands_above_the_clear_that_came_before_it(self) -> None:
+        # A device reads a row at or below its host's clear stamp as one the clear took away, so a
+        # take written in that stamp's own millisecond would vanish from a mirror that has not seen it.
+        stamped = dictations.clear(self.path, "bot-a")["clearedAt"]
+        for index in range(5):
+            found = dictations.record(
+                self.path, "bot-a", {"id": f"after{index}", "text": "late", "at": 1}
+            )
+            self.assertGreater(found["seenAt"], stamped)
+        self.assertGreater(dictations.stats(self.path, "bot-a")["oldest"], stamped)
+
+    def test_a_page_walks_the_index_in_order_and_the_totals_cover_it(self) -> None:
+        # What the index exists for: a page ordered by (seen_at, id) is read off it rather than sorted
+        # per read, and the totals add two integers without fetching each row's words to do it.
+        connect(self.path).close()
+        conn = sqlite3.connect(self.path)
+        try:
+            page = conn.execute(
+                "EXPLAIN QUERY PLAN SELECT id, text FROM dictations WHERE profile = ? "
+                "AND (seen_at < ? OR (seen_at = ? AND id < ?)) "
+                "ORDER BY seen_at DESC, id DESC LIMIT 50",
+                ("bot-a", 5, 5, "d1"),
+            ).fetchall()
+            totals = conn.execute(
+                "EXPLAIN QUERY PLAN SELECT SUM(words), SUM(ms), MAX(seen_at) FROM dictations "
+                "WHERE profile = ?",
+                ("bot-a",),
+            ).fetchall()
+        finally:
+            conn.close()
+        plans = " ".join(str(row) for row in page)
+        self.assertNotIn("TEMP B-TREE", plans, "the page is read in the order the index already holds")
+        self.assertIn("COVERING INDEX", " ".join(str(row) for row in totals))
 
     def test_one_id_belongs_to_each_profile_on_its_own(self) -> None:
         self.add(profile="bot-a", text="mine")
@@ -134,7 +168,7 @@ class DictationsTest(unittest.TestCase):
         )
 
     def test_a_clock_in_the_future_is_clamped_to_when_the_take_arrived(self) -> None:
-        found = self.add(at=dictations._now() + 86_400_000)
+        found = self.add(at=now_ms() + 86_400_000)
         self.assertLessEqual(found["at"], found["seenAt"], "nothing claims a time ahead of this host")
 
     def test_takes_that_share_a_millisecond_are_all_reachable(self) -> None:
@@ -170,7 +204,7 @@ class DictationsTest(unittest.TestCase):
 
     def test_a_store_without_the_hosts_clock_backfills_it_from_the_device_time(self) -> None:
         conn = connect(self.path)
-        conn.execute("DROP INDEX dictation_order")
+        conn.execute("DROP INDEX dictation_read")
         conn.execute("ALTER TABLE dictations DROP COLUMN seen_at")
         conn.execute("PRAGMA user_version = 45")
         conn.execute(
@@ -266,9 +300,10 @@ class OldShapeStoreTest(unittest.TestCase):
             version = conn.execute("PRAGMA user_version").fetchone()[0]
         finally:
             conn.close()
-        self.assertIn("dictation_order", tables)
+        self.assertIn("dictation_read", tables)
+        self.assertNotIn("dictation_order", tables, "the index the page sorted every time is gone")
         self.assertNotIn("dictations_v44", tables)
-        self.assertEqual(version, 46)
+        self.assertEqual(version, 47)
 
 
 if __name__ == "__main__":

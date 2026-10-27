@@ -3802,8 +3802,7 @@ export async function stopRun(config: HermesConfig, runId: string) {
 
 /** Where a bot's dictation log lives on its Gots plugin (`dictations.py`). */
 function dictationRoot(config: HermesConfig, entryId?: string) {
-  const root = `${pluginRoot(config.baseUrl)}/dictations`
-  return entryId ? `${root}/${encodeURIComponent(entryId)}` : root
+  return pluginPath(config, "dictations", ...(entryId ? [entryId] : []))
 }
 
 /**

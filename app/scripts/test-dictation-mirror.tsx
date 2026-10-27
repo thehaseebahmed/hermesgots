@@ -9,8 +9,13 @@ import test from "node:test"
 
 import { connectionKey, serverConfig } from "@/lib/connection"
 import { db } from "@/lib/db"
-import { PAGE, reconcileDictations } from "@/lib/dictations"
-import { botProfile, json } from "./component-kit.tsx"
+import {
+  PAGE,
+  clearDictationLog,
+  reconcileDictations,
+  removeDictation,
+} from "@/lib/dictations"
+import { botProfile, dictationPage, dictationTotals, json } from "./component-kit.tsx"
 
 const AT = new Date(2026, 9, 20, 9).getTime()
 /** The host's own clock, well clear of the stamps these takes carry. */
@@ -38,17 +43,9 @@ function host(script: { holds?: Held[]; count?: number; refuse?: number; down?: 
     calls.push(`${method} ${url.pathname.split("/memento/")[1] ?? url.pathname}`)
     if (script.down) throw new TypeError("Failed to fetch")
     if (url.pathname.endsWith("/dictations/stats")) {
-      const heard = held.map((one) => one.seenAt)
-      return json({
-        stats: {
-          words: held.length * 4,
-          ms: held.length * 2000,
-          count: script.count ?? held.length,
-          newest: heard.length ? Math.max(...heard) : null,
-          oldest: heard.length ? Math.min(...heard) : null,
-          clearedAt: 0,
-        },
-      })
+      // The totals the app itself reconciles against, with the one number a test may contradict.
+      const stats = dictationTotals(held, 0)
+      return json({ stats: { ...stats, count: script.count ?? stats.count } })
     }
     if (method === "POST" && url.pathname.endsWith("/dictations")) {
       const body = JSON.parse(String(init?.body)) as Omit<Held, "seenAt">
@@ -58,20 +55,27 @@ function host(script: { holds?: Held[]; count?: number; refuse?: number; down?: 
       if (!held.some((one) => one.id === stored.id)) held.unshift(stored)
       return json({ dictation: stored }, 201)
     }
+    if (method === "DELETE" && url.pathname.endsWith("/dictations")) {
+      held.length = 0
+      heard = HEARD + 1_000_000
+      return json({
+        stats: { words: 0, ms: 0, count: 0, newest: null, oldest: null, clearedAt: heard },
+      })
+    }
+    if (method === "DELETE" && url.pathname.includes("/dictations/")) {
+      const id = decodeURIComponent(url.pathname.split("/dictations/")[1])
+      const at = held.findIndex((one) => one.id === id)
+      if (at >= 0) held.splice(at, 1)
+      return json({ removed: at >= 0 })
+    }
     if (method === "GET" && url.pathname.endsWith("/dictations")) {
-      const before = url.searchParams.get("before")
-      const beforeId = url.searchParams.get("before_id")
-      const older = held
-        .slice()
-        .sort((one, two) => two.seenAt - one.seenAt || (one.id < two.id ? 1 : -1))
-        .filter(
-          (one) =>
-            before === null ||
-            beforeId === null ||
-            one.seenAt < Number(before) ||
-            (one.seenAt === Number(before) && one.id < beforeId),
-        )
-      return json({ dictations: older.slice(0, Number(url.searchParams.get("limit") ?? 50)) })
+      return json({
+        dictations: dictationPage(held, {
+          before: url.searchParams.get("before"),
+          beforeId: url.searchParams.get("before_id"),
+          limit: url.searchParams.get("limit"),
+        }),
+      })
     }
     return json({ features: ["dictations"] })
   }) as typeof fetch
@@ -201,4 +205,79 @@ test("takes that share a millisecond are all read, not one page of them", async 
   await reconcileDictations(profile)
 
   assert.equal(await db.dictationLog.count(), PAGE + 10, "every take was read")
+})
+
+test("an upgrade's backlog is written a batch at a time, not a take at a time", async () => {
+  const { profile, key } = await fresh()
+  const owed = Array.from({ length: 5 }, (_, index) => ({
+    ...row(`owed${index}`, AT + index * 1000),
+    connection: key,
+    loggedAt: AT + index * 1000,
+    posted: false,
+  }))
+  await db.dictationLog.bulkPut(owed)
+  host({ holds: [] })
+
+  // Every write a live query covers re-runs it, so an upgrade's backlog must not wake the History
+  // tab once per take: the rows a batch of hand-overs leaves are written together.
+  const table = db.dictationLog as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>
+  const writes: string[] = []
+  const real = { bulkPut: table.bulkPut, update: table.update }
+  table.bulkPut = (...args: unknown[]) => {
+    writes.push("bulkPut")
+    return real.bulkPut.apply(table, args)
+  }
+  table.update = (...args: unknown[]) => {
+    writes.push("update")
+    return real.update.apply(table, args)
+  }
+  try {
+    await reconcileDictations(profile)
+  } finally {
+    table.bulkPut = real.bulkPut
+    table.update = real.update
+  }
+
+  assert.equal(writes.filter((one) => one === "update").length, 0, "no take is written on its own")
+  assert.equal(writes.length, 1, "the whole backlog lands in one write")
+  assert.ok((await mirror()).every((one) => one.posted), "and every one is marked as held")
+})
+
+test("a clear keeps the totals its host answered with, rather than emptying them", async () => {
+  const { profile, key } = await fresh()
+  await db.dictationLog.put({ ...row("gone", AT), connection: key, loggedAt: AT, posted: true })
+  await db.dictationStats.put({ id: key, words: 4, ms: 2000, count: 1, clearedAt: 0 })
+  const server = host({ holds: [row("gone", AT)] })
+
+  const refused = await clearDictationLog([profile])
+
+  assert.deepEqual(refused, [], "every host confirmed")
+  assert.equal(await db.dictationLog.count(), 0, "this device's rows went with them")
+  const totals = await db.dictationStats.get(key)
+  assert.ok(totals, "the totals the clear answered with are kept")
+  assert.equal(totals.count, 0, "the log is empty")
+  assert.ok(totals.clearedAt > 0, "and the clock the host stamped it at is here")
+  console.log("cleared ->", server.calls.join(" | "))
+})
+
+test("a delete takes the row it asked for, and not one filed under another bot", async () => {
+  const { profile, key } = await fresh()
+  const other = botProfile("other", { id: "bot-2" })
+  await db.profiles.put(other)
+  const otherKey = connectionKey(serverConfig(other))
+  // The mirror is keyed by the host's id alone, so the second write of one id is the row it holds.
+  await db.dictationLog.put({ ...row("shared", AT), connection: key, loggedAt: AT, posted: true })
+  await db.dictationLog.put({
+    ...row("shared", AT + 1),
+    connection: otherKey,
+    loggedAt: AT + 1,
+    posted: true,
+  })
+  host({ holds: [] })
+
+  await removeDictation(profile, "shared")
+
+  const kept = await db.dictationLog.get("shared")
+  assert.ok(kept, "the row another bot filed under that id stays where it is")
+  assert.equal(kept.connection, otherKey)
 })

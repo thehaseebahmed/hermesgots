@@ -129,6 +129,17 @@ act stays Speech-to-text, and so does each bot's own settings page.
   write, and the old index on `at` gives way to one on `seen_at`. The app's Dexie moves to v26 for
   `seenAt` and `loggedAt` — the instant a row is ordered and grouped by, which is the host's where it
   has answered and the device's own until then — with the upgrade filling `loggedAt` from `at`.
+- **The log is read through one index.** Schema v47 replaces `(profile, seen_at)` with
+  `(profile, seen_at, id, words, ms)`: a page ordered by `(seen_at, id)` was read off an index that
+  could not answer its second term, so SQLite sorted every row of the profile to hand back fifty, and
+  the totals fetched each row's words to add two integers. With the id and the two counts in the key
+  the page walks the index in order and the totals are a covering read. The app's Dexie moves to v27
+  to drop the mirror's index on `at`, which no read uses — the host's stamp is what places a row — and
+  which every write to the take path paid for.
+- **A take lands above the clear that preceded it.** A device reads a row at or below its host's clear
+  stamp as one the clear took away, so the host holds a new row's `seen_at` above that stamp even when
+  it arrives in the stamp's own millisecond; without it a take could be written into a mirror's blind
+  spot and be dropped by every mirror that had not already seen it.
 - **A host that ran a build of this branch before the log was keyed per profile is rebuilt, not
   ignored.** `CREATE TABLE IF NOT EXISTS` cannot change a primary key, so schema v45 detects the old
   table by the `device` column it carried, renames it, creates the keyed one and carries every row
@@ -140,8 +151,9 @@ act stays Speech-to-text, and so does each bot's own settings page.
   scripted host: a log the previous build left settled in one write, a take a host lacked handed over
   once and kept, a take a host refused never asked about again, a read that contradicts the host's
   count taking nothing away, a take whose host never answered surviving the open, a take written on a
-  clock that says 1970 placed where its host heard it, and sixty takes at one instant all read through
-  the walk; `app/scripts/test-dictation-screen.tsx` renders the three tabs over a seeded mirror,
+  clock that says 1970 placed where its host heard it, sixty takes at one instant all read through
+  the walk, a backlog of owed takes written once rather than once each, a clear keeping the totals its
+  host answered with, and a delete leaving a row another bot filed under the same id; `app/scripts/test-dictation-screen.tsx` renders the three tabs over a seeded mirror,
   including a take whose device clock is a month behind drawn in the month it was heard and above one
   it was said after.
   `plugin/tests/test_dictations.py` drives `plugin.dictations` over a temp store: a write, a paged

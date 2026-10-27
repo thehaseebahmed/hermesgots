@@ -3,7 +3,7 @@
  * it adds up to. The screen draws from this device's mirror, so nothing here waits on a host; opening
  * it reconciles every bot in the background and caches the totals it reads (ADR 0060).
  */
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { CheckIcon, CopyIcon, Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
@@ -35,7 +35,7 @@ import {
   useDictationTotals,
 } from "@/lib/dictations"
 import { formatDuration } from "@/lib/format"
-import { useSpeechModel } from "@/lib/host-speech"
+import { useSpeech, type SpeechCheck } from "@/lib/host-speech"
 import { cn } from "@/lib/utils"
 
 /** The rows the History tab draws before the reader reaches the end of them. */
@@ -130,7 +130,7 @@ export function DictationSettings() {
 function HistoryTab({ profiles }: { profiles: Profile[] }) {
   const [shown, setShown] = useState(PAGE_ROWS)
   // One row more than is drawn is what says there is more, so the list needs no separate count.
-  const page = useDictationRows(shown + PAGE_ROWS)
+  const page = useDictationRows(shown + 1)
   const rows = page?.slice(0, shown)
   const more = (page?.length ?? 0) > shown
   const [open, setOpen] = useState<DictationRecord | null>(null)
@@ -152,11 +152,14 @@ function HistoryTab({ profiles }: { profiles: Profile[] }) {
     return () => watcher.disconnect()
   }, [more])
 
-  const names = new Map(profiles.map((profile) => [connectionKey(profile), profile.name]))
+  const byConnection = useMemo(
+    () => new Map(profiles.map((profile) => [connectionKey(profile), profile])),
+    [profiles],
+  )
   const groups = byMonth(rows ?? [])
 
   const remove = async (row: DictationRecord) => {
-    const profile = profiles.find((one) => connectionKey(one) === row.connection)
+    const profile = byConnection.get(row.connection)
     if (!profile) return
     setBusy(true)
     try {
@@ -189,7 +192,9 @@ function HistoryTab({ profiles }: { profiles: Profile[] }) {
               >
                 <span className="line-clamp-2 text-base">{row.text}</span>
                 <span className="text-sm text-muted-foreground">
-                  {[names.get(row.connection), wordsLabel(row.words)].filter(Boolean).join(" · ")}
+                  {[byConnection.get(row.connection)?.name, wordsLabel(row.words)]
+                    .filter(Boolean)
+                    .join(" · ")}
                 </span>
               </button>
             ))}
@@ -200,7 +205,7 @@ function HistoryTab({ profiles }: { profiles: Profile[] }) {
       {open && (
         <EntrySheet
           row={open}
-          bot={names.get(open.connection)}
+          bot={byConnection.get(open.connection)?.name}
           onOpenChange={(next) => !next && setOpen(null)}
           onDelete={() => setConfirming(true)}
         />
@@ -246,7 +251,7 @@ function EntrySheet({
           <PopupTitle>{clockOf(row.at)}</PopupTitle>
         </PopupHeader>
         <div className="flex min-h-0 flex-col gap-4 overflow-y-auto px-4 pb-4">
-          <p className="whitespace-pre-wrap text-base" data-dictation-text>
+          <p className="text-base whitespace-pre-wrap" data-dictation-text>
             {row.text}
           </p>
           <p className="text-sm text-muted-foreground">
@@ -268,7 +273,11 @@ function EntrySheet({
               data-dictation-copy
               onClick={() => void copy()}
             >
-              {copied ? <CheckIcon data-icon="inline-start" /> : <CopyIcon data-icon="inline-start" />}
+              {copied ? (
+                <CheckIcon data-icon="inline-start" />
+              ) : (
+                <CopyIcon data-icon="inline-start" />
+              )}
               {copied ? "Copied" : "Copy"}
             </Button>
           </div>
@@ -301,7 +310,7 @@ function speechLine({
   reason,
 }: {
   model?: string
-  check?: "checking" | "failed"
+  check?: SpeechCheck
   reason?: string
 }) {
   if (reason) return reason
@@ -314,7 +323,7 @@ function speechLine({
 function BotRow({ profile }: { profile: Profile }) {
   const answer = useDictationInfo(profile)
   const reason = answer && answer.status === "off" ? answer.reason : undefined
-  const { model, check } = useSpeechModel(profile)
+  const { model, check } = useSpeech(profile)
   return (
     <LinkRow
       to={botTabPath(profile.id, "speech-to-text")}
