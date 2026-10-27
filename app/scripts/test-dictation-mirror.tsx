@@ -42,7 +42,14 @@ type Held = {
 
 /** A host that answers what the test says, and records what it was asked. */
 function host(
-  script: { holds?: Held[]; count?: number; refuse?: number; down?: boolean; cap?: number } = {},
+  script: {
+    holds?: Held[]
+    count?: number
+    refuse?: number
+    down?: boolean
+    cap?: number
+    old?: boolean
+  } = {},
 ) {
   const held = [...(script.holds ?? [])]
   let heard = HEARD
@@ -64,6 +71,8 @@ function host(
         return json({ error: { message: "That dictation is too long to keep." } }, script.refuse)
       posts.push({ ...body, seenAt: 0 })
       const stored = { ...body, at: Math.min(body.at, heard), seenAt: heard++ }
+      // A host older than the field keeps no words as heard, and answers without them.
+      if (script.old) delete stored.heard
       if (!held.some((one) => one.id === stored.id)) held.unshift(stored)
       return json({ dictation: stored }, 201)
     }
@@ -344,4 +353,20 @@ test("a take with no words as heard is written without them", async () => {
 
   assert.equal("heard" in ((await mirror())[0] ?? {}), false)
   assert.equal("heard" in (server.posts[0] ?? {}), false)
+})
+
+test("a host that keeps no words as heard takes them off the mirror's copy", async () => {
+  const server = host({ old: true })
+  const { profile } = await fresh()
+
+  await writeDictation(serverConfig(profile), "Tidy words.", 4_200, "um tidy words")
+  await until(async () => server.posts.length === 1, "the post")
+  await until(
+    async () => (await mirror())[0]?.heard === undefined,
+    "the words as heard to go with the host's answer",
+  )
+
+  const kept = (await mirror())[0]
+  assert.equal(kept?.text, "Tidy words.", "the words that landed stay")
+  assert.equal(kept?.heard, undefined, "and the heard ones go, since this host keeps none")
 })

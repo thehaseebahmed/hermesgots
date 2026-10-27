@@ -62,13 +62,7 @@ function stored(row: RowFields): DictationRecord {
   return { ...row, loggedAt: orderOf(row) }
 }
 
-function entryOf(
-  connection: string,
-  text: string,
-  ms: number,
-  heard?: string,
-  at = Date.now(),
-): DictationRecord {
+function entryOf(connection: string, text: string, ms: number, heard?: string): DictationRecord {
   const asHeard = heard?.trim()
   return stored({
     id: randomId(),
@@ -77,7 +71,7 @@ function entryOf(
     ...(asHeard ? { heard: asHeard } : {}),
     words: countWords(text),
     ms,
-    at,
+    at: Date.now(),
     posted: false,
   })
 }
@@ -121,8 +115,13 @@ function settledBy({ row, answer, refused }: Posting): DictationRecord | null {
   // stays unposted so the next open asks again, which the host's own idempotence makes harmless.
   if (!answer) return null
   // Its answer is the row as it stored it: its clock heard the take, and its `at` is the one it kept —
-  // a device clock in the future is clamped to that, so the sheet shows a time that can exist.
-  return stored({ ...row, posted: true, at: answer.at, seenAt: answer.seenAt })
+  // a device clock in the future is clamped to that, so the sheet shows a time that can exist. Its
+  // words as heard are the host's to keep too: one it answered without is one it dropped, so the
+  // mirror heals to that rather than holding a text its host has nowhere (ADR 0062).
+  const settled = stored({ ...row, posted: true, at: answer.at, seenAt: answer.seenAt })
+  if (answer.heard === undefined) delete settled.heard
+  else settled.heard = answer.heard
+  return settled
 }
 
 /** Writes what a batch of hand-overs came to in one write, and answers what each row became. */

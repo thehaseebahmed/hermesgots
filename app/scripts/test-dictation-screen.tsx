@@ -16,7 +16,7 @@ import { act } from "react"
 import { DictationSettings, PAGE_ROWS } from "@/components/settings/dictation"
 import { Screen } from "@/components/settings-chrome"
 import { connectionKey } from "@/lib/connection"
-import { spelledCount, monthLabel } from "@/lib/dictation-log"
+import { monthLabel, orderOf, spelledCount } from "@/lib/dictation-log"
 import { db } from "@/lib/db"
 import {
   botProfile,
@@ -26,12 +26,12 @@ import {
   find,
   findAll,
   json,
+  lineLabel,
   mount,
   seedSettings,
   text,
   until,
 } from "./component-kit.tsx"
-import { orderOf } from "@/lib/dictation-log"
 
 const at = (year: number, month: number, day: number, hour = 9) =>
   new Date(year, month - 1, day, hour).getTime()
@@ -221,7 +221,7 @@ const sheet = () => find("[data-dictation-text]")
 /** The words as the host heard them, drawn above the tidied text where the two differ (ADR 0062). */
 const heardBlock = () => find("[data-dictation-heard]")
 /** A block's heading and its words, as one string: the heading is inside the paragraph. */
-const blockText = (node: Element | null) => (node?.textContent ?? "").trim()
+const blockText = (node: Element | null) => (node ? lineLabel(node) : "")
 const copyButton = () => find("[data-dictation-copy]")
 const deleteButton = () => find("[data-dictation-delete]")
 /** A button inside the destructive confirmation, never the one that opened it. */

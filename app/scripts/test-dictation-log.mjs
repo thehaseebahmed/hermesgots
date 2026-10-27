@@ -13,6 +13,7 @@ import {
   pooledRate,
   spokenOf,
   sumTotals,
+  textsOf,
   toUpsert,
   wordsLabel,
 } from "../src/lib/dictation-log.ts"
@@ -137,6 +138,35 @@ test("totals add up across the bots that reported", () => {
     { words: 150, ms: 90_000, count: 3 },
   )
   assert.deepEqual(sumTotals([]), { words: 0, ms: 0, count: 0 })
+})
+
+test("a take's texts are set apart only where the cleanup changed them", () => {
+  const said = "um, draft the reply"
+  assert.deepEqual(
+    textsOf({ text: "Draft the reply.", heard: said }),
+    { heard: said, tidied: "Draft the reply." },
+    "two blocks where the cleanup changed anything",
+  )
+  assert.deepEqual(
+    textsOf({ text: "Send it as it is.", heard: "Send it as it is." }),
+    { heard: "Send it as it is." },
+    "one block, named Heard, where the cleanup left the words alone",
+  )
+  assert.deepEqual(
+    textsOf({ text: "Send it as it is." }),
+    { tidied: "Send it as it is." },
+    "one unlabelled block on a row from before the field",
+  )
+  assert.deepEqual(
+    textsOf({ text: "As it is.", heard: "   " }),
+    { tidied: "As it is." },
+    "a blank heard is none at all",
+  )
+  assert.deepEqual(
+    textsOf({ text: " As it is. ", heard: "  As it is.  " }),
+    { heard: "As it is." },
+    "the two are compared as they are read, not as they were stored",
+  )
 })
 
 test("the rate is pooled over the totals, not averaged over takes", () => {

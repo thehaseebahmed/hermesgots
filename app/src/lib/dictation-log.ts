@@ -159,3 +159,19 @@ export function spelledCount(value: number): string {
 export function wordsLabel(words: number): string {
   return `${spelledCount(words)} ${words === 1 ? "word" : "words"}`
 }
+
+/**
+ * The texts one take draws, as the sheet sets them apart (ADR 0062): the words as its host heard
+ * them, and the tidied text only where the cleanup changed anything — so a take it left alone reads
+ * as one block named Heard, and a row from before the field reads as one text with no heading at all.
+ */
+export function textsOf(row: { text: string; heard?: string }): {
+  heard?: string
+  tidied?: string
+} {
+  const tidied = row.text.trim()
+  const heard = row.heard?.trim()
+  if (!heard) return { tidied }
+  if (heard === tidied) return { heard }
+  return { heard, tidied }
+}

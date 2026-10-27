@@ -3,7 +3,7 @@
  * it adds up to. The screen draws from this device's mirror, so nothing here waits on a host; opening
  * it reconciles every bot in the background and caches the totals it reads (ADR 0060).
  */
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState, type ComponentProps } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { CheckIcon, CopyIcon, Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
@@ -26,7 +26,7 @@ import { connectionKey } from "@/lib/connection"
 import { useCopied } from "@/lib/copied"
 import { listProfiles, type DictationRecord, type Profile } from "@/lib/db"
 import { useDictationInfo } from "@/lib/dictation"
-import { byMonth, pooledRate, spelledCount, wordsLabel } from "@/lib/dictation-log"
+import { byMonth, pooledRate, spelledCount, textsOf, wordsLabel } from "@/lib/dictation-log"
 import {
   clearDictationLog,
   reconcileAll,
@@ -223,9 +223,25 @@ function HistoryTab({ profiles }: { profiles: Profile[] }) {
   )
 }
 
+/** One of a take's texts, under its heading where the take carries two (ADR 0062). */
+function Words({
+  label,
+  text,
+  ...rest
+}: { label: string | null; text: string } & ComponentProps<"p">) {
+  return (
+    <p className="text-base whitespace-pre-wrap" {...rest}>
+      {label && (
+        <span className="mb-1.5 block text-[13px] font-medium text-muted-foreground">{label}</span>
+      )}
+      {text}
+    </p>
+  )
+}
+
 /**
- * One dictation, whole: the words as the host heard them under **Heard**, the tidied text under
- * **Tidied** where the cleanup changed anything, what it was, a Copy and a way to delete it (ADR 0062).
+ * One dictation, whole: the words the host heard under **Heard**, the tidied text under **Tidied**
+ * where the cleanup changed anything, what it was, a Copy and a way to delete it (ADR 0062).
  */
 function EntrySheet({
   row,
@@ -239,10 +255,7 @@ function EntrySheet({
   onDelete: () => void
 }) {
   const { copied, noteCopied } = useCopied()
-  const heard = row.heard?.trim() || undefined
-  // What the cleanup changed, if anything: a take it left alone lands as the words the host heard, so
-  // it reads as one block rather than the same text twice (ADR 0062).
-  const tidied = heard !== undefined && heard !== row.text
+  const { heard, tidied } = textsOf(row)
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(row.text)
@@ -258,24 +271,8 @@ function EntrySheet({
           <PopupTitle>{clockOf(row.at)}</PopupTitle>
         </PopupHeader>
         <div className="flex min-h-0 flex-col gap-4 overflow-y-auto px-4 pb-4">
-          {heard && (
-            <p className="text-base whitespace-pre-wrap" data-dictation-heard>
-              <span className="mb-1.5 block text-[13px] font-medium text-muted-foreground">
-                Heard
-              </span>
-              {heard}
-            </p>
-          )}
-          {heard && !tidied ? null : (
-            <p className="text-base whitespace-pre-wrap" data-dictation-text>
-              {tidied && (
-                <span className="mb-1.5 block text-[13px] font-medium text-muted-foreground">
-                  Tidied
-                </span>
-              )}
-              {row.text}
-            </p>
-          )}
+          {heard && <Words label="Heard" text={heard} data-dictation-heard />}
+          {tidied && <Words label={heard ? "Tidied" : null} text={tidied} data-dictation-text />}
           <p className="text-sm text-muted-foreground">
             {[bot, wordsLabel(row.words), spokenLabel(row.ms)].filter(Boolean).join(" · ")}
           </p>

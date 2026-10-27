@@ -629,7 +629,7 @@ export function useChunkedDictation(
   }, [])
 
   const land = useCallback(
-    (current: Session, text: string, heard = text) => {
+    (current: Session, text: string, heard: string) => {
       forget(current)
       session.current = null
       showIdle()
@@ -662,12 +662,13 @@ export function useChunkedDictation(
       }
       if (done === undefined && deadline !== undefined) {
         stopInflight(current)
-        return land(current, takeText(current.pieces))
+        const heard = takeText(current.pieces)
+        return land(current, heard, heard)
       }
-      const heard = current.pieces.filter((piece) => piece.text !== null)
-      if (heard.length) {
-        const text = joinText(...heard.map((piece) => piece.text ?? ""))
-        const ms = spokenLong(heard)
+      const spoken = current.pieces.filter((piece) => piece.text !== null)
+      if (spoken.length) {
+        const text = joinText(...spoken.map((piece) => piece.text ?? ""))
+        const ms = spokenLong(spoken)
         current.pieces = current.pieces.filter((piece) => piece.text === null)
         save(current, true)
         // Nothing tidied these words, so they are the take as heard as well as what lands.
@@ -701,7 +702,7 @@ export function useChunkedDictation(
           controller.signal,
         )
         if (current.inflight !== controller) return null
-        return land(current, text)
+        return land(current, text, text)
       } catch (failure) {
         if (current.inflight !== controller) return null
         current.error = failure

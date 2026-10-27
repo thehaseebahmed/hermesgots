@@ -3837,11 +3837,11 @@ function dictationRow(value: unknown): HostDictation | null {
   const row = value as Partial<HostDictation> | null
   if (!row || typeof row.id !== "string" || !row.id || typeof row.text !== "string") return null
   const at = finite(row.at) ?? 0
-  const heard = typeof row.heard === "string" && row.heard.trim() ? row.heard : undefined
+  const heard = typeof row.heard === "string" ? row.heard.trim() : ""
   return {
     id: row.id,
     text: row.text,
-    ...(heard === undefined ? {} : { heard }),
+    ...(heard ? { heard } : {}),
     words: finite(row.words) ?? 0,
     ms: finite(row.ms) ?? 0,
     at,

@@ -87,9 +87,7 @@ def _row(row: sqlite3.Row) -> Dict[str, Any]:
     A row that never kept the words as heard answers without `heard` rather than with a null, so the
     app's sheet draws one text exactly as it did before the field existed (ADR 0062).
     """
-    entry = {
-        field: row[field] for field in FIELDS if field not in ("seen_at", "heard")
-    }
+    entry = {field: row[field] for field in FIELDS if field not in ("seen_at", "heard")}
     if row["heard"] is not None:
         entry["heard"] = row["heard"]
     entry["seenAt"] = row["seen_at"]

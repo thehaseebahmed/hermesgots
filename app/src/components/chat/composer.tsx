@@ -188,14 +188,14 @@ export function Composer({
   const lastEscape = useRef<number | null>(null)
   const listId = useId()
   const dictationInfo = useDictationInfo(connection)
-  const placeHeard = useRef<(heard: string) => void>(() => {})
+  const placeLanded = useRef<(landed: string) => void>(() => {})
   const dictation = useChunkedDictation(
     connection,
     joinText(botName, dictationHint ?? ""),
     draftKey,
     dictationWords,
     (text, spokenMs, heard) => {
-      placeHeard.current(text)
+      placeLanded.current(text)
       void writeDictation(connection, text, spokenMs, heard)
     },
   )
@@ -375,9 +375,9 @@ export function Composer({
     textarea.current?.focus()
   }
 
-  const placeDictation = (heard: string) => {
+  const placeDictation = (landed: string) => {
     if (dictationSends.current) {
-      const text = joinText(value, heard)
+      const text = joinText(value, landed)
       if (disabled) setValue(text)
       else submitText(text)
       return
@@ -386,7 +386,7 @@ export function Composer({
       const at = Math.min(dictationAt.current ?? current.length, current.length)
       const before = current.slice(0, at)
       const after = current.slice(at)
-      const middle = joinText(heard)
+      const middle = joinText(landed)
       return `${before}${before && !/\s$/.test(before) ? " " : ""}${middle}${after && !/^\s/.test(after) ? " " : ""}${after}`
     })
     setTimeout(() => textarea.current?.focus())
@@ -397,7 +397,7 @@ export function Composer({
     await dictation.finish(send ? SEND_WAIT_MS : STOP_WAIT_MS)
   }
 
-  placeHeard.current = placeDictation
+  placeLanded.current = placeDictation
 
   const retryDictation = async () => {
     dictationAt.current ??= dictation.anchor()
