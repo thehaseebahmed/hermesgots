@@ -235,7 +235,7 @@ test("the thread draws one divider where the run compacted, and the words around
       return json({
         object: "memento.context",
         prompt_tokens: 4_200,
-        compactions: [{ at: 5_000_000, tokens: 168_000, window: 200_000 }],
+        compactions: [{ at: 5_000_000 }],
       })
     return json({ error: { message: "no route" } }, 404)
   }) as unknown as typeof fetch
@@ -254,10 +254,8 @@ test("the thread draws one divider where the run compacted, and the words around
     }
   })
   assert.equal(seen.dividers, 1, "one divider")
-  assert.ok(
-    seen.html.includes("Compaction · 168k of 200k (84%)"),
-    "it says how full the context was",
-  )
+  // An in-place mark carries no size, so a divider drawn inside a reply says only what it is.
+  assert.ok(seen.html.includes(">Compaction<"), "the divider names the compaction")
   assert.ok(!seen.html.includes(SUMMARY_TEXT), "the summary is not drawn")
   const place = (what: string) => seen.html.indexOf(what)
   const divider = seen.html.indexOf('role="separator"')
