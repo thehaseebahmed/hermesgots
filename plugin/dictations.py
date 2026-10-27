@@ -205,23 +205,14 @@ def _totals(conn: sqlite3.Connection, profile: str) -> Dict[str, Any]:
     cleared = conn.execute(
         "SELECT cleared_at FROM dictation_state WHERE profile = ?", (profile,)
     ).fetchone()
-    totals = {
-        "words": 0,
-        "ms": 0,
-        "count": 0,
-        "newest": None,
-        "oldest": None,
-        "clearedAt": int(cleared["cleared_at"]) if cleared is not None else 0,
-    }
-    if found is None:
-        return totals
+    # An aggregate over no rows still answers one row, so there is no empty case to answer for.
     return {
-        **totals,
         "words": int(found["words"]),
         "ms": int(found["ms"]),
         "count": int(found["count"]),
         "newest": found["newest"],
         "oldest": found["oldest"],
+        "clearedAt": int(cleared["cleared_at"]) if cleared is not None else 0,
     }
 
 

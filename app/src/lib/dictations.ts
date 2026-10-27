@@ -13,6 +13,7 @@ import {
   clearedAway,
   countWords,
   fingerprintOf,
+  orderOf,
   sumTotals,
   toUpsert,
 } from "@/lib/dictation-log"
@@ -50,17 +51,19 @@ type HostAnswer = Awaited<ReturnType<typeof getDictationStats>>
 /** Bots whose plugin has no log at all are left alone for a while, so an open costs them nothing. */
 const missing = cooldown()
 
+/** Everything a mirror row is but the instant it is placed by, which is this module's to compute. */
+type RowFields = Omit<DictationRecord, "loggedAt">
+
+/**
+ * A row as the mirror holds it: its `loggedAt` is the instant `orderOf` reads off the row, so the order
+ * the screen draws by and the one its fingerprint is compared on can't come apart.
+ */
+function stored(row: RowFields): DictationRecord {
+  return { ...row, loggedAt: orderOf(row) }
+}
+
 function entryOf(connection: string, text: string, ms: number, at = Date.now()): DictationRecord {
-  return {
-    id: randomId(),
-    connection,
-    text,
-    words: countWords(text),
-    ms,
-    at,
-    loggedAt: at,
-    posted: false,
-  }
+  return stored({ id: randomId(), connection, text, words: countWords(text), ms, at, posted: false })
 }
 
 function hostOf(row: DictationRecord): DictationWrite {
@@ -90,19 +93,13 @@ async function post(config: HermesConfig, row: DictationRecord): Promise<Posting
 
 /** The row a hand-over leaves behind, or nothing where the host has yet to answer for it. */
 function settledBy({ row, answer, refused }: Posting): DictationRecord | null {
-  if (refused) return { ...row, rejected: true }
+  if (refused) return stored({ ...row, rejected: true })
   // A host that takes the words and answers with nothing has not told us when it heard them; the row
   // stays unposted so the next open asks again, which the host's own idempotence makes harmless.
   if (!answer) return null
   // Its answer is the row as it stored it: its clock heard the take, and its `at` is the one it kept —
   // a device clock in the future is clamped to that, so the sheet shows a time that can exist.
-  return {
-    ...row,
-    posted: true,
-    at: answer.at,
-    seenAt: answer.seenAt,
-    loggedAt: answer.seenAt,
-  }
+  return stored({ ...row, posted: true, at: answer.at, seenAt: answer.seenAt })
 }
 
 /** Writes what a batch of hand-overs came to in one write, and answers what each row became. */
@@ -172,8 +169,11 @@ export async function writeDictation(config: HermesConfig, text: string, ms: num
     .catch(quietly("Writing a dictation to its host"))
 }
 
-/** Every page a host holds, newest first, walked back until one comes short. */
-async function readAll(config: HermesConfig) {
+/**
+ * Every page a host holds, newest first, walked back until it has answered for as many takes as its own
+ * count claims.
+ */
+async function readAll(config: HermesConfig, want: number) {
   const rows: HostDictation[] = []
   let before: number | null = null
   let beforeId: string | null = null
@@ -185,8 +185,12 @@ async function readAll(config: HermesConfig) {
       WALK_PAGE,
       AbortSignal.timeout(READ_TIMEOUT_MS),
     )
+    if (!page.length) return rows
     rows.push(...page)
-    if (page.length < WALK_PAGE) return rows
+    // The host's own count is the bound, not a page that came back short: a host that caps a page
+    // lower than `WALK_PAGE` answers short on every one, and stopping there would repair a mirror
+    // from its newest page alone.
+    if (rows.length >= want) return rows
     const last = page[page.length - 1]
     // A host that ignores the cursor — one too old to have it — hands back the same page for ever, so
     // a walk that is making no progress stops rather than reading the log again and again.
@@ -223,12 +227,13 @@ function fromHost(
   rows: HostDictation[],
   key: string,
 ): DictationRecord[] {
-  return toUpsert(mirror, rows).map((row) => ({
-    ...row,
-    connection: key,
-    loggedAt: row.seenAt,
-    posted: true,
-  }))
+  return toUpsert(mirror, rows).map((row) =>
+    stored({
+      ...row,
+      connection: key,
+      posted: true,
+    }),
+  )
 }
 
 /**
@@ -302,7 +307,7 @@ export async function reconcileDictations(server: Server) {
     const fresh = fromHost(mirror, page, key)
     if (fresh.length) await db.dictationLog.bulkPut(fresh)
   } else {
-    const rows = await readAll(config)
+    const rows = await readAll(config, host.count)
     const have = new Set(rows.map((row) => row.id))
     // Rows go only off a read that agrees with the host's own count: one still arriving is not a
     // host that lost them, and deleting then would take a take both sides hold.

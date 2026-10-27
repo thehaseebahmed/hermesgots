@@ -9,12 +9,7 @@ import test from "node:test"
 
 import { connectionKey, serverConfig } from "@/lib/connection"
 import { db } from "@/lib/db"
-import {
-  PAGE,
-  clearDictationLog,
-  reconcileDictations,
-  removeDictation,
-} from "@/lib/dictations"
+import { PAGE, clearDictationLog, reconcileDictations, removeDictation } from "@/lib/dictations"
 import { botProfile, dictationPage, dictationTotals, json } from "./component-kit.tsx"
 
 const AT = new Date(2026, 9, 20, 9).getTime()
@@ -32,7 +27,9 @@ const row = (id: string, at: number) => ({
 type Held = { id: string; text: string; words: number; ms: number; at: number; seenAt: number }
 
 /** A host that answers what the test says, and records what it was asked. */
-function host(script: { holds?: Held[]; count?: number; refuse?: number; down?: boolean } = {}) {
+function host(
+  script: { holds?: Held[]; count?: number; refuse?: number; down?: boolean; cap?: number } = {},
+) {
   const held = [...(script.holds ?? [])]
   let heard = HEARD
   const posts: Held[] = []
@@ -49,7 +46,8 @@ function host(script: { holds?: Held[]; count?: number; refuse?: number; down?: 
     }
     if (method === "POST" && url.pathname.endsWith("/dictations")) {
       const body = JSON.parse(String(init?.body)) as Omit<Held, "seenAt">
-      if (script.refuse) return json({ error: { message: "That dictation is too long to keep." } }, script.refuse)
+      if (script.refuse)
+        return json({ error: { message: "That dictation is too long to keep." } }, script.refuse)
       posts.push({ ...body, seenAt: 0 })
       const stored = { ...body, at: Math.min(body.at, heard), seenAt: heard++ }
       if (!held.some((one) => one.id === stored.id)) held.unshift(stored)
@@ -73,7 +71,8 @@ function host(script: { holds?: Held[]; count?: number; refuse?: number; down?: 
         dictations: dictationPage(held, {
           before: url.searchParams.get("before"),
           beforeId: url.searchParams.get("before_id"),
-          limit: url.searchParams.get("limit"),
+          // A host is free to answer fewer than it was asked for; `cap` is one that does.
+          limit: Math.min(Number(url.searchParams.get("limit") ?? 50), script.cap ?? 200),
         }),
       })
     }
@@ -111,6 +110,25 @@ test("a log the previous build left settles in one write, not a post per take", 
     "every row is marked as one its host holds",
   )
   console.log("settled in one write ->", server.calls.join(" | "))
+})
+
+test("a repair reads past a host that answers fewer takes than it was asked for", async () => {
+  const { profile } = await fresh()
+  const takes = ["a", "b", "c", "d", "e", "f", "g"].map((id, index) => row(id, AT + index * 1000))
+  const server = host({ holds: takes, cap: 3 })
+
+  await reconcileDictations(profile)
+
+  const rows = await mirror()
+  assert.deepEqual(
+    rows.map((one) => one.id).sort(),
+    takes.map((one) => one.id),
+    "every take its host holds is in the mirror",
+  )
+  assert.ok(
+    server.calls.filter((call) => call === "GET dictations").length > 1,
+    "and the walk kept asking rather than stopping at a short page",
+  )
 })
 
 test("a take its host lacked is handed over once, then kept", async () => {
@@ -220,7 +238,10 @@ test("an upgrade's backlog is written a batch at a time, not a take at a time", 
 
   // Every write a live query covers re-runs it, so an upgrade's backlog must not wake the History
   // tab once per take: the rows a batch of hand-overs leaves are written together.
-  const table = db.dictationLog as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>
+  const table = db.dictationLog as unknown as Record<
+    string,
+    (...args: unknown[]) => Promise<unknown>
+  >
   const writes: string[] = []
   const real = { bulkPut: table.bulkPut, update: table.update }
   table.bulkPut = (...args: unknown[]) => {
@@ -240,7 +261,10 @@ test("an upgrade's backlog is written a batch at a time, not a take at a time", 
 
   assert.equal(writes.filter((one) => one === "update").length, 0, "no take is written on its own")
   assert.equal(writes.length, 1, "the whole backlog lands in one write")
-  assert.ok((await mirror()).every((one) => one.posted), "and every one is marked as held")
+  assert.ok(
+    (await mirror()).every((one) => one.posted),
+    "and every one is marked as held",
+  )
 })
 
 test("a clear keeps the totals its host answered with, rather than emptying them", async () => {
