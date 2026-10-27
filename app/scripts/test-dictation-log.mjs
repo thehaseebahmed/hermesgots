@@ -130,6 +130,27 @@ test("a page upserts only what the mirror is missing or holds older", () => {
   assert.deepEqual(toUpsert([], page).map((row) => row.id), ["b", "c"], "an empty mirror takes the page")
 })
 
+test("a page takes back the words as heard its host doesn't hold", () => {
+  const mirror = [{ id: "a", at: 10, heard: "um, the words" }]
+  const page = [{ id: "a", at: 10, text: "The words." }]
+  assert.deepEqual(
+    toUpsert(mirror, page).map((row) => row.id),
+    ["a"],
+    "a host too old to keep them heals the mirror rather than being defended by it",
+  )
+  const kept = [{ id: "a", at: 10, heard: "um, the words" }]
+  assert.deepEqual(
+    toUpsert([{ id: "a", at: 10 }], kept).map((row) => row.id),
+    ["a"],
+    "and a host that keeps them gives the mirror the ones it has",
+  )
+  assert.deepEqual(
+    toUpsert(mirror, [{ id: "a", at: 10, heard: "um, the words" }]).map((row) => row.id),
+    [],
+    "a row both sides hold as the same is not written again",
+  )
+})
+
 test("totals add up across the bots that reported", () => {
   assert.deepEqual(
     sumTotals([

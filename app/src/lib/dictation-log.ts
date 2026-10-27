@@ -114,12 +114,20 @@ export function clearedAway<T extends { at: number; seenAt?: number }>(
 }
 
 /** The rows a page carries that the mirror's copy no longer matches, or never had. */
-export function toUpsert<T extends { id: string; at: number }>(
-  mirror: { id: string; at: number }[],
+export function toUpsert<T extends { id: string; at: number; heard?: string }>(
+  mirror: { id: string; at: number; heard?: string }[],
   page: T[],
 ): T[] {
-  const known = new Map(mirror.map((row) => [row.id, row.at]))
-  return page.filter((row) => known.get(row.id) !== row.at)
+  const known = new Map(mirror.map((row) => [row.id, stampOf(row)]))
+  return page.filter((row) => known.get(row.id) !== stampOf(row))
+}
+
+/**
+ * What one row says that another can disagree with: its clock, and the words as heard it kept — so a
+ * mirror holding a `heard` its host answered without takes the host's row instead (ADR 0062).
+ */
+function stampOf(row: { at: number; heard?: string }): string {
+  return `${row.at}\u0000${row.heard ?? ""}`
 }
 
 export interface Totals {
