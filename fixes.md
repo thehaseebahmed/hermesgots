@@ -1287,6 +1287,40 @@ The constant also now lives in three places: the component, the browser flow's a
 - Why it is risky: moving the list into a portal changes focus retention and the
   `aria-controls`/`aria-activedescendant` wiring the inline element gets for free.
 
+### 2. The note a compaction writes into the transcript renders as the user's own message
+
+**Applied since.** The fold reads the three headers Hermes writes at the boundary off a `user` row's
+text, and each counts only with the payload the host writes under it — an item line, the notice's
+body, the restated request — so a message quoting the host's words stays the user's. A row carrying
+nothing but those notes draws nothing, closes nothing and starts no turn; a row restating the
+in-flight request draws only that request. A device that had already drawn the bubble keeps it no
+longer: catch-up drops a message held for a row that folds to nothing and rewrites one that drew a
+restatement's header. The rule is `app/src/lib/compaction-seam.ts`, its sentences and the markers its
+snapshot items are read by both pinned and both held to Hermes's own constants by
+`hermes-internals-drift.yml`; `scripts/test-compaction-seam.mjs` drives it, `test-compaction-seam.tsx`
+the fold and that repair, and `history-generations` asserts both notes draw nothing in a browser. One
+residual is left: a user who types the whole of the host's prose *and* its payload loses that message,
+which is the cost of matching text where Hermes stores no flag.
+
+Hermes marks the seam a compaction leaves with a row addressed to the model — "the active task list was
+preserved", "still in progress" — stored as a `user` row. `isNotice` (`app/src/lib/history.ts:192`)
+recognises only the `[System:` form, so a turn-start row like this one is neither skipped nor folded:
+`toMessages` maps it to a user message and the thread draws it in a user bubble, exactly as the
+reporter's screenshot shows between the two copies of the same turn sequence. It is not text the user
+typed, and it is the one row in the thread that no device ever sent.
+
+- Cost: a long chat that has been compacted shows a message in the user's own voice that they never
+  wrote, at the seam where their turns were carried across — and, because it starts a turn, it can
+  also take a reply's place in the thread's ordering until a real turn follows it.
+- Suggested fix: widen the notice rule to the shapes Hermes writes for a session-internal seam (the
+  `[System:` rows it already knows, and the task-list preservation note), keeping it a predicate over
+  the row's text so nothing else changes; `history-generations` then asserts the marker is not drawn
+  as a user message, which is the case a compaction flow can hold.
+- Why it is risky: it decides what a user is allowed to see of Hermes's own bookkeeping, and the
+  widening has to be exact — a rule loose enough to catch the note could swallow a message a user
+  really began with a bracket. The flow's mock would have to emit Hermes's real wording rather than a
+  paraphrase, since the match is textual.
+
 ## Not entries
 
 - **The e2e restates the layout numbers** (`288`, `520 * 0.5` against `SCREEN_SHARE = 0.45`), so the
@@ -1509,23 +1543,8 @@ The diagnosis of the duplicated and misplaced turns in a long chat separated two
 fixed on the branch that recorded it: Hermes's compaction re-emits the carried tail under fresh row
 ids, and catch-up adopted each copy as a new turn, so a turn the device already had was appended
 again. The other is how a message reaches the middle of a turn at all — a plain send while a reply is
-live is stored as a *steer*, and the composer decides which it is from one local flag.
-
-One of the two findings below is applied since: the seam note a compaction writes no longer renders
-as the user's own message. The fold reads the three headers Hermes writes for the model at the
-boundary off a `user` row's text — the restatement's `[STILL IN PROGRESS …]`, the preserved
-`[Your active task list …]` snapshot, the `[Skills pruned …]` reload notice after it, pinned in
-`app/src/lib/compaction-seam.ts` and held to Hermes's own constants by `hermes-internals-drift.yml`
-— keeping only what the user typed, and a row carrying nothing but those notes draws nothing, closes
-nothing and starts no turn. A header counts only with the payload the host writes under it (an item
-line, the notice's body, the restated request), so a message quoting the host's words stays the
-user's; that leaves the one residual this rule can't reach, a user who types the whole of the host's
-prose *and* its payload losing that message, which is what the shape is for. A device that had
-already drawn the bubble keeps it no longer: catch-up drops a message held for a row that folds to
-nothing, and rewrites one that drew a restatement's header. `scripts/test-compaction-seam.mjs`
-drives the rule, `test-compaction-seam.tsx` the fold and that repair, and `history-generations`
-asserts both notes draw nothing in a browser. What follows is the finding
-that remains.
+live is stored as a *steer*, and the composer decides which it is from one local flag. One of the two
+findings below is applied since; what it cost while it stood is kept with it.
 
 ## Risky
 
