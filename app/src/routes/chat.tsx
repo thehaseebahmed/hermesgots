@@ -1253,7 +1253,11 @@ export function ChatPage({
                           onShowSubagents={showSubagents}
                           subagentsInline={message.id === lastId && drawsInline}
                           blocks={draws.get(message.id)}
-                          compactions={conversation?.compactions}
+                          // Only a row that draws a seam reads these: a new array on every
+                          // conversation write would wake every row's memo.
+                          compactions={
+                            message.seams?.length ? conversation?.compactions : undefined
+                          }
                         />
                       </MessageScrollerItem>
                     )
