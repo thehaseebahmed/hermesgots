@@ -1300,7 +1300,8 @@ snapshot items are read by both pinned and both held to Hermes's own constants b
 `hermes-internals-drift.yml`; `scripts/test-compaction-seam.mjs` drives it, `test-compaction-seam.tsx`
 the fold and that repair, and `history-generations` asserts both notes draw nothing in a browser. One
 residual is left: a user who types the whole of the host's prose *and* its payload loses that message,
-which is the cost of matching text where Hermes stores no flag.
+or who pastes a snapshot with text of their own below it, which is the cost of matching text where
+Hermes stores no flag.
 
 Hermes marks the seam a compaction leaves with a row addressed to the model — "the active task list was
 preserved", "still in progress" — stored as a `user` row. `isNotice` (`app/src/lib/history.ts:192`)
@@ -1320,6 +1321,24 @@ typed, and it is the one row in the thread that no device ever sent.
   widening has to be exact — a rule loose enough to catch the note could swallow a message a user
   really began with a bracket. The flow's mock would have to emit Hermes's real wording rather than a
   paraphrase, since the match is textual.
+
+### 3. A restatement can draw the request it restates a second time
+
+The host drops the restated row's timestamp on purpose, so `carried` — the pairing added for the
+re-emitted compaction rows, which matches a copy to the turn it repeats by time — cannot recognise it.
+When the device already holds the original request's row and the transcript also carries the
+restatement, both fold to a message and the thread draws the same request twice.
+
+- Cost: a chat compacted while a turn was in flight shows that turn's request as two consecutive user
+  messages. It is smaller than what it replaces (the restated row drew the whole note, header and
+  all), and it is not this branch's doing: the copy existed as a note before, and only its text is
+  better now.
+- Suggested fix: pair a restatement to the message it repeats by the request it carries, limited to rows
+  that open with the replay header — so a user who sends the same words twice is untouched — and drop
+  the copy rather than the original.
+- Why it is not applied here: no repro beyond a hand-built pairing, and a pairing rule that guesses
+  wrong deletes a message the user sent, which is the failure this branch exists to stop. It wants its
+  own change and its own red loop against a real transcript.
 
 ## Not entries
 
@@ -1593,9 +1612,10 @@ report.
 
 Found while diagnosing the duplicated and misplaced turns in a long chat, against the reporter's own
 transcript (its rows carry the re-emitted compaction generations). The duplication is fixed on that
-branch, the seam note since (above); the steer below is not, and the steer-as-a-plain-send model it
-sits inside is the user's setting rather than a defect. Both came out of reading the same transcript
-and a review of the fix rather than from a repro of their own: what is verified is the shape above —
+branch, the seam note since (above), the second copy a restatement can draw still to do; the steer
+below is not, and the steer-as-a-plain-send model it sits inside is the user's setting rather than a
+defect. They came out of reading the same transcript and a review of the fix rather than from a repro
+of their own: what is verified is the shape above —
 one local status decides the send's kind and a stop leaves it set — read in the tree and matched
 against the transcript and the reporter's screenshot. The four chat flows (`chat-message`,
 `reattach`, `history-pages` and the branch's new `history-generations`) all pass, and none of them
