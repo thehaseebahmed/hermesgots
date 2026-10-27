@@ -16,8 +16,9 @@ per-bot list away, with nothing that gathers them.
 A new Settings section, Dictation, sits under Appearance. It has three tabs. History lists every
 dictation newest first, grouped by month under a month heading, one card of rows per month, drawing
 the first twenty entries and appending more as the reader reaches the end; a row shows the words and
-a muted line of the bot and the word count, and opens a sheet headed by the time it landed, over the
-whole text, the bot, the count and how long the words took, with Delete and a Copy side by side. Bots
+a muted line of the bot and the word count, and opens a sheet headed by the time the words were said,
+over the whole text, the bot, the count and how long the words took, with Delete asking first and a
+Copy beside it. Bots
 draws the Settings menu's own row for each bot, saying what its host hears on — or the host's own
 reason it cannot — and opening that bot's Speech-to-text page. Stats is one card with the words spoken across every bot and the
 pooled words per minute behind them, each row carrying the line that says what it counts.
@@ -58,8 +59,8 @@ on each open, and the last stats answer per bot is cached so the menu row draws 
 - **One entry per take whose words landed.** The text is what landed in the composer (after Cleanup),
   the words are counted on whitespace, and the spoken span is the sum of the take's piece spans, so
   pauses are left out. Those spans ride on the pieces, so a take restored after a reload still reports
-  its own minutes; a take that lands in parts writes a row per part, each with its own span. A take
-  cancelled or failed before any words landed writes nothing.
+  its own minutes; a take whose words land in parts is still one entry, its pieces joined and their
+  spans summed. A take cancelled or failed before any words landed writes nothing.
 - **The plugin gains five routes behind a `dictations` feature**: `POST dictations`,
   `DELETE dictations/<id>`, `DELETE dictations`, `GET dictations?before&before_id&limit`, and
   `GET dictations/stats` returning the totals plus count, newest, oldest and `clearedAt`. The paged
@@ -72,7 +73,8 @@ on each open, and the last stats answer per bot is cached so the menu row draws 
   heard it; nothing else on a device's clock is believed.
 - **The stats route does two jobs**: it is the numbers tab 3 draws and the fingerprint the mirror is
   reconciled against. The app sums each bot's last answer and caches it on the device, so the Settings
-  menu's subtitle reads "1,204 words" — or a generic line until a host has answered once. The totals
+  menu's subtitle reads "1,204 words" — or a generic line until a host has answered once — and the
+  stats card draws no number at all until one has, rather than a zero nobody reported. The totals
   move only when a host answers: a take counts once its own bot has it.
 - **Reconciliation is fingerprint first.** On opening the screen, once per bot and side by side, a
   matching fingerprint does nothing; `clearedAt` drops every mirror row its host held and heard before
@@ -96,7 +98,8 @@ on each open, and the last stats answer per bot is cached so the menu row draws 
   the host's own clock, which is what the comparison is on.
 - **Clearing is one action over every bot**, on the screen's header, behind a confirmation, each host
   stamping its own `clearedAt`. Only the bots whose host confirmed are cleared on the device: a host
-  that refused keeps what the mirror holds, so a half-done clear cannot undo itself on the next open.
+  that refused keeps what the mirror holds, so a half-done clear cannot undo itself on the next open,
+  while a host with no log at all has nothing on it to keep, so that bot's rows go with the clear.
   A clear answers with the totals it leaves behind, and those are the ones cached — an empty log, at
   that stamp — so the menu row and the stats card have an answer without reading the host again.
 - **A bot that cannot answer contributes nothing to the totals**, and a bot whose host cannot dictate
