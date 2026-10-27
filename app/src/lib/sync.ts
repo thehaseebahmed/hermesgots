@@ -616,15 +616,35 @@ async function settleChatTombstones(profileId: string, merged: Doc<ChatValue>) {
 }
 
 /**
- * Pulls what the bot's old Netlify chat list still holds onto this device, so the plugin sync after
- * it carries it over. True when there was a list to move.
+ * Moves what the bot's old Netlify chat list still holds onto this device, then takes the document
+ * off and says it's moved: the plugin sync after it carries the rows over.
  */
-async function pullFallbackChats(key: CryptoKey, profileId: string) {
+async function moveFallbackChats(key: CryptoKey, profileId: string) {
   const remote = await readDoc<ChatValue>(key, `chats/${profileId}`)
   if (!remote.etag) return false
   const local = await localChats(profileId, false)
   await applyChats(profileId, mergeDocs(remote.entries, local).pull)
+  await deleteDoc(`chats/${profileId}`).catch(() => undefined)
+  await recordMoved(profileId)
   return true
+}
+
+/** Bots whose old list is being pulled: one attempt at a time, so no pass starts the same dead read. */
+const pulling = new Map<string, Promise<boolean>>()
+/** The moves landing side by side, written one after another: a read, an append, a write, each in turn. */
+let movedWriting: Promise<unknown> = Promise.resolve()
+
+/** Says the bot's old list is off this device, without losing a move that lands at the same moment. */
+function recordMoved(profileId: string) {
+  // A write that failed leaves the chain as it was, so the next move still gets its turn.
+  movedWriting = movedWriting
+    .catch(() => undefined)
+    .then(async () => {
+      const { movedChats = [] } = await getSettings()
+      if (movedChats.includes(profileId)) return
+      await saveSettings({ movedChats: [...movedChats, profileId] })
+    })
+  return movedWriting
 }
 
 /**
@@ -823,14 +843,19 @@ async function syncChatLists(key: CryptoKey | undefined, only?: Set<string>) {
   const profiles = (await db.profiles.toArray()).filter(
     (p) => !p.disabled && p.apiKey && p.id !== seed?.id && (!only || only.has(p.id)),
   )
-  const held = new Set<string>()
-  // A bot's old list on Netlify moves side by side too: one slow list holds up no one else's.
-  await Promise.all(
-    profiles.map(async (profile) => {
-      if (!key || moved.includes(profile.id)) return
-      if (await pullFallbackChats(key, profile.id)) held.add(profile.id)
-    }),
-  )
+  // A bot's old list moves itself off, out of the pass's way: a read that never answers costs this
+  // pass nothing, and a pass that starts while one is still out doesn't start a second.
+  if (key)
+    for (const profile of profiles) {
+      if (moved.includes(profile.id) || pulling.has(profile.id)) continue
+      const attempt = moveFallbackChats(key, profile.id)
+        .catch((error) => {
+          noteFailure(`Moving ${profile.name}'s old chat list`, error)
+          return false
+        })
+        .finally(() => pulling.delete(profile.id))
+      pulling.set(profile.id, attempt)
+    }
   // One group per server: bots on one server share its list, so they merge side by side and apply
   // in the order they were added, and a server that never answers holds up only its own bots.
   const groups = new Map<string, Profile[]>()
@@ -855,7 +880,7 @@ async function syncChatLists(key: CryptoKey | undefined, only?: Set<string>) {
     for (const [i, profile] of members.entries()) {
       const answer = merged[i] ? "plugin" : "unreachable"
       if (stores[profile.id] !== answer) stores[profile.id] = answer
-      await applyChatList(profile, merged[i], { key, held, moved })
+      await applyChatList(profile, merged[i])
     }
     if (reported) await report(true)
   })
@@ -864,25 +889,19 @@ async function syncChatLists(key: CryptoKey | undefined, only?: Set<string>) {
     for (const result of results)
       if (result.status === "rejected") noteFailure("Applying the chat lists", result.reason)
   })
+  // The pass holds the sync for `CHATS_MERGE_WAIT_MS` at most, whatever the bots' hosts are doing.
   await within(settled, CHATS_MERGE_WAIT_MS)
   if (!reported) await report(false)
 }
 
-/** Applies one bot's answer: its rows and tombstones, and its old Netlify list moved off. */
+/** Applies one bot's answer: its rows and tombstones. Its old list moves off on its own. */
 async function applyChatList(
   profile: Profile,
   result: Awaited<ReturnType<typeof mergePluginChats>>,
-  { key, held, moved }: { key: CryptoKey | undefined; held: Set<string>; moved: string[] },
 ) {
   if (!result) return
   await applyChats(profile.id, mergeDocs(result.merged, result.local).pull)
   await settleChatTombstones(profile.id, result.merged)
-  if (!key || moved.includes(profile.id)) return
-  if (held.has(profile.id)) await deleteDoc(`chats/${profile.id}`).catch(() => undefined)
-  moved.push(profile.id)
-  // The whole list each time: a pass moves several bots side by side, and the later write is the
-  // longer one, so no id is lost between two of them.
-  await saveSettings({ movedChats: [...moved] })
 }
 
 /** The account documents: what every device shares, and the registry that names its bots. */

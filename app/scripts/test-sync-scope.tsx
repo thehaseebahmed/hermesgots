@@ -30,7 +30,7 @@ const REGISTRY_BOT = "bot-registered"
 /** How the sync function answers: at once, slowly, or never well. */
 type Netlify = "fast" | "slow" | "down"
 
-const netlify = { mode: "fast" as Netlify, calls: [] as string[] }
+const netlify = { mode: "fast" as Netlify, calls: [] as string[], hangLists: false }
 /** What each bot's host answers, and what it was asked. */
 const hosts = new Map<string, { chats: number; reachable: boolean }>()
 /** The bots the registry holds, as the sealed records a plugin checks in. */
@@ -89,6 +89,8 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.pathname === "/.netlify/functions/sync") {
     const doc = url.searchParams.get("doc") ?? ""
     netlify.calls.push(`${method} ${doc}`)
+    // A document read with no timeout of its own: fetch is given no signal, so nothing ends it.
+    if (netlify.hangLists && doc.startsWith("chats/")) return neverAnswers(init?.signal)
     if (netlify.mode === "down") return json({ error: "Netlify is having a day" }, 500)
     if (netlify.mode === "slow") await sleep(5_000)
     if (method === "PUT") {
@@ -341,4 +343,29 @@ test("a bot the registry adds is merged in the same pass", async () => {
     "plugin",
     "before the pass it landed in reported done",
   )
+})
+
+test("a document read that never answers doesn't leave the sync running", async () => {
+  await device()
+  // A list that hasn't moved yet: the pass pulls it before it merges anything, and that read
+  // carries no timeout of its own (`account.ts`'s `getDoc` hands `fetch` no signal).
+  await seedSettings({ onboarded: true, movedChats: [] })
+  netlify.hangLists = true
+  host(HOST).chats = 0
+  try {
+    const started = Date.now()
+    const settled = await Promise.race([
+      syncNow().then(() => "settled" as const),
+      sleep(9_000).then(() => "hung" as const),
+    ])
+    const took = Date.now() - started
+    assert.equal(settled, "settled", "the sync ended rather than waiting on the read")
+    assert.ok(took < 8_000, `it ended inside its own budget, not after it (${took}ms)`)
+    assert.equal(syncState().syncingChats, false, "the chat lists' lane ended")
+    assert.equal(syncState().syncingAccount, false, "and so did the documents'")
+    assert.ok(host(HOST).chats >= 1, "and the bots that answered still merged")
+  } finally {
+    netlify.hangLists = false
+    await seedSettings({ onboarded: true, movedChats: [bot.id] })
+  }
 })
