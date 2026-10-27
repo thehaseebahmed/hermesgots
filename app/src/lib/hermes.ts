@@ -24,6 +24,7 @@ import {
   type WorkflowEntry,
 } from "@/lib/workflow"
 import { isNative } from "@/lib/native"
+import type { Fingerprint, Totals } from "@/lib/dictation-log"
 import type { CronSchedule } from "@/lib/schedule"
 import {
   parseMcpAccess,
@@ -3801,4 +3802,141 @@ export async function stopRun(config: HermesConfig, runId: string) {
     method: "POST",
     headers: headers(config),
   })
+}
+
+/** Where a bot's dictation log lives on its Gots plugin (`dictations.py`). */
+function dictationRoot(config: HermesConfig, entryId?: string) {
+  return pluginPath(config, "dictations", ...(entryId ? [entryId] : []))
+}
+
+/**
+ * One dictation as a host holds it. `at` is when the words were said, on the device's clock; `seenAt`
+ * is when that host heard them, on its own — the log's order and its pages read `seenAt`, so a device
+ * whose clock is wrong cannot misplace a take or hide one behind a page (ADR 0060).
+ */
+export interface HostDictation {
+  id: string
+  text: string
+  words: number
+  ms: number
+  at: number
+  seenAt: number
+}
+
+/** A host's totals, and the fingerprint a device's mirror is reconciled against. */
+export interface HostDictationStats extends Totals, Fingerprint {}
+
+/** A number a host sent, or nothing where it sent something else. */
+function finite(raw: unknown): number | null {
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : null
+}
+
+function dictationRow(value: unknown): HostDictation | null {
+  const row = value as Partial<HostDictation> | null
+  if (!row || typeof row.id !== "string" || !row.id || typeof row.text !== "string") return null
+  const at = finite(row.at) ?? 0
+  return {
+    id: row.id,
+    text: row.text,
+    words: finite(row.words) ?? 0,
+    ms: finite(row.ms) ?? 0,
+    at,
+    // A host too old to stamp its own clock ordered its log by `at`, so that is the clock its pages
+    // and totals answer on: reading it as `seenAt` keeps one fingerprint working across both.
+    seenAt: finite(row.seenAt) ?? at,
+  }
+}
+
+function dictationTotals(value: unknown): HostDictationStats {
+  const row = value as Partial<HostDictationStats> | null
+  return {
+    words: finite(row?.words) ?? 0,
+    ms: finite(row?.ms) ?? 0,
+    count: finite(row?.count) ?? 0,
+    newest: finite(row?.newest),
+    oldest: finite(row?.oldest),
+    clearedAt: finite(row?.clearedAt) ?? 0,
+  }
+}
+
+/**
+ * One page of a bot's dictations, newest first. `before` and `beforeId` are the cursor — the last row
+ * the caller already has — and both are given because two takes can share a millisecond, which a
+ * bound on the time alone would skip.
+ */
+export async function getDictations(
+  config: HermesConfig,
+  before: number | null,
+  beforeId: string | null,
+  limit: number,
+  signal?: AbortSignal,
+): Promise<HostDictation[]> {
+  const query = new URLSearchParams({ limit: String(limit) })
+  if (before != null && beforeId) {
+    query.set("before", String(before))
+    query.set("before_id", beforeId)
+  }
+  const response = await request(`${dictationRoot(config)}?${query}`, {
+    headers: headers(config),
+    signal: signal ?? AbortSignal.timeout(READ_TIMEOUT_MS),
+  })
+  const body = await response.json()
+  const rows: unknown[] = Array.isArray(body?.dictations) ? body.dictations : []
+  return rows.map(dictationRow).filter((row): row is HostDictation => row !== null)
+}
+
+/** A bot's totals and its fingerprint — one read that serves both the stats card and a reconcile. */
+export async function getDictationStats(
+  config: HermesConfig,
+  signal?: AbortSignal,
+): Promise<HostDictationStats> {
+  const response = await request(`${dictationRoot(config)}/stats`, {
+    headers: headers(config),
+    signal: signal ?? AbortSignal.timeout(READ_TIMEOUT_MS),
+  })
+  return dictationTotals((await response.json())?.stats)
+}
+
+/** What a device writes: the row as it knows it, before a host has stamped when it heard it. */
+export type DictationWrite = Omit<HostDictation, "seenAt">
+
+/** Writes one dictation; the same id written twice leaves the first where it is. */
+export async function postDictation(
+  config: HermesConfig,
+  entry: DictationWrite,
+  signal?: AbortSignal,
+): Promise<HostDictation | null> {
+  const response = await request(dictationRoot(config), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify(entry),
+    signal: signal ?? AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+  return dictationRow((await response.json())?.dictation)
+}
+
+export async function deleteDictation(
+  config: HermesConfig,
+  entryId: string,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const response = await request(dictationRoot(config, entryId), {
+    method: "DELETE",
+    headers: headers(config),
+    signal: signal ?? AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+  return (await response.json())?.removed === true
+}
+
+/** Takes a bot's whole log away and answers with what its totals are now. */
+export async function clearDictations(
+  config: HermesConfig,
+  signal?: AbortSignal,
+): Promise<HostDictationStats> {
+  const response = await request(dictationRoot(config), {
+    method: "DELETE",
+    headers: headers(config),
+    signal: signal ?? AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+  return dictationTotals((await response.json())?.stats)
 }

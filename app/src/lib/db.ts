@@ -110,6 +110,8 @@ export interface Profile {
   pluginVersion?: string
   /** The host's main model as last read by any device, shown while it's read again. */
   hostModel?: ModelChoice
+  /** The speech model its host last reported, shown while it's read again. Local only. */
+  speechModel?: string
   /** The provider's account-usage windows, local only; read from the Gots plugin. */
   providerUsage?: ProviderUsage
   /** A dismissed limit-notice key (provider + window label + reset), local only. */
@@ -572,6 +574,8 @@ export interface Draft {
 export interface DictationPiece {
   blob: Blob
   text: string | null
+  /** How long this piece ran, so a take's spoken span survives a reload (ADR 0060). */
+  ms?: number
 }
 
 /**
@@ -589,6 +593,52 @@ export interface SavedDictation {
   kind?: "pieces" | "stream"
   /** Where the caret was when the take began, so a restored take lands where it was left. */
   caret?: number
+}
+
+/**
+ * One dictation as the device's mirror holds it: the words a take landed, on the bot that heard
+ * them. The bot's host is the durable copy (`plugin/dictations.py`); this row is what the Dictation
+ * screen reads, so opening it never waits on a host (ADR 0060).
+ */
+export interface DictationRecord {
+  id: string
+  /** The `connectionKey` of the bot that heard it. */
+  connection: string
+  text: string
+  words: number
+  /** How long the words took to say, with the pauses left out. */
+  ms: number
+  /** When the words landed, on this device's clock: what the sheet draws. */
+  at: number
+  /**
+   * When its bot's host heard the take, on the host's clock — the fingerprint's numbers and a clear's
+   * stamp are read on it, so a wrong device clock cannot misplace a row (ADR 0060). Missing until the
+   * host has answered for the row.
+   */
+  seenAt?: number
+  /**
+   * The instant the row is ordered and grouped by: `seenAt` once the host has answered, its own `at`
+   * until then. Stored rather than computed because it is what the History tab's index reads.
+   */
+  loggedAt: number
+  /** Whether its bot's host holds a copy; a take written while a host was away is re-posted. */
+  posted?: boolean
+  /**
+   * Whether its bot's host refused the take itself — a 400 or a 413 on the words. A refusal is
+   * final, so a row marked here is never posted again: the same bytes would be refused every time.
+   */
+  rejected?: boolean
+}
+
+/** The totals a bot's host last reported, kept so the screen and the menu row draw offline. */
+export interface DictationStats {
+  /** The bot's `connectionKey`. */
+  id: string
+  words: number
+  ms: number
+  count: number
+  /** When that host last had its log cleared, so this device can drop what is gone. */
+  clearedAt: number
 }
 
 /**
@@ -659,6 +709,8 @@ export const db = new Dexie("memento") as Dexie & {
   modelsDevCatalog: EntityTable<ModelsDevCatalog, "id">
   overallRankings: EntityTable<OverallRankings, "id">
   dictations: EntityTable<SavedDictation, "id">
+  dictationLog: EntityTable<DictationRecord, "id">
+  dictationStats: EntityTable<DictationStats, "id">
   skills: EntityTable<CachedSkills, "id">
   meetingRecordings: EntityTable<SavedMeetingRecording, "id">
   prompts: EntityTable<PromptEntry, "id">
@@ -916,6 +968,29 @@ db.version(24).upgrade((tx) =>
     .delete(),
 )
 
+// v25: the Dictation screen's mirror of what each bot's host holds, and the totals it last reported
+// (ADR 0060). Both are new tables, so nothing older has to be moved into them.
+db.version(25).stores({
+  dictationLog: "id, at, connection",
+  dictationStats: "id",
+})
+// v26: the log is ordered, paged and grouped by when its host heard a take rather than by when a
+// device's clock says it was said, so a clock that is wrong cannot misplace a row or hide one behind
+// a page (ADR 0060). A row written before this keeps the place it had: its own `at` was the order.
+db.version(26)
+  .stores({ dictationLog: "id, at, connection, loggedAt" })
+  .upgrade((tx) =>
+    tx
+      .table<DictationRecord>("dictationLog")
+      .toCollection()
+      .modify((row) => {
+        row.loggedAt = row.at
+      }),
+  )
+// v27: the log keeps the index every read uses and drops the one no read can — `at` is compared in
+// memory only, so every write to the take path paid to update an index nothing read.
+db.version(27).stores({ dictationLog: "id, connection, loggedAt" })
+
 db.on("populate", (tx) => seedProfile(tx))
 
 export async function getSettings(): Promise<Settings> {
@@ -1023,6 +1098,8 @@ export async function deleteProfile(id: string, { remote = false, last = false }
     db.tombstones,
     db.drafts,
     db.dictations,
+    db.dictationLog,
+    db.dictationStats,
     db.skills,
     db.meetingRecordings,
   ]
@@ -1038,7 +1115,14 @@ export async function deleteProfile(id: string, { remote = false, last = false }
     await db.dictations.bulkDelete(keys)
     await db.meetingRecordings.filter((recording) => recording.profileId === id).delete()
     // The bot's own device state, keyed by its server: a twin bot sharing the connection refills it.
-    if (profile) await db.skills.delete(connectionKey(profile))
+    // Its dictations go with it (ADR 0060) — what its host holds outlives the link, so adding the
+    // bot again restores them.
+    if (profile) {
+      const key = connectionKey(profile)
+      await db.skills.delete(key)
+      await db.dictationLog.where("connection").equals(key).delete()
+      await db.dictationStats.delete(key)
+    }
     await db.conversations.bulkDelete(ids)
     await db.profiles.delete(id)
     if (!remote) await db.tombstones.put({ id: `bot:${id}`, deletedAt: Date.now(), profileId: id })
@@ -1159,6 +1243,8 @@ export async function clearAllData() {
     db.vault,
     db.drafts,
     db.dictations,
+    db.dictationLog,
+    db.dictationStats,
     db.skills,
     db.meetingRecordings,
   ]

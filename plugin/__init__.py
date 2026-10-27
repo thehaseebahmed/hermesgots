@@ -37,6 +37,7 @@ from . import (
     delegation,
     dictation,
     dictation_cleanup,
+    dictations,
     meetings,
     events,
     findings,
@@ -451,6 +452,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "delegation_model",
                     "queue",
                     "dictation",
+                    # A bot's dictation log: the durable copy of the words a take landed, with the
+                    # totals its Dictation screen counts (dictations.py, ADR 0060).
+                    "dictations",
                     "speech_model",
                     "usage",
                     "research",
@@ -2560,6 +2564,76 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if found is None:
             return _error(web, "No such meeting.", 404)
         return web.json_response({"object": "memento.meeting.removed", "removed": True})
+
+    async def list_dictations(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            limit = int(request.query.get("limit", dictations.DEFAULT_LIMIT))
+        except ValueError:
+            return _error(web, "limit must be a whole number.", 400)
+        before = request.query.get("before")
+        try:
+            bound = int(before) if before is not None else None
+        except ValueError:
+            return _error(web, "before must be a whole number.", 400)
+        rows = await asyncio.to_thread(
+            dictations.rows,
+            store_path(),
+            _request_profile(),
+            bound,
+            request.query.get("before_id"),
+            limit,
+        )
+        return web.json_response({"object": "memento.dictations", "dictations": rows})
+
+    async def dictation_stats(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        answer = await asyncio.to_thread(dictations.stats, store_path(), _request_profile())
+        return web.json_response({"object": "memento.dictations.stats", "stats": answer})
+
+    async def write_dictation(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        try:
+            found = await asyncio.to_thread(
+                dictations.record, store_path(), _request_profile(), body
+            )
+        except dictations.DictationLogError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "memento.dictation", "dictation": found}, status=201)
+
+    async def remove_dictation(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        removed = await asyncio.to_thread(
+            dictations.remove,
+            store_path(),
+            _request_profile(),
+            request.match_info["dictation_id"],
+        )
+        return web.json_response({"object": "memento.dictation.removed", "removed": bool(removed)})
+
+    async def clear_dictations(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        answer = await asyncio.to_thread(dictations.clear, store_path(), _request_profile())
+        return web.json_response({"object": "memento.dictations.cleared", "stats": answer})
+
+    app.router.add_get(f"{PREFIX}/dictations", list_dictations)
+    app.router.add_get(f"{PREFIX}/dictations/stats", dictation_stats)
+    app.router.add_post(f"{PREFIX}/dictations", write_dictation)
+    app.router.add_delete(f"{PREFIX}/dictations/{{dictation_id}}", remove_dictation)
+    app.router.add_delete(f"{PREFIX}/dictations", clear_dictations)
 
     app.router.add_get(f"{PREFIX}/meetings", list_meetings)
     app.router.add_post(f"{PREFIX}/meetings", create_meeting)

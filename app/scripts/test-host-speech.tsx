@@ -1,7 +1,9 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { getSpeech, setSpeech } from "@/lib/host-speech"
+import { db } from "@/lib/db"
+import { getSpeech, rememberSpeech, setSpeech } from "@/lib/host-speech"
+import { botProfile } from "./component-kit.tsx"
 
 const config = { baseUrl: "http://host.test:8642/v1", apiKey: "key" }
 
@@ -67,4 +69,21 @@ test("a write the host refuses rejects in the host's own words", async () => {
     setSpeech(config, { model: "enormous" }),
     /enormous isn't a speech model this host can use/,
   )
+})
+
+test("a read keeps the model on the bot without moving the bot's clock", async () => {
+  await db.profiles.clear()
+  const profile = botProfile("clock")
+  await db.profiles.put({ ...profile, updatedAt: 1000 })
+
+  await rememberSpeech(profile.id, "small")
+
+  const kept = await db.profiles.get(profile.id)
+  assert.equal(kept?.speechModel, "small", "the next screen draws what the host last reported")
+  // The bot's own clock is what decides which device's copy wins, and a read is no claim on it: it
+  // would otherwise let a screen that was merely opened beat a rename made on another device.
+  assert.equal(kept?.updatedAt, 1000, "and the bot's own clock is where the user left it")
+
+  await rememberSpeech(profile.id, "small")
+  assert.equal((await db.profiles.get(profile.id))?.updatedAt, 1000, "nor on a second read")
 })

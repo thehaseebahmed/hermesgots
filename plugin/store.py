@@ -4,13 +4,15 @@ projects still cloning (``clones.py``), repos being added to or removed from a p
 pinned projects (``projects.py``), merged pull requests (``merges.py``), a project's AFK switch and
 the tasks it holds (``afk.py``) and recent changes for the app's live stream (``events.py``), devices'
 push subscriptions (``push.py``) and messages waiting for a session's run (``outbox.py``) and research
-missions with their evidence ledgers (``research.py``)."""
+missions with their evidence ledgers (``research.py``), and the dictations a bot has heard
+(``dictations.py``)."""
 
 from __future__ import annotations
 
 import json
 import logging
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -21,7 +23,11 @@ logger = logging.getLogger(__name__)
 # would keep table-scanning the chat list — the cost that index exists to remove. Re-running the block
 # is safe: every ALTER is PRAGMA-guarded and every index says IF NOT EXISTS, so a v42 store builds the
 # index and a v41 store reaches 43 in one pass.
-SCHEMA_VERSION = 43
+# 44 adds the dictation log and the clock a clear stamps (ADR 0060), both new tables. 45 rebuilds the
+# log keyed per profile, and 46 adds the clock its reads order on, so both of those are PRAGMA-guarded
+# or `IF NOT EXISTS`: a store already carrying them has to reach 47 without re-running either. 47
+# replaces the log's index with the one every read asks for.
+SCHEMA_VERSION = 47
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -80,6 +86,18 @@ def put_setting(path: Path, key: str, value: Optional[Any]) -> None:
         conn.close()
 
 
+def open_rows(path: Path) -> sqlite3.Connection:
+    """A store's connection, with rows a reader can name a column on."""
+    conn = connect(path)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def now_ms() -> int:
+    """The host's clock, in the unit the log is stamped in."""
+    return int(time.time() * 1000)
+
+
 def _version(conn: sqlite3.Connection) -> int:
     return conn.execute("PRAGMA user_version").fetchone()[0]
 
@@ -114,6 +132,24 @@ def _carry_hold(conn: sqlite3.Connection, row: Any) -> None:
             stalled_at,
         ),
     )
+
+
+# Every read of the log, off one index: a page is ordered by `(seen_at, id)` — which `(profile,
+# seen_at)` could only answer by sorting the profile's whole log to hand back 50 — and the totals add
+# two integers from the same rows, which fetching every row's words cost (ADR 0060).
+CREATE_DICTATION_READ = """CREATE INDEX IF NOT EXISTS dictation_read
+               ON dictations (profile, seen_at, id, words, ms)"""
+
+# A finished take, as both the first create and the rebuild need it.
+CREATE_DICTATIONS = """CREATE TABLE IF NOT EXISTS dictations (
+                   id TEXT NOT NULL,
+                   profile TEXT NOT NULL DEFAULT '',
+                   text TEXT NOT NULL,
+                   words INTEGER NOT NULL DEFAULT 0,
+                   ms INTEGER NOT NULL DEFAULT 0,
+                   at INTEGER NOT NULL,
+                   PRIMARY KEY (profile, id)
+               )"""
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -650,4 +686,44 @@ def _migrate(conn: sqlite3.Connection) -> None:
             )
         except sqlite3.Error:
             logger.debug("memento: the chat list carries a value that isn't JSON")
+        # v44: a bot's dictations — one row per finished take, written by the app when its words
+        # landed — and the clock its last clear stamped, which is how a device's mirror learns that
+        # its rows above the stamp are gone without comparing ids (dictations.py, ADR 0060).
+        conn.execute(CREATE_DICTATIONS)
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS dictation_state (
+                   profile TEXT PRIMARY KEY,
+                   cleared_at INTEGER NOT NULL DEFAULT 0
+               )"""
+        )
+        # v45: the log is keyed per profile, and `device` is gone. A store that ran the build before
+        # that change has `id` alone as its key, where a second profile's write of the same id is
+        # dropped by INSERT OR IGNORE and then read back as a row it never stored. CREATE TABLE IF
+        # NOT EXISTS cannot change a key, so the table is rebuilt with its rows carried over.
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(dictations)")}
+        if "device" in columns:
+            conn.execute("ALTER TABLE dictations RENAME TO dictations_v44")
+            conn.execute(CREATE_DICTATIONS)
+            # `id` was unique in the old shape, so no row can collide with another on the way in.
+            conn.execute(
+                """INSERT OR IGNORE INTO dictations (id, profile, text, words, ms, at)
+                       SELECT id, profile, text, words, ms, at FROM dictations_v44"""
+            )
+            conn.execute("DROP TABLE dictations_v44")
+        # v46: the log's clock is the host's (dictations.py, ADR 0060). `at` is when the words were
+        # said, which a device's clock decides and a wrong one misplaces; the order, the pages and the
+        # fingerprint read `seen_at`, stamped when the row landed. Rows written before this are
+        # backfilled with their own `at`, which is the order they were already read in, so nothing
+        # moves for a store that has been in use.
+        dictation_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(dictations)")
+        }
+        if "seen_at" not in dictation_columns:
+            conn.execute("ALTER TABLE dictations ADD COLUMN seen_at INTEGER NOT NULL DEFAULT 0")
+            conn.execute("UPDATE dictations SET seen_at = at")
+        # The page no longer reads `at`, so its index would only cost every write.
+        conn.execute("DROP INDEX IF EXISTS dictation_time")
+        # v47: one index for all three reads of the log (CREATE_DICTATION_READ).
+        conn.execute("DROP INDEX IF EXISTS dictation_order")
+        conn.execute(CREATE_DICTATION_READ)
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

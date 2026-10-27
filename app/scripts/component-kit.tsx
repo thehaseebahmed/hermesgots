@@ -12,6 +12,7 @@ import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-rou
 import { AfkPopup } from "@/components/afk"
 import { AppShell } from "@/components/app-shell"
 import { DEFAULT_SETTINGS, db, type Message, type Profile, type Settings } from "@/lib/db"
+import { fingerprintOf, orderOf } from "@/lib/dictation-log"
 import { ChatPage } from "@/routes/chat"
 
 export function json(body: unknown, status = 200) {
@@ -51,6 +52,43 @@ export function botProfile(name: string, patch: Partial<Profile> = {}): Profile 
     updatedAt: 1,
     ...patch,
   }
+}
+
+/** What a host answers about its log: the totals it counts, across the fingerprint beside them. */
+export function dictationTotals<T extends { at: number; seenAt?: number; words: number; ms: number }>(
+  rows: T[],
+  clearedAt = 0,
+) {
+  const words = rows.reduce((total, row) => total + row.words, 0)
+  const ms = rows.reduce((total, row) => total + row.ms, 0)
+  return { words, ms, ...fingerprintOf(rows, clearedAt) }
+}
+
+/**
+ * One page of a host's log, read the way its route reads it: newest first by the host's own clock, and
+ * under the keyset cursor `(seen_at, id)` — a bound on the time alone would skip every row tied with
+ * it, which is a take a mirror could then never reach. Tests that fake that route share this, so the
+ * order and the cursor they answer with are the ones the app really talks to.
+ */
+export function dictationPage<T extends { id: string; at: number; seenAt?: number }>(
+  rows: T[],
+  query: {
+    before?: string | number | null
+    beforeId?: string | null
+    limit?: string | number | null
+  } = {},
+): T[] {
+  const before = query.before === null || query.before === undefined ? null : Number(query.before)
+  const beforeId = query.beforeId || null
+  const older = [...rows].sort(
+    (one, two) => orderOf(two) - orderOf(one) || (one.id < two.id ? 1 : -1),
+  )
+  const under = (row: T) => {
+    if (before === null) return true
+    if (beforeId === null) return orderOf(row) < before
+    return orderOf(row) < before || (orderOf(row) === before && row.id < beforeId)
+  }
+  return older.filter(under).slice(0, Number(query.limit ?? 50))
 }
 
 export async function seedSettings(patch: Partial<Omit<Settings, "id">> = {}) {
