@@ -9,6 +9,10 @@ its internals are read by name (``_active_subagents``, ``_run_statuses``, ``inte
 Hermes renames and rewrites them without knowing this plugin exists, so this check says so on the
 next pull request, or on the weekly run, instead of on a user's wake.
 
+The prompt caps are pinned for the same reason rather than mirrored by Gots: a system-prompt section
+past its cap is dropped whole, and a context file past its own is truncated. Gots tells neither —
+the host reads SOUL.md as the session's identity — so what drifts is what Gots believed about the host.
+
 Everything here reads source text — a substring of a Hermes file, a module-level string constant, or
 the same on the plugin side — so it runs against any checkout with no host and no network. The
 plugin is never imported: its import chain wants a Hermes host (``plugin/__init__.py`` pulls
@@ -57,6 +61,14 @@ ANCHORS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
     (("tools/process_registry_notifications.py",), "matched watch pattern"),
     (("tools/process_registry_notifications.py",), "heartbeat #"),
     (("tools/process_registry_notifications.py",), "background processes completed."),
+    # The caps on what a plugin may add to the system prompt as a section, and on the host's own
+    # context files. A section past the first is dropped whole at render — the reason
+    # plugin/openui.py refuses to register one — and SOUL.md past the third is truncated head and
+    # tail with a marker naming the file read_file recovers it from. Gots injects neither: the host
+    # reads SOUL.md as the session's identity, for coding sessions too. Pinned, never copied.
+    (("hermes_cli/plugins_dispatch.py",), "DEFAULT_SYSTEM_PROMPT_SECTION_MAX_CHARS = 4_000"),
+    (("hermes_cli/plugins_dispatch.py",), "MAX_SYSTEM_PROMPT_SECTIONS_TOTAL_CHARS = 8_000"),
+    (("agent/prompt_builder.py",), "CONTEXT_FILE_MAX_CHARS = 20_000"),
 )
 
 # Hermes's own constants, read out of the checkout as they are: they are what the plugin's copies are

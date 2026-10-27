@@ -321,19 +321,20 @@ class InstructionsTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
-    def test_the_folder_is_named_under_the_sessions_own_section(self) -> None:
+    def test_the_scratch_dir_is_named_under_the_sessions_own_section(self) -> None:
         text = prompt_builder.session_prompt(self.record)
-        self.assertIn(f"This session's library folder is {self.record['files_dir']}", text)
-        self.assertIn("library_add tool", text, "the rule that files them is told too")
+        scratch = f'"$HERMES_SAFE_ROOT/.scratch/{self.record["branch"]}"'
+        self.assertIn(scratch, text)
+        self.assertIn("**library_add**", text, "the rule that files them is told too")
         self.assertLess(
-            text.index("library_add tool"),
-            text.index("This session's library folder"),
-            "the rule stands above the section that names its path",
+            text.index("**library_add**"),
+            text.index(scratch),
+            "the rule stands above the section that names where the session works",
         )
         self.assertNotIn(
-            self.record["files_dir"],
+            self.record["branch"],
             text.split("## Current Session")[0],
-            "no path above the section that names this session",
+            "no branch above the section that names this session",
         )
 
     def test_the_line_teaches_the_naming_convention(self) -> None:
@@ -343,51 +344,75 @@ class InstructionsTest(unittest.TestCase):
         self.assertIn("kebab-case", text)
         self.assertIn("dashboard-light.png", text)
 
-    def test_a_record_without_the_folder_has_no_line(self) -> None:
+    def test_the_scratch_line_is_told_whether_or_not_a_folder_is_set(self) -> None:
+        # The library folder is the tool's business, so nothing in the prompt depends on it: a record
+        # from before library folders is told the same rules and the same scratch directory.
         legacy = {**self.record, "files_dir": None}
-        self.assertNotIn("library", prompt_builder.session_prompt(legacy))
+        self.assertEqual(
+            prompt_builder.session_prompt(legacy), prompt_builder.session_prompt(self.record)
+        )
 
     def test_the_gots_section_tells_its_rules_before_any_session_fact(self) -> None:
         # The Gots section is the same for every session, so its rules are told together and above
         # the section that names this one, which is what makes the opening shared (ADR 0028).
         text = prompt_builder.session_prompt(self.record)
-        self.assertIn("Keep the user in the loop as you work", text)
-        self.assertLess(text.index("library_add tool"), text.index("pull_request tool"))
-        self.assertLess(text.index("pull_request tool"), text.index("Keep the user in the loop"))
-        self.assertLess(text.index("Keep the user in the loop"), text.index("## Current Session"))
+        self.assertIn("Keep the todo list current", text, "the guidelines are told together")
+        self.assertLess(text.index("## Do"), text.index("## Don't"))
+        self.assertLess(text.index("## Don't"), text.index("## Tools"))
+        self.assertLess(text.index("**library_add**"), text.index("**pull_request**"))
+        self.assertLess(text.index("**pull_request**"), text.index("## Current Session"))
 
     def test_the_block_names_the_rhythm_rules(self) -> None:
         text = prompt_builder.session_prompt(self.record)
         self.assertIn("short update between checkpoints", text)
-        self.assertIn("todo list current", text)
+        self.assertIn("Keep the todo list current", text)
+        self.assertIn("before you commit it", text, "the diff is read before it goes in")
         self.assertIn("Don't narrate each edit", text)
+
+    def test_the_media_block_says_how_a_file_is_named_and_where_it_may_come_from(self) -> None:
+        # The tag is a message's own convention, so it is told beside the tools rather than in one of
+        # them: a session can name a file it filed in an earlier run.
+        text = prompt_builder.session_prompt(self.record)
+        self.assertIn("## Media", text)
+        self.assertIn("`MEDIA:`", text, "the marker is told literally")
+        self.assertIn("library file", text, "and the only place a file may come from")
+        media = text.split("## Media")[1]
+        self.assertIn("absolute path", media, "the path starts at the filesystem root")
+        self.assertIn("never a path relative to the folder you are in", media)
+        self.assertIn("Never a scratch, worktree or other temporary path", media)
+        self.assertIn("caches what it fetches", media, "the reason: a temp path draws a stale copy")
+        self.assertIn("is a row the user saves", media, "a file that is not drawn is still handed over")
 
     def test_a_record_without_worktrees_has_no_block(self) -> None:
         # The same gate as the ship instructions: a record with no repos gets neither.
         no_repos = {**self.record, "repos": []}
         text = prompt_builder.session_prompt(no_repos)
-        self.assertNotIn("Keep the user in the loop", text)
-        self.assertNotIn("pull_request tool", text)
+        self.assertNotIn("Keep the todo list current", text)
+        self.assertNotIn("**pull_request**", text)
 
     def test_the_mock_repeats_the_instructions_word_for_word(self) -> None:
         # The mock is a standalone Node process, so its copy can't be imported; the e2e flows read
         # the text it serves, so a drift there tests a prompt no session gets. Compared the way
         # test_push_kinds compares its lists to the app's. Only the blocks meant to be verbatim:
         # the plan is a template, and the wording inside it is Hermes's own.
+        import json
         import re
 
         app = Path(__file__).resolve().parents[2] / "app"
         mock_js = (app / "scripts" / "mock-hermes.mjs").read_text()
         for name, block in (
+            ("GOTS_OPENING", prompt_builder._GOTS_OPENING),
+            ("DO_RULES", prompt_builder._DO_RULES),
+            ("DONT_RULES", prompt_builder._DONT_RULES),
+            ("LIBRARY_RULES", prompt_builder._LIBRARY_RULES),
             ("PR_INSTRUCTIONS", prompt_builder._PR_RULES),
-            ("DONE_INSTRUCTIONS", prompt_builder._DONE_INSTRUCTIONS),
-            ("PROGRESS_UPDATES_INSTRUCTIONS", prompt_builder._PROGRESS_UPDATES_INSTRUCTIONS),
+            ("MEDIA_RULES", prompt_builder._MEDIA_RULES),
         ):
             with self.subTest(block=name):
-                found = re.search(rf'^const {name} = "(.*)"$', mock_js, re.M)
+                found = re.search(rf'^\s*const {name} = "(.*)"$', mock_js, re.M)
                 if found is None:
                     self.fail(f"{name} is not in the mock")
-                self.assertEqual(found.group(1), block)
+                self.assertEqual(json.loads(f'"{found.group(1)}"'), block)
 
 
 if __name__ == "__main__":

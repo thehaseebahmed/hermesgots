@@ -2475,7 +2475,7 @@ class StagedStartTests(SessionTests):
         )
         self.assertNotIn("This task is worked in stages", text, "there is no stage to be told")
         self.assertIn(
-            "ship it yourself with the pull_request tool",
+            "**pull_request** — the only way work leaves this session",
             text,
             "the one run ships the draft itself",
         )

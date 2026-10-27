@@ -6,6 +6,8 @@ on:
     branches: [main]
     paths:
       - "plugin/prompt_builder.py"
+      - "plugin/dictation.py"
+      - "plugin/dictation_cleanup.py"
       - "plugin/scripts/generate_prompts_doc.py"
 
 concurrency:
@@ -18,8 +20,9 @@ permissions:
 
 jobs:
   regenerate:
-    # The prompt builder or its generator moved: rebuild docs/prompts.md and open a PR when the
-    # doc changed, so the readable copy of the injected prompt never goes stale.
+    # A prompt module or the generator moved: rebuild docs/prompts.md and open a PR when the doc
+    # changed, so the readable copy of every prompt — a session's and dictation's — never goes
+    # stale.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,8 +45,9 @@ jobs:
         run: |
           body="## Summary
 
-          Regenerated docs/prompts.md from the current plugin/prompt_builder.py: every prompt a
-          project session's run can be injected with, in one readable file.
+          Regenerated docs/prompts.md from the current plugin modules: every prompt a project
+          session's run can be injected with, and the ones dictation's transcription and cleanup
+          send to a model, in one readable file.
 
           ## Changes
 
@@ -56,8 +60,8 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "docs/prompts-${GITHUB_SHA:0:7}"
           git add docs/prompts.md
-          git commit -m "docs: regenerate the session prompt examples"
+          git commit -m "docs: regenerate the prompts doc"
           git push -u origin HEAD
-          gh pr create --title "docs: regenerate the session prompt examples" --body "$body"
+          gh pr create --title "docs: regenerate the prompts doc" --body "$body"
         env:
           GH_TOKEN: ${{ github.token }}

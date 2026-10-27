@@ -268,6 +268,10 @@ _Avoid_: agent list, delegation sheet, subagent drawer
 A project being worked without its user present. On, Gots claims its ready tasks and works up to its pick count at a time, within its bot's **pick budget**, and stops picking up while the bot's account is over its usage threshold, until the switch is turned off. A task runs one run on the project's **prompt**, unless the project has picked a **workflow**.
 _Avoid_: autopilot, unattended mode, auto mode, yolo
 
+**Host prompt**:
+Everything Hermes tells a session before Gots's own words: the profile's identity from its `SOUL.md`, its system prompt, and the project's context files, the `AGENTS.md` chain above the worktree. The host tells it and Gots never copies it, so editing `SOUL.md` changes what a session is told without touching Gots.
+_Avoid_: system prompt, persona, injected prompt
+
 **Prompt**:
 How a project's AFK work is carried out, told to the run beside AFK's fixed rules: the words the user writes for it, or the ones they pick from the **prompt library**. It lives on the host with the project, starts as the bot's default method, and an empty one means that default again.
 _Avoid_: instructions, system prompt, template, playbook

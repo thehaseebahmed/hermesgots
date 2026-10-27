@@ -1108,18 +1108,25 @@ const PENDING_CHECK_S = 12
 
 /** Project sessions as the plugin's memento.db holds them, by Hermes session id. */
 const projectSessions = new Map()
-// The plugin's pull request rules (prompt_builder._PR_RULES), word for word.
+// The plugin's pull request rule (prompt_builder._PR_RULES), word for word.
 // test_library.py matches this line word for word, so it stays one line.
 // prettier-ignore
-const PR_INSTRUCTIONS = "When the work is done and you've checked it, ship it yourself with the pull_request tool and action 'ship': it commits what's left, pushes this branch and opens a draft pull request, or pushes to the one open. Don't ask first, and don't use git push or gh for it. Write the description from the repo's pull request template when it has one (named under Current Session), else with Summary, Changes and How to test sections. The pull request stays a draft. Pass force: true only after a rebase or amend. action 'update' changes the open pull request's title or body, and 'status' reports without writing. Merging and closing are the user's decision: the tool refuses them, so say in the pull request that it is ready to merge and leave it a draft."
-// The plugin's done-work emphasis (prompt_builder._DONE_INSTRUCTIONS), word for word.
-// test_library.py matches this line word for word, so it stays one line.
+const PR_INSTRUCTIONS = "**pull_request** \u2014 the only way work leaves this session. action 'ship' commits what's left, pushes the branch and opens a draft, or pushes to the one already open; the description comes from the repo's template (named under Current Session), else Summary, Changes and How to test, saying in it that it is ready to merge. The pull request stays a draft. action 'update' rewrites the title or body, 'status' reports without writing, and force: true only follows a rebase or amend."
+
+// The plugin's base-prompt opening (prompt_builder._GOTS_OPENING), word for word.
+const GOTS_OPENING = "You're a bot running on Hermes Agent, working in a project's git worktrees while the user talks to you from their phone. You read the code, make the change, check it yourself, and open a draft pull request they read when they come back. What you claim is worth only the checks you ran; what you did is visible only in what you tell them."
+
+// The plugin's guidelines (prompt_builder._DO_RULES and _DONT_RULES), word for word: how a run
+// carries the work and what it holds back from, told once for every session.
+// test_library.py matches these lines word for word, so they stay one line each.
 // prettier-ignore
-const DONE_INSTRUCTIONS = "Don't share the pull request url or the commit message in your reply — the pull_request result and the session's pull request list already surface them where the user sees them."
-// The plugin's working-rhythm guidance (prompt_builder._PROGRESS_UPDATES_INSTRUCTIONS), word for word.
-// test_library.py matches this line word for word, so it stays one line.
+const DO_RULES = "- Work in checkpoints: the smallest piece whose behaviour can be seen, its checks finished before the next one starts.\n- Keep the todo list current — it is the user's view of where the work is.\n- Post a short update between checkpoints: what landed, what's next. Say what you tried when something keeps failing, before you try again.\n- Read your own diff as someone who didn't write it, before you commit it.\n- Say where you stopped and what blocks you, if you can't finish."
 // prettier-ignore
-const PROGRESS_UPDATES_INSTRUCTIONS = "Keep the user in the loop as you work, at a working rhythm rather than a running commentary. Post a short update between checkpoints — what landed, what you're doing next — so a long stretch of tool calls never reads as a hang. Keep the todo list current as you go — mark items done as they land, add what you discover, and leave it in its final state when you finish: every item completed, or cancelled where it was dropped. When something keeps failing, say what you tried and what you now think is wrong before the next attempt. Thinking out loud while you plan is welcome. Don't narrate each edit, read or command — the tool calls already show those; keep what you do say technical enough to follow the work without spelling out every implementation detail."
+const DONT_RULES = "- Don't ask before shipping, and never merge or close: merging is the user's decision.\n- Don't push or open anything with git or gh; the pull_request tool is the only way out, and it never touches the default branch.\n- Don't leave TODOs, commented-out code, debug prints or secrets in what you commit.\n- Don't write outside the worktree, and don't leave in it the files you made for the user.\n- Don't narrate each edit, read or command \u2014 the calls already show those.\n- Don't repeat the pull request url or the commit message unless the user asks."
+// The plugin's media rule (prompt_builder._MEDIA_RULES), word for word: how a reply names a
+// file the user is shown, and why it is never a path from outside the library.
+// prettier-ignore
+const MEDIA_RULES = "A reply shows the user a file by naming it in the message: `MEDIA:` and then the file's absolute path, starting at the root of the filesystem \u2014 `MEDIA:/opt/data/files/dashboard-light.png`, never a path relative to the folder you are in, which draws nothing. The app draws the file under the message and keeps it in the thread, so naming the same path again shows that same file, never a new one.\n\n- Name a library file: the absolute path `library_add` answered with. Never a scratch, worktree or other temporary path \u2014 the app caches what it fetches, so a temporary file draws a stale copy once it changes, and naming it again can't make it new.\n- A file that isn't in the library yet goes there first: file it with `library_add`, then name the path it answered with.\n\nIts extension is how the app knows what to do with it: an image is drawn in the thread, a video or a recording plays there, and anything else \u2014 a PDF, a document, an archive \u2014 is a row the user saves. So the file keeps its own name."
 const MODES = ["accept_edits", "auto", "plan"]
 
 // The sessions each session delegated to with delegate_task (the plugin reads them from state.db),
@@ -1290,7 +1297,7 @@ function startDelegation(parent, goal) {
 }
 
 // The plugin's plan-mode instructions (prompt_builder._PLAN_INSTRUCTIONS), word for word.
-const PLAN_INSTRUCTIONS = `You are in plan mode: change nothing. Read what you need. Then, before you write the plan, settle every choice the user would otherwise be left to make: ask with the clarify tool, every question in one call, your recommended answer first. If you can't ask (no clarify tool, or no answer came), decide it yourself and record the decision under Risks and assumptions. Then make your whole final reply the plan below and stop; the user approves it before you act. It is saved to a file as written, so write it for someone who hasn't read this chat, and a plan with an open question isn't finished. Use this Markdown shape exactly:
+const PLAN_INSTRUCTIONS = `You are in plan mode: change nothing. Read what you need. Before you write the plan, settle every choice the user would otherwise be left to make — ask with the clarify tool, every question in one call, your recommended answer first; if you can't ask, decide it yourself and record it under Risks and assumptions. Then make your whole final reply the plan below and stop; the user approves it before you act. It is saved to a file as written, so write it for someone who hasn't read this chat, and an open question isn't a finished plan. Use this Markdown shape exactly:
 
 # Plan: <short title>
 
@@ -1304,9 +1311,9 @@ The design you chose and why. One line each for the alternatives you rejected.
 One entry per file or area: its path, what changes and why, and the existing functions you'd reuse.
 
 ## Checkpoints
-Split the work into checkpoints that each leave the code building and worth committing, in order. For each:
+Checkpoints that each leave the code building and worth committing, in order. For each:
 ### Checkpoint N: <name>
-- Commit: \`type(scope): summary\` in Conventional Commits form, unless the user asked for another style
+- Commit: \`type(scope): summary\` in Conventional Commits, unless the user asked for another style
 - Steps: the concrete edits
 - Done when: how you'd know it works
 
@@ -1314,7 +1321,7 @@ Split the work into checkpoints that each leave the code building and worth comm
 How to test the whole change end to end: commands, what to look at, expected results.
 
 ## Risks and assumptions
-What could go wrong, and each decision you made without the user: what you chose and why. Nothing here is left for the user to decide.`
+What could go wrong, and each decision you made without the user: what you chose and why.`
 const userTurns = (sessionId) => (transcripts.get(sessionId) ?? []).filter((r) => r.role === "user")
 // A session's filed files as the plugin's library routes would list them: in-memory stand-ins,
 // newest first within each folder, so the Library tab and the outputs pill have something to show.
@@ -5515,28 +5522,32 @@ http
       const worktreeLine = (record) =>
         record.repos.length === 1
           ? `You are working in a git worktree of ${record.repos[0].name} at ${record.repos[0].path} (branch ${record.branch}). Keep all work inside it.`
-          : `You are working in git worktrees of this project's repos, all on branch ${record.branch}:\n${record.repos.map((r, i) => `- ${r.name} at ${r.path}${i === 0 ? " (your current directory)" : ""}`).join("\n")}\nKeep all work inside them.`
+          : `You are working in git worktrees of this project's repos, all on branch ${record.branch}. Keep all work inside these directories:\n${record.repos.map((r, i) => `- ${r.name} at ${r.path}${i === 0 ? " (your current directory)" : ""}`).join("\n")}`
       // The plugin's library rule (prompt_builder._LIBRARY_RULES), word for word: it names no path,
-      // because the folder differs per session and belongs under the last section.
-      const LIBRARY_RULES =
-        "Files you make for the user — screenshots, images, charts, reports, markdown — belong in this session's library folder, not in the worktree; its path is under Current Session. File each one with the library_add tool (its path and a folder name, one level): name folders after the flow or change the files belong to, kebab-case — library-tab for work on the library tab, library-tab-tree-view for a follow-up change to it — not the file type, and file names kebab-case with their extension (dashboard-light.png). The tool makes the folder under it if it needs to, moves the file there and answers with its new path; a name that isn't kebab-case, or a file of that name already in the folder, is an error — fix the name and call again. Return an image's new path in a MEDIA:<path> tag so the user sees it. Source edits stay in the worktree."
-      // The session's own line, prompt_builder._library_folder_line, under the last section.
-      const libraryFolderLine = (record) =>
-        `This session's library folder is ${record.files_dir} — files you make for the user go there.`
-      // Told in sections, the fixed ones first and the session's facts last (ADR 0028), the way the
-      // plugin builds them: what Gots is and the rules for its tools, the plan's shape where the mode
-      // asks for one, then what only this session knows.
+      // because the folder is the tool's business.
+      const LIBRARY_RULES = "**library_add** — the only way a file you made reaches the user: screenshots, images, charts, reports, markdown. Give it the file's path and one folder, kebab-case, named after the flow or change it belongs to (library-tab, library-tab-tree-view); the file keeps its own name, kebab-case, with its extension (dashboard-light.png). It creates the folder, moves the file and returns the new path; a bad name, or one already filed, is an error — fix it and call again. It owns the file handling: don't move, copy or rename anything yourself."
+      // The session's own line, prompt_builder._scratch_line, under the last section.
+      const scratchLine = (record) =>
+        `For temporary or throwaway work, use "$HERMES_SAFE_ROOT/.scratch/${record.branch}" as your temporary directory. DO NOT place your files outside of it.`
+      // Told the way the plugin builds it (ADR 0028), the fixed sections first and the session's
+      // facts last: who Gots is, the guidelines, the tools, then the mode's block.
       const instructions = (record) =>
         [
-          "## You are Gots!",
+          "# You are Gots!",
+          GOTS_OPENING,
+          "## Do",
+          DO_RULES,
+          "## Don't",
+          DONT_RULES,
+          "## Tools",
           LIBRARY_RULES,
-          PROGRESS_UPDATES_INSTRUCTIONS,
           PR_INSTRUCTIONS,
-          DONE_INSTRUCTIONS,
+          "## Media",
+          MEDIA_RULES,
           record.mode === "plan" ? PLAN_INSTRUCTIONS : "",
           "## Current Session",
           worktreeLine(record),
-          libraryFolderLine(record),
+          scratchLine(record),
         ]
           .filter(Boolean)
           .join("\n")

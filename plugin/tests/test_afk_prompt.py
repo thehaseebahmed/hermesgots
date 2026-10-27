@@ -66,7 +66,7 @@ class AfkPromptTests(unittest.TestCase):
             "its text is the spec",
             "Never ask the user anything",
             "the pull request ships last",
-            "Nothing is merged or closed by you",
+            "never merge or close",
             "secrets",
             "leave the tree consistent",
         ):
@@ -79,11 +79,11 @@ class AfkPromptTests(unittest.TestCase):
             1,
             "the guard is told once, in the section every run shares",
         )
-        self.assertIn("a skill or a User's Workflow", prompt_builder._GOTS_OPENING)
+        self.assertIn("What you claim is worth only the checks you ran", prompt_builder._GOTS_OPENING)
         self.assertLess(
             text.index(prompt_builder._GOTS_OPENING),
             text.index(prompt_builder._AFK_OPENING),
-            "the guard stands above the brief it holds",
+            "the base prompt stands above the brief it holds",
         )
 
     def test_the_default_method_is_served_by_the_host(self) -> None:
@@ -112,7 +112,9 @@ class AfkPromptTests(unittest.TestCase):
     def test_the_brief_is_told_before_the_prompt(self) -> None:
         text = self.text()
         self.assertLess(
-            text.index("The rules:"), text.index("Work in checkpoints"), "the fixed points come first"
+            text.index("The rules:"),
+            text.index(prompt_builder.DEFAULT_PROMPT),
+            "the fixed points come first",
         )
 
     def test_a_projects_prompt_is_told_in_place_of_the_default(self) -> None:
@@ -157,8 +159,12 @@ class AfkPromptTests(unittest.TestCase):
     def test_it_keeps_the_sessions_own_prompt(self) -> None:
         text = self.text()
         self.assertIn("You are working in a git worktree of mock-user/memento", text)
-        self.assertIn("pull_request tool", text, "the session's shipping rules still hold")
-        self.assertIn("/checkout/files/afk-265", text, "and where its generated files go")
+        self.assertIn("**pull_request**", text, "the session's shipping rules still hold")
+        self.assertIn(
+            '$HERMES_SAFE_ROOT/.scratch/hermes/afk-265',
+            text,
+            "and the directory its throwaway work goes in",
+        )
 
     def test_a_run_with_nobody_to_ask_says_the_pull_request_is_ready(self) -> None:
         text = self.text()
@@ -174,7 +180,7 @@ class AfkPromptTests(unittest.TestCase):
 
 
 class SectionTests(unittest.TestCase):
-    """A prompt is told in four named sections, and the fixed ones come first (ADR 0028)."""
+    """A prompt is told in named sections, and the fixed ones come first (ADR 0028)."""
 
     OTHER = {
         **RECORD,
@@ -193,7 +199,11 @@ class SectionTests(unittest.TestCase):
     def test_the_sections_are_told_in_order(self) -> None:
         text = prompt_builder.afk_prompt(RECORD, TASK)
         headings = (
-            "## You are Gots!",
+            "# You are Gots!",
+            "## Do",
+            "## Don't",
+            "## Tools",
+            "## Media",
             "## Away From Keyboard",
             "## User's Workflow",
             "## Current Session",
@@ -204,7 +214,7 @@ class SectionTests(unittest.TestCase):
 
     def test_a_planning_session_is_told_its_mode_after_gots(self) -> None:
         text = prompt_builder.session_prompt({**RECORD, "mode": "plan"})
-        self.assertLess(text.index("## You are Gots!"), text.index("## Plan mode"))
+        self.assertLess(text.index("## Tools"), text.index("## Plan mode"))
         self.assertLess(text.index("## Plan mode"), text.index("## Current Session"))
 
     def test_two_runs_share_their_opening(self) -> None:
@@ -306,7 +316,7 @@ class BuildStageTests(unittest.TestCase):
         text = self.text()
         self.assertIn('follows your skill "plan"', text)
         self.assertIn('skill_view(name="plan")', text)
-        self.assertIn("never whether it is checked", text, "no skill unlocks the gate")
+        self.assertIn("The shipping step above is not yours", text, "no skill unlocks the gate")
 
     def test_a_staged_build_with_no_build_skill_names_none(self) -> None:
         record = {**RECORD, "pipeline": staged_record(pipeline.BUILD, build=None)}
@@ -384,7 +394,11 @@ class StagePromptTests(unittest.TestCase):
         text = self.text().lower()
         for child in ("delegate", "spawn", "subagent"):
             self.assertNotIn(child, text, "the brief neither asks for children nor forbids them")
-        self.assertIn("never whether it is checked", text, "the skill's own words decide how it is done")
+        self.assertIn(
+            prompt_builder._GOTS_OPENING.lower(),
+            text,
+            "the skill's own words decide how it is done, over the prompt every run is given",
+        )
 
     def test_a_stage_with_no_skills_still_states_the_fixed_points(self) -> None:
         record = staged_record(pipeline.CRITIQUE, steps=())
@@ -392,7 +406,7 @@ class StagePromptTests(unittest.TestCase):
         self.assertNotIn("skill_view", text, "nothing is loaded")
         self.assertIn(prompt_builder._GOTS_OPENING, text, "the fixed points hold with no skill to check")
 
-    def test_every_stage_states_the_guard_once(self) -> None:
+    def test_every_stage_states_the_base_prompt_once(self) -> None:
         records = [
             self.REVIEW["pipeline"],
             staged_record(pipeline.BUILD),
@@ -409,12 +423,15 @@ class StagePromptTests(unittest.TestCase):
 
     def test_a_skill_shapes_method_only(self) -> None:
         text = self.text()
-        self.assertIn("a skill changes how the work is done", prompt_builder._GOTS_OPENING)
-        self.assertIn("never whether it is checked", prompt_builder._GOTS_OPENING)
+        # The precedence rule lives in the method a project is told, where a skill is named; the base
+        # prompt is the guidelines every run follows, whatever else it is given.
+        self.assertIn("never whether it is checked", prompt_builder.DEFAULT_PROMPT)
+        self.assertIn("this prompt wins and its three checks still run", prompt_builder.DEFAULT_PROMPT)
+        self.assertNotIn("skill", prompt_builder._GOTS_OPENING)
         self.assertIn("Don't ask the user anything", text, "the stage states its own points")
         self.assertIn("merging or closing to the user", text, "and the merge stays the user's")
 
-    def test_the_guard_is_the_same_one_every_prompt_is_given(self) -> None:
+    def test_the_base_prompt_is_the_same_one_every_prompt_is_given(self) -> None:
         build = prompt_builder.afk_prompt({**RECORD, "pipeline": staged_record()}, TASK)
         self.assertIn(prompt_builder._GOTS_OPENING, build, "one guard, every stage")
         self.assertIn(prompt_builder._GOTS_OPENING, self.text())

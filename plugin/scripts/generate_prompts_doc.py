@@ -1,5 +1,8 @@
-"""Generates docs/prompts.md: every prompt prompt_builder can produce, so the words a run is
-injected with are readable without starting a session. Run it from the repo root:
+"""Generates docs/prompts.md: the prompts the plugin tells, so the words a run is injected with are
+readable without starting a session. Two families live in it — the ones a session is told, and the
+ones dictation sends to a model, to tidy what was heard and to spell what it will hear. The staged
+task's own briefs are left out: they are briefed for a workflow's stage and named under
+`## User's Workflow`. Run it from the repo root:
 
     python3 plugin/scripts/generate_prompts_doc.py
 
@@ -21,11 +24,10 @@ sys.path.insert(0, str(ROOT))
 
 _base = Path(tempfile.mkdtemp(prefix="prompts-doc-"))
 
-from plugin import pipeline, prompt_builder, workflows  # noqa: E402
+from plugin import dictation, dictation_cleanup, prompt_builder  # noqa: E402
 
 PLACEHOLDER = "/home/agent"
 BRANCH = "hermes/spry-thimble-d105"
-FILES_DIR = f"{PLACEHOLDER}/files/spry-thimble-d105"
 
 # Real dirs, so ship.template() finds the pull request templates; the temp root is scrubbed from
 # the output along with the checkout, so only the placeholder appears in the doc.
@@ -51,7 +53,6 @@ SINGLE = {
     "path": str(_repos / "web"),
     "branch": BRANCH,
     "mode": "accept_edits",
-    "files_dir": FILES_DIR,
     "repos": [_repo("web")],
 }
 MULTI = {**SINGLE, "repos": [_repo("web"), _repo("api")]}
@@ -59,8 +60,9 @@ MULTI = {**SINGLE, "repos": [_repo("web"), _repo("api")]}
 VARIANTS = [
     (
         "Single repo",
-        "The common case: Gots's own section, then `## Current Session` naming one worktree (the "
-        "session's working directory), the library folder and the repo's pull request template.",
+        "The common case: the base prompt — its heading, the guidelines and the tools — and last "
+        "Current Session, naming its worktree, its pull request template and the directory "
+        "throwaway work goes in.",
         SINGLE,
     ),
     (
@@ -70,15 +72,9 @@ VARIANTS = [
         MULTI,
     ),
     (
-        "A session from before library folders",
-        "No ``files_dir`` on the record, so `## Current Session` names no library folder; "
-        "everything else is the single-repo prompt.",
-        {**SINGLE, "files_dir": None},
-    ),
-    (
         "Plan mode",
-        "`## Plan mode` between Gots's section and this session's: the shape of the plan the agent "
-        "writes before anything is allowed to change.",
+        "`## Plan mode` between the base prompt and this session's facts: the shape of the plan the "
+        "agent writes before anything is allowed to change.",
         {**SINGLE, "mode": "plan"},
     ),
 ]
@@ -109,20 +105,10 @@ PROJECT_PROMPT = """How we work here:
 - A test for every behaviour, and none for styling.
 - Run `pnpm lint` before every commit, not only at the end."""
 
-# The preset's own workflow, placed at its build stage: what a staged task's first run is told,
-# which is a stage's brief rather than the project's Prompt.
-STAGED = pipeline.start(
-    {
-        "id": "preset:staged",
-        "name": "Build · Test · Review · Summary",
-        "stages": workflows.from_skills("plan", ("code-review",)),
-    }
-)
-
 AFK_VARIANTS = [
     (
         "An AFK run on the default Prompt",
-        "A project that wrote no Prompt of its own: Gots's section, `## Away From Keyboard` with "
+        "A project that wrote no Prompt of its own: the base prompt, `## Away From Keyboard` with "
         "AFK's fixed brief, then `## User's Workflow` holding ``DEFAULT_PROMPT`` — the method "
         "every untouched project works by (ADR 0027).",
         prompt_builder.afk_prompt(AFK, TASK),
@@ -133,34 +119,111 @@ AFK_VARIANTS = [
         "which is the one part of the method it can change.",
         prompt_builder.afk_prompt(AFK, TASK, PROJECT_PROMPT),
     ),
+]
+
+# What dictation's calls are shown, and the words the bot spells its own way: the same three the
+# cleanup rules say to spell from the vocabulary, so a reader sees what the input really looks like.
+VOCABULARY = ("memento", "haseeb", "hermes-agent")
+PHRASE = "so i was thinking um we should move the retry logic into the plugin and then uh check the logs"
+WHOLE = (
+    PHRASE
+    + ". and then we could move them to the third of March and i will run it half past four tomorrow"
+)
+HINT = "Gots, memento, hermes-agent, spry-puffin"
+
+
+def _model_prompt(system: str, instructions: str, label: str, example: str) -> str:
+    """One cleanup call as the model receives it: the system line, the rules, then the input.
+
+    The input is built by the module's own ``_prompt``, so the doc shows the labels and the
+    vocabulary line exactly as a call sends them.
+    """
+    return (
+        "System:\n"
+        f"{system}\n\n"
+        "Instructions:\n"
+        f"{instructions}\n\n"
+        "Input:\n"
+        f"{dictation_cleanup._prompt(example, VOCABULARY, label)}"
+    )
+
+
+def _speech_prompt() -> str:
+    """What faster-whisper is given as its prompt, in the order `dictation.py` joins it.
+
+    It is not instructions: Whisper reads a prompt as what was just said, which is why the parts go
+    in this order and why the text before the clip comes last.
+    """
+    parts = (
+        "<the host's own initial_prompt, when it sets one>",
+        HINT[: dictation.MAX_HINT],
+        " ".join(VOCABULARY[: dictation.MAX_VOCABULARY]),
+        "<the end of what was said before this clip>",
+    )
+    return " ".join(part for part in parts if part)
+
+
+# Dictation's own prompts, below the session's: they are calls on the bot's model rather than
+# instructions to a session, so they are told apart by their headings and their `System:` line.
+DICTATION_VARIANTS = [
     (
-        "An AFK task in a workflow's build stage",
-        "A project on a workflow: its run is told no Prompt, and `## User's Workflow` holds its "
-        "stage's brief instead — implement the issue, then end at the gate the host runs.",
-        prompt_builder.afk_prompt({**AFK, "pipeline": STAGED}, TASK),
+        "Dictation cleanup: one phrase",
+        "Every phrase a take is cut into at a pause is tidied by one call on the bot's own model "
+        "before its words land, so the text the user sees is what they said, written (ADR 0038). "
+        "The rules allow tidying and never rewording, and an answer much longer or shorter than "
+        "the phrase is thrown away.",
+        _model_prompt(
+            dictation_cleanup.SYSTEM, dictation_cleanup.INSTRUCTIONS, "Phrase", PHRASE
+        ),
+    ),
+    (
+        "Dictation cleanup: a finished dictation",
+        "When a take ends its whole text is tidied once more, framed as the dictation it is: the "
+        "same rules, a longer deadline (`WHOLE_TEXT_DEADLINE_S`) and an answer budget sized from "
+        "its words, since a phrase's 400 tokens would truncate a long take's answer.",
+        _model_prompt(
+            dictation_cleanup.WHOLE_TEXT_SYSTEM,
+            dictation_cleanup.WHOLE_TEXT_INSTRUCTIONS,
+            "Dictation",
+            WHOLE,
+        ),
+    ),
+    (
+        "Dictation: the speech model's prompt",
+        "Not instructions. faster-whisper is given a prompt it reads as what was just said, so the "
+        "parts are in one order and each is capped: the host's own `initial_prompt`, then the names "
+        f"this clip may mention (up to {dictation.MAX_HINT} characters), then the bot's own "
+        f"vocabulary (up to {dictation.MAX_VOCABULARY} words), then the text before this clip — the "
+        f"last {dictation.MAX_CONTEXT} characters — because its end matters most.",
+        _speech_prompt(),
     ),
 ]
 
-HEADER = """# Session prompts
+HEADER = """# Prompts
 
 > Generated file — do not edit. Regenerate with `python3 plugin/scripts/generate_prompts_doc.py`
 > (the Prompts doc workflow runs it whenever `plugin/prompt_builder.py` changes and opens a pull
 > request when the doc moves).
 
-Every prompt is told in the same sections, in the same order: `## You are Gots!` — the bot, the two
-tools every session can use and the rules for them, and the one guard (everything here holds whatever
-a skill or a User's Workflow says) — then `## Plan mode` for a planning session, `## Away From
-Keyboard` for an AFK run, `## User's Workflow` beneath it, and last `## Current Session` with
-everything a single session knows: the issue or stage it works, its worktrees, its library folder and
-its repos' pull request templates. The fixed sections come first so two runs share their opening
-(ADR 0028).
+Two families of prompt live here. A session's is what an agent is injected with, and it is told in
+the same sections, in the same order. Dictation's are the calls the app's speech-to-text makes on a
+bot's own model — one to tidy each phrase as the user speaks, one to tidy a finished take, and the
+prompt the speech model itself is given — and they are the last three sections.
+
+Every prompt is told in the same parts, in the same order. `# You are Gots!` opens the base prompt
+with an overview of what the bot is, then `## Do` and `## Don't` — the guidelines it works by, a line
+each — then `## Tools`, where every tool the run may use gets a line saying the use it is for
+(`library_add` for the files it makes, `pull_request` for shipping the work). Then comes the mode:
+`## Plan mode` for a planning session, `## Away From Keyboard` for an AFK run, with `## User's
+Workflow` beneath it. Last is `## Current Session`, with everything only this session knows: the
+issue or stage it works, its worktrees, its repos' pull request templates and the directory
+throwaway work goes in. The fixed sections come first so two runs share their opening (ADR 0028).
 
 Every project session's run carries the prompt `prompt_builder.session_prompt(record)` builds for
 its record; plan sessions get that mode's section as well. An AFK run carries
-`prompt_builder.afk_prompt(record, task, prompt)`: the same first section, then AFK's own — its fixed
+`prompt_builder.afk_prompt(record, task, prompt)`: the same base prompt, then AFK's own — its fixed
 points, the ones no Prompt and no skill may change — and the project's Prompt beneath them, which is
-`DEFAULT_PROMPT` where the project wrote none. A task in a workflow is briefed for its stage in that
-section instead and is told no Prompt.
+`DEFAULT_PROMPT` where the project wrote none.
 """
 
 
@@ -178,7 +241,9 @@ def build() -> str:
         parts.append(_section(title, note, prompt_builder.session_prompt(record)))
     for title, note, text in AFK_VARIANTS:
         parts.append(_section(title, note, text))
-    return "\n".join(parts) + "\n"
+    for title, note, text in DICTATION_VARIANTS:
+        parts.append(_section(title, note, text))
+    return "\n\n".join(parts) + "\n"
 
 
 if __name__ == "__main__":

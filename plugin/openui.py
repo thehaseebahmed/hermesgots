@@ -32,7 +32,8 @@ _HEADER = re.compile(r"^# @openuidev/react-lang (\S+)\s*$", re.M)
 
 # Hermes's DEFAULT_SYSTEM_PROMPT_SECTION_MAX_CHARS, and the cap the generator writes under. A
 # section past it is dropped whole at render, so registering one would advertise a vocabulary the
-# model is never told.
+# model is never told. The sections also share MAX_SYSTEM_PROMPT_SECTIONS_TOTAL_CHARS (8_000), so
+# what this one spends — 3_848 the last time it was measured — is what a second section could have.
 LIMIT = 4_000
 
 
