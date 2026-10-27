@@ -3090,6 +3090,9 @@ const dictationCleanups = []
 // a real host counts for itself is the words and the spoken span of each, and the fingerprint beside
 // them (ADR 0060).
 const DICTATION_CLEARED_AT = { at: 0 }
+// Each row carries two clocks, as the host's table does: `seenAt` is when this host heard the take,
+// which is what it orders and pages by, and `at` is when the device said it was said, kept for what
+// the screen draws (ADR 0060).
 const dictationLog = [
   {
     id: "dict-mock-1",
@@ -3097,6 +3100,7 @@ const dictationLog = [
     words: 11,
     ms: 4_200,
     at: Date.now() - 3 * 60 * 60 * 1000,
+    seenAt: Date.now() - 3 * 60 * 60 * 1000,
   },
   {
     id: "dict-mock-2",
@@ -3104,17 +3108,21 @@ const dictationLog = [
     words: 9,
     ms: 3_600,
     at: Date.now() - 26 * 24 * 60 * 60 * 1000,
+    seenAt: Date.now() - 26 * 24 * 60 * 60 * 1000,
   },
 ]
 
+/** The log in the order a host reads it: newest heard first, an id breaking a shared millisecond. */
+const dictationOrder = (one, two) => two.seenAt - one.seenAt || (one.id < two.id ? 1 : -1)
+
 function dictationStats() {
-  const rows = [...dictationLog].sort((one, two) => two.at - one.at)
+  const rows = [...dictationLog].sort(dictationOrder)
   return {
     words: rows.reduce((total, row) => total + row.words, 0),
     ms: rows.reduce((total, row) => total + row.ms, 0),
     count: rows.length,
-    newest: rows[0]?.at ?? null,
-    oldest: rows.at(-1)?.at ?? null,
+    newest: rows[0]?.seenAt ?? null,
+    oldest: rows.at(-1)?.seenAt ?? null,
     clearedAt: DICTATION_CLEARED_AT.at,
   }
 }
@@ -4984,10 +4992,16 @@ http
     if (PLUGIN && !profile && DICTATIONS && url.pathname === "/api/plugins/memento/dictations") {
       if (req.method === "GET") {
         const before = Number(url.searchParams.get("before") ?? 0)
+        const beforeId = url.searchParams.get("before_id") ?? ""
         const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit") ?? 20)))
         const dictations = [...dictationLog]
-          .filter((row) => !before || row.at < before)
-          .sort((one, two) => two.at - one.at)
+          .sort(dictationOrder)
+          .filter(
+            (row) =>
+              !before ||
+              row.seenAt < before ||
+              (row.seenAt === before && row.id < beforeId),
+          )
           .slice(0, limit)
         return json(res, 200, { object: "memento.dictations", dictations })
       }
@@ -5009,15 +5023,17 @@ http
           return json(res, 400, { error: { message: "A dictation needs its words." } })
         if (text.length > 20000)
           return json(res, 413, { error: { message: "That dictation is too long to keep." } })
-        // Nothing sits below the stamp a clear left, so a take that lands after one is stored at it.
-        const asked = Number(body.at) || Date.now()
-        const at = asked <= DICTATION_CLEARED_AT.at ? DICTATION_CLEARED_AT.at + 1 : asked
+        // Two clocks: this host's, stamped as the take lands and what the log is ordered by, and the
+        // device's, kept unless it claims a time after the host heard it.
+        const seenAt = Date.now()
+        const asked = Number(body.at) || seenAt
         const row = {
           id,
           text,
           words: Number(body.words) || text.trim().split(/\s+/).length,
           ms: Number(body.ms) || 0,
-          at,
+          at: Math.min(asked, seenAt),
+          seenAt,
         }
         const held = dictationLog.find((one) => one.id === id)
         if (held) return json(res, 201, { object: "memento.dictation", dictation: held })

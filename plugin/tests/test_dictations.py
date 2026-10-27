@@ -30,8 +30,10 @@ class DictationsTest(unittest.TestCase):
     def test_a_write_is_the_row_that_is_read_back(self) -> None:
         found = self.add(text="two words", words=2, ms=1500)
         self.assertEqual(
-            found, {"id": "d1", "text": "two words", "words": 2, "ms": 1500, "at": 1}
+            {key: found[key] for key in ("id", "text", "words", "ms", "at")},
+            {"id": "d1", "text": "two words", "words": 2, "ms": 1500, "at": 1},
         )
+        self.assertGreater(found["seenAt"], 0, "the host stamps when it heard the take")
         self.assertEqual(dictations.rows(self.path, "bot-a"), [found])
 
     def test_the_words_are_counted_when_the_body_names_none(self) -> None:
@@ -52,10 +54,14 @@ class DictationsTest(unittest.TestCase):
         with self.assertRaises(dictations.DictationLogError):
             dictations.record(self.path, "bot-a", {"id": "d1", "text": "w", "ms": -1})
 
-    def test_a_take_that_lands_after_a_clear_is_stored_above_its_stamp(self) -> None:
+    def test_a_take_that_lands_after_a_clear_is_kept_and_heard_after_it(self) -> None:
         stamped = dictations.clear(self.path, "bot-a")["clearedAt"]
         found = dictations.record(self.path, "bot-a", {"id": "late", "text": "after", "at": 5})
-        self.assertGreater(found["at"], stamped)
+        # Its words keep the time they were said; the log orders it by when the host heard it, which
+        # is after the clear, so nothing has to be stamped over the device's own clock for the order
+        # to be right.
+        self.assertEqual(found["at"], 5)
+        self.assertGreater(found["seenAt"], stamped)
         self.assertEqual([row["id"] for row in dictations.rows(self.path, "bot-a")], ["late"])
 
     def test_one_id_belongs_to_each_profile_on_its_own(self) -> None:
@@ -64,17 +70,25 @@ class DictationsTest(unittest.TestCase):
         self.assertEqual([row["text"] for row in dictations.rows(self.path, "bot-a")], ["mine"])
         self.assertEqual([row["text"] for row in dictations.rows(self.path, "bot-b")], ["yours"])
 
-    def test_a_page_is_newest_first(self) -> None:
+    def test_a_page_is_newest_first_by_arrival(self) -> None:
         for at in (10, 30, 20):
             self.add(at=at)
-        self.assertEqual([row["at"] for row in dictations.rows(self.path, "bot-a")], [30, 20, 10])
+        # Newest is the last one the host heard, not the latest time a device claimed for one: those
+        # stamps come from clocks this machine cannot check.
+        self.assertEqual([row["at"] for row in dictations.rows(self.path, "bot-a")], [20, 30, 10])
 
-    def test_a_page_is_bounded_and_before_walks_back(self) -> None:
+    def test_a_page_is_bounded_and_the_cursor_walks_back(self) -> None:
         for at in range(1, 8):
             self.add(at=at)
         first = dictations.rows(self.path, "bot-a", limit=3)
         self.assertEqual([row["at"] for row in first], [7, 6, 5])
-        older = dictations.rows(self.path, "bot-a", before=first[-1]["at"], limit=3)
+        older = dictations.rows(
+            self.path,
+            "bot-a",
+            before=first[-1]["seenAt"],
+            before_id=first[-1]["id"],
+            limit=3,
+        )
         self.assertEqual([row["at"] for row in older], [4, 3, 2])
 
     def test_one_profile_never_reads_another(self) -> None:
@@ -103,14 +117,71 @@ class DictationsTest(unittest.TestCase):
         self.assertEqual(dictations.stats(self.path, "bot-b")["clearedAt"], 0)
 
     def test_stats_are_the_profiles_totals_and_its_fingerprint(self) -> None:
-        self.add(profile="bot-a", text="one two", words=2, ms=1000, at=10)
-        self.add(profile="bot-a", text="three", words=1, ms=500, at=40)
+        first = self.add(profile="bot-a", text="one two", words=2, ms=1000, at=10)
+        second = self.add(profile="bot-a", text="three", words=1, ms=500, at=40)
         self.add(profile="bot-b", text="four", words=1, ms=9000, at=20)
         found = dictations.stats(self.path, "bot-a")
         self.assertEqual(
             found,
-            {"words": 3, "ms": 1500, "count": 2, "newest": 40, "oldest": 10, "clearedAt": 0},
+            {
+                "words": 3,
+                "ms": 1500,
+                "count": 2,
+                "newest": second["seenAt"],
+                "oldest": first["seenAt"],
+                "clearedAt": 0,
+            },
         )
+
+    def test_a_clock_in_the_future_is_clamped_to_when_the_take_arrived(self) -> None:
+        found = self.add(at=dictations._now() + 86_400_000)
+        self.assertLessEqual(found["at"], found["seenAt"], "nothing claims a time ahead of this host")
+
+    def test_takes_that_share_a_millisecond_are_all_reachable(self) -> None:
+        # What an unset clock writes, or a backfilled store: sixty takes at one instant. The cursor's
+        # id half is what keeps the page from skipping the rest of them, which a bound on the time
+        # alone did.
+        conn = connect(self.path)
+        for n in range(60):
+            conn.execute(
+                "INSERT INTO dictations (id, profile, text, words, ms, at, seen_at) "
+                "VALUES (?, 'bot-a', 'a take', 1, 0, 1000, 5000)",
+                (f"t{n:02d}",),
+            )
+        conn.commit()
+        conn.close()
+
+        seen, cursor = [], None
+        for _ in range(5):
+            page = dictations.rows(
+                self.path,
+                "bot-a",
+                before=cursor[0] if cursor else None,
+                before_id=cursor[1] if cursor else None,
+                limit=50,
+            )
+            seen.extend(page)
+            if len(page) < 50:
+                break
+            cursor = (page[-1]["seenAt"], page[-1]["id"])
+
+        self.assertEqual(len(seen), 60)
+        self.assertEqual(len({row["id"] for row in seen}), 60)
+
+    def test_a_store_without_the_hosts_clock_backfills_it_from_the_device_time(self) -> None:
+        conn = connect(self.path)
+        conn.execute("DROP INDEX dictation_order")
+        conn.execute("ALTER TABLE dictations DROP COLUMN seen_at")
+        conn.execute("PRAGMA user_version = 45")
+        conn.execute(
+            "INSERT INTO dictations (id, profile, text, words, ms, at) "
+            "VALUES ('old', 'bot-a', 'kept', 1, 10, 7)"
+        )
+        conn.commit()
+        conn.close()
+
+        rows = dictations.rows(self.path, "bot-a")
+        self.assertEqual([(row["id"], row["seenAt"]) for row in rows], [("old", 7)])
 
     def test_an_absent_store_reads_empty_rather_than_writing_one(self) -> None:
         absent = self.home / "nothing.db"
@@ -129,10 +200,6 @@ class DictationsTest(unittest.TestCase):
         conn.close()
         self.add(at=5)
         self.assertEqual(dictations.stats(self.path, "bot-a")["count"], 1)
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class OldShapeStoreTest(unittest.TestCase):
@@ -199,6 +266,10 @@ class OldShapeStoreTest(unittest.TestCase):
             version = conn.execute("PRAGMA user_version").fetchone()[0]
         finally:
             conn.close()
-        self.assertIn("dictation_time", tables)
+        self.assertIn("dictation_order", tables)
         self.assertNotIn("dictations_v44", tables)
-        self.assertEqual(version, 45)
+        self.assertEqual(version, 46)
+
+
+if __name__ == "__main__":
+    unittest.main()

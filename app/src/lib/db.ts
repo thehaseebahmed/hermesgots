@@ -594,8 +594,19 @@ export interface DictationRecord {
   words: number
   /** How long the words took to say, with the pauses left out. */
   ms: number
-  /** When the words landed. */
+  /** When the words landed, on this device's clock: what the sheet draws. */
   at: number
+  /**
+   * When its bot's host heard the take, on the host's clock — the fingerprint's numbers and a clear's
+   * stamp are read on it, so a wrong device clock cannot misplace a row (ADR 0060). Missing until the
+   * host has answered for the row.
+   */
+  seenAt?: number
+  /**
+   * The instant the row is ordered and grouped by: `seenAt` once the host has answered, its own `at`
+   * until then. Stored rather than computed because it is what the History tab's index reads.
+   */
+  loggedAt: number
   /** Whether its bot's host holds a copy; a take written while a host was away is re-posted. */
   posted?: boolean
   /**
@@ -949,6 +960,19 @@ db.version(25).stores({
   dictationLog: "id, at, connection",
   dictationStats: "id",
 })
+// v26: the log is ordered, paged and grouped by when its host heard a take rather than by when a
+// device's clock says it was said, so a clock that is wrong cannot misplace a row or hide one behind
+// a page (ADR 0060). A row written before this keeps the place it had: its own `at` was the order.
+db.version(26)
+  .stores({ dictationLog: "id, at, connection, loggedAt" })
+  .upgrade((tx) =>
+    tx
+      .table<DictationRecord>("dictationLog")
+      .toCollection()
+      .modify((row) => {
+        row.loggedAt = row.at
+      }),
+  )
 
 db.on("populate", (tx) => seedProfile(tx))
 

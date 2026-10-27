@@ -25,6 +25,7 @@ import {
   HermesError,
   postDictation,
   type HermesConfig,
+  type DictationWrite,
   type HostDictation,
 } from "@/lib/hermes"
 import { quietly } from "@/lib/report"
@@ -43,10 +44,19 @@ type HostAnswer = Awaited<ReturnType<typeof getDictationStats>>
 const missing = cooldown()
 
 function entryOf(connection: string, text: string, ms: number, at = Date.now()): DictationRecord {
-  return { id: randomId(), connection, text, words: countWords(text), ms, at, posted: false }
+  return {
+    id: randomId(),
+    connection,
+    text,
+    words: countWords(text),
+    ms,
+    at,
+    loggedAt: at,
+    posted: false,
+  }
 }
 
-function hostOf(row: DictationRecord): HostDictation {
+function hostOf(row: DictationRecord): DictationWrite {
   return { id: row.id, text: row.text, words: row.words, ms: row.ms, at: row.at }
 }
 
@@ -58,8 +68,9 @@ const REFUSED = new Set([400, 413])
  * the host took it, so a caller knows whether the host's own totals moved.
  */
 async function post(config: HermesConfig, row: DictationRecord): Promise<boolean> {
+  let answer: HostDictation | null
   try {
-    await postDictation(config, hostOf(row), AbortSignal.timeout(WRITE_TIMEOUT_MS))
+    answer = await postDictation(config, hostOf(row), AbortSignal.timeout(WRITE_TIMEOUT_MS))
   } catch (error) {
     // The host read the words and said no. Asking again on every open asks the same question of the
     // same bytes, so the row is marked and left to this device alone.
@@ -69,7 +80,17 @@ async function post(config: HermesConfig, row: DictationRecord): Promise<boolean
     }
     throw error
   }
-  await db.dictationLog.update(row.id, { posted: true })
+  // A host that takes the words and answers with nothing has not told us when it heard them; the row
+  // stays unposted so the next open asks again, which the host's own idempotence makes harmless.
+  if (!answer) return false
+  // The host's answer is the row as it stored it: its clock heard the take, and its `at` is the one it
+  // kept — a device clock in the future is clamped to that, so the sheet shows a time that can exist.
+  await db.dictationLog.update(row.id, {
+    posted: true,
+    at: answer.at,
+    seenAt: answer.seenAt,
+    loggedAt: answer.seenAt,
+  })
   return true
 }
 
@@ -133,17 +154,24 @@ export async function writeDictation(config: HermesConfig, text: string, ms: num
 /** Every page a host holds, newest first, walked back until one comes short. */
 async function readAll(config: HermesConfig) {
   const rows: HostDictation[] = []
-  let before: number | undefined
+  let before: number | null = null
+  let beforeId: string | null = null
   for (;;) {
     const page = await getDictations(
       config,
-      before ?? null,
-      PAGE,
+      before,
+      beforeId,
+       PAGE,
       AbortSignal.timeout(READ_TIMEOUT_MS),
     )
     rows.push(...page)
     if (page.length < PAGE) return rows
-    before = page[page.length - 1].at
+    const last = page[page.length - 1]
+    // A host that ignores the cursor — one too old to have it — hands back the same page for ever, so
+    // a walk that is making no progress stops rather than reading the log again and again.
+    if (last.id === beforeId) return rows
+    before = last.seenAt
+    beforeId = last.id
   }
 }
 
@@ -237,8 +265,19 @@ export async function reconcileDictations(server: Server) {
   const appended =
     synced.length > 0 && gap > 0 && gap <= PAGE && host.oldest === fingerprintOf(synced).oldest
   if (appended) {
-    const page = await getDictations(config, null, PAGE, AbortSignal.timeout(READ_TIMEOUT_MS))
-    const fresh = toUpsert(mirror, page).map((row) => ({ ...row, connection: key, posted: true }))
+    const page = await getDictations(
+      config,
+      null,
+      null,
+      PAGE,
+      AbortSignal.timeout(READ_TIMEOUT_MS),
+    )
+    const fresh = toUpsert(mirror, page).map((row) => ({
+      ...row,
+      connection: key,
+      loggedAt: row.seenAt,
+      posted: true,
+    }))
     if (fresh.length) await db.dictationLog.bulkPut(fresh)
   } else {
     const rows = await readAll(config)
@@ -249,7 +288,12 @@ export async function reconcileDictations(server: Server) {
     const lost =
       rows.length === host.count ? synced.filter((row) => !have.has(row.id)).map((row) => row.id) : []
     if (lost.length) await db.dictationLog.bulkDelete(lost)
-    const fresh = toUpsert(mirror, rows).map((row) => ({ ...row, connection: key, posted: true }))
+    const fresh = toUpsert(mirror, rows).map((row) => ({
+      ...row,
+      connection: key,
+      loggedAt: row.seenAt,
+      posted: true,
+    }))
     if (fresh.length) await db.dictationLog.bulkPut(fresh)
   }
   await cacheStats(key, host)
@@ -308,7 +352,10 @@ export async function clearDictationLog(profiles: Profile[]) {
 
 /** The mirror's newest `shown` dictations, every bot's, as the History tab draws them. */
 export function useDictationRows(shown: number) {
-  return useLiveQuery(() => db.dictationLog.orderBy("at").reverse().limit(shown).toArray(), [shown])
+  return useLiveQuery(
+    () => db.dictationLog.orderBy("loggedAt").reverse().limit(shown).toArray(),
+    [shown],
+  )
 }
 
 /** The bots' last reported totals, added up: the stats card and the Settings menu row. */

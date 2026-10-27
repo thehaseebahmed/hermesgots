@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # index and a v41 store reaches 43 in one pass.
 # 44 adds the dictation log and the clock a clear stamps (ADR 0060): two new tables, which is why
 # nothing in the block below has to be PRAGMA-guarded to reach it.
-SCHEMA_VERSION = 45
+SCHEMA_VERSION = 46
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -706,4 +706,20 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS dictation_time ON dictations (profile, at)"
             )
+        # v46: the log's clock is the host's (dictations.py, ADR 0060). `at` is when the words were
+        # said, which a device's clock decides and a wrong one misplaces; the order, the pages and the
+        # fingerprint read `seen_at`, stamped when the row landed. Rows written before this are
+        # backfilled with their own `at`, which is the order they were already read in, so nothing
+        # moves for a store that has been in use.
+        dictation_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(dictations)")
+        }
+        if "seen_at" not in dictation_columns:
+            conn.execute("ALTER TABLE dictations ADD COLUMN seen_at INTEGER NOT NULL DEFAULT 0")
+            conn.execute("UPDATE dictations SET seen_at = at")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS dictation_order ON dictations (profile, seen_at)"
+        )
+        # The page no longer reads `at`, so its index would only cost every write.
+        conn.execute("DROP INDEX IF EXISTS dictation_time")
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

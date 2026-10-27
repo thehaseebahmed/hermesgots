@@ -3806,13 +3806,18 @@ function dictationRoot(config: HermesConfig, entryId?: string) {
   return entryId ? `${root}/${encodeURIComponent(entryId)}` : root
 }
 
-/** One dictation as a host holds it. */
+/**
+ * One dictation as a host holds it. `at` is when the words were said, on the device's clock; `seenAt`
+ * is when that host heard them, on its own — the log's order and its pages read `seenAt`, so a device
+ * whose clock is wrong cannot misplace a take or hide one behind a page (ADR 0060).
+ */
 export interface HostDictation {
   id: string
   text: string
   words: number
   ms: number
   at: number
+  seenAt: number
 }
 
 /** A host's totals, and the fingerprint a device's mirror is reconciled against. */
@@ -3826,12 +3831,16 @@ function finite(raw: unknown): number | null {
 function dictationRow(value: unknown): HostDictation | null {
   const row = value as Partial<HostDictation> | null
   if (!row || typeof row.id !== "string" || !row.id || typeof row.text !== "string") return null
+  const at = finite(row.at) ?? 0
   return {
     id: row.id,
     text: row.text,
     words: finite(row.words) ?? 0,
     ms: finite(row.ms) ?? 0,
-    at: finite(row.at) ?? 0,
+    at,
+    // A host too old to stamp its own clock ordered its log by `at`, so that is the clock its pages
+    // and totals answer on: reading it as `seenAt` keeps one fingerprint working across both.
+    seenAt: finite(row.seenAt) ?? at,
   }
 }
 
@@ -3847,15 +3856,23 @@ function dictationTotals(value: unknown): HostDictationStats {
   }
 }
 
-/** One page of a bot's dictations, newest first, older than `before` where it is given. */
+/**
+ * One page of a bot's dictations, newest first. `before` and `beforeId` are the cursor — the last row
+ * the caller already has — and both are given because two takes can share a millisecond, which a
+ * bound on the time alone would skip.
+ */
 export async function getDictations(
   config: HermesConfig,
   before: number | null,
+  beforeId: string | null,
   limit: number,
   signal?: AbortSignal,
 ): Promise<HostDictation[]> {
   const query = new URLSearchParams({ limit: String(limit) })
-  if (before != null) query.set("before", String(before))
+  if (before != null && beforeId) {
+    query.set("before", String(before))
+    query.set("before_id", beforeId)
+  }
   const response = await request(`${dictationRoot(config)}?${query}`, {
     headers: headers(config),
     signal: signal ?? AbortSignal.timeout(READ_TIMEOUT_MS),
@@ -3877,10 +3894,13 @@ export async function getDictationStats(
   return dictationTotals((await response.json())?.stats)
 }
 
+/** What a device writes: the row as it knows it, before a host has stamped when it heard it. */
+export type DictationWrite = Omit<HostDictation, "seenAt">
+
 /** Writes one dictation; the same id written twice leaves the first where it is. */
 export async function postDictation(
   config: HermesConfig,
-  entry: HostDictation,
+  entry: DictationWrite,
   signal?: AbortSignal,
 ): Promise<HostDictation | null> {
   const response = await request(dictationRoot(config), {

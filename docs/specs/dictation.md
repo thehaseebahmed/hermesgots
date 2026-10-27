@@ -61,16 +61,23 @@ on each open, and the last stats answer per bot is cached so the menu row draws 
   its own minutes; a take that lands in parts writes a row per part, each with its own span. A take
   cancelled or failed before any words landed writes nothing.
 - **The plugin gains five routes behind a `dictations` feature**: `POST dictations`,
-  `DELETE dictations/<id>`, `DELETE dictations`, `GET dictations?before&limit`, and
+  `DELETE dictations/<id>`, `DELETE dictations`, `GET dictations?before&before_id&limit`, and
   `GET dictations/stats` returning the totals plus count, newest, oldest and `clearedAt`. The paged
   read serves a mirror that has to be filled or repaired, never the draw path.
+- **Two clocks, and only one of them is trusted.** A take carries `at`, when the device says the words
+  were said, and the host stamps `seenAt` when it stored the row. The log is ordered, paged, counted
+  and cleared by `seenAt`; the screen draws `at`, which is the only record of when a take was actually
+  spoken. The page cursor is `(seenAt, id)`, because a time alone cannot carry a walk past two rows
+  that share one. `at` is clamped to `seenAt` on the way in, so no take claims a time after its host
+  heard it; nothing else on a device's clock is believed.
 - **The stats route does two jobs**: it is the numbers tab 3 draws and the fingerprint the mirror is
   reconciled against. The app sums each bot's last answer and caches it on the device, so the Settings
   menu's subtitle reads "1,204 words" — or a generic line until a host has answered once. The totals
   move only when a host answers: a take counts once its own bot has it.
 - **Reconciliation is fingerprint first.** On opening the screen, once per bot and side by side, a
-  matching fingerprint does nothing; `clearedAt` drops every mirror row older than it without a
-  row-by-row compare; an append that fits one page reads that page; any other divergence walks the
+  matching fingerprint does nothing; `clearedAt` drops every mirror row its host held and heard before
+  it, without a row-by-row compare (a row no host has confirmed stays: a clear takes away the log a host
+  held, not words it never received); an append that fits one page reads that page; any other divergence walks the
   log back a page at a time and writes what the host has and drops what it no longer does. A row the
   mirror holds and the host does not is only dropped when the host has been told about it: a take
   whose post never answered is re-posted before the host is asked, so an offline take survives. That
@@ -81,8 +88,9 @@ on each open, and the last stats answer per bot is cached so the menu row draws 
 - **A take its host refuses is kept, not retried.** A 400 or a 413 on the words is the host reading
   them and saying no, so the row is marked on the device and never posted again; the words stay in
   the mirror, so History still shows what was said.
-- **Nothing sits below a clear's stamp on the host.** A row that arrives with an `at` at or below the
-  stamp is stored at the stamp, so a write that raced a clear cannot bring cleared history back.
+- **A take keeps the time it was said.** Nothing is written over a device's own stamp, so the sheet
+  shows when the words were spoken; a take that arrives after a clear is ordered after that clear by
+  the host's own clock, which is what the comparison is on.
 - **Clearing is one action over every bot**, on the screen's header, behind a confirmation, each host
   stamping its own `clearedAt`. Only the bots whose host confirmed are cleared on the device: a host
   that refused keeps what the mirror holds, so a half-done clear cannot undo itself on the next open.
@@ -111,16 +119,20 @@ on each open, and the last stats answer per bot is cached so the menu row draws 
   in that order; the clear action behind its confirmation; the Bots tab's rows saying what each host
   hears on, the host's reason where it cannot, `Checking…` while the read is owed, a word where the
   read failed, and the model a refresh reports landing on the bot; a take the host never received
-  surviving a reconcile and being posted again; Stats showing the summed words and rate from the cached
-  answers, each row over its own line.
+  surviving a reconcile and being posted again; a take whose device clock is a month behind drawn in
+  the month it was heard and above one it was said after, its sheet still carrying the time it was
+  said; Stats showing the summed words and rate from the cached answers, each row over its own line.
 - Component (`app/scripts/test-dictation-mirror.tsx`): the reconciliation over a real Dexie database
   and a scripted host — a log the previous build left settled in one write with no POST, a take a host
   lacked handed over once and kept, a take a host refused marked and never asked about again, a read
-  that contradicts the host's count taking nothing away, and a take whose host never answered
-  surviving the open and being handed over by the next one.
-- Plugin (`plugin/tests/test_dictations.py`): a write, a paged read, a delete, a clear that stamps
-  `clearedAt`, stats that answer only their own profile, an id that belongs to each profile on its own,
-  a take that lands after a clear stored at its stamp, a body that names no text being refused, and a
+  that contradicts the host's count taking nothing away, a take whose host never answered surviving the
+  open and being handed over by the next one, a take written on a clock that says 1970 placed where its
+  host heard it, and sixty takes at one instant all read through the walk.
+- Plugin (`plugin/tests/test_dictations.py`): a write, a paged read whose cursor carries the id, a
+  delete, a clear that stamps `clearedAt`, stats that answer only their own profile, an id that belongs
+  to each profile on its own, a take that lands after a clear kept and ordered after it, sixty takes at
+  one instant all reachable, a clock in the future clamped to when the take arrived, a store without
+  the host's clock backfilled from the device's, a body that names no text being refused, and a
   store in the old shape whose rows and index survive the rebuild with an id two profiles can share.
 - No browser flow: every claim here is reachable from a component with a faked HTTP boundary.
 

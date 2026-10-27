@@ -9,6 +9,7 @@ import {
   fingerprintOf,
   monthKey,
   monthLabel,
+  orderOf,
   pooledRate,
   spokenOf,
   sumTotals,
@@ -43,9 +44,9 @@ test("a dictation's month is the key two of them are grouped under", () => {
 
 test("dictations group under their month, in the order they arrived", () => {
   const groups = byMonth([
-    { id: "a", at: LOCAL(2026, 10, 20) },
-    { id: "b", at: LOCAL(2026, 10, 3) },
-    { id: "c", at: LOCAL(2026, 9, 28) },
+    { id: "a", at: LOCAL(2026, 10, 20), loggedAt: LOCAL(2026, 10, 20) },
+    { id: "b", at: LOCAL(2026, 10, 3), loggedAt: LOCAL(2026, 10, 3) },
+    { id: "c", at: LOCAL(2026, 9, 28), loggedAt: LOCAL(2026, 9, 28) },
   ])
   assert.deepEqual(
     groups.map((group) => [group.key, group.rows.map((row) => row.id)]),
@@ -55,6 +56,14 @@ test("dictations group under their month, in the order they arrived", () => {
     ],
   )
   assert.equal(groups[0].label, monthLabel(LOCAL(2026, 10, 20)))
+})
+
+test("a take is drawn under the month it was logged, not the one its own clock claims", () => {
+  // A device whose clock is a month behind said this one in September and its host heard it in
+  // October: it is drawn in October, the month it sits in, so a heading never contradicts the order.
+  const [group] = byMonth([{ id: "a", at: LOCAL(2026, 9, 28), loggedAt: LOCAL(2026, 10, 1) }])
+  assert.equal(group.key, "2026-10")
+  assert.equal(group.label, monthLabel(LOCAL(2026, 10, 1)))
 })
 
 test("a fingerprint is a count and its two edges", () => {
@@ -78,9 +87,34 @@ test("a mirror agrees only when every number agrees", () => {
 })
 
 test("a clear is one clock compare, not a diff", () => {
-  const rows = [{ id: "a", at: 10 }, { id: "b", at: 40 }, { id: "c", at: 41 }]
+  const rows = [
+    { id: "a", at: 10, seenAt: 10 },
+    { id: "b", at: 40, seenAt: 40 },
+    { id: "c", at: 41, seenAt: 41 },
+  ]
   assert.deepEqual(clearedAway(rows, 40).map((row) => row.id), ["a"])
   assert.deepEqual(clearedAway(rows, 0), [], "never cleared drops nothing")
+})
+
+test("a clear takes away what a host held, never a take it never heard", () => {
+  // Its words exist nowhere else: a pending take's own clock cannot decide that a clear covered it.
+  const rows = [
+    { id: "held", at: 10, seenAt: 10 },
+    { id: "pending", at: 10 },
+  ]
+  assert.deepEqual(clearedAway(rows, 40).map((row) => row.id), ["held"])
+})
+
+test("a fingerprint reads the host's clock where it has one", () => {
+  // Both rows say they were said in the seventies; the host heard them now, and its numbers are the
+  // ones the comparison is on.
+  const rows = [
+    { id: "a", at: 0, seenAt: 5000 },
+    { id: "b", at: 0, seenAt: 4000 },
+  ]
+  assert.deepEqual(fingerprintOf(rows), { count: 2, newest: 5000, oldest: 4000, clearedAt: 0 })
+  assert.equal(orderOf(rows[0]), 5000)
+  assert.equal(orderOf({ at: 7 }), 7, "a row with no answer yet is placed by its own stamp")
 })
 
 test("a page upserts only what the mirror is missing or holds older", () => {

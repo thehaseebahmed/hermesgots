@@ -29,6 +29,17 @@ paged read newest first, and the stats — the totals plus a fingerprint. The pa
 device that has to fill or repair a mirror, never for drawing the screen. The stats read is both the
 tab's numbers and the reconciliation's check, so one small read per bot serves both.
 
+A take is stamped twice, because two clocks are involved and only one of them can be trusted. The
+device says when the words were said — `at` — and that is what the screen draws, there being no other
+record of it. The host stamps when it stored the row — `seenAt` — and that is what the log is ordered,
+paged, counted and cleared by. A device's clock is exactly the thing that goes wrong: a phone just set
+up, or one whose owner has travelled, can be hours or a year away from the host it posts to, and a log
+ordered by it would draw a take from this morning below one from last year. Ordering by the host's
+clock also gives the page walk a cursor it can trust, `(seenAt, id)`: a time alone cannot carry a walk
+past two rows that share it, and a coarse clock — or a store whose rows were backfilled from one — can
+make rows share it, so the id is part of the key. A take cannot claim a time after its host heard it,
+so `at` is clamped to `seenAt` on the way in; nothing else on a device's clock is trusted.
+
 A mirror is reconciled when the Dictation screen opens, once per bot, side by side, never in front of
 the first paint. A row owed a post is handed over before the fingerprint is compared, and a device
 upgraded from a build that kept no such mark settles its whole log in one write: that build posted as
@@ -36,8 +47,10 @@ it wrote, so a mirror which already says what its host says owes it nothing, and
 from one read instead of a POST apiece. A backlog is handed over a few at a time rather than all at
 once, and a host that moved its totals with the takes it just took is asked again rather than have
 its pre-post answer cached. The check is a fingerprint, not a diff: count, newest, oldest, and a
-`clearedAt` stamp. A device whose mirror agrees does nothing at all. A clear is settled without a page: every
-mirror row older than `clearedAt` goes, and nothing is compared row by row. What is left is a
+`clearedAt` stamp. A device whose mirror agrees does nothing at all. A clear is settled without a page:
+every mirror row its host held, and heard before `clearedAt`, goes, and nothing is compared row by row.
+A row its host never confirmed stays: those words exist nowhere else, and a clear takes away the log a
+host held rather than words it never received. What is left is a
 divergence, and its shape decides its cost: an append — a count the host grew while both edges held
 still, by less than a page — is the newest page, fifty entries, upserted and nothing dropped; anything
 else, including a fresh device's empty mirror, a gap wider than one page and an entry deleted on
@@ -61,9 +74,11 @@ much as a paragraph.
 Clearing lives on the screen's header, not at the end of a list that lazy loading never reaches, and
 it is a clear of every bot's copy at once: each host stamps its own `clearedAt`, and the mirror loses
 the rows of the bots that confirmed — a host that refused keeps what the device holds, so a half-done
-clear cannot reverse itself on the next open. A clear stamps the host's own clock while an entry
-carries the device's, so an entry arriving from before a clear is stored at the stamp rather than
-below it: nothing a user cleared can be resurrected by a write that was in flight.
+clear cannot reverse itself on the next open. Both stamps are the host's clock, so the comparison is
+like with like: a row is older than a clear only if that host heard it earlier. Nothing is written over
+a device's own time to make that hold, so a take keeps the moment it was said; what a clock that is
+wrong now costs is a clamped `at` where it claimed the future, and, for the seconds or hours before a
+host has answered for a row, the place it is drawn in.
 
 Dictation is the app's name for the record, and the section, the glossary and the code say it; the
 act stays Speech-to-text, and so does each bot's own settings page.
@@ -108,6 +123,12 @@ act stays Speech-to-text, and so does each bot's own settings page.
 - The plugin's store gains a `dictations` table and a per-profile `dictation_state` for `clearedAt`
   in schema v44, the plugin's version rises in both files, and the app's Dexie moves to a new version
   for the mirror and the stats cache.
+- **The host's clock arrives as a column, on data that is already there.** Schema v46 adds `seen_at`
+  to `dictations` and backfills it from each row's `at`, which is the order those rows were read in
+  before, so nothing moves for a store that has been running. From then on the column is stamped on
+  write, and the old index on `at` gives way to one on `seen_at`. The app's Dexie moves to v26 for
+  `seenAt` and `loggedAt` — the instant a row is ordered and grouped by, which is the host's where it
+  has answered and the device's own until then — with the upgrade filling `loggedAt` from `at`.
 - **A host that ran a build of this branch before the log was keyed per profile is rebuilt, not
   ignored.** `CREATE TABLE IF NOT EXISTS` cannot change a primary key, so schema v45 detects the old
   table by the `device` column it carried, renames it, creates the keyed one and carries every row
@@ -118,11 +139,16 @@ act stays Speech-to-text, and so does each bot's own settings page.
   `app/scripts/test-dictation-mirror.tsx` drives the reconciliation over a real Dexie database and a
   scripted host: a log the previous build left settled in one write, a take a host lacked handed over
   once and kept, a take a host refused never asked about again, a read that contradicts the host's
-  count taking nothing away, and a take whose host never answered surviving the open, and
-  `app/scripts/test-dictation-screen.tsx` renders the three tabs over a seeded mirror.
+  count taking nothing away, a take whose host never answered surviving the open, a take written on a
+  clock that says 1970 placed where its host heard it, and sixty takes at one instant all read through
+  the walk; `app/scripts/test-dictation-screen.tsx` renders the three tabs over a seeded mirror,
+  including a take whose device clock is a month behind drawn in the month it was heard and above one
+  it was said after.
   `plugin/tests/test_dictations.py` drives `plugin.dictations` over a temp store: a write, a paged
-  read, a delete, a clear that stamps `clearedAt`, stats that answer only their own profile, an id
-  that belongs to each profile on its own, an entry arriving after a clear stored at its stamp, and a
-  store in the old shape whose rows survive the rebuild with an id two profiles can then share.
+  read whose cursor carries the id, a delete, a clear that stamps `clearedAt`, stats that answer only
+  their own profile, an id that belongs to each profile on its own, a take arriving after a clear kept
+  and ordered after it, sixty takes at one instant all reachable, a clock in the future clamped to the
+  moment the take arrived, a store without the host's clock backfilled from the device's, and a store
+  in the old shape whose rows survive the rebuild with an id two profiles can then share.
 - `GLOSSARY.md` gains **Dictation** and stops listing "dictation" as a word to avoid for
   **Speech-to-text**; `AGENTS.md`'s layout table gains the module rows.

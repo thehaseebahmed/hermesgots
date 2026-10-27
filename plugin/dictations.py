@@ -22,7 +22,7 @@ from .store import connect
 
 logger = logging.getLogger(__name__)
 
-FIELDS = ("id", "text", "words", "ms", "at")
+FIELDS = ("id", "text", "words", "ms", "at", "seen_at")
 # One take's words are a handful of sentences; this is a bound on a body, not a shape a person writes.
 MAX_TEXT = 20000
 MAX_LIMIT = 200
@@ -63,7 +63,10 @@ def _whole(value: Any, field: str, default: Optional[int] = None) -> int:
 
 
 def _row(row: sqlite3.Row) -> Dict[str, Any]:
-    return {field: row[field] for field in FIELDS}
+    """One row as the app reads it: `at` when the words were said, `seenAt` when the host heard them."""
+    entry = {field: row[field] for field in FIELDS if field != "seen_at"}
+    entry["seenAt"] = row["seen_at"]
+    return entry
 
 
 def count_words(text: str) -> int:
@@ -91,22 +94,27 @@ def record(path: Path, profile: Optional[str], body: Dict[str, Any]) -> Dict[str
     conn = _open(path)
     try:
         conn.execute("BEGIN IMMEDIATE")
-        cleared = conn.execute(
-            "SELECT cleared_at FROM dictation_state WHERE profile = ?",
-            (_profile(profile),),
-        ).fetchone()
-        # Nothing may sit below the stamp a clear left, or the entries a device's mirror drops as
-        # cleared would come back on the next walk. A take that lands after a clear arrives with a
-        # clock from before it, so it is stored at the stamp instead of being refused: a device whose
-        # clock runs behind would otherwise lose every take it posts.
-        if cleared is not None and row["at"] <= int(cleared["cleared_at"]):
-            row["at"] = int(cleared["cleared_at"]) + 1
+        # The log's clock is the host's: `seen_at` is when the row arrived, and it is what the order,
+        # the pages and the fingerprint read (ADR 0060). A take cannot have been said after the host
+        # heard it, so a device clock running into the future is clamped to the moment it landed
+        # rather than trusted — nothing in the log then claims a time ahead of this machine's.
+        seen_at = _now()
+        if row["at"] > seen_at:
+            row["at"] = seen_at
         # A retry of the same entry finds the row it wrote and changes nothing, which is what makes
         # the app's write safe to fire again after a dropped connection.
         conn.execute(
-            "INSERT OR IGNORE INTO dictations (id, profile, text, words, ms, at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (row["id"], _profile(profile), row["text"], row["words"], row["ms"], row["at"]),
+            "INSERT OR IGNORE INTO dictations (id, profile, text, words, ms, at, seen_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                row["id"],
+                _profile(profile),
+                row["text"],
+                row["words"],
+                row["ms"],
+                row["at"],
+                seen_at,
+            ),
         )
         found = conn.execute(
             f"SELECT {', '.join(FIELDS)} FROM dictations WHERE id = ? AND profile = ?",
@@ -124,22 +132,28 @@ def rows(
     path: Path,
     profile: Optional[str],
     before: Optional[int] = None,
+    before_id: Optional[str] = None,
     limit: int = DEFAULT_LIMIT,
 ) -> List[Dict[str, Any]]:
     """One profile's dictations, newest first, at most ``limit`` of them.
 
-    ``before`` bounds the page to entries older than itself, which is how a device walks back through
-    a history it has none of. A store that isn't there has no dictations rather than an error.
+    ``before`` with ``before_id`` is the cursor: the last row a caller already has. Both are needed
+    because two takes can share a millisecond — a host clock coarse enough to tie, or rows written by
+    an older build — and a bound on the time alone would skip every row tied with it, which is a take
+    a device could then never reach. A store that isn't there has no dictations rather than an error.
     """
     if not path.exists():
         return []
     page = max(1, min(int(limit), MAX_LIMIT))
     sql = f"SELECT {', '.join(FIELDS)} FROM dictations WHERE profile = ?"
     args: List[Any] = [_profile(profile)]
-    if before is not None:
-        sql += " AND at < ?"
+    if before is not None and before_id is not None:
+        sql += " AND (seen_at < ? OR (seen_at = ? AND id < ?))"
+        args.extend([int(before), int(before), before_id])
+    elif before is not None:
+        sql += " AND seen_at < ?"
         args.append(int(before))
-    sql += " ORDER BY at DESC, id DESC LIMIT ?"
+    sql += " ORDER BY seen_at DESC, id DESC LIMIT ?"
     args.append(page)
     conn = _open(path)
     try:
@@ -208,7 +222,7 @@ def stats(path: Path, profile: Optional[str]) -> Dict[str, Any]:
     try:
         found = conn.execute(
             "SELECT COUNT(*) AS count, COALESCE(SUM(words), 0) AS words, COALESCE(SUM(ms), 0) AS ms, "
-            "MAX(at) AS newest, MIN(at) AS oldest FROM dictations WHERE profile = ?",
+            "MAX(seen_at) AS newest, MIN(seen_at) AS oldest FROM dictations WHERE profile = ?",
             (_profile(profile),),
         ).fetchone()
     finally:

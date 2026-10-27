@@ -2579,7 +2579,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except ValueError:
             return _error(web, "before must be a whole number.", 400)
         rows = await asyncio.to_thread(
-            dictations.rows, store_path(), _request_profile(), bound, limit
+            dictations.rows,
+            store_path(),
+            _request_profile(),
+            bound,
+            request.query.get("before_id"),
+            limit,
         )
         return web.json_response({"object": "memento.dictations", "dictations": rows})
 

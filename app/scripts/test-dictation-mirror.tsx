@@ -9,23 +9,27 @@ import test from "node:test"
 
 import { connectionKey, serverConfig } from "@/lib/connection"
 import { db } from "@/lib/db"
-import { reconcileDictations } from "@/lib/dictations"
+import { PAGE, reconcileDictations } from "@/lib/dictations"
 import { botProfile, json } from "./component-kit.tsx"
 
 const AT = new Date(2026, 9, 20, 9).getTime()
+/** The host's own clock, well clear of the stamps these takes carry. */
+const HEARD = AT + 86_400_000
 const row = (id: string, at: number) => ({
   id,
   text: `a take called ${id}`,
   words: 4,
   ms: 2000,
   at,
+  seenAt: at,
 })
 
-type Held = { id: string; text: string; words: number; ms: number; at: number }
+type Held = { id: string; text: string; words: number; ms: number; at: number; seenAt: number }
 
 /** A host that answers what the test says, and records what it was asked. */
 function host(script: { holds?: Held[]; count?: number; refuse?: number; down?: boolean } = {}) {
   const held = [...(script.holds ?? [])]
+  let heard = HEARD
   const posts: Held[] = []
   const calls: string[] = []
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -34,26 +38,41 @@ function host(script: { holds?: Held[]; count?: number; refuse?: number; down?: 
     calls.push(`${method} ${url.pathname.split("/memento/")[1] ?? url.pathname}`)
     if (script.down) throw new TypeError("Failed to fetch")
     if (url.pathname.endsWith("/dictations/stats")) {
-      const ats = held.map((one) => one.at)
+      const heard = held.map((one) => one.seenAt)
       return json({
         stats: {
           words: held.length * 4,
           ms: held.length * 2000,
           count: script.count ?? held.length,
-          newest: ats.length ? Math.max(...ats) : null,
-          oldest: ats.length ? Math.min(...ats) : null,
+          newest: heard.length ? Math.max(...heard) : null,
+          oldest: heard.length ? Math.min(...heard) : null,
           clearedAt: 0,
         },
       })
     }
     if (method === "POST" && url.pathname.endsWith("/dictations")) {
-      const body = JSON.parse(String(init?.body)) as Held
+      const body = JSON.parse(String(init?.body)) as Omit<Held, "seenAt">
       if (script.refuse) return json({ error: { message: "That dictation is too long to keep." } }, script.refuse)
-      posts.push(body)
-      if (!held.some((one) => one.id === body.id)) held.unshift(body)
-      return json({ dictation: body }, 201)
+      posts.push({ ...body, seenAt: 0 })
+      const stored = { ...body, at: Math.min(body.at, heard), seenAt: heard++ }
+      if (!held.some((one) => one.id === stored.id)) held.unshift(stored)
+      return json({ dictation: stored }, 201)
     }
-    if (method === "GET" && url.pathname.endsWith("/dictations")) return json({ dictations: held })
+    if (method === "GET" && url.pathname.endsWith("/dictations")) {
+      const before = url.searchParams.get("before")
+      const beforeId = url.searchParams.get("before_id")
+      const older = held
+        .slice()
+        .sort((one, two) => two.seenAt - one.seenAt || (one.id < two.id ? 1 : -1))
+        .filter(
+          (one) =>
+            before === null ||
+            beforeId === null ||
+            one.seenAt < Number(before) ||
+            (one.seenAt === Number(before) && one.id < beforeId),
+        )
+      return json({ dictations: older.slice(0, Number(url.searchParams.get("limit") ?? 50)) })
+    }
     return json({ features: ["dictations"] })
   }) as typeof fetch
   return { held, posts, calls }
@@ -73,7 +92,9 @@ const mirror = () => db.dictationLog.toArray()
 test("a log the previous build left settles in one write, not a post per take", async () => {
   const { profile, key } = await fresh()
   const takes = [row("a", AT), row("b", AT + 1000), row("c", AT + 2000)]
-  for (const take of takes) await db.dictationLog.put({ ...take, connection: key })
+  for (const take of takes) {
+    await db.dictationLog.put({ ...take, connection: key, loggedAt: take.at })
+  }
   const server = host({ holds: takes })
 
   await reconcileDictations(profile)
@@ -90,7 +111,7 @@ test("a log the previous build left settles in one write, not a post per take", 
 
 test("a take its host lacked is handed over once, then kept", async () => {
   const { profile, key } = await fresh()
-  await db.dictationLog.put({ ...row("lonely", AT), connection: key })
+  await db.dictationLog.put({ ...row("lonely", AT), connection: key, loggedAt: AT })
   const server = host({ holds: [] })
 
   await reconcileDictations(profile)
@@ -107,7 +128,7 @@ test("a take its host lacked is handed over once, then kept", async () => {
 
 test("a take its host refuses is marked, and never asked about again", async () => {
   const { profile, key } = await fresh()
-  const tooLong = { ...row("long", AT), connection: key, posted: false }
+  const tooLong = { ...row("long", AT), connection: key, loggedAt: AT, posted: false }
   await db.dictationLog.put(tooLong)
   const server = host({ refuse: 413 })
 
@@ -126,7 +147,7 @@ test("a take its host refuses is marked, and never asked about again", async () 
 
 test("a read that contradicts the host's count takes nothing away", async () => {
   const { profile, key } = await fresh()
-  await db.dictationLog.put({ ...row("mine", AT), connection: key, posted: true })
+  await db.dictationLog.put({ ...row("mine", AT), connection: key, loggedAt: AT, posted: true })
   // The host says it holds two, and serves one: a host still catching up, or a proxy ahead of it.
   const server = host({ holds: [row("theirs", AT + 5000)], count: 2 })
 
@@ -139,7 +160,7 @@ test("a read that contradicts the host's count takes nothing away", async () => 
 
 test("a take whose host never answered survives, and the next open hands it over", async () => {
   const { profile, key } = await fresh()
-  await db.dictationLog.put({ ...row("offline", AT), connection: key, posted: false })
+  await db.dictationLog.put({ ...row("offline", AT), connection: key, loggedAt: AT, posted: false })
 
   const down = host({ down: true })
   await assert.rejects(() => reconcileDictations(profile))
@@ -150,4 +171,34 @@ test("a take whose host never answered survives, and the next open hands it over
   await reconcileDictations(profile)
   assert.equal(up.posts.length, 1, "the open that reached the host handed it over")
   assert.equal((await db.dictationLog.get("offline"))?.posted, true, "and marked it as held")
+})
+
+test("a take said on a clock that is wrong is placed where its host heard it", async () => {
+  const { profile, key } = await fresh()
+  await db.dictationLog.put({ ...row("unset", 0), connection: key, loggedAt: 0 })
+
+  const server = host({ holds: [] })
+  await reconcileDictations(profile)
+  assert.equal(server.posts.length, 1, "the host was told about it once")
+
+  const kept = await db.dictationLog.get("unset")
+  assert.equal(kept?.posted, true)
+  assert.equal(kept?.seenAt, HEARD, "the host's own clock, not the one the take was written on")
+  assert.equal(kept?.loggedAt, HEARD, "and that is the instant it is ordered by")
+  assert.equal(kept?.at, 0, "while its own stamp is kept as what the sheet draws")
+})
+
+test("takes that share a millisecond are all read, not one page of them", async () => {
+  const { profile } = await fresh()
+  // Sixty takes at one instant, which is what a backfilled store or a coarse clock holds, and one
+  // more than a page: the walk only reaches the rest if its cursor carries the id as well as the time.
+  const held = Array.from({ length: PAGE + 10 }, (_, index) => ({
+    ...row(`tie${index}`, AT),
+    seenAt: AT,
+  }))
+  host({ holds: held })
+
+  await reconcileDictations(profile)
+
+  assert.equal(await db.dictationLog.count(), PAGE + 10, "every take was read")
 })

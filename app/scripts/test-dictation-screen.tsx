@@ -18,7 +18,7 @@ import { Screen } from "@/components/settings-chrome"
 import { connectionKey } from "@/lib/connection"
 import { spelledCount, monthLabel } from "@/lib/dictation-log"
 import { db } from "@/lib/db"
-import { botProfile, click, find, findAll, json, mount, seedSettings, until } from "./component-kit.tsx"
+import { botProfile, click, find, findAll, json, mount, seedSettings, text, until } from "./component-kit.tsx"
 
 const at = (year: number, month: number, day: number, hour = 9) =>
   new Date(year, month - 1, day, hour).getTime()
@@ -37,7 +37,18 @@ class Watched {
 }
 ;(globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = Watched
 
-type Hosted = { id: string; text: string; words: number; ms: number; at: number }
+/** A row as a host answers for it; `seenAt` is when that host heard it, and defaults to `at`. */
+type Hosted = {
+  id: string
+  text: string
+  words: number
+  ms: number
+  at: number
+  seenAt?: number
+}
+
+/** When a host heard a row: its own stamp, or the take's where the fixture does not set one. */
+const seen = (row: Hosted) => row.seenAt ?? row.at
 
 /** One bot as its host answers for it: what it advertises, and what its log holds. */
 type Bot = {
@@ -61,13 +72,13 @@ type Bot = {
 
 /** What a host says about its own log: the totals and the fingerprint beside them. */
 function statsOf(bot: Bot) {
-  const rows = [...(bot.rows ?? [])].sort((one, two) => two.at - one.at)
+  const rows = [...(bot.rows ?? [])].sort((one, two) => seen(two) - seen(one))
   return {
     words: rows.reduce((total, row) => total + row.words, 0),
     ms: rows.reduce((total, row) => total + row.ms, 0),
     count: rows.length,
-    newest: rows[0]?.at ?? null,
-    oldest: rows.at(-1)?.at ?? null,
+    newest: rows[0] ? seen(rows[0]) : null,
+    oldest: rows.at(-1) ? seen(rows.at(-1)) : null,
     clearedAt: bot.clearedAt ?? 0,
   }
 }
@@ -118,14 +129,22 @@ function host(bots: Bot[]) {
       if (method === "POST") {
         const body = JSON.parse(String(init?.body ?? "{}")) as Hosted
         if (!body.id) return json({ error: { message: "A dictation needs an id." } }, 400)
-        bot.rows = [body, ...(bot.rows ?? []).filter((row) => row.id !== body.id)]
-        return json({ dictation: body }, 201)
+        const stored = { ...body, seenAt: seen(body) }
+        bot.rows = [stored, ...(bot.rows ?? []).filter((row) => row.id !== body.id)]
+        return json({ dictation: stored }, 201)
       }
       const before = url.searchParams.get("before")
+      const beforeId = url.searchParams.get("before_id")
       const limit = Number(url.searchParams.get("limit") ?? 50)
       const rows = [...(bot.rows ?? [])]
-        .filter((row) => before === null || row.at < Number(before))
-        .sort((one, two) => two.at - one.at)
+        .sort((one, two) => seen(two) - seen(one) || (one.id < two.id ? 1 : -1))
+        .filter(
+          (row) =>
+            before === null ||
+            beforeId === null ||
+            seen(row) < Number(before) ||
+            (seen(row) === Number(before) && row.id < beforeId),
+        )
         .slice(0, limit)
       return json({ dictations: rows })
     }
@@ -159,7 +178,13 @@ async function seed(bots: Bot[]) {
     })
     await db.profiles.put(profile)
     for (const row of bot.rows ?? [])
-      await db.dictationLog.put({ ...row, connection: connectionKey(profile), posted: true })
+      await db.dictationLog.put({
+        ...row,
+        seenAt: seen(row),
+        loggedAt: seen(row),
+        connection: connectionKey(profile),
+        posted: true,
+      })
   }
   const server = host(bots)
   globalThis.fetch = server.fetch
@@ -173,6 +198,10 @@ const screen = () => (
     </Screen>
   </MemoryRouter>
 )
+
+/** The sheet's heading is a bare time of day, formatted the way the screen formats it. */
+const clockOf = (value: number) =>
+  new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(value)
 
 const history = () => find("[data-dictation-history]")
 const botsTab = () => find("[data-dictation-bots]")
@@ -266,6 +295,42 @@ test("History keeps the dictations newest first, a card of them under each month
     assert.match(first, /Send the invoice to Nadia/, "the words themselves lead the row")
     assert.match(first, /Aria · 5 words/, "then the bot that heard them and how many they are")
     assert.doesNotMatch(first, /\d{1,2}:\d{2}/, "with the time left to the sheet")
+  })
+})
+
+test("a take is placed by when its host heard it, and shows when it was said", async () => {
+  // This device's clock was a month behind when the first take was spoken; its host heard it late in
+  // October, which is where the log puts it. The sheet still says when it was actually said.
+  const said = at(2026, 9, 28, 11)
+  await seed([
+    {
+      name: "a",
+      label: "Aria",
+      features: ["dictations"],
+      rows: [
+        { id: "slow-clock", text: "Said on a slow clock", words: 4, ms: 1_200, at: said, seenAt: at(2026, 10, 24, 9) },
+        { id: "oct", text: "Said and heard in October", words: 4, ms: 1_100, at: at(2026, 10, 2, 9) },
+      ],
+    },
+  ])
+  await mount(screen(), async () => {
+    await until(async () => rows().length === 2, "both dictations")
+    assert.deepEqual(
+      captions(),
+      [monthLabel(at(2026, 10, 24))],
+      "one card, under the month they were logged in",
+    )
+    assert.deepEqual(
+      rows().map((one) => one.getAttribute("data-dictation")),
+      ["slow-clock", "oct"],
+      "the take heard last is on top, though its own clock is a month behind",
+    )
+    await click(rows()[0] ?? null)
+    await until(async () => Boolean(sheet()), "its sheet")
+    assert.ok(
+      text().includes(clockOf(said)),
+      "the sheet carries when the words were said, not when the host heard them",
+    )
   })
 })
 
@@ -529,6 +594,7 @@ test("opening the screen fills a mirror that a host has more in", async () => {
     words: 4,
     ms: 1_800,
     at: at(2026, 10, 24),
+    loggedAt: at(2026, 10, 24),
     posted: true,
   })
   await mount(screen(), async () => {
@@ -551,6 +617,7 @@ test("a take its host never received is kept, and posted again at the next open"
     words: 6,
     ms: 2_000,
     at: at(2026, 10, 24),
+    loggedAt: at(2026, 10, 24),
     posted: false,
   })
   await mount(screen(), async () => {
@@ -575,7 +642,16 @@ test("a host without the routes leaves the mirror and its cached totals alone", 
   const profile = await db.profiles.get("a")
   assert.ok(profile)
   const key = connectionKey(profile)
-  await db.dictationLog.put({ id: "old", connection: key, text: "Kept from when it could", words: 5, ms: 2_000, at: at(2026, 10, 24), posted: true })
+  await db.dictationLog.put({
+    id: "old",
+    connection: key,
+    text: "Kept from when it could",
+    words: 5,
+    ms: 2_000,
+    at: at(2026, 10, 24),
+    loggedAt: at(2026, 10, 24),
+    posted: true,
+  })
   await db.dictationStats.put({ id: key, words: 5, ms: 2_000, count: 1, clearedAt: 0 })
   await mount(screen(), async () => {
     await until(async () => rows().length === 1, "the row it already held")

@@ -4,10 +4,16 @@
  * Import-free, so `scripts/test-dictation-log.mjs` runs it as a pure rule.
  */
 
-/** What the log needs of a row to count it, compare it and group it. */
+/**
+ * What the log needs of a row to count it, compare it and group it. `at` is when the words were said, on
+ * the device's clock; `seenAt` is when that bot's host heard them, on its own, and `loggedAt` is the
+ * instant the row is ordered and grouped by — the host's where it has answered, its own until then.
+ */
 export interface Logged {
   id: string
   at: number
+  loggedAt: number
+  seenAt?: number
   words: number
   ms: number
 }
@@ -42,14 +48,19 @@ export interface MonthGroup<T> {
   rows: T[]
 }
 
-/** Rows into month groups, in the order the rows arrive (the screen hands them newest first). */
-export function byMonth<T extends { at: number }>(rows: T[]): MonthGroup<T>[] {
+/**
+ * Rows into month groups, in the order the rows arrive (the screen hands them newest first, by the
+ * instant each was logged). Grouping reads the same instant the order does, so a take said late one
+ * night and heard just after midnight sits under the month it is drawn in rather than the one its
+ * clock claims.
+ */
+export function byMonth<T extends { loggedAt: number }>(rows: T[]): MonthGroup<T>[] {
   const groups: MonthGroup<T>[] = []
   for (const row of rows) {
-    const key = monthKey(row.at)
+    const key = monthKey(row.loggedAt)
     const last = groups.at(-1)
     if (last?.key === key) last.rows.push(row)
-    else groups.push({ key, label: monthLabel(row.at), rows: [row] })
+    else groups.push({ key, label: monthLabel(row.loggedAt), rows: [row] })
   }
   return groups
 }
@@ -62,13 +73,22 @@ export interface Fingerprint {
   clearedAt: number
 }
 
+/** The instant a row is placed by: the host's answer where there is one, the device's stamp until then. */
+export function orderOf(row: { at: number; seenAt?: number }): number {
+  return row.seenAt ?? row.at
+}
+
 /** A mirror's side of that comparison, from the rows it holds for one bot. */
-export function fingerprintOf(rows: { at: number }[], clearedAt = 0): Fingerprint {
+export function fingerprintOf(
+  rows: { at: number; seenAt?: number }[],
+  clearedAt = 0,
+): Fingerprint {
   let newest: number | null = null
   let oldest: number | null = null
   for (const row of rows) {
-    if (newest === null || row.at > newest) newest = row.at
-    if (oldest === null || row.at < oldest) oldest = row.at
+    const at = orderOf(row)
+    if (newest === null || at > newest) newest = at
+    if (oldest === null || at < oldest) oldest = at
   }
   return { count: rows.length, newest, oldest, clearedAt }
 }
@@ -83,10 +103,17 @@ export function agrees(local: Fingerprint, host: Fingerprint): boolean {
   )
 }
 
-/** A clear is settled without a diff: everything the mirror holds from before the stamp is gone. */
-export function clearedAway<T extends { at: number }>(rows: T[], clearedAt: number): T[] {
+/**
+ * A clear is settled without a diff: every row whose host had it, and heard it before the stamp, is
+ * gone. A row the host never confirmed is left out on purpose — its words exist nowhere else, and a
+ * clear takes away the log a host held rather than words it never received.
+ */
+export function clearedAway<T extends { at: number; seenAt?: number }>(
+  rows: T[],
+  clearedAt: number,
+): T[] {
   if (clearedAt <= 0) return []
-  return rows.filter((row) => row.at < clearedAt)
+  return rows.filter((row) => row.seenAt !== undefined && row.seenAt < clearedAt)
 }
 
 /** The rows a page carries that the mirror's copy no longer matches, or never had. */
