@@ -253,7 +253,7 @@ const dropsFromThread = (row: SessionMessage, summaries?: SummaryRows) =>
 function seamOrder(rows: SessionMessage[], summaries?: SummaryRows) {
   // Most transcripts hold no compaction at all: the scan that finds one is also the check that
   // leaves them as they came, rather than copying every read for nothing.
-  if (!rows.some((row) => isSummaryRow(row, summaries))) return rows
+  if (!rows.some((row) => isSummaryRow(row, summaries) || isRestatement(row))) return rows
   const out = [...rows]
   const placed = new Set<number>()
   for (let s = 0; s < out.length; s++) {
@@ -289,7 +289,26 @@ function seamOrder(rows: SessionMessage[], summaries?: SummaryRows) {
       next++
     if (next > at + 1) out.splice(next - 1, 0, ...out.splice(at, 1))
   }
-  return out
+  return withoutRepeatedRestatements(out, summaries)
+}
+
+/**
+ * A turn that compacts more than once is restated after each compaction, and the host carries the
+ * earlier restatement forward too. A restatement of the request the previous turn start already
+ * restated is that turn going on, so it draws nothing and starts no turn.
+ */
+function withoutRepeatedRestatements(rows: SessionMessage[], summaries?: SummaryRows) {
+  let opener: SessionMessage | undefined
+  return rows.filter((row) => {
+    if (!isTurnStart(row, summaries)) return true
+    const again =
+      opener !== undefined &&
+      isRestatement(opener) &&
+      isRestatement(row) &&
+      seamText(opener.content ?? "") === seamText(row.content ?? "")
+    if (!again) opener = row
+    return !again
+  })
 }
 
 /**

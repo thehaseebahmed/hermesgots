@@ -369,3 +369,61 @@ test("a summary stamped after the carried copies sits where the compaction fell"
   assert.equal(reply?.seams?.[0].toolsBefore, 3, "the three carried calls are above the line")
   assert.equal(reply?.seams?.[0].row, rows[summary].id, "it names the summary's own row")
 })
+
+/** A turn that compacts twice: each compaction restates the request under its own summary. */
+function twice({ copy }: { copy: boolean }) {
+  next = 100
+  const restated = () => row("user", `${REPLAY_HEADER}\n${REQUEST}`)
+  return [
+    row("user", "An earlier ask"),
+    row("assistant", "An earlier answer"),
+    row("assistant", SUMMARY),
+    ...pair("terminal", "Carried one"),
+    restated(),
+    ...pair("patch", "After one"),
+    row("assistant", SUMMARY),
+    ...pair("terminal", "Carried two"),
+    ...(copy ? [restated()] : []),
+    restated(),
+    ...pair("patch", "After two"),
+    row("assistant", "Final words"),
+  ]
+}
+
+for (const copy of [false, true])
+  test(`a turn that compacts twice stays one turn${copy ? ", with the first request carried again" : ""}`, async () => {
+    const rows = twice({ copy })
+    const drawn = shape(rows)
+    assert.equal(
+      drawn.filter((line) => line.startsWith(`user: ${REQUEST}`)).length,
+      1,
+      `the request is drawn once: ${drawn.join(" | ")}`,
+    )
+    assert.equal(drawn.length, 4, `one reply for the turn: ${drawn.join(" | ")}`)
+    assert.match(drawn[3], /\[\d+ calls, 2 seams\]$/, `both compactions mark it: ${drawn[3]}`)
+    serve(rows)
+    const live = await liveTurn(server, SESSION, REQUEST)
+    assert.ok(live, "the running turn is found")
+    for (const words of ["Carried one", "After one", "Carried two", "After two", "Final words"])
+      assert.ok(live.content.includes(words), `${words} is in the live reply: ${live.content}`)
+    assert.equal(live.tools?.length, 4, "every call, before both boundaries and after them")
+  })
+
+test("the same words asked in two turns stay two turns when the second one compacts", () => {
+  next = 100
+  const rows = [
+    row("user", REQUEST),
+    ...pair("terminal", "First turn's work"),
+    row("assistant", "First turn's answer"),
+    row("assistant", SUMMARY),
+    ...pair("terminal", "Second turn's carried work"),
+    row("user", `${REPLAY_HEADER}\n${REQUEST}`),
+    ...pair("patch", "Second turn's later work"),
+  ]
+  const drawn = shape(rows)
+  assert.equal(
+    drawn.filter((line) => line.startsWith(`user: ${REQUEST}`)).length,
+    2,
+    `each turn keeps its own request: ${drawn.join(" | ")}`,
+  )
+})
