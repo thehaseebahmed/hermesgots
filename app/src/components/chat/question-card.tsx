@@ -9,6 +9,7 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/componen
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { answerClarify } from "@/lib/chat"
+import { prefersReducedMotion } from "@/lib/media"
 import type { ClarifyAnswers, ClarifyQuestion, Message } from "@/lib/db"
 import { cn } from "@/lib/utils"
 
@@ -157,7 +158,7 @@ function Question({
 }
 
 const motion = () =>
-  window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"
+  prefersReducedMotion() ? "auto" : "smooth"
 
 /**
  * The agent's questions, in place of the composer until answered; the answers then show as a card

@@ -2,17 +2,15 @@ import { memo, useCallback, useEffect, useRef, useState } from "react"
 import { ChevronRightIcon } from "lucide-react"
 
 import { Markdown } from "@/components/chat/markdown"
-import { WORK_ROW_CLASS, WorkRow } from "@/components/chat/work-row"
+import { WORK_ROW_CLASS, WorkLabel, WorkRow } from "@/components/chat/work-row"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
-import { Spinner } from "@/components/ui/spinner"
 import { COLUMN } from "@/lib/layout"
+import { prefersReducedMotion } from "@/lib/media"
 import { thinkingLabel } from "@/lib/thinking"
 import { cn } from "@/lib/utils"
 
 /** How close to the sheet's bottom still counts as its end, for words that landed in view already. */
 const AT_END = 4
-
-const reducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
 
 /**
  * "The reader left": a wheel up, the keys that jump up, a finger dragging down — any of them takes
@@ -51,12 +49,12 @@ function watchAway(view: HTMLElement, away: () => void) {
 /**
  * One stretch of a reply's thinking — or the stretch still to come, while the reply works and its
  * model has said nothing yet, drawn as a status row with nothing to open until words arrive. The
- * row says what the turn is doing: its spinner while the thinking still arrives, its label once
- * this device has measured how long the run took. It opens the working-out in the same sheet the
+ * row says what the turn is doing: its words wave while the thinking still arrives, and read plainly
+ * once this device has measured how long the run took. It opens the working-out in the same sheet the
  * tool row opens, so the thread's two accounts of the work read and open the same way. A live run
  * opened in the sheet lands on its newest words and keeps them in view while they arrive, until the
  * reader scrolls away inside the sheet; the sheet never closes itself — when the thinking ends the
- * label beside it just reads the span. See ADR 0050.
+ * label beside it just reads the span. See ADR 0050 and ADR 0061.
  */
 export const ThinkingLine = memo(function ThinkingLine({
   reasoning,
@@ -66,9 +64,9 @@ export const ThinkingLine = memo(function ThinkingLine({
   className,
 }: {
   reasoning: string
-  /** The model is still thinking, so the row spins and reads "Thinking…" wherever it is drawn. */
+  /** The model is still thinking, so the row's words wave and read "Thinking…" wherever it is drawn. */
   thinking: boolean
-  /** The turn works but its stretch has not arrived: the row shows the spinner with no tap. */
+  /** The turn works but its stretch has not arrived: the row waves over no words and offers no tap. */
   pending?: boolean
   /** How long this device watched the turn think, when it watched it at all. */
   spanMs?: number
@@ -109,7 +107,7 @@ export const ThinkingLine = memo(function ThinkingLine({
     // The tap is the reader asking for this run, so its end comes into view.
     following.current = true
     const end = (behavior: ScrollBehavior) => node.scrollIntoView({ block: "end", behavior })
-    end(reducedMotion() ? "auto" : "smooth")
+    end(prefersReducedMotion() ? "auto" : "smooth")
     if (typeof ResizeObserver === "undefined") return stopAway
     // A browser reports once as soon as an observer is registered, and that report lands while the
     // smooth arrival is still moving the sheet: it would cancel it. The run's growth is waited for.
@@ -146,8 +144,7 @@ export const ThinkingLine = memo(function ThinkingLine({
         // The turn's own stretch has not arrived: the row names what the turn is doing and offers
         // no tap — under this same key, the run's row takes over the moment its words land.
         <div className={WORK_ROW_CLASS} data-slot="thinking-pending">
-          <Spinner aria-label="Thinking…" className="size-4 shrink-0" />
-          {label}
+          <WorkLabel wave>{label}</WorkLabel>
         </div>
       ) : (
         <WorkRow
@@ -155,10 +152,9 @@ export const ThinkingLine = memo(function ThinkingLine({
           aria-expanded={open}
           aria-label={label}
           onClick={() => setOpen(true)}
-          before={thinking ? <Spinner aria-label="Thinking…" className="size-4 shrink-0" /> : null}
           after={<ChevronRightIcon className="size-4 shrink-0" aria-hidden />}
         >
-          {label}
+          <WorkLabel wave={thinking}>{label}</WorkLabel>
         </WorkRow>
       )}
       {!pending && (

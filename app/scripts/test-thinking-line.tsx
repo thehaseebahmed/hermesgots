@@ -19,6 +19,7 @@ import {
   shutSheet,
   spyScrollIntoView,
   thinkingLines,
+  until,
   withReducedMotion,
 } from "./component-kit.tsx"
 
@@ -105,6 +106,10 @@ async function screen(
 /** The footer's working line: what the turn is doing, said under the reply. It never thinks. */
 const workingLine = () => find('[aria-live="polite"]')
 
+/** The words the footer has typed so far, and the whole label it keeps beside them to be heard. */
+const typedWords = () => find("[data-slot=typed-words]")?.textContent ?? ""
+const announcedWords = () => find("[data-slot=typed-label]")?.textContent ?? ""
+
 /** The open sheet's body: a row's words are on the page only while its sheet is open. */
 const sheet = () => find("[data-slot=thinking-body]")
 
@@ -123,7 +128,10 @@ async function read(row: Element) {
   return sheetText()
 }
 
-/** Whether the row carries the spinner that says the turn is thinking right now. */
+/** Whether the row carries the wave: its words lit and travelling, the sign that it is still working. */
+const waves = (line: Element) => Boolean(line.querySelector("[data-slot=work-wave]"))
+
+/** Whether anything in the row spins: the sign of loading the wave replaced (ADR 0061). */
 const spins = (line: Element) => Boolean(line.querySelector("[data-slot=spinner]"))
 
 const screenText = () => document.body.textContent ?? ""
@@ -160,14 +168,15 @@ function sized(element: Element, size: { client: number; scroll: number }) {
   Object.defineProperty(element, "scrollHeight", { value: size.scroll, configurable: true })
 }
 
-test("a row spins for the turn's thinking, and the footer never says it too", async () => {
+test("a working row waves its words, and the footer never says it too", async () => {
   host()
   const id = "streaming"
   await screen(undefined, turn({ id, reasoningRuns: [run(REASONING)] }), async () => {
     await stream(id)
     const line = onlyThinkingLine()
     assert.equal(lineLabel(line), "Thinking…", "still thinking, so no duration yet")
-    assert.ok(spins(line), "and it carries the spinner, as the tool row does while it runs")
+    assert.ok(waves(line), "and its words wave, as the tool row's do while it runs")
+    assert.ok(!spins(line), "with no spinner: the wave is the only sign the row is at it")
     assert.equal(expanded(line), "false", "its sheet starts shut")
     assert.equal(sheet(), null, "with nothing of the run on the page until it is asked for")
     assert.equal(
@@ -185,7 +194,8 @@ test("a reply that never thinks wears the row while it works, and loses it at th
     await stream(id)
     const line = onlyThinkingLine()
     assert.equal(lineLabel(line), "Thinking…", "the row is on screen from the first working moment")
-    assert.ok(spins(line), "with its spinner, before a word of thinking arrives")
+    assert.ok(waves(line), "waving, before a word of thinking arrives")
+    assert.ok(!spins(line), "and no spinner anywhere in it")
     assert.equal(expanded(line), null, "the row offers no tap: its stretch has not arrived")
     await click(line)
     assert.equal(sheet(), null, "and nothing opens until there are words to open")
@@ -213,7 +223,7 @@ test("behind a finished call, the model's quiet draws a row after it until words
       await stream(id)
       const line = onlyThinkingLine()
       assert.equal(lineLabel(line), "Thinking…", "the model is quiet behind its last call")
-      assert.ok(spins(line), "so the row spins where the footer's line used to be")
+      assert.ok(waves(line), "so the row waves where the footer's line used to be")
       const box = item(line)
       assert.ok(follows(toolRow(box), line), "drawn after the call the quiet follows")
 
@@ -379,7 +389,8 @@ test("a run this device measured reads in whole seconds, not the stats line's fi
   await screen(undefined, turn(reply), async () => {
     assert.equal(lineLabel(onlyThinkingLine()), "Thought for 12s", "the span this device measured")
     assert.equal(expanded(onlyThinkingLine()), "false", "its sheet starts shut over an answer")
-    assert.ok(!spins(onlyThinkingLine()), "and nothing spins for a run that ended")
+    assert.ok(!waves(onlyThinkingLine()), "and nothing waves for a run that ended")
+    assert.ok(!spins(onlyThinkingLine()), "nor spins")
     assert.match(screenText(), /12\.0s/, "and the turn's own duration stays in the stats line")
   })
 })
@@ -465,12 +476,83 @@ test("a run that already ended keeps its label while the call it broke runs", as
       await stream(id)
       const line = onlyThinkingLine()
       assert.equal(lineLabel(line), "Thought for 12s", "the number it measured is what it reads")
-      assert.ok(
-        !spins(line),
-        "an ended run does not spin as Thinking… while the call it broke runs",
-      )
+      assert.ok(!waves(line), "an ended run draws no wave while the call it broke runs")
     },
   )
+})
+
+test("the footer types what the turn is doing, and a thought row above clears it", async () => {
+  host()
+  const id = "typed-footer"
+  const TEXT = "I read the parser first."
+  await screen(undefined, turn({ id, content: TEXT }), async () => {
+    await stream(id)
+    assert.ok(workingLine(), "the footer says what the turn is doing")
+    assert.equal(announcedWords(), "Writing…", "the whole label is there to be heard at once")
+    assert.ok(
+      !find("[data-slot=typed-line] [data-slot=spinner]"),
+      "and no spinner turns beside the words it types",
+    )
+    await until(
+      async () => Boolean(typedWords()) && typedWords() !== "Writing",
+      "the line to be part way through typing its word",
+    )
+
+    // A call lands and the model goes quiet behind it: the row above is the one place that names
+    // thinking, so the line half way through typing it goes at once.
+    await db.messages.put({
+      ...(await db.messages.get(id))!,
+      tools: [{ ...call("call-1"), contentOffset: TEXT.length }],
+      reasoningRuns: [run(REASONING, { afterToolId: "call-1" })],
+    })
+    await settle()
+    assert.ok(!workingLine(), "the footer says nothing beside the row that took over")
+    assert.ok(!find("[data-slot=typed-line]"), "and its half-typed label goes with it")
+    assert.equal(lineLabel(onlyThinkingLine()), "Thinking…", "the row is the one saying it now")
+  })
+})
+
+test("the tool group's row waves while a call runs, and is still once it lands", async () => {
+  host()
+  const id = "running-call"
+  const TEXT = "I read the parser first."
+  await screen(
+    undefined,
+    turn({
+      id,
+      content: TEXT,
+      tools: [{ ...call("call-1"), status: "running", contentOffset: TEXT.length }],
+    }),
+    async () => {
+      await stream(id)
+      const group = toolRow(document.body)
+      assert.ok(waves(group), "the calls' row waves while a call runs")
+      assert.ok(!spins(group), "with no spinner: a tool row is a work row too")
+      assert.equal(workingLine(), null, "and the footer leaves the saying to it")
+
+      await db.messages.put({
+        ...(await db.messages.get(id))!,
+        tools: [{ ...call("call-1"), contentOffset: TEXT.length }],
+      })
+      await settle()
+      assert.ok(!waves(toolRow(document.body)), "its words are still once the call has landed")
+      assert.ok(!spins(toolRow(document.body)), "with nothing spinning in it either")
+    },
+  )
+})
+
+test("reduced motion draws a working row's words plain", async () => {
+  host()
+  const id = "no-wave"
+  await withReducedMotion(async () => {
+    await screen(undefined, turn({ id, reasoningRuns: [run(REASONING)] }), async () => {
+      await stream(id)
+      const line = onlyThinkingLine()
+      assert.equal(lineLabel(line), "Thinking…", "the row still says what the turn is doing")
+      assert.ok(!waves(line), "with no wave: the reader asked for no motion")
+      assert.ok(!spins(line), "and no spinner either")
+    })
+  })
 })
 
 test("a reply whose thinking is broken by tool calls draws one row above them", async () => {
@@ -573,7 +655,7 @@ test("a merged row adds up the spans it holds, and claims none where a stretch w
   })
 })
 
-test("a merged row whose last stretch still streams reads Thinking… and spins", async () => {
+test("a merged row whose last stretch still streams reads Thinking… and waves", async () => {
   host()
   const id = "merged-streaming"
   const messages = turn({
@@ -590,7 +672,7 @@ test("a merged row whose last stretch still streams reads Thinking… and spins"
     const rows = thinkingLines()
     assert.equal(rows.length, 1, "one row for the stretches that touched")
     assert.equal(lineLabel(rows[0]), "Thinking…", "a stretch still thinking holds the whole row")
-    assert.ok(spins(rows[0]), "and the spinner says the turn is at it now")
+    assert.ok(waves(rows[0]), "and its words wave, saying the turn is at it now")
     assert.equal(expanded(rows[0]), "false", "with its sheet shut until a tap")
     assert.match(await read(rows[0]), /first call printed/, "holding the one that ended")
     assert.match(sheetText(), /blocks are what matter/, "and the one still going")
@@ -650,7 +732,7 @@ test("a reply stored before runs draws its thinking as one row at the top", asyn
   })
 })
 
-test("while the turn waits on the user, the working line says so beside the spinning row", async () => {
+test("while the turn waits on the user, the working line says so beside the waving row", async () => {
   host()
   const id = "waiting"
   const messages = turn({
@@ -665,8 +747,13 @@ test("while the turn waits on the user, the working line says so beside the spin
   })
   await screen(undefined, messages, async () => {
     await stream(id)
-    assert.ok(spins(onlyThinkingLine()), "the thinking is still arriving")
+    assert.ok(waves(onlyThinkingLine()), "the thinking is still arriving, so the row waves")
     assert.match(screenText(), /Waiting for your approval…/, "waiting on the user is named")
+    assert.equal(
+      typedWords(),
+      "Waiting for your approval…",
+      "a line waiting on the reader says its words whole",
+    )
   })
 })
 
@@ -709,7 +796,7 @@ test("a coding session's thread draws the same row, in place, as the same reply 
     const streaming = thinkingLines()
     assert.equal(streaming.length, 1, "a streaming session keeps the one row")
     assert.equal(lineLabel(streaming[0]), "Thinking…", "its newest stretch holds the whole row")
-    assert.ok(spins(streaming[0]), "with the spinner the row wears everywhere")
+    assert.ok(waves(streaming[0]), "waving, as the row waves everywhere else")
     assert.equal(workingLine(), null, "and the session's footer leaves the saying to the row too")
 
     assert.match(

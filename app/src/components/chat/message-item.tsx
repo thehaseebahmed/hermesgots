@@ -18,10 +18,10 @@ import { MediaTag } from "@/components/chat/media-image"
 import { ClarifyCard, PlanApprovedCard } from "@/components/chat/session-cards"
 import { ThinkingLine } from "@/components/chat/thinking-line"
 import { ToolGroup } from "@/components/chat/tool-group"
+import { TypedLine } from "@/components/chat/typed-line"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Button } from "@/components/ui/button"
 import { Message as MessageRow, MessageContent } from "@/components/ui/message"
-import { Spinner } from "@/components/ui/spinner"
 import { spawnedAgent } from "@/lib/spawn"
 import { attachmentUrl } from "@/lib/attachment-url"
 import { downloadAttachment } from "@/lib/attachments"
@@ -413,14 +413,22 @@ function FailedActions({ message }: { message: Message }) {
   )
 }
 
-function StatusLine({ text, children }: { text?: string; children?: ReactNode }) {
+function StatusLine({
+  text,
+  waiting,
+  children,
+}: {
+  text?: string
+  /** The turn waits on the reader, so the words appear whole and carry no dots. */
+  waiting?: boolean
+  children?: ReactNode
+}) {
   return (
     <div
       className={cn(REPLY_INSET, "flex items-center gap-2 text-sm text-muted-foreground")}
       aria-live="polite"
     >
-      <Spinner className="size-4" />
-      {text && <span className="min-w-0 truncate">{text}</span>}
+      {text && <TypedLine label={text} waiting={waiting} />}
       {children}
     </div>
   )
@@ -467,10 +475,12 @@ export const MessageItem = memo(function MessageItem({
   const storedTools = message.tools
   const storedContent = message.content
   const storedStatusText = message.statusText
-  const waiting = Boolean(
-    (message.approval && !message.approval.resolved) ||
-    (message.clarify && !message.clarify.resolved),
-  )
+  // The turn's own state, read once: a reply waiting on the reader is not at work, so the row above
+  // it stands down and its line says its words whole rather than typing them.
+  const approval = message.approval
+  const awaitingApproval = Boolean(approval && !approval.resolved)
+  const awaitingClarify = Boolean(message.clarify && !message.clarify.resolved)
+  const waiting = awaitingApproval || awaitingClarify
   const thinking: RunPart[] = useMemo(
     () =>
       thinkingRows({
@@ -553,9 +563,6 @@ export const MessageItem = memo(function MessageItem({
     </>
   )
   const streaming = message.status === "streaming"
-  const approval = message.approval
-  const awaitingApproval = Boolean(approval && !approval.resolved)
-  const awaitingClarify = Boolean(message.clarify && !message.clarify.resolved)
   // While this device shows the question as a form, the call's own "waiting" card would repeat it.
   const asking = awaitingClarify
     ? message.tools?.findLast((t) => t.tool === "clarify" && t.status === "running")
@@ -643,7 +650,9 @@ export const MessageItem = memo(function MessageItem({
   // once a line shows.
   const footerLines = [
     (activity || shown) && (
-      <StatusLine key="status" text={activity}>
+      // Waiting on the reader is not work in progress: the line says its words whole, and the reply
+      // already knows it waits, so it is told rather than left to read its own label.
+      <StatusLine key="status" text={activity} waiting={waiting}>
         {shown && onShowSubagents && (
           <>
             {activity && <span aria-hidden>·</span>}

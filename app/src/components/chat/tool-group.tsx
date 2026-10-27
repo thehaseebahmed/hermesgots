@@ -19,7 +19,7 @@ import {
 
 import { StepRail } from "@/components/chat/step-rail"
 import { Details } from "@/components/chat/tool-card"
-import { WorkRow, WORK_LABEL_DENT } from "@/components/chat/work-row"
+import { WorkRow, WORK_LABEL_DENT, WorkLabel } from "@/components/chat/work-row"
 import { Button } from "@/components/ui/button"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { usePopupDrawer, usePopupForm } from "@/lib/popup-form"
@@ -306,16 +306,14 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
         aria-label={full}
         onClick={() => setOpen(true)}
         before={
-          <>
-            {running && <Spinner className="size-4 shrink-0" />}
-            {failed && !running && (
-              <XIcon
-                className="size-4 shrink-0 text-destructive"
-                strokeWidth={3}
-                aria-label="Failed"
-              />
-            )}
-          </>
+          failed &&
+          !running && (
+            <XIcon
+              className="size-4 shrink-0 text-destructive"
+              strokeWidth={3}
+              aria-label="Failed"
+            />
+          )
         }
         after={
           <>
@@ -324,9 +322,9 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
           </>
         }
       >
-        <span ref={text} className="min-w-0 truncate">
+        <WorkLabel ref={text} wave={running}>
           {label}
-        </span>
+        </WorkLabel>
       </WorkRow>
       {failed && (
         <p className={cn(WORK_LABEL_DENT, "truncate pb-1 text-sm text-destructive")}>

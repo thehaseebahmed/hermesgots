@@ -19,6 +19,10 @@ const SPAN = /^Thought for \d+s$/
 const ROW = "[data-slot=thinking-line]"
 const SHEET = "[data-slot=thinking-sheet]"
 const BODY = "[data-slot=thinking-body]"
+/** The footer's line: the words it types, the whole label it keeps beside them, its held box. */
+const TYPED = "[data-slot=typed-line]"
+const TYPED_WORDS = "[data-slot=typed-words]"
+const TYPED_LABEL = "[data-slot=typed-label]"
 /** The share of the viewport height the deleted `max-h-[30dvh]` cap held: a sheet body outgrows it. */
 const FORMER_CAP_SHARE = 0.3
 const FIRST = "working-out, not just the answer"
@@ -39,7 +43,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   const item = page.locator(ITEM).last()
   const rows = item.locator(ROW).locator("button")
 
-  // Everything the reply draws that only the browser has: each row's label and whether it spins,
+  // Everything the reply draws that only the browser has: each row's label and whether it waves,
   // the order the rows and calls are drawn in, the sheet when one is open — its words, its box and
   // where it is scrolled to — and whether a cap, a fade or a Show more survives anywhere.
   const threadState = () =>
@@ -78,7 +82,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
             return {
               label: control?.textContent?.trim() ?? null,
               expanded: control?.getAttribute("aria-expanded") ?? null,
-              spin: Boolean(control?.querySelector("[data-slot=spinner]")),
+              wave: Boolean(control?.querySelector("[data-slot=work-wave]")),
             }
           }),
           // The reply's drawn things in the order they are drawn: a thinking row is a button whose
@@ -254,8 +258,8 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     await settled(page)
   }
 
-  // The turn's own pause and lead-in: nothing has arrived, so the row carries the turn — its
-  // spinner on screen from the first moment the reply works, before a word of thinking arrives.
+  // The turn's own pause and lead-in: nothing has arrived, so the row carries the turn — its words
+  // waving on screen from the first moment the reply works, before a word of thinking arrives.
   // The store is waited on first (the row and the footer's line are drawn in one render), then the
   // row itself through the thread's own probe, which is where every other reading of it comes from.
   await until(
@@ -278,7 +282,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     "the row carrying the turn before any thinking lands",
   )
   assert.equal(before.rows.length, 1, "the row is on screen from the first moment the turn works")
-  assert.equal(before.rows[0].spin, true, "with its spinner, before a word of thinking arrives")
+  assert.equal(before.rows[0].wave, true, "its words waving, before a word of thinking arrives")
   assert.equal(
     before.rows[0].expanded,
     null,
@@ -288,7 +292,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   const says = await page.evaluate((sel) => document.querySelector(sel)?.textContent ?? "", WORKING)
   assert.ok(!/Writing…|Thinking…/.test(says), "the footer says nothing while the row says it")
   await shot("working")
-  pass("the row wears the spinner from the turn's first working moment, the footer silent")
+  pass("the row's words wave from the turn's first working moment, the footer silent")
 
   // The first stretch landing with more of it still to come, and nothing said: a single block would
   // have put the whole working-out on the row at once, which is what the mock is told not to do.
@@ -309,7 +313,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     5_000,
     "the thinking to reach the row",
   )
-  assert.equal(streaming.rows[0].spin, true, "the row says it is thinking")
+  assert.equal(streaming.rows[0].wave, true, "the row's words wave: it is still thinking")
   assert.equal(streaming.rows[0].expanded, "false", "and its words are shut in the sheet")
   assert.equal(streaming.sheet, null, "with no sheet open")
   await inThread(FIRST, "while the turn thinks")
@@ -332,7 +336,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   await shut()
 
   // A call ends that stretch. The stretch after the call joins the row above it — a tool row never
-  // lands between two thought rows — so the row keeps spinning over both.
+  // lands between two thought rows — so the row keeps waving over both.
   const latched = await until(
     async () => {
       const reply = await lastReply(chatId)
@@ -348,7 +352,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     "Thinking…",
     "the row reads the turn's thinking while the stretch after the call arrives",
   )
-  assert.equal(latched.rows[0].spin, true, "with its spinner while that stretch streams")
+  assert.equal(latched.rows[0].wave, true, "its words waving while that stretch streams")
   assert.deepEqual(
     latched.order.map((one) => one.kind),
     ["thinking", "tool"],
@@ -356,7 +360,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   )
   await inThread(MEASURED, "after the first call")
   await shot("latched")
-  pass("the call draws no second row: the row above it keeps spinning while the next stretch streams")
+  pass("the call draws no second row: the row above it keeps waving while the next stretch streams")
 
   // A second call, straight after the first with nothing said between them: the two draw as ONE tool
   // group, and every stretch of the turn's thinking sits above it as one row holding all their
@@ -421,7 +425,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     20_000,
     "the turn's last thinking piece to land with the row still thinking",
   )
-  pass("the turn thinks to its last piece with the one row above its calls still wearing the spinner")
+  pass("the turn thinks to its last piece with the one row above its calls still waving")
 
   // What the row may read now that its spans are frozen: the sum of every stretch it holds — never
   // the part of it this device measured for one of them.
@@ -458,10 +462,67 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     "nor the two that followed the first call",
   )
   assert.ok(
-    frozen.rows.every((one) => one.spin === false),
-    "with the spinner gone from the row the turn thought in",
+    frozen.rows.every((one) => one.wave === false),
+    "with the wave gone from the row the turn thought in",
+  )
+  assert.equal(
+    await item.locator("[data-slot=work-wave]").count(),
+    0,
+    "and neither the row nor the tool group under it waves once both have landed",
   )
   assert.equal(frozen.sheet, null, "the answer closes no sheet: none was open")
+
+  // The footer's line types what the turn is doing: the words arrive a character at a time, the
+  // ellipsis it reads is never typed with them, and the box it draws them into holds the label it is
+  // heading for — so what stands beside it on the line never moves. A width is geometry a DOM
+  // without layout has none of, which is why it is measured here (ADR 0019).
+  const lineState = () =>
+    page.evaluate(
+      ({ line, words, named }) => {
+        const box = document.querySelector(line)
+        if (!box) return null
+        const footer = box.closest('[aria-live="polite"]')
+        const width = (node) =>
+          node ? Math.round(node.getBoundingClientRect().width * 10) / 10 : null
+        return {
+          typed: box.querySelector(words)?.textContent ?? "",
+          label: box.querySelector(named)?.textContent ?? "",
+          width: width(box),
+          footer: width(footer),
+        }
+      },
+      { line: TYPED, words: TYPED_WORDS, named: TYPED_LABEL },
+    )
+  const typing = await until(
+    async () => {
+      const state = await lineState()
+      return state?.label === "Writing…" ? state : null
+    },
+    15_000,
+    "the footer's line to say the turn is writing",
+  )
+  assert.notEqual(typing.width, null, "the line is drawn")
+  assert.ok(!typing.typed.includes("…"), `the ellipsis is never typed ("${typing.typed}")`)
+
+  // The words go on arriving — typed at first, then the dots a step at a time — in a box that holds
+  // still: it is the width of the label, not of what has been said so far.
+  const dotted = await until(
+    async () => {
+      const state = await lineState()
+      return state && state.typed !== typing.typed && state.typed.endsWith(".") ? state : null
+    },
+    8_000,
+    "the line to grow its dots",
+  )
+  assert.ok(dotted.typed.startsWith("Writing"), `the words arrived ("${dotted.typed}")`)
+  assert.equal(
+    dotted.width,
+    typing.width,
+    `the line held its box while it typed (${typing.width}px)`,
+  )
+  assert.equal(dotted.footer, typing.footer, "and the footer it stands in held its own")
+  assert.equal(dotted.label, "Writing…", "while the label heard stays whole, not a keystroke")
+  pass(`the footer types "${dotted.typed}" into a box it never grows`)
 
   await until(
     async () => ((await lastReply(chatId))?.status === "done" ? true : null),
@@ -544,7 +605,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     10_000,
     "the long run's row",
   )
-  assert.equal(opening.rows[0].spin, true, "which spins while its run streams")
+  assert.equal(opening.rows[0].wave, true, "whose words wave while its run streams")
   await inThread(LONG_FIRST, "with a long run streaming")
   await uncapped("with a long run streaming")
 

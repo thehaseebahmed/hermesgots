@@ -369,20 +369,19 @@ export async function resized(near?: string) {
   await settle()
 }
 
+/**
+ * Runs `body` as a reader who asked for no motion. The preference is flipped where the query is read,
+ * not in `matchMedia`: a module keeps one list per query, so a stub swapped in afterwards is never
+ * asked and the component would draw the moving version.
+ */
 export async function withReducedMotion(body: () => Promise<void>) {
-  const media = globalThis.matchMedia
-  const reduced = (query: string) => {
-    const answer = media(query)
-    if (query !== "(prefers-reduced-motion: reduce)") return answer
-    return { ...answer, matches: true }
-  }
-  globalThis.matchMedia = reduced
-  window.matchMedia = reduced
+  const flag = globalThis as unknown as { __reducedMotion?: boolean }
+  const before = flag.__reducedMotion
+  flag.__reducedMotion = true
   try {
     await body()
   } finally {
-    globalThis.matchMedia = media
-    window.matchMedia = media
+    flag.__reducedMotion = before
   }
 }
 

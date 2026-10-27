@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react"
 
+import { prefersReducedMotion } from "@/lib/media"
+
 /** About 30 updates a second: often enough to read as typing, rarely enough to re-render Markdown. */
 const FRAME_MS = 33
 /** Each frame reveals this share of what's waiting, so a big chunk types out in a second or two. */
 const CATCH_UP = 12
 
-const reducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
 
 /** The end of the word that `index` falls in, so text never stops mid-word. */
 function wordEnd(text: string, index: number) {
@@ -24,7 +25,7 @@ export function useReveal(text: string) {
 
   useEffect(() => {
     const previous = shown.current
-    if (!text.startsWith(previous.text.slice(0, previous.length)) || reducedMotion()) {
+    if (!text.startsWith(previous.text.slice(0, previous.length)) || prefersReducedMotion()) {
       shown.current = { text, length: text.length }
       setLength(text.length)
       return

@@ -16,7 +16,7 @@ import { KeyboardShortcuts } from "@/components/keyboard-shortcuts"
 import { DrawerContext } from "@/components/drawer-context"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 import { mainThreadId } from "@/lib/db"
-import { useLarge, useWide } from "@/lib/media"
+import { prefersReducedMotion, useLarge, useWide } from "@/lib/media"
 import { depth } from "@/lib/nav"
 import { useCodePane, useMeetingsPane, useProjectsPane, useResearchPane } from "@/lib/pane"
 import { useSidebarCollapsed } from "@/lib/sidebar"
@@ -99,7 +99,7 @@ function usePageTransition(ref: RefObject<HTMLElement | null>, pane: ListPane | 
     // A new chat taking its id once the first message is sent stays the same screen.
     if (type === "REPLACE" && (location.state as { quiet?: boolean } | null)?.quiet) return
     if (isChatSwitch(previous.screen, screen)) return
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return
+    if (prefersReducedMotion()) return
     const step = Math.sign(last.current.idx - previous.idx)
     ref.current?.animate(
       step
@@ -117,7 +117,7 @@ function usePageTransition(ref: RefObject<HTMLElement | null>, pane: ListPane | 
       onChatSwap((slot) => {
         if (faded.current.get(slot) === location.key) return
         faded.current.set(slot, location.key)
-        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return
+        if (prefersReducedMotion()) return
         document.querySelector<HTMLElement>(`[data-pane="${slot}"]`)?.animate(FADE, {
           duration: FADE_MS,
           easing: EASE,
@@ -154,7 +154,7 @@ function Panes({ pane, children }: { pane: ListPane | undefined; children: React
   const session = useRef<HTMLDivElement>(null)
   const open = Boolean(pane?.open)
   useLayoutEffect(() => {
-    if (!open || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return
+    if (!open || prefersReducedMotion()) return
     session.current?.animate(
       [
         { opacity: 0, transform: "translateX(48px)" },
