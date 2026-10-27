@@ -89,20 +89,22 @@ async def _title_of(db: Any, session_id: str) -> Optional[str]:
         return None
 
 
-def watch_titles(path: Path, db: Any) -> "asyncio.Task[None]":
+def watch_titles(path: Path, db: Any, home: Path) -> "asyncio.Task[None]":
     """Starts this store's title reader; the plugin keeps one running for its life.
 
     The start is stamped here, not in the reader, so a session that moves the moment the plugin
     comes up is watched: only the rows written from now on are armed, and the ledger's history —
     a restart's hour of rows, whose titles landed long ago — is left alone.
     """
-    return asyncio.ensure_future(_read_titles(path, db, int(time.time() * 1000)))
+    return asyncio.ensure_future(_read_titles(path, db, home, int(time.time() * 1000)))
 
 
-async def _read_titles(path: Path, db: Any, since: int) -> None:
+async def _read_titles(path: Path, db: Any, home: Path, since: int) -> None:
     """Notes the title of every session that moves on this store after ``since``."""
     record = _title_watchers.setdefault(str(path), {"sessions": {}})
     sessions: Dict[str, Dict[str, Any]] = record["sessions"]
+    # Session -> the chat it started as, which is the id the app knows a chat by.
+    roots: Dict[str, str] = {}
     cursor = await asyncio.to_thread(events.tail_before, path, since)
     while True:
         try:
@@ -111,9 +113,13 @@ async def _read_titles(path: Path, db: Any, since: int) -> None:
                 cursor = rows[-1]["id"]
             for row in rows:
                 if row["kind"] == "session" and row["session_id"]:
+                    # Compression moves a chat on to a child session, and the title follows the
+                    # chat: the event has to name the session the app knows it by, or its
+                    # `title` frame matches no chat at all.
+                    chat = await asyncio.to_thread(chat_session, home, row["session_id"], roots)
                     until = time.monotonic() + TITLE_WATCH_SECONDS
-                    sessions.setdefault(row["session_id"], {"title": None, "until": until})
-                    sessions[row["session_id"]]["until"] = until
+                    sessions.setdefault(chat, {"title": None, "until": until})
+                    sessions[chat]["until"] = until
             now = time.monotonic()
             for session_id in [one for one, watch in sessions.items() if now > watch["until"]]:
                 del sessions[session_id]

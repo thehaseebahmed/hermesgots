@@ -326,7 +326,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         title_db = await open_db() if callable(open_db) else None
         if title_db is not None:
             # The reader hands back its task, so the shutdown below cancels it with the rest.
-            tasks.append(stream.watch_titles(store_path(), title_db))
+            tasks.append(stream.watch_titles(store_path(), title_db, home))
         yield
         for task in tasks:
             task.cancel()

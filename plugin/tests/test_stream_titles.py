@@ -13,14 +13,35 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
+import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Iterable, List, Optional
 from unittest import mock
 
 from plugin import events, stream
 from plugin.store import db_path
+
+
+def compression(home: Path, *ids: str) -> None:
+    """A Hermes ``state.db`` where each session was compressed into the next, oldest first."""
+    home.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(home / "state.db")) as conn:
+        conn.execute(
+            "CREATE TABLE sessions (id TEXT PRIMARY KEY, parent_session_id TEXT, end_reason TEXT,"
+            " model_config TEXT, source TEXT)"
+        )
+        conn.executemany(
+            "INSERT INTO sessions VALUES (?, ?, ?, ?, ?)",
+            [
+                (one, ids[i - 1] if i else None, "compression" if i < len(ids) - 1 else None, None, None)
+                for i, one in enumerate(ids)
+            ],
+        )
+        conn.commit()
 
 
 class FakeSessions:
@@ -57,11 +78,12 @@ class TitleReader(unittest.IsolatedAsyncioTestCase):
             patcher = mock.patch.object(stream, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
+        self.home = Path(self._dir.name)
         self.tasks: list[asyncio.Task] = []
         self.addAsyncCleanup(self.stop)
 
-    def reading(self, sessions: FakeSessions) -> None:
-        self.tasks.append(asyncio.ensure_future(stream.watch_titles(self.path, sessions)))
+    def reading(self, sessions: FakeSessions, home: Optional[Path] = None) -> None:
+        self.tasks.append(stream.watch_titles(self.path, sessions, home or self.home))
 
     async def stop(self) -> None:
         for task in self.tasks:
@@ -139,6 +161,19 @@ class TitleReader(unittest.IsolatedAsyncioTestCase):
         await self.seeded(sessions)
         await asyncio.sleep(0.15)
         self.assertEqual(stream._title_watchers[str(self.path)]["sessions"], {})
+
+    async def test_a_compressed_chat_is_noted_as_the_session_it_started_as(self):
+        # The app knows a chat by the session it began as, and so does the title it is given:
+        # compression moves the session on, and the event has to name the chat's own id.
+        compression(self.home, "session_root", "session_child")
+        sessions = FakeSessions()
+        self.reading(sessions)
+        events.note("session", "session_child", self.path, True)
+        await self.seeded(sessions)
+        self.assertEqual(sessions.seen, {"session_root"})
+        sessions.title = "the title Hermes gave it"
+        await self.until(lambda: ledger_titles(self.path), "the title was never noted")
+        self.assertEqual(ledger_titles(self.path), [("title", "session_root")])
 
     async def test_one_reader_watches_every_session_on_the_store(self):
         sessions = FakeSessions()
