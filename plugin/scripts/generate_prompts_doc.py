@@ -1,7 +1,8 @@
-"""Generates docs/prompts.md: the prompts a session is told, so the words a run is injected with
-are readable without starting a session. The staged task's own briefs are left out — they are
-briefed for a workflow's stage and named under `## User's Workflow` — and the doc carries the shapes
-a project session and an AFK run are given. Run it from the repo root:
+"""Generates docs/prompts.md: the prompts the plugin tells, so the words a run is injected with are
+readable without starting a session. Two families live in it — the ones a session is told, and the
+ones dictation sends to a model, to tidy what was heard and to spell what it will hear. The staged
+task's own briefs are left out: they are briefed for a workflow's stage and named under
+`## User's Workflow`. Run it from the repo root:
 
     python3 plugin/scripts/generate_prompts_doc.py
 
@@ -23,7 +24,7 @@ sys.path.insert(0, str(ROOT))
 
 _base = Path(tempfile.mkdtemp(prefix="prompts-doc-"))
 
-from plugin import prompt_builder  # noqa: E402
+from plugin import dictation, dictation_cleanup, prompt_builder  # noqa: E402
 
 PLACEHOLDER = "/home/agent"
 BRANCH = "hermes/spry-thimble-d105"
@@ -59,9 +60,9 @@ MULTI = {**SINGLE, "repos": [_repo("web"), _repo("api")]}
 VARIANTS = [
     (
         "Single repo",
-        "The common case: the base prompt — `# You are Gots!`, then `## Tools` with its "
-        "`### library_add` and `### pull_request` subsections — and last `## Current Session` "
-        "naming its worktree, its pull request template and the directory throwaway work goes in.",
+        "The common case: the base prompt — its heading, then the Tools section with the "
+        "library_add and pull_request subsections — and last Current Session, naming its "
+        "worktree, its pull request template and the directory throwaway work goes in.",
         SINGLE,
     ),
     (
@@ -120,11 +121,94 @@ AFK_VARIANTS = [
     ),
 ]
 
-HEADER = """# Session prompts
+# What dictation's calls are shown, and the words the bot spells its own way: the same three the
+# cleanup rules say to spell from the vocabulary, so a reader sees what the input really looks like.
+VOCABULARY = ("memento", "haseeb", "hermes-agent")
+PHRASE = "so i was thinking um we should move the retry logic into the plugin and then uh check the logs"
+WHOLE = (
+    PHRASE
+    + ". and then we could move them to the third of March and i will run it half past four tomorrow"
+)
+HINT = "Gots, memento, hermes-agent, spry-puffin"
+
+
+def _model_prompt(system: str, instructions: str, label: str, example: str) -> str:
+    """One cleanup call as the model receives it: the system line, the rules, then the input.
+
+    The input is built by the module's own ``_prompt``, so the doc shows the labels and the
+    vocabulary line exactly as a call sends them.
+    """
+    return (
+        "System:\n"
+        f"{system}\n\n"
+        "Instructions:\n"
+        f"{instructions}\n\n"
+        "Input:\n"
+        f"{dictation_cleanup._prompt(example, VOCABULARY, label)}"
+    )
+
+
+def _speech_prompt() -> str:
+    """What faster-whisper is given as its prompt, in the order `dictation.py` joins it.
+
+    It is not instructions: Whisper reads a prompt as what was just said, which is why the parts go
+    in this order and why the text before the clip comes last.
+    """
+    parts = (
+        "<the host's own initial_prompt, when it sets one>",
+        HINT[: dictation.MAX_HINT],
+        " ".join(VOCABULARY[: dictation.MAX_VOCABULARY]),
+        "<the end of what was said before this clip>",
+    )
+    return " ".join(part for part in parts if part)
+
+
+# Dictation's own prompts, below the session's: they are calls on the bot's model rather than
+# instructions to a session, so they are told apart by their headings and their `System:` line.
+DICTATION_VARIANTS = [
+    (
+        "Dictation cleanup: one phrase",
+        "Every phrase a take is cut into at a pause is tidied by one call on the bot's own model "
+        "before its words land, so the text the user sees is what they said, written (ADR 0038). "
+        "The rules allow tidying and never rewording, and an answer much longer or shorter than "
+        "the phrase is thrown away.",
+        _model_prompt(
+            dictation_cleanup.SYSTEM, dictation_cleanup.INSTRUCTIONS, "Phrase", PHRASE
+        ),
+    ),
+    (
+        "Dictation cleanup: a finished dictation",
+        "When a take ends its whole text is tidied once more, framed as the dictation it is: the "
+        "same rules, a longer deadline (`WHOLE_TEXT_DEADLINE_S`) and an answer budget sized from "
+        "its words, since a phrase's 400 tokens would truncate a long take's answer.",
+        _model_prompt(
+            dictation_cleanup.WHOLE_TEXT_SYSTEM,
+            dictation_cleanup.WHOLE_TEXT_INSTRUCTIONS,
+            "Dictation",
+            WHOLE,
+        ),
+    ),
+    (
+        "Dictation: the speech model's prompt",
+        "Not instructions. faster-whisper is given a prompt it reads as what was just said, so the "
+        "parts are in one order and each is capped: the host's own `initial_prompt`, then the names "
+        f"this clip may mention (up to {dictation.MAX_HINT} characters), then the bot's own "
+        f"vocabulary (up to {dictation.MAX_VOCABULARY} words), then the text before this clip — the "
+        f"last {dictation.MAX_CONTEXT} characters — because its end matters most.",
+        _speech_prompt(),
+    ),
+]
+
+HEADER = """# Prompts
 
 > Generated file — do not edit. Regenerate with `python3 plugin/scripts/generate_prompts_doc.py`
 > (the Prompts doc workflow runs it whenever `plugin/prompt_builder.py` changes and opens a pull
 > request when the doc moves).
+
+Two families of prompt live here. A session's is what an agent is injected with, and it is told in
+the same sections, in the same order. Dictation's are the calls the app's speech-to-text makes on a
+bot's own model — one to tidy each phrase as the user speaks, one to tidy a finished take, and the
+prompt the speech model itself is given — and they are the last three sections.
 
 Every prompt is told in the same sections, in the same order. `# You are Gots!` opens the base prompt,
 and `## Tools` under it gives each tool the run can use a subsection of its own — `### library_add`
@@ -156,6 +240,8 @@ def build() -> str:
     for title, note, record in VARIANTS:
         parts.append(_section(title, note, prompt_builder.session_prompt(record)))
     for title, note, text in AFK_VARIANTS:
+        parts.append(_section(title, note, text))
+    for title, note, text in DICTATION_VARIANTS:
         parts.append(_section(title, note, text))
     return "\n\n".join(parts) + "\n"
 
