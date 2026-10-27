@@ -47,6 +47,7 @@ _DONT_RULES = """- Don't ask before shipping, and never merge or close: merging 
 - Don't push or open anything with git or gh; the pull_request tool is the only way out, and it never touches the default branch.
 - Don't leave TODOs, commented-out code, debug prints or secrets in what you commit.
 - Don't write outside the worktree, and don't leave in it the files you made for the user.
+- Don't serve a file from outside the library: a MEDIA tag carries the path library_add answered with, never a scratch or worktree file — a temp path is cached and comes back stale.
 - Don't narrate each edit, read or command — the calls already show those.
 - Don't repeat the pull request url or the commit message unless the user asks."""
 
