@@ -758,6 +758,17 @@ async function runningOnHost(config: HermesConfig, sessionId: string) {
   return Boolean((await readLiveRuns(config))?.runIds[sessionId])
 }
 
+/**
+ * A message this device drew for the seam outlives the fold that stopped drawing it, and no turn above
+ * ever visits it: dropped here, on the catch-up that runs whether or not the host has written since.
+ */
+async function scrubSeamBubbles(local: Message[], sessionId: string) {
+  const stale = local.filter(
+    (m) => m.role === "user" && rowIdOf(m, sessionId) !== undefined && isSeamScaffolding(m),
+  )
+  if (stale.length) await db.messages.bulkDelete(stale.map((m) => m.id))
+}
+
 async function reconcile(conversationId: string) {
   const conversation = await db.conversations.get(conversationId)
   if (!conversation) return 0
@@ -767,6 +778,7 @@ async function reconcile(conversationId: string) {
   // The streaming reply catches up when it ends.
   if (isStreaming(local)) return null
   const sessionId = conversation.hermesSessionId
+  await scrubSeamBubbles(local, sessionId)
   const tip = local.length ? conversation.hermesTip : undefined
   if (tip !== undefined) {
     const [newest] = await listSessionMessages(config, sessionId, { limit: 1, offset: 0 })
@@ -913,13 +925,6 @@ async function reconcile(conversationId: string) {
       writes.push(user)
       floor = user.createdAt + 1
       if (reply) put(reply)
-    }
-    // A message held for a host row, holding nothing but the seam, is the bubble the fold no longer
-    // draws: a device that drew it before the fold read the seam keeps it otherwise, since the row it
-    // came from folds to no turn at all and no turn above visits it.
-    for (const message of current) {
-      if (message.role !== "user" || rowIdOf(message, sessionId) === undefined) continue
-      if (isSeamScaffolding(message)) parts.push(message.id)
     }
     await db.messages.bulkDelete(parts)
     await db.messages.bulkPut(writes)

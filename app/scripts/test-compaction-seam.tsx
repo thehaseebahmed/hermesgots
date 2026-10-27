@@ -8,7 +8,7 @@ import {
   REPLAY_HEADER,
   TASK_SNAPSHOT_HEADER,
 } from "@/lib/compaction-seam"
-import { getMessages, type Message } from "@/lib/db"
+import { db, getMessages, type Message } from "@/lib/db"
 import { reconcileHistory, toMessages } from "@/lib/history"
 import type { SessionMessage } from "@/lib/hermes"
 import { botProfile, json, seedChat } from "./component-kit.tsx"
@@ -134,4 +134,27 @@ test("a chat that drew the seam before the fold read it stops showing it", async
   await reconcileHistory("chat-1")
   const after = (await getMessages("chat-1")).map((m) => `${m.role}: ${m.content}`)
   assert.deepEqual(after, [`user: ${REQUEST}`], `the request alone is left: ${after.join(" | ")}`)
+})
+
+test("a chat whose newest row is the seam still loses the bubble it drew", async () => {
+  const profile = botProfile("compaction-seam-idle")
+  const rows = [seamRow(SNAPSHOT, 44)]
+  globalThis.fetch = (async (input) => {
+    const url = new URL(String(input))
+    if (/\/api\/sessions\/chat-1-hermes\/messages$/.test(url.pathname)) return json({ data: rows })
+    return json({ error: { message: "no route" } }, 404)
+  }) as unknown as typeof fetch
+  const ghost: Message = {
+    id: "h-chat-1-hermes-44",
+    conversationId: "chat-1",
+    role: "user",
+    content: SNAPSHOT,
+    status: "done",
+    createdAt: 10,
+  }
+  await seedChat({ id: "chat-1", profile, messages: [ghost] })
+  // Nothing has been written since: the catch-up would stop at "the host has nothing newer".
+  await db.conversations.update("chat-1", { hermesTip: 44 })
+  await reconcileHistory("chat-1")
+  assert.deepEqual(await getMessages("chat-1"), [], "the bubble the fold stopped drawing is gone")
 })
