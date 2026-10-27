@@ -13,6 +13,8 @@ import { AfkPopup } from "@/components/afk"
 import { AppShell } from "@/components/app-shell"
 import { DEFAULT_SETTINGS, db, type Message, type Profile, type Settings } from "@/lib/db"
 import { fingerprintOf, orderOf } from "@/lib/dictation-log"
+import type { SessionMessage } from "@/lib/hermes"
+import { WAKE_PROMPT_FOOTER, WAKE_PROMPT_HEADER } from "@/lib/wake-prompt"
 import { ChatPage } from "@/routes/chat"
 
 export function json(body: unknown, status = 200) {
@@ -21,6 +23,48 @@ export function json(body: unknown, status = 200) {
     headers: { "content-type": "application/json" },
   })
 }
+
+/**
+ * Transcript rows for a session, each taking the next id and a time that follows it: a row, a call
+ * and its result, and the two together. `reset` starts the ids over for the next case.
+ */
+export function transcriptRows(start = 0) {
+  let last = start
+  const row = (role: string, content: string | null, extra: Partial<SessionMessage> = {}) =>
+    ({ id: ++last, role, content, timestamp: 1_000 + last, ...extra }) as SessionMessage
+  const call = (name: string, text?: string) =>
+    row("assistant", text ?? null, {
+      tool_calls: [
+        { id: `call-${last + 1}`, type: "function", function: { name, arguments: "{}" } },
+      ],
+    })
+  const result = (calling: SessionMessage) =>
+    row("tool", "{}", {
+      tool_call_id: calling.tool_calls![0].id,
+      tool_name: calling.tool_calls![0].function.name,
+    })
+  const pair = (name: string, text?: string) => {
+    const calling = call(name, text)
+    return [calling, result(calling)]
+  }
+  return { row, call, result, pair, reset: (to = start) => void (last = to) }
+}
+
+/** Answers a session's transcript the way the host pages it: newest rows first, each page oldest first. */
+export function serveTranscript(rows: SessionMessage[]) {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input))
+    if (!/\/messages$/.test(url.pathname)) return json({ error: { message: "no route" } }, 404)
+    const limit = Number(url.searchParams.get("limit"))
+    const offset = Number(url.searchParams.get("offset"))
+    const page = [...rows].sort((a, b) => b.id - a.id).slice(offset, offset + limit)
+    return json({ data: page.reverse() })
+  }) as unknown as typeof fetch
+}
+
+/** The wake run's own input, as the plugin posts it: the pinned header, the result, core's footer. */
+export const wakePromptText = (body = "A finding") =>
+  `${WAKE_PROMPT_HEADER}child-1]\n${body}\n\n${WAKE_PROMPT_FOOTER} to keep you going]`
 
 /** Waits for the reads a screen starts to land, then lets React commit what they changed. */
 export async function settle() {
@@ -55,10 +99,9 @@ export function botProfile(name: string, patch: Partial<Profile> = {}): Profile 
 }
 
 /** What a host answers about its log: the totals it counts, across the fingerprint beside them. */
-export function dictationTotals<T extends { at: number; seenAt?: number; words: number; ms: number }>(
-  rows: T[],
-  clearedAt = 0,
-) {
+export function dictationTotals<
+  T extends { at: number; seenAt?: number; words: number; ms: number },
+>(rows: T[], clearedAt = 0) {
   const words = rows.reduce((total, row) => total + row.words, 0)
   const ms = rows.reduce((total, row) => total + row.ms, 0)
   return { words, ms, ...fingerprintOf(rows, clearedAt) }

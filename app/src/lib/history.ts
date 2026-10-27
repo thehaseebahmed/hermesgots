@@ -223,7 +223,6 @@ function afterNotice(fragment: string, next: string, notice: string) {
 /** The rows the host flagged as a compaction's summary, by id, where the plugin said which. */
 export type SummaryRows = ReadonlySet<number>
 
-/** The summary rows a chat's compactions name. */
 export const summaryRowsOf = (compactions?: { row?: number }[]): SummaryRows | undefined => {
   const rows = compactions?.flatMap((one) => (one.row === undefined ? [] : [one.row]))
   return rows?.length ? new Set(rows) : undefined
@@ -243,17 +242,16 @@ const dropsFromThread = (row: SessionMessage, summaries?: SummaryRows) =>
   isSubagentResult(row) || isSeamScaffolding(row) || isSummaryRow(row, summaries)
 
 /**
- * A compaction writes its summary, then the work it carried forward, then the turn's restated
- * request, then whatever the run did after. The carried copies keep their old times, and the summary
- * is stamped with the moment the compaction ran. Read in that order the request would close a reply
- * that isn't its own, and the summary would sit above work done before it. So the request moves up to
- * open its turn, and the summary moves down to just before the first row written after it — which is
- * where the compaction really happened, mid-reply or between turns. Idempotent.
+ * The host writes a compaction as its summary, the work it carried forward (under their old times),
+ * the turn's restated request, then what came after. Read in that order the request closes a reply
+ * that isn't its own and the summary sits above work done before it. The request moves up to open
+ * its turn and the summary down to just before the first row written after it, which is where the
+ * compaction really happened. Idempotent.
  */
 function seamOrder(rows: SessionMessage[], summaries?: SummaryRows) {
   // Most transcripts hold no compaction at all: the scan that finds one is also the check that
   // leaves them as they came, rather than copying every read for nothing.
-  if (!rows.some((row) => isSummaryRow(row, summaries) || isRestatement(row))) return rows
+  if (!rows.some((row) => isSummaryRow(row, summaries))) return rows
   const out = [...rows]
   const placed = new Set<number>()
   for (let s = 0; s < out.length; s++) {
@@ -289,7 +287,7 @@ function seamOrder(rows: SessionMessage[], summaries?: SummaryRows) {
       next++
     if (next > at + 1) out.splice(next - 1, 0, ...out.splice(at, 1))
   }
-  return withoutRepeatedRestatements(out, summaries)
+  return out
 }
 
 /**
@@ -298,17 +296,20 @@ function seamOrder(rows: SessionMessage[], summaries?: SummaryRows) {
  * restated is that turn going on, so it draws nothing and starts no turn.
  */
 function withoutRepeatedRestatements(rows: SessionMessage[], summaries?: SummaryRows) {
-  let opener: SessionMessage | undefined
+  let restated: string | undefined
   return rows.filter((row) => {
     if (!isTurnStart(row, summaries)) return true
-    const again =
-      opener !== undefined &&
-      isRestatement(opener) &&
-      isRestatement(row) &&
-      seamText(opener.content ?? "") === seamText(row.content ?? "")
-    if (!again) opener = row
+    const request = isRestatement(row) ? seamText(row.content ?? "") : undefined
+    const again = request !== undefined && request === restated
+    if (!again) restated = request
     return !again
   })
+}
+
+/** A transcript's rows in the order a turn reads: ordered around each compaction, each turn once. */
+function seamRows(rows: SessionMessage[], summaries?: SummaryRows) {
+  if (!rows.some((row) => isRestatement(row) || isSummaryRow(row, summaries))) return rows
+  return withoutRepeatedRestatements(seamOrder(rows, summaries), summaries)
 }
 
 /**
@@ -324,7 +325,7 @@ export function toMessages(
   const { summaries } = options
   // The live read and the archive's display read both hold a compaction as summary, carried copies,
   // then what came after: one order serves both.
-  rows = seamOrder(rows, summaries)
+  rows = seamRows(rows, summaries)
   const messages: Message[] = []
   let reply: Message | undefined
   // Where the reply's text since its last tool call starts, and the notice that text was cut by.
@@ -668,7 +669,7 @@ export async function liveTurn(
       signal,
     })
     for (const row of batch) rows.set(row.id, row)
-    const sorted = seamOrder(
+    const sorted = seamRows(
       [...rows.values()].sort((a, b) => a.id - b.id),
       summaries,
     )
@@ -849,7 +850,7 @@ function turnsOf(
   summaries?: SummaryRows,
 ) {
   const groups: SessionMessage[][] = []
-  for (const row of seamOrder(rows, summaries)) {
+  for (const row of seamRows(rows, summaries)) {
     if (isTurnStart(row, summaries) || !groups.length) groups.push([row])
     else groups[groups.length - 1].push(row)
   }

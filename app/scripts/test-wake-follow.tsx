@@ -8,10 +8,17 @@ import test from "node:test"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { db, type Profile } from "@/lib/db"
-import { WAKE_PROMPT_FOOTER, WAKE_PROMPT_HEADER } from "@/lib/wake-prompt"
 import type { HermesConfig } from "@/lib/hermes"
 import { ChatPage } from "@/routes/chat"
-import { connection, json, mount, seedChat, seedSettings, until } from "./component-kit.tsx"
+import {
+  connection,
+  json,
+  mount,
+  seedChat,
+  seedSettings,
+  until,
+  wakePromptText,
+} from "./component-kit.tsx"
 
 const server: HermesConfig = connection("wake-follow")
 const bot: Profile = {
@@ -31,14 +38,9 @@ const WAKE_STARTED = 100
 const FIRST = "Pass one is applied and committed."
 const WOKEN = "The finding changes the plan."
 
-const wake = [
-  `${WAKE_PROMPT_HEADER}child-1]`,
-  "A background subagent you dispatched earlier has finished.",
-  "--- RESULT ---",
-  "Done.",
-  "",
-  `${WAKE_PROMPT_FOOTER} to keep you going]`,
-].join("\n")
+const wake = wakePromptText(
+  "A background subagent you dispatched earlier has finished.\n--- RESULT ---\nDone.",
+)
 
 const call = (id: string, name: string) => ({
   id,
@@ -135,11 +137,8 @@ test("a wake run followed by its transcript draws its own reply, and the earlier
         assert.equal(earlier.length, 1, "the earlier reply is held once")
       } finally {
         over = true
-        try {
-          await until(finished, "the run to end", 10_000)
-        } catch {
-          // The failure above is what the case reports; a drain that also hangs adds nothing.
-        }
+        // The failure above is what the case reports; a drain that also hangs adds nothing.
+        await until(finished, "the run to end", 10_000).catch(() => {})
       }
     },
   )
