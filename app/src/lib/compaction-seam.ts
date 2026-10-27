@@ -41,7 +41,7 @@ const BACKGROUND_NOTICE =
 const BACKGROUND_BATCH = /^\[IMPORTANT: \d+ background processes completed\./
 
 /** An item of the host's snapshot — `- [>] 4. Wire it (in_progress)`, two spaces per depth. */
-const SNAPSHOT_ITEM = new RegExp(`\\n[ \\t]*- \\[[${SNAPSHOT_MARKERS.join("")}]\\] \\d+\\. `)
+const SNAPSHOT_ITEM = new RegExp(`\\n[ \\t]*- \\[[${SNAPSHOT_MARKERS.join("")}]\\] \\S+\\. `)
 
 type SeamRow = { role?: string; content?: string | null; display_kind?: string | null }
 
@@ -70,6 +70,41 @@ function isReloadNoticeOnly(text: string): boolean {
   )
 }
 
+/** `agent/context_compressor.py` `SUMMARY_PREFIX`: the summary's first words. */
+export const SUMMARY_HEADER = "[CONTEXT COMPACTION — REFERENCE ONLY]"
+
+/** `agent/context_compressor.py` `_MERGED_PRIOR_CONTEXT_HEADER`: a summary merged into a reply. */
+export const PRIOR_CONTEXT_HEADER = "[PRIOR CONTEXT — for reference only; not a new message]"
+
+/** `agent/context_compressor.py` `LEGACY_SUMMARY_PREFIX`: the words an older Hermes opened one with. */
+export const LEGACY_SUMMARY_HEADER = "[CONTEXT SUMMARY]:"
+
+const SUMMARY_HEADERS = [SUMMARY_HEADER, PRIOR_CONTEXT_HEADER, LEGACY_SUMMARY_HEADER]
+
+/** `agent/context_compressor.py` `_SUMMARY_END_MARKER`: the line every summary ends on. */
+export const SUMMARY_END =
+  "--- END OF CONTEXT SUMMARY — respond to the message below, not the summary above ---"
+
+/**
+ * A compaction summary read off its text: opened by one of the host's headers and closed by its end
+ * line. `after` is whatever the host wrote below that line into the same row — the user's message it
+ * folded in, or a restated request — and empty for a summary on its own. Undefined for anything else.
+ */
+export function summaryOf(text: string): { after: string } | undefined {
+  const head = text.trimStart()
+  if (!SUMMARY_HEADERS.some((header) => head.startsWith(header))) return undefined
+  const end = lineAt(head, SUMMARY_END)
+  if (end < 0) return undefined
+  return { after: head.slice(end + SUMMARY_END.length).trim() }
+}
+
+/** Whether the text is a compaction summary with nothing of anyone's below it. */
+export const isSummary = (text: string) => summaryOf(text)?.after === ""
+
+/** Whether a row restates the in-flight request: Hermes writes it after the work it carried forward. */
+export const isRestatement = (row: SeamRow) =>
+  row.role === "user" && (row.content ?? "").trimStart().startsWith(REPLAY_HEADER)
+
 /** The request a restated row leads with, or undefined where it leads with anything else. */
 function restatedRequest(text: string): string | undefined {
   return text.startsWith(REPLAY_HEADER) ? text.slice(REPLAY_HEADER.length).trimStart() : undefined
@@ -83,6 +118,10 @@ function carriesRestatement(text: string): boolean {
 
 /** What of a seam row's text the thread draws: the host's notes cut, what the user typed kept. */
 export function seamText(content: string): string {
+  // A summary the host folded the user's next message into draws that message; one that restates the
+  // request draws nothing, as the restatement's own row does below.
+  const summary = summaryOf(content)
+  if (summary) return summary.after.startsWith(REPLAY_HEADER) ? "" : seamText(summary.after)
   const text = cutSnapshot(content)
   const head = text.trimStart()
   if (isReloadNoticeOnly(head) || carriesRestatement(head)) return ""

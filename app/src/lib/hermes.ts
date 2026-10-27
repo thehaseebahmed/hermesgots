@@ -2257,6 +2257,8 @@ export interface ModelChange {
 /** A point where the host compacted a chat's context, on its own clock. */
 export interface Compaction {
   at: number
+  /** The summary's row, for one made in place, where the plugin names it. */
+  row?: number
   /** The context just before it: the last prompt size the host recorded, and the window it was measured against. */
   tokens?: number
   window?: number
@@ -2318,8 +2320,10 @@ function readCompactions(value: unknown): Compaction[] | undefined {
       typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined
     const tokens = count(row.tokens)
     const window = count(row.window)
+    const summary = typeof row.row === "number" && Number.isInteger(row.row) ? row.row : undefined
     found.push({
       at: row.at,
+      ...(summary !== undefined ? { row: summary } : {}),
       ...(tokens ? { tokens } : {}),
       ...(window ? { window } : {}),
     })

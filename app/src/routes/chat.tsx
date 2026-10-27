@@ -128,7 +128,7 @@ import {
   setActiveProfile,
   updateConversation,
 } from "@/lib/db"
-import { compactionMarks } from "@/lib/compactions"
+import { compactionMarks, compactionOf } from "@/lib/compactions"
 import { dayOf } from "@/lib/days"
 import { moveMarks, openedThread } from "@/lib/move-marks"
 import { undoMove } from "@/lib/moves"
@@ -440,9 +440,7 @@ export function ChatPage({
     if (!id) return
     setLoadingEarlier(true)
     loadEarlierHistory(id)
-      .catch((error) =>
-        toast.error(error instanceof Error ? error.message : "Couldn't load more."),
-      )
+      .catch((error) => toast.error(error instanceof Error ? error.message : "Couldn't load more."))
       .finally(() => setLoadingEarlier(false))
   }, [id])
   const [historyMissing, setHistoryMissing] = useState<string>()
@@ -531,10 +529,13 @@ export function ChatPage({
     [thread, conversation?.modelChanges],
   )
   // Where the host compacted this chat's context: the first message after each carries a divider above it.
-  const compacted = useMemo(
-    () => compactionMarks(thread ?? [], conversation?.compactions),
-    [thread, conversation?.compactions],
-  )
+  // One that fell inside a reply is drawn in the reply, where it happened, and not here.
+  const compacted = useMemo(() => {
+    const seams = (thread ?? []).flatMap((message) => message.seams ?? [])
+    const inside = new Set(seams.map((seam) => compactionOf(seam, conversation?.compactions)))
+    const held = conversation?.compactions?.filter((one) => !inside.has(one))
+    return compactionMarks(thread ?? [], held)
+  }, [thread, conversation?.compactions])
   const moved = useMemo(
     () => moveMarks(thread ?? [], conversation?.moves, threadsDrawnAsCards),
     [thread, conversation?.moves, threadsDrawnAsCards],
@@ -1254,6 +1255,9 @@ export function ChatPage({
                           onShowSubagents={showSubagents}
                           subagentsInline={message.id === lastId && drawsInline}
                           blocks={draws.get(message.id)}
+                          compactions={
+                            message.seams?.length ? conversation?.compactions : undefined
+                          }
                         />
                       </MessageScrollerItem>
                     )

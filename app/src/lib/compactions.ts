@@ -34,3 +34,20 @@ export function compactionMarks(messages: Message[], compactions?: Compaction[])
   }
   return marks
 }
+
+/** How far the host's time for a compaction may sit from its summary row's own, in ms. */
+const SEAM_SLACK_MS = 1_000
+
+/**
+ * The host's record of the compaction a reply's seam marks: by the summary's row where the plugin
+ * named it, else by the summary's time.
+ */
+export function compactionOf(
+  seam: { row: number; at: number },
+  compactions?: Compaction[],
+): Compaction | undefined {
+  return (
+    compactions?.find((one) => one.row === seam.row) ??
+    compactions?.find((one) => one.row === undefined && Math.abs(one.at - seam.at) <= SEAM_SLACK_MS)
+  )
+}

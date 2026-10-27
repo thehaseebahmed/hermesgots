@@ -15,6 +15,7 @@ import { Markdown } from "@/components/chat/markdown"
 import { AgentCards } from "@/components/chat/agent-card"
 import { SubagentLine } from "@/components/chat/subagent-line"
 import { MediaTag } from "@/components/chat/media-image"
+import { Compacted } from "@/components/chat/model-change"
 import { ClarifyCard, PlanApprovedCard } from "@/components/chat/session-cards"
 import { ThinkingLine } from "@/components/chat/thinking-line"
 import { ToolGroup } from "@/components/chat/tool-group"
@@ -28,6 +29,8 @@ import { downloadAttachment } from "@/lib/attachments"
 import { splitAttachments } from "@/lib/attachment-text"
 import { removeQueued, sendQueued } from "@/lib/chat"
 import type { Attachment, Message, ToolEvent } from "@/lib/db"
+import { compactionOf } from "@/lib/compactions"
+import type { Compaction } from "@/lib/hermes"
 import { describeActivity, formatDuration } from "@/lib/format"
 import { COLUMN, REPLY_INSET } from "@/lib/layout"
 import { mediaCell, mediaKind, type MediaCell } from "@/lib/media-kind"
@@ -437,6 +440,8 @@ interface MessageItemProps {
   onShowSubagents?: () => void
   /** Whether this row draws the count beside its activity words, rather than leaving it to the foot. */
   subagentsInline?: boolean
+  /** The host's record of this chat's compactions, which says how full the context was at each. */
+  compactions?: Compaction[]
 }
 
 /**
@@ -452,6 +457,7 @@ export const MessageItem = memo(function MessageItem({
   subagents,
   onShowSubagents,
   subagentsInline,
+  compactions,
 }: MessageItemProps) {
   // Replies type out a word at a time, however Hermes delivers them.
   const content = useReveal(message.role === "assistant" ? message.content : "")
@@ -566,7 +572,14 @@ export const MessageItem = memo(function MessageItem({
 
   // An answered approval and each steer split the reply so they sit where they happened: what
   // Hermes said and ran before, the card or the user's message, then what came after.
-  const breaks: { key: string; offset: number; time: number; node: ReactNode }[] = []
+  const breaks: {
+    key: string
+    offset: number
+    time: number
+    /** How many of the reply's calls came before it, where the transcript says. */
+    tools?: number
+    node: ReactNode
+  }[] = []
   if (approval?.resolved && approval.contentOffset !== undefined)
     breaks.push({
       key: "approval",
@@ -581,25 +594,34 @@ export const MessageItem = memo(function MessageItem({
       time: steer.at,
       node: <SteerBubble text={steer.text} />,
     })
+  for (const seam of message.seams ?? [])
+    breaks.push({
+      key: seam.id,
+      offset: seam.contentOffset,
+      time: seam.at,
+      tools: seam.toolsBefore,
+      node: <Compacted compaction={compactionOf(seam, compactions) ?? { at: seam.at }} />,
+    })
   breaks.sort((a, b) => a.offset - b.offset || a.time - b.time)
   const segments: Segment[] = []
   let start = 0
-  let since = -Infinity
-  for (const b of [...breaks, { offset: content.length, time: Infinity }]) {
+  let since: { time: number; tools?: number } = { time: -Infinity }
+  for (const b of [...breaks, { offset: content.length, time: Infinity, tools: undefined }]) {
     const end = Math.min(Math.max(b.offset, start), content.length)
     segments.push({
       start,
       end,
-      tools: tools.filter((tool) => {
+      tools: tools.filter((tool, index) => {
         const at = tool.contentOffset ?? 0
-        return (
-          (at > start || (at === start && tool.startedAt > since)) &&
-          (at < end || (at === end && tool.startedAt <= b.time))
-        )
+        // A call at the offset a break sits on is told apart by the transcript's own count where it
+        // has one, and by when it started otherwise.
+        const after = since.tools !== undefined ? index >= since.tools : tool.startedAt > since.time
+        const before = b.tools !== undefined ? index < b.tools : tool.startedAt <= b.time
+        return (at > start || (at === start && after)) && (at < end || (at === end && before))
       }),
     })
     start = end
-    since = b.time
+    since = { time: b.time, tools: b.tools }
   }
 
   const thinkingBySegment = new Map<number, RunPart[]>()

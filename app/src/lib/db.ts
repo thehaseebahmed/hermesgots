@@ -406,6 +406,18 @@ export interface Steer {
   at: number
 }
 
+/** Where the host compacted the context inside a reply: the line the reply is drawn split at. */
+export interface Seam {
+  id: string
+  /** The summary's own row, which the host's record of the compaction names. */
+  row: number
+  /** Where in the reply's text it fell, and how many of its calls had run, so it sits there. */
+  contentOffset: number
+  toolsBefore: number
+  /** The summary row's own time, which is the time the host recorded the compaction at. */
+  at: number
+}
+
 /** `queued` is a user message waiting for the current reply to finish. */
 export type MessageStatus = "triaging" | "queued" | "streaming" | "done" | "error" | "stopped"
 
@@ -431,6 +443,8 @@ export interface Message {
   clarify?: ClarifyRequest
   /** A reply's steers, in order. */
   steers?: Steer[]
+  /** The compactions that fell inside this reply, from the transcript. */
+  seams?: Seam[]
   status: MessageStatus
   /** Latest `hermes.status` text while streaming, or the error text. */
   statusText?: string
