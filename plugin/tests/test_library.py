@@ -325,9 +325,9 @@ class InstructionsTest(unittest.TestCase):
         text = prompt_builder.session_prompt(self.record)
         scratch = f'"$HERMES_SAFE_ROOT/.scratch/{self.record["branch"]}"'
         self.assertIn(scratch, text)
-        self.assertIn("`library_add` tool", text, "the rule that files them is told too")
+        self.assertIn("**library_add**", text, "the rule that files them is told too")
         self.assertLess(
-            text.index("`library_add` tool"),
+            text.index("**library_add**"),
             text.index(scratch),
             "the rule stands above the section that names where the session works",
         )
@@ -356,46 +356,48 @@ class InstructionsTest(unittest.TestCase):
         # The Gots section is the same for every session, so its rules are told together and above
         # the section that names this one, which is what makes the opening shared (ADR 0028).
         text = prompt_builder.session_prompt(self.record)
-        self.assertIn("Keep the user in the loop as you work", text)
-        self.assertLess(text.index("`library_add` tool"), text.index("`pull_request` tool"))
-        self.assertLess(text.index("`pull_request` tool"), text.index("Keep the user in the loop"))
-        self.assertLess(text.index("Keep the user in the loop"), text.index("## Current Session"))
+        self.assertIn("Keep the todo list current", text, "the guidelines are told together")
+        self.assertLess(text.index("## Do"), text.index("## Don't"))
+        self.assertLess(text.index("## Don't"), text.index("## Tools"))
+        self.assertLess(text.index("**library_add**"), text.index("**pull_request**"))
+        self.assertLess(text.index("**pull_request**"), text.index("## Current Session"))
 
     def test_the_block_names_the_rhythm_rules(self) -> None:
         text = prompt_builder.session_prompt(self.record)
         self.assertIn("short update between checkpoints", text)
-        self.assertIn("`todo_list` tool religiously", text)
-        self.assertIn("Leave it in its final state", text)
+        self.assertIn("Keep the todo list current", text)
+        self.assertIn("before you commit it", text, "the diff is read before it goes in")
         self.assertIn("Don't narrate each edit", text)
 
     def test_a_record_without_worktrees_has_no_block(self) -> None:
         # The same gate as the ship instructions: a record with no repos gets neither.
         no_repos = {**self.record, "repos": []}
         text = prompt_builder.session_prompt(no_repos)
-        self.assertNotIn("Keep the user in the loop", text)
-        self.assertNotIn("`pull_request` tool", text)
+        self.assertNotIn("Keep the todo list current", text)
+        self.assertNotIn("**pull_request**", text)
 
     def test_the_mock_repeats_the_instructions_word_for_word(self) -> None:
         # The mock is a standalone Node process, so its copy can't be imported; the e2e flows read
         # the text it serves, so a drift there tests a prompt no session gets. Compared the way
         # test_push_kinds compares its lists to the app's. Only the blocks meant to be verbatim:
         # the plan is a template, and the wording inside it is Hermes's own.
+        import json
         import re
 
         app = Path(__file__).resolve().parents[2] / "app"
         mock_js = (app / "scripts" / "mock-hermes.mjs").read_text()
         for name, block in (
             ("GOTS_OPENING", prompt_builder._GOTS_OPENING),
+            ("DO_RULES", prompt_builder._DO_RULES),
+            ("DONT_RULES", prompt_builder._DONT_RULES),
+            ("LIBRARY_RULES", prompt_builder._LIBRARY_RULES),
             ("PR_INSTRUCTIONS", prompt_builder._PR_RULES),
-            ("DONE_INSTRUCTIONS", prompt_builder._DONE_INSTRUCTIONS),
-            ("TODO_INSTRUCTIONS", prompt_builder._TODO_INSTRUCTIONS),
-            ("PROGRESS_UPDATES_INSTRUCTIONS", prompt_builder._PROGRESS_UPDATES_INSTRUCTIONS),
         ):
             with self.subTest(block=name):
-                found = re.search(rf'^const {name} = "(.*)"$', mock_js, re.M)
+                found = re.search(rf'^\s*const {name} = "(.*)"$', mock_js, re.M)
                 if found is None:
                     self.fail(f"{name} is not in the mock")
-                self.assertEqual(found.group(1), block)
+                self.assertEqual(json.loads(f'"{found.group(1)}"'), block)
 
 
 if __name__ == "__main__":

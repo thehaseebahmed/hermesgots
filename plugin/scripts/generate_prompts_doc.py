@@ -60,9 +60,9 @@ MULTI = {**SINGLE, "repos": [_repo("web"), _repo("api")]}
 VARIANTS = [
     (
         "Single repo",
-        "The common case: the base prompt — its heading, then the Tools section with the "
-        "library_add and pull_request subsections — and last Current Session, naming its "
-        "worktree, its pull request template and the directory throwaway work goes in.",
+        "The common case: the base prompt — its heading, the guidelines and the tools — and last "
+        "Current Session, naming its worktree, its pull request template and the directory "
+        "throwaway work goes in.",
         SINGLE,
     ),
     (
@@ -210,14 +210,14 @@ the same sections, in the same order. Dictation's are the calls the app's speech
 bot's own model — one to tidy each phrase as the user speaks, one to tidy a finished take, and the
 prompt the speech model itself is given — and they are the last three sections.
 
-Every prompt is told in the same sections, in the same order. `# You are Gots!` opens the base prompt,
-and `## Tools` under it gives each tool the run can use a subsection of its own — `### library_add`
-for the files it makes, `### pull_request` for shipping the work — followed by how to keep the todo
-list and the user in step. Then comes the mode: `## Plan mode` for a planning session, `## Away From
-Keyboard` for an AFK run, with `## User's Workflow` beneath it. Last is `## Current Session`, with
-everything only this session knows: the issue or stage it works, its worktrees, its repos' pull
-request templates and the directory throwaway work goes in. The fixed sections come first so two runs
-share their opening (ADR 0028).
+Every prompt is told in the same parts, in the same order. `# You are Gots!` opens the base prompt
+with an overview of what the bot is, then `## Do` and `## Don't` — the guidelines it works by, a line
+each — then `## Tools`, where every tool the run may use gets a line saying the use it is for
+(`library_add` for the files it makes, `pull_request` for shipping the work). Then comes the mode:
+`## Plan mode` for a planning session, `## Away From Keyboard` for an AFK run, with `## User's
+Workflow` beneath it. Last is `## Current Session`, with everything only this session knows: the
+issue or stage it works, its worktrees, its repos' pull request templates and the directory
+throwaway work goes in. The fixed sections come first so two runs share their opening (ADR 0028).
 
 Every project session's run carries the prompt `prompt_builder.session_prompt(record)` builds for
 its record; plan sessions get that mode's section as well. An AFK run carries

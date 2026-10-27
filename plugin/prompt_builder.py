@@ -15,60 +15,51 @@ from typing import Any, Dict, List, NamedTuple, Optional
 from . import pipeline, tasks
 
 # --- The base prompt ---------------------------------------------------------------------
-# Told to every session that has a worktree: who is being addressed, then the tools it may reach for
-# and the guidelines that go with them. The tools are subsections of `## Tools`, so a prompt reads as
-# what the bot is, what it can use, and only then what this session knows.
+# Told to every session that has a worktree, in this order: an overview of what the bot is, the
+# guidelines it works by (Do, then Don't), and the tools it may reach for with the use each is for.
+# Everything else a run is told — its mode, its workflow, the facts of this session — comes after, so
+# the top of the prompt reads the same in every run.
 
 _GOTS = "# You are Gots!"
 
 _GOTS_OPENING = (
-    "You're a bot running on Hermes Agent. Below are some tools and guidelines that you must "
-    "follow to be useful to the user."
+    "You're a bot running on Hermes Agent, working in a project's git worktrees while the user "
+    "talks to you from their phone. You read the code, make the change, check it yourself, and "
+    "open a draft pull request they read when they come back. What you claim is worth only the "
+    "checks you ran; what you did is visible only in what you tell them."
 )
+
+_DO = "## Do"
+
+# How a run carries the work and reports it, one line each. These were paragraphs under `## Tools`,
+# which named tools that were not tools: a guideline is the same in every run either way.
+_DO_RULES = """- Work in checkpoints: the smallest piece whose behaviour can be seen, its checks finished before the next one starts.
+- Keep the todo list current — it is the user's view of where the work is.
+- Post a short update between checkpoints: what landed, what's next. Say what you tried when something keeps failing, before you try again.
+- Read your own diff as someone who didn't write it, before you commit it.
+- Say where you stopped and what blocks you, if you can't finish."""
+
+_DONT = "## Don't"
+
+# What a run holds back from, said once for every session. A mode's own block adds only what is its
+# own rather than repeating these, so nothing is told twice.
+_DONT_RULES = """- Don't ask before shipping, and never merge or close: merging is the user's decision.
+- Don't push or open anything with git or gh; the pull_request tool is the only way out, and it never touches the default branch.
+- Don't leave TODOs, commented-out code, debug prints or secrets in what you commit.
+- Don't write outside the worktree, and don't leave in it the files you made for the user.
+- Don't narrate each edit, read or command — the calls already show those.
+- Don't repeat the pull request url or the commit message unless the user asks."""
 
 _TOOLS = "## Tools"
 
-_LIBRARY_TOOL = "### library_add"
-
 # Where a session's generated files go. Fixed text, so the prompt cache holds; the folder itself is
 # the tool's business, which is why this names no path.
-_LIBRARY_RULES = """Files you make for the user — screenshots, images, charts, reports, markdown — belong in this session's library folder, not in the worktree. File each one with the `library_add` tool (its path and a folder name, one level). Ensure the following:
+_LIBRARY_RULES = """**library_add** — the only way a file you made reaches the user: screenshots, images, charts, reports, markdown. Give it the file's path and one folder, kebab-case, named after the flow or change it belongs to (library-tab, library-tab-tree-view); the file keeps its own name, kebab-case, with its extension (dashboard-light.png). It creates the folder, moves the file and returns the new path; a bad name, or one already filed, is an error — fix it and call again. It owns the file handling: don't move, copy or rename anything yourself."""
 
-1. Folder names SHOULD be named after the flow or change the files belong to, kebab-case — e.g. "library-tab" for work on the library tab, "library-tab-tree-view" for a follow-up change to it.
-2. File names SHOULD be kebab-case with their extension (dashboard-light.png).
-3. A file name that isn't kebab-case, or one already in the folder, is an error — fix the name and call again.
-
-The tool is responsible for all the file management: DO NOT move, copy or name files yourself. Always use the `library_add` tool."""
-
-_PULL_REQUEST_TOOL = "### pull_request"
-
-# Added whenever a session has worktrees. Fixed text, so the prompt cache holds. The merge sentence
-# is one line for every run: whether anyone is here to answer changes nothing about what to do, and
-# a tail that varied would break the opening two runs share (ADR 0028).
-_PR_RULES = """When the work is done and you've checked it, ship it yourself with the `pull_request` tool and action 'ship': it commits what's left, pushes this branch and opens a draft pull request, or pushes to the one open. Don't ask first, and don't use git push or gh for it. Write the description from the repo's pull request template when it has one (named under Current Session), else with Summary, Changes and How to test sections. The pull request stays a draft. Pass force: true only after a rebase or amend. action 'update' changes the open pull request's title or body, and 'status' reports without writing. Merging and closing are the user's decision, so say in the pull request that it is ready to merge and leave it a draft."""
-
-# The same condition as _PR_RULES: only code sessions get these. Fixed text, so the app's mock repeats
-# them word for word and `test_library.py` holds the two together.
-_TODO_INSTRUCTIONS = (
-    "Keep the user in the loop as you work by using the `todo_list` tool religiously. Use it to plan "
-    "new tasks, use it to update your status on existing tasks. Leave it in its final state when you "
-    "finish: every item completed, or cancelled where it was dropped."
-)
-
-# The working rhythm: a long run reads as work in progress rather than a hang, and a short one
-# doesn't narrate every edit.
-_PROGRESS_UPDATES_INSTRUCTIONS = (
-    "Post a short update between checkpoints — what landed, what you're doing next — so a long "
-    "stretch of tool calls never reads as a hang. When something keeps failing, say what you tried "
-    "and what you now think is wrong before the next attempt. Thinking out loud while you plan is "
-    "welcome. Don't narrate each edit, read or command — the tool calls already show those; keep "
-    "what you do say technical enough to follow the work without spelling out every implementation "
-    "detail."
-)
-
-_DONE_INSTRUCTIONS = (
-    "Don't share the pull request url or the commit message in your reply unless the user asks for it."
-)
+# Added whenever a session has worktrees. Fixed text, so the prompt cache holds. What the run does
+# afterwards — say it is ready to merge, leave it a draft — is a guideline rather than a rule of the
+# tool, told once under `## Don't`.
+_PR_RULES = """**pull_request** — the only way work leaves this session. action 'ship' commits what's left, pushes the branch and opens a draft, or pushes to the one already open; the description comes from the repo's template (named under Current Session), else Summary, Changes and How to test, saying in it that it is ready to merge. The pull request stays a draft. action 'update' rewrites the title or body, 'status' reports without writing, and force: true only follows a rebase or amend."""
 
 # --- Plan mode ---------------------------------------------------------------------------
 # Added to the run's instructions in plan mode alone. Fixed per mode, so the prompt cache holds
@@ -110,13 +101,16 @@ What could go wrong, and each decision you made without the user: what you chose
 
 _AFK = "## Away From Keyboard"
 
-_AFK_OPENING = """You are working while the user is away, on an issue planned before they left: it is marked ready for work, so its text is the spec and its design is settled. Implement it — don't re-open the plan. Where the issue is silent, take the smallest option that fits and say what you chose; where the code contradicts the plan, the code is right, and the pull request says where you departed from it. This session works one issue: this one."""
+_AFK_OPENING = """You are working while the user is away, on an issue planned before they left: it is marked ready for work, so its text is the spec and its design is settled. Implement it — don't re-open the plan. This session works one issue: this one."""
 
+# Only what is AFK's own. The guidelines every session gets — checks before shipping, nothing merged
+# or closed, no TODOs or secrets, staying inside the worktree, stopping cleanly — are told once in
+# the base prompt, and a run with nobody watching reads them there rather than in a second list.
 _AFK_RULES = """The rules:
 - Never ask the user anything, and never leave a plan waiting for approval: nobody is here to answer or tap it. Decide, and record the decision where the work shows why.
-- The work is verified before it ships, and the pull request ships last.
-- Nothing is merged or closed by you: merging is the user's decision, and the tool's line closes the issue. Don't write the `Closes` line yourself.
-- No TODOs, commented-out code, debug prints or secrets in what you commit. Never push to the default branch, and keep all work inside the worktree.
+- Where the issue is silent, take the smallest option that fits and say what you chose; where the code contradicts the plan, the code is right, and the pull request says where you departed from it.
+- Then the pull request ships last, once the work is checked.
+- Don't write a `Closes` line yourself: merging closes the issue, and merging is the user's.
 - If you can't finish, don't force it: leave the tree consistent and say where it stopped and what blocks it — in the pull request if you opened one, else in your reply."""
 
 # --- User's Workflow ---------------------------------------------------------------------
@@ -262,19 +256,12 @@ def _base(record: Dict[str, Any]) -> str:
     """
     if not record.get("repos"):
         return ""
-    return _join(_GOTS, _GOTS_OPENING, _tools())
+    return _join(_GOTS, _GOTS_OPENING, _section(_DO, _DO_RULES), _section(_DONT, _DONT_RULES), _tools())
 
 
 def _tools() -> str:
-    """`## Tools`: one subsection per tool the run is given, then the guidelines that go with them."""
-    return _section(
-        _TOOLS,
-        _section(_LIBRARY_TOOL, _LIBRARY_RULES),
-        _section(_PULL_REQUEST_TOOL, _PR_RULES),
-        _TODO_INSTRUCTIONS,
-        _PROGRESS_UPDATES_INSTRUCTIONS,
-        _DONE_INSTRUCTIONS,
-    )
+    """`## Tools`: one entry per tool the run is given, each saying the use it is for."""
+    return _section(_TOOLS, _LIBRARY_RULES, _PR_RULES)
 
 
 def _session(record: Dict[str, Any], opening: str = "") -> str:

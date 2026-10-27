@@ -1108,24 +1108,21 @@ const PENDING_CHECK_S = 12
 
 /** Project sessions as the plugin's memento.db holds them, by Hermes session id. */
 const projectSessions = new Map()
-// The plugin's pull request rules (prompt_builder._PR_RULES), word for word.
+// The plugin's pull request rule (prompt_builder._PR_RULES), word for word.
 // test_library.py matches this line word for word, so it stays one line.
 // prettier-ignore
-const PR_INSTRUCTIONS = "When the work is done and you've checked it, ship it yourself with the `pull_request` tool and action 'ship': it commits what's left, pushes this branch and opens a draft pull request, or pushes to the one open. Don't ask first, and don't use git push or gh for it. Write the description from the repo's pull request template when it has one (named under Current Session), else with Summary, Changes and How to test sections. The pull request stays a draft. Pass force: true only after a rebase or amend. action 'update' changes the open pull request's title or body, and 'status' reports without writing. Merging and closing are the user's decision, so say in the pull request that it is ready to merge and leave it a draft."
+const PR_INSTRUCTIONS = "**pull_request** \u2014 the only way work leaves this session. action 'ship' commits what's left, pushes the branch and opens a draft, or pushes to the one already open; the description comes from the repo's template (named under Current Session), else Summary, Changes and How to test, saying in it that it is ready to merge. The pull request stays a draft. action 'update' rewrites the title or body, 'status' reports without writing, and force: true only follows a rebase or amend."
 
 // The plugin's base-prompt opening (prompt_builder._GOTS_OPENING), word for word.
-const GOTS_OPENING = "You're a bot running on Hermes Agent. Below are some tools and guidelines that you must follow to be useful to the user."
+const GOTS_OPENING = "You're a bot running on Hermes Agent, working in a project's git worktrees while the user talks to you from their phone. You read the code, make the change, check it yourself, and open a draft pull request they read when they come back. What you claim is worth only the checks you ran; what you did is visible only in what you tell them."
 
-// The plugin's todo guidance (prompt_builder._TODO_INSTRUCTIONS), word for word.
-const TODO_INSTRUCTIONS = "Keep the user in the loop as you work by using the `todo_list` tool religiously. Use it to plan new tasks, use it to update your status on existing tasks. Leave it in its final state when you finish: every item completed, or cancelled where it was dropped."
-// The plugin's done-work emphasis (prompt_builder._DONE_INSTRUCTIONS), word for word.
-// test_library.py matches this line word for word, so it stays one line.
+// The plugin's guidelines (prompt_builder._DO_RULES and _DONT_RULES), word for word: how a run
+// carries the work and what it holds back from, told once for every session.
+// test_library.py matches these lines word for word, so they stay one line each.
 // prettier-ignore
-const DONE_INSTRUCTIONS = "Don't share the pull request url or the commit message in your reply unless the user asks for it."
-// The plugin's working-rhythm guidance (prompt_builder._PROGRESS_UPDATES_INSTRUCTIONS), word for word.
-// test_library.py matches this line word for word, so it stays one line.
+const DO_RULES = "- Work in checkpoints: the smallest piece whose behaviour can be seen, its checks finished before the next one starts.\n- Keep the todo list current — it is the user's view of where the work is.\n- Post a short update between checkpoints: what landed, what's next. Say what you tried when something keeps failing, before you try again.\n- Read your own diff as someone who didn't write it, before you commit it.\n- Say where you stopped and what blocks you, if you can't finish."
 // prettier-ignore
-const PROGRESS_UPDATES_INSTRUCTIONS = "Post a short update between checkpoints — what landed, what you're doing next — so a long stretch of tool calls never reads as a hang. When something keeps failing, say what you tried and what you now think is wrong before the next attempt. Thinking out loud while you plan is welcome. Don't narrate each edit, read or command — the tool calls already show those; keep what you do say technical enough to follow the work without spelling out every implementation detail."
+const DONT_RULES = "- Don't ask before shipping, and never merge or close: merging is the user's decision.\n- Don't push or open anything with git or gh; the pull_request tool is the only way out, and it never touches the default branch.\n- Don't leave TODOs, commented-out code, debug prints or secrets in what you commit.\n- Don't write outside the worktree, and don't leave in it the files you made for the user.\n- Don't narrate each edit, read or command — the calls already show those.\n- Don't repeat the pull request url or the commit message unless the user asks."
 const MODES = ["accept_edits", "auto", "plan"]
 
 // The sessions each session delegated to with delegate_task (the plugin reads them from state.db),
@@ -5524,24 +5521,23 @@ http
           : `You are working in git worktrees of this project's repos, all on branch ${record.branch}. Keep all work inside these directories:\n${record.repos.map((r, i) => `- ${r.name} at ${r.path}${i === 0 ? " (your current directory)" : ""}`).join("\n")}`
       // The plugin's library rule (prompt_builder._LIBRARY_RULES), word for word: it names no path,
       // because the folder is the tool's business.
-      const LIBRARY_RULES = "Files you make for the user — screenshots, images, charts, reports, markdown — belong in this session's library folder, not in the worktree. File each one with the `library_add` tool (its path and a folder name, one level). Ensure the following:\n\n1. Folder names SHOULD be named after the flow or change the files belong to, kebab-case — e.g. \"library-tab\" for work on the library tab, \"library-tab-tree-view\" for a follow-up change to it.\n2. File names SHOULD be kebab-case with their extension (dashboard-light.png).\n3. A file name that isn't kebab-case, or one already in the folder, is an error — fix the name and call again.\n\nThe tool is responsible for all the file management: DO NOT move, copy or name files yourself. Always use the `library_add` tool."
+      const LIBRARY_RULES = "**library_add** — the only way a file you made reaches the user: screenshots, images, charts, reports, markdown. Give it the file's path and one folder, kebab-case, named after the flow or change it belongs to (library-tab, library-tab-tree-view); the file keeps its own name, kebab-case, with its extension (dashboard-light.png). It creates the folder, moves the file and returns the new path; a bad name, or one already filed, is an error — fix it and call again. It owns the file handling: don't move, copy or rename anything yourself."
       // The session's own line, prompt_builder._scratch_line, under the last section.
       const scratchLine = (record) =>
         `For temporary or throwaway work, use "$HERMES_SAFE_ROOT/.scratch/${record.branch}" as your temporary directory. DO NOT place your files outside of it.`
       // Told the way the plugin builds it (ADR 0028), the fixed sections first and the session's
-      // facts last: who Gots is, then `## Tools` with a subsection per tool, then the mode's block.
+      // facts last: who Gots is, the guidelines, the tools, then the mode's block.
       const instructions = (record) =>
         [
           "# You are Gots!",
           GOTS_OPENING,
+          "## Do",
+          DO_RULES,
+          "## Don't",
+          DONT_RULES,
           "## Tools",
-          "### library_add",
           LIBRARY_RULES,
-          "### pull_request",
           PR_INSTRUCTIONS,
-          TODO_INSTRUCTIONS,
-          PROGRESS_UPDATES_INSTRUCTIONS,
-          DONE_INSTRUCTIONS,
           record.mode === "plan" ? PLAN_INSTRUCTIONS : "",
           "## Current Session",
           worktreeLine(record),

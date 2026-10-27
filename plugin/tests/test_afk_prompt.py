@@ -66,7 +66,7 @@ class AfkPromptTests(unittest.TestCase):
             "its text is the spec",
             "Never ask the user anything",
             "the pull request ships last",
-            "Nothing is merged or closed by you",
+            "never merge or close",
             "secrets",
             "leave the tree consistent",
         ):
@@ -79,7 +79,7 @@ class AfkPromptTests(unittest.TestCase):
             1,
             "the guard is told once, in the section every run shares",
         )
-        self.assertIn("guidelines that you must follow", prompt_builder._GOTS_OPENING)
+        self.assertIn("What you claim is worth only the checks you ran", prompt_builder._GOTS_OPENING)
         self.assertLess(
             text.index(prompt_builder._GOTS_OPENING),
             text.index(prompt_builder._AFK_OPENING),
@@ -112,7 +112,9 @@ class AfkPromptTests(unittest.TestCase):
     def test_the_brief_is_told_before_the_prompt(self) -> None:
         text = self.text()
         self.assertLess(
-            text.index("The rules:"), text.index("Work in checkpoints"), "the fixed points come first"
+            text.index("The rules:"),
+            text.index(prompt_builder.DEFAULT_PROMPT),
+            "the fixed points come first",
         )
 
     def test_a_projects_prompt_is_told_in_place_of_the_default(self) -> None:
@@ -157,7 +159,7 @@ class AfkPromptTests(unittest.TestCase):
     def test_it_keeps_the_sessions_own_prompt(self) -> None:
         text = self.text()
         self.assertIn("You are working in a git worktree of mock-user/memento", text)
-        self.assertIn("`pull_request` tool", text, "the session's shipping rules still hold")
+        self.assertIn("**pull_request**", text, "the session's shipping rules still hold")
         self.assertIn(
             '$HERMES_SAFE_ROOT/.scratch/hermes/afk-265',
             text,
@@ -198,6 +200,8 @@ class SectionTests(unittest.TestCase):
         text = prompt_builder.afk_prompt(RECORD, TASK)
         headings = (
             "# You are Gots!",
+            "## Do",
+            "## Don't",
             "## Tools",
             "## Away From Keyboard",
             "## User's Workflow",
