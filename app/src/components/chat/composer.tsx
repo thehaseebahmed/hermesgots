@@ -194,8 +194,6 @@ export function Composer({
     joinText(botName, dictationHint ?? ""),
     draftKey,
     dictationWords,
-    // A take's words land here, whether they came whole or with a phrase still out: the composer
-    // places them and the log records them (ADR 0060).
     (heard, spokenMs) => {
       placeHeard.current(heard)
       void writeDictation(connection, heard, spokenMs)

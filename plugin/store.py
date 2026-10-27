@@ -134,6 +134,12 @@ def _carry_hold(conn: sqlite3.Connection, row: Any) -> None:
     )
 
 
+# Every read of the log, off one index: a page is ordered by `(seen_at, id)` — which `(profile,
+# seen_at)` could only answer by sorting the profile's whole log to hand back 50 — and the totals add
+# two integers from the same rows, which fetching every row's words cost (ADR 0060).
+CREATE_DICTATION_READ = """CREATE INDEX IF NOT EXISTS dictation_read
+               ON dictations (profile, seen_at, id, words, ms)"""
+
 # A finished take, as both the first create and the rebuild need it.
 CREATE_DICTATIONS = """CREATE TABLE IF NOT EXISTS dictations (
                    id TEXT NOT NULL,
@@ -717,14 +723,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute("UPDATE dictations SET seen_at = at")
         # The page no longer reads `at`, so its index would only cost every write.
         conn.execute("DROP INDEX IF EXISTS dictation_time")
-        # v47: one index for all three reads of the log. A page is ordered by `(seen_at, id)`, which
-        # `(profile, seen_at)` could only answer by sorting every row of the profile to hand back 50;
-        # the totals add two integers off the same rows and fetched each row's words to do it. With
-        # the id and the two counts in the key, the page walks the index in order and the totals are
-        # a covering read: one B-tree, and nothing sorted.
+        # v47: one index for all three reads of the log (CREATE_DICTATION_READ).
         conn.execute("DROP INDEX IF EXISTS dictation_order")
-        conn.execute(
-            """CREATE INDEX IF NOT EXISTS dictation_read
-                   ON dictations (profile, seen_at, id, words, ms)"""
-        )
+        conn.execute(CREATE_DICTATION_READ)
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

@@ -2,11 +2,11 @@
  * Settings › Dictation over a seeded mirror and faked hosts, as ADR 0060 draws it: three tabs in one
  * screen, History first; its rows newest first, a card of them under each month's caption, each row
  * the words over the bot and the count; a page drawn at a time and more appended at its end; a row
- * opening its sheet with the whole dictation, a Copy
- * that copies it and a Delete that takes it off its host; every bot listed in the list's own order,
- * the ones whose host can't dictate disabled with the host's reason; the totals pooled over the bots
- * that reported; and opening the screen reconciling a bot whose host has more than the mirror holds,
- * while a host without the routes leaves the mirror and its cached totals alone.
+ * opening its sheet with the whole dictation, a Copy that copies it and a Delete that takes it off
+ * its host; every bot listed in the list's own order, the ones whose host can't dictate disabled
+ * with the host's reason; the totals pooled over the bots that reported; and opening the screen
+ * reconciling a bot whose host has more than the mirror holds, while a host without the routes
+ * leaves the mirror and its cached totals alone.
  */
 import assert from "node:assert/strict"
 import test from "node:test"

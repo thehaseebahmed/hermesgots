@@ -39,6 +39,21 @@ def _profile(value: Optional[str]) -> str:
     return (value or "").strip()
 
 
+def _seen_at(conn: sqlite3.Connection, profile: str) -> int:
+    """When this host heard a take: the log's own clock, in the unit it is stamped in.
+
+    Held above the profile's last clear, because a device reads a row at or below that stamp as one
+    the clear took away — a take landing in the stamp's own millisecond would otherwise be dropped
+    by every mirror that has not seen it yet (ADR 0060).
+    """
+    cleared = conn.execute(
+        "SELECT cleared_at FROM dictation_state WHERE profile = ?", (profile,)
+    ).fetchone()
+    if cleared is None:
+        return now_ms()
+    return max(now_ms(), int(cleared["cleared_at"]) + 1)
+
+
 @contextmanager
 def _transaction(conn: sqlite3.Connection) -> Iterator[None]:
     """One write, committed or rolled back whole: a close alone leaves the rollback implicit."""
@@ -97,21 +112,11 @@ def record(path: Path, profile: Optional[str], body: Dict[str, Any]) -> Dict[str
     conn = open_rows(path)
     try:
         with _transaction(conn):
-            # The log's clock is the host's: `seen_at` is when the row arrived, and it is what the
-            # order, the pages and the fingerprint read (ADR 0060). A take cannot have been said after
-            # the host heard it, so a device clock running into the future is clamped to the moment it
-            # landed rather than trusted — nothing in the log then claims a time ahead of this machine's.
-            # It is also held above this profile's last clear: a device reads a row at or below that
-            # stamp as one the clear took away, so a take landing in the stamp's own millisecond would
-            # be dropped by every mirror that has not seen it yet.
-            cleared = conn.execute(
-                "SELECT cleared_at FROM dictation_state WHERE profile = ?", (name,)
-            ).fetchone()
-            seen_at = max(now_ms(), int(cleared["cleared_at"]) + 1) if cleared is not None else now_ms()
+            seen_at = _seen_at(conn, name)
+            # A take cannot have been said after the host heard it: a device clock running ahead is
+            # clamped rather than trusted, so nothing here claims a time after this machine's.
             if row["at"] > seen_at:
                 row["at"] = seen_at
-            # A retry of the same entry finds the row it wrote and changes nothing, which is what makes
-            # the app's write safe to fire again after a dropped connection.
             conn.execute(
                 "INSERT OR IGNORE INTO dictations (id, profile, text, words, ms, at, seen_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",

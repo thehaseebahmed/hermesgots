@@ -82,8 +82,6 @@ async function post(config: HermesConfig, row: DictationRecord): Promise<Posting
     const answer = await postDictation(config, hostOf(row), AbortSignal.timeout(WRITE_TIMEOUT_MS))
     return { row, answer: answer ?? null, refused: false }
   } catch (error) {
-    // The host read the words and said no. Asking again on every open asks the same question of the
-    // same bytes, so the row is marked and left to this device alone.
     if (error instanceof HermesError && error.status !== undefined && REFUSED.has(error.status))
       return { row, answer: null, refused: true }
     throw error
@@ -117,7 +115,7 @@ async function applyPostings(postings: Posting[]) {
 /** How many takes are handed over at once: an upgrade's backlog is a queue, not a burst. */
 const POSTS_AT_ONCE = 4
 
-/** Answers what each take came to, four at a time: an upgrade's backlog is a queue, not a burst. */
+/** Answers what each take came to, a batch at a time. */
 async function postAll(config: HermesConfig, rows: DictationRecord[]): Promise<Posting[]> {
   const postings: Posting[] = []
   for (let index = 0; index < rows.length; index += POSTS_AT_ONCE) {
@@ -234,6 +232,25 @@ function fromHost(
 }
 
 /**
+ * Whether an upgrade's backlog can settle without being posted: a mirror that already says what its
+ * host says owes it nothing, so a whole log costs one write where the host holds its takes already.
+ * Only rows the previous build wrote can settle this way — a row this build wrote and never
+ * confirmed is one the host may still be missing.
+ */
+async function settleLegacy(
+  key: string,
+  rows: DictationRecord[],
+  mirror: DictationRecord[],
+  host: HostAnswer,
+) {
+  if (!rows.every((row) => row.posted === undefined)) return false
+  if (!agrees(fingerprintOf(mirror, host.clearedAt), host)) return false
+  await markPosted(rows)
+  await cacheStats(key, host)
+  return true
+}
+
+/**
  * Brings one bot's mirror up to what its host says, and caches the answer for the stats.
  *
  * The fingerprint is the gate: a device that already agrees does nothing. Divergence is then handled
@@ -246,24 +263,13 @@ export async function reconcileDictations(server: Server) {
   if (missing.cooling(key)) return
 
   let mirror = await db.dictationLog.where("connection").equals(key).toArray()
-  // A take whose host write never answered belongs to the mirror alone, and a take its host refused
-  // is one this device keeps on its own, so neither is handed over again.
   const unconfirmed = mirror.filter((row) => !row.posted && !row.rejected)
 
   let host = await askStats(config, key)
   if (!host) return
 
   if (unconfirmed.length) {
-    // The first open after an upgrade asks before it posts: a mirror that already says what its host
-    // says owes it nothing, so a whole log settles in one write instead of a POST per take the host
-    // already holds. Rows the previous build wrote carry no answer either way, which is why they are
-    // the ones this can settle; a row this build wrote and never confirmed is posted.
-    const legacy = unconfirmed.every((row) => row.posted === undefined)
-    if (legacy && agrees(fingerprintOf(mirror, host.clearedAt), host)) {
-      await markPosted(unconfirmed)
-      await cacheStats(key, host)
-      return
-    }
+    if (await settleLegacy(key, unconfirmed, mirror, host)) return
     const postings = await postAll(config, unconfirmed)
     const changed = await applyPostings(postings)
     mirror = mirror.map((row) => changed.get(row.id) ?? row)
@@ -272,7 +278,6 @@ export async function reconcileDictations(server: Server) {
     if (postings.some((posting) => posting.answer)) host = (await askStats(config, key)) ?? host
   }
 
-  // A clear needs no diff: everything this device holds from before the stamp is gone.
   const gone = clearedAway(mirror, host.clearedAt)
   if (gone.length) {
     await db.dictationLog.bulkDelete(gone.map((row) => row.id))
@@ -280,8 +285,7 @@ export async function reconcileDictations(server: Server) {
     mirror = mirror.filter((row) => !dropped.has(row.id))
   }
 
-  // Only rows the host holds are compared with it: a take it never confirmed would otherwise hold
-  // the fingerprint apart and walk the whole log on every open.
+  // One it never confirmed would hold the fingerprint apart and walk the whole log on every open.
   const synced = mirror.filter((row) => row.posted)
   const print = fingerprintOf(synced, host.clearedAt)
   if (agrees(print, host)) {
@@ -289,9 +293,8 @@ export async function reconcileDictations(server: Server) {
     return
   }
 
-  // Divergence is handled by its shape: an append that fits one page is one read, anything else
-  // walks the log. A fresh device has an empty mirror, so it walks once rather than trusting a page;
-  // a gap wider than a page would never close from the newest page alone.
+  // A page only closes a gap that starts at the newest row this device holds: a fresh mirror has
+  // nothing to append to and a wider gap would never close, so both walk.
   const gap = host.count - print.count
   const appended = synced.length > 0 && gap > 0 && gap <= PAGE && host.oldest === print.oldest
   if (appended) {
@@ -301,9 +304,8 @@ export async function reconcileDictations(server: Server) {
   } else {
     const rows = await readAll(config)
     const have = new Set(rows.map((row) => row.id))
-    // A host whose own count disagrees with the pages it served is not one a row can be taken away
-    // on: a proxy in front of it can answer the totals before it answers every page, and a delete
-    // read off that would lose a take both sides still hold.
+    // Rows go only off a read that agrees with the host's own count: one still arriving is not a
+    // host that lost them, and deleting then would take a take both sides hold.
     const lost =
       rows.length === host.count
         ? synced.filter((row) => !have.has(row.id)).map((row) => row.id)
@@ -333,8 +335,7 @@ export async function removeDictation(profile: Profile, id: string) {
     // A host too old to have the routes keeps whatever it holds; this device still forgets the row.
     if (!(await lacksRoute(config, error, DICTATIONS))) throw error
   }
-  // The mirror is keyed by the host's id alone, so a row filed under another bot is one this delete
-  // did not ask for: it stays where it is.
+  // Keyed by the host's id alone: a row another bot filed under it was not one this delete asked for.
   const row = await db.dictationLog.get(id)
   if (row && row.connection !== connectionKey(config)) return
   await db.dictationLog.delete(id)

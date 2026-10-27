@@ -973,9 +973,8 @@ db.version(26)
         row.loggedAt = row.at
       }),
   )
-// v27: the log keeps the index every read uses and drops the one no read can. `at` is compared in
-// memory only — the host marks the place a row holds now — and every write to the take path paid to
-// update it, which is the cost the plugin dropped on its own side for the same reason.
+// v27: the log keeps the index every read uses and drops the one no read can — `at` is compared in
+// memory only, so every write to the take path paid to update an index nothing read.
 db.version(27).stores({ dictationLog: "id, connection, loggedAt" })
 
 db.on("populate", (tx) => seedProfile(tx))
