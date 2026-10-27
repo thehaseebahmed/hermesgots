@@ -75,19 +75,14 @@ const row = (role: "user" | "assistant", content: string): SessionMessage => ({
   timestamp: 1_000 + next,
 })
 
-/** `carried` pairs of work from before the boundary, `after` pairs after it. */
-function run({
-  summaryRole,
-  restated,
-  carried = 3,
-  amid,
-}: {
+type Run = {
   summaryRole: "assistant" | "user"
   restated: boolean
   carried?: number
-  /** A row the carried work holds that the thread draws nothing of, or draws in the reply. */
   amid?: "subagent" | "steer"
-}) {
+}
+
+function run({ summaryRole, restated, carried = 3, amid }: Run) {
   next = 100
   const rows: SessionMessage[] = [
     row("user", "An earlier ask"),
@@ -129,7 +124,6 @@ function serve(rows: SessionMessage[]) {
 
 const server = connection("compaction-live")
 
-/** The running turn's reply at every length the transcript passes through after the boundary. */
 async function replies(rows: SessionMessage[], from: number, content: string) {
   const seen: { tools: number; content: string }[] = []
   for (let n = from; n <= rows.length; n++) {
@@ -208,8 +202,6 @@ test("a chat opened after a compaction shows the turn's words before and after i
 })
 
 test("the thread draws one divider where the run compacted, and the words around it, and not the summary", async () => {
-  // On the host's clock as it really is: the carried work keeps its old times, the request its
-  // older one, and only what the run did after the boundary is newer than the summary.
   const rows = run({ summaryRole: "assistant", restated: true })
   const summary = rows.findIndex((r) => (r.content ?? "").startsWith("[CONTEXT"))
   const request = rows.findIndex((r) => (r.content ?? "").startsWith("[STILL"))
@@ -229,7 +221,6 @@ test("the thread draws one divider where the run compacted, and the words around
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input))
     if (/\/messages$/.test(url.pathname)) {
-      // The archive holds nothing this test cares about.
       if (url.searchParams.has("include_compacted")) return json({ data: [] })
       const limit = Number(url.searchParams.get("limit"))
       const offset = Number(url.searchParams.get("offset"))
@@ -279,7 +270,6 @@ test("the thread draws one divider where the run compacted, and the words around
   assert.ok(divider < place("After one"), "what the run did after it sits below the line")
 })
 
-/** What the fold draws: each message's role, words, calls and seams. */
 const shape = (rows: SessionMessage[], options?: { hostOrder?: boolean }) =>
   toMessages("c", SESSION, rows, options).map(
     (m) =>

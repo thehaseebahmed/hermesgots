@@ -118,8 +118,6 @@ function carriesRestatement(text: string): boolean {
 
 /** What of a seam row's text the thread draws: the host's notes cut, what the user typed kept. */
 export function seamText(content: string): string {
-  // A summary the host folded the user's next message into draws that message; one that restates the
-  // request draws nothing, as the restatement's own row does below.
   const summary = summaryOf(content)
   if (summary) return summary.alone ? "" : seamText(summary.after)
   const text = cutSnapshot(content)

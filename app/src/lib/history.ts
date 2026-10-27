@@ -229,14 +229,6 @@ export const summaryRowsOf = (compactions?: { row?: number }[]): SummaryRows | u
   return rows?.length ? new Set(rows) : undefined
 }
 
-/**
- * A row's compaction summary, if it is one: `alone` draws nothing and marks where the compaction
- * happened, `merged` is a summary the host folded the user's next message into, which draws that
- * message, and `after` is whatever the host wrote below it. The host writes either as a user or an
- * assistant row, never a tool's. The text is read first: it is the whole record for a session the
- * plugin never named a row in, and the flag only ever repeats it, so a summary sits in neither the
- * user's words nor the reply's.
- */
 function summaryOfRow(row: SessionMessage, summaries?: SummaryRows) {
   if (row.role !== "user" && row.role !== "assistant") return undefined
   const summary = summaryOf(row.content ?? "")
@@ -336,13 +328,10 @@ export function toMessages(
   }
   for (let row of rows) {
     if (row.display_kind === "hidden" || row.role === "system") continue
-    // The summary is the model's handoff, not the reply's words or the user's message. Inside a
-    // reply it is where the compaction happened, so the reply is drawn split there.
     const summary = summaryOfRow(row, summaries)
     // The row's own time, on this device's clock: a summary with none is the moment it was read.
     const createdAt = Math.round((row.timestamp ?? 0) * 1000) || Date.now()
     if (summary?.kind === "alone") {
-      // Inside a reply, even one that has drawn nothing yet, it splits the reply where it fell.
       if (reply)
         reply.seams = [
           ...(reply.seams ?? []),
@@ -358,7 +347,6 @@ export function toMessages(
       if (!row.tool_calls?.length) continue
       row = { ...row, content: "" }
     }
-    // A reply the host folded a summary into keeps only its own words.
     if (summary?.kind === "merged" && row.role === "assistant")
       row = { ...row, content: summary.after }
     if (isNotice(row)) {

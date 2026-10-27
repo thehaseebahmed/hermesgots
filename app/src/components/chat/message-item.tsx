@@ -580,8 +580,7 @@ export const MessageItem = memo(function MessageItem({
     key: string
     offset: number
     time: number
-    /** How many of the reply's calls came before it, where the transcript says. */
-    tools?: number
+    toolsBefore?: number
     node: ReactNode
   }[] = []
   if (approval?.resolved && approval.contentOffset !== undefined)
@@ -603,14 +602,14 @@ export const MessageItem = memo(function MessageItem({
       key: seam.id,
       offset: seam.contentOffset,
       time: seam.at,
-      tools: seam.toolsBefore,
+      toolsBefore: seam.toolsBefore,
       node: <Compacted compaction={compactionOf(seam, compactions)} />,
     })
   breaks.sort((a, b) => a.offset - b.offset || a.time - b.time)
   const segments: Segment[] = []
   let start = 0
-  let since: { time: number; tools?: number } = { time: -Infinity }
-  for (const b of [...breaks, { offset: content.length, time: Infinity, tools: undefined }]) {
+  let since: { time: number; toolsBefore?: number } = { time: -Infinity }
+  for (const b of [...breaks, { offset: content.length, time: Infinity, toolsBefore: undefined }]) {
     const end = Math.min(Math.max(b.offset, start), content.length)
     segments.push({
       start,
@@ -620,13 +619,15 @@ export const MessageItem = memo(function MessageItem({
         const index = callIndex.get(tool) ?? 0
         // A call at the offset a break sits on is told apart by the transcript's own count where it
         // has one, and by when it started otherwise.
-        const after = since.tools !== undefined ? index >= since.tools : tool.startedAt > since.time
-        const before = b.tools !== undefined ? index < b.tools : tool.startedAt <= b.time
+        const after =
+          since.toolsBefore !== undefined ? index >= since.toolsBefore : tool.startedAt > since.time
+        const before =
+          b.toolsBefore !== undefined ? index < b.toolsBefore : tool.startedAt <= b.time
         return (at > start || (at === start && after)) && (at < end || (at === end && before))
       }),
     })
     start = end
-    since = { time: b.time, tools: b.tools }
+    since = { time: b.time, toolsBefore: b.toolsBefore }
   }
 
   const thinkingBySegment = new Map<number, RunPart[]>()
