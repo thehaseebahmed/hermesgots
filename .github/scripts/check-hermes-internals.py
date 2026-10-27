@@ -56,6 +56,9 @@ ANCHORS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
     (("agent/context_compressor.py",), "You've reached the maximum number of tool-calling iterations allowed"),
     # The status markers the app's snapshot check reads an item line by.
     (("tools/todo_tool.py",), '_STATUS_MARKERS = {"completed": "[x]"'),
+    # The shape of an item line, `- [>] <id>. <content> (<status>)`: the id is the model's own word
+    # (`plugin`, `app-data`), not a number, and the app tells the snapshot by it.
+    (("tools/todo_tool.py",), "{marker} {item['id']}. "),
     # The process notices the app draws nothing of, told from a message that names one.
     (("tools/process_registry_notifications.py",), "[IMPORTANT: Background process "),
     (("tools/process_registry_notifications.py",), "matched watch pattern"),
@@ -79,6 +82,7 @@ NOTICE_REL = "tools/process_registry_notifications.py"
 REPLAY_REL = "agent/context_compressor.py"
 TODO_REL = "tools/todo_tool.py"
 RELOAD_REL = "agent/conversation_compression.py"
+SUMMARY_REL = "agent/context_compressor.py"
 
 CONSTANTS: Tuple[Tuple[str, str, str, str], ...] = (
     (FOOTER_REL, "INTERNAL_NOTIFICATION_FOOTER", "footer", "the machine-provenance footer"),
@@ -87,6 +91,10 @@ CONSTANTS: Tuple[Tuple[str, str, str, str], ...] = (
     (REPLAY_REL, "_INFLIGHT_TASK_REPLAY_HEADER", "replay", "the restatement's header"),
     (TODO_REL, "TODO_INJECTION_HEADER", "snapshot", "the preserved task list's header"),
     (RELOAD_REL, "_PRUNED_SKILL_RELOAD_NOTICE_HEADER", "reload", "the reload notice's header"),
+    (SUMMARY_REL, "SUMMARY_PREFIX", "summary", "the compaction summary's opening"),
+    (SUMMARY_REL, "LEGACY_SUMMARY_PREFIX", "legacySummary", "an older summary's opening"),
+    (SUMMARY_REL, "_SUMMARY_END_MARKER", "summaryEnd", "the line every summary ends on"),
+    (SUMMARY_REL, "_MERGED_PRIOR_CONTEXT_HEADER", "prior", "a summary merged into a reply's opening"),
 )
 
 # The plugin's copies. Each is compared, character for character, with the value the checkout holds
@@ -110,6 +118,10 @@ APP_COPIES: Tuple[Tuple[str, str, str, bool], ...] = (
     ("TASK_SNAPSHOT_HEADER", "snapshot", "the preserved task list's header", True),
     ("RELOAD_NOTICE_HEADER", "reload", "the reload notice's header", True),
     ("RELOAD_NOTICE_BODY", "reloadBody", "the notice's own opening", False),
+    ("SUMMARY_HEADER", "summary", "the compaction summary's opening", False),
+    ("LEGACY_SUMMARY_HEADER", "legacySummary", "an older summary's opening", True),
+    ("SUMMARY_END", "summaryEnd", "the line every summary ends on", True),
+    ("PRIOR_CONTEXT_HEADER", "prior", "a summary merged into a reply's opening", True),
 )
 
 # The plugin's own half of the names above: a rename here would leave the checks below passing while
