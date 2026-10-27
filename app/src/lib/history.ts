@@ -268,7 +268,8 @@ export function toMessages(
       continue
     }
     if (row.role === "user") {
-      // The host's own bookkeeping draws nothing, closes no reply and starts no turn.
+      // A subagent's finding is read in the sub-thread a tap opens, and a compaction's notes are the
+      // model's own input: neither is a message here, so neither closes a reply or starts a turn.
       if (dropsFromThread(row)) continue
       reply = undefined
       // The wake run's input is the model's own, never the user's: it draws no message of its own,
