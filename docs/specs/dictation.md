@@ -73,7 +73,14 @@ on each open, and the last stats answer per bot is cached so the menu row draws 
   row-by-row compare; an append that fits one page reads that page; any other divergence walks the
   log back a page at a time and writes what the host has and drops what it no longer does. A row the
   mirror holds and the host does not is only dropped when the host has been told about it: a take
-  whose post never answered is re-posted before the host is asked, so an offline take survives.
+  whose post never answered is re-posted before the host is asked, so an offline take survives. That
+  drop also needs a read that agrees with the host's own count, so a host still catching up — or a
+  proxy in front of one — cannot cost a take both sides hold. A device upgraded from a build that kept
+  no posted mark settles its whole log in one write when the mirror already says what its host says,
+  rather than one POST per take the host already holds, and a backlog is handed over a few at a time.
+- **A take its host refuses is kept, not retried.** A 400 or a 413 on the words is the host reading
+  them and saying no, so the row is marked on the device and never posted again; the words stay in
+  the mirror, so History still shows what was said.
 - **Nothing sits below a clear's stamp on the host.** A row that arrives with an `at` at or below the
   stamp is stored at the stamp, so a write that raced a clear cannot bring cleared history back.
 - **Clearing is one action over every bot**, on the screen's header, behind a confirmation, each host
@@ -89,6 +96,8 @@ on each open, and the last stats answer per bot is cached so the menu row draws 
   `/settings/dictation` opens it.
 - Nothing raises `MIN_PLUGIN_VERSION`; the plugin's version rises in `plugin.yaml` and
   `dashboard/manifest.json`, and the plugin store's schema moves one version for the two new tables.
+  A store that ran a build of the branch before the log was keyed per profile is rebuilt in the next
+  schema version with its rows carried over, since `CREATE TABLE IF NOT EXISTS` cannot change a key.
 
 ## Testing Decisions
 
@@ -104,9 +113,15 @@ on each open, and the last stats answer per bot is cached so the menu row draws 
   read failed, and the model a refresh reports landing on the bot; a take the host never received
   surviving a reconcile and being posted again; Stats showing the summed words and rate from the cached
   answers, each row over its own line.
+- Component (`app/scripts/test-dictation-mirror.tsx`): the reconciliation over a real Dexie database
+  and a scripted host — a log the previous build left settled in one write with no POST, a take a host
+  lacked handed over once and kept, a take a host refused marked and never asked about again, a read
+  that contradicts the host's count taking nothing away, and a take whose host never answered
+  surviving the open and being handed over by the next one.
 - Plugin (`plugin/tests/test_dictations.py`): a write, a paged read, a delete, a clear that stamps
   `clearedAt`, stats that answer only their own profile, an id that belongs to each profile on its own,
-  a take that lands after a clear stored at its stamp, and a body that names no text being refused.
+  a take that lands after a clear stored at its stamp, a body that names no text being refused, and a
+  store in the old shape whose rows and index survive the rebuild with an id two profiles can share.
 - No browser flow: every claim here is reachable from a component with a faked HTTP boundary.
 
 ## Out of Scope

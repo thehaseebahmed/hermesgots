@@ -22,6 +22,7 @@ import {
   deleteDictation,
   getDictationStats,
   getDictations,
+  HermesError,
   postDictation,
   type HermesConfig,
   type HostDictation,
@@ -49,10 +50,71 @@ function hostOf(row: DictationRecord): HostDictation {
   return { id: row.id, text: row.text, words: row.words, ms: row.ms, at: row.at }
 }
 
-/** Hands one take to its host and marks the mirror's row as one the host holds too. */
-async function post(config: HermesConfig, row: DictationRecord) {
-  await postDictation(config, hostOf(row), AbortSignal.timeout(WRITE_TIMEOUT_MS))
+/** Refusals about the take itself: the same words would be refused on every open, so they are final. */
+const REFUSED = new Set([400, 413])
+
+/**
+ * Hands one take to its host and marks the mirror's row as one the host holds too. Answers whether
+ * the host took it, so a caller knows whether the host's own totals moved.
+ */
+async function post(config: HermesConfig, row: DictationRecord): Promise<boolean> {
+  try {
+    await postDictation(config, hostOf(row), AbortSignal.timeout(WRITE_TIMEOUT_MS))
+  } catch (error) {
+    // The host read the words and said no. Asking again on every open asks the same question of the
+    // same bytes, so the row is marked and left to this device alone.
+    if (error instanceof HermesError && error.status !== undefined && REFUSED.has(error.status)) {
+      await db.dictationLog.update(row.id, { rejected: true })
+      return false
+    }
+    throw error
+  }
   await db.dictationLog.update(row.id, { posted: true })
+  return true
+}
+
+/** How many takes are handed over at once: an upgrade's backlog is a queue, not a burst. */
+const POSTS_AT_ONCE = 4
+
+/** Answers how many of them the host took, which is how many moved its totals. */
+async function postAll(config: HermesConfig, rows: DictationRecord[]): Promise<number> {
+  let taken = 0
+  for (let index = 0; index < rows.length; index += POSTS_AT_ONCE) {
+    const batch = rows.slice(index, index + POSTS_AT_ONCE)
+    const answers = await Promise.all(
+      batch.map(async (row) => {
+        try {
+          return await post(config, row)
+        } catch (error) {
+          quietly("Writing a dictation to its host")(error)
+          return false
+        }
+      }),
+    )
+    taken += answers.filter(Boolean).length
+  }
+  return taken
+}
+
+/** Marks rows as ones their host holds, in one write, so the screens reading them wake once. */
+async function markPosted(rows: DictationRecord[]) {
+  await db.dictationLog.bulkPut(rows.map((row) => ({ ...row, posted: true })))
+}
+
+/**
+ * A host's totals, or nothing where its plugin has no log at all — which cools that bot off for a
+ * while. A host that is merely away throws, and its mirror is left exactly as it is.
+ */
+async function askStats(config: HermesConfig, key: string): Promise<HostAnswer | null> {
+  try {
+    const host = await getDictationStats(config, AbortSignal.timeout(READ_TIMEOUT_MS))
+    missing.clear(key)
+    return host
+  } catch (error) {
+    if (!(await lacksRoute(config, error, DICTATIONS))) throw error
+    missing.start(key)
+    return null
+  }
 }
 
 /**
@@ -119,26 +181,38 @@ export async function reconcileDictations(server: Server) {
   if (missing.cooling(key)) return
 
   let mirror = await db.dictationLog.where("connection").equals(key).toArray()
-  // A take whose host write never answered belongs to the mirror alone. Posting it here keeps the
-  // host the durable copy the ADR promises, and one open settles both sides.
-  if (mirror.some((row) => !row.posted)) {
-    await Promise.all(
-      mirror
-        .filter((row) => !row.posted)
-        .map((row) => post(config, row).catch(quietly("Writing a dictation to its host"))),
-    )
+  // A take whose host write never answered belongs to the mirror alone, and a take its host refused
+  // is one this device keeps on its own, so neither is handed over again.
+  const unconfirmed = mirror.filter((row) => !row.posted && !row.rejected)
+
+  let host: HostAnswer | null = null
+  if (unconfirmed.length) {
+    host = await askStats(config, key)
+    if (!host) return
+    // The first open after an upgrade asks before it posts: a mirror that already says what its host
+    // says owes it nothing, so a whole log settles in one write instead of a POST per take the host
+    // already holds. Rows the previous build wrote carry no answer either way, which is why they are
+    // the ones this can settle; a row this build wrote and never confirmed is posted.
+    const legacy = unconfirmed.every((row) => row.posted === undefined)
+    if (legacy && agrees(fingerprintOf(mirror, host.clearedAt), host)) {
+      await markPosted(unconfirmed)
+      await cacheStats(key, host)
+      return
+    }
+    // A host that never answered keeps the take here, and the next open asks again.
+    const taken = await postAll(config, unconfirmed)
     mirror = await db.dictationLog.where("connection").equals(key).toArray()
+    if (taken) {
+      // The totals the host gave before the takes it just took are stale by exactly that many, so
+      // they are asked for again rather than cached as a count its own log no longer matches.
+      host = (await askStats(config, key)) ?? host
+    }
   }
 
-  let host: HostAnswer
-  try {
-    host = await getDictationStats(config, AbortSignal.timeout(READ_TIMEOUT_MS))
-  } catch (error) {
-    if (!(await lacksRoute(config, error, DICTATIONS))) throw error
-    missing.start(key)
-    return
+  if (!host) {
+    host = await askStats(config, key)
+    if (!host) return
   }
-  missing.clear(key)
 
   // A clear needs no diff: everything this device holds from before the stamp is gone.
   const gone = clearedAway(mirror, host.clearedAt)
@@ -169,7 +243,11 @@ export async function reconcileDictations(server: Server) {
   } else {
     const rows = await readAll(config)
     const have = new Set(rows.map((row) => row.id))
-    const lost = synced.filter((row) => !have.has(row.id)).map((row) => row.id)
+    // A host whose own count disagrees with the pages it served is not one a row can be taken away
+    // on: a proxy in front of it can answer the totals before it answers every page, and a delete
+    // read off that would lose a take both sides still hold.
+    const lost =
+      rows.length === host.count ? synced.filter((row) => !have.has(row.id)).map((row) => row.id) : []
     if (lost.length) await db.dictationLog.bulkDelete(lost)
     const fresh = toUpsert(mirror, rows).map((row) => ({ ...row, connection: key, posted: true }))
     if (fresh.length) await db.dictationLog.bulkPut(fresh)

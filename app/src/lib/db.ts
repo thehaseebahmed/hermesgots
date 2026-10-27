@@ -598,6 +598,11 @@ export interface DictationRecord {
   at: number
   /** Whether its bot's host holds a copy; a take written while a host was away is re-posted. */
   posted?: boolean
+  /**
+   * Whether its bot's host refused the take itself — a 400 or a 413 on the words. A refusal is
+   * final, so a row marked here is never posted again: the same bytes would be refused every time.
+   */
+  rejected?: boolean
 }
 
 /** The totals a bot's host last reported, kept so the screen and the menu row draw offline. */

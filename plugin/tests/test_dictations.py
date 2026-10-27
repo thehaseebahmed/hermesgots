@@ -5,6 +5,7 @@ Run: python3 -m unittest plugin.tests.test_dictations -v
 
 from __future__ import annotations
 
+import sqlite3
 import unittest
 
 from plugin import dictations
@@ -132,3 +133,72 @@ class DictationsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OldShapeStoreTest(unittest.TestCase):
+    """A store that ran the build before the key was per profile keeps its rows and gains the key."""
+
+    OLD = """
+        CREATE TABLE dictations (
+            id TEXT PRIMARY KEY,
+            profile TEXT NOT NULL DEFAULT '',
+            text TEXT NOT NULL,
+            words INTEGER NOT NULL DEFAULT 0,
+            ms INTEGER NOT NULL DEFAULT 0,
+            at INTEGER NOT NULL,
+            device TEXT
+        );
+        CREATE INDEX dictation_time ON dictations (profile, at);
+        INSERT INTO dictations (id, profile, text, words, ms, at, device)
+            VALUES ('d1', 'bot-a', 'kept through the rebuild', 4, 900, 5, 'phone');
+        PRAGMA user_version = 44;
+    """
+
+    def setUp(self) -> None:
+        self.home = temp_hermes_home(self)
+        self.path = db_path(self.home)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(self.path)
+        conn.executescript(self.OLD)
+        conn.commit()
+        conn.close()
+
+    def shape(self) -> str:
+        conn = sqlite3.connect(self.path)
+        try:
+            return conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'dictations'"
+            ).fetchone()[0]
+        finally:
+            conn.close()
+
+    def test_the_migration_rekeys_the_table_and_keeps_its_rows(self) -> None:
+        connect(self.path).close()
+        shape = self.shape()
+        self.assertIn("PRIMARY KEY (profile, id)", shape)
+        self.assertNotIn("device", shape)
+        self.assertEqual(
+            [row["text"] for row in dictations.rows(self.path, "bot-a")],
+            ["kept through the rebuild"],
+        )
+
+    def test_an_id_two_profiles_share_is_stored_for_both_after_the_rebuild(self) -> None:
+        connect(self.path).close()
+        other = dictations.record(self.path, "bot-b", {"id": "d1", "text": "the other bot", "at": 6})
+        self.assertEqual(other["text"], "the other bot")
+        self.assertEqual(
+            [row["text"] for row in dictations.rows(self.path, "bot-a")],
+            ["kept through the rebuild"],
+        )
+
+    def test_a_migrated_store_keeps_its_index_and_its_version(self) -> None:
+        connect(self.path).close()
+        conn = sqlite3.connect(self.path)
+        try:
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+        finally:
+            conn.close()
+        self.assertIn("dictation_time", tables)
+        self.assertNotIn("dictations_v44", tables)
+        self.assertEqual(version, 45)

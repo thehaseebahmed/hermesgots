@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # index and a v41 store reaches 43 in one pass.
 # 44 adds the dictation log and the clock a clear stamps (ADR 0060): two new tables, which is why
 # nothing in the block below has to be PRAGMA-guarded to reach it.
-SCHEMA_VERSION = 44
+SCHEMA_VERSION = 45
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -677,4 +677,33 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    cleared_at INTEGER NOT NULL DEFAULT 0
                )"""
         )
+        # v45: the log is keyed per profile, and `device` is gone. A store that ran the build before
+        # that change has `id` alone as its key, where a second profile's write of the same id is
+        # dropped by INSERT OR IGNORE and then read back as a row it never stored. CREATE TABLE IF
+        # NOT EXISTS cannot change a key, so the table is rebuilt with its rows carried over.
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(dictations)")}
+        if "device" in columns:
+            conn.execute("ALTER TABLE dictations RENAME TO dictations_v44")
+            conn.execute(
+                """CREATE TABLE dictations (
+                       id TEXT NOT NULL,
+                       profile TEXT NOT NULL DEFAULT '',
+                       text TEXT NOT NULL,
+                       words INTEGER NOT NULL DEFAULT 0,
+                       ms INTEGER NOT NULL DEFAULT 0,
+                       at INTEGER NOT NULL,
+                       PRIMARY KEY (profile, id)
+                   )"""
+            )
+            # `id` was unique in the old shape, so no row can collide with another on the way in.
+            conn.execute(
+                """INSERT OR IGNORE INTO dictations (id, profile, text, words, ms, at)
+                       SELECT id, profile, text, words, ms, at FROM dictations_v44"""
+            )
+            # Dropping the old table takes its `dictation_time` index with it; the one below is built
+            # again on the shape a page read asks for.
+            conn.execute("DROP TABLE dictations_v44")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS dictation_time ON dictations (profile, at)"
+            )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

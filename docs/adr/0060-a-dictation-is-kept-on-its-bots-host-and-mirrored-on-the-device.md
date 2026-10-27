@@ -16,7 +16,10 @@ mirror first and posted to the host afterwards, so a host that is away — or to
 routes — costs the entry nothing: the mirror is still the log, and no error reaches the user. The row remembers
 whether the host ever answered for it, so a post that failed is not a row the host refuses — it is a
 row still owed, posted again the next time the mirror is reconciled and dropped from the comparison
-until it is. A take
+until it is. A refusal is the one failure that is not owed: the host read the words and said no (400,
+or 413 for a take over its bound), so the same bytes would be refused on every open. That row is
+marked on the device and never asked about again, and it stays in the mirror, because the words are
+the user's whatever one host thinks of them. A take
 that is cancelled, fails, or is abandoned before any words land writes nothing; a take whose words
 land and are then edited away or thrown out still wrote.
 
@@ -27,14 +30,22 @@ device that has to fill or repair a mirror, never for drawing the screen. The st
 tab's numbers and the reconciliation's check, so one small read per bot serves both.
 
 A mirror is reconciled when the Dictation screen opens, once per bot, side by side, never in front of
-the first paint. The check is a fingerprint, not a diff: count, newest, oldest, and a `clearedAt`
-stamp. A device whose mirror agrees does nothing at all. A clear is settled without a page: every
+the first paint. A row owed a post is handed over before the fingerprint is compared, and a device
+upgraded from a build that kept no such mark settles its whole log in one write: that build posted as
+it wrote, so a mirror which already says what its host says owes it nothing, and the rows are marked
+from one read instead of a POST apiece. A backlog is handed over a few at a time rather than all at
+once, and a host that moved its totals with the takes it just took is asked again rather than have
+its pre-post answer cached. The check is a fingerprint, not a diff: count, newest, oldest, and a
+`clearedAt` stamp. A device whose mirror agrees does nothing at all. A clear is settled without a page: every
 mirror row older than `clearedAt` goes, and nothing is compared row by row. What is left is a
 divergence, and its shape decides its cost: an append — a count the host grew while both edges held
 still, by less than a page — is the newest page, fifty entries, upserted and nothing dropped; anything
 else, including a fresh device's empty mirror, a gap wider than one page and an entry deleted on
 another device, walks the log back a page at a time until one comes short, writes what the host has
-and drops what it no longer does. The walk never drops a row the host was never told about. So a device
+and drops what it no longer does. The walk never drops a row the host was never told about, and it
+drops nothing on a read that disagrees with the host's own count: a host still catching up — or a
+proxy in front of it answering totals before pages — would otherwise cost a take both sides still
+hold. A row is taken away only once the pages served match the count the host reported. So a device
 that is in step pays one small read, a device that has fallen behind catches up, and the walk only
 happens when the two copies really disagree about the middle of the log.
 
@@ -97,11 +108,21 @@ act stays Speech-to-text, and so does each bot's own settings page.
 - The plugin's store gains a `dictations` table and a per-profile `dictation_state` for `clearedAt`
   in schema v44, the plugin's version rises in both files, and the app's Dexie moves to a new version
   for the mirror and the stats cache.
+- **A host that ran a build of this branch before the log was keyed per profile is rebuilt, not
+  ignored.** `CREATE TABLE IF NOT EXISTS` cannot change a primary key, so schema v45 detects the old
+  table by the `device` column it carried, renames it, creates the keyed one and carries every row
+  over before dropping it. What it would otherwise leave behind is a store where a second profile's
+  write of a shared id is dropped by `INSERT OR IGNORE` and the read after it finds nothing.
 - `app/scripts/test-dictation-log.mjs` pins the pure rules — an entry's words and spoken span, the
-  month a dictation falls in, the fingerprint comparison and the pooled rate — and
+  month a dictation falls in, the fingerprint comparison and the pooled rate —
+  `app/scripts/test-dictation-mirror.tsx` drives the reconciliation over a real Dexie database and a
+  scripted host: a log the previous build left settled in one write, a take a host lacked handed over
+  once and kept, a take a host refused never asked about again, a read that contradicts the host's
+  count taking nothing away, and a take whose host never answered surviving the open, and
   `app/scripts/test-dictation-screen.tsx` renders the three tabs over a seeded mirror.
   `plugin/tests/test_dictations.py` drives `plugin.dictations` over a temp store: a write, a paged
   read, a delete, a clear that stamps `clearedAt`, stats that answer only their own profile, an id
-  that belongs to each profile on its own, and an entry arriving after a clear stored at its stamp.
+  that belongs to each profile on its own, an entry arriving after a clear stored at its stamp, and a
+  store in the old shape whose rows survive the rebuild with an id two profiles can then share.
 - `GLOSSARY.md` gains **Dictation** and stops listing "dictation" as a word to avoid for
   **Speech-to-text**; `AGENTS.md`'s layout table gains the module rows.
