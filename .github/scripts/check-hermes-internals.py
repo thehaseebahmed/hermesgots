@@ -9,6 +9,10 @@ its internals are read by name (``_active_subagents``, ``_run_statuses``, ``inte
 Hermes renames and rewrites them without knowing this plugin exists, so this check says so on the
 next pull request, or on the weekly run, instead of on a user's wake.
 
+The prompt caps are pinned for the same reason rather than mirrored by Gots: a system-prompt section
+past its cap is dropped whole, and a context file past its own is truncated. Gots tells neither —
+the host reads SOUL.md as the session's identity — so what drifts is what Gots believed about the host.
+
 Everything here reads source text — a substring of a Hermes file, a module-level string constant, or
 the same on the plugin side — so it runs against any checkout with no host and no network. The
 plugin is never imported: its import chain wants a Hermes host (``plugin/__init__.py`` pulls

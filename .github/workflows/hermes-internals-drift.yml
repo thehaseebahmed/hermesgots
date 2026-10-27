@@ -62,11 +62,13 @@ jobs:
           repository: NousResearch/hermes-agent
           ref: ${{ steps.ref.outputs.ref }}
           path: .hermes
-          # The internals span the tools, gateway and agent packages, not just tools.
+          # The internals span the tools, gateway, agent and hermes_cli packages (the last holds the
+          # system-prompt section caps), not just tools.
           sparse-checkout: |
             tools
             gateway
             agent
+            hermes_cli
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
