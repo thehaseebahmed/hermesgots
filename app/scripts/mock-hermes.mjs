@@ -1122,7 +1122,11 @@ const GOTS_OPENING = "You're a bot running on Hermes Agent, working in a project
 // prettier-ignore
 const DO_RULES = "- Work in checkpoints: the smallest piece whose behaviour can be seen, its checks finished before the next one starts.\n- Keep the todo list current — it is the user's view of where the work is.\n- Post a short update between checkpoints: what landed, what's next. Say what you tried when something keeps failing, before you try again.\n- Read your own diff as someone who didn't write it, before you commit it.\n- Say where you stopped and what blocks you, if you can't finish."
 // prettier-ignore
-const DONT_RULES = "- Don't ask before shipping, and never merge or close: merging is the user's decision.\n- Don't push or open anything with git or gh; the pull_request tool is the only way out, and it never touches the default branch.\n- Don't leave TODOs, commented-out code, debug prints or secrets in what you commit.\n- Don't write outside the worktree, and don't leave in it the files you made for the user.\n- Don't serve a file from outside the library: a MEDIA tag carries the path library_add answered with, never a scratch or worktree file \u2014 a temp path is cached and comes back stale.\n- Don't narrate each edit, read or command \u2014 the calls already show those.\n- Don't repeat the pull request url or the commit message unless the user asks."
+const DONT_RULES = "- Don't ask before shipping, and never merge or close: merging is the user's decision.\n- Don't push or open anything with git or gh; the pull_request tool is the only way out, and it never touches the default branch.\n- Don't leave TODOs, commented-out code, debug prints or secrets in what you commit.\n- Don't write outside the worktree, and don't leave in it the files you made for the user.\n- Don't narrate each edit, read or command \u2014 the calls already show those.\n- Don't repeat the pull request url or the commit message unless the user asks."
+// The plugin's media rule (prompt_builder._MEDIA_RULES), word for word: how a reply names a
+// file the user is shown, and why it is never a path from outside the library.
+// prettier-ignore
+const MEDIA_RULES = "A reply shows the user a file by naming it in the message: `MEDIA:` and then the file's path \u2014 `MEDIA:/.../dashboard-light.png`. The app draws the file under the message and keeps it in the thread, so naming the same path again shows that same file, never a new one.\n\n- Name a library file: the path `library_add` answered with. Never a scratch, worktree or other temporary path \u2014 the app caches what it fetches, so a temporary file draws a stale copy once it changes, and naming it again can't make it new.\n- A file that isn't in the library yet goes there first: file it with `library_add`, then name the path it answered with.\n\nIts extension is how the app knows what to draw, so the file keeps its own name."
 const MODES = ["accept_edits", "auto", "plan"]
 
 // The sessions each session delegated to with delegate_task (the plugin reads them from state.db),
@@ -5538,6 +5542,8 @@ http
           "## Tools",
           LIBRARY_RULES,
           PR_INSTRUCTIONS,
+          "## Media",
+          MEDIA_RULES,
           record.mode === "plan" ? PLAN_INSTRUCTIONS : "",
           "## Current Session",
           worktreeLine(record),

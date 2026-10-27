@@ -369,6 +369,17 @@ class InstructionsTest(unittest.TestCase):
         self.assertIn("before you commit it", text, "the diff is read before it goes in")
         self.assertIn("Don't narrate each edit", text)
 
+    def test_the_media_block_says_how_a_file_is_named_and_where_it_may_come_from(self) -> None:
+        # The tag is a message's own convention, so it is told beside the tools rather than in one of
+        # them: a session can name a file it filed in an earlier run.
+        text = prompt_builder.session_prompt(self.record)
+        self.assertIn("## Media", text)
+        self.assertIn("`MEDIA:`", text, "the marker is told literally")
+        self.assertIn("library file", text, "and the only place a file may come from")
+        media = text.split("## Media")[1]
+        self.assertIn("Never a scratch, worktree or other temporary path", media)
+        self.assertIn("caches what it fetches", media, "the reason: a temp path draws a stale copy")
+
     def test_a_record_without_worktrees_has_no_block(self) -> None:
         # The same gate as the ship instructions: a record with no repos gets neither.
         no_repos = {**self.record, "repos": []}
@@ -392,6 +403,7 @@ class InstructionsTest(unittest.TestCase):
             ("DONT_RULES", prompt_builder._DONT_RULES),
             ("LIBRARY_RULES", prompt_builder._LIBRARY_RULES),
             ("PR_INSTRUCTIONS", prompt_builder._PR_RULES),
+            ("MEDIA_RULES", prompt_builder._MEDIA_RULES),
         ):
             with self.subTest(block=name):
                 found = re.search(rf'^\s*const {name} = "(.*)"$', mock_js, re.M)

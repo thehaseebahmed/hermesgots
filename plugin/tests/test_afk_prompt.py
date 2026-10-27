@@ -203,6 +203,7 @@ class SectionTests(unittest.TestCase):
             "## Do",
             "## Don't",
             "## Tools",
+            "## Media",
             "## Away From Keyboard",
             "## User's Workflow",
             "## Current Session",

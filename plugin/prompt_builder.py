@@ -47,11 +47,22 @@ _DONT_RULES = """- Don't ask before shipping, and never merge or close: merging 
 - Don't push or open anything with git or gh; the pull_request tool is the only way out, and it never touches the default branch.
 - Don't leave TODOs, commented-out code, debug prints or secrets in what you commit.
 - Don't write outside the worktree, and don't leave in it the files you made for the user.
-- Don't serve a file from outside the library: a MEDIA tag carries the path library_add answered with, never a scratch or worktree file — a temp path is cached and comes back stale.
 - Don't narrate each edit, read or command — the calls already show those.
 - Don't repeat the pull request url or the commit message unless the user asks."""
 
 _TOOLS = "## Tools"
+
+# How a reply names a file, told apart from `library_add` on purpose: the tag is a convention of the
+# message, and a session can show a file it filed in an earlier run. The grammar is the app's
+# (`app/src/lib/media-parts.ts`): the marker, then a path with an extension it can draw.
+_MEDIA = "## Media"
+
+_MEDIA_RULES = """A reply shows the user a file by naming it in the message: `MEDIA:` and then the file's path — `MEDIA:/.../dashboard-light.png`. The app draws the file under the message and keeps it in the thread, so naming the same path again shows that same file, never a new one.
+
+- Name a library file: the path `library_add` answered with. Never a scratch, worktree or other temporary path — the app caches what it fetches, so a temporary file draws a stale copy once it changes, and naming it again can't make it new.
+- A file that isn't in the library yet goes there first: file it with `library_add`, then name the path it answered with.
+
+Its extension is how the app knows what to draw, so the file keeps its own name."""
 
 # Where a session's generated files go. Fixed text, so the prompt cache holds; the folder itself is
 # the tool's business, which is why this names no path.
@@ -257,7 +268,10 @@ def _base(record: Dict[str, Any]) -> str:
     """
     if not record.get("repos"):
         return ""
-    return _join(_GOTS, _GOTS_OPENING, _section(_DO, _DO_RULES), _section(_DONT, _DONT_RULES), _tools())
+    return _join(
+        _GOTS, _GOTS_OPENING, _section(_DO, _DO_RULES), _section(_DONT, _DONT_RULES), _tools(),
+        _section(_MEDIA, _MEDIA_RULES),
+    )
 
 
 def _tools() -> str:
