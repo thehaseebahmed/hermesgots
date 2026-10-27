@@ -566,7 +566,11 @@ export const MessageItem = memo(function MessageItem({
   const asking = awaitingClarify
     ? message.tools?.findLast((t) => t.tool === "clarify" && t.status === "running")
     : undefined
-  const tools = (message.tools ?? []).filter((t) => t !== asking)
+  const allTools = message.tools ?? []
+  const tools = allTools.filter((t) => t !== asking)
+  // The reply's calls in the transcript's own order, which is what a seam counts its `toolsBefore` in:
+  // the one call this device hides behind a question form must not shift the ones after it.
+  const callIndex = new Map(allTools.map((tool, index) => [tool, index]))
   // The tool group right above already names the running call, so repeating it here is noise.
   const runningTool = tools.some((t) => t.status === "running")
 
@@ -600,7 +604,7 @@ export const MessageItem = memo(function MessageItem({
       offset: seam.contentOffset,
       time: seam.at,
       tools: seam.toolsBefore,
-      node: <Compacted compaction={compactionOf(seam, compactions) ?? { at: seam.at }} />,
+      node: <Compacted compaction={compactionOf(seam, compactions)} />,
     })
   breaks.sort((a, b) => a.offset - b.offset || a.time - b.time)
   const segments: Segment[] = []
@@ -611,8 +615,9 @@ export const MessageItem = memo(function MessageItem({
     segments.push({
       start,
       end,
-      tools: tools.filter((tool, index) => {
+      tools: tools.filter((tool) => {
         const at = tool.contentOffset ?? 0
+        const index = callIndex.get(tool) ?? 0
         // A call at the offset a break sits on is told apart by the transcript's own count where it
         // has one, and by when it started otherwise.
         const after = since.tools !== undefined ? index >= since.tools : tool.startedAt > since.time

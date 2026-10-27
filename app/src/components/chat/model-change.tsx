@@ -58,13 +58,14 @@ export function ModelChange({ model }: { model: string }) {
 }
 
 /** How full the context was when the host compacted it, where the host recorded it. */
-function size({ tokens, window }: Compaction) {
+function size({ tokens, window }: Pick<Compaction, "tokens" | "window">) {
   if (!tokens) return ""
   if (!window) return ` · ${formatTokens(tokens)}`
   return ` · ${formatTokens(tokens)} of ${formatTokens(window)} (${Math.round((tokens / window) * 100)}%)`
 }
 
-export function Compacted({ compaction }: { compaction: Compaction }) {
-  const text = `Compaction${size(compaction)}`
+/** What the host recorded about a compaction; a divider drawn from one it hasn't recorded says so. */
+export function Compacted({ compaction }: { compaction?: Pick<Compaction, "tokens" | "window"> }) {
+  const text = `Compaction${size(compaction ?? {})}`
   return <Divider label={text} text={text} />
 }

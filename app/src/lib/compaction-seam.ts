@@ -88,18 +88,18 @@ export const SUMMARY_END =
 /**
  * A compaction summary read off its text: opened by one of the host's headers and closed by its end
  * line. `after` is whatever the host wrote below that line into the same row — the user's message it
- * folded in, or a restated request — and empty for a summary on its own. Undefined for anything else.
+ * folded in, or a restated request — and empty for a summary on its own. `alone` says nothing of
+ * anyone's came below it: a summary that restates the request draws no text either, since the
+ * restatement is the host's note and not the user's words. Undefined for anything else.
  */
-export function summaryOf(text: string): { after: string } | undefined {
+export function summaryOf(text: string): { after: string; alone: boolean } | undefined {
   const head = text.trimStart()
   if (!SUMMARY_HEADERS.some((header) => head.startsWith(header))) return undefined
   const end = lineAt(head, SUMMARY_END)
   if (end < 0) return undefined
-  return { after: head.slice(end + SUMMARY_END.length).trim() }
+  const after = head.slice(end + SUMMARY_END.length).trim()
+  return { after, alone: after === "" || after.startsWith(REPLAY_HEADER) }
 }
-
-/** Whether the text is a compaction summary with nothing of anyone's below it. */
-export const isSummary = (text: string) => summaryOf(text)?.after === ""
 
 /** Whether a row restates the in-flight request: Hermes writes it after the work it carried forward. */
 export const isRestatement = (row: SeamRow) =>
@@ -121,7 +121,7 @@ export function seamText(content: string): string {
   // A summary the host folded the user's next message into draws that message; one that restates the
   // request draws nothing, as the restatement's own row does below.
   const summary = summaryOf(content)
-  if (summary) return summary.after.startsWith(REPLAY_HEADER) ? "" : seamText(summary.after)
+  if (summary) return summary.alone ? "" : seamText(summary.after)
   const text = cutSnapshot(content)
   const head = text.trimStart()
   if (isReloadNoticeOnly(head) || carriesRestatement(head)) return ""

@@ -22,7 +22,6 @@ import { isWakePrompt } from "@/lib/wake-prompt.ts"
 import {
   isRestatement,
   isSeamScaffolding,
-  REPLAY_HEADER,
   summaryOf,
   seamDrawnContent,
   seamText,
@@ -233,14 +232,14 @@ export const summaryRowsOf = (compactions?: { row?: number }[]): SummaryRows | u
 /**
  * Whether a row is a compaction's summary, and of which kind: `alone` draws nothing and marks where
  * the compaction happened; `merged` is a summary the host folded the user's next message into, which
- * draws that message. The host writes either as a user or an assistant row, never a tool's. Its own
- * flag, where the plugin passed it on, is the authority; the text is read where it hasn't yet.
+ * draws that message. The host writes either as a user or an assistant row, never a tool's. The text
+ * is read first: it is the whole record for a session the plugin never named a row in, and the flag
+ * only ever repeats it, so a summary sits in neither the user's words nor the reply's.
  */
 function summaryKind(row: SessionMessage, summaries?: SummaryRows) {
   if (row.role !== "user" && row.role !== "assistant") return undefined
   const summary = summaryOf(row.content ?? "")
-  if (summary)
-    return summary.after === "" || summary.after.startsWith(REPLAY_HEADER) ? "alone" : "merged"
+  if (summary) return summary.alone ? "alone" : "merged"
   return summaries?.has(row.id) ? "alone" : undefined
 }
 
@@ -259,6 +258,9 @@ const dropsFromThread = (row: SessionMessage, summaries?: SummaryRows) =>
  * where the compaction really happened, mid-reply or between turns. Idempotent.
  */
 export function seamOrder(rows: SessionMessage[], summaries?: SummaryRows) {
+  // Most transcripts hold no compaction at all: the scan that finds one is also the check that
+  // leaves them as they came, rather than copying every read for nothing.
+  if (!rows.some((row) => isSummaryRow(row, summaries))) return rows
   const out = [...rows]
   const placed = new Set<number>()
   for (let s = 0; s < out.length; s++) {
@@ -601,6 +603,17 @@ export function foldTranscriptDetails(local: ToolEvent[], transcript: ToolEvent[
 }
 
 /**
+ * The seams a transcript read found, where they are not the ones this device already drew: the same
+ * cuts in the same order, by id, so an unchanged read writes nothing.
+ */
+function mergeSeams(local: Message, reply: Message | undefined) {
+  const found = reply?.seams
+  if (!found?.length) return undefined
+  const held = (local.seams ?? []).map((seam) => seam.id).join()
+  return found.map((seam) => seam.id).join() === held ? undefined : found
+}
+
+/**
  * The transcript's tool details folded into the reply this device already drew, for a turn it kept:
  * what the stream recorded stays, and its calls gain what only the transcript carries.
  */
@@ -610,10 +623,7 @@ function withReplyDetails(local: Message, reply: Message | undefined) {
     local.tools?.length && reply.tools?.length
       ? foldTranscriptDetails(local.tools, reply.tools)
       : undefined
-  const seams =
-    reply.seams?.length && JSON.stringify(reply.seams) !== JSON.stringify(local.seams)
-      ? reply.seams
-      : undefined
+  const seams = mergeSeams(local, reply)
   if (!tools && !seams) return
   return { ...local, ...(tools ? { tools } : {}), ...(seams ? { seams } : {}) }
 }
@@ -656,7 +666,7 @@ export async function liveTurn(
     const resumed =
       start < 0 &&
       summary >= 0 &&
-      !sorted.slice(summary + 1).some((row) => isTurnStart(row, summaries))
+      !sorted.some((row, i) => i > summary && isTurnStart(row, summaries))
     const turn =
       // Past the last page the turn is read from its request, as it was before the summary mattered.
       carriedAbove && batch.length === PAGE && page < MAX_SKIPS
@@ -832,11 +842,9 @@ function turnsOf(
       user,
       reply,
       wake: isWakePrompt(group[0]),
-      // A compaction's carried rows have lower ids than the request they now follow.
-      rows: {
-        first: Math.min(...group.map((row) => row.id)),
-        last: Math.max(...group.map((row) => row.id)),
-      },
+      // A compaction's carried rows have lower ids than the request they now follow, so a turn's
+      // parts are its own rows, not the id range they happen to span.
+      rows: new Set(group.map((row) => row.id)),
     }
   })
 }
@@ -850,25 +858,14 @@ function replyRowOf(message: Message, sessionId: string) {
 }
 
 /**
- * Replies loaded from Hermes for rows `first` to `last`, other than `keep`: a turn's part loaded on
- * its own when a page edge cut it, which the whole turn replaces. A streaming one is left alone.
+ * Replies loaded from Hermes for the rows `ids`, other than `keep`: a turn's part loaded on its own
+ * when a page edge cut it, which the whole turn replaces. A streaming one is left alone.
  */
-function partsOf(
-  current: Message[],
-  sessionId: string,
-  rows: { first: number; last: number },
-  keep?: string,
-) {
+function partsOf(current: Message[], sessionId: string, ids: Set<number>, keep?: string) {
   return current
     .filter((m) => {
       const row = replyRowOf(m, sessionId)
-      return (
-        row !== undefined &&
-        row >= rows.first &&
-        row <= rows.last &&
-        m.id !== keep &&
-        m.status !== "streaming"
-      )
+      return row !== undefined && ids.has(row) && m.id !== keep && m.status !== "streaming"
     })
     .map((m) => m.id)
 }
@@ -975,12 +972,12 @@ async function reconcile(conversationId: string) {
       writes.push(message)
       floor = message.createdAt + 1
     }
-    for (const { user, reply, wake, rows: range } of turns) {
+    for (const { user, reply, wake, rows: ids } of turns) {
       if (!user) {
         // The turn a wake run opened: the prompt draws nothing, and the answer it brought is the
         // thread's next message — a reply of its own, after the turn it closed.
         if (wake && reply) {
-          parts.push(...partsOf(current, sessionId, range, reply.id))
+          parts.push(...partsOf(current, sessionId, ids, reply.id))
           put(reply)
           continue
         }
@@ -988,15 +985,15 @@ async function reconcile(conversationId: string) {
         if (!current.length && reply) writes.push(reply)
         continue
       }
-      parts.push(...partsOf(current, sessionId, range, reply?.id))
+      parts.push(...partsOf(current, sessionId, ids, reply?.id))
       const seen = known.get(user.hermesRowId!)
       if (seen) {
         floor = turnEnd(seen)
         if (seen.id === user.id && reply) {
           // A turn loaded from Hermes earlier, possibly before it finished: refresh its reply, keeping
           // the spans this device measured on the runs that are still the same runs. The rows this
-          // pass read may start inside the turn — a tail read does — so `partsOf`'s range is not the
-          // turn's own, and the reply this device holds for it is named after the first row it wrote.
+          // pass read may start inside the turn — a tail read does — so `partsOf` holds only the rows
+          // it saw, and the reply this device holds for it is named after the first row it wrote.
           const local = byId.get(reply.id)
           const createdAt = local?.createdAt ?? Math.max(reply.createdAt, floor)
           writes.push({ ...reply, createdAt, ...mergedRuns(reply, local) })
@@ -1031,12 +1028,13 @@ async function reconcile(conversationId: string) {
               ? reply.content
               : local.content
           const restored = { ...local, content }
+          const seams = mergeSeams(restored, reply)
           writes.push({
             ...restored,
             tools: withTranscriptToolOffsets(restored, reply),
             ...mergedRuns(reply, local),
             steers: local.steers ?? reply.steers,
-            ...(reply.seams?.length ? { seams: reply.seams } : {}),
+            ...(seams ? { seams } : {}),
           })
         } else if (local?.role === "assistant") {
           const merged = withReplyDetails(local, reply)

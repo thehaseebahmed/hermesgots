@@ -128,7 +128,7 @@ import {
   setActiveProfile,
   updateConversation,
 } from "@/lib/db"
-import { compactionMarks, compactionOf } from "@/lib/compactions"
+import { compactionMarks } from "@/lib/compactions"
 import { dayOf } from "@/lib/days"
 import { moveMarks, openedThread } from "@/lib/move-marks"
 import { undoMove } from "@/lib/moves"
@@ -528,14 +528,12 @@ export function ChatPage({
     () => modelChanges(thread ?? [], conversation?.modelChanges),
     [thread, conversation?.modelChanges],
   )
-  // Where the host compacted this chat's context: the first message after each carries a divider above it.
-  // One that fell inside a reply is drawn in the reply, where it happened, and not here.
-  const compacted = useMemo(() => {
-    const seams = (thread ?? []).flatMap((message) => message.seams ?? [])
-    const inside = new Set(seams.map((seam) => compactionOf(seam, conversation?.compactions)))
-    const held = conversation?.compactions?.filter((one) => !inside.has(one))
-    return compactionMarks(thread ?? [], held)
-  }, [thread, conversation?.compactions])
+  // Where the host compacted this chat's context: the first message after each carries a divider above
+  // it. One that fell inside a reply is drawn in the reply, where it happened, and not by this.
+  const compacted = useMemo(
+    () => compactionMarks(thread ?? [], conversation?.compactions),
+    [thread, conversation?.compactions],
+  )
   const moved = useMemo(
     () => moveMarks(thread ?? [], conversation?.moves, threadsDrawnAsCards),
     [thread, conversation?.moves, threadsDrawnAsCards],
