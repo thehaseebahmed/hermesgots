@@ -4,7 +4,8 @@ projects still cloning (``clones.py``), repos being added to or removed from a p
 pinned projects (``projects.py``), merged pull requests (``merges.py``), a project's AFK switch and
 the tasks it holds (``afk.py``) and recent changes for the app's live stream (``events.py``), devices'
 push subscriptions (``push.py``) and messages waiting for a session's run (``outbox.py``) and research
-missions with their evidence ledgers (``research.py``)."""
+missions with their evidence ledgers (``research.py``), and the dictations a bot has heard
+(``dictations.py``)."""
 
 from __future__ import annotations
 
@@ -21,7 +22,9 @@ logger = logging.getLogger(__name__)
 # would keep table-scanning the chat list — the cost that index exists to remove. Re-running the block
 # is safe: every ALTER is PRAGMA-guarded and every index says IF NOT EXISTS, so a v42 store builds the
 # index and a v41 store reaches 43 in one pass.
-SCHEMA_VERSION = 43
+# 44 adds the dictation log and the clock a clear stamps (ADR 0060): two new tables, which is why
+# nothing in the block below has to be PRAGMA-guarded to reach it.
+SCHEMA_VERSION = 44
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -650,4 +653,28 @@ def _migrate(conn: sqlite3.Connection) -> None:
             )
         except sqlite3.Error:
             logger.debug("memento: the chat list carries a value that isn't JSON")
+        # v44: a bot's dictations — one row per finished take, written by the app when its words
+        # landed — and the clock its last clear stamped, which is how a device's mirror learns that
+        # its rows above the stamp are gone without comparing ids (dictations.py, ADR 0060).
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS dictations (
+                   id TEXT PRIMARY KEY,
+                   profile TEXT NOT NULL DEFAULT '',
+                   text TEXT NOT NULL,
+                   words INTEGER NOT NULL DEFAULT 0,
+                   ms INTEGER NOT NULL DEFAULT 0,
+                   at INTEGER NOT NULL,
+                   device TEXT
+               )"""
+        )
+        # Every read is one profile's newest first, and the page below asks for `at` under a bound.
+        conn.execute(
+            """CREATE INDEX IF NOT EXISTS dictation_time ON dictations (profile, at)"""
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS dictation_state (
+                   profile TEXT PRIMARY KEY,
+                   cleared_at INTEGER NOT NULL DEFAULT 0
+               )"""
+        )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
