@@ -652,8 +652,6 @@ export function useChunkedDictation(
           : await within(draining, Math.max(0, deadline - Date.now()))
       if (session.current !== current) return null
       if (done) {
-        // The take as the host heard it, which is what the cleanup is given and what the row keeps
-        // beside the tidied text: the two differ by exactly what the cleanup did (ADR 0062).
         const heard = takeText(current.pieces)
         const budget = deadline === undefined ? TIDY_MS : deadline - Date.now()
         const text = await tidy(current, heard, budget)
@@ -671,7 +669,6 @@ export function useChunkedDictation(
         const ms = spokenLong(spoken)
         current.pieces = current.pieces.filter((piece) => piece.text === null)
         save(current, true)
-        // Nothing tidied these words, so they are the take as heard as well as what lands.
         if (text) latest.current.onCommitted?.(text, ms, text)
       }
       showFailure(

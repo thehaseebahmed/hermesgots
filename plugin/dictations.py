@@ -82,14 +82,10 @@ def _whole(value: Any, field: str, default: Optional[int] = None) -> int:
 
 
 def _row(row: sqlite3.Row) -> Dict[str, Any]:
-    """One row as the app reads it: `at` when the words were said, `seenAt` when the host heard them.
-
-    A row that never kept the words as heard answers without `heard` rather than with a null, so the
-    app's sheet draws one text exactly as it did before the field existed (ADR 0062).
-    """
-    entry = {field: row[field] for field in FIELDS if field not in ("seen_at", "heard")}
-    if row["heard"] is not None:
-        entry["heard"] = row["heard"]
+    """One row as the app reads it: `at` when the words were said, `seenAt` when the host heard them."""
+    entry = {field: row[field] for field in FIELDS if field != "seen_at"}
+    if entry["heard"] is None:
+        del entry["heard"]
     entry["seenAt"] = row["seen_at"]
     return entry
 
@@ -100,11 +96,7 @@ def count_words(text: str) -> int:
 
 
 def _heard(value: Any) -> Optional[str]:
-    """The words as the host heard them, or None where the app sent none this host can keep.
-
-    Display-only, and never a reason to lose a dictation: a `heard` that isn't text, is blank, or is
-    past the bound the words themselves carry is dropped and the row is written without it (ADR 0062).
-    """
+    """The words as the host heard them, or None where this host can't keep them (ADR 0062)."""
     if not isinstance(value, str):
         return None
     heard = value.strip()

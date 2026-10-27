@@ -71,7 +71,6 @@ function host(
         return json({ error: { message: "That dictation is too long to keep." } }, script.refuse)
       posts.push({ ...body, seenAt: 0 })
       const stored = { ...body, at: Math.min(body.at, heard), seenAt: heard++ }
-      // A host older than the field keeps no words as heard, and answers without them.
       if (script.old) delete stored.heard
       if (!held.some((one) => one.id === stored.id)) held.unshift(stored)
       return json({ dictation: stored }, 201)

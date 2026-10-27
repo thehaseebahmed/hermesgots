@@ -728,8 +728,6 @@ def _migrate(conn: sqlite3.Connection) -> None:
         # v47: one index for all three reads of the log (CREATE_DICTATION_READ).
         conn.execute("DROP INDEX IF EXISTS dictation_order")
         conn.execute(CREATE_DICTATION_READ)
-        # v48: the words as the host heard them, kept beside the words that landed (dictations.py,
-        # ADR 0062). Nullable, so a row written before this reads as one that never kept them.
         if "heard" not in dictation_columns:
             conn.execute("ALTER TABLE dictations ADD COLUMN heard TEXT")
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

@@ -223,7 +223,6 @@ function HistoryTab({ profiles }: { profiles: Profile[] }) {
   )
 }
 
-/** One of a take's texts, under its heading where the take carries two (ADR 0062). */
 function Words({
   label,
   text,
@@ -239,10 +238,7 @@ function Words({
   )
 }
 
-/**
- * One dictation, whole: the words the host heard under **Heard**, the tidied text under **Tidied**
- * where the cleanup changed anything, what it was, a Copy and a way to delete it (ADR 0062).
- */
+/** One dictation, whole: its words, what it was, a Copy and a way to delete it. */
 function EntrySheet({
   row,
   bot,

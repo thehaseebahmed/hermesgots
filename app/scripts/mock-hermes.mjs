@@ -3096,8 +3096,6 @@ const MAX_DICTATION_TEXT = 20_000
 // Each row carries two clocks, as the host's table does: `seenAt` is when this host heard the take,
 // which is what it orders and pages by, and `at` is when the device said it was said, kept for what
 // the screen draws (ADR 0060).
-// The first carries the words as the host heard them beside the tidied ones, which the entry sheet sets
-// apart; the second was kept by a host that pre-dates the field, so it reads as one block (ADR 0062).
 const dictationLog = [
   {
     id: "dict-mock-1",
@@ -5033,8 +5031,6 @@ http
         // device's, kept unless it claims a time after the host heard it.
         const seenAt = Date.now()
         const asked = Number(body.at) || seenAt
-        // The words as the host heard them are kept beside the ones that landed, and one a host can't
-        // take — not text, blank, past the bound — is dropped without costing the row (ADR 0062).
         const asHeard = typeof body.heard === "string" ? body.heard.trim() : ""
         const heard = asHeard && asHeard.length <= MAX_DICTATION_TEXT ? asHeard : undefined
         const row = {

@@ -115,9 +115,7 @@ function settledBy({ row, answer, refused }: Posting): DictationRecord | null {
   // stays unposted so the next open asks again, which the host's own idempotence makes harmless.
   if (!answer) return null
   // Its answer is the row as it stored it: its clock heard the take, and its `at` is the one it kept —
-  // a device clock in the future is clamped to that, so the sheet shows a time that can exist. Its
-  // words as heard are the host's to keep too: one it answered without is one it dropped, so the
-  // mirror heals to that rather than holding a text its host has nowhere (ADR 0062).
+  // a device clock in the future is clamped to that, so the sheet shows a time that can exist.
   const settled = stored({ ...row, posted: true, at: answer.at, seenAt: answer.seenAt })
   if (answer.heard === undefined) delete settled.heard
   else settled.heard = answer.heard
@@ -180,9 +178,6 @@ async function askStats(config: HermesConfig, key: string): Promise<HostAnswer |
  * Writes one dictation at the moment a take's words land. The mirror takes it first and the host's
  * copy is fired without being awaited, so a host that is away — or too old to have the routes —
  * costs the take nothing, and a take the host never confirmed is posted again at the next reconcile.
- *
- * `heard` is the same take as the host's speech model wrote it, before Cleanup: the words that landed
- * and the words as heard are both kept, since what the cleanup did is worth seeing (ADR 0062).
  */
 export async function writeDictation(config: HermesConfig, text: string, ms: number, heard?: string) {
   const trimmed = text.trim()

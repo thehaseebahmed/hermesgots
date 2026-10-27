@@ -218,7 +218,6 @@ const rows = () => findAll("[data-dictation-history] button[data-dictation]")
 const rowText = (index: number) => (rows()[index]?.textContent ?? "").trim()
 
 const sheet = () => find("[data-dictation-text]")
-/** The words as the host heard them, drawn above the tidied text where the two differ (ADR 0062). */
 const heardBlock = () => find("[data-dictation-heard]")
 /** A block's heading and its words, as one string: the heading is inside the paragraph. */
 const blockText = (node: Element | null) => (node ? lineLabel(node) : "")
