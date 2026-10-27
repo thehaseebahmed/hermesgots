@@ -1111,15 +1111,15 @@ const projectSessions = new Map()
 // The plugin's pull request rules (prompt_builder._PR_RULES), word for word.
 // test_library.py matches this line word for word, so it stays one line.
 // prettier-ignore
-const PR_INSTRUCTIONS = "When the work is done and you've checked it, ship it yourself with the pull_request tool and action 'ship': it commits what's left, pushes this branch and opens a draft pull request, or pushes to the one open. Don't ask first, and don't use git push or gh for it. Write the description from the repo's pull request template when it has one (named under Current Session), else with Summary, Changes and How to test sections. The pull request stays a draft. Pass force: true only after a rebase or amend. action 'update' changes the open pull request's title or body, and 'status' reports without writing. Merging and closing are the user's decision: the tool refuses them, so say in the pull request that it is ready to merge and leave it a draft."
+const PR_INSTRUCTIONS = "When the work is done and checked, ship it yourself with the pull_request tool and action 'ship': it commits what's left, pushes this branch and opens a draft pull request, or pushes to the one open. Don't ask first, and don't use git push or gh. Write the description from the repo's pull request template (named under Current Session), else with Summary, Changes and How to test. The pull request stays a draft; pass force: true only after a rebase or amend. action 'update' changes its title or body, and 'status' reports without writing. Merging and closing are the user's decision and the tool refuses them: say it is ready to merge, and leave it a draft."
 // The plugin's done-work emphasis (prompt_builder._DONE_INSTRUCTIONS), word for word.
 // test_library.py matches this line word for word, so it stays one line.
 // prettier-ignore
-const DONE_INSTRUCTIONS = "Don't share the pull request url or the commit message in your reply — the pull_request result and the session's pull request list already surface them where the user sees them."
+const DONE_INSTRUCTIONS = "Don't share the pull request url or the commit message in your reply — the pull_request result and the session's pull request list already show them to the user."
 // The plugin's working-rhythm guidance (prompt_builder._PROGRESS_UPDATES_INSTRUCTIONS), word for word.
 // test_library.py matches this line word for word, so it stays one line.
 // prettier-ignore
-const PROGRESS_UPDATES_INSTRUCTIONS = "Keep the user in the loop as you work, at a working rhythm rather than a running commentary. Post a short update between checkpoints — what landed, what you're doing next — so a long stretch of tool calls never reads as a hang. Keep the todo list current as you go — mark items done as they land, add what you discover, and leave it in its final state when you finish: every item completed, or cancelled where it was dropped. When something keeps failing, say what you tried and what you now think is wrong before the next attempt. Thinking out loud while you plan is welcome. Don't narrate each edit, read or command — the tool calls already show those; keep what you do say technical enough to follow the work without spelling out every implementation detail."
+const PROGRESS_UPDATES_INSTRUCTIONS = "Keep the user in the loop as you work, at a working rhythm rather than a running commentary: a short update between checkpoints — what landed, what's next — so a long run never reads as a hang. Keep the todo list current: mark items done as they land, add what you find, and leave it finished, every item completed or cancelled where it was dropped. When something keeps failing, say what you tried and what you think is wrong before the next attempt. Thinking out loud while you plan is welcome. Don't narrate each edit, read or command — the tool calls show those; keep what you say technical enough to follow without spelling out every detail."
 const MODES = ["accept_edits", "auto", "plan"]
 
 // The sessions each session delegated to with delegate_task (the plugin reads them from state.db),
@@ -1290,7 +1290,7 @@ function startDelegation(parent, goal) {
 }
 
 // The plugin's plan-mode instructions (prompt_builder._PLAN_INSTRUCTIONS), word for word.
-const PLAN_INSTRUCTIONS = `You are in plan mode: change nothing. Read what you need. Then, before you write the plan, settle every choice the user would otherwise be left to make: ask with the clarify tool, every question in one call, your recommended answer first. If you can't ask (no clarify tool, or no answer came), decide it yourself and record the decision under Risks and assumptions. Then make your whole final reply the plan below and stop; the user approves it before you act. It is saved to a file as written, so write it for someone who hasn't read this chat, and a plan with an open question isn't finished. Use this Markdown shape exactly:
+const PLAN_INSTRUCTIONS = `You are in plan mode: change nothing. Read what you need. Before you write the plan, settle every choice the user would otherwise be left to make — ask with the clarify tool, every question in one call, your recommended answer first; if you can't ask, decide it yourself and record it under Risks and assumptions. Then make your whole final reply the plan below and stop; the user approves it before you act. It is saved to a file as written, so write it for someone who hasn't read this chat, and an open question isn't a finished plan. Use this Markdown shape exactly:
 
 # Plan: <short title>
 
@@ -1304,9 +1304,9 @@ The design you chose and why. One line each for the alternatives you rejected.
 One entry per file or area: its path, what changes and why, and the existing functions you'd reuse.
 
 ## Checkpoints
-Split the work into checkpoints that each leave the code building and worth committing, in order. For each:
+Checkpoints that each leave the code building and worth committing, in order. For each:
 ### Checkpoint N: <name>
-- Commit: \`type(scope): summary\` in Conventional Commits form, unless the user asked for another style
+- Commit: \`type(scope): summary\` in Conventional Commits, unless the user asked for another style
 - Steps: the concrete edits
 - Done when: how you'd know it works
 
@@ -1314,7 +1314,7 @@ Split the work into checkpoints that each leave the code building and worth comm
 How to test the whole change end to end: commands, what to look at, expected results.
 
 ## Risks and assumptions
-What could go wrong, and each decision you made without the user: what you chose and why. Nothing here is left for the user to decide.`
+What could go wrong, and each decision you made without the user: what you chose and why.`
 const userTurns = (sessionId) => (transcripts.get(sessionId) ?? []).filter((r) => r.role === "user")
 // A session's filed files as the plugin's library routes would list them: in-memory stand-ins,
 // newest first within each folder, so the Library tab and the outputs pill have something to show.
