@@ -578,6 +578,38 @@ export interface SavedDictation {
 }
 
 /**
+ * One dictation as the device's mirror holds it: the words a take landed, on the bot that heard
+ * them. The bot's host is the durable copy (`plugin/dictations.py`); this row is what the Dictation
+ * screen reads, so opening it never waits on a host (ADR 0060).
+ */
+export interface DictationRecord {
+  id: string
+  /** The `connectionKey` of the bot that heard it. */
+  connection: string
+  text: string
+  words: number
+  /** How long the words took to say, with the pauses left out. */
+  ms: number
+  /** When the words landed. */
+  at: number
+}
+
+/** The totals a bot's host last reported, kept so the screen and the menu row draw offline. */
+export interface DictationStats {
+  /** The bot's `connectionKey`. */
+  id: string
+  words: number
+  ms: number
+  count: number
+  newest: number | null
+  oldest: number | null
+  /** When that host last had its log cleared, so this device can drop what is gone. */
+  clearedAt: number
+  /** When this device read it. */
+  at: number
+}
+
+/**
  * A meeting being recorded in the app, kept on the device as it records (a chunk every few
  * seconds), so a page closed mid-meeting loses at most the last few seconds. It goes once the host
  * has the recording, or when the user discards it.
@@ -645,6 +677,8 @@ export const db = new Dexie("memento") as Dexie & {
   modelsDevCatalog: EntityTable<ModelsDevCatalog, "id">
   overallRankings: EntityTable<OverallRankings, "id">
   dictations: EntityTable<SavedDictation, "id">
+  dictationLog: EntityTable<DictationRecord, "id">
+  dictationStats: EntityTable<DictationStats, "id">
   skills: EntityTable<CachedSkills, "id">
   meetingRecordings: EntityTable<SavedMeetingRecording, "id">
   prompts: EntityTable<PromptEntry, "id">
@@ -902,6 +936,13 @@ db.version(24).upgrade((tx) =>
     .delete(),
 )
 
+// v25: the Dictation screen's mirror of what each bot's host holds, and the totals it last reported
+// (ADR 0060). Both are new tables, so nothing older has to be moved into them.
+db.version(25).stores({
+  dictationLog: "id, at, connection, [connection+at]",
+  dictationStats: "id",
+})
+
 db.on("populate", (tx) => seedProfile(tx))
 
 export async function getSettings(): Promise<Settings> {
@@ -1009,6 +1050,8 @@ export async function deleteProfile(id: string, { remote = false, last = false }
     db.tombstones,
     db.drafts,
     db.dictations,
+    db.dictationLog,
+    db.dictationStats,
     db.skills,
     db.meetingRecordings,
   ]
@@ -1024,7 +1067,14 @@ export async function deleteProfile(id: string, { remote = false, last = false }
     await db.dictations.bulkDelete(keys)
     await db.meetingRecordings.filter((recording) => recording.profileId === id).delete()
     // The bot's own device state, keyed by its server: a twin bot sharing the connection refills it.
-    if (profile) await db.skills.delete(connectionKey(profile))
+    // Its dictations go with it (ADR 0060) — what its host holds outlives the link, so adding the
+    // bot again restores them.
+    if (profile) {
+      const key = connectionKey(profile)
+      await db.skills.delete(key)
+      await db.dictationLog.where("connection").equals(key).delete()
+      await db.dictationStats.delete(key)
+    }
     await db.conversations.bulkDelete(ids)
     await db.profiles.delete(id)
     if (!remote) await db.tombstones.put({ id: `bot:${id}`, deletedAt: Date.now(), profileId: id })
@@ -1145,6 +1195,8 @@ export async function clearAllData() {
     db.vault,
     db.drafts,
     db.dictations,
+    db.dictationLog,
+    db.dictationStats,
     db.skills,
     db.meetingRecordings,
   ]

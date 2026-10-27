@@ -3798,3 +3798,128 @@ export async function stopRun(config: HermesConfig, runId: string) {
     headers: headers(config),
   })
 }
+
+/** Where a bot's dictation log lives on its Gots plugin (`dictations.py`). */
+function dictationRoot(config: HermesConfig, entryId?: string) {
+  const root = `${pluginRoot(config.baseUrl)}/dictations`
+  return entryId ? `${root}/${encodeURIComponent(entryId)}` : root
+}
+
+/** One dictation as a host holds it. */
+export interface HostDictation {
+  id: string
+  text: string
+  words: number
+  ms: number
+  at: number
+  device?: string | null
+}
+
+/** A host's totals, and the fingerprint a device's mirror is reconciled against. */
+export interface HostDictationStats {
+  words: number
+  ms: number
+  count: number
+  newest: number | null
+  oldest: number | null
+  clearedAt: number
+}
+
+function dictationRow(value: unknown): HostDictation | null {
+  const row = value as Partial<HostDictation> | null
+  if (!row || typeof row.id !== "string" || !row.id || typeof row.text !== "string") return null
+  const number = (raw: unknown) => (typeof raw === "number" && Number.isFinite(raw) ? raw : 0)
+  return {
+    id: row.id,
+    text: row.text,
+    words: number(row.words),
+    ms: number(row.ms),
+    at: number(row.at),
+    device: typeof row.device === "string" ? row.device : null,
+  }
+}
+
+function dictationTotals(value: unknown): HostDictationStats {
+  const row = value as Partial<HostDictationStats> | null
+  const number = (raw: unknown) => (typeof raw === "number" && Number.isFinite(raw) ? raw : 0)
+  const bound = (raw: unknown) => (typeof raw === "number" && Number.isFinite(raw) ? raw : null)
+  return {
+    words: number(row?.words),
+    ms: number(row?.ms),
+    count: number(row?.count),
+    newest: bound(row?.newest),
+    oldest: bound(row?.oldest),
+    clearedAt: number(row?.clearedAt),
+  }
+}
+
+/** One page of a bot's dictations, newest first, older than `before` where it is given. */
+export async function getDictations(
+  config: HermesConfig,
+  before?: number | null,
+  limit = 50,
+  signal?: AbortSignal,
+): Promise<HostDictation[]> {
+  const query = new URLSearchParams({ limit: String(limit) })
+  if (before != null) query.set("before", String(before))
+  const response = await request(`${dictationRoot(config)}?${query}`, {
+    headers: headers(config),
+    signal: signal ?? AbortSignal.timeout(READ_TIMEOUT_MS),
+  })
+  const body = await response.json()
+  const rows: unknown[] = Array.isArray(body?.dictations) ? body.dictations : []
+  return rows.map(dictationRow).filter((row): row is HostDictation => row !== null)
+}
+
+/** A bot's totals and its fingerprint — one read that serves both the stats card and a reconcile. */
+export async function getDictationStats(
+  config: HermesConfig,
+  signal?: AbortSignal,
+): Promise<HostDictationStats> {
+  const response = await request(`${dictationRoot(config)}/stats`, {
+    headers: headers(config),
+    signal: signal ?? AbortSignal.timeout(READ_TIMEOUT_MS),
+  })
+  return dictationTotals((await response.json())?.stats)
+}
+
+/** Writes one dictation; the same id written twice leaves the first where it is. */
+export async function postDictation(
+  config: HermesConfig,
+  entry: HostDictation,
+  signal?: AbortSignal,
+): Promise<HostDictation | null> {
+  const response = await request(dictationRoot(config), {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify(entry),
+    signal: signal ?? AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+  return dictationRow((await response.json())?.dictation)
+}
+
+export async function deleteDictation(
+  config: HermesConfig,
+  entryId: string,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const response = await request(dictationRoot(config, entryId), {
+    method: "DELETE",
+    headers: headers(config),
+    signal: signal ?? AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+  return (await response.json())?.removed === true
+}
+
+/** Takes a bot's whole log away and answers with what its totals are now. */
+export async function clearDictations(
+  config: HermesConfig,
+  signal?: AbortSignal,
+): Promise<HostDictationStats> {
+  const response = await request(dictationRoot(config), {
+    method: "DELETE",
+    headers: headers(config),
+    signal: signal ?? AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+  return dictationTotals((await response.json())?.stats)
+}

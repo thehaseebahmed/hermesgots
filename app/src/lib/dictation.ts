@@ -197,6 +197,8 @@ interface Session {
   /** Cancelled or done: nothing more is kept. */
   closed: boolean
   restored?: boolean
+  /** How long its pieces ran for, pauses left out: what the logged dictation reports (ADR 0060). */
+  spoken: number
   saving: Promise<unknown>
   saveTimer?: number
 }
@@ -220,6 +222,7 @@ const newSession = (
   failure: null,
   stopping: null,
   closed: false,
+  spoken: 0,
   saving: Promise.resolve(),
 })
 
@@ -351,7 +354,8 @@ export function useChunkedDictation(
   hint: string,
   key?: string,
   vocabulary: string[] = [],
-  onCommitted?: (text: string) => void,
+  /** The take's words, once they are final: where they landed and how long they took to say. */
+  onCommitted?: (text: string, spokenMs: number) => void,
 ) {
   const [status, setStatus] = useState<DictationStatus>("idle")
   const [levels, setLevels] = useState<number[] | null>(null)
@@ -449,6 +453,8 @@ export function useChunkedDictation(
         recording.segments = recording.segments.filter((open) => open !== segment)
         if (segment.chunks.length && !segment.skip) {
           const type = recorder.mimeType || recording.mimeType || "audio/webm"
+          // The span of the piece that becomes words: a cut at a pause leaves the pause out of it.
+          current.spoken += Math.max(0, Date.now() - segment.startedAt)
           current.pieces.push({ blob: new Blob(segment.chunks, { type }), text: null })
         }
         save(current, true)
@@ -623,6 +629,8 @@ export function useChunkedDictation(
       forget(current)
       session.current = null
       showIdle()
+      // The one moment the words are final, whether they came whole or with a phrase still out.
+      if (text) latest.current.onCommitted?.(text, current.spoken)
       return text
     },
     [showIdle],
@@ -655,7 +663,7 @@ export function useChunkedDictation(
         const text = joinText(...heard.map((piece) => piece.text ?? ""))
         current.pieces = current.pieces.filter((piece) => piece.text === null)
         save(current, true)
-        if (text) latest.current.onCommitted?.(text)
+        if (text) latest.current.onCommitted?.(text, current.spoken)
       }
       showFailure(
         current.error !== null
@@ -688,6 +696,7 @@ export function useChunkedDictation(
         forget(current)
         session.current = null
         showIdle()
+        if (text) latest.current.onCommitted?.(text, current.spoken)
         return text
       } catch (failure) {
         if (current.inflight !== controller) return null
