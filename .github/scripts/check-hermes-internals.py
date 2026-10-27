@@ -57,6 +57,14 @@ ANCHORS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
     (("tools/process_registry_notifications.py",), "matched watch pattern"),
     (("tools/process_registry_notifications.py",), "heartbeat #"),
     (("tools/process_registry_notifications.py",), "background processes completed."),
+    # The caps on what a plugin may add to the system prompt as a section, and on the host's own
+    # context files. A section past the first is dropped whole at render — the reason
+    # plugin/openui.py refuses to register one — and SOUL.md past the third is truncated head and
+    # tail with a marker naming the file read_file recovers it from. Gots injects neither: the host
+    # reads SOUL.md as the session's identity, for coding sessions too. Pinned, never copied.
+    (("hermes_cli/plugins_dispatch.py",), "DEFAULT_SYSTEM_PROMPT_SECTION_MAX_CHARS = 4_000"),
+    (("hermes_cli/plugins_dispatch.py",), "MAX_SYSTEM_PROMPT_SECTIONS_TOTAL_CHARS = 8_000"),
+    (("agent/prompt_builder.py",), "CONTEXT_FILE_MAX_CHARS = 20_000"),
 )
 
 # Hermes's own constants, read out of the checkout as they are: they are what the plugin's copies are
