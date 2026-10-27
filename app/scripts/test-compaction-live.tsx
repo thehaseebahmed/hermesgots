@@ -12,12 +12,13 @@ import {
   REPLAY_HEADER,
   RELOAD_NOTICE_BODY,
   RELOAD_NOTICE_HEADER,
+  SUMMARY_END,
+  SUMMARY_HEADER,
   TASK_SNAPSHOT_HEADER,
 } from "@/lib/compaction-seam"
 import { getMessages } from "@/lib/db"
 import { liveTurn, reconcileHistory, toMessages } from "@/lib/history"
 import type { SessionMessage } from "@/lib/hermes"
-import { ChatPage } from "@/routes/chat"
 
 import {
   botProfile,
@@ -33,7 +34,9 @@ import {
 const SESSION = "compact-session"
 const REQUEST = "Ask me that again."
 const SUMMARY_TEXT = "SUMMARY-OF-EARLIER-WORK"
-const SUMMARY = `[CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were compacted.\n${SUMMARY_TEXT}\n--- END OF CONTEXT SUMMARY — respond to the message below, not the summary above ---`
+const SUMMARY = [`${SUMMARY_HEADER} Earlier turns were compacted.`, SUMMARY_TEXT, SUMMARY_END].join(
+  "\n",
+)
 const SNAPSHOT = [
   TASK_SNAPSHOT_HEADER,
   "- [>] plugin. Plugin: store table (in_progress)",
