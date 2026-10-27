@@ -1,9 +1,13 @@
 import { useSyncExternalStore } from "react"
 import { liveQuery } from "dexie"
 
-import { READ_TIMEOUT_MS } from "@/lib/freshness"
+import { ACCOUNT_SYNC_MS, READ_TIMEOUT_MS, CHATS_MERGE_WAIT_MS } from "@/lib/freshness"
 import { noteFailure, quietly } from "@/lib/report"
 import { createSignal } from "@/lib/store"
+import { connectionKey } from "@/lib/connection"
+import { onWake } from "@/lib/wake"
+import { syncsAccount, type SyncTrigger } from "@/lib/sync-scope"
+import { within } from "@/lib/within"
 import {
   deleteDoc,
   getDoc,
@@ -102,7 +106,10 @@ export interface SyncState {
   account: Account
   vault: "unknown" | "missing" | "locked" | "unlocked"
   passkeys: boolean
-  syncing: boolean
+  /** The chat lists are merging. It ends when the bots that answer have, not when a dead one times out. */
+  syncingChats: boolean
+  /** The account documents — bots, the appearance switches, the prompt library — are being read or written. */
+  syncingAccount: boolean
   error?: string
   syncedAt?: number
   /** By profile id; missing until the bot's server has answered. */
@@ -115,7 +122,8 @@ let state: SyncState = {
   account: { status: "loading" },
   vault: "unknown",
   passkeys: false,
-  syncing: false,
+  syncingChats: false,
+  syncingAccount: false,
   chatStores: {},
 }
 const stateSignal = createSignal()
@@ -608,18 +616,42 @@ async function settleChatTombstones(profileId: string, merged: Doc<ChatValue>) {
 }
 
 /**
- * Pulls what the bot's old Netlify chat list still holds onto this device, so the plugin sync after
- * it carries it over. True when there was a list to move.
+ * Moves what the bot's old Netlify chat list still holds onto this device, then takes the document
+ * off and says it's moved: the plugin sync after it carries the rows over.
  */
-async function pullFallbackChats(key: CryptoKey, profileId: string) {
+async function moveFallbackChats(key: CryptoKey, profileId: string) {
   const remote = await readDoc<ChatValue>(key, `chats/${profileId}`)
   if (!remote.etag) return false
   const local = await localChats(profileId, false)
   await applyChats(profileId, mergeDocs(remote.entries, local).pull)
+  await deleteDoc(`chats/${profileId}`).catch(() => undefined)
+  await recordMoved(profileId)
   return true
 }
 
-/** Merges the bot's chat list with its plugin's; the merged list, or undefined when it didn't answer. */
+/** Bots whose old list is being pulled: one attempt at a time, so no pass starts the same dead read. */
+const pulling = new Map<string, Promise<boolean>>()
+/** The moves landing side by side, written one after another: a read, an append, a write, each in turn. */
+let movedWriting: Promise<unknown> = Promise.resolve()
+
+/** Says the bot's old list is off this device, without losing a move that lands at the same moment. */
+function recordMoved(profileId: string) {
+  // A write that failed leaves the chain as it was, so the next move still gets its turn.
+  movedWriting = movedWriting
+    .catch(() => undefined)
+    .then(async () => {
+      const { movedChats = [] } = await getSettings()
+      if (movedChats.includes(profileId)) return
+      await saveSettings({ movedChats: [...movedChats, profileId] })
+    })
+  return movedWriting
+}
+
+/**
+ * Merges the bot's chat list with its plugin's; the merged list, or undefined when the bot's server
+ * didn't answer. Only the host read can say the bot is away — a local read that fails is this
+ * device's problem and leaves the pass, rather than being blamed on the server.
+ */
 async function mergePluginChats(profile: Profile) {
   const drafts = await hasPluginFeature(profile, "draft_text")
   const local = await localChats(profile.id, drafts)
@@ -646,82 +678,263 @@ async function fingerprint() {
   return `${bots}|${count}@${newest?.changedAt ?? 0}|${tombstones}|${settings.onboarded}|${appearance}@${settings.appearanceAt ?? 0}|prompts@${settings.promptsAt ?? 0}`
 }
 
-let running: Promise<void> | undefined
-let again = false
+let chatLane: Promise<void> | undefined
+let accountLane: Promise<void> | undefined
+/** Chat lists asked for again while their lane ran: every bot, or only those named. */
+let againChats: "all" | Set<string> | undefined
+let againAccount = false
+/** When the account documents last completed, on this launch only, so a fresh launch reads them. */
+let accountSyncedAt: number | undefined
+/** The account documents' failure, for the completion that reports it and puts it in `state.error`. */
+let accountError: string | undefined
 let syncedFingerprint = ""
+/** The merges still out, so a pass that takes over for one more doesn't ask a bot twice. */
+const merging = new Map<string, Promise<Awaited<ReturnType<typeof mergePluginChats>>>>()
 
-async function runSync() {
-  markResume("sync-start")
-  const key = state.vault === "unlocked" ? await localKey() : undefined
-  try {
-    if (key) await ensureInbox(key)
-    // Bots, the appearance switches and the prompt library are separate documents, so they go side
-    // by side; the registry read follows, since it wants the inbox key.
-    if (key) {
-      await Promise.all([syncBots(key), syncAppearance(key), syncPrompts(key)])
-      markResume("account-docs-end")
-      await pullRegistry()
-      markResume("registry-end")
-    }
-    await syncChatLists(key)
-    syncedFingerprint = await fingerprint()
-    if (!key) return setState({ syncing: false })
-    const syncedAt = Date.now()
-    await saveSettings({ syncedAt })
-    setState({ syncing: false, error: undefined, syncedAt })
-  } catch (error) {
-    setState({ syncing: false, error: error instanceof Error ? error.message : "Sync failed" })
-  } finally {
-    markResume("sync-end")
+/** What a request covers: the chat lists, and the account documents too. */
+interface SyncAsk {
+  chats: boolean
+  account: boolean
+}
+
+/** The data key, when this device holds one: without it the account's documents can't be read. */
+async function currentKey() {
+  return state.vault === "unlocked" ? await localKey() : undefined
+}
+
+/** Marks chat lists for one more merge once the pass running now has finished. */
+function againChatList(only?: Set<string>) {
+  if (againChats === "all" || !only) againChats = "all"
+  else if (againChats) for (const id of only) againChats.add(id)
+  else againChats = new Set(only)
+}
+
+/** The bots the next pass covers, clearing the ask: every bot, or only those named. */
+function takeAgainChats() {
+  const only = againChats === "all" ? undefined : againChats
+  againChats = undefined
+  return only
+}
+
+/** One bot's merge, shared with a pass that asks for it while it's still out. */
+function mergeOnce(profile: Profile) {
+  const started = merging.get(profile.id)
+  if (started) return started
+  const work = mergePluginChats(profile).finally(() => merging.delete(profile.id))
+  merging.set(profile.id, work)
+  return work
+}
+
+/**
+ * The chat lists: every bot's, merged side by side, and once more if anything asked for them while
+ * this pass ran. Its failures stay here — a bot's server being away is `chatStores`' news, not the
+ * account's.
+ */
+function startChatLane(key: CryptoKey | undefined, only?: Set<string>) {
+  if (chatLane) {
+    againChatList(only)
+    return chatLane
   }
+  setState({ syncingChats: true })
+  const run = async () => {
+    for (let ids = only; ;) {
+      await syncChatLists(key, ids)
+      // What the merge pulled in isn't a change of this device's to push back.
+      syncedFingerprint = await fingerprint()
+      if (!againChats) break
+      ids = takeAgainChats()
+    }
+  }
+  chatLane = run()
+    .catch(quietly("Syncing the chat lists"))
+    .finally(() => {
+      chatLane = undefined
+      setState({ syncingChats: false })
+      // Asked for in the breath between the loop ending and this: it still gets its pass.
+      if (againChats) void startChatLane(key, takeAgainChats())
+    })
+  return chatLane
+}
+
+/**
+ * The account documents, on their own lane so a slow or failing Netlify can't stand between a
+ * return to the app and the chat lists. A bot the registry adds during the pass had no chat list
+ * when the chat lane read its bots, so its own list is merged before this ends.
+ */
+function startAccountLane(key: CryptoKey | undefined) {
+  if (accountLane) {
+    againAccount = true
+    return accountLane
+  }
+  setState({ syncingAccount: true })
+  const run = async () => {
+    for (;;) {
+      const added = key ? await syncAccountDocs(key) : []
+      if (key) accountSyncedAt = Date.now()
+      if (added.length) await startChatLane(key, new Set(added))
+      if (!againAccount) break
+      againAccount = false
+    }
+  }
+  accountLane = run()
+    .catch((error) => {
+      accountError = error instanceof Error ? error.message : "Sync failed"
+    })
+    .finally(() => {
+      accountLane = undefined
+      setState({ syncingAccount: false })
+      if (againAccount) {
+        againAccount = false
+        void startAccountLane(key)
+      }
+    })
+  return accountLane
+}
+
+/**
+ * Runs what a request covers. `trigger` is set by a request that is a whole sync — a return to the
+ * app, or a change made here — so the trace marks it once, and never for the chat-list-only asks a
+ * stream's events make.
+ */
+async function requestSync(ask: SyncAsk, trigger?: SyncTrigger, only?: Set<string>) {
+  if (trigger) markResume("sync-start")
+  // A return inside the account documents' freshness reads the chat lists alone.
+  const readsAccount =
+    ask.account &&
+    (!trigger ||
+      syncsAccount({
+        trigger,
+        lastSyncedAt: accountSyncedAt,
+        now: Date.now(),
+        every: ACCOUNT_SYNC_MS,
+      }))
+  const key = await currentKey()
+  // A lane that is free starts now and one that is running takes this for once more, so the ask
+  // never becomes a second pass: it's the lane's own state, not a decision taken outside it.
+  if (ask.chats) startChatLane(key, only)
+  if (readsAccount) startAccountLane(key)
+  await Promise.all([ask.chats ? chatLane : undefined, readsAccount ? accountLane : undefined])
+  await finishSync(key, readsAccount)
+  if (trigger) markResume("sync-end")
+}
+
+/** Reports a sync with nothing left running. A request still working reports its own. */
+async function finishSync(key: CryptoKey | undefined, readDocuments: boolean) {
+  if (chatLane || accountLane) return
+  if (readDocuments) {
+    const error = accountError
+    accountError = undefined
+    if (error) return setState({ error })
+  }
+  syncedFingerprint = await fingerprint()
+  // Last synced is a whole sync's: a chat list merged on its own says nothing about the documents.
+  if (!key || !readDocuments) return
+  const syncedAt = Date.now()
+  await saveSettings({ syncedAt })
+  setState({ error: undefined, syncedAt })
 }
 
 /** Merges each bot's chat list with its plugin's: every bot's, or only those `only` names. */
 async function syncChatLists(key: CryptoKey | undefined, only?: Set<string>) {
-  const chatStores = { ...state.chatStores }
   const seed = await pristineSeed()
   const { movedChats = [] } = await getSettings()
+  const moved = [...movedChats]
   // Turned off: nothing checks on it. Without a key, Hermes keeps no session for our ids.
   const profiles = (await db.profiles.toArray()).filter(
     (p) => !p.disabled && p.apiKey && p.id !== seed?.id && (!only || only.has(p.id)),
   )
-  const held = new Set<string>()
-  for (const profile of profiles) {
-    if (key && !movedChats.includes(profile.id) && (await pullFallbackChats(key, profile.id)))
-      held.add(profile.id)
-  }
-  // Every host at once, so one that hangs holds up only its own bots.
-  const results = await Promise.all(profiles.map(mergePluginChats))
-  // Applied in order: two bots on one server share its list, and a chat stays with the first.
-  for (const [i, profile] of profiles.entries()) {
-    const result = results[i]
-    chatStores[profile.id] = result ? "plugin" : "unreachable"
-    if (!result) continue
-    await applyChats(profile.id, mergeDocs(result.merged, result.local).pull)
-    await settleChatTombstones(profile.id, result.merged)
-    if (key && !movedChats.includes(profile.id)) {
-      if (held.has(profile.id)) await deleteDoc(`chats/${profile.id}`).catch(() => undefined)
-      await saveSettings({ movedChats: [...movedChats, profile.id] })
-      movedChats.push(profile.id)
+  // A bot's old list moves itself off, out of the pass's way: a read that never answers costs this
+  // pass nothing, and a pass that starts while one is still out doesn't start a second.
+  if (key)
+    for (const profile of profiles) {
+      if (moved.includes(profile.id) || pulling.has(profile.id)) continue
+      const attempt = moveFallbackChats(key, profile.id)
+        .catch((error) => {
+          noteFailure(`Moving ${profile.name}'s old chat list`, error)
+          return false
+        })
+        .finally(() => pulling.delete(profile.id))
+      pulling.set(profile.id, attempt)
     }
+  // One group per server: bots on one server share its list, so they merge side by side and apply
+  // in the order they were added, and a server that never answers holds up only its own bots.
+  const groups = new Map<string, Profile[]>()
+  for (const profile of profiles) {
+    const members = groups.get(connectionKey(profile))
+    if (members) members.push(profile)
+    else groups.set(connectionKey(profile), [profile])
   }
-  setState({ chatStores })
+  // What the rows say, written once the pass stops waiting rather than once per bot, and once more
+  // for a bot that lands later: its rows are here, so it is no longer news that it was out.
+  const stores = { ...state.chatStores }
+  let reported = false
+  const report = async (late: boolean) => {
+    reported = true
+    // Merged over what the state holds, since a later pass may have answered while this one waited.
+    setState({ chatStores: { ...state.chatStores, ...stores } })
+    // A merge that landed after the pass ended pulled rows in; they aren't ours to push back.
+    if (late) syncedFingerprint = await fingerprint()
+  }
+  const passes = [...groups.values()].map(async (members) => {
+    const merged = await Promise.all(members.map(mergeOnce))
+    for (const [i, profile] of members.entries()) {
+      const answer = merged[i] ? "plugin" : "unreachable"
+      if (stores[profile.id] !== answer) stores[profile.id] = answer
+      await applyChatList(profile, merged[i])
+    }
+    if (reported) await report(true)
+  })
+  // A bot still out after this is left to land on its own: the pass reports what answered.
+  const settled = Promise.allSettled(passes).then((results) => {
+    for (const result of results)
+      if (result.status === "rejected") noteFailure("Applying the chat lists", result.reason)
+  })
+  // The pass holds the sync for `CHATS_MERGE_WAIT_MS` at most, whatever the bots' hosts are doing.
+  await within(settled, CHATS_MERGE_WAIT_MS)
+  if (!reported) await report(false)
 }
 
-/** Reads the registry; once a linked bot is in, the untouched seed bot makes way for it. */
-async function pullRegistry() {
+/** Applies one bot's answer: its rows and tombstones. Its old list moves off on its own. */
+async function applyChatList(
+  profile: Profile,
+  result: Awaited<ReturnType<typeof mergePluginChats>>,
+) {
+  if (!result) return
+  await applyChats(profile.id, mergeDocs(result.merged, result.local).pull)
+  await settleChatTombstones(profile.id, result.merged)
+}
+
+/** The account documents: what every device shares, and the registry that names its bots. */
+async function syncAccountDocs(key: CryptoKey) {
+  await ensureInbox(key)
+  // Bots, the appearance switches and the prompt library are separate documents, so they go side
+  // by side; the registry read follows, since it wants the inbox key.
+  await Promise.all([syncBots(key), syncAppearance(key), syncPrompts(key)])
+  markResume("account-docs-end")
+  const added = await pullRegistry()
+  markResume("registry-end")
+  return added
+}
+
+/**
+ * Reads the registry, answering the bots it added; once a linked bot is in, the untouched seed bot
+ * makes way for it.
+ */
+async function pullRegistry(): Promise<string[]> {
   // Looked for first: once linked bots are in, the seed is no longer the only bot.
   const seed = await pristineSeed()
+  const known = new Set((await db.profiles.toArray()).map((profile) => profile.id))
   try {
     await syncRegistry()
     setState({ registryError: undefined })
   } catch (error) {
     setState({ registryError: error instanceof Error ? error.message : "Couldn't refresh bots" })
-    return
+    return []
   }
   if (seed && (await db.profiles.filter((p) => Boolean(p.hostId)).count())) {
     await deleteProfile(seed.id, { remote: true })
   }
+  return (await db.profiles.toArray()).map((profile) => profile.id).filter((id) => !known.has(id))
 }
 
 /** Reads the registry now, for screens that wait on a bot to link. */
@@ -730,44 +943,28 @@ export async function refreshBots() {
   await pullRegistry()
 }
 
-/** Syncs now, or once more after the sync already running. */
 /**
- * Merges the chat lists of these bots only, for a server whose plugin said its list changed. A
- * whole sync already running covers them, so it runs once more instead.
+ * Merges the chat lists of these bots only, for a server whose plugin said its list changed. The
+ * pass already sent its merge before that change, so one that is running takes this for once more.
  */
 export function syncChatsOf(botIds: string[]): Promise<void> {
-  if (running) {
-    again = true
-    return running
-  }
-  running = syncChatLists(undefined, new Set(botIds))
-    // What it pulled in isn't a change of this device's to push back.
-    .then(async () => void (syncedFingerprint = await fingerprint()))
-    .catch(quietly("Syncing chat lists"))
-    .finally(() => {
-      running = undefined
-      if (again) {
-        again = false
-        void syncNow()
-      }
-    })
-  return running
+  return requestSync({ chats: true, account: false }, undefined, new Set(botIds))
 }
 
+/** A whole sync: the account documents and the chat lists, for a change made here, a sign-in, or
+ * the Settings button. Never waits on how recently the documents were read. */
 export function syncNow(): Promise<void> {
-  if (running) {
-    again = true
-    return running
-  }
-  setState({ syncing: true })
-  running = runSync().finally(() => {
-    running = undefined
-    if (again) {
-      again = false
-      void syncNow()
-    }
-  })
-  return running
+  return requestSync({ chats: true, account: true }, "full")
+}
+
+/**
+ * A return to the app: the chat lists at once, and the account documents beside them only once
+ * they're stale, so Netlify can't stand between the return and the chats. `onWake` asks for this
+ * after a while away or when the network comes back; a flick away and back is left to the stream,
+ * whose connection never closed.
+ */
+export function wakeSync(): Promise<void> {
+  return requestSync({ chats: true, account: true }, "wake")
 }
 
 let started = false
@@ -779,6 +976,8 @@ export async function startSync() {
   setState({ syncedAt: (await getSettings()).syncedAt })
   const onAccount = async (account: Account) => {
     setState({ account })
+    // Another account's documents are read at once, throttle or no throttle.
+    accountSyncedAt = undefined
     if (account.status !== "signed-in") return
     try {
       await refreshVault()
@@ -810,8 +1009,5 @@ export async function startSync() {
     window.clearTimeout(timer)
     timer = window.setTimeout(() => void syncNow(), 1500)
   })
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") void syncNow()
-  })
-  window.addEventListener("online", () => void syncNow())
+  onWake(() => void wakeSync())
 }

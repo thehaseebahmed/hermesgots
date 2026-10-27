@@ -20,6 +20,19 @@ export const MCP_ACCESS_MS = 40_000
 /** A plugin that lacks a route (an older one) is left alone this long before it's asked again. */
 export const MISSING_ROUTE_MS = 5 * 60_000
 
+/**
+ * How long the account documents stay fresh after they were last read and written: Netlify is the
+ * slow part of a resume, and bots, the appearance switches and the prompt library rarely change.
+ */
+export const ACCOUNT_SYNC_MS = 60_000
+
+/**
+ * How long one chat-list pass holds the sync open for a bot that hasn't answered: past this the pass
+ * ends and the bot's own read timeout settles its row when it lands, so one dead host can't hold the
+ * sync for the whole of `READ_TIMEOUT_MS` while everything on screen is already merged.
+ */
+export const CHATS_MERGE_WAIT_MS = 5_000
+
 /** Which runs are in flight and what waits on the user (`runs/live`), shared by every screen. */
 export const RUNS_MS = 10_000
 /** An open chat looks for turns sent from another device. */

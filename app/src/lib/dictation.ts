@@ -8,6 +8,7 @@ import {
 } from "react"
 
 import { DICTATION_INFO_MS } from "@/lib/freshness"
+import { within } from "@/lib/within"
 import { createSignal } from "@/lib/store"
 import { connectionKey } from "@/lib/connection"
 import { db, type DictationPiece, type SavedDictation } from "@/lib/db"
@@ -230,21 +231,6 @@ export function joinText(...parts: string[]) {
 }
 
 const takeText = (pieces: DictationPiece[]) => joinText(...pieces.map((piece) => piece.text ?? ""))
-
-/**
- * A promise given at most `ms` to resolve: what it answers, or undefined when the wait is up. A
- * take's ending is bounded by this rather than by the host answering, so a wedged host can't hold
- * the composer (ADR 0038).
- */
-export function within<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
-  let timer: number | undefined
-  const wait = new Promise<undefined>((done) => {
-    timer = window.setTimeout(done, ms)
-  })
-  return Promise.race([promise.catch(() => undefined), wait]).finally(() =>
-    window.clearTimeout(timer),
-  )
-}
 
 function save(session: Session, now = false) {
   if (!session.key || session.closed) return

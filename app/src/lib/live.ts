@@ -10,7 +10,7 @@ import { followEvents, getPluginFeatures, HermesError, type HermesConfig } from 
 import { reconcileHistory } from "@/lib/history"
 import { markResume } from "@/lib/resume-trace"
 import { takeHostTitle } from "@/lib/title"
-import { syncChatsOf, syncNow } from "@/lib/sync"
+import { syncChatsOf } from "@/lib/sync"
 
 /**
  * Hears from each server's Gots plugin as things change, instead of asking every so often: one
@@ -175,7 +175,9 @@ async function chatsFor(key: string, sessionId: unknown) {
 
 /** After a gap in what this device heard: everything that may have changed meanwhile. */
 function catchUpAll(key: string) {
-  void syncNow()
+  // The chat lists are the part a return to the app must not wait for, and nothing in a resume
+  // changed the account's documents: they're merged here, not the whole sync.
+  void syncChatsOf(botsOf(key).map((bot) => bot.id))
   for (const id of openChats) {
     void db.conversations.get(id).then((chat) => {
       if (chat && botsOf(key).some((bot) => bot.id === chat.profileId)) catchUpChat(id)

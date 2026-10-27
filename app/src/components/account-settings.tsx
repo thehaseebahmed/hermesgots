@@ -148,7 +148,11 @@ export function AccountSettings() {
               <div className="flex flex-col gap-3">
                 <LastSynced at={sync.syncedAt} />
                 <div className="flex flex-wrap gap-3">
-                  <Button variant="outline" disabled={sync.syncing} onClick={() => void syncNow()}>
+                  <Button
+                    variant="outline"
+                    disabled={sync.syncingChats || sync.syncingAccount}
+                    onClick={() => void syncNow()}
+                  >
                     <RefreshCwIcon data-icon="inline-start" />
                     Sync now
                   </Button>
