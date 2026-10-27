@@ -658,13 +658,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
         # its rows above the stamp are gone without comparing ids (dictations.py, ADR 0060).
         conn.execute(
             """CREATE TABLE IF NOT EXISTS dictations (
-                   id TEXT PRIMARY KEY,
+                   id TEXT NOT NULL,
                    profile TEXT NOT NULL DEFAULT '',
                    text TEXT NOT NULL,
                    words INTEGER NOT NULL DEFAULT 0,
                    ms INTEGER NOT NULL DEFAULT 0,
                    at INTEGER NOT NULL,
-                   device TEXT
+                   PRIMARY KEY (profile, id)
                )"""
         )
         # Every read is one profile's newest first, and the page below asks for `at` under a bound.

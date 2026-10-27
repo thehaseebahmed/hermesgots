@@ -2597,12 +2597,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         body = await json_body(request)
         if body is None:
             return _error(web, "Body must be a JSON object", 400)
-        # The path and the profile are read here, not inside the thread: both are scoped to this
-        # request, and a thread doesn't see either scope.
-        path, profile = store_path(), _request_profile()
         try:
-            found = await asyncio.to_thread(dictations.record, path, profile, body)
-        except dictations.DictationError as error:
+            found = await asyncio.to_thread(
+                dictations.record, store_path(), _request_profile(), body
+            )
+        except dictations.DictationLogError as error:
             return _error(web, str(error), error.status)
         return web.json_response({"object": "memento.dictation", "dictation": found}, status=201)
 

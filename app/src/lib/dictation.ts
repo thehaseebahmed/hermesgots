@@ -12,6 +12,7 @@ import { within } from "@/lib/within"
 import { createSignal } from "@/lib/store"
 import { connectionKey } from "@/lib/connection"
 import { db, type DictationPiece, type SavedDictation } from "@/lib/db"
+import { spokenOf } from "@/lib/dictation-log"
 import {
   blockedMicrophone,
   clipFailure,
@@ -197,8 +198,6 @@ interface Session {
   /** Cancelled or done: nothing more is kept. */
   closed: boolean
   restored?: boolean
-  /** How long its pieces ran for, pauses left out: what the logged dictation reports (ADR 0060). */
-  spoken: number
   saving: Promise<unknown>
   saveTimer?: number
 }
@@ -222,7 +221,6 @@ const newSession = (
   failure: null,
   stopping: null,
   closed: false,
-  spoken: 0,
   saving: Promise.resolve(),
 })
 
@@ -235,6 +233,8 @@ export function joinText(...parts: string[]) {
 
 const takeText = (pieces: DictationPiece[]) => joinText(...pieces.map((piece) => piece.text ?? ""))
 
+/** How long the pieces ran for, pauses left out: what the logged dictation reports (ADR 0060). */
+const spokenLong = (pieces: DictationPiece[]) => spokenOf(pieces.map((piece) => piece.ms ?? 0))
 function save(session: Session, now = false) {
   if (!session.key || session.closed) return
   if (!now) {
@@ -453,9 +453,8 @@ export function useChunkedDictation(
         recording.segments = recording.segments.filter((open) => open !== segment)
         if (segment.chunks.length && !segment.skip) {
           const type = recorder.mimeType || recording.mimeType || "audio/webm"
-          // The span of the piece that becomes words: a cut at a pause leaves the pause out of it.
-          current.spoken += Math.max(0, Date.now() - segment.startedAt)
-          current.pieces.push({ blob: new Blob(segment.chunks, { type }), text: null })
+          const ms = Math.max(0, Date.now() - segment.startedAt)
+          current.pieces.push({ blob: new Blob(segment.chunks, { type }), text: null, ms })
         }
         save(current, true)
         // A take that died waits for Retry instead, so its failure stays the bar's one message.
@@ -629,8 +628,7 @@ export function useChunkedDictation(
       forget(current)
       session.current = null
       showIdle()
-      // The one moment the words are final, whether they came whole or with a phrase still out.
-      if (text) latest.current.onCommitted?.(text, current.spoken)
+      if (text) latest.current.onCommitted?.(text, spokenLong(current.pieces))
       return text
     },
     [showIdle],
@@ -661,9 +659,10 @@ export function useChunkedDictation(
       const heard = current.pieces.filter((piece) => piece.text !== null)
       if (heard.length) {
         const text = joinText(...heard.map((piece) => piece.text ?? ""))
+        const ms = spokenLong(heard)
         current.pieces = current.pieces.filter((piece) => piece.text === null)
         save(current, true)
-        if (text) latest.current.onCommitted?.(text, current.spoken)
+        if (text) latest.current.onCommitted?.(text, ms)
       }
       showFailure(
         current.error !== null
@@ -693,11 +692,7 @@ export function useChunkedDictation(
           controller.signal,
         )
         if (current.inflight !== controller) return null
-        forget(current)
-        session.current = null
-        showIdle()
-        if (text) latest.current.onCommitted?.(text, current.spoken)
-        return text
+        return land(current, text)
       } catch (failure) {
         if (current.inflight !== controller) return null
         current.error = failure
@@ -708,7 +703,7 @@ export function useChunkedDictation(
         if (current.inflight === controller) current.inflight = null
       }
     },
-    [showFailure, showIdle],
+    [land, showFailure],
   )
 
   const cancel = useCallback(() => {

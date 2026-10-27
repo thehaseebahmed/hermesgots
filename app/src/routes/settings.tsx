@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTheme } from "next-themes"
-import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router"
+import { Navigate, useNavigate, useParams, useSearchParams } from "react-router"
 import {
   ArrowLeftIcon,
   AudioLinesIcon,
@@ -20,7 +20,6 @@ import {
   MessageCircleQuestionIcon,
   SlidersHorizontalIcon,
   TerminalIcon,
-  ChevronRightIcon,
   DatabaseIcon,
   MenuIcon,
   MessagesSquareIcon,
@@ -52,10 +51,10 @@ import { DictationSettings } from "@/components/settings/dictation"
 import {
   ActionRow,
   Group,
+  LinkRow,
   RowText,
   SheetRow,
   SwitchRow,
-  linkRowClass,
   rowClass,
   Screen,
 } from "@/components/settings-chrome"
@@ -85,7 +84,7 @@ import {
   type Profile,
 } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
-import { spelledCount } from "@/lib/dictation-log"
+import { wordsLabel } from "@/lib/dictation-log"
 import { useDictationTotals } from "@/lib/dictations"
 import { useLiveStatus, type LiveStatus } from "@/lib/live"
 import { useLarge } from "@/lib/media"
@@ -735,13 +734,12 @@ function Row({
 }) {
   const { active, replace } = useContext(MenuContext)
   return (
-    <Link
+    <LinkRow
       to={`/settings/${to}`}
+      current={active === to}
       replace={replace}
-      aria-current={active === to ? "page" : undefined}
-      className={cn(linkRowClass, "aria-[current=page]:bg-muted")}
-    >
-      {leading ??
+      leading={
+        leading ??
         (image ? (
           <img
             src={image}
@@ -750,10 +748,11 @@ function Row({
           />
         ) : Icon ? (
           <Icon className="size-5 shrink-0 text-muted-foreground" />
-        ) : null)}
-      <RowText title={title} subtitle={subtitle} />
-      <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
-    </Link>
+        ) : null)
+      }
+      title={title}
+      subtitle={subtitle}
+    />
   )
 }
 
@@ -772,7 +771,7 @@ function DictationRow() {
       to="dictation"
       icon={AudioLinesIcon}
       title="Dictation"
-      subtitle={reported ? `${spelledCount(totals.words)} words` : "History, bots and stats"}
+      subtitle={reported ? wordsLabel(totals.words) : "History, bots and stats"}
     />
   )
 }

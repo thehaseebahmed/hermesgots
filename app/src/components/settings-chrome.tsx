@@ -5,6 +5,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type ComponentProps,
   type ReactNode,
 } from "react"
 
@@ -18,6 +19,8 @@ import {
 } from "lucide-react"
 
 import { toast } from "sonner"
+
+import { Link } from "react-router"
 
 import { ModelPicker } from "@/components/chat/model-picker"
 import { ExperimentalBadge } from "@/components/experimental-badge"
@@ -138,6 +141,38 @@ export function RowText({ title, subtitle }: { title: ReactNode; subtitle?: Reac
 }
 
 /** A row that opens a pop-up of its own: the row chrome, and the open state the sheet takes. */
+/** A row that goes somewhere: one composition for the Settings menu and every screen that lists bots. */
+export function LinkRow({
+  to,
+  current,
+  replace,
+  leading,
+  title,
+  subtitle,
+  ...rest
+}: {
+  to: string
+  current?: boolean
+  replace?: boolean
+  leading?: ReactNode
+  title: ReactNode
+  subtitle?: ReactNode
+} & Omit<ComponentProps<typeof Link>, "to" | "children" | "title" | "subtitle">) {
+  return (
+    <Link
+      to={to}
+      replace={replace}
+      aria-current={current ? "page" : undefined}
+      className={cn(linkRowClass, "aria-[current=page]:bg-muted")}
+      {...rest}
+    >
+      {leading}
+      <RowText title={title} subtitle={subtitle} />
+      <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
+    </Link>
+  )
+}
+
 export function SheetRow({
   icon: Icon,
   title,

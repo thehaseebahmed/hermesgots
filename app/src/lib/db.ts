@@ -560,6 +560,8 @@ export interface Draft {
 export interface DictationPiece {
   blob: Blob
   text: string | null
+  /** How long this piece ran, so a take's spoken span survives a reload (ADR 0060). */
+  ms?: number
 }
 
 /**
@@ -594,6 +596,8 @@ export interface DictationRecord {
   ms: number
   /** When the words landed. */
   at: number
+  /** Whether its bot's host holds a copy; a take written while a host was away is re-posted. */
+  posted?: boolean
 }
 
 /** The totals a bot's host last reported, kept so the screen and the menu row draw offline. */
@@ -603,12 +607,8 @@ export interface DictationStats {
   words: number
   ms: number
   count: number
-  newest: number | null
-  oldest: number | null
   /** When that host last had its log cleared, so this device can drop what is gone. */
   clearedAt: number
-  /** When this device read it. */
-  at: number
 }
 
 /**
@@ -941,7 +941,7 @@ db.version(24).upgrade((tx) =>
 // v25: the Dictation screen's mirror of what each bot's host holds, and the totals it last reported
 // (ADR 0060). Both are new tables, so nothing older has to be moved into them.
 db.version(25).stores({
-  dictationLog: "id, at, connection, [connection+at]",
+  dictationLog: "id, at, connection",
   dictationStats: "id",
 })
 

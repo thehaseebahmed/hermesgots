@@ -3097,7 +3097,6 @@ const dictationLog = [
     words: 11,
     ms: 4_200,
     at: Date.now() - 3 * 60 * 60 * 1000,
-    device: "mock-device",
   },
   {
     id: "dict-mock-2",
@@ -3105,7 +3104,6 @@ const dictationLog = [
     words: 9,
     ms: 3_600,
     at: Date.now() - 26 * 24 * 60 * 60 * 1000,
-    device: "mock-device",
   },
 ]
 
@@ -4986,7 +4984,7 @@ http
     if (PLUGIN && !profile && DICTATIONS && url.pathname === "/api/plugins/memento/dictations") {
       if (req.method === "GET") {
         const before = Number(url.searchParams.get("before") ?? 0)
-        const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit") ?? 50)))
+        const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit") ?? 20)))
         const dictations = [...dictationLog]
           .filter((row) => !before || row.at < before)
           .sort((one, two) => two.at - one.at)
@@ -5004,19 +5002,27 @@ http
       }
       if (req.method === "POST") {
         const body = await readBody(req).catch(() => ({}))
+        const id = typeof body.id === "string" ? body.id.trim() : ""
+        if (!id) return json(res, 400, { error: { message: "A dictation needs an id." } })
         const text = typeof body.text === "string" ? body.text : ""
         if (!text.trim())
-          return json(res, 400, { error: { message: "Body needs the dictation's text." } })
+          return json(res, 400, { error: { message: "A dictation needs its words." } })
+        if (text.length > 20000)
+          return json(res, 413, { error: { message: "That dictation is too long to keep." } })
+        // Nothing sits below the stamp a clear left, so a take that lands after one is stored at it.
+        const asked = Number(body.at) || Date.now()
+        const at = asked <= DICTATION_CLEARED_AT.at ? DICTATION_CLEARED_AT.at + 1 : asked
         const row = {
-          id: typeof body.id === "string" && body.id ? body.id : `dict-mock-${Date.now()}`,
+          id,
           text,
           words: Number(body.words) || text.trim().split(/\s+/).length,
           ms: Number(body.ms) || 0,
-          at: Number(body.at) || Date.now(),
-          device: typeof body.device === "string" ? body.device : null,
+          at,
         }
-        if (!dictationLog.some((one) => one.id === row.id)) dictationLog.push(row)
-        return json(res, 200, { object: "memento.dictation", dictation: row })
+        const held = dictationLog.find((one) => one.id === id)
+        if (held) return json(res, 201, { object: "memento.dictation", dictation: held })
+        dictationLog.push(row)
+        return json(res, 201, { object: "memento.dictation", dictation: row })
       }
     }
     if (
@@ -5028,11 +5034,10 @@ http
     ) {
       const id = decodeURIComponent(url.pathname.slice("/api/plugins/memento/dictations/".length))
       const at = dictationLog.findIndex((row) => row.id === id)
-      if (at < 0) return json(res, 404, { error: { message: "No dictation with that id." } })
-      dictationLog.splice(at, 1)
+      if (at >= 0) dictationLog.splice(at, 1)
       return json(res, 200, {
         object: "memento.dictation.removed",
-        removed: true,
+        removed: at >= 0,
         stats: dictationStats(),
       })
     }

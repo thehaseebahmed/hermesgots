@@ -89,7 +89,7 @@ export function clearedAway<T extends { at: number }>(rows: T[], clearedAt: numb
   return rows.filter((row) => row.at < clearedAt)
 }
 
-/** The rows a page carries that the mirror has no copy of, or has an older copy of. */
+/** The rows a page carries that the mirror's copy no longer matches, or never had. */
 export function toUpsert<T extends { id: string; at: number }>(
   mirror: { id: string; at: number }[],
   page: T[],
@@ -129,4 +129,9 @@ export function pooledRate(words: number, ms: number): number | null {
 /** A word count with its thousands marked, for a value read at a glance. */
 export function spelledCount(value: number): string {
   return value.toLocaleString()
+}
+
+/** That count with its noun: "1 word", "1,204 words". */
+export function wordsLabel(words: number): string {
+  return `${spelledCount(words)} ${words === 1 ? "word" : "words"}`
 }

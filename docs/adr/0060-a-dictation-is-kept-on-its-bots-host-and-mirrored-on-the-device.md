@@ -13,7 +13,10 @@ they took to say.
 The write happens at the moment the words land, in the one path both a Stop and a Send end on
 (`useChunkedDictation`'s commit), and it is never awaited by the send. The entry is written to the
 mirror first and posted to the host afterwards, so a host that is away — or too old to have the
-routes — costs the entry nothing: the mirror is still the log, and no error reaches the user. A take
+routes — costs the entry nothing: the mirror is still the log, and no error reaches the user. The row remembers
+whether the host ever answered for it, so a post that failed is not a row the host refuses — it is a
+row still owed, posted again the next time the mirror is reconciled and dropped from the comparison
+until it is. A take
 that is cancelled, fails, or is abandoned before any words land writes nothing; a take whose words
 land and are then edited away or thrown out still wrote.
 
@@ -28,9 +31,10 @@ the first paint. The check is a fingerprint, not a diff: count, newest, oldest, 
 stamp. A device whose mirror agrees does nothing at all. A clear is settled without a page: every
 mirror row older than `clearedAt` goes, and nothing is compared row by row. What is left is a
 divergence, and its shape decides its cost: an append — a count the host grew while both edges held
-still — is the newest page, fifty entries, upserted and nothing dropped; anything else, including a
-fresh device's empty mirror and an entry deleted on another device, walks the log back a page at a
-time until one comes short, writes what the host has and drops what it no longer does. So a device
+still, by less than a page — is the newest page, fifty entries, upserted and nothing dropped; anything
+else, including a fresh device's empty mirror, a gap wider than one page and an entry deleted on
+another device, walks the log back a page at a time until one comes short, writes what the host has
+and drops what it no longer does. The walk never drops a row the host was never told about. So a device
 that is in step pays one small read, a device that has fallen behind catches up, and the walk only
 happens when the two copies really disagree about the middle of the log.
 
@@ -44,8 +48,11 @@ as it is cut — and never an average of per-take rates, which would let a three
 much as a paragraph.
 
 Clearing lives on the screen's header, not at the end of a list that lazy loading never reaches, and
-it is a clear of every bot's copy at once: each host stamps its own `clearedAt`, the mirror is
-emptied, and a bot too old to answer has its local rows removed and keeps whatever its host holds.
+it is a clear of every bot's copy at once: each host stamps its own `clearedAt`, and the mirror loses
+the rows of the bots that confirmed — a host that refused keeps what the device holds, so a half-done
+clear cannot reverse itself on the next open. A clear stamps the host's own clock while an entry
+carries the device's, so an entry arriving from before a clear is stored at the stamp rather than
+below it: nothing a user cleared can be resurrected by a write that was in flight.
 
 Dictation is the app's name for the record, and the section, the glossary and the code say it; the
 act stays Speech-to-text, and so does each bot's own settings page.
@@ -93,7 +100,8 @@ act stays Speech-to-text, and so does each bot's own settings page.
 - `app/scripts/test-dictation-log.mjs` pins the pure rules — an entry's words and spoken span, the
   month a dictation falls in, the fingerprint comparison and the pooled rate — and
   `app/scripts/test-dictation-screen.tsx` renders the three tabs over a seeded mirror.
-  `plugin/tests/test_dictations.py` drives the routes over a temp store: a write, a paged read, a
-  delete, a clear that stamps `clearedAt`, and stats that answer only their own profile.
+  `plugin/tests/test_dictations.py` drives `plugin.dictations` over a temp store: a write, a paged
+  read, a delete, a clear that stamps `clearedAt`, stats that answer only their own profile, an id
+  that belongs to each profile on its own, and an entry arriving after a clear stored at its stamp.
 - `GLOSSARY.md` gains **Dictation** and stops listing "dictation" as a word to avoid for
   **Speech-to-text**; `AGENTS.md`'s layout table gains the module rows.

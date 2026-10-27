@@ -27,9 +27,9 @@ class DictationsTest(unittest.TestCase):
         )
 
     def test_a_write_is_the_row_that_is_read_back(self) -> None:
-        found = self.add(text="two words", words=2, ms=1500, device="phone")
+        found = self.add(text="two words", words=2, ms=1500)
         self.assertEqual(
-            found, {"id": "d1", "text": "two words", "words": 2, "ms": 1500, "at": 1, "device": "phone"}
+            found, {"id": "d1", "text": "two words", "words": 2, "ms": 1500, "at": 1}
         )
         self.assertEqual(dictations.rows(self.path, "bot-a"), [found])
 
@@ -44,12 +44,24 @@ class DictationsTest(unittest.TestCase):
 
     def test_a_body_without_words_is_refused(self) -> None:
         for body in ({}, {"id": "d1"}, {"id": "d1", "text": "   "}, {"text": "words"}):
-            with self.assertRaises(dictations.DictationError):
+            with self.assertRaises(dictations.DictationLogError):
                 dictations.record(self.path, "bot-a", body)
 
     def test_a_negative_span_is_refused(self) -> None:
-        with self.assertRaises(dictations.DictationError):
+        with self.assertRaises(dictations.DictationLogError):
             dictations.record(self.path, "bot-a", {"id": "d1", "text": "w", "ms": -1})
+
+    def test_a_take_that_lands_after_a_clear_is_stored_above_its_stamp(self) -> None:
+        stamped = dictations.clear(self.path, "bot-a")["clearedAt"]
+        found = dictations.record(self.path, "bot-a", {"id": "late", "text": "after", "at": 5})
+        self.assertGreater(found["at"], stamped)
+        self.assertEqual([row["id"] for row in dictations.rows(self.path, "bot-a")], ["late"])
+
+    def test_one_id_belongs_to_each_profile_on_its_own(self) -> None:
+        self.add(profile="bot-a", text="mine")
+        self.add(profile="bot-b", text="yours")
+        self.assertEqual([row["text"] for row in dictations.rows(self.path, "bot-a")], ["mine"])
+        self.assertEqual([row["text"] for row in dictations.rows(self.path, "bot-b")], ["yours"])
 
     def test_a_page_is_newest_first(self) -> None:
         for at in (10, 30, 20):

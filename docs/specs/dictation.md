@@ -16,10 +16,10 @@ per-bot list away, with nothing that gathers them.
 A new Settings section, Dictation, sits under Appearance. It has three tabs. History lists every
 dictation newest first, grouped by month under a month heading, one card of rows per month, drawing
 the first twenty entries and appending more as the reader reaches the end; a row shows the words and
-a muted line of time, bot and word count, and opens a sheet with the whole text over the bot, the
-count and how long the words took, with Delete and a Copy side by side. Bots draws the Settings menu's
-own bot rows, each saying what its host hears on — or the host's own reason it cannot — and opening
-that bot's Speech-to-text page. Stats is one card with the words spoken across every bot and the
+a muted line of the bot and the word count, and opens a sheet headed by the time it landed, over the
+whole text, the bot, the count and how long the words took, with Delete and a Copy side by side. Bots
+draws the Settings menu's own row for each bot, saying what its host hears on — or the host's own
+reason it cannot — and opening that bot's Speech-to-text page. Stats is one card with the words spoken across every bot and the
 pooled words per minute behind them, each row carrying the line that says what it counts.
 
 A dictation is written at the moment a take's words land, kept on the bot that heard it by the Gots
@@ -57,25 +57,33 @@ on each open, and the last stats answer per bot is cached so the menu row draws 
   and posted afterwards, never awaited on a send path.
 - **One entry per take whose words landed.** The text is what landed in the composer (after Cleanup),
   the words are counted on whitespace, and the spoken span is the sum of the take's piece spans, so
-  pauses are left out. A take cancelled or failed before any words landed writes nothing.
+  pauses are left out. Those spans ride on the pieces, so a take restored after a reload still reports
+  its own minutes; a take that lands in parts writes a row per part, each with its own span. A take
+  cancelled or failed before any words landed writes nothing.
 - **The plugin gains five routes behind a `dictations` feature**: `POST dictations`,
   `DELETE dictations/<id>`, `DELETE dictations`, `GET dictations?before&limit`, and
   `GET dictations/stats` returning the totals plus count, newest, oldest and `clearedAt`. The paged
   read serves a mirror that has to be filled or repaired, never the draw path.
 - **The stats route does two jobs**: it is the numbers tab 3 draws and the fingerprint the mirror is
   reconciled against. The app sums each bot's last answer and caches it on the device, so the Settings
-  menu's subtitle reads "1,204 words" — or a generic line until a host has answered once.
+  menu's subtitle reads "1,204 words" — or a generic line until a host has answered once. The totals
+  move only when a host answers: a take counts once its own bot has it.
 - **Reconciliation is fingerprint first.** On opening the screen, once per bot and side by side, a
   matching fingerprint does nothing; `clearedAt` drops every mirror row older than it without a
-  row-by-row compare; an append reads the newest page; any other divergence walks the log back a page
-  at a time and writes what the host has and drops what it no longer does.
+  row-by-row compare; an append that fits one page reads that page; any other divergence walks the
+  log back a page at a time and writes what the host has and drops what it no longer does. A row the
+  mirror holds and the host does not is only dropped when the host has been told about it: a take
+  whose post never answered is re-posted before the host is asked, so an offline take survives.
+- **Nothing sits below a clear's stamp on the host.** A row that arrives with an `at` at or below the
+  stamp is stored at the stamp, so a write that raced a clear cannot bring cleared history back.
 - **Clearing is one action over every bot**, on the screen's header, behind a confirmation, each host
-  stamping its own `clearedAt`. A bot without the routes loses only its local rows.
+  stamping its own `clearedAt`. Only the bots whose host confirmed are cleared on the device: a host
+  that refused keeps what the mirror holds, so a half-done clear cannot undo itself on the next open.
 - **A bot that cannot answer contributes nothing to the totals**, and a bot whose host cannot dictate
   is still listed in Bots, with the host's own reason in place of a status.
-- **A bot's row says what its host hears on**, `On · <model>` or `Off`, or `Checking…` until the read
-  answers, and the model is a cached fact on the bot written whenever a host's speech settings are
-  read, so the row answers at once and refreshes behind it.
+- **A bot's row says what its host hears on**, `On · <model>` or `Off`, `Checking…` until the read
+  answers and a word of its own where the read failed; the model is a cached fact on the bot written
+  whenever a host's speech settings are read, so the row answers at once and refreshes behind it.
 - **Tabs live inside the one section screen** (the `Tabs` component), so back leaves Dictation.
 - **The screen is a component, not routes**; the section is one entry under Appearance and
   `/settings/dictation` opens it.
@@ -85,16 +93,20 @@ on each open, and the last stats answer per bot is cached so the menu row draws 
 ## Testing Decisions
 
 - Unit, pure rules (`app/scripts/test-dictation-log.mjs`): an entry's word count and spoken span from
-  a take's pieces, the month key and heading of a dictation, the fingerprint comparison (match,
-  stale window, clear), and the pooled rate including a zero-words and a zero-milliseconds case.
+  a take's pieces, the count with its noun singular and plural, the month key and heading of a
+  dictation, the fingerprint comparison (match, stale window, clear), and the pooled rate including a
+  zero-words and a zero-milliseconds case.
 - Component (`app/scripts/test-dictation-screen.tsx`): the three tabs render over a seeded mirror; the
-  month headings and their card grouping; twenty rows and more appended; a row opening its sheet with
-  the bot, the count and the spoken length over Delete and Copy in that order; the clear action behind
-  its confirmation; the Bots tab's rows saying what each host hears on, the host's reason where it
-  cannot, `Checking…` while the read is owed, and the model a refresh reports landing on the bot; Stats
-  showing the summed words and rate from the cached answers, each row over its own line.
+  month headings and their card grouping; twenty rows drawn and the rest appended when the end comes
+  into view; a row opening its sheet with the bot, the count and the spoken length over Delete and Copy
+  in that order; the clear action behind its confirmation; the Bots tab's rows saying what each host
+  hears on, the host's reason where it cannot, `Checking…` while the read is owed, a word where the
+  read failed, and the model a refresh reports landing on the bot; a take the host never received
+  surviving a reconcile and being posted again; Stats showing the summed words and rate from the cached
+  answers, each row over its own line.
 - Plugin (`plugin/tests/test_dictations.py`): a write, a paged read, a delete, a clear that stamps
-  `clearedAt`, stats that answer only their own profile, and a body that names no text being refused.
+  `clearedAt`, stats that answer only their own profile, an id that belongs to each profile on its own,
+  a take that lands after a clear stored at its stamp, and a body that names no text being refused.
 - No browser flow: every claim here is reachable from a component with a faked HTTP boundary.
 
 ## Out of Scope

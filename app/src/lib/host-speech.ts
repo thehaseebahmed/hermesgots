@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 
 import { connectionKey } from "@/lib/connection"
 import { db, updateProfile } from "@/lib/db"
@@ -22,34 +22,55 @@ export async function rememberSpeech(id: string | undefined, model: string) {
   await updateProfile(id, { speechModel: model })
 }
 
-/** Whether each bot's model is being read right now, and which reads came back empty-handed. */
-export type SpeechCheck = Record<string, "checking" | "failed" | undefined>
+/** Whether a bot's speech read is still owed, and when it came back empty-handed. */
+export type SpeechCheck = "checking" | "failed" | undefined
 
 /**
- * Asks every bot's host what model hears on, once per set of bots and all at a time, so the rows
- * show what each host last said and fill in as the answers land (ADR 0060).
+ * What one bot's host hears on: the model it last reported for that bot, and whether this screen's
+ * read is still owed. Gated on the feature `useSpeech` reads, so a host that can't report a model is
+ * never asked for one (ADR 0060).
  */
-export function useSpeechRefresh(profiles: readonly (Server & { id: string })[]) {
-  const [state, setState] = useState<SpeechCheck>({})
-  const asked = useRef("")
-  const ids = profiles.map((one) => one.id).join(" ")
+export function useSpeechModel(
+  profile?: (Server & { id?: string; speechModel?: string }) | null,
+) {
+  const baseUrl = profile?.baseUrl ?? ""
+  const apiKey = profile?.apiKey ?? ""
+  const id = profile?.id
+  const key = connectionKey({ baseUrl, apiKey })
+  const supported = usePluginFeatureOn({ baseUrl, apiKey }, SPEECH_MODEL)
+  const [answer, setAnswer] = useState<{ key: string; model: string }>()
+  const [settled, setSettled] = useState("")
+  const [failed, setFailed] = useState("")
 
   useEffect(() => {
-    if (!ids || asked.current === ids) return
-    asked.current = ids
-    setState(Object.fromEntries(profiles.map((one) => [one.id, "checking" as const])))
-    for (const { id, baseUrl, apiKey } of profiles) {
-      void getSpeech({ baseUrl, apiKey }, AbortSignal.timeout(READ_TIMEOUT_MS))
-        .then((settings) => rememberSpeech(id, settings.model))
-        .then(() => setState((now) => ({ ...now, [id]: undefined })))
-        .catch((error: unknown) => {
-          noteFailure("Reading a host's speech model", error)
-          setState((now) => ({ ...now, [id]: "failed" }))
-        })
+    if (!baseUrl || !supported) return
+    let cancelled = false
+    void getSpeech({ baseUrl, apiKey }, AbortSignal.timeout(READ_TIMEOUT_MS))
+      .then((settings) => {
+        if (!cancelled) {
+          setAnswer({ key, model: settings.model })
+          setSettled(key)
+        }
+        void rememberSpeech(id, settings.model)
+      })
+      .catch((error: unknown) => {
+        noteFailure("Reading the host's speech model", error)
+        if (!cancelled) setFailed(key)
+      })
+    return () => {
+      cancelled = true
     }
-  }, [ids, profiles])
+  }, [key, id, baseUrl, apiKey, supported])
 
-  return state
+  const model = (answer?.key === key ? answer.model : profile?.speechModel) || undefined
+  return {
+    model,
+    check: failed === key
+      ? ("failed" as const)
+      : model || settled === key || !supported
+        ? undefined
+        : ("checking" as const),
+  }
 }
 
 export async function setSpeech(

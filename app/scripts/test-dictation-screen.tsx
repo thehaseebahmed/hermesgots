@@ -1,7 +1,8 @@
 /**
  * Settings › Dictation over a seeded mirror and faked hosts, as ADR 0060 draws it: three tabs in one
  * screen, History first; its rows newest first, a card of them under each month's caption, each row
- * the words over the time, bot and count; a row opening its sheet with the whole dictation, a Copy
+ * the words over the bot and the count; a page drawn at a time and more appended at its end; a row
+ * opening its sheet with the whole dictation, a Copy
  * that copies it and a Delete that takes it off its host; every bot listed in the list's own order,
  * the ones whose host can't dictate disabled with the host's reason; the totals pooled over the bots
  * that reported; and opening the screen reconciling a bot whose host has more than the mirror holds,
@@ -12,14 +13,29 @@ import test from "node:test"
 import { MemoryRouter } from "react-router"
 import { act } from "react"
 
-import { DictationSettings } from "@/components/settings/dictation"
+import { DictationSettings, PAGE_ROWS } from "@/components/settings/dictation"
 import { Screen } from "@/components/settings-chrome"
 import { connectionKey } from "@/lib/connection"
 import { spelledCount, monthLabel } from "@/lib/dictation-log"
 import { db } from "@/lib/db"
 import { botProfile, click, find, findAll, json, mount, seedSettings, until } from "./component-kit.tsx"
 
-const at = (year: number, month: number, day: number, hour = 9) => new Date(year, month - 1, day, hour).getTime()
+const at = (year: number, month: number, day: number, hour = 9) =>
+  new Date(year, month - 1, day, hour).getTime()
+
+/** The browser's observer, stood in for: it records what it watches and the test fires it. */
+const watched: (() => void)[] = []
+class Watched {
+  private readonly fire: (entries: { isIntersecting: boolean }[]) => void
+  constructor(fire: (entries: { isIntersecting: boolean }[]) => void) {
+    this.fire = fire
+  }
+  observe() {
+    watched.push(() => this.fire([{ isIntersecting: true }]))
+  }
+  disconnect() {}
+}
+;(globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = Watched
 
 type Hosted = { id: string; text: string; words: number; ms: number; at: number }
 
@@ -39,6 +55,8 @@ type Bot = {
   known?: string
   /** A host that never answers, so the row is caught mid-read. */
   stalls?: boolean
+  /** A host whose speech read comes back a failure. */
+  fails?: boolean
 }
 
 /** What a host says about its own log: the totals and the fingerprint beside them. */
@@ -65,12 +83,16 @@ function host(bots: Bot[]) {
     if (!bot) return json({}, 404)
     if (url.pathname.endsWith(`${pluginPath}/info`))
       return json({
-        features: bot.features ?? [],
+        features:
+          bot.model !== undefined || bot.stalls
+            ? [...new Set([...(bot.features ?? []), "speech_model"])]
+            : (bot.features ?? []),
         dictation: bot.dictation ?? { ready: true, reason: null },
       })
     if (url.pathname.endsWith(`${pluginPath}/speech`)) {
       calls.push({ path: url.pathname, method })
       if (bot.stalls) return new Promise<Response>(() => {})
+      if (bot.fails) return json({ error: { message: "No speech here." } }, 500)
       return json({
         speech: {
           model: bot.model ?? "",
@@ -93,6 +115,12 @@ function host(bots: Bot[]) {
         bot.clearedAt = Date.now()
         return json({ removed: true, stats: statsOf(bot) })
       }
+      if (method === "POST") {
+        const body = JSON.parse(String(init?.body ?? "{}")) as Hosted
+        if (!body.id) return json({ error: { message: "A dictation needs an id." } }, 400)
+        bot.rows = [body, ...(bot.rows ?? []).filter((row) => row.id !== body.id)]
+        return json({ dictation: body }, 201)
+      }
       const before = url.searchParams.get("before")
       const limit = Number(url.searchParams.get("limit") ?? 50)
       const rows = [...(bot.rows ?? [])]
@@ -113,7 +141,11 @@ function host(bots: Bot[]) {
   return { fetch: fetch as unknown as typeof globalThis.fetch, calls }
 }
 
+/** Each test's bots answer on their own connection, so one test's answers never reach the next. */
+let connections = 0
+
 async function seed(bots: Bot[]) {
+  const apiKey = `test-key-${connections++}`
   await seedSettings()
   await db.profiles.clear()
   await db.dictationLog.clear()
@@ -123,10 +155,11 @@ async function seed(bots: Bot[]) {
       id: bot.name,
       name: bot.label ?? bot.name,
       speechModel: bot.known,
+      apiKey,
     })
     await db.profiles.put(profile)
     for (const row of bot.rows ?? [])
-      await db.dictationLog.put({ ...row, connection: connectionKey(profile) })
+      await db.dictationLog.put({ ...row, connection: connectionKey(profile), posted: true })
   }
   const server = host(bots)
   globalThis.fetch = server.fetch
@@ -231,9 +264,8 @@ test("History keeps the dictations newest first, a card of them under each month
     )
     const first = rowText(0)
     assert.match(first, /Send the invoice to Nadia/, "the words themselves lead the row")
-    assert.match(first, /Aria/, "the bot that heard them")
-    assert.match(first, /5 words/, "and how many they are")
-    assert.match(first, /\d{1,2}:\d{2}/, "with the time they landed")
+    assert.match(first, /Aria · 5 words/, "then the bot that heard them and how many they are")
+    assert.doesNotMatch(first, /\d{1,2}:\d{2}/, "with the time left to the sheet")
   })
 })
 
@@ -380,12 +412,49 @@ test("a bot whose model is still being read says Checking…", async () => {
   })
 })
 
+test("a bot whose speech read failed says so, not nothing", async () => {
+  await seed([
+    {
+      name: "a",
+      label: "Aria",
+      features: ["dictation", "dictations"],
+      model: "base.en",
+      fails: true,
+    },
+  ])
+  await mount(screen(), async () => {
+    await openTab("Bots")
+    await until(
+      async () => /Couldn't read this bot's host/.test(botRow("a")?.textContent ?? ""),
+      "the row saying the read failed",
+    )
+  })
+})
+
 test("opening the Bots tab fills the model its host reports onto the bot", async () => {
   await seed([{ name: "a", label: "Aria", features: ["dictation", "dictations"], model: "base.en" }])
   await mount(screen(), async () => {
     await openTab("Bots")
     await until(async () => (await db.profiles.get("a"))?.speechModel === "base.en", "the model kept")
     await until(async () => /On · base\.en/.test(botRow("a")?.textContent ?? ""), "the row's line")
+  })
+})
+
+test("History draws a page at a time and appends the rest at its end", async () => {
+  const takes = Array.from({ length: PAGE_ROWS + 1 }, (_, index) => ({
+    id: `take-${index}`,
+    text: `Take ${index}`,
+    words: 1,
+    ms: 1_000,
+    at: at(2026, 10, 24) + index * 60_000,
+  }))
+  await seed([{ name: "a", label: "Aria", features: ["dictations"], rows: takes }])
+  await mount(screen(), async () => {
+    await until(async () => rows().length === PAGE_ROWS, "one page of them")
+    await act(async () => {
+      watched.pop()?.()
+    })
+    await until(async () => rows().length === PAGE_ROWS + 1, "the dictation past the page")
   })
 })
 
@@ -460,6 +529,7 @@ test("opening the screen fills a mirror that a host has more in", async () => {
     words: 4,
     ms: 1_800,
     at: at(2026, 10, 24),
+    posted: true,
   })
   await mount(screen(), async () => {
     await until(async () => rows().length === 2, "the host's newer dictation")
@@ -467,6 +537,29 @@ test("opening the screen fills a mirror that a host has more in", async () => {
     const cached = await db.dictationStats.get(connectionKey(profile))
     assert.equal(cached?.count, 2, "and the totals came with it")
     assert.equal(cached?.words, 7, "the words of both")
+  })
+})
+
+test("a take its host never received is kept, and posted again at the next open", async () => {
+  const calls = await seed([{ name: "a", label: "Aria", features: ["dictations"] }])
+  const profile = await db.profiles.get("a")
+  assert.ok(profile)
+  await db.dictationLog.put({
+    id: "lonely",
+    connection: connectionKey(profile),
+    text: "Said while the host was away",
+    words: 6,
+    ms: 2_000,
+    at: at(2026, 10, 24),
+    posted: false,
+  })
+  await mount(screen(), async () => {
+    await until(async () => rows().length === 1, "the take the mirror keeps")
+    await until(
+      async () => calls.some((one) => one.method === "POST"),
+      "the take its host never answered for, posted again",
+    )
+    assert.ok((await db.dictationLog.get("lonely"))?.posted, "and marked as its host's copy now")
   })
 })
 
@@ -482,8 +575,8 @@ test("a host without the routes leaves the mirror and its cached totals alone", 
   const profile = await db.profiles.get("a")
   assert.ok(profile)
   const key = connectionKey(profile)
-  await db.dictationLog.put({ id: "old", connection: key, text: "Kept from when it could", words: 5, ms: 2_000, at: at(2026, 10, 24) })
-  await db.dictationStats.put({ id: key, words: 5, ms: 2_000, count: 1, newest: at(2026, 10, 24), oldest: at(2026, 10, 24), clearedAt: 0, at: 1 })
+  await db.dictationLog.put({ id: "old", connection: key, text: "Kept from when it could", words: 5, ms: 2_000, at: at(2026, 10, 24), posted: true })
+  await db.dictationStats.put({ id: key, words: 5, ms: 2_000, count: 1, clearedAt: 0 })
   await mount(screen(), async () => {
     await until(async () => rows().length === 1, "the row it already held")
     await act(async () => {

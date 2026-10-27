@@ -396,7 +396,6 @@ export function Composer({
 
   const endDictation = async (send: boolean) => {
     dictationSends.current = send
-    // The words land in the take's own callback, which places them here and logs them.
     await dictation.finish(send ? SEND_WAIT_MS : STOP_WAIT_MS)
   }
 

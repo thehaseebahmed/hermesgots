@@ -3,10 +3,9 @@
  * it adds up to. The screen draws from this device's mirror, so nothing here waits on a host; opening
  * it reconciles every bot in the background and caches the totals it reads (ADR 0060).
  */
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { CheckIcon, ChevronRightIcon, CopyIcon, Trash2Icon } from "lucide-react"
-import { Link } from "react-router"
+import { CheckIcon, CopyIcon, Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
 
 import { Bot } from "@/components/bot"
@@ -15,7 +14,7 @@ import {
   Caption,
   ConfirmDestructive,
   Group,
-  RowText,
+  LinkRow,
   ValueRow,
   linkRowClass,
   useHeaderAction,
@@ -27,16 +26,16 @@ import { connectionKey } from "@/lib/connection"
 import { useCopied } from "@/lib/copied"
 import { listProfiles, type DictationRecord, type Profile } from "@/lib/db"
 import { useDictationInfo } from "@/lib/dictation"
-import { byMonth, pooledRate, spelledCount } from "@/lib/dictation-log"
+import { byMonth, pooledRate, spelledCount, wordsLabel } from "@/lib/dictation-log"
 import {
   clearDictationLog,
   reconcileAll,
   removeDictation,
-  useDictationCount,
   useDictationRows,
   useDictationTotals,
 } from "@/lib/dictations"
-import { useSpeechRefresh } from "@/lib/host-speech"
+import { formatDuration } from "@/lib/format"
+import { useSpeechModel } from "@/lib/host-speech"
 import { cn } from "@/lib/utils"
 
 /** The rows the History tab draws before the reader reaches the end of them. */
@@ -48,14 +47,9 @@ function clockOf(at: number) {
   return clockFormat.format(at)
 }
 
-function wordsLabel(words: number) {
-  return `${spelledCount(words)} ${words === 1 ? "word" : "words"}`
-}
-
-/** How long the words took to say, to a tenth of a second under a minute. */
+/** How long the words took to say, in the app's own duration format. */
 function spokenLabel(ms: number) {
-  const seconds = ms / 1000
-  return `${seconds < 60 ? seconds.toFixed(1) : Math.round(seconds)}s spoken`
+  return `${formatDuration(ms)} spoken`
 }
 
 export function DictationSettings() {
@@ -66,12 +60,14 @@ export function DictationSettings() {
   // Once per open, every bot at a time: a matching fingerprint costs one small read, and a bot that
   // is away never holds up another. Nothing here is waited on before the first paint.
   const reconciled = useRef("")
+  const bots = useRef(profiles)
+  bots.current = profiles
   const ids = (profiles ?? []).map((profile) => profile.id).join(",")
   useEffect(() => {
-    if (!profiles?.length || reconciled.current === ids) return
+    if (!ids || reconciled.current === ids) return
     reconciled.current = ids
-    void reconcileAll(profiles)
-  }, [ids, profiles])
+    void reconcileAll(bots.current ?? [])
+  }, [ids])
 
   useHeaderAction(
     "dictation-clear",
@@ -133,35 +129,31 @@ export function DictationSettings() {
 /** Every dictation, newest first, a card of rows under each month it falls in. */
 function HistoryTab({ profiles }: { profiles: Profile[] }) {
   const [shown, setShown] = useState(PAGE_ROWS)
-  const rows = useDictationRows(shown)
-  const total = useDictationCount() ?? 0
+  // One row more than is drawn is what says there is more, so the list needs no separate count.
+  const page = useDictationRows(shown + PAGE_ROWS)
+  const rows = page?.slice(0, shown)
+  const more = (page?.length ?? 0) > shown
   const [open, setOpen] = useState<DictationRecord | null>(null)
-  const [deleting, setDeleting] = useState<DictationRecord | null>(null)
+  const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
   const sentinel = useRef<HTMLDivElement>(null)
 
-  // The next page appends when the end of what is drawn comes into view.
   useEffect(() => {
     const node = sentinel.current
-    if (!node || rows === undefined || rows.length < shown || rows.length >= total) return
+    if (!node || !more) return
     const watcher = new IntersectionObserver(
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting))
-          setShown((current) => Math.min(current + PAGE_ROWS, total))
+          setShown((current) => current + PAGE_ROWS)
       },
       { rootMargin: "200px" },
     )
     watcher.observe(node)
     return () => watcher.disconnect()
-  }, [rows, shown, total])
+  }, [more])
 
-  const names = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const profile of profiles) map.set(connectionKey(profile), profile.name)
-    return map
-  }, [profiles])
-
-  const groups = useMemo(() => byMonth(rows ?? []), [rows])
+  const names = new Map(profiles.map((profile) => [connectionKey(profile), profile.name]))
+  const groups = byMonth(rows ?? [])
 
   const remove = async (row: DictationRecord) => {
     const profile = profiles.find((one) => connectionKey(one) === row.connection)
@@ -170,7 +162,7 @@ function HistoryTab({ profiles }: { profiles: Profile[] }) {
     try {
       await removeDictation(profile, row.id)
       setOpen(null)
-      setDeleting(null)
+      setConfirming(false)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't delete that dictation.")
     } finally {
@@ -197,13 +189,7 @@ function HistoryTab({ profiles }: { profiles: Profile[] }) {
               >
                 <span className="line-clamp-2 text-base">{row.text}</span>
                 <span className="text-sm text-muted-foreground">
-                  {[
-                    clockOf(row.at),
-                    names.get(row.connection),
-                    wordsLabel(row.words),
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
+                  {[names.get(row.connection), wordsLabel(row.words)].filter(Boolean).join(" · ")}
                 </span>
               </button>
             ))}
@@ -216,17 +202,17 @@ function HistoryTab({ profiles }: { profiles: Profile[] }) {
           row={open}
           bot={names.get(open.connection)}
           onOpenChange={(next) => !next && setOpen(null)}
-          onDelete={() => setDeleting(open)}
+          onDelete={() => setConfirming(true)}
         />
       )}
       <ConfirmDestructive
-        open={deleting !== null}
+        open={confirming && open !== null}
         title="Delete this dictation?"
         description="It goes from this device and from its bot's host."
         confirmLabel="Delete"
         busy={busy}
-        onOpenChange={(next) => !next && setDeleting(null)}
-        onConfirm={() => deleting && void remove(deleting)}
+        onOpenChange={(next) => !next && setConfirming(false)}
+        onConfirm={() => open && void remove(open)}
       />
     </>
   )
@@ -292,47 +278,56 @@ function EntrySheet({
   )
 }
 
-/** One row per bot, shaped like the Settings menu's own bot rows. */
+/** One row per bot: the Settings menu's own row, into that bot's speech settings. */
 function BotsTab({ profiles }: { profiles: Profile[] }) {
-  const check = useSpeechRefresh(profiles)
   if (!profiles.length)
     return <p className="px-5 py-6 text-sm text-muted-foreground">No bots yet.</p>
   return (
     <Group>
       {profiles.map((profile) => (
-        <BotRow key={profile.id} profile={profile} check={check[profile.id]} />
+        <BotRow key={profile.id} profile={profile} />
       ))}
     </Group>
   )
 }
 
 /**
- * What a bot's host is doing about speech: the host's own sentence where it can't dictate, then the
- * model it last reported, and "Checking…" until it has reported one (ADR 0060).
+ * What a bot's host is doing about speech: the host's own sentence where it can't dictate, else the
+ * model it last reported, "Checking…" until it reports one, and a word where the read itself failed.
  */
-function speechLine(profile: Profile, check: "checking" | "failed" | undefined, reason?: string) {
+function speechLine({
+  model,
+  check,
+  reason,
+}: {
+  model?: string
+  check?: "checking" | "failed"
+  reason?: string
+}) {
   if (reason) return reason
-  if (profile.speechModel !== undefined)
-    return profile.speechModel ? `On · ${profile.speechModel}` : "Off"
-  return check === "checking" ? "Checking…" : undefined
+  if (model) return `On · ${model}`
+  if (check === "failed") return "Couldn't read this bot's host."
+  if (check === "checking") return "Checking…"
+  return "Off"
 }
 
-function BotRow({ profile, check }: { profile: Profile; check?: "checking" | "failed" }) {
+function BotRow({ profile }: { profile: Profile }) {
   const answer = useDictationInfo(profile)
   const reason = answer && answer.status === "off" ? answer.reason : undefined
+  const { model, check } = useSpeechModel(profile)
   return (
-    <Link
+    <LinkRow
       to={botTabPath(profile.id, "speech-to-text")}
       data-dictation-bot={profile.id}
-      className={linkRowClass}
-    >
-      <Bot
-        id={profile.botId}
-        className={cn("size-8 shrink-0", profile.disabled && "opacity-40")}
-      />
-      <RowText title={profile.name} subtitle={speechLine(profile, check, reason)} />
-      <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
-    </Link>
+      leading={
+        <Bot
+          id={profile.botId}
+          className={cn("size-8 shrink-0", profile.disabled && "opacity-40")}
+        />
+      }
+      title={profile.name}
+      subtitle={speechLine({ model, check, reason })}
+    />
   )
 }
 

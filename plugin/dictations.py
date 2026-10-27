@@ -22,14 +22,14 @@ from .store import connect
 
 logger = logging.getLogger(__name__)
 
-FIELDS = ("id", "text", "words", "ms", "at", "device")
+FIELDS = ("id", "text", "words", "ms", "at")
 # One take's words are a handful of sentences; this is a bound on a body, not a shape a person writes.
 MAX_TEXT = 20000
 MAX_LIMIT = 200
 DEFAULT_LIMIT = 20
 
 
-class DictationError(Exception):
+class DictationLogError(Exception):
     def __init__(self, message: str, status: int = 400) -> None:
         super().__init__(message)
         self.status = status
@@ -53,12 +53,12 @@ def _whole(value: Any, field: str, default: Optional[int] = None) -> int:
     if value is None and default is not None:
         return default
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise DictationError(f"{field} must be a whole number.")
+        raise DictationLogError(f"{field} must be a whole number.")
     if int(value) != value:
-        raise DictationError(f"{field} must be a whole number.")
+        raise DictationLogError(f"{field} must be a whole number.")
     number = int(value)
     if number < 0:
-        raise DictationError(f"{field} can't be negative.")
+        raise DictationLogError(f"{field} can't be negative.")
     return number
 
 
@@ -75,39 +75,49 @@ def record(path: Path, profile: Optional[str], body: Dict[str, Any]) -> Dict[str
     """Writes one dictation: the entry the app posted when a take's words landed."""
     entry_id = body.get("id")
     if not isinstance(entry_id, str) or not entry_id.strip() or len(entry_id) > 100:
-        raise DictationError("A dictation needs an id.")
+        raise DictationLogError("A dictation needs an id.")
     text = body.get("text")
     if not isinstance(text, str) or not text.strip():
-        raise DictationError("A dictation needs its words.")
+        raise DictationLogError("A dictation needs its words.")
     if len(text) > MAX_TEXT:
-        raise DictationError("That dictation is too long to keep.", 413)
-    device = body.get("device")
-    if device is not None and (not isinstance(device, str) or len(device) > 100):
-        raise DictationError("device must be a short string.")
+        raise DictationLogError("That dictation is too long to keep.", 413)
     row = {
         "id": entry_id.strip(),
         "text": text,
         "words": _whole(body.get("words"), "words", count_words(text)),
         "ms": _whole(body.get("ms"), "ms", 0),
         "at": _whole(body.get("at"), "at", _now()),
-        "device": device,
     }
     conn = _open(path)
     try:
+        conn.execute("BEGIN IMMEDIATE")
+        cleared = conn.execute(
+            "SELECT cleared_at FROM dictation_state WHERE profile = ?",
+            (_profile(profile),),
+        ).fetchone()
+        # Nothing may sit below the stamp a clear left, or the entries a device's mirror drops as
+        # cleared would come back on the next walk. A take that lands after a clear arrives with a
+        # clock from before it, so it is stored at the stamp instead of being refused: a device whose
+        # clock runs behind would otherwise lose every take it posts.
+        if cleared is not None and row["at"] <= int(cleared["cleared_at"]):
+            row["at"] = int(cleared["cleared_at"]) + 1
         # A retry of the same entry finds the row it wrote and changes nothing, which is what makes
         # the app's write safe to fire again after a dropped connection.
         conn.execute(
-            "INSERT OR IGNORE INTO dictations (id, profile, text, words, ms, at, device) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (row["id"], _profile(profile), row["text"], row["words"], row["ms"], row["at"], row["device"]),
+            "INSERT OR IGNORE INTO dictations (id, profile, text, words, ms, at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (row["id"], _profile(profile), row["text"], row["words"], row["ms"], row["at"]),
         )
         found = conn.execute(
             f"SELECT {', '.join(FIELDS)} FROM dictations WHERE id = ? AND profile = ?",
             (row["id"], _profile(profile)),
         ).fetchone()
+        conn.execute("COMMIT")
     finally:
         conn.close()
-    return _row(found) if found is not None else row
+    if found is None:
+        raise DictationLogError("That dictation could not be stored.", 500)
+    return _row(found)
 
 
 def rows(

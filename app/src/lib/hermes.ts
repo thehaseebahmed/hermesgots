@@ -24,6 +24,7 @@ import {
   type WorkflowEntry,
 } from "@/lib/workflow"
 import { isNative } from "@/lib/native"
+import type { Fingerprint, Totals } from "@/lib/dictation-log"
 import type { CronSchedule } from "@/lib/schedule"
 import {
   parseMcpAccess,
@@ -3812,52 +3813,45 @@ export interface HostDictation {
   words: number
   ms: number
   at: number
-  device?: string | null
 }
 
 /** A host's totals, and the fingerprint a device's mirror is reconciled against. */
-export interface HostDictationStats {
-  words: number
-  ms: number
-  count: number
-  newest: number | null
-  oldest: number | null
-  clearedAt: number
+export interface HostDictationStats extends Totals, Fingerprint {}
+
+/** A number a host sent, or nothing where it sent something else. */
+function finite(raw: unknown): number | null {
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : null
 }
 
 function dictationRow(value: unknown): HostDictation | null {
   const row = value as Partial<HostDictation> | null
   if (!row || typeof row.id !== "string" || !row.id || typeof row.text !== "string") return null
-  const number = (raw: unknown) => (typeof raw === "number" && Number.isFinite(raw) ? raw : 0)
   return {
     id: row.id,
     text: row.text,
-    words: number(row.words),
-    ms: number(row.ms),
-    at: number(row.at),
-    device: typeof row.device === "string" ? row.device : null,
+    words: finite(row.words) ?? 0,
+    ms: finite(row.ms) ?? 0,
+    at: finite(row.at) ?? 0,
   }
 }
 
 function dictationTotals(value: unknown): HostDictationStats {
   const row = value as Partial<HostDictationStats> | null
-  const number = (raw: unknown) => (typeof raw === "number" && Number.isFinite(raw) ? raw : 0)
-  const bound = (raw: unknown) => (typeof raw === "number" && Number.isFinite(raw) ? raw : null)
   return {
-    words: number(row?.words),
-    ms: number(row?.ms),
-    count: number(row?.count),
-    newest: bound(row?.newest),
-    oldest: bound(row?.oldest),
-    clearedAt: number(row?.clearedAt),
+    words: finite(row?.words) ?? 0,
+    ms: finite(row?.ms) ?? 0,
+    count: finite(row?.count) ?? 0,
+    newest: finite(row?.newest),
+    oldest: finite(row?.oldest),
+    clearedAt: finite(row?.clearedAt) ?? 0,
   }
 }
 
 /** One page of a bot's dictations, newest first, older than `before` where it is given. */
 export async function getDictations(
   config: HermesConfig,
-  before?: number | null,
-  limit = 50,
+  before: number | null,
+  limit: number,
   signal?: AbortSignal,
 ): Promise<HostDictation[]> {
   const query = new URLSearchParams({ limit: String(limit) })

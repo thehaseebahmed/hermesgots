@@ -13,6 +13,7 @@ import {
   spokenOf,
   sumTotals,
   toUpsert,
+  wordsLabel,
 } from "../src/lib/dictation-log.ts"
 
 const LOCAL = (year, month, day, hour = 12) => new Date(year, month - 1, day, hour).getTime()
