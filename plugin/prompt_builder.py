@@ -1,12 +1,11 @@
 """The prompt Gots injects into a project session's run.
 
-One module holds the whole thing: every fixed paragraph of the run's instructions as a private
-string at the top, and one brief per kind of stage built from the session's record
-(``stage_prompt``). A prompt is told in five named sections — Gots's tools and rules, the plan
-mode, the AFK brief, the workflow, then what only this session knows — and always in that order, so
-the fixed sections come first and two runs that share them share their opening tokens (ADR 0028). A
-stage's own name and its skills are named into the brief rather than quoted, which keeps the fixed
-text cacheable across the turns of every task.
+One module holds the whole thing, arranged the way a prompt is told (ADR 0028): the base prompt
+every session with a worktree gets, then the block a mode adds (plan mode, AFK), then the workflow
+the work runs by, and last the facts only this session has. Every block above `## Current Session`
+is fixed text, and none of them names a path, a branch or an issue, so two runs share their opening
+tokens and the prompt cache holds across a session's turns. A stage's own name and its skills are
+named into its brief rather than quoted, for the same reason.
 """
 
 from __future__ import annotations
@@ -15,8 +14,68 @@ from typing import Any, Dict, List, NamedTuple, Optional
 
 from . import pipeline, tasks
 
-# Added to the run's instructions in plan mode. Fixed per mode, so the prompt cache holds across
-# the turns of one mode. The app's mock repeats it; keep them the same.
+# --- The base prompt ---------------------------------------------------------------------
+# Told to every session that has a worktree: who is being addressed, then the tools it may reach for
+# and the guidelines that go with them. The tools are subsections of `## Tools`, so a prompt reads as
+# what the bot is, what it can use, and only then what this session knows.
+
+_GOTS = "# You are Gots!"
+
+_GOTS_OPENING = (
+    "You're a bot running on Hermes Agent. Below are some tools and guidelines that you must "
+    "follow to be useful to the user."
+)
+
+_TOOLS = "## Tools"
+
+_LIBRARY_TOOL = "### library_add"
+
+# Where a session's generated files go. Fixed text, so the prompt cache holds; the folder itself is
+# the tool's business, which is why this names no path.
+_LIBRARY_RULES = """Files you make for the user — screenshots, images, charts, reports, markdown — belong in this session's library folder, not in the worktree. File each one with the `library_add` tool (its path and a folder name, one level). Ensure the following:
+
+1. Folder names SHOULD be named after the flow or change the files belong to, kebab-case — e.g. "library-tab" for work on the library tab, "library-tab-tree-view" for a follow-up change to it.
+2. File names SHOULD be kebab-case with their extension (dashboard-light.png).
+3. A file name that isn't kebab-case, or one already in the folder, is an error — fix the name and call again.
+
+The tool is responsible for all the file management: DO NOT move, copy or name files yourself. Always use the `library_add` tool."""
+
+_PULL_REQUEST_TOOL = "### pull_request"
+
+# Added whenever a session has worktrees. Fixed text, so the prompt cache holds. The merge sentence
+# is one line for every run: whether anyone is here to answer changes nothing about what to do, and
+# a tail that varied would break the opening two runs share (ADR 0028).
+_PR_RULES = """When the work is done and you've checked it, ship it yourself with the `pull_request` tool and action 'ship': it commits what's left, pushes this branch and opens a draft pull request, or pushes to the one open. Don't ask first, and don't use git push or gh for it. Write the description from the repo's pull request template when it has one (named under Current Session), else with Summary, Changes and How to test sections. The pull request stays a draft. Pass force: true only after a rebase or amend. action 'update' changes the open pull request's title or body, and 'status' reports without writing. Merging and closing are the user's decision, so say in the pull request that it is ready to merge and leave it a draft."""
+
+# The same condition as _PR_RULES: only code sessions get these. Fixed text, so the app's mock repeats
+# them word for word and `test_library.py` holds the two together.
+_TODO_INSTRUCTIONS = (
+    "Keep the user in the loop as you work by using the `todo_list` tool religiously. Use it to plan "
+    "new tasks, use it to update your status on existing tasks. Leave it in its final state when you "
+    "finish: every item completed, or cancelled where it was dropped."
+)
+
+# The working rhythm: a long run reads as work in progress rather than a hang, and a short one
+# doesn't narrate every edit.
+_PROGRESS_UPDATES_INSTRUCTIONS = (
+    "Post a short update between checkpoints — what landed, what you're doing next — so a long "
+    "stretch of tool calls never reads as a hang. When something keeps failing, say what you tried "
+    "and what you now think is wrong before the next attempt. Thinking out loud while you plan is "
+    "welcome. Don't narrate each edit, read or command — the tool calls already show those; keep "
+    "what you do say technical enough to follow the work without spelling out every implementation "
+    "detail."
+)
+
+_DONE_INSTRUCTIONS = (
+    "Don't share the pull request url or the commit message in your reply unless the user asks for it."
+)
+
+# --- Plan mode ---------------------------------------------------------------------------
+# Added to the run's instructions in plan mode alone. Fixed per mode, so the prompt cache holds
+# across the turns of one mode. The app's mock repeats it; keep them the same.
+
+_PLAN = "## Plan mode"
+
 _PLAN_INSTRUCTIONS = """You are in plan mode: change nothing. Read what you need. Before you write the plan, settle every choice the user would otherwise be left to make — ask with the clarify tool, every question in one call, your recommended answer first; if you can't ask, decide it yourself and record it under Risks and assumptions. Then make your whole final reply the plan below and stop; the user approves it before you act. It is saved to a file as written, so write it for someone who hasn't read this chat, and an open question isn't a finished plan. Use this Markdown shape exactly:
 
 # Plan: <short title>
@@ -42,77 +101,15 @@ How to test the whole change end to end: commands, what to look at, expected res
 
 ## Risks and assumptions
 What could go wrong, and each decision you made without the user: what you chose and why."""
-# The sections of every prompt, in the order they are told (ADR 0028): what Gots is and how its
-# tools work, the mode the session is in, AFK's own words, then the facts only this session has.
-# Nothing that varies per session sits above the last heading, which is what makes the opening
-# shared between runs.
-_GOTS = "## You are Gots!"
-_PLAN = "## Plan mode"
-_AFK = "## Away From Keyboard"
-_WORKFLOW = "## User's Workflow"
-_SESSION = "## Current Session"
 
-# The first words of every prompt: who is being addressed and where the rules come from. It carries
-# the one precedence rule — a skill or a workflow may change how the work is done and never whether
-# it is checked — so no later section has to say it again (ADR 0028).
-_GOTS_OPENING = (
-    "You're the agent this user talks to from their phone, and the one that does the work. These "
-    "are your tools and their rules, and everything here holds whatever a skill or a User's Workflow "
-    "says: a skill changes how the work is done, never whether it is checked."
-)
-
-# Where a session's generated files go. Fixed text, so the prompt cache holds; the folder is a
-# session fact and is named under Current Session, which is why this rule points at it rather than
-# repeating it. A record from before the library folder has none, and is told neither this nor a
-# folder it hasn't got.
-_LIBRARY_RULES = (
-    "Files you make for the user — screenshots, images, charts, reports, markdown — go in this "
-    "session's library folder, not the worktree; its path is under Current Session. File each with "
-    "the library_add tool: its path and a folder name (one level), both kebab-case, the folder named "
-    "after the flow or change it belongs to — library-tab, library-tab-tree-view — never the file "
-    "type, and the file name with its extension (dashboard-light.png). The tool creates the folder, "
-    "moves the file and returns its new path; a bad name, or one already filed there, is an error — "
-    "fix it and call again. Return an image's path in a MEDIA:<path> tag. Source edits stay in the "
-    "worktree."
-)
-
-# Added whenever a session has worktrees. Fixed text, so the prompt cache holds. The merge sentence
-# is one line for every run: whether anyone is here to answer changes nothing about what to do, and
-# a tail that varied would break the opening two runs share (ADR 0028).
-_PR_RULES = (
-    "When the work is done and checked, ship it yourself with the pull_request tool and action "
-    "'ship': it commits what's left, pushes this branch and opens a draft pull request, or pushes to "
-    "the one open. Don't ask first, and don't use git push or gh. Write the description from the "
-    "repo's pull request template (named under Current Session), else with Summary, Changes and How "
-    "to test. The pull request stays a draft; pass force: true only after a rebase or amend. action "
-    "'update' changes its title or body, and 'status' reports without writing. Merging and closing "
-    "are the user's decision and the tool refuses them: say it is ready to merge, and leave it a "
-    "draft."
-)
-
-# The same condition as _PR_RULES: only code sessions get it.
-_DONE_INSTRUCTIONS = (
-    "Don't share the pull request url or the commit message in your reply — the pull_request result "
-    "and the session's pull request list already show them to the user."
-)
-# Added whenever a session has worktrees: the working rhythm, so a long run reads as work in
-# progress rather than a hang, and a short one doesn't narrate every edit. Fixed text, so the prompt
-# cache holds. The app's mock repeats it; keep them the same.
-_PROGRESS_UPDATES_INSTRUCTIONS = (
-    "Keep the user in the loop as you work, at a working rhythm rather than a running commentary: a "
-    "short update between checkpoints — what landed, what's next — so a long run never reads as a "
-    "hang. Keep the todo list current: mark items done as they land, add what you find, and leave it "
-    "finished, every item completed or cancelled where it was dropped. When something keeps failing, "
-    "say what you tried and what you think is wrong before the next attempt. Thinking out loud while "
-    "you plan is welcome. Don't narrate each edit, read or command — the tool calls show those; keep "
-    "what you say technical enough to follow without spelling out every detail."
-)
-
-
+# --- Away From Keyboard ------------------------------------------------------------------
 # AFK's section (ADR 0011, ADR 0013, ADR 0027): who the run works for and the points no Prompt and
 # no skill may change. The opening is shared by both shapes — a run of its own and a stage's — so it
 # is written once; how the work is carried out is the project's Prompt, or its workflow's stages,
 # told under User's Workflow.
+
+_AFK = "## Away From Keyboard"
+
 _AFK_OPENING = """You are working while the user is away, on an issue planned before they left: it is marked ready for work, so its text is the spec and its design is settled. Implement it — don't re-open the plan. Where the issue is silent, take the smallest option that fits and say what you chose; where the code contradicts the plan, the code is right, and the pull request says where you departed from it. This session works one issue: this one."""
 
 _AFK_RULES = """The rules:
@@ -122,12 +119,15 @@ _AFK_RULES = """The rules:
 - No TODOs, commented-out code, debug prints or secrets in what you commit. Never push to the default branch, and keep all work inside the worktree.
 - If you can't finish, don't force it: leave the tree consistent and say where it stopped and what blocks it — in the pull request if you opened one, else in your reply."""
 
-
+# --- User's Workflow ---------------------------------------------------------------------
 # The method a run is told when its project has written no Prompt of its own (ADR 0027). It is the
 # project's to rewrite — the brief above is what no Prompt changes — and the host serves it, so the
 # app and the device hold no copy, and a project nobody edited is still told the careful method: a
 # checkpoint at a time, each one checked three ways before it is committed, the whole change reviewed
 # by two skills once the issue is done, and a last reply in four headings a person can read.
+
+_WORKFLOW = "## User's Workflow"
+
 DEFAULT_PROMPT = """Work in checkpoints: small slices of the issue, one at a time; none is done until it has passed its checks.
 
 A checkpoint is the smallest piece of the issue whose behaviour can be seen — one command, one function, one screen state, one bug. If you can't say in a line what would prove it works, it is two checkpoints.
@@ -169,11 +169,12 @@ Your last reply is the summary the user reads when they come back — short, in 
 **Your move**
 - One line: what to look at or decide first — the draft pull request, one file in it, a migration to run, a follow-up issue."""
 
-
+# --- A staged task's workflow ------------------------------------------------------------
 # A staged task's build run is briefed as it was before the Prompt (ADR 0027): its workflow is what
 # its work runs by, so the method a project's Prompt now carries stays here for the stage, and
 # `_BUILD_STAGE`'s "shipping step above" is still step 5. The steps and the rules are the workflow's
 # own words, told under User's Workflow, in the place a project's Prompt would be.
+
 _STAGED_STEPS = """The workflow:
 1. Read. The issue and its comments as Current Session says, then the code and tests it touches. The issue is the source of truth, not your memory of it.
 2. Plan. Your todo list is the plan: what changes, in what order, each checkpoint leaving the repo building and worth committing. Keep the change as small as the issue allows and add nothing it didn't ask for.
@@ -234,6 +235,11 @@ def _words(kind: Optional[str]) -> StageWords:
     return _WORDS.get(kind or pipeline.DONE, _WORDS[pipeline.BUILD])
 
 
+# --- The sections a prompt is told in, and how they are joined ----------------------------
+
+_SESSION = "## Current Session"
+
+
 def _join(*parts: str) -> str:
     """The parts a record filled in, one blank line apart, with the empty ones left out."""
     return "\n\n".join(part for part in parts if part)
@@ -248,34 +254,40 @@ def _section(heading: str, *parts: str) -> str:
     return _join(heading, *body) if body else ""
 
 
-def _gots(record: Dict[str, Any]) -> str:
-    """Gots's own section: the same words for every session that has a worktree (ADR 0028).
+def _base(record: Dict[str, Any]) -> str:
+    """The base prompt: who the bot is and the tools it uses, the same words for every session.
 
     Nothing here names a path, a branch, a repo or an issue, which is what makes it shared by every
-    run of the bot, whichever project or task it works.
+    run of the bot, whichever project or task it works (ADR 0028).
     """
     if not record.get("repos"):
         return ""
+    return _join(_GOTS, _GOTS_OPENING, _tools())
+
+
+def _tools() -> str:
+    """`## Tools`: one subsection per tool the run is given, then the guidelines that go with them."""
     return _section(
-        _GOTS,
-        _GOTS_OPENING,
-        _LIBRARY_RULES if record.get("files_dir") else "",
-        _PR_RULES,
+        _TOOLS,
+        _section(_LIBRARY_TOOL, _LIBRARY_RULES),
+        _section(_PULL_REQUEST_TOOL, _PR_RULES),
+        _TODO_INSTRUCTIONS,
         _PROGRESS_UPDATES_INSTRUCTIONS,
         _DONE_INSTRUCTIONS,
     )
 
 
 def _session(record: Dict[str, Any], opening: str = "") -> str:
-    """The facts only this session has: the issue or stage it works, its worktrees, its library
-    folder and its repos' templates. It is told last, so everything above it is shared.
+    """The facts only this session has: the issue or stage it works, its worktrees, its repos'
+    templates and the directory it may keep throwaway work in. It is told last, so everything above
+    it is shared.
     """
     return _section(
         _SESSION,
         opening,
         _worktree_line(record),
-        _library_folder_line(record),
         _template_line(record),
+        _scratch_line(record),
     )
 
 
@@ -285,15 +297,15 @@ def _plan_mode(record: Dict[str, Any]) -> str:
 
 
 def session_prompt(record: Dict[str, Any]) -> str:
-    """What a project session's run is told: Gots's tools and rules, the plan shape in plan mode,
-    and then this session's own worktrees, library folder and templates (ADR 0028).
+    """What a project session's run is told: the base prompt, the plan shape in plan mode, and then
+    this session's own worktrees, templates and temporary directory (ADR 0028).
     """
-    return _join(_gots(record), _plan_mode(record), _session(record))
+    return _join(_base(record), _plan_mode(record), _session(record))
 
 
 def afk_prompt(record: Dict[str, Any], task: Dict[str, Any], prompt: Optional[str] = None) -> str:
-    """What an AFK session's first run is told: Gots's tools and rules, AFK's own words, the Prompt
-    its project works by, and its session's facts (ADR 0011, ADR 0027, ADR 0028).
+    """What an AFK session's first run is told: the base prompt, AFK's own words, the Prompt its
+    project works by, and its session's facts (ADR 0011, ADR 0027, ADR 0028).
 
     The brief is AFK's own, the points no Prompt may change; everything about how the work is done
     is the Prompt — the project's words, or ``DEFAULT_PROMPT`` when it has written none — told under
@@ -305,11 +317,11 @@ def afk_prompt(record: Dict[str, Any], task: Dict[str, Any], prompt: Optional[st
     """
     if pipeline.read(record.get("pipeline")) is not None:
         return stage_prompt(record, task, handed=True)
-    workflow = _section(_WORKFLOW, prompt or DEFAULT_PROMPT)
     return _join(
-        _gots(record),
+        _base(record),
         _plan_mode(record),
-        _section(_AFK, _AFK_OPENING, _AFK_RULES, workflow),
+        _section(_AFK, _AFK_OPENING, _AFK_RULES),
+        _section(_WORKFLOW, prompt or DEFAULT_PROMPT),
         _session(record, _handed_line(task, pipeline.BUILD)),
     )
 
@@ -321,8 +333,8 @@ def stage_prompt(
     *,
     handed: bool = False,
 ) -> str:
-    """What a staged task's run is told: Gots's tools and rules, AFK's opening, the stage it is in
-    and the skills it applies in order, and its session's facts (ADR 0020, ADR 0028).
+    """What a staged task's run is told: the base prompt, AFK's opening, the stage it is in and the
+    skills it applies in order, and its session's facts (ADR 0020, ADR 0028).
 
     Every stage of a workflow is briefed the same way, whatever its name: a build implements and
     ends at the gate, the shipping stage reviews and opens the draft, and a stage after it wraps up.
@@ -344,9 +356,10 @@ def stage_prompt(
         _brief(staged),
     )
     return _join(
-        _gots(record),
+        _base(record),
         _plan_mode(record),
-        _section(_AFK, _AFK_OPENING, workflow),
+        _section(_AFK, _AFK_OPENING),
+        workflow,
         _session(record, _handed_line(task, kind) if handed else _task_line(task, kind)),
     )
 
@@ -471,6 +484,7 @@ def _issue_ref(task: Dict[str, Any]) -> IssueRef:
 
 
 def _worktree_line(record: Dict[str, Any]) -> str:
+    """The worktrees this session works in: one repo told as a sentence, several as a list."""
     repos = record.get("repos") or []
     if not repos:
         return ""
@@ -484,23 +498,13 @@ def _worktree_line(record: Dict[str, Any]) -> str:
         for i, repo in enumerate(repos)
     ]
     return (
-        f"You are working in git worktrees of this project's repos, all on branch {repos[0]['branch']}:\n"
-        + "\n".join(lines)
-        + "\nKeep all work inside them."
+        "You are working in git worktrees of this project's repos, all on branch "
+        f"{repos[0]['branch']}. Keep all work inside these directories:\n" + "\n".join(lines)
     )
 
 
-def _library_folder_line(record: Dict[str, Any]) -> str:
-    """Where this session files what it makes: the folder named once, below the rule that sends
-    files there. Fixed per session (the folder is), so the prompt cache holds across its turns;
-    empty for a record from before it."""
-    folder = record.get("files_dir")
-    if not folder:
-        return ""
-    return f"This session's library folder is {folder} — files you make for the user go there."
-
-
 def _template_line(record: Dict[str, Any]) -> str:
+    """Each repo's pull request template, so the body a run writes comes from the repo's own."""
     from .ship import template
 
     found = [(repo["name"], template(repo.get("path"))) for repo in record.get("repos") or []]
@@ -509,4 +513,17 @@ def _template_line(record: Dict[str, Any]) -> str:
         return ""
     if len(record.get("repos") or []) == 1:
         return f"Its pull request template is {found[0][1]}."
-    return "Pull request templates: " + "; ".join(f"{name}: {path}" for name, path in found) + "."
+    return "Pull request templates:\n" + "\n".join(f"- {name}: {path}" for name, path in found)
+
+
+def _scratch_line(record: Dict[str, Any]) -> str:
+    """Where throwaway work goes: a directory of the session's own, so nothing is left beside the
+    user's files. `$HERMES_SAFE_ROOT` is the host's, which is why it is named rather than resolved.
+    """
+    branch = record.get("branch") or ""
+    if not branch:
+        return ""
+    return (
+        f'For temporary or throwaway work, use "$HERMES_SAFE_ROOT/.scratch/{branch}" as your '
+        "temporary directory. DO NOT place your files outside of it."
+    )

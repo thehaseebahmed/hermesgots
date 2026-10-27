@@ -321,19 +321,20 @@ class InstructionsTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.tmp.cleanup()
 
-    def test_the_folder_is_named_under_the_sessions_own_section(self) -> None:
+    def test_the_scratch_dir_is_named_under_the_sessions_own_section(self) -> None:
         text = prompt_builder.session_prompt(self.record)
-        self.assertIn(f"This session's library folder is {self.record['files_dir']}", text)
-        self.assertIn("library_add tool", text, "the rule that files them is told too")
+        scratch = f'"$HERMES_SAFE_ROOT/.scratch/{self.record["branch"]}"'
+        self.assertIn(scratch, text)
+        self.assertIn("`library_add` tool", text, "the rule that files them is told too")
         self.assertLess(
-            text.index("library_add tool"),
-            text.index("This session's library folder"),
-            "the rule stands above the section that names its path",
+            text.index("`library_add` tool"),
+            text.index(scratch),
+            "the rule stands above the section that names where the session works",
         )
         self.assertNotIn(
-            self.record["files_dir"],
+            self.record["branch"],
             text.split("## Current Session")[0],
-            "no path above the section that names this session",
+            "no branch above the section that names this session",
         )
 
     def test_the_line_teaches_the_naming_convention(self) -> None:
@@ -343,23 +344,28 @@ class InstructionsTest(unittest.TestCase):
         self.assertIn("kebab-case", text)
         self.assertIn("dashboard-light.png", text)
 
-    def test_a_record_without_the_folder_has_no_line(self) -> None:
+    def test_the_scratch_line_is_told_whether_or_not_a_folder_is_set(self) -> None:
+        # The library folder is the tool's business, so nothing in the prompt depends on it: a record
+        # from before library folders is told the same rules and the same scratch directory.
         legacy = {**self.record, "files_dir": None}
-        self.assertNotIn("library", prompt_builder.session_prompt(legacy))
+        self.assertEqual(
+            prompt_builder.session_prompt(legacy), prompt_builder.session_prompt(self.record)
+        )
 
     def test_the_gots_section_tells_its_rules_before_any_session_fact(self) -> None:
         # The Gots section is the same for every session, so its rules are told together and above
         # the section that names this one, which is what makes the opening shared (ADR 0028).
         text = prompt_builder.session_prompt(self.record)
         self.assertIn("Keep the user in the loop as you work", text)
-        self.assertLess(text.index("library_add tool"), text.index("pull_request tool"))
-        self.assertLess(text.index("pull_request tool"), text.index("Keep the user in the loop"))
+        self.assertLess(text.index("`library_add` tool"), text.index("`pull_request` tool"))
+        self.assertLess(text.index("`pull_request` tool"), text.index("Keep the user in the loop"))
         self.assertLess(text.index("Keep the user in the loop"), text.index("## Current Session"))
 
     def test_the_block_names_the_rhythm_rules(self) -> None:
         text = prompt_builder.session_prompt(self.record)
         self.assertIn("short update between checkpoints", text)
-        self.assertIn("todo list current", text)
+        self.assertIn("`todo_list` tool religiously", text)
+        self.assertIn("Leave it in its final state", text)
         self.assertIn("Don't narrate each edit", text)
 
     def test_a_record_without_worktrees_has_no_block(self) -> None:
@@ -367,7 +373,7 @@ class InstructionsTest(unittest.TestCase):
         no_repos = {**self.record, "repos": []}
         text = prompt_builder.session_prompt(no_repos)
         self.assertNotIn("Keep the user in the loop", text)
-        self.assertNotIn("pull_request tool", text)
+        self.assertNotIn("`pull_request` tool", text)
 
     def test_the_mock_repeats_the_instructions_word_for_word(self) -> None:
         # The mock is a standalone Node process, so its copy can't be imported; the e2e flows read
@@ -379,8 +385,10 @@ class InstructionsTest(unittest.TestCase):
         app = Path(__file__).resolve().parents[2] / "app"
         mock_js = (app / "scripts" / "mock-hermes.mjs").read_text()
         for name, block in (
+            ("GOTS_OPENING", prompt_builder._GOTS_OPENING),
             ("PR_INSTRUCTIONS", prompt_builder._PR_RULES),
             ("DONE_INSTRUCTIONS", prompt_builder._DONE_INSTRUCTIONS),
+            ("TODO_INSTRUCTIONS", prompt_builder._TODO_INSTRUCTIONS),
             ("PROGRESS_UPDATES_INSTRUCTIONS", prompt_builder._PROGRESS_UPDATES_INSTRUCTIONS),
         ):
             with self.subTest(block=name):

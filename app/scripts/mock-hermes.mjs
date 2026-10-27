@@ -1111,15 +1111,21 @@ const projectSessions = new Map()
 // The plugin's pull request rules (prompt_builder._PR_RULES), word for word.
 // test_library.py matches this line word for word, so it stays one line.
 // prettier-ignore
-const PR_INSTRUCTIONS = "When the work is done and checked, ship it yourself with the pull_request tool and action 'ship': it commits what's left, pushes this branch and opens a draft pull request, or pushes to the one open. Don't ask first, and don't use git push or gh. Write the description from the repo's pull request template (named under Current Session), else with Summary, Changes and How to test. The pull request stays a draft; pass force: true only after a rebase or amend. action 'update' changes its title or body, and 'status' reports without writing. Merging and closing are the user's decision and the tool refuses them: say it is ready to merge, and leave it a draft."
+const PR_INSTRUCTIONS = "When the work is done and you've checked it, ship it yourself with the `pull_request` tool and action 'ship': it commits what's left, pushes this branch and opens a draft pull request, or pushes to the one open. Don't ask first, and don't use git push or gh for it. Write the description from the repo's pull request template when it has one (named under Current Session), else with Summary, Changes and How to test sections. The pull request stays a draft. Pass force: true only after a rebase or amend. action 'update' changes the open pull request's title or body, and 'status' reports without writing. Merging and closing are the user's decision, so say in the pull request that it is ready to merge and leave it a draft."
+
+// The plugin's base-prompt opening (prompt_builder._GOTS_OPENING), word for word.
+const GOTS_OPENING = "You're a bot running on Hermes Agent. Below are some tools and guidelines that you must follow to be useful to the user."
+
+// The plugin's todo guidance (prompt_builder._TODO_INSTRUCTIONS), word for word.
+const TODO_INSTRUCTIONS = "Keep the user in the loop as you work by using the `todo_list` tool religiously. Use it to plan new tasks, use it to update your status on existing tasks. Leave it in its final state when you finish: every item completed, or cancelled where it was dropped."
 // The plugin's done-work emphasis (prompt_builder._DONE_INSTRUCTIONS), word for word.
 // test_library.py matches this line word for word, so it stays one line.
 // prettier-ignore
-const DONE_INSTRUCTIONS = "Don't share the pull request url or the commit message in your reply — the pull_request result and the session's pull request list already show them to the user."
+const DONE_INSTRUCTIONS = "Don't share the pull request url or the commit message in your reply unless the user asks for it."
 // The plugin's working-rhythm guidance (prompt_builder._PROGRESS_UPDATES_INSTRUCTIONS), word for word.
 // test_library.py matches this line word for word, so it stays one line.
 // prettier-ignore
-const PROGRESS_UPDATES_INSTRUCTIONS = "Keep the user in the loop as you work, at a working rhythm rather than a running commentary: a short update between checkpoints — what landed, what's next — so a long run never reads as a hang. Keep the todo list current: mark items done as they land, add what you find, and leave it finished, every item completed or cancelled where it was dropped. When something keeps failing, say what you tried and what you think is wrong before the next attempt. Thinking out loud while you plan is welcome. Don't narrate each edit, read or command — the tool calls show those; keep what you say technical enough to follow without spelling out every detail."
+const PROGRESS_UPDATES_INSTRUCTIONS = "Post a short update between checkpoints — what landed, what you're doing next — so a long stretch of tool calls never reads as a hang. When something keeps failing, say what you tried and what you now think is wrong before the next attempt. Thinking out loud while you plan is welcome. Don't narrate each edit, read or command — the tool calls already show those; keep what you do say technical enough to follow the work without spelling out every implementation detail."
 const MODES = ["accept_edits", "auto", "plan"]
 
 // The sessions each session delegated to with delegate_task (the plugin reads them from state.db),
@@ -5515,28 +5521,31 @@ http
       const worktreeLine = (record) =>
         record.repos.length === 1
           ? `You are working in a git worktree of ${record.repos[0].name} at ${record.repos[0].path} (branch ${record.branch}). Keep all work inside it.`
-          : `You are working in git worktrees of this project's repos, all on branch ${record.branch}:\n${record.repos.map((r, i) => `- ${r.name} at ${r.path}${i === 0 ? " (your current directory)" : ""}`).join("\n")}\nKeep all work inside them.`
+          : `You are working in git worktrees of this project's repos, all on branch ${record.branch}. Keep all work inside these directories:\n${record.repos.map((r, i) => `- ${r.name} at ${r.path}${i === 0 ? " (your current directory)" : ""}`).join("\n")}`
       // The plugin's library rule (prompt_builder._LIBRARY_RULES), word for word: it names no path,
-      // because the folder differs per session and belongs under the last section.
-      const LIBRARY_RULES =
-        "Files you make for the user — screenshots, images, charts, reports, markdown — belong in this session's library folder, not in the worktree; its path is under Current Session. File each one with the library_add tool (its path and a folder name, one level): name folders after the flow or change the files belong to, kebab-case — library-tab for work on the library tab, library-tab-tree-view for a follow-up change to it — not the file type, and file names kebab-case with their extension (dashboard-light.png). The tool makes the folder under it if it needs to, moves the file there and answers with its new path; a name that isn't kebab-case, or a file of that name already in the folder, is an error — fix the name and call again. Return an image's new path in a MEDIA:<path> tag so the user sees it. Source edits stay in the worktree."
-      // The session's own line, prompt_builder._library_folder_line, under the last section.
-      const libraryFolderLine = (record) =>
-        `This session's library folder is ${record.files_dir} — files you make for the user go there.`
-      // Told in sections, the fixed ones first and the session's facts last (ADR 0028), the way the
-      // plugin builds them: what Gots is and the rules for its tools, the plan's shape where the mode
-      // asks for one, then what only this session knows.
+      // because the folder is the tool's business.
+      const LIBRARY_RULES = "Files you make for the user — screenshots, images, charts, reports, markdown — belong in this session's library folder, not in the worktree. File each one with the `library_add` tool (its path and a folder name, one level). Ensure the following:\n\n1. Folder names SHOULD be named after the flow or change the files belong to, kebab-case — e.g. \"library-tab\" for work on the library tab, \"library-tab-tree-view\" for a follow-up change to it.\n2. File names SHOULD be kebab-case with their extension (dashboard-light.png).\n3. A file name that isn't kebab-case, or one already in the folder, is an error — fix the name and call again.\n\nThe tool is responsible for all the file management: DO NOT move, copy or name files yourself. Always use the `library_add` tool."
+      // The session's own line, prompt_builder._scratch_line, under the last section.
+      const scratchLine = (record) =>
+        `For temporary or throwaway work, use "$HERMES_SAFE_ROOT/.scratch/${record.branch}" as your temporary directory. DO NOT place your files outside of it.`
+      // Told the way the plugin builds it (ADR 0028), the fixed sections first and the session's
+      // facts last: who Gots is, then `## Tools` with a subsection per tool, then the mode's block.
       const instructions = (record) =>
         [
-          "## You are Gots!",
+          "# You are Gots!",
+          GOTS_OPENING,
+          "## Tools",
+          "### library_add",
           LIBRARY_RULES,
-          PROGRESS_UPDATES_INSTRUCTIONS,
+          "### pull_request",
           PR_INSTRUCTIONS,
+          TODO_INSTRUCTIONS,
+          PROGRESS_UPDATES_INSTRUCTIONS,
           DONE_INSTRUCTIONS,
           record.mode === "plan" ? PLAN_INSTRUCTIONS : "",
           "## Current Session",
           worktreeLine(record),
-          libraryFolderLine(record),
+          scratchLine(record),
         ]
           .filter(Boolean)
           .join("\n")

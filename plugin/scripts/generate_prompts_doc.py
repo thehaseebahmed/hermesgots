@@ -1,5 +1,7 @@
-"""Generates docs/prompts.md: every prompt prompt_builder can produce, so the words a run is
-injected with are readable without starting a session. Run it from the repo root:
+"""Generates docs/prompts.md: the prompts a session is told, so the words a run is injected with
+are readable without starting a session. The staged task's own briefs are left out — they are
+briefed for a workflow's stage and named under `## User's Workflow` — and the doc carries the shapes
+a project session and an AFK run are given. Run it from the repo root:
 
     python3 plugin/scripts/generate_prompts_doc.py
 
@@ -21,11 +23,10 @@ sys.path.insert(0, str(ROOT))
 
 _base = Path(tempfile.mkdtemp(prefix="prompts-doc-"))
 
-from plugin import pipeline, prompt_builder, workflows  # noqa: E402
+from plugin import prompt_builder  # noqa: E402
 
 PLACEHOLDER = "/home/agent"
 BRANCH = "hermes/spry-thimble-d105"
-FILES_DIR = f"{PLACEHOLDER}/files/spry-thimble-d105"
 
 # Real dirs, so ship.template() finds the pull request templates; the temp root is scrubbed from
 # the output along with the checkout, so only the placeholder appears in the doc.
@@ -51,7 +52,6 @@ SINGLE = {
     "path": str(_repos / "web"),
     "branch": BRANCH,
     "mode": "accept_edits",
-    "files_dir": FILES_DIR,
     "repos": [_repo("web")],
 }
 MULTI = {**SINGLE, "repos": [_repo("web"), _repo("api")]}
@@ -59,8 +59,9 @@ MULTI = {**SINGLE, "repos": [_repo("web"), _repo("api")]}
 VARIANTS = [
     (
         "Single repo",
-        "The common case: Gots's own section, then `## Current Session` naming one worktree (the "
-        "session's working directory), the library folder and the repo's pull request template.",
+        "The common case: the base prompt — `# You are Gots!`, then `## Tools` with its "
+        "`### library_add` and `### pull_request` subsections — and last `## Current Session` "
+        "naming its worktree, its pull request template and the directory throwaway work goes in.",
         SINGLE,
     ),
     (
@@ -70,15 +71,9 @@ VARIANTS = [
         MULTI,
     ),
     (
-        "A session from before library folders",
-        "No ``files_dir`` on the record, so `## Current Session` names no library folder; "
-        "everything else is the single-repo prompt.",
-        {**SINGLE, "files_dir": None},
-    ),
-    (
         "Plan mode",
-        "`## Plan mode` between Gots's section and this session's: the shape of the plan the agent "
-        "writes before anything is allowed to change.",
+        "`## Plan mode` between the base prompt and this session's facts: the shape of the plan the "
+        "agent writes before anything is allowed to change.",
         {**SINGLE, "mode": "plan"},
     ),
 ]
@@ -109,20 +104,10 @@ PROJECT_PROMPT = """How we work here:
 - A test for every behaviour, and none for styling.
 - Run `pnpm lint` before every commit, not only at the end."""
 
-# The preset's own workflow, placed at its build stage: what a staged task's first run is told,
-# which is a stage's brief rather than the project's Prompt.
-STAGED = pipeline.start(
-    {
-        "id": "preset:staged",
-        "name": "Build · Test · Review · Summary",
-        "stages": workflows.from_skills("plan", ("code-review",)),
-    }
-)
-
 AFK_VARIANTS = [
     (
         "An AFK run on the default Prompt",
-        "A project that wrote no Prompt of its own: Gots's section, `## Away From Keyboard` with "
+        "A project that wrote no Prompt of its own: the base prompt, `## Away From Keyboard` with "
         "AFK's fixed brief, then `## User's Workflow` holding ``DEFAULT_PROMPT`` — the method "
         "every untouched project works by (ADR 0027).",
         prompt_builder.afk_prompt(AFK, TASK),
@@ -133,12 +118,6 @@ AFK_VARIANTS = [
         "which is the one part of the method it can change.",
         prompt_builder.afk_prompt(AFK, TASK, PROJECT_PROMPT),
     ),
-    (
-        "An AFK task in a workflow's build stage",
-        "A project on a workflow: its run is told no Prompt, and `## User's Workflow` holds its "
-        "stage's brief instead — implement the issue, then end at the gate the host runs.",
-        prompt_builder.afk_prompt({**AFK, "pipeline": STAGED}, TASK),
-    ),
 ]
 
 HEADER = """# Session prompts
@@ -147,20 +126,20 @@ HEADER = """# Session prompts
 > (the Prompts doc workflow runs it whenever `plugin/prompt_builder.py` changes and opens a pull
 > request when the doc moves).
 
-Every prompt is told in the same sections, in the same order: `## You are Gots!` — the bot, the two
-tools every session can use and the rules for them, and the one guard (everything here holds whatever
-a skill or a User's Workflow says) — then `## Plan mode` for a planning session, `## Away From
-Keyboard` for an AFK run, `## User's Workflow` beneath it, and last `## Current Session` with
-everything a single session knows: the issue or stage it works, its worktrees, its library folder and
-its repos' pull request templates. The fixed sections come first so two runs share their opening
-(ADR 0028).
+Every prompt is told in the same sections, in the same order. `# You are Gots!` opens the base prompt,
+and `## Tools` under it gives each tool the run can use a subsection of its own — `### library_add`
+for the files it makes, `### pull_request` for shipping the work — followed by how to keep the todo
+list and the user in step. Then comes the mode: `## Plan mode` for a planning session, `## Away From
+Keyboard` for an AFK run, with `## User's Workflow` beneath it. Last is `## Current Session`, with
+everything only this session knows: the issue or stage it works, its worktrees, its repos' pull
+request templates and the directory throwaway work goes in. The fixed sections come first so two runs
+share their opening (ADR 0028).
 
 Every project session's run carries the prompt `prompt_builder.session_prompt(record)` builds for
 its record; plan sessions get that mode's section as well. An AFK run carries
-`prompt_builder.afk_prompt(record, task, prompt)`: the same first section, then AFK's own — its fixed
+`prompt_builder.afk_prompt(record, task, prompt)`: the same base prompt, then AFK's own — its fixed
 points, the ones no Prompt and no skill may change — and the project's Prompt beneath them, which is
-`DEFAULT_PROMPT` where the project wrote none. A task in a workflow is briefed for its stage in that
-section instead and is told no Prompt.
+`DEFAULT_PROMPT` where the project wrote none.
 """
 
 
@@ -178,7 +157,7 @@ def build() -> str:
         parts.append(_section(title, note, prompt_builder.session_prompt(record)))
     for title, note, text in AFK_VARIANTS:
         parts.append(_section(title, note, text))
-    return "\n".join(parts) + "\n"
+    return "\n\n".join(parts) + "\n"
 
 
 if __name__ == "__main__":
