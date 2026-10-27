@@ -110,6 +110,8 @@ export interface Profile {
   pluginVersion?: string
   /** The host's main model as last read by any device, shown while it's read again. */
   hostModel?: ModelChoice
+  /** The speech model its host last reported, shown while it's read again. Local only. */
+  speechModel?: string
   /** The provider's account-usage windows, local only; read from the Gots plugin. */
   providerUsage?: ProviderUsage
   /** A dismissed limit-notice key (provider + window label + reset), local only. */

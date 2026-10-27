@@ -5,15 +5,17 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { CheckIcon, CopyIcon, Trash2Icon } from "lucide-react"
+import { CheckIcon, ChevronRightIcon, CopyIcon, Trash2Icon } from "lucide-react"
 import { Link } from "react-router"
 import { toast } from "sonner"
 
+import { Bot } from "@/components/bot"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import {
   Caption,
   ConfirmDestructive,
   Group,
+  RowText,
   ValueRow,
   linkRowClass,
   useHeaderAction,
@@ -24,6 +26,7 @@ import { botTabPath } from "@/lib/bot-tabs"
 import { connectionKey } from "@/lib/connection"
 import { useCopied } from "@/lib/copied"
 import { listProfiles, type DictationRecord, type Profile } from "@/lib/db"
+import { useDictationInfo } from "@/lib/dictation"
 import { byMonth, pooledRate, spelledCount } from "@/lib/dictation-log"
 import {
   clearDictationLog,
@@ -33,7 +36,7 @@ import {
   useDictationRows,
   useDictationTotals,
 } from "@/lib/dictations"
-import { usePluginFeature } from "@/lib/features"
+import { useSpeechRefresh } from "@/lib/host-speech"
 import { cn } from "@/lib/utils"
 
 /** The rows the History tab draws before the reader reaches the end of them. */
@@ -261,23 +264,26 @@ function EntrySheet({
             {row.text}
           </p>
           <p className="text-sm text-muted-foreground">
-            {[bot, clockOf(row.at), wordsLabel(row.words), spokenLabel(row.ms)]
-              .filter(Boolean)
-              .join(" · ")}
+            {[bot, wordsLabel(row.words), spokenLabel(row.ms)].filter(Boolean).join(" · ")}
           </p>
-          <div className="flex flex-col gap-2">
-            <Button variant="outline" className="h-11" data-dictation-copy onClick={() => void copy()}>
-              {copied ? <CheckIcon data-icon="inline-start" /> : <CopyIcon data-icon="inline-start" />}
-              {copied ? "Copied" : "Copy"}
-            </Button>
+          <div className="flex gap-2">
             <Button
-              variant="ghost"
-              className="h-11 text-destructive hover:text-destructive"
+              variant="outline"
+              className="h-11 flex-1 text-destructive hover:text-destructive"
               data-dictation-delete
               onClick={onDelete}
             >
               <Trash2Icon data-icon="inline-start" />
               Delete
+            </Button>
+            <Button
+              variant="outline"
+              className="h-11 flex-1"
+              data-dictation-copy
+              onClick={() => void copy()}
+            >
+              {copied ? <CheckIcon data-icon="inline-start" /> : <CopyIcon data-icon="inline-start" />}
+              {copied ? "Copied" : "Copy"}
             </Button>
           </div>
         </div>
@@ -286,38 +292,46 @@ function EntrySheet({
   )
 }
 
-/** One row per bot, into its own speech settings, disabled where its host can't dictate. */
+/** One row per bot, shaped like the Settings menu's own bot rows. */
 function BotsTab({ profiles }: { profiles: Profile[] }) {
+  const check = useSpeechRefresh(profiles)
   if (!profiles.length)
     return <p className="px-5 py-6 text-sm text-muted-foreground">No bots yet.</p>
   return (
     <Group>
       {profiles.map((profile) => (
-        <BotLink key={profile.id} profile={profile} />
+        <BotRow key={profile.id} profile={profile} check={check[profile.id]} />
       ))}
     </Group>
   )
 }
 
-function BotLink({ profile }: { profile: Profile }) {
-  const answer = usePluginFeature(profile, "dictation")
-  const off = answer === "no"
-  const body = (
-    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-      <span className="truncate text-base">{profile.name}</span>
-      {off && <span className="text-sm text-muted-foreground">Not available on this bot's host</span>}
-    </span>
-  )
-  const path = botTabPath(profile.id, "speech-to-text")
-  if (off)
-    return (
-      <div aria-disabled data-dictation-bot={profile.id} className={cn(linkRowClass, "opacity-60 hover:bg-card")}>
-        {body}
-      </div>
-    )
+/**
+ * What a bot's host is doing about speech: the host's own sentence where it can't dictate, then the
+ * model it last reported, and "Checking…" until it has reported one (ADR 0060).
+ */
+function speechLine(profile: Profile, check: "checking" | "failed" | undefined, reason?: string) {
+  if (reason) return reason
+  if (profile.speechModel !== undefined)
+    return profile.speechModel ? `On · ${profile.speechModel}` : "Off"
+  return check === "checking" ? "Checking…" : undefined
+}
+
+function BotRow({ profile, check }: { profile: Profile; check?: "checking" | "failed" }) {
+  const answer = useDictationInfo(profile)
+  const reason = answer && answer.status === "off" ? answer.reason : undefined
   return (
-    <Link to={path} data-dictation-bot={profile.id} className={linkRowClass}>
-      {body}
+    <Link
+      to={botTabPath(profile.id, "speech-to-text")}
+      data-dictation-bot={profile.id}
+      className={linkRowClass}
+    >
+      <Bot
+        id={profile.botId}
+        className={cn("size-8 shrink-0", profile.disabled && "opacity-40")}
+      />
+      <RowText title={profile.name} subtitle={speechLine(profile, check, reason)} />
+      <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
     </Link>
   )
 }
@@ -327,20 +341,19 @@ function StatsTab() {
   const { totals } = useDictationTotals()
   const rate = pooledRate(totals.words, totals.ms)
   return (
-    <>
-      <Caption>All bots</Caption>
-      <Group>
-        <ValueRow
-          title="Words spoken"
-          value={spelledCount(totals.words)}
-          data-setting="words-spoken"
-        />
-        <ValueRow
-          title="Words per minute"
-          value={rate === null ? "—" : String(rate)}
-          data-setting="words-per-minute"
-        />
-      </Group>
-    </>
+    <Group>
+      <ValueRow
+        title="Words spoken"
+        purpose="Every word you've spoken so far"
+        value={spelledCount(totals.words)}
+        data-setting="words-spoken"
+      />
+      <ValueRow
+        title="Words per minute"
+        purpose="This is your pooled pace"
+        value={rate === null ? "—" : String(rate)}
+        data-setting="words-per-minute"
+      />
+    </Group>
   )
 }

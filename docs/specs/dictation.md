@@ -16,10 +16,11 @@ per-bot list away, with nothing that gathers them.
 A new Settings section, Dictation, sits under Appearance. It has three tabs. History lists every
 dictation newest first, grouped by month under a month heading, one card of rows per month, drawing
 the first twenty entries and appending more as the reader reaches the end; a row shows the words and
-a muted line of time, bot and word count, and opens a sheet with the whole text, its metadata, Copy
-and Delete. Bots links to every bot's Speech-to-text page, in list order, with a bot whose host
-can't dictate shown disabled with the host's reason. Stats is one card with the words spoken across
-every bot and the pooled words per minute behind them.
+a muted line of time, bot and word count, and opens a sheet with the whole text over the bot, the
+count and how long the words took, with Delete and a Copy side by side. Bots draws the Settings menu's
+own bot rows, each saying what its host hears on — or the host's own reason it cannot — and opening
+that bot's Speech-to-text page. Stats is one card with the words spoken across every bot and the
+pooled words per minute behind them, each row carrying the line that says what it counts.
 
 A dictation is written at the moment a take's words land, kept on the bot that heard it by the Gots
 plugin, and mirrored on the device. Every read the screen makes is against the mirror; the host
@@ -70,8 +71,11 @@ on each open, and the last stats answer per bot is cached so the menu row draws 
   at a time and writes what the host has and drops what it no longer does.
 - **Clearing is one action over every bot**, on the screen's header, behind a confirmation, each host
   stamping its own `clearedAt`. A bot without the routes loses only its local rows.
-- **A bot that cannot answer contributes nothing to the totals**, and a bot without `dictations` is
-  still listed in Bots, disabled with its host's reason.
+- **A bot that cannot answer contributes nothing to the totals**, and a bot whose host cannot dictate
+  is still listed in Bots, with the host's own reason in place of a status.
+- **A bot's row says what its host hears on**, `On · <model>` or `Off`, or `Checking…` until the read
+  answers, and the model is a cached fact on the bot written whenever a host's speech settings are
+  read, so the row answers at once and refreshes behind it.
 - **Tabs live inside the one section screen** (the `Tabs` component), so back leaves Dictation.
 - **The screen is a component, not routes**; the section is one entry under Appearance and
   `/settings/dictation` opens it.
@@ -85,8 +89,10 @@ on each open, and the last stats answer per bot is cached so the menu row draws 
   stale window, clear), and the pooled rate including a zero-words and a zero-milliseconds case.
 - Component (`app/scripts/test-dictation-screen.tsx`): the three tabs render over a seeded mirror; the
   month headings and their card grouping; twenty rows and more appended; a row opening its sheet with
-  Copy and Delete; the clear action behind its confirmation; the Bots tab listing a disabled bot with
-  its reason; Stats showing the summed words and rate from the cached answers.
+  the bot, the count and the spoken length over Delete and Copy in that order; the clear action behind
+  its confirmation; the Bots tab's rows saying what each host hears on, the host's reason where it
+  cannot, `Checking…` while the read is owed, and the model a refresh reports landing on the bot; Stats
+  showing the summed words and rate from the cached answers, each row over its own line.
 - Plugin (`plugin/tests/test_dictations.py`): a write, a paged read, a delete, a clear that stamps
   `clearedAt`, stats that answer only their own profile, and a body that names no text being refused.
 - No browser flow: every claim here is reachable from a component with a faked HTTP boundary.

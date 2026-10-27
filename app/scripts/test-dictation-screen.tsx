@@ -31,6 +31,14 @@ type Bot = {
   rows?: Hosted[]
   /** The clear stamp the host reports, for a log cleared from another device. */
   clearedAt?: number
+  /** What the host says about dictating at all: the reason it can't, where it can't. */
+  dictation?: { ready: boolean; reason: string | null }
+  /** The speech model its host reports, read by the bots tab's own refresh. */
+  model?: string
+  /** The model already on the bot, as an earlier read left it. */
+  known?: string
+  /** A host that never answers, so the row is caught mid-read. */
+  stalls?: boolean
 }
 
 /** What a host says about its own log: the totals and the fingerprint beside them. */
@@ -56,7 +64,21 @@ function host(bots: Bot[]) {
     const bot = bots.find((one) => url.hostname === `${one.name}.test`)
     if (!bot) return json({}, 404)
     if (url.pathname.endsWith(`${pluginPath}/info`))
-      return json({ features: bot.features ?? [] })
+      return json({
+        features: bot.features ?? [],
+        dictation: bot.dictation ?? { ready: true, reason: null },
+      })
+    if (url.pathname.endsWith(`${pluginPath}/speech`)) {
+      calls.push({ path: url.pathname, method })
+      if (bot.stalls) return new Promise<Response>(() => {})
+      return json({
+        speech: {
+          model: bot.model ?? "",
+          models: [],
+          cleanup: { model: null, allowed: false, reason: null },
+        },
+      })
+    }
     const known = (bot.features ?? []).includes("dictations")
     if (url.pathname.endsWith(`${pluginPath}/dictations/stats`)) {
       calls.push({ path: url.pathname, method })
@@ -97,7 +119,11 @@ async function seed(bots: Bot[]) {
   await db.dictationLog.clear()
   await db.dictationStats.clear()
   for (const bot of bots) {
-    const profile = botProfile(bot.name, { id: bot.name, name: bot.label ?? bot.name })
+    const profile = botProfile(bot.name, {
+      id: bot.name,
+      name: bot.label ?? bot.name,
+      speechModel: bot.known,
+    })
     await db.profiles.put(profile)
     for (const row of bot.rows ?? [])
       await db.dictationLog.put({ ...row, connection: connectionKey(profile) })
@@ -222,10 +248,15 @@ test("a row opens its dictation whole, a Copy that copies it", async () => {
     await click(rows()[0] ?? null)
     await until(async () => Boolean(sheet()), "the dictation's sheet")
     assert.equal(sheet()?.textContent, text, "the sheet holds every word, the line break included")
-    assert.match(
-      find("[data-dictation-text]")?.parentElement?.textContent ?? "",
-      /6\.0s spoken/,
-      "the sheet says how long those words took to say",
+    assert.equal(
+      find("[data-dictation-text]")?.nextElementSibling?.textContent?.trim(),
+      "Aria · 12 words · 6.0s spoken",
+      "bot, words and how long they took, with the clock in the heading and not here",
+    )
+    assert.ok(
+      deleteButton()?.compareDocumentPosition(copyButton() ?? deleteButton()!) ===
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      "Delete on the left, Copy on the right",
     )
     await click(copyButton())
     await until(async () => copied.length === 1, "the copy")
@@ -287,21 +318,74 @@ test("Clear history empties every bot's log, this device's and theirs", async ()
   })
 })
 
-test("Bots lists every bot, the ones whose host can't dictate disabled with its reason", async () => {
+test("Bots lists every bot as a row into its speech settings, saying what its host hears on", async () => {
   await seed([
-    { name: "a", label: "Aria", features: ["dictation", "dictations"] },
-    { name: "b", label: "Older", features: [] },
+    {
+      name: "a",
+      label: "Aria",
+      features: ["dictation", "dictations"],
+      known: "whisper-large-v3",
+      model: "whisper-large-v3",
+    },
+    {
+      name: "b",
+      label: "Older",
+      features: [],
+      dictation: { ready: false, reason: "Speech-to-text is off in Hermes" },
+      known: "",
+    },
   ])
   await mount(screen(), async () => {
     await openTab("Bots")
     const aria = botRow("a")
     const older = botRow("b")
-    assert.ok(aria && older, "both bots are on the tab, in the list's own order")
-    assert.equal(aria?.tagName, "A", "a bot that can dictate is a link")
-    assert.equal(aria?.getAttribute("href"), "/settings/bots/a/speech-to-text", "to its own speech settings")
-    assert.notEqual(older?.tagName, "A", "one that can't is not")
-    assert.equal(older?.hasAttribute("aria-disabled"), true, "and says it is out")
-    assert.match(older?.textContent ?? "", /Not available on this bot's host/, "with the reason")
+    assert.ok(aria && older, "both bots are on the tab")
+    assert.deepEqual(
+      [aria?.getAttribute("data-dictation-bot"), older?.getAttribute("data-dictation-bot")],
+      ["a", "b"],
+      "in the list's own order",
+    )
+    assert.equal(aria?.tagName, "A", "a bot with speech is a link")
+    assert.equal(
+      aria?.getAttribute("href"),
+      "/settings/bots/a/speech-to-text",
+      "to its own speech settings",
+    )
+    assert.match(aria?.textContent ?? "", /On · whisper-large-v3/, "what its host hears on")
+    assert.equal(older?.tagName, "A", "a bot whose host can't dictate is a link too")
+    assert.match(
+      older?.textContent ?? "",
+      /Speech-to-text is off in Hermes/,
+      "with the host's own reason in place of the status",
+    )
+  })
+})
+
+test("a bot whose host reports no model says Off", async () => {
+  await seed([{ name: "a", label: "Aria", features: ["dictation", "dictations"], known: "" }])
+  await mount(screen(), async () => {
+    await openTab("Bots")
+    await until(
+      async () => /Off/.test(botRow("a")?.textContent ?? ""),
+      "the row saying its host hears on nothing",
+    )
+  })
+})
+
+test("a bot whose model is still being read says Checking…", async () => {
+  await seed([{ name: "a", label: "Aria", features: ["dictation", "dictations"], stalls: true }])
+  await mount(screen(), async () => {
+    await openTab("Bots")
+    assert.match(botRow("a")?.textContent ?? "", /Checking…/, "the line until the host answers")
+  })
+})
+
+test("opening the Bots tab fills the model its host reports onto the bot", async () => {
+  await seed([{ name: "a", label: "Aria", features: ["dictation", "dictations"], model: "base.en" }])
+  await mount(screen(), async () => {
+    await openTab("Bots")
+    await until(async () => (await db.profiles.get("a"))?.speechModel === "base.en", "the model kept")
+    await until(async () => /On · base\.en/.test(botRow("a")?.textContent ?? ""), "the row's line")
   })
 })
 
@@ -331,6 +415,16 @@ test("Stats pools every bot's totals into one rate over the sum of the minutes",
       "600 words over five minutes is 120 a minute, pooled and not averaged per take",
     )
     assert.equal(statTitle("words-per-minute"), "Words per minute", "and the second names the rate")
+    assert.match(
+      find('[data-setting="words-spoken"]')?.textContent ?? "",
+      /Every word you've spoken so far/,
+      "each row says what it counts",
+    )
+    assert.match(
+      find('[data-setting="words-per-minute"]')?.textContent ?? "",
+      /This is your pooled pace/,
+      "in its own line under the title",
+    )
   })
 })
 
