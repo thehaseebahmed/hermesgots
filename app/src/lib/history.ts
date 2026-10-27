@@ -619,6 +619,18 @@ function withReplyDetails(local: Message, reply: Message | undefined) {
 }
 
 /**
+ * The rows of the run the turn is on now. A wake run draws no user message, so it is asked for by the
+ * turn before it: its rows follow that turn's own, and the reply being written is the wake run's, not
+ * the one the turn already finished. A later user message is another turn, whichever device sent it.
+ */
+function newestRun(turn: SessionMessage[], summaries?: SummaryRows) {
+  const end = turn.findIndex((row, i) => i > 0 && isTurnStart(row, summaries) && !isWakePrompt(row))
+  const own = end < 0 ? turn : turn.slice(0, end)
+  const wake = own.findLastIndex((row) => isWakePrompt(row))
+  return wake < 0 ? own : own.slice(wake)
+}
+
+/**
  * The reply so far of the running turn that `userContent` started, from the transcript Hermes
  * writes after every tool round. For a client that can't read the run's events.
  */
@@ -663,7 +675,7 @@ export async function liveTurn(
     if (start >= 0) turn = sorted.slice(start)
     else if (resumed) turn = sorted.slice(summary + 1)
     if (turn)
-      return toMessages("", sessionId, turn, { live: true, summaries }).find(
+      return toMessages("", sessionId, newestRun(turn, summaries), { live: true, summaries }).find(
         (m) => m.role === "assistant",
       )
     if (batch.length < PAGE) return undefined
