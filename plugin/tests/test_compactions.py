@@ -147,7 +147,7 @@ class CompactionsTest(unittest.TestCase):
         # The mark is the summary's own time — the moment the compaction ran — so the divider
         # lands above the first turn written after it, with the summary and everything older on
         # the side that was compacted, on any device.
-        self.assertEqual(compactions.read(self.home, "s1"), [{"at": 500_000}])
+        self.assertEqual(compactions.read(self.home, "s1"), [{"at": 500_000, "row": 3}])
 
     def test_a_mark_is_the_rows_time_as_the_app_rounds_it(self) -> None:
         # The app turns a row's own timestamp into ms with Math.round (history.ts), and the mark
@@ -164,7 +164,7 @@ class CompactionsTest(unittest.TestCase):
         )
         self.assertEqual(
             compactions.read(self.home, "s1"),
-            [{"at": 6001}],  # 6.0009 s is 6000.9 ms: 6001 rounded, 6000 truncated
+            [{"at": 6001, "row": 2}],  # 6.0009 s is 6000.9 ms: 6001 rounded, 6000 truncated
         )
 
     def test_a_mark_is_the_compaction_moment_not_the_end_of_the_archived_rows(self) -> None:
@@ -185,7 +185,7 @@ class CompactionsTest(unittest.TestCase):
                 message(7, 600.0, role="assistant"),  # first turn written after it
             ],
         )
-        self.assertEqual(compactions.read(self.home, "s1"), [{"at": 500_000}])
+        self.assertEqual(compactions.read(self.home, "s1"), [{"at": 500_000, "row": 6}])
 
     def test_each_in_place_compaction_is_one_mark_oldest_first(self) -> None:
         # A second compaction archives the first summary with everything else, so its own summary is
@@ -203,7 +203,7 @@ class CompactionsTest(unittest.TestCase):
                 message(7, 900.0, role="assistant"),
             ],
         )
-        self.assertEqual(compactions.read(self.home, "s1"), [{"at": 500_000}, {"at": 800_000}])
+        self.assertEqual(compactions.read(self.home, "s1"), [{"at": 500_000, "row": 3}, {"at": 800_000, "row": 6}])
 
     def test_in_place_marks_and_a_rotation_merge_oldest_first(self) -> None:
         # A host that rotated once and then compacted in place: the lineage's rotation and the
@@ -221,7 +221,7 @@ class CompactionsTest(unittest.TestCase):
                 message(4, 800.0, session="s2", role="assistant"),
             ],
         )
-        self.assertEqual(compactions.read(self.home, "s2"), [{"at": 100_000}, {"at": 700_000}])
+        self.assertEqual(compactions.read(self.home, "s2"), [{"at": 100_000}, {"at": 700_000, "row": 3}])
 
     def test_a_rotation_summary_is_that_rotation_not_one_more(self) -> None:
         # A rotation publishes its summary into the child as one of its first rows, flagged
@@ -242,7 +242,26 @@ class CompactionsTest(unittest.TestCase):
                 message(4, 800.0, session="s2", role="assistant"),
             ],
         )
-        self.assertEqual(compactions.read(self.home, "s2"), [{"at": 100_000}, {"at": 700_000}])
+        self.assertEqual(compactions.read(self.home, "s2"), [{"at": 100_000}, {"at": 700_000, "row": 3}])
+
+    def test_an_in_place_mark_names_the_summary_row_and_a_rotation_none(self) -> None:
+        # The API server strips the flag from the rows it serves, so the mark's row is how the app
+        # knows which row is the summary. A rotation's own summary is that rotation's mark, which
+        # has no row in this transcript to name.
+        store(
+            self.home,
+            [
+                ("s1", None, "compression", 100.0, None, None),
+                ("s2", "s1", None, None, None, None),
+            ],
+            [
+                message(1, 90.0, session="s1"),
+                message(2, 99.0, session="s2", summary=1),
+                message(7, 700.0, session="s2", summary=1),
+            ],
+        )
+        marks = compactions.read(self.home, "s2")
+        self.assertEqual([mark.get("row") for mark in marks], [None, 7])
 
     def test_a_live_row_with_no_summary_flag_is_not_a_mark(self) -> None:
         store(

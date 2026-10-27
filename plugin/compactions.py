@@ -31,7 +31,8 @@ logger = logging.getLogger(__name__)
 
 def read(home: Path, session_id: str) -> Optional[List[Dict[str, Any]]]:
     """The compactions in the chat ``session_id`` is the live end of, oldest first, as ``{ at }`` in ms,
-    with ``tokens`` and ``window`` where the plugin recorded the parent's last call.
+    with ``tokens`` and ``window`` where the plugin recorded the parent's last call, and ``row`` — the
+    summary's own transcript row — for one made in place.
 
     A store that can't be read answers ``None``, which the app reads as "unknown" and keeps the
     markers it has: an empty list would mean "nothing was compacted".
@@ -95,7 +96,10 @@ def _ms(seconds: float) -> int:
 def _in_place(
     conn: sqlite3.Connection, walked: List[str], continued: Dict[str, float]
 ) -> List[Dict[str, Any]]:
-    """Each in-place compaction in those sessions' transcripts, as ``{ at }`` in ms.
+    """Each in-place compaction in those sessions' transcripts, as ``{ at, row }``: ``at`` in ms, and
+    ``row`` the summary's id. The API server strips Hermes's ``_compressed_summary`` flag from the rows
+    it serves, so this is the one place the app learns which rows are summaries rather than reading
+    it off their text — and the place a divider is matched to its compaction exactly.
 
     ``at`` is the summary row's own time — the moment the compaction ran, which is also the row
     the thread's divider must stand above: the first message written after it. So every device
@@ -131,7 +135,7 @@ def _in_place(
         logger.warning("memento: couldn't read a chat's in-place compactions", exc_info=True)
         return []
     return [
-        {"at": _ms(row["timestamp"])}
+        {"at": _ms(row["timestamp"]), "row": row["id"]}
         for row in rows
         if isinstance(row["timestamp"], (int, float))
         and row["timestamp"] > continued.get(row["session_id"], 0.0)
