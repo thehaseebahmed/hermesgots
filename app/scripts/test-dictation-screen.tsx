@@ -558,7 +558,20 @@ test("Stats pools every bot's totals into one rate over the sum of the minutes",
   })
 })
 
-test("nothing counted yet reads as no words and no rate", async () => {
+test("a card no host has answered for draws no number rather than a zero", async () => {
+  await seed([{ name: "a" }])
+  await mount(screen(), async () => {
+    await openTab("Stats")
+    await until(async () => statValue("words-spoken") === "—", "no words reported")
+    assert.equal(
+      statValue("words-per-minute"),
+      "—",
+      "a zero nobody reported is not a measurement, so there is no rate either",
+    )
+  })
+})
+
+test("a host that answered with an empty log reads as no words and no rate", async () => {
   await seed([{ name: "a", features: ["dictations"] }])
   await mount(screen(), async () => {
     await openTab("Stats")

@@ -340,22 +340,25 @@ function BotRow({ profile }: { profile: Profile }) {
   )
 }
 
+/** What a value reads where nothing has been reported for it yet. */
+const UNSET = "—"
+
 /** What every bot has added up to, as the hosts last reported it. */
 function StatsTab() {
-  const { totals } = useDictationTotals()
+  const { totals, reported } = useDictationTotals()
   const rate = pooledRate(totals.words, totals.ms)
   return (
     <Group>
       <ValueRow
         title="Words spoken"
         purpose="Every word you've spoken so far"
-        value={spelledCount(totals.words)}
+        value={reported ? spelledCount(totals.words) : UNSET}
         data-setting="words-spoken"
       />
       <ValueRow
         title="Words per minute"
         purpose="This is your pooled pace"
-        value={rate === null ? "—" : String(rate)}
+        value={rate === null ? UNSET : String(rate)}
         data-setting="words-per-minute"
       />
     </Group>
