@@ -64,7 +64,10 @@ function size({ tokens, window }: Pick<Compaction, "tokens" | "window">) {
   return ` · ${formatTokens(tokens)} of ${formatTokens(window)} (${Math.round((tokens / window) * 100)}%)`
 }
 
-/** What the host recorded about a compaction; a divider drawn from one it hasn't recorded says so. */
+/**
+ * What the host recorded about a compaction. An in-place mark carries no size, so a divider drawn
+ * inside a reply reads from this alone; one the record doesn't name is the same divider, or none.
+ */
 export function Compacted({ compaction }: { compaction?: Pick<Compaction, "tokens" | "window"> }) {
   const text = `Compaction${size(compaction ?? {})}`
   return <Divider label={text} text={text} />

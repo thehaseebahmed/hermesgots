@@ -6,6 +6,8 @@ import test from "node:test"
 
 import {
   isSeamScaffolding,
+  MERGED_SUMMARY_DELIMITER,
+  PRIOR_CONTEXT_HEADER,
   RELOAD_NOTICE_BODY,
   RELOAD_NOTICE_HEADER,
   REPLAY_HEADER,
@@ -143,4 +145,29 @@ test("a summary is alone unless the host folded a message under its end line", (
 test("a header with no end line, or one quoted mid-sentence, is not a summary", () => {
   assert.equal(summaryOf(`${SUMMARY_HEADER} and then the run stopped`), undefined)
   assert.equal(summaryOf(`I saw ${SUMMARY_HEADER} in a log once`), undefined)
+})
+test("a summary merged into a carried row keeps the row's own words above its delimiter", () => {
+  // `_merge_summary_into_tail_row`: the old tail content goes between the prior-context header and
+  // the delimiter, the end marker last, so the words worth drawing are neither "after the summary"
+  // nor part of it.
+  const merged = [
+    PRIOR_CONTEXT_HEADER,
+    "Work before the compaction.",
+    "",
+    MERGED_SUMMARY_DELIMITER,
+    "",
+    `${SUMMARY_HEADER} Earlier turns were compacted.`,
+    "",
+    SUMMARY_END,
+  ].join("\n")
+  assert.deepEqual(summaryOf(merged), { after: "Work before the compaction.", alone: false })
+  assert.equal(seamText(merged), "Work before the compaction.", "the reply keeps its own words")
+  const nothingKept = [
+    PRIOR_CONTEXT_HEADER,
+    MERGED_SUMMARY_DELIMITER,
+    "",
+    SUMMARY_HEADER,
+    SUMMARY_END,
+  ].join("\n")
+  assert.deepEqual(summaryOf(nothingKept), { after: "", alone: true })
 })

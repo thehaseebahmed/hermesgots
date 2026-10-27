@@ -76,6 +76,12 @@ export const SUMMARY_HEADER = "[CONTEXT COMPACTION — REFERENCE ONLY]"
 /** `agent/context_compressor.py` `_MERGED_PRIOR_CONTEXT_HEADER`: a summary merged into a reply. */
 export const PRIOR_CONTEXT_HEADER = "[PRIOR CONTEXT — for reference only; not a new message]"
 
+/**
+ * `agent/context_compressor.py` `_MERGED_SUMMARY_DELIMITER`: where a merged summary begins, the row's
+ * own words kept as delimited reference above it.
+ */
+export const MERGED_SUMMARY_DELIMITER = "[END OF PRIOR CONTEXT — COMPACTION SUMMARY BELOW]"
+
 /** `agent/context_compressor.py` `LEGACY_SUMMARY_PREFIX`: the words an older Hermes opened one with. */
 export const LEGACY_SUMMARY_HEADER = "[CONTEXT SUMMARY]:"
 
@@ -98,7 +104,18 @@ export function summaryOf(text: string): { after: string; alone: boolean } | und
   const end = lineAt(head, SUMMARY_END)
   if (end < 0) return undefined
   const after = head.slice(end + SUMMARY_END.length).trim()
-  return { after, alone: after === "" || after.startsWith(REPLAY_HEADER) }
+  // A summary merged into a carried row puts that row's own words above its delimiter, inside the
+  // prior-context block: they are the reply's, and drawn from here rather than lost with the summary.
+  const merged = head.startsWith(PRIOR_CONTEXT_HEADER) ? mergedPrior(head) : undefined
+  const drawn = merged === undefined ? after : merged
+  return { after: drawn, alone: drawn === "" || drawn.startsWith(REPLAY_HEADER) }
+}
+
+/** What a merged row kept of its own above the delimiter, empty where it kept nothing. */
+function mergedPrior(head: string): string {
+  const at = head.indexOf(MERGED_SUMMARY_DELIMITER)
+  if (at < 0) return ""
+  return head.slice(PRIOR_CONTEXT_HEADER.length, at).trim()
 }
 
 /** Whether a row restates the in-flight request: Hermes writes it after the work it carried forward. */

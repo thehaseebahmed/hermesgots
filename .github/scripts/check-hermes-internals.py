@@ -94,6 +94,7 @@ CONSTANTS: Tuple[Tuple[str, str, str, str], ...] = (
     (SUMMARY_REL, "SUMMARY_PREFIX", "summary", "the compaction summary's opening"),
     (SUMMARY_REL, "LEGACY_SUMMARY_PREFIX", "legacySummary", "an older summary's opening"),
     (SUMMARY_REL, "_SUMMARY_END_MARKER", "summaryEnd", "the line every summary ends on"),
+    (SUMMARY_REL, "_MERGED_SUMMARY_DELIMITER", "mergedDelimiter", "where a merged summary begins"),
     (SUMMARY_REL, "_MERGED_PRIOR_CONTEXT_HEADER", "prior", "a summary merged into a reply's opening"),
 )
 
@@ -122,6 +123,7 @@ APP_COPIES: Tuple[Tuple[str, str, str, bool], ...] = (
     ("LEGACY_SUMMARY_HEADER", "legacySummary", "an older summary's opening", True),
     ("SUMMARY_END", "summaryEnd", "the line every summary ends on", True),
     ("PRIOR_CONTEXT_HEADER", "prior", "a summary merged into a reply's opening", True),
+    ("MERGED_SUMMARY_DELIMITER", "mergedDelimiter", "where a merged summary begins", True),
 )
 
 # The plugin's own half of the names above: a rename here would leave the checks below passing while
