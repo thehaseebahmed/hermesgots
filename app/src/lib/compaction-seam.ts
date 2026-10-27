@@ -30,14 +30,17 @@ export const RELOAD_NOTICE_HEADER =
 /** The opening of the notice's own body: the second marker, where a message may quote the header. */
 export const RELOAD_NOTICE_BODY = "The task list above crossed the compression boundary"
 
+/** `tools/todo_tool.py` `_STATUS_MARKERS`, and the `[?]` an item is printed in before it has one. */
+export const SNAPSHOT_MARKERS = ["x", ">", "~", "?", " "] as const
+
 /** An item of the host's snapshot — `- [>] 4. Wire it (in_progress)`, two spaces per depth. */
-const SNAPSHOT_ITEM = /\n[ \t]*- \[[x>~? ]\] \d+\. /
+const SNAPSHOT_ITEM = new RegExp(`\\n[ \\t]*- \\[[${SNAPSHOT_MARKERS.join("")}]\\] \\d+\\. `)
 
 type SeamRow = { role?: string; content?: string | null; display_kind?: string | null }
 
-/** Where `header` opens a line of `content`, at or after `from`: -1 where it opens none. */
-function lineAt(content: string, header: string, from = 0): number {
-  let at = content.indexOf(header, from)
+/** Where `header` opens a line of `content`: -1 where it opens none, a quote mid-sentence. */
+function lineAt(content: string, header: string): number {
+  let at = content.indexOf(header)
   while (at >= 0) {
     if (at === 0 || content[at - 1] === "\n") return at
     at = content.indexOf(header, at + 1)

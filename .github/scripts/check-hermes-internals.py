@@ -85,14 +85,14 @@ COPIES: Tuple[Tuple[str, str, str], ...] = (
 )
 
 APP_SEAM_REL = "app/src/lib/compaction-seam.ts"
-APP_COPIES: Tuple[Tuple[str, str, str], ...] = (
-    ("REPLAY_HEADER", "replay", "the restatement's header"),
-    ("TASK_SNAPSHOT_HEADER", "snapshot", "the preserved task list's header"),
-    ("RELOAD_NOTICE_HEADER", "reload", "the reload notice's header"),
-)
 
-APP_OPENINGS: Tuple[Tuple[str, str, str], ...] = (
-    ("RELOAD_NOTICE_BODY", "reloadBody", "the notice's own opening"),
+# `whole` is how much of the host's text the app's copy carries: the three headers word for word, the
+# notice's body as the opening that tells it from a message quoting the header.
+APP_COPIES: Tuple[Tuple[str, str, str, bool], ...] = (
+    ("REPLAY_HEADER", "replay", "the restatement's header", True),
+    ("TASK_SNAPSHOT_HEADER", "snapshot", "the preserved task list's header", True),
+    ("RELOAD_NOTICE_HEADER", "reload", "the reload notice's header", True),
+    ("RELOAD_NOTICE_BODY", "reloadBody", "the notice's own opening", False),
 )
 
 # The plugin's own half of the names above: a rename here would leave the checks below passing while
@@ -103,7 +103,9 @@ PLUGIN_NAMES: Tuple[Tuple[str, str], ...] = (
     ("interrupt_subagent", "core's per-child stop"),
 )
 
-TOTAL = len(ANCHORS) + len(CONSTANTS) + len(COPIES) + len(APP_COPIES) + len(APP_OPENINGS) + len(PLUGIN_NAMES)
+TOTAL = (
+    len(ANCHORS) + len(CONSTANTS) + len(COPIES) + len(APP_COPIES) + len(PLUGIN_NAMES) + 1
+)
 
 _OPENING = re.compile(r"(?:[rRbBuUfF]{0,2})('''|\"\"\"|'|\")")
 _SPACE = " \t\r\n\f\v"
@@ -222,6 +224,31 @@ def _ts_constant(src: str, name: str) -> Optional[str]:
     return piece[0] if piece else None
 
 
+def _ts_strings(src: str, name: str) -> Optional[List[str]]:
+    """The strings an exported ``const NAME = ["a", "b"]`` holds."""
+    match = re.search(r"(?m)^export const " + re.escape(name) + r"\s*=\s*\[", src)
+    if not match:
+        return None
+    end = src.find("]", match.end())
+    if end < 0:
+        return None
+    body, pos, out = src[match.end():end], 0, []
+    while True:
+        while pos < len(body) and body[pos] not in "\"'":
+            pos += 1
+        piece = _read_string(body, pos)
+        if piece is None:
+            return out or None
+        text, pos = piece
+        out.append(text)
+
+
+def _todo_markers(src: str) -> Optional[List[str]]:
+    """The bracket characters a task item's status is printed in, one per marker."""
+    found = re.findall(r'"\w+": "\[([^\]])\]"', src)
+    return found or None
+
+
 def _status_mark(src: str) -> Optional[str]:
     """The Status line's truncation suffix, which core appends inline rather than naming."""
     match = re.search(r'"(\s*\[TRUNCATED:[^"\n]*max_iterations[^"\n]*\])"', src)
@@ -333,6 +360,7 @@ def main(argv: List[str]) -> int:
         lambda src: _joined(src, '"The task list above crossed'),
         "the reload notice's own opening",
     )
+    derive("markers", TODO_REL, sourced(TODO_REL), _todo_markers, "the status markers an item prints")
 
     # The plugin side: the same names, and the same sentences.
     delegation = plugin / "delegation.py"
@@ -381,19 +409,34 @@ def main(argv: List[str]) -> int:
             expected, rel = derived[key]
             return value, expected, rel
 
-        for constant, key, what in APP_COPIES:
+        for constant, key, what, whole in APP_COPIES:
             pair = app_pair(constant, key, what)
-            if pair and _canonical(pair[0]) != _canonical(pair[1]):
+            if not pair:
+                continue
+            value, expected, rel = pair
+            held = _canonical(value) == _canonical(expected) if whole else (
+                _canonical(expected).startswith(_canonical(value))
+            )
+            if not held:
                 failures.append(
-                    f"app:{APP_SEAM_REL}: {constant} ({what}) is not what hermes:{pair[2]} writes — "
-                    f"hermes {pair[1]!r} app {pair[0]!r}"
+                    f"app:{APP_SEAM_REL}: {constant} ({what}) "
+                    f"{'is not' if whole else 'does not open'} what hermes:{rel} writes — "
+                    f"hermes {expected!r} app {value!r}"
                 )
-        for constant, key, what in APP_OPENINGS:
-            pair = app_pair(constant, key, what)
-            if pair and not _canonical(pair[1]).startswith(_canonical(pair[0])):
+
+        marks = _ts_strings(seam, "SNAPSHOT_MARKERS")
+        if marks is None:
+            failures.append(f"app:{APP_SEAM_REL}: missing SNAPSHOT_MARKERS (an item's status markers)")
+        elif "markers" not in derived:
+            failures.append(
+                f"app:{APP_SEAM_REL}: SNAPSHOT_MARKERS compares against unknown check 'markers'"
+            )
+        else:
+            expected_marks, rel = derived["markers"]
+            if sorted(marks) != sorted(list(expected_marks) + ["?"]):
                 failures.append(
-                    f"app:{APP_SEAM_REL}: {constant} ({what}) does not open what hermes:{pair[2]} "
-                    f"writes — hermes {pair[1]!r} app {pair[0]!r}"
+                    f"app:{APP_SEAM_REL}: SNAPSHOT_MARKERS (an item's status markers) is not what "
+                    f"hermes:{rel} prints — hermes {sorted(expected_marks)!r} app {sorted(marks)!r}"
                 )
 
     if failures:
