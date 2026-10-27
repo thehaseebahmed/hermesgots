@@ -22,6 +22,7 @@ import {
 } from "@/lib/dictation-failure"
 import { RESTORED, SAVE_MS, keptAudio } from "@/lib/dictation-kept"
 import { holdTake, releaseTake } from "@/lib/dictation-lock"
+import { prefersReducedMotion } from "@/lib/media"
 import {
   getDictationInfo,
   tidyDictation,
@@ -506,7 +507,7 @@ export function useChunkedDictation(
         audio.createMediaStreamSource(recording.stream).connect(analyser)
         recording.audio = audio
         recording.measured = true
-        const motion = !window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        const motion = !prefersReducedMotion()
         const samples = new Uint8Array(analyser.fftSize)
         let history = Array<number>(BARS).fill(0)
         let floor = Infinity

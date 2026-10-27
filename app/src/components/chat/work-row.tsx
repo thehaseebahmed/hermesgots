@@ -1,5 +1,6 @@
 import { forwardRef, type ComponentProps, type ReactNode } from "react"
 
+import { useReducedMotion } from "@/lib/media"
 import { cn } from "@/lib/utils"
 
 /**
@@ -16,8 +17,37 @@ export const WORK_ROW_CLASS =
  */
 export const WORK_LABEL_DENT = "pl-6"
 
+/** The wave's own name: the class the stylesheet turns into a light, and the slot the tests read. */
+const WAVE = "work-wave"
+
 /**
- * The row button over that shape: what shows before the label (a spinner while the work still runs)
+ * A work row's words, carrying the wave while the row works — a light travelling through them, a lap
+ * every 1.4 seconds (ADR 0061). It is decoration over words the reader can already read: nothing
+ * announces it, and where the reader asked for reduced motion the words are plain.
+ *
+ * The wave is its own span so the gradient fills the words and nothing else: `truncate`'s ellipsis
+ * would otherwise be painted with the same transparent fill, and so would a row's marks.
+ */
+export const WorkLabel = forwardRef<HTMLSpanElement, ComponentProps<"span"> & { wave?: boolean }>(
+  function WorkLabel({ wave, className, children, ...props }, ref) {
+    const reduced = useReducedMotion()
+    const moving = Boolean(wave) && !reduced
+    return (
+      <span ref={ref} className={cn("min-w-0 truncate", className)} {...props}>
+        {moving ? (
+          <span className={WAVE} data-slot={WAVE}>
+            {children}
+          </span>
+        ) : (
+          children
+        )}
+      </span>
+    )
+  },
+)
+
+/**
+ * The row button over that shape: what shows before the label (a failed group's mark, or nothing)
  * and what follows it (a ruler, a chevron) belong to the row itself, so each caller keeps its own.
  */
 export const WorkRow = forwardRef<

@@ -1,12 +1,27 @@
 import { useSyncExternalStore } from "react"
 
+const queries = new Map<string, MediaQueryList>()
+
+/**
+ * One query's list, made once and kept: a snapshot is read on every commit, so a list built per read
+ * is an allocation per read, and each row that animates asks from its own component.
+ */
+function watch(query: string) {
+  const held = queries.get(query)
+  if (held) return held
+  const made = window.matchMedia(query)
+  queries.set(query, made)
+  return made
+}
+
+/** A screen's answer to a media query, redrawn when the reader changes it. */
 function media(query: string) {
-  const list = window.matchMedia(query)
   const subscribe = (onChange: () => void) => {
+    const list = watch(query)
     list.addEventListener("change", onChange)
     return () => list.removeEventListener("change", onChange)
   }
-  return () => useSyncExternalStore(subscribe, () => list.matches)
+  return () => useSyncExternalStore(subscribe, () => watch(query).matches)
 }
 
 /** Whether the screen is tablet-sized (Tailwind's `md`) or wider. */
@@ -20,3 +35,15 @@ export const useXLarge = media("(min-width: 1280px)")
 
 /** Whether the main pointer can hover (a mouse or trackpad), so a hover can show more. */
 export const useHover = media("(hover: hover) and (pointer: fine)")
+
+/** The query behind the animations a screen's own markup decides. */
+const MOTION = "(prefers-reduced-motion: reduce)"
+
+/**
+ * Whether the reader asked for no motion, for work outside a component — a scroll's behaviour, a
+ * roll's pace. A screen that draws the still version of its own animation asks `useReducedMotion`.
+ */
+export const prefersReducedMotion = () => watch(MOTION).matches
+
+/** The same answer as a hook, so a preference changed mid-session redraws what it stopped. */
+export const useReducedMotion = media(MOTION)

@@ -1,5 +1,7 @@
 import { Component, createRef, type ReactNode } from "react"
 
+import { prefersReducedMotion } from "@/lib/media"
+
 // A plain fade rather than Material's fade through: two items of one list share their chrome (a
 // session's header, composer and banners), and a fade through took all of it to nothing and back
 // on every switch — the flashing Material says to answer with a fade.
@@ -11,7 +13,6 @@ interface Ghost {
   scrolls: [Element, number, number][]
 }
 
-const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches
 
 /** A still copy of what a pane shows, scrolled where it was, that nothing can reach or act on. */
 function copy(live: HTMLElement): Ghost {
@@ -54,7 +55,7 @@ export class PaneTransition extends Component<{ item?: string; children: ReactNo
   getSnapshotBeforeUpdate(previous: { item?: string }): Ghost | null {
     const live = this.live.current
     const { item } = this.props
-    if (!live || !previous.item || !item || previous.item === item || reducedMotion()) return null
+    if (!live || !previous.item || !item || previous.item === item || prefersReducedMotion()) return null
     return copy(live)
   }
 

@@ -115,6 +115,7 @@ import {
 import { setBackGuard } from "@/lib/native"
 import { useAllProjects } from "@/lib/projects"
 import { useNav } from "@/lib/nav"
+import { prefersReducedMotion } from "@/lib/media"
 import {
   itemToOpen,
   useMeetingsPane,
@@ -1055,7 +1056,7 @@ function MeetingView() {
     if (!said || !node) return
     node.scrollTo({
       top: node.scrollHeight,
-      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+      behavior: prefersReducedMotion() ? "auto" : "smooth",
     })
   }, [said])
   const [tab, setTab] = useState("notes")
@@ -1379,7 +1380,7 @@ function TranscriptView({
     const frame = requestAnimationFrame(() =>
       rows.current.get(currentId)?.scrollIntoView({
         block: "center",
-        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+        behavior: prefersReducedMotion() ? "auto" : "smooth",
       }),
     )
     return () => cancelAnimationFrame(frame)
