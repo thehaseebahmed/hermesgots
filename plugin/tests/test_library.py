@@ -381,6 +381,7 @@ class InstructionsTest(unittest.TestCase):
         self.assertIn("never a path relative to the folder you are in", media)
         self.assertIn("Never a scratch, worktree or other temporary path", media)
         self.assertIn("caches what it fetches", media, "the reason: a temp path draws a stale copy")
+        self.assertIn("is a row the user saves", media, "a file that is not drawn is still handed over")
 
     def test_a_record_without_worktrees_has_no_block(self) -> None:
         # The same gate as the ship instructions: a record with no repos gets neither.
