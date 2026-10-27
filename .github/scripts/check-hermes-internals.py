@@ -52,6 +52,11 @@ ANCHORS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
     (("agent/context_compressor.py",), "You've reached the maximum number of tool-calling iterations allowed"),
     # The status markers the app's snapshot check reads an item line by.
     (("tools/todo_tool.py",), '_STATUS_MARKERS = {"completed": "[x]"'),
+    # The process notices the app draws nothing of, told from a message that names one.
+    (("tools/process_registry_notifications.py",), "[IMPORTANT: Background process "),
+    (("tools/process_registry_notifications.py",), "matched watch pattern"),
+    (("tools/process_registry_notifications.py",), "heartbeat #"),
+    (("tools/process_registry_notifications.py",), "background processes completed."),
 )
 
 # Hermes's own constants, read out of the checkout as they are: they are what the plugin's copies are

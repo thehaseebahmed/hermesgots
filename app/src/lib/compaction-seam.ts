@@ -33,6 +33,13 @@ export const RELOAD_NOTICE_BODY = "The task list above crossed the compression b
 /** `tools/todo_tool.py` `_STATUS_MARKERS`, and the `[?]` an item is printed in before it has one. */
 export const SNAPSHOT_MARKERS = ["x", ">", "~", "?", " "] as const
 
+/** `tools/process_registry_notifications.py`: a completion, a watch hit, or a heartbeat. */
+const BACKGROUND_NOTICE =
+  /^\[(?:IMPORTANT: )?Background process \S+ [^\n]*(?:\(exit code -?\d+\)|matched watch pattern "|heartbeat #)/
+
+/** The one header that speaks for several processes at once. */
+const BACKGROUND_BATCH = /^\[IMPORTANT: \d+ background processes completed\./
+
 /** An item of the host's snapshot — `- [>] 4. Wire it (in_progress)`, two spaces per depth. */
 const SNAPSHOT_ITEM = new RegExp(`\\n[ \\t]*- \\[[${SNAPSHOT_MARKERS.join("")}]\\] \\d+\\. `)
 
@@ -68,11 +75,18 @@ function restatedRequest(text: string): string | undefined {
   return text.startsWith(REPLAY_HEADER) ? text.slice(REPLAY_HEADER.length).trimStart() : undefined
 }
 
+/** A compaction summary, which carries the restatement under its own words: no part of it is the user's. */
+function carriesRestatement(text: string): boolean {
+  const at = lineAt(text, REPLAY_HEADER)
+  return at > 0 && text.slice(at + REPLAY_HEADER.length).trim() !== ""
+}
+
 /** What of a seam row's text the thread draws: the host's notes cut, what the user typed kept. */
 export function seamText(content: string): string {
   const text = cutSnapshot(content)
   const head = text.trimStart()
-  if (isReloadNoticeOnly(head)) return ""
+  if (isReloadNoticeOnly(head) || carriesRestatement(head)) return ""
+  if (BACKGROUND_NOTICE.test(head) || BACKGROUND_BATCH.test(head)) return ""
   return restatedRequest(head) || text
 }
 

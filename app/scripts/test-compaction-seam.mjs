@@ -91,3 +91,30 @@ test("the mock writes the host's own words, not a paraphrase of them", () => {
   for (const text of [TASK_SNAPSHOT_HEADER, RELOAD_NOTICE_HEADER, RELOAD_NOTICE_BODY])
     assert.ok(source.includes(text), `the mock writes ${text.slice(0, 48)}… as the host does`)
 })
+
+test("the host's process notices draw nothing, and a message about one stays the user's", () => {
+  const notices = [
+    '[IMPORTANT: Background process gp-7f2a completed (exit code 0).\nIts output is in the run log.]',
+    '[IMPORTANT: Background process gp-7f2a matched watch pattern "ERROR".\nSomething failed.]',
+    "[Background process gp-7f2a heartbeat #3 — still running after 10 minutes.]",
+    "[IMPORTANT: 2 background processes completed. Treat these results as one batch and give one " +
+      "consolidated response; preserve failures and actionable results.]",
+  ]
+  for (const notice of notices) {
+    assert.equal(seamText(notice), "", `the host's own notice draws nothing: ${notice.slice(0, 40)}…`)
+    assert.ok(isSeamScaffolding(row(notice)), "and its row is no message")
+  }
+  const mine = "[IMPORTANT: my background process keeps dying — read the log before you answer.]"
+  assert.equal(seamText(mine), mine, "a message about a process is the user's own")
+})
+
+test("a compaction's summary carrying the restatement draws nothing", () => {
+  const carrier = [
+    "The conversation was compressed; earlier turns are summarised above.",
+    "",
+    REPLAY_HEADER,
+    REQUEST,
+  ].join("\n")
+  assert.equal(seamText(carrier), "", "the summary is the host's, the whole of it")
+  assert.ok(isSeamScaffolding(row(carrier)), "and the row is no message")
+})
