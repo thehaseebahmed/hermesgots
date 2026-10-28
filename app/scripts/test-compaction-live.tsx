@@ -28,6 +28,8 @@ import {
   json,
   mount,
   seedChat,
+  serveTranscript as serve,
+  transcriptRows,
   until,
 } from "./component-kit.tsx"
 
@@ -44,36 +46,7 @@ const SNAPSHOT = [
 ].join("\n")
 const NOTICE = `${RELOAD_NOTICE_HEADER}\n${RELOAD_NOTICE_BODY} verbatim, but the skills were pruned.`
 
-let next = 100
-const id = () => ++next
-const call = (name: string, text?: string): SessionMessage => {
-  const n = id()
-  return {
-    id: n,
-    role: "assistant",
-    content: text ?? null,
-    timestamp: 1_000 + n,
-    tool_calls: [{ id: `call-${n}`, type: "function", function: { name, arguments: "{}" } }],
-  }
-}
-const result = (calling: SessionMessage): SessionMessage => ({
-  id: id(),
-  role: "tool",
-  tool_call_id: calling.tool_calls![0].id,
-  tool_name: calling.tool_calls![0].function.name,
-  content: "{}",
-  timestamp: 1_000 + next,
-})
-const pair = (name: string, text?: string) => {
-  const c = call(name, text)
-  return [c, result(c)]
-}
-const row = (role: "user" | "assistant", content: string): SessionMessage => ({
-  id: id(),
-  role,
-  content,
-  timestamp: 1_000 + next,
-})
+const { row, call, result, pair, reset } = transcriptRows(100)
 
 type Run = {
   summaryRole: "assistant" | "user"
@@ -83,7 +56,7 @@ type Run = {
 }
 
 function run({ summaryRole, restated, carried = 3, amid }: Run) {
-  next = 100
+  reset(100)
   const rows: SessionMessage[] = [
     row("user", "An earlier ask"),
     row("assistant", "An earlier answer"),
@@ -107,19 +80,6 @@ function run({ summaryRole, restated, carried = 3, amid }: Run) {
   rows.push(...pair("terminal"))
   rows.push(row("assistant", "After two"))
   return rows
-}
-
-function serve(rows: SessionMessage[]) {
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const url = new URL(String(input))
-    if (/\/messages$/.test(url.pathname)) {
-      const limit = Number(url.searchParams.get("limit"))
-      const offset = Number(url.searchParams.get("offset"))
-      const page = [...rows].sort((a, b) => b.id - a.id).slice(offset, offset + limit)
-      return json({ data: page.reverse() })
-    }
-    return json({ error: { message: "no route" } }, 404)
-  }) as unknown as typeof fetch
 }
 
 const server = connection("compaction-live")
@@ -294,7 +254,7 @@ for (const amid of ["subagent", "steer"] as const)
   })
 
 test("a tool's result that opens with the summary's words is still its result", () => {
-  next = 100
+  reset(100)
   const reading = call("read_file", "Reading the old summary")
   const answered = { ...result(reading), content: SUMMARY }
   const reply = toMessages("c", SESSION, [row("user", "Read it"), reading, answered], {
@@ -326,13 +286,13 @@ test("the archive's rows read the same way: no summary drawn, the divider where 
 
 test("a summary the host folded the user's message into draws that message, and only that", () => {
   // Hermes writes the next user message under the summary's end line in the same row.
-  next = 100
+  reset(100)
   const folded = `${SUMMARY}\n\nWhy did it say this?`
   assert.deepEqual(shape([row("user", folded)]), ["user: Why did it say this? [0 calls, 0 seams]"])
 })
 
 test("a message that only quotes a summary mid-text stays the user's", () => {
-  next = 100
+  reset(100)
   const quoting = `As the note said:\n${SUMMARY}\nthat was hours ago.`
   assert.deepEqual(shape([row("user", quoting)]), [
     `user: ${quoting.replace(/\n+/g, " / ")} [0 calls, 0 seams]`,
@@ -340,7 +300,7 @@ test("a message that only quotes a summary mid-text stays the user's", () => {
 })
 
 test("the host's own flag names a summary the text alone would not", () => {
-  next = 100
+  reset(100)
   const rows = [row("user", "Ask"), row("assistant", "Before"), row("assistant", "Odd handoff")]
   rows.push(...pair("terminal", "After"))
   assert.equal(
@@ -356,7 +316,7 @@ test("the host's own flag names a summary the text alone would not", () => {
 test("a summary stamped after the carried copies sits where the compaction fell", () => {
   // Carried copies keep their old times; the summary is stamped with the moment it ran, so the
   // rows written after it are the ones that follow it — not the carried ones.
-  next = 100
+  reset(100)
   const rows = run({ summaryRole: "assistant", restated: true })
   const summary = rows.findIndex((r) => (r.content ?? "").startsWith("[CONTEXT"))
   const request = rows.findIndex((r) => (r.content ?? "").startsWith("[STILL"))
@@ -368,4 +328,70 @@ test("a summary stamped after the carried copies sits where the compaction fell"
   assert.equal(reply?.seams?.length, 1)
   assert.equal(reply?.seams?.[0].toolsBefore, 3, "the three carried calls are above the line")
   assert.equal(reply?.seams?.[0].row, rows[summary].id, "it names the summary's own row")
+})
+
+/** A turn that compacts twice: each compaction restates the request under its own summary. */
+function twice({ copy }: { copy: boolean }) {
+  reset(100)
+  const restated = () => row("user", `${REPLAY_HEADER}\n${REQUEST}`)
+  return [
+    row("user", "An earlier ask"),
+    row("assistant", "An earlier answer"),
+    row("assistant", SUMMARY),
+    ...pair("terminal", "Carried one"),
+    restated(),
+    ...pair("patch", "After one"),
+    row("assistant", SUMMARY),
+    ...pair("terminal", "Carried two"),
+    ...(copy ? [restated()] : []),
+    restated(),
+    ...pair("patch", "After two"),
+    row("assistant", "Final words"),
+  ]
+}
+
+for (const copy of [false, true])
+  test(`a turn that compacts twice stays one turn${copy ? ", with the first request carried again" : ""}`, async () => {
+    const rows = twice({ copy })
+    const turn = toMessages("c", SESSION, rows).slice(2)
+    assert.deepEqual(
+      turn.map((message) => message.role),
+      ["user", "assistant"],
+      "one request and one reply for the turn",
+    )
+    assert.equal(turn[0].content, REQUEST, "the request is drawn once")
+    const summaries = rows.filter((one) => one.content === SUMMARY)
+    assert.deepEqual(
+      turn[1].seams?.map((seam) => [seam.row, seam.toolsBefore]),
+      [
+        [summaries[0].id, 1],
+        [summaries[1].id, 3],
+      ],
+      "each compaction marks the reply where it fell: after the work it carried, before what came next",
+    )
+    serve(rows)
+    const live = await liveTurn(server, SESSION, REQUEST)
+    assert.ok(live, "the running turn is found")
+    for (const words of ["Carried one", "After one", "Carried two", "After two", "Final words"])
+      assert.ok(live.content.includes(words), `${words} is in the live reply: ${live.content}`)
+    assert.equal(live.tools?.length, 4, "every call, before both boundaries and after them")
+  })
+
+test("the same words asked in two turns stay two turns when the second one compacts", () => {
+  reset(100)
+  const rows = [
+    row("user", REQUEST),
+    ...pair("terminal", "First turn's work"),
+    row("assistant", "First turn's answer"),
+    row("assistant", SUMMARY),
+    ...pair("terminal", "Second turn's carried work"),
+    row("user", `${REPLAY_HEADER}\n${REQUEST}`),
+    ...pair("patch", "Second turn's later work"),
+  ]
+  const drawn = shape(rows)
+  assert.equal(
+    drawn.filter((line) => line.startsWith(`user: ${REQUEST}`)).length,
+    2,
+    `each turn keeps its own request: ${drawn.join(" | ")}`,
+  )
 })
