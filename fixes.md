@@ -443,7 +443,7 @@ row for, so a matcher miss filed as a coverage gap silences the job over a real 
 
 ### 2. Family spellings are code rather than data
 
-`app/src/lib/model-match.ts:62` splices a per-family alias (`gemma4` → `gemma-4`) into a candidate
+`app/src/lib/model-match.ts:65` splices a per-family alias (`gemma4` → `gemma-4`) into a candidate
 builder that otherwise derives every spelling from shape (`:` tag to dash, a date or
 `-preview`/`-free` suffix stripped).
 
