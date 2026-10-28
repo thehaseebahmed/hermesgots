@@ -57,7 +57,8 @@ export default async (_req: Request) => {
     const entry: CachedRankings = { data, fetchedAt: Date.now() }
     await store.setJSON(CACHE_KEY, entry)
     return json(data, entry.fetchedAt, false)
-  } catch {
+  } catch (error) {
+    console.error("BenchLM refetch failed", error instanceof Error ? error.message : error)
     if (cached) return json(cached.data, cached.fetchedAt, true)
     return Response.json({ error: "BenchLM is unreachable" }, { status: 502 })
   }
