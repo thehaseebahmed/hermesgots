@@ -1,7 +1,7 @@
 import { toast } from "sonner"
 
 import { serverConfig } from "@/lib/connection"
-import { READ_TIMEOUT_MS, TRIAGE_MS } from "@/lib/freshness"
+import { FLUSH_INTERVAL_MS, READ_TIMEOUT_MS, TRIAGE_MS } from "@/lib/freshness"
 import {
   db,
   getActiveProfile,
@@ -95,12 +95,6 @@ import {
  * The UI renders straight from Dexie live queries, so it never holds stream state itself.
  */
 
-/**
- * How often streamed text is written to IndexedDB. Each write re-runs every live query over the
- * chat, and `useReveal` paces the text on screen anyway, so a faster write buys nothing. A tool
- * call, an approval, a question or a status change is written at once.
- */
-const FLUSH_INTERVAL_MS = 150
 /**
  * How long one status or transcript read of a running turn may take. A connection can die without
  * the request ever failing (a phone that slept, a tunnel that dropped it), which would hold the

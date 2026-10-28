@@ -1,7 +1,17 @@
-import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react"
+import { useLiveQuery } from "dexie-react-hooks"
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react"
 import { useSearchParams } from "react-router"
 
 import { Markdown } from "@/components/chat/markdown"
+import { db, type SessionDb } from "@/lib/db"
 
 import { cardsByPart, cardsOf, DELEGATE, type Card } from "./agents"
 import {
@@ -16,7 +26,8 @@ import {
   startRun,
 } from "./api"
 import { foldTurns, type Row, type ToolCall, type Turn } from "./fold"
-import { initial, reduce, type ThreadEvent, type Waiting } from "./state"
+import { foldedOf, turnsOf, type ThreadEvent, type Waiting } from "./state"
+import { readRows, storeFor } from "./store"
 
 /** The questions a finished `clarify` call got answered, each as "<question> → <answer>". */
 function answered(call: ToolCall): string[] {
@@ -44,6 +55,14 @@ const failure = (error: unknown): ThreadEvent => ({
 })
 
 const NO_CARDS: Card[] = []
+const NO_ROWS: Row[] = []
+
+/** The turns just drawn, each the very object already held where it says the same. */
+function shared(held: Turn[], read: Turn[]): Turn[] {
+  return read.map((turn, at) =>
+    held[at] && JSON.stringify(held[at]) === JSON.stringify(turn) ? held[at] : turn,
+  )
+}
 
 const sameCards = (a: Card[], b: Card[]) =>
   a.length === b.length &&
@@ -296,19 +315,44 @@ export function ChatNextPage({
   pollMs = POLL_MS,
   idleMs = IDLE_MS,
   stallMs = STALL_MS,
+  database = db,
 }: {
   pollMs?: number
   idleMs?: number
   stallMs?: number
+  /** The device's database; a test gives each device its own (ADR 0065). */
+  database?: SessionDb
 }) {
   const [params] = useSearchParams()
   const server = params.get("server")
   const key = params.get("key")
   const session = params.get("session")
-  const [state, dispatch] = useReducer(reduce, initial)
+  // The thread is drawn from the device's copy; the store is the only thing that writes it, and
+  // says what the page is doing.
+  const store = useMemo(() => storeFor(database, session ?? ""), [database, session])
+  const doing = useSyncExternalStore(store.subscribe, store.doing)
+  const dispatch = useCallback((event: ThreadEvent) => void store.apply(event), [store])
+  const rows = useLiveQuery(
+    () => readRows(database, session ?? "", "live"),
+    [database, session],
+    NO_ROWS,
+  )
+  const held = useLiveQuery(() => database.sessionStates.get(session ?? ""), [database, session])
+  const archived = useLiveQuery(
+    () => (held?.archived ? readRows(database, session ?? "", "archive") : undefined),
+    [database, session, held?.archived],
+  )
+  const folded = useMemo(() => foldedOf(rows, archived), [rows, archived])
+  const drawn = useRef<Turn[]>([])
+  const turns = useMemo(
+    () => (drawn.current = shared(drawn.current, turnsOf(folded, held?.live))),
+    [folded, held?.live],
+  )
   const [draft, setDraft] = useState("")
   const [earlier, setEarlier] = useState<"idle" | "reading" | "failed">("idle")
-  const [host, setHost] = useState<"checking" | "ok" | { version?: string }>("checking")
+  const [host, setHost] = useState<"checking" | "ok" | "away" | { version?: string }>("checking")
+  // A host that cannot be reached is asked again, and meanwhile the chat is what the device holds.
+  const [asks, setAsks] = useState(0)
   const ready = host === "ok"
   // A read begun before a send or a joined run is stale and does not land. Reads of the transcript
   // run one at a time, and a request that comes while one is out waits for it and is answered by
@@ -325,10 +369,25 @@ export function ChatNextPage({
     if (!server || !key) return
     const controller = new AbortController()
     void readVersion({ server, key }, controller.signal).then((version) => {
-      if (!controller.signal.aborted) setHost(version && atLeast(version) ? "ok" : { version })
+      if (controller.signal.aborted) return
+      if (version === "unreachable") setHost("away")
+      else setHost(version && atLeast(version) ? "ok" : { version })
     })
     return () => controller.abort()
-  }, [server, key])
+  }, [server, key, asks])
+
+  useEffect(() => {
+    if (host !== "away") return
+    const again = () => {
+      if (document.visibilityState === "visible") setAsks((n) => n + 1)
+    }
+    const timer = setInterval(again, idleMs)
+    document.addEventListener("visibilitychange", again)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener("visibilitychange", again)
+    }
+  }, [host, idleMs])
 
   const catchUp = useCallback(
     async function read(final = false): Promise<void> {
@@ -361,7 +420,7 @@ export function ChatNextPage({
       queued.current = null
       if (next) await read(next.final)
     },
-    [server, key, session],
+    [server, key, session, dispatch],
   )
 
   useEffect(() => {
@@ -381,28 +440,28 @@ export function ChatNextPage({
 
   // A turn the host has not finished and this device is not streaming is followed, by its events
   // where the plugin names the run and by the transcript where it cannot.
-  const last = state.turns.at(-1)
-  const following = state.status !== "loading" && !state.running && last !== undefined && !last.done
+  const last = turns.at(-1)
+  const following = doing.status !== "loading" && !doing.running && last !== undefined && !last.done
   // A child at work, or one that finished whose result the transcript does not hold yet, keeps the
   // chat read at the fast pace too: the card is to follow it and the wake turn is on its way.
-  const agents = state.agents ?? []
+  const listed = held?.agents
+  const agents = listed ?? []
   const goals = useMemo(
-    () => Object.fromEntries((state.agents ?? []).map((agent) => [agent.id, agent.goal])),
-    [state.agents],
+    () => Object.fromEntries((listed ?? []).map((agent) => [agent.id, agent.goal])),
+    [listed],
   )
-  const delivered = useMemo(() => state.turns.flatMap((turn) => turn.delivered), [state.turns])
+  const delivered = useMemo(() => turns.flatMap((turn) => turn.delivered), [turns])
   const working = agents.some((agent) => agent.status === "running")
   const owed = agents.some((agent) => agent.status !== "running" && !delivered.includes(agent.id))
   // A delegation just dispatched has no child on the list yet; where the host lists children at
   // all, the list is read again until the child shows, whatever else the page is doing.
-  const cards = useMemo(() => cardsOf(state.turns, state.agents ?? []), [state.turns, state.agents])
+  const cards = useMemo(() => cardsOf(turns, listed ?? []), [turns, listed])
   const starting =
-    state.agents !== undefined &&
-    cards.some((list) => list.some((card) => card.status === "starting"))
+    listed !== undefined && cards.some((list) => list.some((card) => card.status === "starting"))
   const busy = following || working || owed || starting
   const progress = useRef({ shape: "", at: 0 })
   const shape =
-    state.turns
+    turns
       .map((turn) =>
         turn.parts.map((part) => (part.kind === "tools" ? part.calls.length : "t")).join(),
       )
@@ -433,7 +492,7 @@ export function ChatNextPage({
       // Whatever the stream said, the host's transcript is what the turn was.
       await catchUp(true)
     },
-    [server, key, session, catchUp],
+    [server, key, session, catchUp, dispatch],
   )
 
   // An open chat is read now and then even when it looks finished, since another device may have
@@ -474,6 +533,7 @@ export function ChatNextPage({
     starting,
     catchUp,
     follow,
+    dispatch,
     server,
     key,
     session,
@@ -561,9 +621,14 @@ export function ChatNextPage({
 
   return (
     <main className="mx-auto w-full max-w-3xl space-y-6 p-4">
-      {state.status === "failed" ? <p role="alert">{state.error}</p> : null}
-      {!state.archived &&
-      state.turns.some((turn) => turn.parts.some((part) => part.kind === "compaction")) ? (
+      {host === "away" ? (
+        <p data-away role="status" className="text-sm text-muted-foreground">
+          Can't reach this host right now.
+        </p>
+      ) : null}
+      {doing.status === "failed" ? <p role="alert">{doing.error}</p> : null}
+      {!held?.archived &&
+      turns.some((turn) => turn.parts.some((part) => part.kind === "compaction")) ? (
         <button
           data-earlier
           type="button"
@@ -574,7 +639,7 @@ export function ChatNextPage({
           {earlier === "failed" ? "Couldn't load earlier messages. Try again" : "Earlier messages"}
         </button>
       ) : null}
-      {state.turns.map((turn, at) => (
+      {turns.map((turn, at) => (
         <TurnView key={at} turn={turn} cards={cards[at] ?? NO_CARDS} goals={goals} onOpen={open} />
       ))}
       {opened && openedRows?.id === opened.id ? (
@@ -584,41 +649,43 @@ export function ChatNextPage({
           onClose={() => setOpened(undefined)}
         />
       ) : null}
-      {state.waiting?.kind === "question" ? (
+      {doing.waiting?.kind === "question" ? (
         <QuestionCard
-          key={state.waiting.promptId}
-          waiting={state.waiting}
-          onAnswer={(value) => void answer(state.waiting as Waiting, value)}
+          key={doing.waiting.promptId}
+          waiting={doing.waiting}
+          onAnswer={(value) => void answer(doing.waiting as Waiting, value)}
         />
       ) : null}
-      {state.waiting?.kind === "approval" ? (
+      {doing.waiting?.kind === "approval" ? (
         <ApprovalCard
-          key={state.waiting.promptId}
-          waiting={state.waiting}
-          onChoose={(choice) => void answer(state.waiting as Waiting, choice)}
+          key={doing.waiting.promptId}
+          waiting={doing.waiting}
+          onChoose={(choice) => void answer(doing.waiting as Waiting, choice)}
         />
       ) : null}
-      <form
-        className="flex gap-2"
-        onSubmit={(event) => {
-          event.preventDefault()
-          void send()
-        }}
-      >
-        <textarea
-          data-composer
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          className="min-h-10 flex-1 rounded-md border bg-background px-3 py-2"
-        />
-        <button
-          data-send
-          type="submit"
-          className="rounded-md bg-primary px-4 text-primary-foreground"
+      {host === "away" ? null : (
+        <form
+          className="flex gap-2"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void send()
+          }}
         >
-          Send
-        </button>
-      </form>
+          <textarea
+            data-composer
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            className="min-h-10 flex-1 rounded-md border bg-background px-3 py-2"
+          />
+          <button
+            data-send
+            type="submit"
+            className="rounded-md bg-primary px-4 text-primary-foreground"
+          >
+            Send
+          </button>
+        </form>
+      )}
     </main>
   )
 }

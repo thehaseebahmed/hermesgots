@@ -1,14 +1,24 @@
+import type { LiveTurn } from "@/lib/db"
+
 import type { Agent } from "./agents"
 import type { RunEvent } from "./api"
 import { foldTurns, withArchive, type Part, type Row, type Turn } from "./fold"
 
+/**
+ * A thread as the page knows it. The rows, the archive, the subagents and the streamed turn are what
+ * the chat says, and are kept on the device; the rest is what this page is doing, and is not
+ * (ADR 0065).
+ */
 export interface ThreadState {
   status: "loading" | "ready" | "failed"
-  turns: Turn[]
+  /** The transcript as the host last gave it. */
+  rows: Row[]
   /** The children the session delegated to, as the plugin last listed them; none before it has. */
   agents?: Agent[]
   /** The rows a compaction archived, once the reader has asked for them; kept across every read. */
   archived?: Row[]
+  /** The turn this device is streaming, drawn over the transcript's until the host's replaces it. */
+  live?: LiveTurn
   /** This device has a turn running; while it does, what the host's transcript says waits. */
   running: boolean
   /** What the run is held up on, until the user's answer or someone else's takes it away. */
@@ -47,7 +57,17 @@ export type ThreadEvent =
   | { type: "run"; event: RunEvent }
   | { type: "failed"; error: string }
 
-export const initial: ThreadState = { status: "loading", turns: [], running: false }
+export const initial: ThreadState = { status: "loading", rows: [], running: false }
+
+/** The transcript's turns, the archive folded in where the reader has asked for it. */
+export const foldedOf = (rows: Row[], archived?: Row[]) =>
+  foldTurns(archived ? withArchive(rows, archived) : rows)
+
+/** The turns the screen draws: the transcript's, with the streamed one laid over the last. */
+export function turnsOf(folded: Turn[], live?: LiveTurn): Turn[] {
+  if (!live) return folded
+  return live.replaces ? [...folded.slice(0, -1), live.turn] : [...folded, live.turn]
+}
 
 /** One live event's change to the turn it belongs to; only the part it touches is a new object. */
 function live(turn: Turn, event: RunEvent): Turn {
@@ -80,13 +100,6 @@ function live(turn: Turn, event: RunEvent): Turn {
     return { ...turn, parts: parts.with(at, { ...part, calls }) }
   }
   return turn
-}
-
-/** The turns just read, each the very object already held where it says the same. */
-function shared(held: Turn[], read: Turn[]): Turn[] {
-  return read.map((turn, at) =>
-    held[at] && JSON.stringify(held[at]) === JSON.stringify(turn) ? held[at] : turn,
-  )
 }
 
 const sameAgents = (a: Agent[] | undefined, b: Agent[]) =>
@@ -131,18 +144,15 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
   switch (event.type) {
     case "transcript": {
       if (state.running && !event.final) return state
-      const turns = shared(
-        state.turns,
-        foldTurns(state.archived ? withArchive(event.rows, state.archived) : event.rows),
-      )
+      const done = foldedOf(event.rows, state.archived).at(-1)?.done
       return {
         status: "ready",
-        turns,
+        rows: event.rows,
         archived: state.archived,
         agents: state.agents,
         running: false,
         // A finished turn waits on nothing, and the end of a followed run settles what it was on.
-        waiting: event.final || turns.at(-1)?.done ? undefined : state.waiting,
+        waiting: event.final || done ? undefined : state.waiting,
       }
     }
     case "earlier":
@@ -151,22 +161,26 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
     case "sent":
       return {
         status: "ready",
+        rows: state.rows,
         running: true,
         archived: state.archived,
         agents: state.agents,
-        turns: [...state.turns, { user: event.user, parts: [], done: false, delivered: [] }],
+        live: {
+          turn: { user: event.user, parts: [], done: false, delivered: [] },
+          replaces: false,
+        },
       }
-    case "attach":
+    case "attach": {
       // The run's events are replayed from its start, so the turn, and what it waits on, are drawn
       // again from nothing.
+      const last = turnsOf(foldedOf(state.rows, state.archived), state.live).at(-1)
       return {
         ...state,
         running: true,
         waiting: undefined,
-        turns: state.turns.map((turn, at) =>
-          at === state.turns.length - 1 ? { ...turn, parts: [], done: false } : turn,
-        ),
+        live: last ? { turn: { ...last, parts: [], done: false }, replaces: true } : undefined,
       }
+    }
     case "agents":
       return sameAgents(state.agents, event.agents) ? state : { ...state, agents: event.agents }
     case "ended":
@@ -179,13 +193,17 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       return { ...state, waiting: undefined }
     case "run": {
       const waiting = waitingAfter(state.waiting, event.event)
-      const at = state.turns.length - 1
-      const turn = state.turns[at]
-      const next = turn && live(turn, event.event)
-      if (waiting === state.waiting && next === turn) return state
-      return { ...state, waiting, turns: next === turn ? state.turns : state.turns.with(at, next) }
+      const held = state.live
+      const turn = held && live(held.turn, event.event)
+      const moved = held && turn && turn !== held.turn ? { ...held, turn } : held
+      if (waiting === state.waiting && moved === held) return state
+      return { ...state, waiting, live: moved }
     }
     case "failed":
       return { ...state, status: "failed", running: false, waiting: undefined, error: event.error }
   }
 }
+
+/** The turns a state draws. */
+export const threadTurns = (state: ThreadState) =>
+  turnsOf(foldedOf(state.rows, state.archived), state.live)

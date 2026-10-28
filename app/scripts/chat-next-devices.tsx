@@ -2,16 +2,21 @@
  * What the chat-next tests drive a device with. A device is its own mount of the page with its own
  * state; the host (`chat-next-host.ts`) is the only thing devices share.
  *
+ * Each device keeps its own database, as each device in the world does (ADR 0065); a reload is the
+ * page opened again on the same one (`{ database: device.database }`).
+ *
  * The contract the page is held to: a composer (`[data-composer]`, its send button `[data-send]`),
  * a turn is a `main > section`, and a device that comes back to the foreground (`visibilitychange`)
  * reads the chat again.
  */
+import Dexie from "dexie"
 import assert from "node:assert/strict"
 import { act } from "react"
 import { createRoot } from "react-dom/client"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { ChatNextPage } from "@/chat-next/page"
+import { SESSION_STORES, type SessionDb } from "@/lib/db"
 import { click, settle, type } from "./component-kit.tsx"
 import { fakeHost, type ExpectedTurn } from "./chat-next-host.ts"
 
@@ -38,7 +43,19 @@ export async function eventually(check: () => void, what: string) {
  * default so a test needs no waiting. A test about what keeps the page busy gives it a slow one, so
  * that only the busy poll can have done the reading.
  */
-export async function openDevice(host: Host, { idleMs = 20 }: { idleMs?: number } = {}) {
+let devices = 0
+
+/** A database of the device's own, holding only what chat-next keeps. */
+export function deviceDatabase(): SessionDb {
+  const database = new Dexie(`chat-next-device-${++devices}`) as SessionDb
+  database.version(1).stores(SESSION_STORES)
+  return database
+}
+
+export async function openDevice(
+  host: Host,
+  { idleMs = 20, database = deviceDatabase() }: { idleMs?: number; database?: SessionDb } = {},
+) {
   const container = document.createElement("div")
   document.body.append(container)
   const root = createRoot(container)
@@ -47,7 +64,10 @@ export async function openDevice(host: Host, { idleMs = 20 }: { idleMs?: number 
     root.render(
       <MemoryRouter initialEntries={[`/next?${query}`]}>
         <Routes>
-          <Route path="/next" element={<ChatNextPage pollMs={20} idleMs={idleMs} />} />
+          <Route
+            path="/next"
+            element={<ChatNextPage pollMs={20} idleMs={idleMs} database={database} />}
+          />
         </Routes>
       </MemoryRouter>,
     ),
@@ -55,9 +75,12 @@ export async function openDevice(host: Host, { idleMs = 20 }: { idleMs?: number 
   await settle()
   const one = (selector: string) => container.querySelector(selector)
   return {
+    database,
     /** The notice an unsupported host is given in place of the chat. */
     notice: () => one("[data-unsupported]")?.textContent ?? undefined,
     composer: () => Boolean(one("[data-composer]")),
+    /** The line a host that can't be reached is given, over what the device holds. */
+    away: () => Boolean(one("[data-away]")),
     turns: (): ExpectedTurn[] =>
       [...container.querySelectorAll("main > section")].map((section) => ({
         user: section.querySelector("[data-user]")?.textContent ?? "",

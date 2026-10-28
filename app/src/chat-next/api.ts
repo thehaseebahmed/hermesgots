@@ -56,11 +56,23 @@ export function atLeast(version: string, min = MIN_HERMES): boolean {
   return true
 }
 
-/** The Hermes version the host reports on `/health`, which asks for no key. */
-export async function readVersion(connection: Connection, signal?: AbortSignal) {
+/**
+ * The Hermes version the host reports on `/health`, which asks for no key. A host that answers
+ * without one has no version; one that cannot be reached at all is `"unreachable"`, which says
+ * nothing about what it runs.
+ */
+export async function readVersion(
+  connection: Connection,
+  signal?: AbortSignal,
+): Promise<string | "unreachable" | undefined> {
+  let response: Response
   try {
-    const response = await fetch(`${root(connection)}/health`, { signal: within(signal) })
-    if (!response.ok) return undefined
+    response = await fetch(`${root(connection)}/health`, { signal: within(signal) })
+  } catch {
+    return "unreachable"
+  }
+  if (!response.ok) return undefined
+  try {
     const { version } = (await response.json()) as { version?: string }
     return typeof version === "string" ? version : undefined
   } catch {
