@@ -8,6 +8,8 @@ export interface Connection {
 /** What a live run says as it goes; the fields are the ones Hermes v0.21.5 sends, and no more. */
 export interface RunEvent {
   event: string
+  /** Only a host whose events can be shared numbers them. */
+  seq?: number
   delta?: string
   tool?: string
   preview?: string

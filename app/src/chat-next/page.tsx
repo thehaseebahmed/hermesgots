@@ -101,8 +101,11 @@ export function ChatNextPage({
   useEffect(() => {
     progress.current = { shape, at: Date.now() }
   }, [shape])
-  // One run's events at a time, whoever started it.
+  // One run's events at a time, whoever started it. On the recorded Hermes v0.21.5 a run's events
+  // are one queue shared by every follower, so a device follows a run it did not start only after
+  // it has seen the host number its events, which a host that can share them does.
   const streaming = useRef(false)
+  const shared = useRef(false)
   const follow = useCallback(
     async (run: string) => {
       if (!server || !key || !session) return
@@ -111,7 +114,10 @@ export function ChatNextPage({
         await followRun(
           { server, key },
           run,
-          (event) => dispatch({ type: "run", event }),
+          (event) => {
+            if (typeof event.seq === "number") shared.current = true
+            dispatch({ type: "run", event })
+          },
           alive.current.signal,
         )
       } catch (error) {
@@ -134,7 +140,7 @@ export function ChatNextPage({
       async () => {
         if (document.visibilityState !== "visible" || streaming.current) return
         if (following && Date.now() - progress.current.at > stallMs) return
-        if (following && server && key && session) {
+        if (following && shared.current && server && key && session) {
           streaming.current = true
           const run = await readLiveRun({ server, key }, session, alive.current.signal)
           if (run) {

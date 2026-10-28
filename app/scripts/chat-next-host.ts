@@ -38,12 +38,27 @@ export interface Run {
   finish(output: string): void
 }
 
-export function fakeHost(session: string, { plugin = false }: { plugin?: boolean } = {}) {
+/**
+ * `plugin` serves the Gots plugin's `runs/live`. `sequenced` is a newer Hermes, whose events carry
+ * a `seq` and replay to every subscriber; without it the host is the recorded v0.21.5, where a
+ * run's events are one shared queue: the first subscriber gets the replay, and live events go to
+ * one subscriber at a time, so two followers of a run each miss what the other was given.
+ */
+export function fakeHost(
+  session: string,
+  { plugin = false, sequenced = false }: { plugin?: boolean; sequenced?: boolean } = {},
+) {
   const rows: Row[] = []
   const expected: ExpectedTurn[] = []
   const runs = new Map<
     string,
-    { events: object[]; listeners: Set<(event: object | null) => void>; done: boolean }
+    {
+      events: object[]
+      listeners: Set<(event: object | null) => void>
+      done: boolean
+      subscribed: boolean
+      handed: number
+    }
   >()
   let nextId = 1000
   let nextRun = 0
@@ -70,12 +85,22 @@ export function fakeHost(session: string, { plugin = false }: { plugin?: boolean
       events: [] as object[],
       listeners: new Set<(e: object | null) => void>(),
       done: false,
+      subscribed: false,
+      handed: 0,
     }
     runs.set(id, state)
     const push = (event: string, body: object) => {
-      const sent = { event, run_id: id, timestamp: ++clock, ...body }
+      const sent = {
+        event,
+        run_id: id,
+        timestamp: ++clock,
+        ...(sequenced ? { seq: state.events.length + 1 } : {}),
+        ...body,
+      }
       state.events.push(sent)
-      state.listeners.forEach((listen) => listen(sent))
+      const listeners = [...state.listeners]
+      if (sequenced) listeners.forEach((listen) => listen(sent))
+      else listeners[state.handed++ % listeners.length]?.(sent)
     }
     write("user", input)
     expected.push({ user: input, texts: [], tools: 0 })
@@ -112,8 +137,11 @@ export function fakeHost(session: string, { plugin = false }: { plugin?: boolean
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(encoder.encode(": open\n\n"))
-        for (const sent of state.events)
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(sent)}\n\n`))
+        asked.subscriptions++
+        if (sequenced || !state.subscribed)
+          for (const sent of state.events)
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(sent)}\n\n`))
+        state.subscribed = true
         if (state.done) return controller.close()
         listener = (sent) => {
           if (sent) controller.enqueue(encoder.encode(`data: ${JSON.stringify(sent)}\n\n`))
@@ -126,7 +154,7 @@ export function fakeHost(session: string, { plugin = false }: { plugin?: boolean
     return new Response(body, { headers: { "content-type": "text/event-stream" } })
   }
 
-  const asked = { transcript: 0, runs: 0 }
+  const asked = { transcript: 0, runs: 0, subscriptions: 0 }
   const latest: { run?: Run } = {}
 
   function install() {
