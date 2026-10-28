@@ -135,43 +135,10 @@ hand.
   to gate on, so the split is deliberate rather than accidental. The reviewers disagreed on
   now-versus-later; the two who read the surrounding code most closely said later.
 
-### 2. The fail-open guard hides a core failure
-
-`plugin/usage.py::fetch` wraps the core import and call in one `try` that returns `None` on any
-exception, and `None` means "no data" to the app: the sheet shows nothing. It also conflates "core
-raised" with "core has no fetcher for this provider", so a core that throws skips the
-`ollama-cloud` balance read even though core owns no fetcher for it.
-
-- Cost: diagnostic only — a shape or signature regression looks exactly like a provider Hermes does
-  not track, and the app's only recovery is its 5-minute back-off, so the failure stays silent for
-  the session.
-- Suggested fix: keep the fail-open behaviour (a 500 makes the app read the plugin as missing, which
-  is worse) but make it observable with a `logger.debug(..., exc_info=True)` in each `except`,
-  matching `plugin/__init__.py`'s idiom; and, if the distinction is wanted, a sentinel for "core
-  raised" so a plugin-owned provider still gets its own read.
-- Why it is risky: low if only a log line is added, medium if the `except` is narrowed, since an
-  unexpected exception type would then surface as a 500 the app reads as "no plugin". The lines are
-  pre-existing (`git blame`: 33a3f392) and the reachable case is thin — a healthy core catches its
-  own fetcher failures and returns `None` rather than raising.
-
-### 3. "ollama-cloud" is a bare literal in two modules that must agree
-
-`plugin/usage.py::fetch` dispatches on `provider == "ollama-cloud"` while `plugin/usage_ollama.py`
-stamps `provider="ollama-cloud"` on the snapshot it returns. Nothing ties them together and no
-constant exists, although `usage_ollama.py` already keeps `BALANCE_URL` and `TIMEOUT_S` at module
-level, so the convention is right there.
-
-- Cost: a rename in one module turns the fallback into "no windows" with a green test suite; the
-  tests would have to be edited in five places to notice.
-- Suggested fix: `PROVIDER = "ollama-cloud"` next to `BALANCE_URL`, used for the snapshot and
-  compared against by `fetch` (`plugin/usage.py` already imports the module).
-- Why it is risky: pre-existing, low value, and it touches a second module's surface for a rename
-  that buys little today.
-
 ---
 
 Found by the `/simplify-code` pass on this branch. It was a cleanup review, not a bug hunt —
-correctness was out of scope — and none of the three blocks the pull request.
+correctness was out of scope — and the one left does not block the pull request.
 
 ---
 
@@ -386,24 +353,10 @@ row, while the host persists a `failed_turn` row that `history.ts:315-317` maps.
 - Why it is risky: test-only, but the double then has to match the host's row shape, which is
   exactly what it simplified away.
 
-### 8. Three flows keep their own copy of the same page-side helpers
-
-`app/scripts/e2e/failed-send.mjs:42` sends a photo from the page the way `photo-progress.mjs` and
-`image-viewer.mjs` already do; the row locator is written twice (`failed-send.mjs:62`,
-`plain-error.mjs:12`); and the laptop/phone-dark pair is restated in each flow this branch adds,
-though `cli.mjs` already owns the height convention.
-
-- Cost: the next flow copies a fourth time, and a change to the app's module paths or to the
-  message slot name breaks three files.
-- Suggested fix: one `photo(...)`, `row(...)` and `LOOKS` in `lib.mjs`'s `helpers(page)`, with the
-  three flows using them.
-- Why it is risky: it edits two pre-existing flows for a test-only gain, and each has to be re-run
-  at both widths to show the move changed nothing.
-
 ---
 
 Found by the `/simplify-code` pass on this branch. It was a cleanup review, not a bug hunt —
-correctness was out of scope — and none of the eight blocks the pull request.
+correctness was out of scope — and none of the seven blocks the pull request.
 
 ---
 
@@ -505,43 +458,6 @@ builder that otherwise derives every spelling from shape (`:` tag to dash, a dat
 
 ## Careful
 
-### 3. One models.dev URL, two literals
-
-`app/scripts/check-benchlm-matches.mjs:15` declares `MODELS_DEV_URL` while
-`app/src/lib/models.ts:9` already has `CATALOG_URL` for the same endpoint.
-
-- Cost: if the catalog URL ever gains a version or moves host, the nightly job silently queries the
-  dead one while the app queries the new one, and the drift shows up as every model reading
-  unmatched.
-- Suggested fix: hoist the literal into a dependency-free module both import — the scripts already
-  follow this pattern by importing `src/lib/model-match.ts` — since the check cannot import
-  `models.ts` (Dexie, React and the `@/` alias).
-- Why it is risky: one URL that has never changed, and the fix adds a module for a single string.
-
-### 4. The check's BenchLM host is hard-coded
-
-`app/scripts/check-benchlm-matches.mjs:14` bakes in the deploy host, while the app derives the same
-endpoint from its site URL (`app/src/lib/rankings.ts:8`, `app/src/lib/native.ts:66`).
-
-- Cost: a site rename or a staging run leaves the nightly job hitting the old host, and it fails as a
-  red "BenchLM unreachable" rather than anything that names the cause.
-- Suggested fix: read the site URL the way the app and the Android workflows do (the repo's
-  `MEMENTO_SITE_URL`/`VITE_SITE_URL`), falling back to the current host.
-- Why it is risky: it needs the workflow to pass that variable through, for a host that has not
-  changed, on a job whose failure mode is already visible.
-
-### 5. The proxy's bare catch hides an upstream failure
-
-`app/netlify/functions/benchlm.mts:60` catches everything and discards it, and with a stale cache
-present the function still answers 200: a persistent auth or schema failure upstream is invisible,
-and the app scores from old data indefinitely. Pre-existing (`git blame`: f9a4fa05) — this branch
-changed only the surface it requests.
-
-- Cost: diagnostic only, but it is the one place that would say why the scores stopped moving.
-- Suggested fix: log the error and keep serving the stale payload (the current behaviour is right;
-  it just says nothing).
-- Why it is risky: low, and out of scope for a cleanup of the matching — the line predates the diff.
-
 ### 6. One tooltip root per capability per row
 
 `app/src/components/chat/model-picker.tsx:351` mounts a Base UI `Tooltip` root for each capability a
@@ -553,20 +469,10 @@ model has, in a list that is not virtualised.
 - Why it is risky: mounting cost only, and unmeasured — the rows are small and the list is
   short in practice.
 
-### 7. The issue step reads 30 issues to find one
-
-`.github/workflows/benchlm-match.yml:50` lists open issues by label and matches the title in
-JavaScript.
-
-- Cost: a page of issues per nightly run for one lookup, and the update would miss the issue entirely
-  if more than 30 labelled ones were ever open.
-- Suggested fix: `search.issuesAndPullRequests` with `repo:… label:benchlm-match in:title`.
-- Why it is risky: it swaps a call that cannot fail for one that can, to save a read nobody pays for.
-
 ---
 
 Found by the `/simplify-code` pass on this branch. It was a cleanup review, not a bug hunt —
-correctness was out of scope — and none of the seven blocks the pull request. Two live checks the
+correctness was out of scope — and none of the three blocks the pull request. Two live checks the
 branch still owes are not entries here: the overall surface needs Netlify to deploy before
 `claude-sonnet-4-5` reaches its row (entry 1), and the Dexie v14 upgrade has not been exercised on a
 device.
@@ -612,21 +518,6 @@ normalized dict, so they cannot simply call it today.
   `LIVE_STATES`), then move all six sites onto it.
 - Why it is not applied here: it edits `alerts.py` and `merges.py`, which this change never touched,
   so it belongs in a pass that can test their own flows.
-
-### 2. `force` is validated in the handler while the text fields validate themselves
-
-`plugin/ship.py::handle` type-checks `force` and answers a JSON error, but `title`, `body` and
-`commit_message` are checked inside `ship()`/`update()` by `_text()`, which raises `ValueError` for
-the handler to catch. A `force: "yes"` therefore comes back through a different path from a
-`title: 42`.
-
-- Cost: two answers to "how does this tool reject bad input", and a later reader copies whichever
-  they find first.
-- Suggested fix: a `_bool()` beside `_text()`, with `ship()` doing the check, so every argument is
-  refused the same way.
-- Why it is not applied here: the handler-level check is defensible for an argument the schema
-  declares a boolean (the schema is what the model sees), so this is a preference rather than a
-  defect, and the reviewers were split on it.
 
 ---
 
@@ -1913,23 +1804,6 @@ Declined with the evidence, each for what it is:
   across whatever width the card has; the cap changed the width alone, and the spec's revision note
   scopes the flow to card-against-box and text-against-column.
 
-## Risky, pre-existing
-
-### 2. The openui flow asserts a streamed title without waiting for the stream
-
-`app/scripts/e2e/openui.mjs` (a stay, #389) waits for the interface card to appear and then asserts
-the title's exact text, but the mock streams the title word by word, so the assert can read a
-prefix of it — this branch saw one red run where `Quarterly` was read against `Quarterly sales`,
-and an immediate re-run passed 8/8.
-
-- Cost: a false red on a healthy branch; someone reruns or, worse, investigates a layout regression
-  that is not there.
-- Suggested fix: wait for the full title string the same way the flow already waits for the card
-  (an `until` on the exact text), so the assert reads what the stream settled on.
-- Why it is not applied here: the race is in #389's own wait contract, not in anything this branch
-  wrote; rewriting a stay's waits belongs with the flow's owner, and this branch only observed the
-  flake once while re-taking shots.
-
 ---
 
 Found by the review passes on this branch (simplify, no-comments, code-review). All that the branch
@@ -2011,28 +1885,6 @@ the same drift class this branch fixed in `ChatHeader`, reached by asymmetric pa
   about what a drawer heading should do, so the choice belongs with whoever owns the popup's design.
 - Why it is risky: `PopupHeader` renders above every sheet, drawer and menu in the app; a padding
   change moves every pop-up's heading at once and no flow measures a drawer heading's centre today.
-
-### 2. The audit calls `bot-threads` a component while the flow measures layout
-
-`docs/e2e-flow-audit.md`'s `bot-threads` row (ticket #415) is verdict `component` and argues "none
-of them needs a browser's layout" — but the flow's laptop leg measures its thread header's geometry
-(the title on its pane's centre, the actions ending on the row's right edge), legs this branch
-tightened to `<= 2`. ADR 0019 sends geometry to the sweep, and the row's own *What replaces it* cell
-already says the flow stays, so verdict and prose disagree with the row itself.
-
-- Cost: the page's contract is every row carrying "what the flow asserts today", and this one omits
-  the only legs no component tier reaches; the arithmetic section repeats the claim ("The eleventh,
-  `bot-threads` … is a component by the same rule as the five"), the count table reads component 53
-  / stay 14, and `scripts/test-e2e-registry.mjs` pins `STAYS = 14`.
-- Suggested fix: flip the row's verdict to `stay`, reword *Why it moves* as layout a DOM without
-  layout cannot measure, recount (stay 15, component 52 — table and prose both), and raise `STAYS`
-  to 15; the checker test arbitrates every number.
-- Why it is not applied here: the mis-verdict predates this branch — the geometry legs came with
-  #422 — and the flip reclassifies what ticket #415 will do, a plan decision for whoever owns the
-  audit; the blast radius is prose arithmetic, a pinned test constant and a ticket's scope, none of
-  which this diff touches.
-- Why it is risky: the counts are gate-checked, so a partial recount fails the suite, and a row
-  half-corrected leaves the page arguing with itself about a ticket's scope.
 
 ## Not entries
 
@@ -2318,35 +2170,6 @@ briefly hidden, never work that didn't.
 Found by the design session for the agent-card classification change (ADR 0053). It does not block
 the pull request.
 
-# Deferred: two route-switch settle races that flake the component suite under load
-
-`scripts/test-bot-pane.tsx`'s "the thread that was open is the one beside Main when the user comes
-back to it" and `scripts/test-thread-command.tsx`'s "/thread alone starts an empty thread and opens
-it" assert exact UI state right after an address change — the pane's thread list by
-`deepStrictEqual` behind an `includes` wait, the composer's field in one read — and both flake when
-the suite runs under contention: twice in five full local runs on the tool-row placement branch, and
-once in GitHub's runner (Tests run 747), while each file passes 3/3 in isolation on that branch, a
-full suite on pure `origin/main` passed, and that branch's last full run was 389/389.
-
-## Careful
-
-### 1. The waits bind on presence, the assertions on equality
-- Cost: a red App gates run that means nothing and a re-run to clear it, paid by whichever branch
-  loads the machine when it runs.
-- Suggested fix: wait for the exact value rather than its presence — the pane's list equal to what
-  the test expects instead of merely containing the new thread, the composer's field read through
-  `until` its value is `''` rather than once after the route moves.
-- Why it is deferred here: both tests belong to the chat-switch work (#569, #572) and neither can
-  execute the code this branch changes — `test-thread-command` seeds no messages at all and
-  `test-bot-pane` seeds only user-role messages, while the placement change sits in the
-  assistant-reply path — so the fix belongs with the tests' owner, not a placement PR.
-
----
-
-Found by gating the tool-row placement change; it does not block that pull request.
-
----
-
 # Deferred: a pull request row stored before the stamp reads *Used a tool*
 
 ## Not entries, but recorded: the wording a pre-change row loses
@@ -2487,13 +2310,6 @@ into `walk` / `mend` / `write` was the loudest quality finding, and the split th
 one that takes the cursor as a value and returns the next — which is `history-window.ts`, and it is
 done. What is left is a loop over that rule, and each of its three behaviours has a test that fails
 without it; splitting further would trade one long function for four that each take six arguments.
-
-## The two flows still carry their own helpers
-
-`startRun` and `runStatus` are byte-identical in `chat-archive.mjs` and `history-pages.mjs` and belong
-in `lib.mjs` beside `setUpBot`. Not applied because both flows pass, and moving them means editing two
-green browser flows in the same pass that rewrote the walk they exercise; `thread` differs between the
-two by the fields it reads, so the shared half is smaller than it looks.
 
 ---
 
