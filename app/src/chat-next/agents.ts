@@ -109,3 +109,19 @@ export function cardsOf(turns: Turn[], agents: Agent[]): Card[][] {
     )
   return cards
 }
+
+/**
+ * A turn's cards split by the tools part that asked for them, in part order: a part takes the cards
+ * of the delegations it holds, as many as its calls asked for goals. `cards` is the turn's list
+ * from `cardsOf`; cards it holds beyond what the calls asked for (a compaction's orphans) belong to
+ * no part.
+ */
+export function cardsByPart(turn: Turn, cards: Card[]): Card[][] {
+  let from = 0
+  return turn.parts.map((part) => {
+    const asked = part.kind === "tools" ? part.calls.flatMap(goalsOf).length : 0
+    const mine = cards.slice(from, from + asked)
+    from += asked
+    return mine
+  })
+}

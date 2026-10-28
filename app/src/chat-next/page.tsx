@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router"
 
 import { Markdown } from "@/components/chat/markdown"
 
-import { cardsOf, DELEGATE, goalsOf, type Card } from "./agents"
+import { cardsByPart, cardsOf, DELEGATE, type Card } from "./agents"
 import {
   atLeast,
   followRun,
@@ -90,11 +90,7 @@ function TurnView({
   goals?: Record<string, string>
   onOpen?: (card: Card) => void
 }) {
-  // Each tools part takes the cards of the delegations it holds, in the order they were asked.
-  const asked = turn.parts.map((part) =>
-    part.kind === "tools" ? part.calls.flatMap(goalsOf).length : 0,
-  )
-  const first = asked.map((_, at) => asked.slice(0, at).reduce((sum, count) => sum + count, 0))
+  const byPart = cardsByPart(turn, cards)
   return (
     <section className="space-y-3">
       {turn.wake ? (
@@ -137,7 +133,6 @@ function TurnView({
         const plain = part.calls.filter(
           (call) => call.name !== "clarify" && call.name !== DELEGATE,
         ).length
-        const mine = cards.slice(first[at], first[at] + asked[at])
         return (
           <div key={at} className="space-y-3">
             {plain ? (
@@ -150,7 +145,7 @@ function TurnView({
                 {line}
               </p>
             ))}
-            {mine.map((card, index) => (
+            {byPart[at].map((card, index) => (
               <AgentCard key={index} card={card} onOpen={onOpen} />
             ))}
           </div>
@@ -375,6 +370,10 @@ export function ChatNextPage({
   // A child at work, or one that finished whose result the transcript does not hold yet, keeps the
   // chat read at the fast pace too: the card is to follow it and the wake turn is on its way.
   const agents = state.agents ?? []
+  const goals = useMemo(
+    () => Object.fromEntries((state.agents ?? []).map((agent) => [agent.id, agent.goal])),
+    [state.agents],
+  )
   const delivered = state.turns.flatMap((turn) => turn.delivered)
   const working = agents.some((agent) => agent.status === "running")
   const owed = agents.some((agent) => agent.status !== "running" && !delivered.includes(agent.id))
@@ -557,13 +556,7 @@ export function ChatNextPage({
         </button>
       ) : null}
       {state.turns.map((turn, at) => (
-        <TurnView
-          key={at}
-          turn={turn}
-          cards={cards[at] ?? []}
-          goals={Object.fromEntries(agents.map((agent) => [agent.id, agent.goal]))}
-          onOpen={open}
-        />
+        <TurnView key={at} turn={turn} cards={cards[at] ?? []} goals={goals} onOpen={open} />
       ))}
       {opened && openedRows?.id === opened.id ? (
         <ChildThread
