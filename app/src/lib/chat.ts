@@ -158,7 +158,7 @@ async function profileFor(profileId?: string) {
 
 type Draft = Message & { tools: ToolEvent[] }
 
-interface Turn {
+export interface Turn {
   conversationId: string
   config: HermesConfig
   draft: Draft
@@ -508,7 +508,7 @@ interface TurnSource {
  * turn has no run, and its reply was made when it was sent. Undefined for a chat with no session row
  * or a run whose start isn't known — asked again next time, since either may change.
  */
-async function turnSource(turn: Turn) {
+export async function turnSource(turn: Turn) {
   turn.source ??= (async () => {
     const conversation = await db.conversations.get(turn.conversationId)
     if (!conversation) return undefined
