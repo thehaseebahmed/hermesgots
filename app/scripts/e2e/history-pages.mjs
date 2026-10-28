@@ -4,25 +4,9 @@
 // chat. Main split the turn at the page edge, so it showed twice, and the live reply grew above the
 // stale part. Then a chat left in that split state by an older version is mended by its next window
 // step.
-import { app, assert, flow, mock, pass, runId } from "./lib.mjs"
+import { app, assert, flow, mock, pass, runId, runStatus, startRun } from "./lib.mjs"
 
 const auth = { Authorization: "Bearer mock-key", "Content-Type": "application/json" }
-
-/** Starts a turn straight on the host, as another device would. */
-async function startRun(sessionId, input) {
-  const res = await fetch(`${mock}/v1/runs`, {
-    method: "POST",
-    headers: auth,
-    body: JSON.stringify({ session_id: sessionId, input }),
-  })
-  assert.equal(res.status, 202, `the host starts "${input}"`)
-  return (await res.json()).run_id
-}
-
-async function runStatus(id) {
-  const res = await fetch(`${mock}/v1/runs/${id}`, { headers: auth })
-  return (await res.json()).status
-}
 
 async function transcript(sessionId) {
   const res = await fetch(`${mock}/api/sessions/${sessionId}/messages?order=latest&limit=500`, {

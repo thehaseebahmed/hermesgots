@@ -10,7 +10,7 @@ const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8")
 const audit = read("../../docs/e2e-flow-audit.md")
 
 const VERDICTS = ["stay", "component", "plugin", "delete"]
-const STAYS = 18
+const STAYS = 19
 
 const registry = () => Object.keys(FLOWS)
 
@@ -59,6 +59,6 @@ test("the audit's own counts are what its rows add up to", () => {
   assert.equal(Number(total?.[1]), all.length, "the total")
 })
 
-test("the flows that stay are the seventeen the audit argues for", () => {
+test("the flows that stay are the nineteen the audit argues for", () => {
   assert.equal(rows().filter((row) => row.verdict === "stay").length, STAYS)
 })

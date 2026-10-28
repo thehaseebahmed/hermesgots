@@ -3,7 +3,7 @@
 // didn't go and no more: a reason, when the host gives one, belongs in the chat's own error, not under
 // the message. The state is on the device, so it outlives a reload. Sends are refused meanwhile, as a
 // host the browser can't reach, or one that answers with its own reason, does.
-import { app, assert, flow, pass, runId } from "./lib.mjs"
+import { app, assert, flow, LOOKS, pass, runId } from "./lib.mjs"
 
 const REFUSAL = "Rate limit exceeded. Try again in a few seconds."
 
@@ -38,19 +38,6 @@ const refuseSends = (page) =>
       : route.continue(),
   )
 
-/** Sends a photo from the page, as the composer's own attachment flow would. */
-const sendPhoto = (page, chatId) =>
-  page
-    .evaluate(async (id) => {
-      const { prepareAttachment } = await import("/src/lib/attachments.ts")
-      const { sendMessage } = await import("/src/lib/chat.ts")
-      const canvas = Object.assign(document.createElement("canvas"), { width: 8, height: 8 })
-      const blob = await new Promise((done) => canvas.toBlob(done, "image/png"))
-      const photo = await prepareAttachment(new File([blob], "photo.png", { type: "image/png" }))
-      void sendMessage(id, "log the whole disk", { attachments: [photo] })
-    }, chatId)
-    .catch(() => undefined)
-
 /** With nothing streaming, a send starts a turn here rather than waiting in the queue. */
 const idle = (page, chatId) =>
   page.evaluate(async (id) => {
@@ -58,8 +45,6 @@ const idle = (page, chatId) =>
     const rows = await db.messages.where("conversationId").equals(id).toArray()
     return !rows.some((m) => m.status === "streaming" || m.status === "queued")
   }, chatId)
-
-const rowOf = (page, text) => page.locator("[data-slot=message]").filter({ hasText: text })
 
 /**
  * The bubble's own colour and opacity beside the ones the page offers, which is how a message that
@@ -107,7 +92,7 @@ async function assertNotSent(page, row, what) {
   )
 }
 
-async function body({ page, seed, send, lastReply, until, shot }) {
+async function body({ page, seed, send, lastReply, until, shot, row, photo }) {
   const chat = `e2e-failed-send-${runId()}`
   await seed([{ id: chat, title: "Failed send" }])
   await page.goto(`${app}/c/${chat}`)
@@ -116,7 +101,7 @@ async function body({ page, seed, send, lastReply, until, shot }) {
   // beside it.
   await blockSends(page)
   await send("count the old logs")
-  const logs = rowOf(page, "count the old logs")
+  const logs = row("count the old logs")
   await assertNotSent(page, logs, "a send the browser couldn't make")
   assert.deepEqual(await messages(page, chat), [
     { role: "user", status: "error", content: "count the old logs", attachments: undefined },
@@ -144,11 +129,11 @@ async function body({ page, seed, send, lastReply, until, shot }) {
   // own reason is not repeated under it — a reason belongs in the chat's error, not here.
   await until(() => idle(page, chat), 30_000, "the chat to be idle")
   await refuseSends(page)
-  await sendPhoto(page, chat)
+  await photo(chat, "log the whole disk")
   const sent = async () =>
     (await messages(page, chat)).find((m) => m.content === "log the whole disk")
   await until(async () => (await sent())?.status === "error", 30_000, "the photo's send to fail")
-  await assertNotSent(page, rowOf(page, "log the whole disk"), "a send the host turned down")
+  await assertNotSent(page, row("log the whole disk"), "a send the host turned down")
   assert.equal(await page.getByText(REFUSAL).count(), 0, "the reason isn't repeated under it")
   assert.deepEqual(await sent(), {
     role: "user",
@@ -159,7 +144,7 @@ async function body({ page, seed, send, lastReply, until, shot }) {
   await shot("refused")
 
   await page.unroute("**/v1/**")
-  await rowOf(page, "log the whole disk").getByRole("button", { name: "Retry" }).click()
+  await row("log the whole disk").getByRole("button", { name: "Retry" }).click()
   await until(async () => (await sent())?.status === "done", 30_000, "the photo's message to go through")
   assert.deepEqual(await sent(), {
     role: "user",
@@ -180,7 +165,7 @@ async function body({ page, seed, send, lastReply, until, shot }) {
     20_000,
     "the second send to fail",
   )
-  await rowOf(page, "and the ones from last week")
+  await row("and the ones from last week")
     .getByRole("button", { name: "Cancel failed message" })
     .click()
   await until(
@@ -196,7 +181,7 @@ async function body({ page, seed, send, lastReply, until, shot }) {
   await until(() => idle(page, chat), 30_000, "the chat to be idle")
   await blockSends(page)
   await send("and this one as well")
-  const stuck = rowOf(page, "and this one as well")
+  const stuck = row("and this one as well")
   await assertNotSent(page, stuck, "a failed send beside a queued one")
   await page.unroute("**/v1/**")
   await send("go slow about it") // the mock answers this one in 20 steps, to queue behind
@@ -214,7 +199,7 @@ async function body({ page, seed, send, lastReply, until, shot }) {
     20_000,
     "the send to wait its turn",
   )
-  const waiting = rowOf(page, "queue this one behind it")
+  const waiting = row("queue this one behind it")
   assert.equal(
     await waiting.getByRole("img", { name: "Not sent" }).count(),
     0,
@@ -254,12 +239,6 @@ async function body({ page, seed, send, lastReply, until, shot }) {
 
 // The mark, the dim bubble and the two controls have to read right on a laptop and on a phone in
 // the dark.
-for (const width of [1440, 390]) {
-  const look = width < 768 ? "phone-dark" : "laptop"
-  await flow(`failed-send-${look}`, body, {
-    viewport: { width, height: width < 768 ? 844 : 900 },
-    dark: width < 768,
-  })
-}
+for (const { look, options } of LOOKS) await flow(`failed-send-${look}`, body, options)
 
 pass("a failed send is kept, sent again with what it held, and taken back on request")

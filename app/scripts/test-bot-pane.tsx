@@ -167,7 +167,10 @@ test(
       await until(async () => remembered(bot.id) === "t-a", "the thread this device opened last")
       await click(find("[data-to-main]"))
       await until(async () => path() === `/c/${MAIN}`, "Main again")
-      await until(async () => titles().includes("Thread t-a"), "the thread that was open")
+      await until(
+        async () => titles().join("|") === "Mainly|Thread t-a",
+        "the thread that was open beside Main",
+      )
       assert.deepEqual(
         titles(),
         ["Mainly", "Thread t-a"],

@@ -29,6 +29,8 @@ jobs:
         working-directory: app
       - name: Check model ids against BenchLM
         id: check
+        env:
+          MEMENTO_SITE_URL: ${{ vars.MEMENTO_CANDIDATE_URL || vars.MEMENTO_SITE_URL }}
         run: node --experimental-strip-types scripts/check-benchlm-matches.mjs --report "$RUNNER_TEMP/benchlm-report.json"
         working-directory: app
         continue-on-error: true
@@ -58,10 +60,10 @@ jobs:
                 ]
               : ["The check wrote no report, so BenchLM or models.dev could not be read. See the job log."]
             const body = lines.join("\n")
-            const { data: open } = await github.rest.issues.listForRepo({
-              owner: context.repo.owner, repo: context.repo.repo, state: "open", labels: "benchlm-match",
+            const { data: found } = await github.rest.search.issuesAndPullRequests({
+              q: `repo:${context.repo.owner}/${context.repo.repo} is:issue is:open label:benchlm-match in:title "${title}"`,
             })
-            const existing = open.find((i) => i.title === title)
+            const existing = found.items.find((i) => i.title === title)
             if (existing) {
               await github.rest.issues.update({ owner: context.repo.owner, repo: context.repo.repo, issue_number: existing.number, body })
             } else {

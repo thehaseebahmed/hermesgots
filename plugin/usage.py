@@ -14,11 +14,14 @@ takes that kwarg (see ``_accepts_read_only``).
 from __future__ import annotations
 
 import inspect
+import logging
 from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Any, Callable, Dict, List, Optional
 
 from . import usage_ollama
+
+logger = logging.getLogger(__name__)
 
 
 def _utc(value: datetime) -> datetime:
@@ -105,12 +108,14 @@ def fetch(provider: str) -> Optional[Dict[str, Any]]:
         else:
             snapshot = fetch_account_usage(provider)
     except Exception:
+        logger.debug("memento: couldn't read %s's usage from Hermes", provider, exc_info=True)
         return None
     if snapshot is not None:
         return serialize(snapshot)
-    if provider == "ollama-cloud":
+    if provider == usage_ollama.PROVIDER:
         try:
             return serialize(usage_ollama.fetch_windows())
         except Exception:
+            logger.debug("memento: couldn't read %s's balance", provider, exc_info=True)
             return None
     return None

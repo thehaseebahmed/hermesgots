@@ -5,8 +5,8 @@ import { db, type ModelsDevCatalog, type Profile } from "@/lib/db"
 import { getModelInfo, type ModelInfo } from "@/lib/hermes"
 import { fullModel } from "@/lib/model-info"
 import { lastSegment, normalise } from "@/lib/model-match"
+import { MODELS_DEV_URL } from "@/lib/models-dev"
 
-const CATALOG_URL = "https://models.dev/api.json"
 const CATALOG_ROW = "catalog"
 const TTL_MS = 24 * 60 * 60 * 1000
 
@@ -47,7 +47,7 @@ function isCatalog(data: unknown): data is Catalog {
 /** Fetches the registry; with an ETag a 304 means "unchanged", not empty. */
 async function fetchRegistry(etag: string | undefined) {
   const response = await fetch(
-    CATALOG_URL,
+    MODELS_DEV_URL,
     etag ? { headers: { "If-None-Match": etag } } : undefined,
   )
   if (response.status === 304) return { catalog: undefined, etag: etag ?? "" }

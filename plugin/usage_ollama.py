@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+PROVIDER = "ollama-cloud"
 BALANCE_URL = "https://ollama.com/api/balance"
 TIMEOUT_S = 10.0
 
@@ -148,7 +149,7 @@ def fetch_windows() -> Optional[Snapshot]:
         return None
     plan = payload.get("plan") if isinstance(payload, dict) else None
     return Snapshot(
-        provider="ollama-cloud",
+        provider=PROVIDER,
         windows=windows,
         plan=plan if isinstance(plan, str) and plan else None,
     )

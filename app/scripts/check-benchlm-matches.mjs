@@ -9,12 +9,14 @@ import { fileURLToPath } from "node:url"
 import path from "node:path"
 
 import { scoreFor, scoreMapOf } from "../src/lib/model-match.ts"
+import { MODELS_DEV_URL } from "../src/lib/models-dev.ts"
 
 const PROVIDERS = ["github-copilot", "ollama-cloud", "anthropic", "deepseek", "xai"]
 // Every push to main deploys the candidate build first, so ids are checked against what the site
-// will serve before a release reaches it.
-const BENCHLM_URL = "https://candidate--hermesgots.netlify.app/.netlify/functions/benchlm"
-const MODELS_DEV_URL = "https://models.dev/api.json"
+// will serve before a release reaches it; the workflow passes that URL as MEMENTO_SITE_URL.
+const SITE_URL =
+  process.env.MEMENTO_SITE_URL || process.env.VITE_SITE_URL || "https://candidate--hermesgots.netlify.app"
+const BENCHLM_URL = `${SITE_URL.replace(/\/+$/, "")}/.netlify/functions/benchlm`
 const here = path.dirname(fileURLToPath(import.meta.url))
 const GAPS_PATH = path.join(here, "benchlm-known-gaps.json")
 

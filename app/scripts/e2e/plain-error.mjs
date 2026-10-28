@@ -1,14 +1,13 @@
 // A turn Hermes can't finish, before it says anything: the chat shows why as an error line on the
 // page, marked, with no bubble and no picture of the bot — the way every reply is drawn.
-import { app, assert, flow, pass, runId } from "./lib.mjs"
+import { app, assert, flow, LOOKS, pass, runId } from "./lib.mjs"
 
 const REFUSED = "The model provider didn't respond."
 
-async function body({ page, seed, send, shot, until, lastReply }) {
+async function body({ page, seed, send, shot, until, lastReply, row }) {
   const chat = `e2e-plain-error-${runId()}`
   await seed([{ id: chat, title: "A turn that fails" }])
   await page.goto(`${app}/c/${chat}`)
-  const row = (text) => page.locator("[data-slot=message]").filter({ hasText: text })
 
   // A reply that lands: the bot answers on the page, with no bubble and no picture beside it.
   await send("sort the logs by size")
@@ -32,12 +31,6 @@ async function body({ page, seed, send, shot, until, lastReply }) {
 }
 
 // The error line has to read right on a laptop and on a phone in the dark.
-for (const width of [1440, 390]) {
-  const look = width < 768 ? "phone-dark" : "laptop"
-  await flow(`plain-error-${look}`, body, {
-    viewport: { width, height: width < 768 ? 844 : 900 },
-    dark: width < 768,
-  })
-}
+for (const { look, options } of LOOKS) await flow(`plain-error-${look}`, body, options)
 
 pass("a failed turn reads as an error line on the page, marked, with no bubble or picture")

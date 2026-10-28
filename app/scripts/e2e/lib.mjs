@@ -209,6 +209,24 @@ export async function setUpBot(page) {
   }, botPatch(mock))
 }
 
+const hostAuth = { Authorization: "Bearer mock-key", "Content-Type": "application/json" }
+
+/** Starts a turn straight on the host, as another device would. */
+export async function startRun(sessionId, input) {
+  const res = await fetch(`${mock}/v1/runs`, {
+    method: "POST",
+    headers: hostAuth,
+    body: JSON.stringify({ session_id: sessionId, input }),
+  })
+  assert.equal(res.status, 202, `the host starts "${input}"`)
+  return (await res.json()).run_id
+}
+
+export async function runStatus(id) {
+  const res = await fetch(`${mock}/v1/runs/${id}`, { headers: hostAuth })
+  return (await res.json()).status
+}
+
 export async function addBot(page, { name, messages, hour = 3_600_000 }) {
   return page.evaluate(
     async ({ name, messages, patch, hour }) => {
@@ -348,9 +366,32 @@ export async function signedIn({ width = 1440, dark = false, vault = "exists" } 
   }
 }
 
+/** The laptop and the phone in the dark, which a flow checks its marks at; the height convention is `cli.mjs`'s. */
+export const LOOKS = [1440, 390].map((width) => ({
+  look: width < 768 ? "phone-dark" : "laptop",
+  options: { viewport: { width, height: width < 768 ? 844 : 900 }, dark: width < 768 },
+}))
+
 function helpers(page) {
   const composer = page.getByRole("textbox").last()
   return {
+    /** A thread's message row holding `text`. */
+    row: (text) => page.locator("[data-slot=message]").filter({ hasText: text }),
+    /** Sends a photo from the page, as the composer's own attachment flow would. */
+    photo: (chatId, text) =>
+      page
+        .evaluate(
+          async ([id, text]) => {
+            const { prepareAttachment } = await import("/src/lib/attachments.ts")
+            const { sendMessage } = await import("/src/lib/chat.ts")
+            const canvas = Object.assign(document.createElement("canvas"), { width: 8, height: 8 })
+            const blob = await new Promise((done) => canvas.toBlob(done, "image/png"))
+            const photo = await prepareAttachment(new File([blob], "photo.png", { type: "image/png" }))
+            void sendMessage(id, text, { attachments: [photo] })
+          },
+          [chatId, text],
+        )
+        .catch(() => undefined),
     /** Writes chats straight to Dexie: `{ id, title, projectId? }`, titled for good. */
     async seed(chats) {
       await page.evaluate(async (chats) => {

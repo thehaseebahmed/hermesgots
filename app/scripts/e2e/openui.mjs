@@ -108,10 +108,11 @@ await flow(
     const thread = page.locator(VIEWPORT)
 
     await until(() => card.count().then((count) => count === 1), 25_000, "the interface to draw")
-    assert.equal(
-      await card.locator("[data-slot=card-title]").textContent(),
-      "Quarterly sales",
-      "the reply's block drew an interface from the library",
+    const title = card.locator("[data-slot=card-title]")
+    await until(
+      async () => (await title.textContent()) === "Quarterly sales",
+      10_000,
+      "the reply's block to draw an interface from the library",
     )
     await until(
       async () => /Up 12%/.test((await card.textContent()) ?? ""),
