@@ -22,6 +22,7 @@ import {
   TerminalIcon,
   DatabaseIcon,
   MenuIcon,
+  MessageSquareDashedIcon,
   MessagesSquareIcon,
   MessageSquareTextIcon,
   PaletteIcon,
@@ -600,6 +601,15 @@ export function DeveloperSettings() {
           subtitle="Bots in the sidebar, chats as threads"
           checked={Boolean(settings?.botThreads)}
           onCheckedChange={(checked) => saveSettings({ botThreads: checked })}
+        />
+        <SwitchRow
+          id="chat-next"
+          icon={MessageSquareDashedIcon}
+          title="New chat screen"
+          experimental
+          subtitle="Chats read straight from Hermes 0.22.5 or newer"
+          checked={Boolean(settings?.chatNext)}
+          onCheckedChange={(checked) => saveSettings({ chatNext: checked })}
         />
         <SwitchRow
           id="meetings"

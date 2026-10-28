@@ -306,27 +306,41 @@ const AGENTS_COOLDOWN_MS = 60_000
 /** A turn that has written nothing for this long is not waited on any more. */
 const STALL_MS = 5 * 60_000
 
-/**
- * A session read from the host and drawn, opened by `?server=&key=&session=`. It works with the
- * Hermes that shares a run's events between every follower (`MIN_HERMES`), and says so on an older
- * one rather than ask it for anything.
- */
-export function ChatNextPage({
-  pollMs = POLL_MS,
-  idleMs = IDLE_MS,
-  stallMs = STALL_MS,
-  database = db,
-}: {
+interface ThreadOptions {
   pollMs?: number
   idleMs?: number
   stallMs?: number
   /** The device's database; a test gives each device its own (ADR 0065). */
   database?: SessionDb
-}) {
+}
+
+/** The dev route: a session opened by `?server=&key=&session=`. */
+export function ChatNextPage(options: ThreadOptions) {
   const [params] = useSearchParams()
-  const server = params.get("server")
-  const key = params.get("key")
-  const session = params.get("session")
+  return (
+    <ChatNextThread
+      {...options}
+      server={params.get("server")}
+      apiKey={params.get("key")}
+      session={params.get("session")}
+    />
+  )
+}
+
+/**
+ * A session read from the host and drawn. It works with the Hermes that shares a run's events
+ * between every follower (`MIN_HERMES`), and says so on an older one rather than ask it for
+ * anything. `server` is the bot's base URL, `/v1` or not.
+ */
+export function ChatNextThread({
+  pollMs = POLL_MS,
+  idleMs = IDLE_MS,
+  stallMs = STALL_MS,
+  database = db,
+  server,
+  apiKey: key,
+  session,
+}: ThreadOptions & { server: string | null; apiKey: string | null; session: string | null }) {
   // The thread is drawn from the device's copy; the store is the only thing that writes it, and
   // says what the page is doing.
   const store = useMemo(() => storeFor(database, session ?? ""), [database, session])

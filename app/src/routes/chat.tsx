@@ -1,5 +1,7 @@
 import {
+  lazy,
   startTransition,
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -32,6 +34,7 @@ import {
   SEND_CAUGHT_UP_MS,
 } from "@/lib/freshness"
 import { COLUMN_BOX } from "@/lib/layout"
+import { opensOnChatNext } from "@/chat-next/route"
 import { quietly } from "@/lib/report"
 import { threadCount, threadsLine } from "@/lib/bot-chrome"
 import { repoCap, sessionSubtitle } from "@/lib/repo-line"
@@ -372,15 +375,95 @@ function LoadOlderWindow({
   return null
 }
 
-export function ChatPage({
-  chatId,
-  paneThread,
-  slot,
-}: {
+const ChatNextThread = lazy(() =>
+  import("@/chat-next/page").then((m) => ({ default: m.ChatNextThread })),
+)
+
+interface ChatPageProps {
   chatId?: string
   paneThread?: string
   slot: HoldSlot
-}) {
+}
+
+/**
+ * The chat on screen, on chat-next where its Developer switch takes it (ADR 0065) and on the current
+ * screen otherwise. The choice is one string, so a write to the chat that changes nothing about it
+ * draws nothing again; with the switch off only the settings row is read.
+ */
+export function ChatPage(props: ChatPageProps) {
+  const params = useParams()
+  const id = props.chatId ?? params.id
+  const verdict = useLiveQuery(async () => {
+    const settings = await getSettings()
+    const on = Boolean(settings.developer && settings.chatNext)
+    if (!on || !id) return `current\n${id}`
+    const chat = await db.conversations.get(id)
+    const bot = chat ? await db.profiles.get(chat.profileId) : undefined
+    return `${opensOnChatNext(on, chat, bot) ? "next" : "current"}\n${id}`
+  }, [id])
+  // While the verdict for a chat just switched to is still out, the screen that drew the last one
+  // keeps drawing: the current screen holds the chat it left until the new one is ready.
+  const kind = verdict?.split("\n")[0]
+  if (kind === "next" && verdict === `next\n${id}` && id)
+    return <NextChat id={id} slot={props.slot} />
+  if (kind === "current") return <CurrentChatPage {...props} />
+  return (
+    <div
+      data-slot="chat-pane"
+      data-pane={props.slot}
+      className="relative flex min-h-0 flex-1 flex-col"
+      inert
+    >
+      <PendingChat />
+    </div>
+  )
+}
+
+/** A chat drawn by chat-next, under the chat's own header. */
+function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
+  const chat = useLiveQuery(() => db.conversations.get(id), [id])
+  const bot = useLiveQuery(
+    async () => (chat ? db.profiles.get(chat.profileId) : undefined),
+    [chat?.profileId],
+  )
+  const ready = Boolean(chat && bot && chat.id === id)
+  useLayoutEffect(() => {
+    if (ready) hold(slot, id)
+  })
+  return (
+    <div
+      data-slot="chat-pane"
+      data-pane={slot}
+      data-chat-next
+      className="relative flex min-h-0 flex-1 flex-col"
+      inert={!ready}
+    >
+      {chat && bot && ready ? (
+        <>
+          <ChatHeader
+            title={chat.title}
+            botId={bot.botId}
+            muted={Boolean(chat.muted || bot.muted)}
+          />
+          <div className="min-h-0 flex-1 overflow-y-auto pt-16">
+            <Suspense fallback={null}>
+              <ChatNextThread
+                key={chat.hermesSessionId}
+                server={bot.baseUrl}
+                apiKey={bot.apiKey}
+                session={chat.hermesSessionId}
+              />
+            </Suspense>
+          </div>
+        </>
+      ) : (
+        <PendingChat />
+      )}
+    </div>
+  )
+}
+
+function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   const params = useParams()
   const { pathname } = useLocation()
   const id = chatId ?? params.id

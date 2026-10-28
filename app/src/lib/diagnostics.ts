@@ -65,6 +65,8 @@ export interface DiagDevice {
   schema: number
   developer: boolean
   botThreads: boolean
+  /** Which chat screen this device draws (ADR 0065). */
+  chatNext: boolean
   /** The latest return to the foreground, timed; absent before this launch's first one. */
   resume?: DiagResume
   bots: DiagBot[]

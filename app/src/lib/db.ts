@@ -40,6 +40,8 @@ export interface Settings {
   developer?: boolean
   /** The bot-first layout: bots in the sidebar, each chat a thread in its bot. Developer, local. */
   botThreads?: boolean
+  /** A chat opens on chat-next instead of the current screen (ADR 0065). Developer, local. */
+  chatNext?: boolean
   /** Meetings: add a recording or transcript and read the host's notes. Developer, local. */
   meetings?: boolean
   /** AFK's workflow library: a project's Workflow row, its library and its editor. Developer, local. */
