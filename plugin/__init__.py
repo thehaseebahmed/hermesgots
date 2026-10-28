@@ -456,6 +456,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # totals its Dictation screen counts (dictations.py, ADR 0060).
                     "dictations",
                     "speech_model",
+                    # The rest of the host's `stt` section, on the same page (speech.py, ADR 0063):
+                    # advertised only where this host's Hermes declares those defaults, so a host
+                    # that doesn't keeps the one speech row it already draws.
+                    *(["stt_settings"] if await asyncio.to_thread(speech.stt_available) else []),
                     "usage",
                     "research",
                     "research_followup",
@@ -1935,7 +1939,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
 
         def run() -> Dict[str, Any]:
             with scope():
-                return speech.read(config_path, path, gate)
+                # The page's other rows ride on the one read it already makes (ADR 0063).
+                return speech.read(config_path, path, gate, with_stt=True)
 
         try:
             payload = await asyncio.to_thread(run)
@@ -1979,6 +1984,35 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
 
     app.router.add_get(f"{PREFIX}/speech", get_speech)
     app.router.add_post(f"{PREFIX}/speech", set_speech)
+
+    async def set_stt(request: "web.Request") -> "web.Response":
+        """Writes one speech setting in the bot's own ``config.yaml``, and answers the fresh block."""
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if not body or "key" not in body:
+            return _error(web, "Body needs a key and a value.", 400)
+        config_path = host_config_path()
+        scope = profile_scope()
+
+        def run() -> Dict[str, Any]:
+            with scope():
+                speech.set_stt_value(config_path, body.get("key"), body.get("value"))
+                return speech.stt_settings(config_path)
+
+        try:
+            payload = await asyncio.to_thread(run)
+        except ValueError as error:
+            return _error(web, str(error), 400)
+        except ImportError:
+            return _error(web, "This Hermes version can't read speech settings from here.", 501)
+        except Exception as error:
+            logger.warning("memento: couldn't save the speech setting", exc_info=True)
+            return _error(web, f"The host couldn't save the speech setting: {error}", 502)
+        return web.json_response({"object": "memento.stt", "stt": payload})
+
+    app.router.add_post(f"{PREFIX}/stt", set_stt)
 
     async def queue_response(session_id: str, path: Path) -> "web.Response":
         found = await asyncio.to_thread(outbox.read, path, session_id)

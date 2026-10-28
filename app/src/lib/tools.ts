@@ -230,7 +230,8 @@ export function kindOf(tool: ToolEvent): Kind {
   return KINDS[tool.tool] ?? USED
 }
 
-const plural = (count: number, one: string, many: string) =>
+/** `count` and its noun, singular or plural: "1 task", "3 tasks". */
+export const plural = (count: number, one: string, many: string) =>
   count === 1 ? `${count} ${one}` : `${count} ${many}`
 
 /**

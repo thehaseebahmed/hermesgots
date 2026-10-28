@@ -1,252 +1,36 @@
-/**
- * The Speech-to-text page over a seeded device database and a faked host, as ADR 0055 draws it: the
- * page only where the host hears speech; its groups as cards under the captions "Gots" and "Hermes",
- * with no heading anywhere; each setting a value row whose title, purpose line and value a user
- * reads, the value in the accent colour and "Not set" muted where it holds nothing; the Vocabulary
- * row drilling into the words themselves, adding and removing them; the speech model picking from
- * the host's models in a bottom sheet; the cleanup model picking through the composer's own picker,
- * where "Default" clears it; a host's refusal leaving the model that was in play, and its sentence
- * leading the page; a model the host is downloading saying so in its notes; and cleanup being
- * explained, not offered, where the host disallows it.
- */
 import assert from "node:assert/strict"
 import test from "node:test"
-import { useLiveQuery } from "dexie-react-hooks"
-import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-router"
 
-import { BotSettingsList, BotSettingsPage } from "@/components/bot-settings"
-import { botSubOf } from "@/lib/bot-subs"
-import { botTabOf } from "@/lib/bot-tabs"
-import { db } from "@/lib/db"
 import {
-  botProfile,
-  click,
-  find,
-  findAll,
-  json,
-  mount,
-  seedSettings,
-  text,
-  type,
-  until,
-} from "./component-kit.tsx"
-
-const speech = (patch: Record<string, unknown> = {}) => ({
-  model: "small",
-  models: [
-    {
-      name: "base",
-      size_mb: 145,
-      speed: 16,
-      slow_on_cpu: false,
-      downloaded: true,
-      in_use: false,
-      downloading: false,
-    },
-    {
-      name: "small",
-      size_mb: 484,
-      speed: 6,
-      slow_on_cpu: false,
-      downloaded: true,
-      in_use: true,
-      downloading: false,
-    },
-    {
-      name: "large-v3",
-      size_mb: 3090,
-      speed: 0.6,
-      slow_on_cpu: true,
-      downloaded: false,
-      in_use: false,
-      downloading: false,
-    },
-  ],
-  cleanup: { model: null, allowed: true, reason: null },
-  ...patch,
-})
-
-type Speech = ReturnType<typeof speech>
-
-/** The bot's Hermes models, as `/api/model/options` answers them: two providers to pick between. */
-const BOT_MODELS = {
-  model: "test/model",
-  provider: "openrouter",
-  providers: [
-    {
-      slug: "openrouter",
-      name: "OpenRouter",
-      authenticated: true,
-      models: ["openrouter/one", "openrouter/two"],
-    },
-    { slug: "anthropic", name: "Anthropic", authenticated: true, models: ["claude-x"] },
-  ],
-}
-
-function host(
-  features: string[],
-  options: {
-    speech?: Speech
-    next?: Speech
-    refuse?: string
-    writers?: { model: boolean; provider: boolean }
-    /** The bot's models, as the cleanup pick's own picker reads them. */
-    models?: unknown
-  } = {},
-) {
-  const calls: { path: string; method: string; body: unknown }[] = []
-  const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    const path = new URL(String(input)).pathname
-    const method = init?.method ?? "GET"
-    if (path.endsWith("/api/plugins/memento/info"))
-      return json({
-        features,
-        research: { writers: options.writers ?? { model: true, provider: true } },
-      })
-    // The bot's Hermes, which the cleanup pick's own picker lists: two providers, so the picker
-    // offers its "Default" row over them rather than drilling into the only one it has.
-    if (path.endsWith("/api/model/options")) return json(options.models ?? BOT_MODELS)
-    if (path.endsWith("/api/plugins/memento/speech")) {
-      if (method === "POST") {
-        const body = init?.body ? JSON.parse(String(init.body)) : undefined
-        calls.push({ path, method, body })
-        if (options.refuse) return json({ error: { message: options.refuse } }, 400)
-        return json({ speech: options.next ?? options.speech })
-      }
-      if (!options.speech) return json({}, 404)
-      return json({ speech: options.speech })
-    }
-    return json({}, 404)
-  }
-  return { fetch: fetch as unknown as typeof globalThis.fetch, calls }
-}
-
-function LiveEditor() {
-  const { tab, sub } = useParams()
-  const profile = useLiveQuery(() => db.profiles.get("bot-1"), [])
-  if (!profile) return null
-  const botTab = botTabOf(tab) ?? "general"
-  // The fourth segment names a page's own sub-screen, as the settings route resolves it.
-  const botSub = tab && sub ? botSubOf(botTab, sub) : undefined
-  return (
-    <>
-      <BotSettingsList profile={profile} />
-      <BotSettingsPage key={profile.id} profile={profile} tab={botTab} sub={botSub} />
-    </>
-  )
-}
-
-function Where() {
-  const location = useLocation()
-  return <span data-here>{location.pathname}</span>
-}
-
-const editor = (path: string) => (
-  <MemoryRouter initialEntries={[path]}>
-    <Where />
-    <Routes>
-      <Route path="/settings/bots/:botId/:tab?/:sub?" element={<LiveEditor />} />
-    </Routes>
-  </MemoryRouter>
-)
-
-const here = () => find("[data-here]")?.textContent
-/** The page itself, and its row in the list beside it. */
-const speechPage = () => find("[data-bot-dictation]")
-const speechRow = () => find('[data-bot-page="speech-to-text"]')
-/** A setting's value row, by the name its page gives it. */
-const row = (name: string) => find(`[data-setting="${name}"]`)
-
-/**
- * The lines a row draws, top to bottom: its title, the purpose line where it has one, and its value.
- * Each is a leaf, so this reads what a user reads rather than the spans it is wrapped in.
- */
-const lines = (element: Element | null) =>
-  [...(element?.querySelectorAll("span") ?? [])]
-    .filter((span) => !span.querySelector("*"))
-    .map((span) => span.textContent?.trim() ?? "")
-const titleOf = (element: Element | null) => lines(element)[0] ?? ""
-const valueOf = (element: Element | null) => lines(element).at(-1) ?? ""
-/** Whether a row's value wears the accent colour, or is muted because it holds nothing. */
-const valueColour = (element: Element | null) => {
-  const leaf = [...(element?.querySelectorAll("span") ?? [])].filter(
-    (span) => !span.querySelector("*"),
-  )
-  const className = leaf.at(-1)?.getAttribute("class") ?? ""
-  if (className.includes("text-primary")) return "accent"
-  return className.includes("text-muted-foreground") ? "muted" : "neither"
-}
-
-/** The captions the page draws over its cards, in the order it draws them. */
-const captions = () =>
-  findAll("[data-bot-dictation] > p").map((node) => node.textContent?.trim() ?? "")
-
-/** Which settings sit under which caption, in drawing order: a page's cards, as a user sees them. */
-function captioned() {
-  const found: Record<string, string[]> = {}
-  let caption = ""
-  for (const block of [...(speechPage()?.children ?? [])]) {
-    if (block.tagName === "P") {
-      caption = block.textContent?.trim() ?? ""
-      found[caption] = []
-      continue
-    }
-    for (const setting of [...block.querySelectorAll("[data-setting]")])
-      if (caption) (found[caption] ??= []).push(titleOf(setting))
-  }
-  return found
-}
-
-const headings = () => findAll("[data-bot-dictation] h2").map((node) => node.textContent?.trim())
-/** The chevrons ADR 0055 took off every row: nothing on the page draws one. */
-const chevrons = () =>
-  findAll("[data-bot-dictation] svg").filter((svg) =>
-    (svg.getAttribute("class") ?? "").includes("chevron"),
-  )
-
-/** The sheet the Speech model row opens, and the options it lists. */
-const speechSheet = () => find('[data-pick-list="Speech models"]')
-const speechOptions = () => findAll('[data-pick-list="Speech models"] > button')
-/** The option wearing the tick: the model the host has in play. */
-const speechInPlay = () => speechOptions().find((option) => option.querySelector("svg")) ?? null
-const speechOption = (name: string) =>
-  speechOptions().find((option) => (option.textContent ?? "").trim().startsWith(name)) ?? null
-const openSpeech = async () => {
-  await click(row("speech-model"))
-  await until(async () => speechOptions().length > 0, "the host's speech models")
-}
-
-/** A row the cleanup pick's own picker draws, by the name it starts with. */
-const modelRow = (label: string) =>
-  findAll("button").find((button) => (button.textContent ?? "").startsWith(label)) ?? null
-const openCleanup = async () => {
-  await click(row("cleanup-model"))
-  await until(async () => Boolean(modelRow("Default")), "the bot's own models")
-}
-
-/** The Vocabulary detail's own pieces: a word's remove button, the add field, and the buttons. */
-const vocabulary = () => find("[data-vocabulary]")
-const removeButton = (word: string) => find(`[aria-label="Remove ${word}"]`)
-const addField = () => find('[aria-label="Add a word"]')
-const detailButton = (label: string) =>
-  findAll("[data-vocabulary] button").find((one) => one.textContent?.trim() === label) ?? null
-const add = () => click(detailButton("Add"))
-/** What the add field holds now, as the user reads it. */
-const draft = () => (addField() as HTMLInputElement | null)?.value ?? null
-
-async function seed(
-  name: string,
-  features: string[],
-  patch = {},
-  options: Parameters<typeof host>[1] = {},
-) {
-  await seedSettings()
-  await db.profiles.clear()
-  await db.profiles.put(botProfile(name, patch))
-  const server = host(features, options)
-  globalThis.fetch = server.fetch
-  return server.calls
-}
+  speech,
+  editor,
+  here,
+  speechPage,
+  speechRow,
+  row,
+  lines,
+  titleOf,
+  valueOf,
+  valueColour,
+  headings,
+  chevrons,
+  speechSheet,
+  speechOptions,
+  speechInPlay,
+  speechOption,
+  openSpeech,
+  modelRow,
+  openCleanup,
+  vocabulary,
+  removeButton,
+  addField,
+  detailButton,
+  add,
+  draft,
+  seed,
+} from "./dictation-page-kit.tsx"
+import { click, find, findAll, mount, text, type, until } from "./component-kit.tsx"
+import { db } from "@/lib/db"
 
 test("a host that can hear speech has a Speech-to-text page, its Vocabulary row counting the words", async () => {
   await seed("dictating", ["dictation"], { vocabulary: ["Haseeb"] })
@@ -270,7 +54,7 @@ test("a host that can't hear speech has no Speech-to-text page, and its address 
   })
 })
 
-test("the page is captioned Gots and Hermes, its rows under them, with no heading or chevron", async () => {
+test("the page draws its rows over one card per owner, with no heading or chevron", async () => {
   await seed(
     "grouped",
     ["dictation", "speech_model"],
@@ -278,13 +62,12 @@ test("the page is captioned Gots and Hermes, its rows under them, with no headin
     { speech: speech() },
   )
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
-    assert.deepEqual(captions(), ["Gots", "Hermes"], "one muted caption over each owner's card")
     assert.deepEqual(
-      captioned(),
-      { Gots: ["Vocabulary", "Cleanup model"], Hermes: ["Speech model"] },
-      "each setting under the caption of the owner it belongs to",
+      [...(speechPage()?.querySelectorAll("[data-setting]") ?? [])].map(titleOf),
+      ["Speech model", "Vocabulary", "Cleanup model"],
+      "the model the host has, then Gots's two rows",
     )
-    assert.deepEqual(headings(), [], "no group headings: the captions took their place")
+    assert.deepEqual(headings(), [], "no group headings: the rows need none")
     assert.deepEqual(chevrons(), [], "and no row draws a chevron")
     assert.equal(
       findAll("[data-bot-dictation] input").length,
@@ -293,13 +76,13 @@ test("the page is captioned Gots and Hermes, its rows under them, with no headin
     )
     assert.deepEqual(
       lines(row("vocabulary")),
-      ["Vocabulary", "The words this bot's speech leans towards", "3 words"],
-      "Vocabulary's title, its line and its value",
+      ["Vocabulary", "Gots", "The words this bot's speech leans towards", "3 words"],
+      "Vocabulary's title and its own mark, its line and its value",
     )
     assert.deepEqual(
       lines(row("cleanup-model")),
-      ["Cleanup model", "The model that tidies a take's finished words", "Default"],
-      "Cleanup model's three lines, its value the default",
+      ["Cleanup model", "Gots", "The model that tidies a take's finished words", "Default"],
+      "Cleanup model's lines, its value the default",
     )
     assert.deepEqual(
       lines(row("speech-model")),
@@ -657,7 +440,7 @@ test("a host that withholds the model-override permission says so instead of off
     assert.ok(refused, "the row is still on the page")
     assert.deepEqual(
       lines(refused),
-      ["Cleanup model", reason, "Default"],
+      ["Cleanup model", "Gots", reason, "Default"],
       "its purpose line is the host's own sentence, word for word",
     )
     assert.notEqual(refused?.tagName, "BUTTON", "with no pick behind it: a tap the host ignores")
@@ -665,3 +448,5 @@ test("a host that withholds the model-override permission says so instead of off
     assert.equal(findAll("[data-pick-list]").length, 0, "so no sheet opens")
   })
 })
+
+/** The switch a speech setting's row draws. */

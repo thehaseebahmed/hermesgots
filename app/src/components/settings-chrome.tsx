@@ -225,6 +225,7 @@ export function SwitchRow({
   disabled,
   variant,
   onCheckedChange,
+  ...rest
 }: {
   id: string
   /** A category header is a title alone, so a row without one draws nothing in the icon's place. */
@@ -239,7 +240,7 @@ export function SwitchRow({
   /** `header` tops a group of switches it controls; `nested` is one of them. */
   variant?: "header" | "nested"
   onCheckedChange: (checked: boolean) => void
-}) {
+} & Record<`data-${string}`, string | undefined>) {
   return (
     <label
       htmlFor={id}
@@ -248,6 +249,7 @@ export function SwitchRow({
         "cursor-pointer",
         variant === "nested" && "pl-9",
       )}
+      {...rest}
     >
       {Icon && <Icon className="size-5 shrink-0 text-muted-foreground" />}
       <span className="flex min-w-0 flex-1 flex-col">
@@ -340,8 +342,10 @@ export const NOT_SET = "Not set"
  */
 export function ValueRow({
   title,
+  tag,
   purpose,
   value,
+  muted,
   onClick,
   disabled,
   busy,
@@ -350,10 +354,14 @@ export function ValueRow({
   ...rest
 }: {
   title: string
+  /** A short mark beside the title, in the accent colour: which side of the app owns the row. */
+  tag?: string
   /** What the setting is for: kept only where the row drills in or the purpose isn't obvious. */
   purpose?: string
   /** The value the setting holds; left off where the row holds something other than a value. */
   value?: string | null
+  /** The value is the host's own default rather than one written here: read muted, not accented. */
+  muted?: boolean
   onClick?: () => void
   disabled?: boolean
   /** While a pick is on its way to the host: the row wears `aria-busy` and takes no taps. */
@@ -366,10 +374,25 @@ export function ValueRow({
   const holds = Boolean(value && String(value).trim())
   const body = (
     <span className="flex min-w-0 flex-1 flex-col gap-0.5 py-0.5">
-      <span className="truncate text-base">{title}</span>
+      <span className="flex min-w-0 items-center gap-2">
+        <span className="truncate text-base">{title}</span>
+        {tag && (
+          <span
+            data-tag={tag}
+            className="shrink-0 rounded-full bg-primary/10 px-1.5 text-xs leading-5 text-primary"
+          >
+            {tag}
+          </span>
+        )}
+      </span>
       {purpose && <span className="line-clamp-2 text-sm text-muted-foreground">{purpose}</span>}
       {value != null && (
-        <span className={cn("truncate text-sm", holds ? "text-primary" : "text-muted-foreground")}>
+        <span
+          className={cn(
+            "truncate text-sm",
+            holds && !muted ? "text-primary" : "text-muted-foreground",
+          )}
+        >
           {holds ? value : NOT_SET}
         </span>
       )}

@@ -6,6 +6,8 @@
  * without a host.
  */
 
+import { readStt, type SttSettings } from "./stt-settings.ts"
+
 /** The feature a host advertises when it has the host speech settings at all. */
 export const SPEECH_MODEL = "speech_model"
 
@@ -44,6 +46,8 @@ export interface SpeechSettings {
   models: SpeechModel[]
   /** The last pick that didn't load, with the host's reason, until a take on it succeeds. */
   cleanup: SpeechCleanup
+  /** Every other speech setting the host carries, where it advertises them (ADR 0063). */
+  stt?: SttSettings
 }
 
 function choice(raw: unknown): SpeechPick | null {
@@ -71,6 +75,9 @@ function modelOf(raw: unknown): SpeechModel | null {
 export function readSpeech(raw: unknown): SpeechSettings {
   const speech = (raw ?? {}) as Record<string, unknown>
   const cleanup = (speech.cleanup ?? {}) as Record<string, unknown>
+  // The rest of the `stt` section only where the host sends it: a plugin without the feature
+  // leaves the field out rather than promising settings it never described (ADR 0063).
+  const stt = readStt(speech.stt)
   return {
     model: typeof speech.model === "string" ? speech.model : "",
     models: Array.isArray(speech.models)
@@ -81,6 +88,7 @@ export function readSpeech(raw: unknown): SpeechSettings {
       allowed: Boolean(cleanup.allowed),
       reason: typeof cleanup.reason === "string" ? cleanup.reason : null,
     },
+    ...(stt ? { stt } : {}),
   }
 }
 

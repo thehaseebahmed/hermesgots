@@ -41,7 +41,7 @@ import { CommunitySettings } from "@/components/community-settings"
 import { BotSettingsList, BotSettingsPage } from "@/components/bot-settings"
 import type { BotSub } from "@/lib/bot-subs"
 import { botPageOf, botPath, botTabOf, botTabPath, type BotPage } from "@/lib/bot-tabs"
-import { botSubOf } from "@/lib/bot-subs"
+import { botSubOf, botSubPath } from "@/lib/bot-subs"
 import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { OnlineDot } from "@/components/bot-card"
@@ -131,7 +131,7 @@ const MenuContext = createContext<{ active?: string; replace: boolean }>({ repla
  * open by default.
  */
 export function SettingsPage() {
-  const { section, botId, tab, sub } = useParams()
+  const { section, botId, tab, sub, leaf } = useParams()
   const large = useLarge()
   const { up, root } = useNav()
   const navigate = useNavigate()
@@ -145,8 +145,9 @@ export function SettingsPage() {
   // One reading of the URL's third segment, so nothing downstream narrows it again with a cast.
   const botTab = botTabOf(tab)
   const page = botTab ? botPageOf(botTab) : undefined
-  // A page's sub-screen: the row's edit or the list it drills into, named by the fourth segment.
-  const botSub = botTab && sub ? botSubOf(botTab, sub) : undefined
+  // A page's sub-screen: the row's edit or the list it drills into, named by the fourth segment —
+  // and, where that segment names a list, the item behind it by the fifth.
+  const botSub = botTab && sub ? botSubOf(botTab, sub, leaf) : undefined
   // On its own screen, a page sits under its bot's list and the list under the Settings menu.
   useEffect(() => {
     if (!separate) return
@@ -171,6 +172,9 @@ export function SettingsPage() {
   if (botId && botTab && tab !== botTab) return <Navigate to={botTabPath(botId, botTab)} replace />
   // A fourth segment that names nothing on this page is the page itself, in its own entry.
   if (sub && botTab && !botSub) return <Navigate to={botTabPath(botId!, botTab)} replace />
+  // A fifth segment on a page that lists no items addresses the page itself.
+  if (leaf && botSub && !botSub.item)
+    return <Navigate to={botSubPath(botId!, botTab!, botSub.id)} replace />
   if (sub && !botTab) return <Navigate to={botId ? botPath(botId) : "/settings"} replace />
   // A botId that isn't one of this device's bots is the menu, and nothing of a bot's screen.
   if (section === "bots" && botId && !bot)

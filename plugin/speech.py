@@ -6,6 +6,13 @@ the models this module lists, so a pick is that one key, written through Hermes'
 YAML writer: every other speech setting, and the rest of the file with its comments, stays. The
 model a pick leaves in place is read on the next clip, never mid-clip, as a bot's vocabulary is.
 
+The same section holds every other setting that decides how a bot's speech is heard, and the
+Speech-to-text page draws them all (ADR 0063): ``stt_settings`` answers the page in one read — the
+explicit values, Hermes's own defaults, the provider Hermes resolves, each provider's key presence
+and the model catalogues — and ``set_stt_value`` writes one dotted path, or clears it back to the
+host's default with ``None``. No value of a key is ever read: a provider is reported as having one
+or not.
+
 Two things are kept beside it in the host's settings store, per bot:
 
 - the model a finished dictation's cleanup runs on, where the host grants the plugin its
@@ -152,8 +159,15 @@ def downloaded(entry: Dict[str, Any], roots: Sequence[Path]) -> bool:
     return False
 
 
-def read(config_path: Path, path: Path, gate: Dict[str, bool]) -> Dict[str, Any]:
-    """The host's speech settings as the Dictation tab draws them: the pick, the list."""
+def read(
+    config_path: Path, path: Path, gate: Dict[str, bool], with_stt: bool = False
+) -> Dict[str, Any]:
+    """The host's speech settings as the Dictation tab draws them: the pick, the list.
+
+    ``with_stt`` adds the whole ``stt`` block the Speech-to-text page draws, built from the read
+    this function already did, so one request parses ``config.yaml`` once. A host that declares no
+    ``stt`` defaults answers without it — the feature absent, not a read that failed.
+    """
     stt = _stt(config_path)
     model = _model_of(stt)
     roots = cache_roots(stt)
@@ -187,11 +201,17 @@ def read(config_path: Path, path: Path, gate: Dict[str, bool]) -> Dict[str, Any]
                 "downloading": False,
             },
         )
-    return {
+    payload = {
         "model": model,
         "models": rows,
         "cleanup": cleanup_state(path, gate),
     }
+    if with_stt:
+        try:
+            payload["stt"] = stt_settings(config_path, stt)
+        except ImportError:
+            logger.debug("memento: this host declares no speech settings", exc_info=True)
+    return payload
 
 
 def set_model(config_path: Path, value: Any) -> str:
@@ -208,6 +228,203 @@ def set_model(config_path: Path, value: Any) -> str:
     section = {**stt, "local": {**local, "model": name}}
     _write_stt(config_path, section)
     return name
+
+
+# ---- The whole ``stt`` section, one key at a time (ADR 0063) --------------------------------
+
+# The key the schema never seeds: a stored value is an explicit pick, and absent means Hermes's own
+# resolver decides, which is a real state and why it is the row's first choice.
+PROVIDER_KEY = "stt.provider"
+# Hermes declares these per provider and this page does not carry them: a URL typed on a phone that
+# silently breaks transcription, and a secret this app never holds (ADR 0063).
+HIDDEN = frozenset({"base_url", "api_key"})
+# The variable Hermes reads each provider's key from. Only its presence is asked for, never its
+# value: the check answers a boolean and nothing else.
+KEY_ENV = {
+    "groq": "GROQ_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "mistral": "MISTRAL_API_KEY",
+    "xai": "XAI_API_KEY",
+    "elevenlabs": "ELEVENLABS_API_KEY",
+    "deepinfra": "DEEPINFRA_API_KEY",
+}
+TURNED_OFF = "Speech-to-text is turned off on this host."
+NOTHING_USABLE = "No speech provider on this host can hear a take."
+
+
+def _defaults() -> Dict[str, Any]:
+    """Hermes's own ``stt`` defaults: the keys the page draws, and what each row falls back to.
+
+    Read per call, never cached: a test, or a second host in the same process, installs its own.
+    """
+    from hermes_cli.config_defaults import DEFAULT_CONFIG
+
+    section = DEFAULT_CONFIG.get(STT_KEY) if isinstance(DEFAULT_CONFIG, dict) else None
+    if not isinstance(section, dict) or not section:
+        raise ImportError("no stt defaults")
+    return section
+
+
+def _flatten(section: Dict[str, Any], prefix: str = f"{STT_KEY}.") -> Dict[str, Any]:
+    """A section as the dotted paths Hermes spells it by, minus the ones this page never carries."""
+    out: Dict[str, Any] = {}
+    for key, value in section.items():
+        if key in HIDDEN:
+            continue
+        path = f"{prefix}{key}"
+        if isinstance(value, dict):
+            out.update(_flatten(value, f"{path}."))
+        else:
+            out[path] = value
+    return out
+
+
+def stt_available() -> bool:
+    """Whether this host declares the speech settings the page draws: no defaults, no feature."""
+    try:
+        return bool(_defaults())
+    except Exception:
+        return False
+
+
+def _provider_names(defaults: Dict[str, Any]) -> List[str]:
+    """The providers the host declares, in its own order: every block of settings but ``local``."""
+    return [name for name, value in defaults.items() if isinstance(value, dict) and name != "local"]
+
+
+def _catalogues() -> Dict[str, List[str]]:
+    """Each provider's model catalogue, where Hermes ships one; DeepInfra's is read live by the host."""
+    try:
+        from tools.transcription_common import STT_MODEL_CATALOG
+    except Exception:
+        logger.debug("memento: no speech model catalogues on this host", exc_info=True)
+        return {}
+    if not isinstance(STT_MODEL_CATALOG, dict):
+        return {}
+    return {
+        str(name): [str(model) for model in models]
+        for name, models in STT_MODEL_CATALOG.items()
+        if isinstance(models, (list, tuple)) and models
+    }
+
+
+def _env_lookup() -> Optional[Callable[[str], Any]]:
+    """The host's dotenv-aware env read, where it has one."""
+    try:
+        from agent.credential_pool import get_env_prefer_dotenv
+    except Exception:
+        logger.debug("memento: no credential pool: provider keys unknown", exc_info=True)
+        return None
+    return get_env_prefer_dotenv
+
+
+def _key_set(provider: str, lookup: Optional[Callable[[str], Any]]) -> Optional[bool]:
+    """Whether the host holds this provider's key — a boolean, never the value, None where unknown."""
+    variable = KEY_ENV.get(provider)
+    if variable is None or lookup is None:
+        return None
+    try:
+        return bool(lookup(variable))
+    except Exception:
+        logger.debug("memento: couldn't ask for %s's key", provider, exc_info=True)
+        return None
+
+
+def _on(section: Dict[str, Any]) -> bool:
+    value = section.get("enabled", True)
+    if isinstance(value, str):
+        return value.strip().lower() not in ("false", "no", "off", "0", "")
+    return bool(value)
+
+
+def _resolved(section: Dict[str, Any]) -> Dict[str, Optional[str]]:
+    """Which provider Hermes would use, and — where it can use none — its reason in plain words."""
+    try:
+        from tools.transcription_tools import _get_provider
+    except Exception:
+        logger.debug("memento: no provider resolver on this host", exc_info=True)
+        return {"name": "", "reason": None}
+    try:
+        name = str(_get_provider(dict(section)) or "")
+    except Exception as error:
+        logger.debug("memento: couldn't resolve a speech provider", exc_info=True)
+        return {"name": "none", "reason": str(error) or NOTHING_USABLE}
+    if name and name != "none":
+        return {"name": name, "reason": None}
+    return {"name": "none", "reason": NOTHING_USABLE if _on(section) else TURNED_OFF}
+
+
+def stt_settings(config_path: Path, section: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """The page's one read: what the file holds, what Hermes defaults to, and who hears a take.
+
+    ``section`` is the ``stt`` block a caller already read — the Dictation tab's own read — so one
+    request parses ``config.yaml`` once. Raises ImportError where this host declares no ``stt``
+    defaults, which is the feature absent rather than a read that failed.
+    """
+    if section is None:
+        section = _stt(config_path)
+    defaults_section = _defaults()
+    defaults = _flatten(defaults_section)
+    known = {*defaults.keys(), PROVIDER_KEY}
+    values = {key: value for key, value in _flatten(section).items() if key in known}
+    pick = values.get(PROVIDER_KEY)
+    catalogues = _catalogues()
+    resolved = _resolved(section)
+    lookup = _env_lookup()
+    return {
+        "values": values,
+        "defaults": defaults,
+        "provider": {
+            **resolved,
+            "explicit": pick.strip() if isinstance(pick, str) and pick.strip() else None,
+        },
+        "providers": [
+            {"name": name, "key_set": _key_set(name, lookup)}
+            for name in _provider_names(defaults_section)
+        ],
+        "models": catalogues,
+    }
+
+
+def _checked(key: Any, value: Any) -> Any:
+    """``value`` as the key it names takes it, or ValueError before anything is written."""
+    defaults = _flatten(_defaults())
+    if not isinstance(key, str) or key not in {*defaults.keys(), PROVIDER_KEY}:
+        raise ValueError(f"{key} isn't a speech setting this page can write.")
+    if value is None:
+        return None
+    sample = defaults.get(key)
+    if key == PROVIDER_KEY:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("A provider pick needs a provider's name, or nothing for Automatic.")
+        return value.strip()
+    if isinstance(sample, bool):
+        if not isinstance(value, bool):
+            raise ValueError(f"{key} is a switch, so its value is true or false.")
+        return value
+    if isinstance(sample, (int, float)):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"{key} takes a number.")
+        return value
+    if isinstance(sample, str):
+        if not isinstance(value, str):
+            raise ValueError(f"{key} takes text.")
+        return value
+    raise ValueError(f"{key} isn't a speech setting this page can write.")
+
+
+def set_stt_value(config_path: Path, key: Any, value: Any = None) -> None:
+    """Writes one dotted key in ``config_path``'s ``stt`` section; ``None`` clears it.
+
+    One path through Hermes's round-trip writer, so a comment, the section's order and a block this
+    page doesn't model — a plugin provider's own, a ``base_url`` — all survive, and clearing a key
+    removes that key alone. ValueError names a key the page may not write, or a value the key it
+    names can't hold, before the file is touched.
+    """
+    wanted = _checked(key, value)
+    from utils import atomic_roundtrip_yaml_update
+
+    atomic_roundtrip_yaml_update(config_path, str(key), wanted)
 
 
 def read_cleanup(path: Path) -> Optional[Dict[str, str]]:

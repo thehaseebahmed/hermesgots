@@ -27,6 +27,7 @@ import {
 import { isNative } from "@/lib/native"
 import type { Fingerprint, Totals } from "@/lib/dictation-log"
 import type { CronSchedule } from "@/lib/schedule"
+import { readStt, type SttValue } from "@/lib/stt-settings"
 import {
   parseMcpAccess,
   readMcpAccessOffer,
@@ -1244,6 +1245,26 @@ export async function setSpeechSettings(
     signal,
   })
   return ((await response.json())?.speech ?? null) as Record<string, unknown> | null
+}
+
+/**
+ * Writes one speech setting in the bot's own `config.yaml` — a dotted path and a scalar, or `null`
+ * to clear it back to the host's default — and answers the host's fresh `stt` block. The host
+ * refuses a key the page may not write, and its own sentence is what the page shows.
+ */
+export async function setSttSetting(
+  config: HermesConfig,
+  key: string,
+  value: SttValue,
+  signal?: AbortSignal,
+) {
+  const response = await request(`${pluginRoot(config.baseUrl)}/stt`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ key, value }),
+    signal,
+  })
+  return readStt(((await response.json())?.stt ?? null) as unknown)
 }
 
 /**
