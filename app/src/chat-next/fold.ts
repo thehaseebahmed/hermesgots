@@ -20,10 +20,16 @@ export interface ToolCall {
 }
 
 /** A reply in the order the host wrote it: its words, then the run of calls it made, then more words. */
-export type Part = { kind: "text"; text: string } | { kind: "tools"; calls: ToolCall[] }
+export type Part =
+  | { kind: "text"; text: string }
+  | { kind: "tools"; calls: ToolCall[] }
+  /** The host compacted the conversation here; the rows above are summarised in what follows. */
+  | { kind: "compaction" }
 
 export interface Turn {
   user: string
+  /** The host archived this turn's request when it compacted: what is left is the work, from the seam on. */
+  carried?: boolean
   parts: Part[]
   /** The host has written the reply's last row: an assistant row that makes no more calls and says why it stopped. */
   done: boolean
@@ -31,6 +37,16 @@ export interface Turn {
   wake?: boolean
   /** The children whose results this wake turn carries, as the host names them. */
   delivered: string[]
+}
+
+/**
+ * A transcript with the rows a compaction archived put back above it. The archive read holds the
+ * live rows too, in the conversation's order rather than by id, so only the rows the live read lacks
+ * are added, in the order the host gave them.
+ */
+export function withArchive(live: Row[], archive: Row[]): Row[] {
+  const held = new Set(live.map((row) => row.id))
+  return [...archive.filter((row) => !held.has(row.id)), ...live]
 }
 
 /** What Hermes writes in place of the user when a background subagent finishes. */
@@ -48,6 +64,22 @@ export function foldTurns(rows: Row[]): Turn[] {
   const callOf = new Map<string, ToolCall>()
   for (const row of rows) {
     if (row.role === "user") {
+      // The host's own rows are the model's input, never the user's words. A compaction leaves one,
+      // empty, where the summary went; a model switch is a note to the model.
+      if (row.display_kind === "model_switch") continue
+      if (row.display_kind === "hidden") {
+        const last = turns.at(-1)
+        if (!last)
+          turns.push({
+            user: "",
+            parts: [{ kind: "compaction" }],
+            done: true,
+            carried: true,
+            delivered: [],
+          })
+        else if (last.parts.at(-1)?.kind !== "compaction") last.parts.push({ kind: "compaction" })
+        continue
+      }
       const content = row.content ?? ""
       if (DELIVERY.test(content)) {
         const last = turns.at(-1)

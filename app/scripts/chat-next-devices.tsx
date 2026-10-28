@@ -52,6 +52,7 @@ export async function openDevice(host: Host, { idleMs = 20 }: { idleMs?: number 
           .map((line) => Number(/^(\d+) tool/.exec(line.textContent ?? "")?.[1] ?? 0))
           .reduce((sum, count) => sum + count, 0),
         asks: [...section.querySelectorAll("[data-answered]")].map((ask) => ask.textContent ?? ""),
+        seams: section.querySelectorAll("[data-compaction]").length,
         agents: [...section.querySelectorAll("[data-agent]")].map((card) => ({
           goal: card.querySelector("[data-agent-goal]")?.textContent ?? "",
           status: card.getAttribute("data-status") ?? "",
@@ -73,6 +74,12 @@ export async function openDevice(host: Host, { idleMs = 20 }: { idleMs?: number 
             ),
           }))
         : undefined
+    },
+    /** Whether the screen offers the messages a compaction took out of the transcript. */
+    offersEarlier: () => Boolean(one("[data-earlier]")),
+    async loadEarlier() {
+      await click(one("[data-earlier]"))
+      await settle()
     },
     async openAgent(goal: string) {
       const card = [...container.querySelectorAll("[data-agent]")].find(
@@ -134,10 +141,11 @@ export async function openDevice(host: Host, { idleMs = 20 }: { idleMs?: number 
 export type Device = Awaited<ReturnType<typeof openDevice>>
 
 /** Gives a device the moment it needs to draw what it was told, then holds it to the host's word. */
-export async function showsEverything(device: Device, host: Host, what: string) {
+export async function showsEverything(device: Device, host: Host, what: string, full = false) {
+  const expected = () => host.view(full)
   for (let tries = 0; tries < 60; tries++) {
     try {
-      assert.deepEqual(device.turns(), host.expected)
+      assert.deepEqual(device.turns(), expected())
       break
     } catch {
       await wait(25)
@@ -145,8 +153,8 @@ export async function showsEverything(device: Device, host: Host, what: string) 
   }
   assert.deepEqual(
     device.turns(),
-    host.expected,
-    `${what}\n  device:   ${JSON.stringify(device.turns())}\n  expected: ${JSON.stringify(host.expected)}`,
+    expected(),
+    `${what}\n  device:   ${JSON.stringify(device.turns())}\n  expected: ${JSON.stringify(expected())}`,
   )
 }
 

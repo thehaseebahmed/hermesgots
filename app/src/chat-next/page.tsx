@@ -100,7 +100,7 @@ function TurnView({
             : "a subagent"}
           {turn.done ? " finished" : " just finished"}
         </p>
-      ) : (
+      ) : turn.carried ? null : (
         <p
           data-user
           className="ml-auto w-fit max-w-[85%] rounded-2xl bg-muted px-4 py-2 whitespace-pre-wrap"
@@ -109,6 +109,19 @@ function TurnView({
         </p>
       )}
       {turn.parts.map((part, at) => {
+        if (part.kind === "compaction")
+          return (
+            <div
+              key={at}
+              data-compaction
+              role="separator"
+              className="flex items-center gap-3 text-xs text-muted-foreground"
+            >
+              <span className="h-px flex-1 bg-border" />
+              Context compacted
+              <span className="h-px flex-1 bg-border" />
+            </div>
+          )
         if (part.kind === "text")
           return (
             <div key={at} data-text>
@@ -277,6 +290,7 @@ export function ChatNextPage({
   const session = params.get("session")
   const [state, dispatch] = useReducer(reduce, initial)
   const [draft, setDraft] = useState("")
+  const [earlier, setEarlier] = useState<"idle" | "reading" | "failed">("idle")
   const [host, setHost] = useState<"checking" | "ok" | { version?: string }>("checking")
   const ready = host === "ok"
   // A read begun before a send or a joined run is stale and does not land. Reads of the transcript
@@ -499,6 +513,20 @@ export function ChatNextPage({
     }
   }
 
+  /** Asks for the rows a compaction took out of the transcript; the next read folds them in. */
+  async function loadEarlier() {
+    if (!server || !key || !session) return
+    setEarlier("reading")
+    try {
+      const rows = await readTranscript({ server, key }, session, alive.current.signal, true)
+      dispatch({ type: "earlier", rows })
+      setEarlier("idle")
+      await catchUp()
+    } catch {
+      if (!alive.current.signal.aborted) setEarlier("failed")
+    }
+  }
+
   if (!server || !key || !session)
     return <p className="p-4 text-sm">Open with ?server=&key=&session=</p>
 
@@ -514,6 +542,18 @@ export function ChatNextPage({
   return (
     <main className="mx-auto w-full max-w-3xl space-y-6 p-4">
       {state.status === "failed" ? <p role="alert">{state.error}</p> : null}
+      {!state.archived &&
+      state.turns.some((turn) => turn.parts.some((part) => part.kind === "compaction")) ? (
+        <button
+          data-earlier
+          type="button"
+          disabled={earlier === "reading"}
+          className="mx-auto block rounded-md border px-3 py-1 text-sm"
+          onClick={() => void loadEarlier()}
+        >
+          {earlier === "failed" ? "Couldn't load earlier messages. Try again" : "Earlier messages"}
+        </button>
+      ) : null}
       {state.turns.map((turn, at) => (
         <TurnView
           key={at}

@@ -68,7 +68,8 @@ export async function readVersion(connection: Connection, signal?: AbortSignal) 
 }
 
 /**
- * A session's whole transcript, oldest row first. The host pages newest-first by offset, so older
+ * A session's whole transcript, oldest row first. With `archived` it holds the rows a compaction took
+ * out of it too, in the conversation's order rather than the ids'. The host pages newest-first by offset, so older
  * pages are read until one comes back short. A session the host has not heard of yet is an empty
  * chat, not a failure.
  */
@@ -76,11 +77,12 @@ export async function readTranscript(
   connection: Connection,
   session: string,
   signal?: AbortSignal,
+  archived = false,
 ): Promise<Row[]> {
   const pages: Row[][] = []
   for (let offset = 0; ; offset += PAGE) {
     const response = await fetch(
-      `${root(connection)}/api/sessions/${encodeURIComponent(session)}/messages?order=latest&limit=${PAGE}&offset=${offset}`,
+      `${root(connection)}/api/sessions/${encodeURIComponent(session)}/messages?order=latest&limit=${PAGE}&offset=${offset}${archived ? "&include_compacted=true" : ""}`,
       { headers: headers(connection), signal: within(signal) },
     )
     if (response.status === 404) {

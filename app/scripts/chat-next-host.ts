@@ -30,6 +30,10 @@ interface Row {
   timestamp: number
   display_kind: string | null
   finish_reason: string | null
+  /** Where the conversation puts the row, which is not the id's order once a compaction has run. */
+  order: number
+  /** A compaction took the row out of the transcript the host answers with, into its archive. */
+  archived?: boolean
 }
 
 export interface ExpectedTurn {
@@ -40,6 +44,8 @@ export interface ExpectedTurn {
   asks: string[]
   /** Subagents the turn set to work, each with what its child is doing. */
   agents: { goal: string; status: "running" | "done" }[]
+  /** Compaction dividers drawn in the turn. */
+  seams: number
 }
 
 /** A subagent the host is running for a `delegate_task` call. */
@@ -139,10 +145,13 @@ export function fakeHost(
   const runs = new Map<string, RunState>()
   const answers: { run: string; prompt_id: string; generation: number; answer: string }[] = []
   const approvals: { run: string; choice: string }[] = []
-  const asked = { transcript: 0, runs: 0, subscriptions: 0, health: 0 }
+  const asked = { transcript: 0, archive: 0, runs: 0, subscriptions: 0, health: 0 }
   const latest: { run?: Run; id?: string } = {}
   const agents: AgentRecord[] = []
   const children = new Map<string, Row[]>()
+  const compactions: { row: Row; turn: number; inside: boolean }[] = []
+  const gone = new Set<number>()
+  const lostRequest = new Set<number>()
   let nextId = 1000
   let nextRun = 0
   let nextPrompt = 0
@@ -162,6 +171,7 @@ export function fakeHost(
       timestamp: ++clock,
       display_kind: null,
       finish_reason: null,
+      order: nextId,
       ...extra,
     })
 
@@ -176,7 +186,7 @@ export function fakeHost(
       state.listeners.forEach((listen) => listen(sent))
     }
     if (input !== null) write("user", input)
-    expected.push({ user: input ?? "", texts: [], tools: 0, asks: [], agents: [] })
+    expected.push({ user: input ?? "", texts: [], tools: 0, asks: [], agents: [], seams: 0 })
     const turn = expected.at(-1)!
     let calls = 0
 
@@ -460,11 +470,17 @@ export function fakeHost(
         )
       const limit = Number(url.searchParams.get("limit"))
       const offset = Number(url.searchParams.get("offset"))
-      const page = [...rows].sort((a, b) => b.id - a.id).slice(offset, offset + limit)
+      // Archived rows come back only when asked for, and the order is the conversation's.
+      if (url.searchParams.get("include_compacted") === "true") asked.archive++
+      const held =
+        url.searchParams.get("include_compacted") === "true"
+          ? rows
+          : rows.filter((row) => !row.archived)
+      const page = [...held].sort((a, b) => b.order - a.order).slice(offset, offset + limit)
       return reply({
         object: "list",
         session_id: session,
-        data: page.reverse(),
+        data: page.reverse().map(({ order: _order, archived: _archived, ...row }) => row),
         pagination: { limit, offset, order: "latest", returned: page.length },
       })
     }
@@ -545,10 +561,70 @@ export function fakeHost(
     }
   }
 
+  /**
+   * Hermes compacts the conversation in place. The oldest turns go to the archive, `keep` finished
+   * turns stay (the host protects the tail), and an empty `hidden` row stands where the summary
+   * went. A turn still being worked keeps its work but loses its request to the archive, which is
+   * what the real host did to a request in flight. Wake turns are not modelled.
+   */
+  function compact({ keep = 1 }: { keep?: number } = {}) {
+    const live = rows.filter((row) => !row.archived).sort((a, b) => a.order - b.order)
+    const starts = live.filter((row) => row.role === "user" && !row.display_kind)
+    const last = live.at(-1)
+    const open = !(last?.role === "assistant" && last.finish_reason === "stop")
+    // Turns, as the live rows split at each user row.
+    const turnOf = (row: Row) => starts.filter((start) => start.order <= row.order).length - 1
+    const count = starts.length
+    const cut = open ? count - 1 : count - keep
+    if (cut < 0 || (cut === 0 && !open)) return
+    const firstKept = starts[cut]
+    const doomed = live.filter((row) => turnOf(row) < cut || (open && row === firstKept))
+    const carried = open && cut === count - 1
+    doomed.forEach((row) => (row.archived = true))
+    const after = live.filter((row) => !row.archived)
+    const at = after[0] ? after[0].order - 0.5 : (live.at(-1)?.order ?? 0) + 0.5
+    write("user", "", { display_kind: "hidden", order: at })
+    const base = expected.length - count
+    compactions.push({ row: rows.at(-1)!, turn: base + cut, inside: carried })
+    for (let index = base; index < base + (open ? cut : cut); index++) gone.add(index)
+    if (carried) lostRequest.add(base + cut)
+  }
+
+  /**
+   * What a device should show: the turns the host's transcript holds, or with `full` the archive
+   * put back. A compaction whose hidden row was itself archived is only in the archive.
+   */
+  function view(full = false): ExpectedTurn[] {
+    const out: ExpectedTurn[] = []
+    const marks = compactions.filter((mark) => full || !mark.row.archived)
+    expected.forEach((turn, index) => {
+      if (!full && gone.has(index)) return
+      const here = marks.filter((mark) =>
+        mark.inside ? mark.turn === index : mark.turn - 1 === index,
+      )
+      const lead = marks.filter((mark) => !mark.inside && mark.turn === index)
+      // A compaction ahead of the first turn the transcript holds is a divider on its own.
+      if (!full && out.length === 0 && lead.length)
+        out.push({ user: "", texts: [], tools: 0, asks: [], agents: [], seams: 1 })
+      out.push({
+        ...turn,
+        user: !full && lostRequest.has(index) ? "" : turn.user,
+        seams: here.length,
+      })
+    })
+    // Seams between turns the live view no longer shows were counted on the turns they follow.
+    return out
+  }
+
   /** Every open event stream dies without a word, as a phone's does when it goes to sleep. */
   function dropConnections() {
     for (const state of runs.values()) {
-      state.listeners.forEach((listen) => listen(null))
+      // A finished run's stream is already closed, and closing it again throws.
+      state.listeners.forEach((listen) => {
+        try {
+          listen(null)
+        } catch {}
+      })
       state.listeners.clear()
     }
   }
@@ -566,6 +642,8 @@ export function fakeHost(
     handle,
     seed,
     expected,
+    view,
+    compact,
     asked,
     answers,
     approvals,
