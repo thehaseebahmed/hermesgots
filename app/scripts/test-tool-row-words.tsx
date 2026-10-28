@@ -68,7 +68,11 @@ test("a failed group is marked at its head, and its reason stands under the word
       const mark = row?.firstElementChild
       assert.equal(mark?.getAttribute("data-slot"), "work-sign", "the mark leads the row")
       assert.match(mark?.getAttribute("class") ?? "", /text-destructive/, "in the failure's colour")
-      assert.equal(mark?.getAttribute("aria-hidden"), "true", "and says nothing over the row's name")
+      assert.equal(
+        mark?.getAttribute("aria-hidden"),
+        "true",
+        "and says nothing over the row's name",
+      )
       assert.match(
         row?.getAttribute("aria-label") ?? "",
         /(^|,\s)failed$/,
@@ -76,7 +80,11 @@ test("a failed group is marked at its head, and its reason stands under the word
       )
       const reason = find('[data-slot="tool-group-reason"]')
       assert.equal(reason?.textContent, "Exited 2", "the host's reason stands under the label")
-      assert.match(reason?.className ?? "", /pl-6/, "dented past the mark, so it stands under the words")
+      assert.match(
+        reason?.className ?? "",
+        /pl-6/,
+        "dented past the mark, so it stands under the words",
+      )
       assert.equal(
         reason?.previousElementSibling?.getAttribute("data-slot"),
         "tool-group",

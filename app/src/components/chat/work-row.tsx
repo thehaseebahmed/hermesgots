@@ -42,11 +42,12 @@ export function WorkSign({ failed }: { failed?: boolean }) {
  * A work row's words: the one box they are bounded by, whichever row draws them, so a long label
  * truncates in the row's shape rather than pushing what follows it (ADR 0050).
  */
-export const WorkLabel = forwardRef<HTMLSpanElement, ComponentProps<"span">>(
-  function WorkLabel({ className, ...props }, ref) {
-    return <span ref={ref} className={cn("min-w-0 truncate", className)} {...props} />
-  },
-)
+export const WorkLabel = forwardRef<HTMLSpanElement, ComponentProps<"span">>(function WorkLabel(
+  { className, ...props },
+  ref,
+) {
+  return <span ref={ref} className={cn("min-w-0 truncate", className)} {...props} />
+})
 
 /**
  * The row button over that shape: what follows the label (a ruler, a chevron) belongs to the row

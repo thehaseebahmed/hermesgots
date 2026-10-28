@@ -97,9 +97,11 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
             groups: parts("tool-group").map(edge),
             text: parts("markdown").map(edge),
           },
-          // Whether a calls' row is spinning, asked of the row rather than of the reply: the footer's
-          // own loader is a spinner too, and it stands down only while a row names the work.
-          groupSpins: parts("tool-group").map((one) => Boolean(one.querySelector("[data-slot=spinner]"))),
+          // Asked of the row, not of the reply: the footer's own loader is a spinner too, and it
+          // stands down only while a row names the work.
+          groupSpins: parts("tool-group").map((one) =>
+            Boolean(one.querySelector("[data-slot=spinner]")),
+          ),
           group: own?.querySelector("[data-slot=tool-group]")?.getAttribute("aria-label") ?? null,
           groups: own?.querySelectorAll("[data-slot=tool-group]").length ?? 0,
           // The sheet is one pop-up wherever a row opened it: its body holds the whole markdown.
