@@ -548,10 +548,6 @@ export function fakeHost(
     return reply({ error: { message: `no route ${path}` } }, 404)
   }
 
-  function install() {
-    globalThis.fetch = handle as typeof fetch
-  }
-
   /** Turns already on the host before any device looks: finished, with their calls and reply. */
   function seed(turns: { user: string; tools?: number; reply: string }[]) {
     for (const turn of turns) {
@@ -637,8 +633,10 @@ export function fakeHost(
     return run
   }
 
+  // The host answers every request this process makes from the moment it exists.
+  globalThis.fetch = handle as typeof fetch
+
   return {
-    install,
     handle,
     seed,
     expected,

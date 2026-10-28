@@ -15,6 +15,7 @@ import {
   sendFrom,
   showsEverything,
   type Device,
+  withDevice,
 } from "./chat-next-devices.tsx"
 
 // An idle device would read once a minute here: what follows the child is the busy poll alone.
@@ -23,7 +24,6 @@ const slow = (host: ReturnType<typeof fakeHost>) => openDevice(host, { idleMs: 6
 const GOAL = "Check the weather in Lisbon"
 const setUp = (name: string, options = {}) => {
   const host = fakeHost(`memento-delegate-${name}`, { plugin: true, ...options })
-  host.install()
   return host
 }
 
@@ -38,21 +38,17 @@ async function delegating(device: Device, host: ReturnType<typeof setUp>, goal =
 
 test("a delegated turn ends while its child works, and draws a card for the child", async () => {
   const host = setUp("card")
-  const phone = await slow(host)
-  try {
+  await withDevice(slow(host), async (phone) => {
     await delegating(phone, host)
     await showsEverything(phone, host, "the turn, its reply and a running card for the child")
     assert.deepEqual(phone.turns()[0].agents, [{ goal: GOAL, status: "running" }])
     assert.equal(phone.turns()[0].tools, 0, "the call is the card, not a tool line")
-  } finally {
-    await phone.close()
-  }
+  })
 })
 
 test("the card follows the child to done, and the wake turn arrives without a message of the user's", async () => {
   const host = setUp("wake")
-  const phone = await slow(host)
-  try {
+  await withDevice(slow(host), async (phone) => {
     const child = await delegating(phone, host)
     await showsEverything(phone, host, "the running card first")
     const wake = child.finish("The weather is mild.")
@@ -65,15 +61,12 @@ test("the card follows the child to done, and the wake turn arrives without a me
     wake.finish("It is mild, the subagent says.")
     await showsEverything(phone, host, "both turns, the card done")
     assert.equal(phone.turns()[0].agents[0].status, "done")
-  } finally {
-    await phone.close()
-  }
+  })
 })
 
 test("a wake turn opens with a line naming the subagent that finished, resuming and then resumed", async () => {
   const host = setUp("note")
-  const phone = await slow(host)
-  try {
+  await withDevice(slow(host), async (phone) => {
     const child = await delegating(phone, host)
     await showsEverything(phone, host, "the running card first")
     assert.deepEqual(phone.wakes(), [], "nothing to resume while the child works")
@@ -89,15 +82,12 @@ test("a wake turn opens with a line naming the subagent that finished, resuming 
       "and past tense once it is done",
     )
     assert.equal(phone.turns()[0].user, "go", "an ordinary turn gets no such line")
-  } finally {
-    await phone.close()
-  }
+  })
 })
 
 test("the delivery rows the host writes are never drawn", async () => {
   const host = setUp("hidden")
-  const phone = await slow(host)
-  try {
+  await withDevice(slow(host), async (phone) => {
     const child = await delegating(phone, host)
     child.finish("done").finish("All done.")
     await showsEverything(phone, host, "both turns")
@@ -106,9 +96,7 @@ test("the delivery rows the host writes are never drawn", async () => {
       "no delivery row in the thread",
     )
     assert.ok(!document.body.textContent?.includes("--- RESULT ---"))
-  } finally {
-    await phone.close()
-  }
+  })
 })
 
 test("a device that opens while the child works shows the running card, then the rest", async () => {
@@ -131,22 +119,18 @@ test("a device that opens while the child works shows the running card, then the
 
 test("a device that was away while the child finished comes back to the done card and the wake turn", async () => {
   const host = setUp("away")
-  const phone = await slow(host)
-  try {
+  await withDevice(slow(host), async (phone) => {
     const child = await delegating(phone, host)
     await showsEverything(phone, host, "the running card")
     child.finish("Mild.").finish("It is mild.")
     await phone.returns()
     await showsEverything(phone, host, "everything it missed")
-  } finally {
-    await phone.close()
-  }
+  })
 })
 
 test("a card opens its child's own transcript, read only", async () => {
   const host = setUp("thread")
-  const phone = await slow(host)
-  try {
+  await withDevice(slow(host), async (phone) => {
     const child = await delegating(phone, host)
     child.finish("The weather is mild.").finish("It is mild.")
     await showsEverything(phone, host, "the finished turns")
@@ -158,15 +142,12 @@ test("a card opens its child's own transcript, read only", async () => {
     assert.equal(host.asked.runs, 1, "reading a child starts nothing")
     await phone.closeAgent()
     assert.equal(phone.thread(), undefined, "and it closes")
-  } finally {
-    await phone.close()
-  }
+  })
 })
 
 test("two goals in one call are two cards, found in order even when the preview cut their words", async () => {
   const host = setUp("two")
-  const phone = await slow(host)
-  try {
+  await withDevice(slow(host), async (phone) => {
     const first = "Look up the weather in Lisbon for the whole of next week"
     const second = "Look up the weather in Porto for the whole of next week"
     const run = await sendFrom(phone, host, "go")
@@ -185,16 +166,13 @@ test("two goals in one call are two cards, found in order even when the preview 
       phone.turns()[0].agents.map((card) => card.goal),
       [first, second],
     )
-  } finally {
-    await phone.close()
-  }
+  })
 })
 
 test("without the plugin the card is drawn from the transcript and the wake turn still arrives", async () => {
   const host = setUp("bare", { plugin: false })
   // Nothing says a child is working, so the wake turn is found by the idle read alone.
-  const phone = await openDevice(host)
-  try {
+  await withDevice(openDevice(host), async (phone) => {
     const child = await delegating(phone, host)
     await eventually(
       () =>
@@ -209,7 +187,5 @@ test("without the plugin the card is drawn from the transcript and the wake turn
       () => assert.deepEqual(phone.turns().at(-1)?.texts, ["It is mild."]),
       "the wake turn, read from the transcript",
     )
-  } finally {
-    await phone.close()
-  }
+  })
 })

@@ -5,24 +5,19 @@
 import test from "node:test"
 
 import { fakeHost } from "./chat-next-host.ts"
-import { openDevice, showsEverything, turn } from "./chat-next-devices.tsx"
+import { openDevice, showsEverything, turn, withDevice } from "./chat-next-devices.tsx"
 
 test("1: a chat left open on the device that started it shows every turn it made", async () => {
   const host = fakeHost("memento-one")
-  host.install()
-  const phone = await openDevice(host)
-  try {
+  await withDevice(openDevice(host), async (phone) => {
     await turn(phone, host, "first question", "The first answer.")
     await turn(phone, host, "second question", "The second answer.", 3)
     await showsEverything(phone, host, "both turns, with their calls, on the device that made them")
-  } finally {
-    await phone.close()
-  }
+  })
 })
 
 test("2: a device that never held the chat shows all of it, however long it has grown", async () => {
   const host = fakeHost("memento-two")
-  host.install()
   // Thirty turns of six rows each: far more than the one page of fifty the host answers with.
   host.seed(
     Array.from({ length: 30 }, (_, at) => ({
@@ -31,17 +26,13 @@ test("2: a device that never held the chat shows all of it, however long it has 
       reply: `answer ${at}`,
     })),
   )
-  const laptop = await openDevice(host)
-  try {
+  await withDevice(openDevice(host), async (laptop) => {
     await showsEverything(laptop, host, "every turn, the oldest ones included")
-  } finally {
-    await laptop.close()
-  }
+  })
 })
 
 test("3: a chat continued on another device is whole again when the first device comes back", async () => {
   const host = fakeHost("memento-three")
-  host.install()
   const phone = await openDevice(host)
   const laptop = await openDevice(host)
   try {
