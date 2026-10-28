@@ -50,8 +50,8 @@ function watchAway(view: HTMLElement, away: () => void) {
  * One stretch of a reply's thinking — or the stretch still to come, while the reply works and its
  * model has said nothing yet, drawn as a status row with nothing to open until words arrive. The
  * row says what the turn is doing: it turns a spinner ahead of the label while the thinking still
- * arrives, and stands still once this device has measured how long the run took. It opens the
- * working-out in the same sheet the tool row opens, so the thread's two accounts of the work read
+ * arrives, and wears no sign at all once this device has measured how long the run took. It opens
+ * the working-out in the same sheet the tool row opens, so the thread's two accounts of the work read
  * and open the same way. A live run opened in the sheet lands on its newest words and keeps them in
  * view while they arrive, until the reader scrolls away inside the sheet; the sheet never closes
  * itself — when the thinking ends the label beside it just reads the span. See ADR 0050 and ADR 0064.

@@ -41,7 +41,7 @@ does not reach it. The wave was the only thing this pair of decisions shared.
   fast they move.
 - **A mark that is not a spinner** — a dot, a bar, the chevron lit. Rejected: a new glyph in a slot
   every other app fills with a spinner passes the cost onto the reader to learn, and the app already
-  draws spinner in that slot in lists and sheets.
+  draws a spinner in that slot in lists and sheets.
 - **Rows with no sign at all, the status line alone moving.** Rejected: while a thought row names the
   thinking the status line says nothing (ADR 0050), so a turn whose thinking is arriving would show
   nothing moving anywhere on the screen.
@@ -52,10 +52,14 @@ does not reach it. The wave was the only thing this pair of decisions shared.
 ## Consequences
 
 - `WorkRow` carries `before` again, and `WORK_LABEL_DENT` returns with it, so a reason line and the
-  label it explains stand under one left edge. The note loses the pull ADR 0062 gave it at the same
-  moment: that pull closed the half-line a row with no mark left under its label, and with the dent
-  back the note's own line box is the only gap it needs. `WorkLabel` and the `.work-wave` keyframe go,
-  along with the `useReducedMotion` hook whose only reader was the wave.
+  label it explains stand under one left edge. `WorkSign` is the one place that sign is drawn — a
+  spinner at work, the X on a group whose calls failed — so the box the dent clears is stated beside
+  the dent. `WorkLabel` keeps the label's own box and loses the `wave` prop; the `.work-wave` keyframe
+  goes, along with the `useReducedMotion` hook whose only reader was the wave.
+- The note also loses the pull ADR 0062 gave it, standing as it did before #647. That pull closed the
+  half-line the row's centred label leaves under itself — a question about the row's 29px box rather
+  than about the mark — so this ADR restores the note's old shape and does not re-decide that
+  spacing.
 - A working thought row, the row a turn wears before a word of thinking arrives, and a tool group
   while any of its calls run each draw a spinner before their label; a group whose calls failed draws
   the X where it is not running. Reduced motion is the spinner's own: `motion-safe:animate-spin`

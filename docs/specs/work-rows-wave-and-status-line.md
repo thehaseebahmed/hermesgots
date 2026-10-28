@@ -136,12 +136,15 @@ is installed to do any of it.
 
 - A good test here drives what the reader sees: a row that is working carries a spinner, a finished one
   carries none, a failed group wears its mark, and the line draws a loader beside the words it is
-  saying. It does not assert class names beyond the slots each keeps for the purpose.
+  saying. It reads the slot each element keeps for the purpose, and pins three class names on purpose:
+  the failure's colour, the reason's dent, and the ring's `motion-safe:animate-spin`, which is the
+  one place the reduced-motion preference is decided.
 - **Component** (`app/scripts/test-thinking-line.tsx`, `test-tool-row-words.tsx` and
   `test-subagent-line.tsx`): a working row carries the spinner and no wave; a finished row carries
-  neither; a failed group wears its mark and carries its failure in its name; the status line draws a
-  loader beside whole words in the accent colour; a waiting line draws no loader and stands muted; the
-  subagent line is blue wherever it lands.
+  neither; a failed group wears its mark and carries its failure in its name; a row under reduced
+  motion still carries its sign, and the ring it is drawn with is the one that stills; the status line
+  draws a loader beside whole words in the accent colour; a waiting line draws no loader and stands
+  muted; the subagent line is blue wherever it lands.
 - **End to end** (`pnpm e2e thinking-line`): the rows are sampled for the spinner a working row carries,
   and the status line for its loader and the accent colour on both — colour is what a DOM without layout
   cannot reach (ADR 0019). The flow keeps its row in `docs/e2e-flow-audit.md`.
