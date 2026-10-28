@@ -1,0 +1,16 @@
+{
+  "object": "memento.agents",
+  "session_id": "memento-fixture-delegate-2",
+  "agents": [
+    {
+      "id": "20261028_151948_ac4d09",
+      "goal": "Run the terminal command `sleep 25 && echo second` and report its exact output. Return the literal stdout text of the command as your final answer, plus a one-line note of how you ran it (foreground vs background, exit code). Do not modify anything else.",
+      "model": "minimax-m3.1-flash",
+      "started_at": 1793200788.15607,
+      "ended_at": null,
+      "end_reason": null,
+      "tool_calls": 0,
+      "status": "running"
+    }
+  ]
+}

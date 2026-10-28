@@ -1,0 +1,25 @@
+: open
+
+id: 0
+data: {"event": "tool.started", "run_id": "run_39e3991d95e2489ab67c37277f094771", "timestamp": 1793198623.0447848, "tool": "terminal", "preview": "rm -rf /tmp/gots-approval-fixture-does-not-exist", "tool_call_id": "call_function_buvzktctlwus_1", "seq": 0}
+
+id: 1
+data: {"event": "approval.request", "run_id": "run_39e3991d95e2489ab67c37277f094771", "timestamp": 1793198623.1058898, "kind": "approval", "prompt_id": "78e6b47b81d74c508050f6ae435e9d2b", "execution_generation": 1, "command": "rm -rf /tmp/gots-approval-fixture-does-not-exist", "description": "delete in root path", "choices": ["once", "deny", "session", "always"], "seq": 1}
+
+id: 2
+data: {"event": "approval.settled", "run_id": "run_39e3991d95e2489ab67c37277f094771", "timestamp": 1793198624.2214043, "prompt_id": "78e6b47b81d74c508050f6ae435e9d2b", "execution_generation": 1, "seq": 2}
+
+id: 3
+data: {"event": "tool.completed", "run_id": "run_39e3991d95e2489ab67c37277f094771", "timestamp": 1793198624.2685215, "tool": "terminal", "duration": 0, "error": true, "tool_call_id": "call_function_buvzktctlwus_1", "preview": "", "seq": 3}
+
+id: 4
+data: {"event": "message.delta", "run_id": "run_39e3991d95e2489ab67c37277f094771", "timestamp": 1793198625.2186258, "delta": "\n\nThe command was blocked \u2014", "seq": 4}
+
+id: 5
+data: {"event": "message.delta", "run_id": "run_39e3991d95e2489ab67c37277f094771", "timestamp": 1793198625.3709934, "delta": " it did not run. Nothing was deleted. I'll leave it there rather than rephrasing or retrying it.", "seq": 5}
+
+id: 6
+data: {"event": "run.completed", "run_id": "run_39e3991d95e2489ab67c37277f094771", "timestamp": 1793198625.709443, "output": "The command was blocked \u2014 it did not run. Nothing was deleted. I'll leave it there rather than rephrasing or retrying it.", "usage": {"input_tokens": 52497, "output_tokens": 193, "total_tokens": 52690}, "runtime": {"provider": "", "model": "", "route_source": "global"}, "completed": true, "partial": false, "interrupted": false, "seq": 6}
+
+: stream closed
+

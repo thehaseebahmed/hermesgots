@@ -1,0 +1,22 @@
+: open
+
+id: 0
+data: {"event": "tool.started", "run_id": "run_e682b17a888246f0bc17ac59eccfc6aa", "timestamp": 1793200455.0930142, "tool": "delegate_task", "preview": "1 tasks: Run the shell command `sleep 12 && ec...", "tool_call_id": "call_function_vhdpvvlxyasi_1", "seq": 0}
+
+id: 1
+data: {"event": "tool.completed", "run_id": "run_e682b17a888246f0bc17ac59eccfc6aa", "timestamp": 1793200455.416651, "tool": "delegate_task", "duration": 0, "error": false, "tool_call_id": "call_function_vhdpvvlxyasi_1", "preview": "", "seq": 1}
+
+id: 2
+data: {"event": "message.delta", "run_id": "run_e682b17a888246f0bc17ac59eccfc6aa", "timestamp": 1793200456.547093, "delta": "\n\nDelegated \u2014", "seq": 2}
+
+id: 3
+data: {"event": "message.delta", "run_id": "run_e682b17a888246f0bc17ac59eccfc6aa", "timestamp": 1793200456.7981231, "delta": " one subagent (sa-0-1bdcd8f6) is running `sleep 12 && echo hello from the subagent` in the background now. Its output will land here as a fresh message once it finishes; I'll relay", "seq": 3}
+
+id: 4
+data: {"event": "message.delta", "run_id": "run_e682b17a888246f0bc17ac59eccfc6aa", "timestamp": 1793200456.8549125, "delta": " the result then.", "seq": 4}
+
+id: 5
+data: {"event": "run.completed", "run_id": "run_e682b17a888246f0bc17ac59eccfc6aa", "timestamp": 1793200457.193335, "output": "Delegated \u2014 one subagent (sa-0-1bdcd8f6) is running `sleep 12 && echo hello from the subagent` in the background now. Its output will land here as a fresh message once it finishes; I'll relay the result then.", "usage": {"input_tokens": 52801, "output_tokens": 303, "total_tokens": 53104}, "runtime": {"provider": "", "model": "", "route_source": "global"}, "completed": true, "partial": false, "interrupted": false, "seq": 5}
+
+: stream closed
+

@@ -1,0 +1,22 @@
+: open
+
+id: 0
+data: {"event": "message.delta", "run_id": "run_2ac1749f243c4b1e91be100d40db5e38", "timestamp": 1793203438.6418626, "delta": "I'll spin", "seq": 0}
+
+id: 1
+data: {"event": "message.delta", "run_id": "run_2ac1749f243c4b1e91be100d40db5e38", "timestamp": 1793203438.8276827, "delta": " up a subagent to run that check.", "seq": 1}
+
+id: 2
+data: {"event": "tool.started", "run_id": "run_2ac1749f243c4b1e91be100d40db5e38", "timestamp": 1793203439.58835, "tool": "delegate_task", "preview": "1 tasks: Run the shell command `sleep 10 && ec...", "tool_call_id": "call_function_pplty9jl7xw7_1", "seq": 2}
+
+id: 3
+data: {"event": "tool.completed", "run_id": "run_2ac1749f243c4b1e91be100d40db5e38", "timestamp": 1793203439.7106688, "tool": "delegate_task", "duration": 0, "error": false, "tool_call_id": "call_function_pplty9jl7xw7_1", "preview": "", "seq": 3}
+
+id: 4
+data: {"event": "message.delta", "run_id": "run_2ac1749f243c4b1e91be100d40db5e38", "timestamp": 1793203440.9833684, "delta": "\n\nDelegated.", "seq": 4}
+
+id: 5
+data: {"event": "run.completed", "run_id": "run_2ac1749f243c4b1e91be100d40db5e38", "timestamp": 1793203441.2384434, "output": "Delegated.", "usage": {"input_tokens": 52736, "output_tokens": 169, "total_tokens": 52905}, "runtime": {"provider": "", "model": "", "route_source": "global"}, "completed": true, "partial": false, "interrupted": false, "seq": 5}
+
+: stream closed
+

@@ -53,9 +53,65 @@ _pending: Dict[str, Pending] = {}  # by run id: the agent asks one thing at a ti
 _definition: Any = None  # the tool's definition, looked up once; False when Hermes has none
 
 
+def native(adapter: Any) -> bool:
+    """Whether Hermes answers questions itself: its API server carries the answer route
+    (``POST /v1/runs/{id}/clarify``) and its turn runner gives every agent the callback."""
+    return callable(getattr(adapter, "_handle_run_clarify", None))
+
+
+def include_toolset() -> bool:
+    """Puts ``clarify`` among the toolsets the API server builds its agents with, unless the user
+    disabled it. Hermes asks ``_get_platform_tools`` for them on every agent it builds, and from
+    0.22.5 rebuilds an agent's tool list from them and answers ``tool_search`` from them, so a tool
+    added to one agent afterwards is dropped and can't be found. False when this Hermes has no
+    such lookup."""
+    try:
+        import importlib
+
+        tools_config = importlib.import_module("hermes_cli.tools_config")
+    except Exception:
+        logger.debug("memento: no hermes_cli.tools_config", exc_info=True)
+        return False
+    original = getattr(tools_config, "_get_platform_tools", None)
+    if not callable(original):
+        return False
+    if getattr(original, "memento_clarify", False):
+        return True
+
+    def get_platform_tools(config: Any, platform: Any, *args: Any, **kwargs: Any) -> Any:
+        enabled = original(config, platform, *args, **kwargs)
+        if platform == "api_server" and TOOL not in enabled and not _disabled(config):
+            return set(enabled) | {TOOL}
+        return enabled
+
+    get_platform_tools.memento_clarify = True  # type: ignore[attr-defined]
+    tools_config._get_platform_tools = get_platform_tools
+    return True
+
+
+def _disabled(config: Any) -> bool:
+    """Whether the profile switched the toolset off for good (``agent.disabled_toolsets``)."""
+    try:
+        names = (config.get("agent") or {}).get("disabled_toolsets") or []
+    except Exception:
+        return False
+    if isinstance(names, str):
+        return TOOL in names
+    return TOOL in [str(name).strip() for name in names]
+
+
 def wire(adapter: Any) -> bool:
-    """Makes every agent the adapter builds able to ask: wraps ``_create_agent`` so the tool and
-    its callback are added after Hermes's own setup. False when this Hermes has no such seam."""
+    """Lets the agent ask the user on the API server: ``clarify`` goes among its toolsets, and on a
+    Hermes that does not answer questions itself every agent also gets the plugin's callback."""
+    toolset = include_toolset()
+    if native(adapter):
+        return toolset
+    return _wire_agents(adapter) or toolset
+
+
+def _wire_agents(adapter: Any) -> bool:
+    """For a Hermes without native clarify: wraps ``_create_agent`` so the tool and its callback
+    are added after Hermes's own setup. False when this Hermes has no such seam."""
     original = getattr(adapter, "_create_agent", None)
     if not callable(original):
         logger.warning("memento: this Hermes has no _create_agent; the agent can't ask questions")

@@ -1,0 +1,22 @@
+{
+  "object": "hermes.run",
+  "model": "hermes-agent",
+  "created_at": 1793198619.9547539,
+  "pending_controls": [
+    {
+      "kind": "approval",
+      "prompt_id": "78e6b47b81d74c508050f6ae435e9d2b",
+      "execution_generation": 1,
+      "command": "rm -rf /tmp/gots-approval-fixture-does-not-exist",
+      "description": "delete in root path",
+      "choices": ["once", "deny", "session", "always"]
+    }
+  ],
+  "run_id": "run_39e3991d95e2489ab67c37277f094771",
+  "status": "waiting_for_approval",
+  "session_id": "memento-fixture-approval-v22b",
+  "admission_id": "fc9e0e8e89f04d2ba37f993e11d495f9",
+  "execution_generation": 1,
+  "output": "",
+  "usage": {}
+}
