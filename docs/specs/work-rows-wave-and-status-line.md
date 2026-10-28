@@ -3,6 +3,11 @@
 **Status:** designed, not started. Its tickets are #639 and #640. Nothing here starts until pull
 request #641 — this spec, ADR 0061 and the glossary — merges; gate #642 is the issue that merge closes.
 
+**Amended 2026-10-27:** the status line's typing is reversed. It turns a loader beside words that
+stand whole again, both in the accent colour, and drops the loader while the turn waits on the
+reader ([ADR 0062](adr/0062-a-work-row-wears-no-mark-and-the-status-line-loads.md)). Everything here
+about the wave stands; the typed line's stories, rules and tests go with it.
+
 ## Problem Statement
 
 A reply says it is working with a spinner — the same turning ring on the thought row while its

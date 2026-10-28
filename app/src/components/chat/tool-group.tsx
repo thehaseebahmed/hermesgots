@@ -19,7 +19,7 @@ import {
 
 import { StepRail } from "@/components/chat/step-rail"
 import { Details } from "@/components/chat/tool-card"
-import { WorkRow, WORK_LABEL_DENT, WorkLabel } from "@/components/chat/work-row"
+import { WorkRow, WorkLabel } from "@/components/chat/work-row"
 import { Button } from "@/components/ui/button"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { usePopupDrawer, usePopupForm } from "@/lib/popup-form"
@@ -36,7 +36,6 @@ import {
   type Kind,
   type KindId,
 } from "@/lib/tools"
-import { cn } from "@/lib/utils"
 
 function useElapsed(tool: ToolEvent) {
   const [now, setNow] = useState(() => Date.now())
@@ -298,23 +297,17 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
   const [last, setLast] = useState<ToolEvent | undefined>()
   if (detail && detail !== last) setLast(detail)
   const shownDetail = detail ?? last
+  // A failed group carries its failure in its name: the mark that used to sit before the label is
+  // gone from every row, and the reason under it is text a screen reader reaches after the button
+  // rather than as part of it.
+  const failedWords = failures.length === 1 ? "a call failed" : `${failures.length} calls failed`
   return (
     <>
       <WorkRow
         ref={row}
         data-slot="tool-group"
-        aria-label={full}
+        aria-label={failed ? `${full}, ${failedWords}` : full}
         onClick={() => setOpen(true)}
-        before={
-          failed &&
-          !running && (
-            <XIcon
-              className="size-4 shrink-0 text-destructive"
-              strokeWidth={3}
-              aria-label="Failed"
-            />
-          )
-        }
         after={
           <>
             <span ref={ruler} className="invisible absolute w-max whitespace-nowrap" aria-hidden />
@@ -327,7 +320,9 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
         </WorkLabel>
       </WorkRow>
       {failed && (
-        <p className={cn(WORK_LABEL_DENT, "truncate pb-1 text-sm text-destructive")}>
+        // Flush under the label rather than on its own line's worth of space: the row's 29px box
+        // centres its words, so the reason starts where the words end (ADR 0062).
+        <p className="-mt-1 truncate pb-1 text-sm text-destructive">
           {failures.length === 1 ? whyFailed(failures[0]) : `${failures.length} calls failed`}
         </p>
       )}

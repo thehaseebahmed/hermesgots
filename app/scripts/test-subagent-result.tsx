@@ -205,14 +205,10 @@ const resultRow = () => rows().find((row) => row.textContent?.includes("The fixt
 const agentCard = () => document.querySelector("[data-slot=agent-card]")
 
 /**
- * What a row says, with the status line left out: that line animates a word rather than holding one,
- * so a row's text sampled twice would differ by a keystroke alone and its own copy beside it.
+ * What a row says, with nothing left out: a row's words stand still now that the footer no longer
+ * types them, so two samples of the same row agree by construction.
  */
-const said = (row: Element) => {
-  const copy = row.cloneNode(true) as Element
-  copy.querySelectorAll("[data-slot=typed-line]").forEach((line) => line.remove())
-  return copy.textContent ?? ""
-}
+const said = (row: Element) => row.textContent ?? ""
 
 /** The thread as a reader sees it: each row, on its side, holding what it says. */
 const drawn = () => rows().map((row) => `${row.getAttribute("data-align")}:${said(row)}`)

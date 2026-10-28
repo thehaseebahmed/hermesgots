@@ -6,7 +6,8 @@ import { cn } from "@/lib/utils"
  * How many subagents a session has at work, as a line of its own: drawn by whichever row the thread
  * ends on, so it rides beside a streaming reply's activity words and stands at the thread's foot
  * under anything sent since. Pressing it opens the subagent sheet — the only way to reach subagents
- * whose cards the thread no longer shows.
+ * whose cards the thread no longer shows. It is blue wherever it lands, the loader included, so a
+ * delegated job never reads as the reply's own work (ADR 0062).
  */
 export function SubagentLine({
   count,
@@ -25,7 +26,7 @@ export function SubagentLine({
       type="button"
       onClick={onOpen}
       className={cn(
-        "flex min-h-11 min-w-0 items-center gap-1.5 rounded-full text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+        "flex min-h-11 min-w-0 items-center gap-1.5 rounded-full text-sm text-info outline-none hover:text-info/80 focus-visible:ring-2 focus-visible:ring-ring",
         className,
       )}
     >

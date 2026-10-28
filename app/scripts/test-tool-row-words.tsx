@@ -50,3 +50,37 @@ test("a row drops an envelope's arguments but keeps words that only open on a br
     },
   )
 })
+
+test("a failed group wears no mark before its words, and its reason stands flush under them", async () => {
+  await mount(
+    <MessageItem
+      message={reply([
+        {
+          ...call("c-fail", "terminal", "ls -la"),
+          status: "failed",
+          error: "Exited 2",
+        },
+      ])}
+    />,
+    async () => {
+      const row = find('[data-slot="tool-group"]')
+      // No row a reply draws wears a mark of its own (ADR 0062): the label is the row's first child,
+      // so nothing can sit in front of the words without this failing.
+      assert.equal(row?.firstElementChild?.tagName, "SPAN", "the words lead the row")
+      assert.equal(row?.querySelector('[aria-label="Failed"]'), null, "and no mark precedes them")
+      assert.match(
+        row?.getAttribute("aria-label") ?? "",
+        /a call failed/,
+        "the row's own name is what says it failed",
+      )
+      const reason = find(".text-destructive")
+      assert.equal(reason?.textContent, "Exited 2", "the host's reason stands under the label")
+      assert.match(reason?.className ?? "", /-mt-1/, "flush under the words rather than on a gap")
+      assert.doesNotMatch(
+        reason?.className ?? "",
+        /pl-6/,
+        "and at the row's own left edge, not dented past a mark that is gone",
+      )
+    },
+  )
+})

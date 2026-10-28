@@ -97,7 +97,7 @@ The sign that a work row is working: a light travelling left to right through th
 _Avoid_: spinner, shimmer, skeleton, pulse, loader
 
 **Status line**:
-The one line under a reply that says what the turn is doing while it works — "Writing", "Running bash", the host's own words for it — typed a character at a time, its ellipsis grown a dot at a time. It says when the turn waits on the reader ("Waiting for your answer") in words that appear whole and carry no dots, because nothing is progressing. It says nothing while a thought row above says the turn is thinking, and a label it was halfway through typing is cleared the moment such a row appears.
+The one line under a reply that says what the turn is doing while it works — "Writing", "Running bash", the host's own words for it — a loader and those words together, both in the accent colour. It says when the turn waits on the reader ("Waiting for your answer") in words that stand whole and muted with no loader, because nothing is progressing. It says nothing while a thought row above says the turn is thinking.
 _Avoid_: footer (that is where the line stands, not what it is), progress text, activity
 
 **Command**:

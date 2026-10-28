@@ -93,6 +93,17 @@ test("the line counts what runs, and nothing when nothing does", async () => {
   }
 })
 
+test("the line is blue wherever it lands, its loader included", async () => {
+  const line = await mount(<SubagentLine count={2} onOpen={() => {}} />)
+  try {
+    const button = findAll("button")[0]
+    assert.match(button.className, /text-info/, "delegated work reads in the blue, not the reply's grey")
+    assert.ok(button.querySelector('[data-slot="spinner"]'), "with its loader beside it")
+  } finally {
+    await line.close()
+  }
+})
+
 test("pressing the line opens the sheet", async () => {
   let opened = 0
   const line = await mount(<SubagentLine count={2} onOpen={() => opened++} />)
