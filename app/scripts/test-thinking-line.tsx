@@ -19,7 +19,6 @@ import {
   shutSheet,
   spyScrollIntoView,
   thinkingLines,
-  until,
   withReducedMotion,
 } from "./component-kit.tsx"
 
@@ -104,11 +103,10 @@ async function screen(
 }
 
 /** The footer's working line: what the turn is doing, said under the reply. It never thinks. */
-const workingLine = () => find('[aria-live="polite"]')
+const workingLine = () => find("[data-slot=status-line]")
 
-/** The words the footer has typed so far, and the whole label it keeps beside them to be heard. */
-const typedWords = () => find("[data-slot=typed-words]")?.textContent ?? ""
-const announcedWords = () => find("[data-slot=typed-label]")?.textContent ?? ""
+const statusWords = () => find("[data-slot=status-words]")?.textContent ?? ""
+const statusLoader = () => workingLine()?.querySelector('[data-slot="spinner"]')
 
 /** The open sheet's body: a row's words are on the page only while its sheet is open. */
 const sheet = () => find("[data-slot=thinking-body]")
@@ -481,25 +479,24 @@ test("a run that already ended keeps its label while the call it broke runs", as
   )
 })
 
-test("the footer types what the turn is doing, and a thought row above clears it", async () => {
+test("the footer names what the turn is doing beside a loader, and a thought row above clears it", async () => {
   host()
-  const id = "typed-footer"
+  const id = "status-footer"
   const TEXT = "I read the parser first."
   await screen(undefined, turn({ id, content: TEXT }), async () => {
     await stream(id)
-    assert.ok(workingLine(), "the footer says what the turn is doing")
-    assert.equal(announcedWords(), "Writing…", "the whole label is there to be heard at once")
-    assert.ok(
-      !find("[data-slot=typed-line] [data-slot=spinner]"),
-      "and no spinner turns beside the words it types",
-    )
-    await until(
-      async () => Boolean(typedWords()) && typedWords() !== "Writing",
-      "the line to be part way through typing its word",
+    const line = workingLine()
+    assert.ok(line, "the footer says what the turn is doing")
+    assert.equal(statusWords(), "Writing…", "the words stand whole, untyped")
+    assert.ok(statusLoader(), "and a loader turns beside them")
+    assert.match(
+      line!.className,
+      /(^|\s)text-primary(\s|$)/,
+      "the loader and the words it sits by take the accent colour",
     )
 
     // A call lands and the model goes quiet behind it: the row above is the one place that names
-    // thinking, so the line half way through typing it goes at once.
+    // thinking, so the footer's line goes at once.
     await db.messages.put({
       ...(await db.messages.get(id))!,
       tools: [{ ...call("call-1"), contentOffset: TEXT.length }],
@@ -507,7 +504,6 @@ test("the footer types what the turn is doing, and a thought row above clears it
     })
     await settle()
     assert.ok(!workingLine(), "the footer says nothing beside the row that took over")
-    assert.ok(!find("[data-slot=typed-line]"), "and its half-typed label goes with it")
     assert.equal(lineLabel(onlyThinkingLine()), "Thinking…", "the row is the one saying it now")
   })
 })
@@ -750,9 +746,15 @@ test("while the turn waits on the user, the working line says so beside the wavi
     assert.ok(waves(onlyThinkingLine()), "the thinking is still arriving, so the row waves")
     assert.match(screenText(), /Waiting for your approval…/, "waiting on the user is named")
     assert.equal(
-      typedWords(),
+      statusWords(),
       "Waiting for your approval…",
       "a line waiting on the reader says its words whole",
+    )
+    assert.ok(!statusLoader(), "and no loader turns, because nothing is running")
+    assert.match(
+      workingLine()!.className,
+      /(^|\s)text-muted-foreground(\s|$)/,
+      "the waiting line stands muted rather than in the accent colour",
     )
   })
 })

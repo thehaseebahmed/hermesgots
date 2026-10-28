@@ -13,16 +13,15 @@ import { thinkingLabel } from "../../src/lib/thinking.ts"
 
 /** The reply's own item on the page: its rows, its calls and the sheet are all drawn inside it. */
 const ITEM = "[data-slot=message-scroller-item]"
-const WORKING = '[aria-live="polite"]'
+const WORKING = "[data-slot=status-line]"
 const THINKING = /^(Thinking…|Thought it through|Thought for \d+[sm])/
 const SPAN = /^Thought for \d+s$/
 const ROW = "[data-slot=thinking-line]"
 const SHEET = "[data-slot=thinking-sheet]"
 const BODY = "[data-slot=thinking-body]"
-/** The footer's line: the words it types, the whole label it keeps beside them, its held box. */
-const TYPED = "[data-slot=typed-line]"
-const TYPED_WORDS = "[data-slot=typed-words]"
-const TYPED_LABEL = "[data-slot=typed-label]"
+const STATUS_WORDS = "[data-slot=status-words]"
+/** How long the line is watched after its words land: a line still typing would move inside it. */
+const STEADY_MS = 600
 /** The share of the viewport height the deleted `max-h-[30dvh]` cap held: a sheet body outgrows it. */
 const FORMER_CAP_SHARE = 0.3
 const FIRST = "working-out, not just the answer"
@@ -472,57 +471,47 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   )
   assert.equal(frozen.sheet, null, "the answer closes no sheet: none was open")
 
-  // The footer's line types what the turn is doing: the words arrive a character at a time, the
-  // ellipsis it reads is never typed with them, and the box it draws them into holds the label it is
-  // heading for — so what stands beside it on the line never moves. A width is geometry a DOM
-  // without layout has none of, which is why it is measured here (ADR 0019).
+  // The accent as this theme resolves it, read once before the wait: it cannot change inside a flow,
+  // and a poll that re-derived it would colour a span on the live chat at every turn of the wait.
+  const accent = await page.evaluate(() => {
+    const probe = document.createElement("span")
+    probe.style.color = "var(--color-primary)"
+    document.body.append(probe)
+    const colour = getComputedStyle(probe).color
+    probe.remove()
+    return colour
+  })
   const lineState = () =>
     page.evaluate(
-      ({ line, words, named }) => {
+      ({ line, words }) => {
         const box = document.querySelector(line)
         if (!box) return null
-        const footer = box.closest('[aria-live="polite"]')
-        const width = (node) =>
-          node ? Math.round(node.getBoundingClientRect().width * 10) / 10 : null
+        const span = box.querySelector(words)
         return {
-          typed: box.querySelector(words)?.textContent ?? "",
-          label: box.querySelector(named)?.textContent ?? "",
-          width: width(box),
-          footer: width(footer),
+          words: span?.textContent ?? "",
+          loader: Boolean(box.querySelector("[data-slot=spinner]")),
+          colour: getComputedStyle(box).color,
+          wordsColour: span ? getComputedStyle(span).color : "",
         }
       },
-      { line: TYPED, words: TYPED_WORDS, named: TYPED_LABEL },
+      { line: WORKING, words: STATUS_WORDS },
     )
-  const typing = await until(
+  const writing = await until(
     async () => {
       const state = await lineState()
-      return state?.label === "Writing…" ? state : null
+      return state?.words === "Writing…" ? state : null
     },
     15_000,
     "the footer's line to say the turn is writing",
   )
-  assert.notEqual(typing.width, null, "the line is drawn")
-  assert.ok(!typing.typed.includes("…"), `the ellipsis is never typed ("${typing.typed}")`)
-
-  // The words go on arriving — typed at first, then the dots a step at a time — in a box that holds
-  // still: it is the width of the label, not of what has been said so far.
-  const dotted = await until(
-    async () => {
-      const state = await lineState()
-      return state && state.typed !== typing.typed && state.typed.endsWith(".") ? state : null
-    },
-    8_000,
-    "the line to grow its dots",
-  )
-  assert.ok(dotted.typed.startsWith("Writing"), `the words arrived ("${dotted.typed}")`)
-  assert.equal(
-    dotted.width,
-    typing.width,
-    `the line held its box while it typed (${typing.width}px)`,
-  )
-  assert.equal(dotted.footer, typing.footer, "and the footer it stands in held its own")
-  assert.equal(dotted.label, "Writing…", "while the label heard stays whole, not a keystroke")
-  pass(`the footer types "${dotted.typed}" into a box it never grows`)
+  assert.ok(writing.loader, "a loader turns beside the words")
+  assert.equal(writing.colour, accent, "the loader and its words both read in the accent colour")
+  assert.equal(writing.wordsColour, accent, "the words' own text takes it too, not just the row")
+  await page.waitForTimeout(STEADY_MS)
+  const steady = await lineState()
+  assert.equal(steady?.words, "Writing…", "the words stand whole: nothing types itself in")
+  assert.equal(steady?.colour, writing.colour, "and the line holds the colour it works in")
+  pass(`the footer names "Writing…" beside a loader, in ${writing.colour}`)
 
   await until(
     async () => ((await lastReply(chatId))?.status === "done" ? true : null),

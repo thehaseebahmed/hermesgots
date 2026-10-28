@@ -19,10 +19,10 @@ import { Compacted } from "@/components/chat/model-change"
 import { ClarifyCard, PlanApprovedCard } from "@/components/chat/session-cards"
 import { ThinkingLine } from "@/components/chat/thinking-line"
 import { ToolGroup } from "@/components/chat/tool-group"
-import { TypedLine } from "@/components/chat/typed-line"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Button } from "@/components/ui/button"
 import { Message as MessageRow, MessageContent } from "@/components/ui/message"
+import { Spinner } from "@/components/ui/spinner"
 import { spawnedAgent } from "@/lib/spawn"
 import { attachmentUrl } from "@/lib/attachment-url"
 import { downloadAttachment } from "@/lib/attachments"
@@ -422,16 +422,27 @@ function StatusLine({
   children,
 }: {
   text?: string
-  /** The turn waits on the reader, so the words appear whole and carry no dots. */
+  /** The turn wants the reader, not the host: its words stand and no loader turns beside them. */
   waiting?: boolean
   children?: ReactNode
 }) {
+  const working = Boolean(text) && !waiting
   return (
     <div
-      className={cn(REPLY_INSET, "flex items-center gap-2 text-sm text-muted-foreground")}
+      className={cn(
+        REPLY_INSET,
+        "flex items-center gap-2 text-sm",
+        working ? "text-primary" : "text-muted-foreground",
+      )}
       aria-live="polite"
+      data-slot="status-line"
     >
-      {text && <TypedLine label={text} waiting={waiting} />}
+      {working && <Spinner aria-hidden />}
+      {text && (
+        <span className="min-w-0 truncate" data-slot="status-words">
+          {text}
+        </span>
+      )}
       {children}
     </div>
   )
@@ -482,7 +493,7 @@ export const MessageItem = memo(function MessageItem({
   const storedContent = message.content
   const storedStatusText = message.statusText
   // The turn's own state, read once: a reply waiting on the reader is not at work, so the row above
-  // it stands down and its line says its words whole rather than typing them.
+  // it stands down and its line stands whole, with no loader.
   const approval = message.approval
   const awaitingApproval = Boolean(approval && !approval.resolved)
   const awaitingClarify = Boolean(message.clarify && !message.clarify.resolved)
@@ -678,12 +689,14 @@ export const MessageItem = memo(function MessageItem({
   // once a line shows.
   const footerLines = [
     (activity || shown) && (
-      // Waiting on the reader is not work in progress: the line says its words whole, and the reply
-      // already knows it waits, so it is told rather than left to read its own label.
       <StatusLine key="status" text={activity} waiting={waiting}>
         {shown && onShowSubagents && (
           <>
-            {activity && <span aria-hidden>·</span>}
+            {activity && (
+              <span aria-hidden data-slot="status-separator" className="text-info">
+                ·
+              </span>
+            )}
             <SubagentLine
               count={subagentCount}
               onOpen={onShowSubagents}

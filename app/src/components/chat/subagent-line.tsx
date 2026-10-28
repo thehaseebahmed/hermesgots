@@ -25,11 +25,11 @@ export function SubagentLine({
       type="button"
       onClick={onOpen}
       className={cn(
-        "flex min-h-11 min-w-0 items-center gap-1.5 rounded-full text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+        "flex min-h-11 min-w-0 items-center gap-1.5 rounded-full text-sm text-info underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring",
         className,
       )}
     >
-      {spinner && <Spinner className="size-4" />}
+      {spinner && <Spinner aria-hidden />}
       <span className="truncate">{subagentsLine(count)}</span>
     </button>
   )

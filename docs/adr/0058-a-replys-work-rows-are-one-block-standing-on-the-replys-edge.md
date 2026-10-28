@@ -1,5 +1,7 @@
 # A reply's work rows are one block standing on the reply's own edge
 
+**Superseded in its dent sentence by [ADR 0062](0062-a-work-row-wears-no-mark-and-the-status-line-loads.md)**: a failed group's reason no longer takes the label dent — with no mark at the head of a row there is nothing to line up past, so it stands flush under the label at the row's own left edge. Everything else here stands.
+
 A reply draws its working-out as rows — a thought row, the tool group its calls merged into, a
 status row while the turn has nothing to show — and each of them is a tap target. Held at the app's
 44px, two rows a whole target tall read as a stack of bands rather than as the one passage of work

@@ -1,7 +1,8 @@
 /**
  * What a tool row puts beside its verb: the call's own words, and never the arguments a transcript
  * row fell back to. The decision is whether the label reads as an envelope, not whether it opens on
- * a brace — a command that starts with `{` is the words it is.
+ * a brace — a command that starts with `{` is the words it is. A failed group draws here too: no
+ * mark, its failure in the row's name, and the host's reason under it.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -47,6 +48,37 @@ test("a row drops an envelope's arguments but keeps words that only open on a br
       assert.equal(rows[0], "Ran { cat package.json; }", "the command's own words")
       assert.doesNotMatch(rows[1], /\{/, "the arguments never stand in for the row's words")
       assert.equal(rows[1], "Checked a pull request", "and the action words the call itself")
+    },
+  )
+})
+
+test("a failed group wears no mark before its words, and its reason stands flush under them", async () => {
+  await mount(
+    <MessageItem
+      message={reply([
+        {
+          ...call("c-fail", "terminal", "ls -la"),
+          status: "failed",
+          error: "Exited 2",
+        },
+      ])}
+    />,
+    async () => {
+      const row = find('[data-slot="tool-group"]')
+      assert.equal(row?.firstElementChild?.tagName, "SPAN", "the words lead the row")
+      assert.ok(!row?.querySelector('[aria-label="Failed"]'), "and no mark precedes them")
+      assert.match(
+        row?.getAttribute("aria-label") ?? "",
+        /(^|,\s)failed$/,
+        "the row's own name is what says it failed",
+      )
+      const reason = find('[data-slot="tool-group-reason"]')
+      assert.equal(reason?.textContent, "Exited 2", "the host's reason stands under the label")
+      assert.equal(
+        reason?.previousElementSibling?.getAttribute("data-slot"),
+        "tool-group",
+        "and it follows the row it explains",
+      )
     },
   )
 })

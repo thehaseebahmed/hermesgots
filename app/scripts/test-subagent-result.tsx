@@ -204,18 +204,7 @@ const bubble = (row: Element) => row.querySelector("[data-slot=bubble]")
 const resultRow = () => rows().find((row) => row.textContent?.includes("The fixture is in place"))
 const agentCard = () => document.querySelector("[data-slot=agent-card]")
 
-/**
- * What a row says, with the status line left out: that line animates a word rather than holding one,
- * so a row's text sampled twice would differ by a keystroke alone and its own copy beside it.
- */
-const said = (row: Element) => {
-  const copy = row.cloneNode(true) as Element
-  copy.querySelectorAll("[data-slot=typed-line]").forEach((line) => line.remove())
-  return copy.textContent ?? ""
-}
-
-/** The thread as a reader sees it: each row, on its side, holding what it says. */
-const drawn = () => rows().map((row) => `${row.getAttribute("data-align")}:${said(row)}`)
+const drawn = () => rows().map((row) => `${row.getAttribute("data-align")}:${row.textContent ?? ""}`)
 
 /** The thread as it lands: the catch-up reads Hermes, then the turn's rows draw. */
 async function landed() {

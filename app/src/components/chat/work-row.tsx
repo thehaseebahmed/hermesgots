@@ -11,12 +11,6 @@ import { cn } from "@/lib/utils"
 export const WORK_ROW_CLASS =
   "relative flex min-h-[29px] w-full items-center gap-2 text-left text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
 
-/**
- * The dent a line takes to stand under a row's label rather than under its icon: the icon and the
- * gap after it (ADR 0058).
- */
-export const WORK_LABEL_DENT = "pl-6"
-
 /** The wave's own name: the class the stylesheet turns into a light, and the slot the tests read. */
 const WAVE = "work-wave"
 
@@ -47,18 +41,27 @@ export const WorkLabel = forwardRef<HTMLSpanElement, ComponentProps<"span"> & { 
 )
 
 /**
- * The row button over that shape: what shows before the label (a failed group's mark, or nothing)
- * and what follows it (a ruler, a chevron) belong to the row itself, so each caller keeps its own.
+ * The row button over that shape: what follows the label (a ruler, a chevron) belongs to the row
+ * itself, so each caller keeps its own.
  */
 export const WorkRow = forwardRef<
   HTMLButtonElement,
-  ComponentProps<"button"> & { before?: ReactNode; after?: ReactNode }
->(function WorkRow({ before, after, children, className, ...props }, ref) {
+  ComponentProps<"button"> & { after?: ReactNode }
+>(function WorkRow({ after, children, className, ...props }, ref) {
   return (
     <button ref={ref} type="button" className={cn(WORK_ROW_CLASS, className)} {...props}>
-      {before}
       {children}
       {after}
     </button>
   )
 })
+
+/**
+ * A note a row says under itself, standing flush at the row's own left edge and starting where its
+ * label ends: the row's 29px box centres a 20px line, so the pull takes back the half-line left
+ * under it (ADR 0062). The row's height and the note's offset live in one file, so they move
+ * together.
+ */
+export function WorkNote({ className, ...props }: ComponentProps<"p">) {
+  return <p className={cn("-mt-1 truncate pb-1 text-sm", className)} {...props} />
+}

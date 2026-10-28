@@ -1,5 +1,7 @@
 # A working row waves and the status line types itself
 
+**Superseded in its status-line sentence by [ADR 0062](0062-a-work-row-wears-no-mark-and-the-status-line-loads.md)**: the status line no longer types what it says — it turns a loader beside words that stand whole, in the accent colour, and drops the loader while the turn waits on the reader. Everything said here about the wave stands.
+
 A reply says it is working with a spinner. `Loader2Icon` turns on a thought row while its thinking
 still arrives, on the tool group's row while a call runs, and on the status line under the reply. The
 same glyph in three places, and the one thing moving in a thread the reader watches — which is mostly
