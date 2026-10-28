@@ -245,7 +245,7 @@ test("a call that is still running takes its action from the transcript the chat
   // so the chat reads the running turn's transcript. The call's result row isn't written yet, so the
   // row is still running — and it must already say what it is doing.
   serve(sessionRows([{ id: "call_pr", name: PR_TOOL, args: { action: "status" } }]))
-  const running = await liveTurn(server, SESSION, "Ship it")
+  const running = await liveTurn(server, SESSION, STARTED)
   assert.ok(running, "the running turn's reply, from its transcript")
   assert.deepEqual(
     (running.tools ?? []).map((tool) => [tool.tool, tool.status, tool.action]),
@@ -259,7 +259,7 @@ test("a streamed call takes its action from the transcript while it is still run
   // What the chat does as such a call starts: it reads the turn's transcript once and folds in only
   // what the stream couldn't know. The row keeps the label and the status this device drew.
   serve(sessionRows([{ id: "call_pr", name: PR_TOOL, args: { action: "update" } }], undefined))
-  const reply = await liveTurn(server, SESSION, "Ship it")
+  const reply = await liveTurn(server, SESSION, STARTED)
   const tools = foldTranscriptDetails([streamedRow()], reply?.tools ?? [])
   assert.deepEqual(
     tools?.map((tool) => [tool.label, tool.action, tool.status]),

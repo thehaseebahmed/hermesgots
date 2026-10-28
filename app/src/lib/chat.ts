@@ -54,6 +54,7 @@ import { refreshChatProviderUsage } from "@/lib/provider-usage"
 import {
   foldTranscriptDetails,
   liveTurn,
+  RUN_START_SLACK_S,
   summaryRowsOf,
   noteFollowUps,
   patchStats,
@@ -157,7 +158,7 @@ async function profileFor(profileId?: string) {
 
 type Draft = Message & { tools: ToolEvent[] }
 
-interface Turn {
+export interface Turn {
   conversationId: string
   config: HermesConfig
   draft: Draft
@@ -168,7 +169,7 @@ interface Turn {
   resumed: boolean
   /** Stops flushing and saves the draft one last time. */
   close: () => Promise<void>
-  /** The user message and session a transcript read is asked by, resolved once. */
+  /** The session and run start a transcript read is asked by, resolved once. */
   source?: Promise<TurnSource | undefined>
   /** The transcript read out now, and whether a caller asked for another pass while it was. */
   read?: { pending?: Promise<Message | undefined>; again?: boolean }
@@ -492,29 +493,31 @@ const retryable = (error: unknown) =>
   error.status >= 500 ||
   [408, 429].includes(error.status)
 
-/** The turn's own user message and the chat's session, as the chat holds them. */
+/** The chat's session and when the turn's run began, as a transcript read is asked by them. */
 interface TurnSource {
   conversation: Conversation
-  user: Message
+  /** The run's start in the host's Unix seconds. */
+  since: number
 }
 
 /**
- * What a read of the transcript is asked by: the turn's own user message and the chat's session,
- * read once per turn since neither changes under it. Undefined for a chat with no session row or a
- * turn whose message is gone — asked again next time, since a chat may gain either.
+ * What a read of the transcript is asked by: the chat's session and when the turn's run began, read
+ * once per turn since neither changes under it. The start is the host's own, for a run: this device's
+ * clock can't place it among the transcript's rows (a queued message is made before the turn ahead
+ * of it ends), so a host that doesn't answer leaves the read for the next round. A chat-completions
+ * turn has no run, and its reply was made when it was sent. Undefined for a chat with no session row
+ * or a run whose start isn't known — asked again next time, since either may change.
  */
-async function turnSource(turn: Turn) {
+export async function turnSource(turn: Turn) {
   turn.source ??= (async () => {
     const conversation = await db.conversations.get(turn.conversationId)
-    const messages = await getMessages(turn.conversationId)
-    const index = messages.findIndex((m) => m.id === turn.draft.id)
-    let user: Message | undefined
-    for (let at = (index < 0 ? messages.length : index) - 1; at >= 0; at--)
-      if (messages[at].role === "user") {
-        user = messages[at]
-        break
-      }
-    return conversation && user ? { conversation, user } : undefined
+    if (!conversation) return undefined
+    const { runId } = turn.draft
+    if (!runId) return { conversation, since: turn.draft.createdAt / 1000 }
+    const run = await getRun(turn.config, runId, AbortSignal.timeout(READ_TIMEOUT_MS)).catch(
+      quietly("Reading when the run started"),
+    )
+    return run?.createdAt === undefined ? undefined : { conversation, since: run.createdAt }
   })()
   const source = await turn.source
   if (!source) turn.source = undefined
@@ -543,7 +546,7 @@ function transcriptOf(turn: Turn, signal: AbortSignal) {
       reply = await liveTurn(
         turn.config,
         source.conversation.hermesSessionId,
-        source.user.content,
+        source.since,
         signal,
         summaryRowsOf(source.conversation.compactions),
       )
@@ -1383,9 +1386,6 @@ export async function reattachRun(conversationId: string) {
   await resumeReply({ ...stale, runId })
 }
 
-// How far apart the host's and the transcript's clocks may read for one turn.
-const RUN_START_SLACK_S = 5
-
 /**
  * Follows a run this device didn't start (another device's, the plugin's queue, the wake run a
  * finished subagent starts), once the host's shared `runs/live` answer names it for this chat, so
@@ -1909,8 +1909,7 @@ export async function steerQueued(message: Message) {
     )
     if (typeof steered.run_id === "string") runId = steered.run_id
   } else {
-    if (!turn || !runId || !canSteer(carried))
-      throw new HermesError("This reply can't be steered.")
+    if (!turn || !runId || !canSteer(carried)) throw new HermesError("This reply can't be steered.")
     carried = await savedForSteer(message, carried)
     said = attachmentsText(message.content, carried)
     await steerRun(turn.config, runId, said)

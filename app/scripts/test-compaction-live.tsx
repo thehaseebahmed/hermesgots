@@ -84,11 +84,15 @@ function run({ summaryRole, restated, carried = 3, amid }: Run) {
 
 const server = connection("compaction-live")
 
-async function replies(rows: SessionMessage[], from: number, content: string) {
+/** When the run began: after the earlier turn's last row, as the host's clock would say. */
+const startAfter = (rows: SessionMessage[]) =>
+  rows.find((one) => one.content === "An earlier answer")!.timestamp! + 6
+
+async function replies(rows: SessionMessage[], from: number) {
   const seen: { tools: number; content: string }[] = []
   for (let n = from; n <= rows.length; n++) {
     serve(rows.slice(0, n))
-    const reply = await liveTurn(server, SESSION, content)
+    const reply = await liveTurn(server, SESSION, startAfter(rows))
     if (reply) seen.push({ tools: reply.tools?.length ?? 0, content: reply.content })
   }
   return seen
@@ -113,7 +117,7 @@ for (const [name, opts, content] of [
 ] as const) {
   test(`the running turn keeps growing across a compaction: ${name}`, async () => {
     const rows = run(opts)
-    const seen = await replies(rows, 3, content)
+    const seen = await replies(rows, 3)
     assert.ok(seen.length > 0, "the turn is found once it has work")
     for (let i = 1; i < seen.length; i++) {
       assert.ok(seen[i].tools >= seen[i - 1].tools, "a call already drawn never leaves the turn")
@@ -270,7 +274,7 @@ test("a tool's result that opens with the summary's words is still its result", 
 test("carried work longer than every page the live read takes still comes back", async () => {
   const rows = run({ summaryRole: "assistant", restated: true, carried: 300 })
   serve(rows)
-  const reply = await liveTurn(server, SESSION, REQUEST)
+  const reply = await liveTurn(server, SESSION, startAfter(rows))
   assert.ok(reply, "the running turn is found")
   assert.ok(
     reply.content.includes("After two") && (reply.tools?.length ?? 0) >= 2,
@@ -370,7 +374,7 @@ for (const copy of [false, true])
       "each compaction marks the reply where it fell: after the work it carried, before what came next",
     )
     serve(rows)
-    const live = await liveTurn(server, SESSION, REQUEST)
+    const live = await liveTurn(server, SESSION, startAfter(rows))
     assert.ok(live, "the running turn is found")
     for (const words of ["Carried one", "After one", "Carried two", "After two", "Final words"])
       assert.ok(live.content.includes(words), `${words} is in the live reply: ${live.content}`)
