@@ -1,6 +1,9 @@
 # A working row waves and the status line types itself
 
-**Superseded in its status-line sentence by [ADR 0062](0062-a-work-row-wears-no-mark-and-the-status-line-loads.md)**: the status line no longer types what it says — it turns a loader beside words that stand whole, in the accent colour, and drops the loader while the turn waits on the reader. Everything said here about the wave stands.
+**Superseded by [ADR 0064](0064-a-work-row-turns-a-spinner-and-wears-its-mark-again.md)**: a working
+row turns a spinner ahead of its label again. Its status-line sentence was already superseded by
+[ADR 0062](0062-a-work-row-wears-no-mark-and-the-status-line-loads.md) — the status line no longer
+types what it says, and that part of 0062 still stands.
 
 A reply says it is working with a spinner. `Loader2Icon` turns on a thought row while its thinking
 still arrives, on the tool group's row while a call runs, and on the status line under the reply. The
