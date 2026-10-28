@@ -329,48 +329,6 @@
   }
 }
 
-/* A working row's wave (src/components/chat/work-row.tsx): a light travelling left to right through
-   the words, a lap every 1.4 seconds, brightening the label's own colour toward white. Only the
-   words are filled, so a row's chevron, its marks and its truncation draw exactly as they did, and
-   the span is only there at all while the row works — reduced motion leaves it plain in the markup,
-   never by a rule this stylesheet could hide from the test tiers (ADR 0061). */
-.work-wave {
-  background-image: linear-gradient(
-    90deg,
-    currentColor 0%,
-    currentColor 40%,
-    color-mix(in oklab, currentColor 45%, white) 50%,
-    currentColor 60%,
-    currentColor 100%
-  );
-  background-repeat: no-repeat;
-  background-position: 100% 0;
-  background-size: 220% 100%;
-  background-clip: text;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: work-wave 1.4s linear infinite;
-}
-
-@keyframes work-wave {
-  from {
-    background-position: 100% 0;
-  }
-  to {
-    background-position: 0% 0;
-  }
-}
-
-/* High contrast drops painted backgrounds, so a text fill would take the words with it: the label
-   stays readable and still, which is the whole of what a wave is for. */
-@media (forced-colors: active) {
-  .work-wave {
-    background-image: none;
-    -webkit-text-fill-color: currentColor;
-    animation: none;
-  }
-}
-
 /* highlight.js classes, mapped onto the theme's syntax tokens. */
 .hljs-keyword,
 .hljs-built_in,

@@ -19,7 +19,7 @@ import {
 
 import { StepRail } from "@/components/chat/step-rail"
 import { Details } from "@/components/chat/tool-card"
-import { WorkRow, WorkNote, WorkLabel } from "@/components/chat/work-row"
+import { WorkRow, WorkNote } from "@/components/chat/work-row"
 import { Button } from "@/components/ui/button"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { usePopupDrawer, usePopupForm } from "@/lib/popup-form"
@@ -305,6 +305,14 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
         data-slot="tool-group"
         aria-label={failed ? `${full}, failed` : full}
         onClick={() => setOpen(true)}
+        before={
+          <>
+            {running && <Spinner aria-hidden className="size-4 shrink-0" />}
+            {failed && !running && (
+              <XIcon className="size-4 shrink-0 text-destructive" strokeWidth={3} aria-hidden />
+            )}
+          </>
+        }
         after={
           <>
             <span ref={ruler} className="invisible absolute w-max whitespace-nowrap" aria-hidden />
@@ -312,9 +320,9 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
           </>
         }
       >
-        <WorkLabel ref={text} wave={running}>
+        <span ref={text} className="min-w-0 truncate">
           {label}
-        </WorkLabel>
+        </span>
       </WorkRow>
       {failed && (
         <WorkNote className="text-destructive" data-slot="tool-group-reason">

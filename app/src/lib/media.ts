@@ -36,14 +36,11 @@ export const useXLarge = media("(min-width: 1280px)")
 /** Whether the main pointer can hover (a mouse or trackpad), so a hover can show more. */
 export const useHover = media("(hover: hover) and (pointer: fine)")
 
-/** The query behind the animations a screen's own markup decides. */
+/** The query behind the animations the app carries out itself, rather than in CSS. */
 const MOTION = "(prefers-reduced-motion: reduce)"
 
 /**
  * Whether the reader asked for no motion, for work outside a component — a scroll's behaviour, a
- * roll's pace. A screen that draws the still version of its own animation asks `useReducedMotion`.
+ * roll's pace. What animates in stylesheet terms asks the query in CSS instead.
  */
 export const prefersReducedMotion = () => watch(MOTION).matches
-
-/** The same answer as a hook, so a preference changed mid-session redraws what it stopped. */
-export const useReducedMotion = media(MOTION)

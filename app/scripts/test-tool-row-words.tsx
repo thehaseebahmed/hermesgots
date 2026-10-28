@@ -1,8 +1,8 @@
 /**
  * What a tool row puts beside its verb: the call's own words, and never the arguments a transcript
  * row fell back to. The decision is whether the label reads as an envelope, not whether it opens on
- * a brace — a command that starts with `{` is the words it is. A failed group draws here too: no
- * mark, its failure in the row's name, and the host's reason under it.
+ * a brace — a command that starts with `{` is the words it is. A failed group draws here too: its
+ * mark ahead of the words, its failure in the row's name, and the host's reason dented under them.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -52,7 +52,7 @@ test("a row drops an envelope's arguments but keeps words that only open on a br
   )
 })
 
-test("a failed group wears no mark before its words, and its reason stands flush under them", async () => {
+test("a failed group is marked at its head, and its reason stands under the words", async () => {
   await mount(
     <MessageItem
       message={reply([
@@ -65,8 +65,10 @@ test("a failed group wears no mark before its words, and its reason stands flush
     />,
     async () => {
       const row = find('[data-slot="tool-group"]')
-      assert.equal(row?.firstElementChild?.tagName, "SPAN", "the words lead the row")
-      assert.ok(!row?.querySelector('[aria-label="Failed"]'), "and no mark precedes them")
+      const mark = row?.firstElementChild
+      assert.equal(mark?.tagName.toLowerCase(), "svg", "the mark leads the row")
+      assert.match(mark?.getAttribute("class") ?? "", /text-destructive/, "in the failure's colour")
+      assert.equal(mark?.getAttribute("aria-hidden"), "true", "and says nothing over the row's name")
       assert.match(
         row?.getAttribute("aria-label") ?? "",
         /(^|,\s)failed$/,
@@ -74,6 +76,7 @@ test("a failed group wears no mark before its words, and its reason stands flush
       )
       const reason = find('[data-slot="tool-group-reason"]')
       assert.equal(reason?.textContent, "Exited 2", "the host's reason stands under the label")
+      assert.match(reason?.className ?? "", /pl-6/, "dented past the mark, so it stands under the words")
       assert.equal(
         reason?.previousElementSibling?.getAttribute("data-slot"),
         "tool-group",
