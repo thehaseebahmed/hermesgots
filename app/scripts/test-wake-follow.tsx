@@ -12,6 +12,7 @@ import type { HermesConfig } from "@/lib/hermes"
 import { ChatPage } from "@/routes/chat"
 import {
   connection,
+  findAll,
   json,
   mount,
   seedChat,
@@ -135,6 +136,13 @@ test("a wake run followed by its transcript draws its own reply, and the earlier
           (m) => m.role === "assistant" && m.content.includes(FIRST),
         )
         assert.equal(earlier.length, 1, "the earlier reply is held once")
+        // The words ride the markdown renderer, a lazy import on this route.
+        await import("@/components/chat/markdown-renderer")
+        const drawn = (words: string) =>
+          findAll("[data-slot=message]").filter((one) => one.textContent?.includes(words)).length
+        await until(async () => drawn(WOKEN) > 0, "the wake run's words on the page", 10_000)
+        assert.equal(drawn(FIRST), 1, "the earlier reply is drawn once")
+        assert.equal(drawn(WOKEN), 1, "the wake run's reply is drawn once")
       } finally {
         over = true
         // The failure above is what the case reports; a drain that also hangs adds nothing.

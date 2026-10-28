@@ -41,16 +41,13 @@ test("a wake run's reply is read as its own, not as the turn before it", async (
   )
 })
 
-test("a wake run with nothing written yet is not the turn before it either", async () => {
+test("a wake run with nothing written yet reads as nothing, not as the turn before it", async () => {
   const reply = await replyOf(() => [
     row("user", REQUEST),
     ...pair("terminal", "Pass one is applied"),
     wakePrompt(),
   ])
-  assert.ok(
-    !reply || !reply.content.includes("Pass one"),
-    `drew the earlier reply: ${reply?.content}`,
-  )
+  assert.equal(reply, undefined)
 })
 
 test("a turn the user started is still its own reply, wake runs before it left alone", async () => {

@@ -360,7 +360,15 @@ for (const copy of [false, true])
       "one request and one reply for the turn",
     )
     assert.equal(turn[0].content, REQUEST, "the request is drawn once")
-    assert.equal(turn[1].seams?.length, 2, "both compactions mark the reply")
+    const summaries = rows.filter((one) => one.content === SUMMARY)
+    assert.deepEqual(
+      turn[1].seams?.map((seam) => [seam.row, seam.toolsBefore]),
+      [
+        [summaries[0].id, 1],
+        [summaries[1].id, 3],
+      ],
+      "each compaction marks the reply where it fell: after the work it carried, before what came next",
+    )
     serve(rows)
     const live = await liveTurn(server, SESSION, REQUEST)
     assert.ok(live, "the running turn is found")
