@@ -76,10 +76,13 @@ function AgentCard({ card, onOpen }: { card: Card; onOpen: (card: Card) => void 
 function TurnView({
   turn,
   cards,
+  goals = {},
   onOpen,
 }: {
   turn: Turn
   cards: Card[]
+  /** What each child was asked, by its id, for the line a wake turn opens with. */
+  goals?: Record<string, string>
   onOpen: (card: Card) => void
 }) {
   // Each tools part takes the cards of the delegations it holds, in the order they were asked.
@@ -89,7 +92,15 @@ function TurnView({
   const first = asked.map((_, at) => asked.slice(0, at).reduce((sum, count) => sum + count, 0))
   return (
     <section className="space-y-3">
-      {turn.wake ? null : (
+      {turn.wake ? (
+        <p data-wake className="text-sm text-muted-foreground">
+          {turn.done ? "Resumed after " : "Resuming… "}
+          {turn.delivered.length
+            ? turn.delivered.map((id) => goals[id] ?? "a subagent").join(", ")
+            : "a subagent"}
+          {turn.done ? " finished" : " just finished"}
+        </p>
+      ) : (
         <p
           data-user
           className="ml-auto w-fit max-w-[85%] rounded-2xl bg-muted px-4 py-2 whitespace-pre-wrap"
@@ -504,7 +515,13 @@ export function ChatNextPage({
     <main className="mx-auto w-full max-w-3xl space-y-6 p-4">
       {state.status === "failed" ? <p role="alert">{state.error}</p> : null}
       {state.turns.map((turn, at) => (
-        <TurnView key={at} turn={turn} cards={cards[at] ?? []} onOpen={open} />
+        <TurnView
+          key={at}
+          turn={turn}
+          cards={cards[at] ?? []}
+          goals={Object.fromEntries(agents.map((agent) => [agent.id, agent.goal]))}
+          onOpen={open}
+        />
       ))}
       {opened && openedRows?.id === opened.id ? (
         <ChildThread

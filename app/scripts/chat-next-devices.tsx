@@ -57,6 +57,11 @@ export async function openDevice(host: Host, { idleMs = 20 }: { idleMs?: number 
           status: card.getAttribute("data-status") ?? "",
         })),
       })),
+    /** The line a wake turn opens with, saying which subagent's finish it answers. */
+    wakes: () =>
+      [...container.querySelectorAll("main > section [data-wake]")].map(
+        (note) => note.textContent ?? "",
+      ),
     /** The child's own thread, once a card has been opened. */
     thread: () => {
       const open = one("[data-agent-thread]")

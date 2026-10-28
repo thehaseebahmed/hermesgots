@@ -79,6 +79,30 @@ test("the card follows the child to done, and the wake turn arrives without a me
   }
 })
 
+test("a wake turn opens with a line naming the subagent that finished, resuming and then resumed", async () => {
+  const host = setUp("note")
+  const phone = await slow(host)
+  try {
+    const child = await delegating(phone, host)
+    await showsEverything(phone, host, "the running card first")
+    assert.deepEqual(phone.wakes(), [], "nothing to resume while the child works")
+    const wake = child.finish("Mild.")
+    wake.say("\n\nIt is mild")
+    await eventually(
+      () => assert.deepEqual(phone.wakes(), [`Resuming… ${GOAL} just finished`]),
+      "the line while the wake turn is under way",
+    )
+    wake.finish("It is mild.")
+    await eventually(
+      () => assert.deepEqual(phone.wakes(), [`Resumed after ${GOAL} finished`]),
+      "and past tense once it is done",
+    )
+    assert.equal(phone.turns()[0].user, "go", "an ordinary turn gets no such line")
+  } finally {
+    await phone.close()
+  }
+})
+
 test("the delivery rows the host writes are never drawn", async () => {
   const host = setUp("hidden")
   const phone = await slow(host)
