@@ -977,6 +977,53 @@ async function scrubSeamBubbles(local: Message[], sessionId: string) {
   if (stale.length) await db.messages.bulkDelete(stale.map((m) => m.id))
 }
 
+/**
+ * A compaction carries the newest turns forward under fresh row ids with their text and times
+ * untouched, and the display read answers those copies. A turn this device already holds under its
+ * old row id comes back looking new, and this can run before a catch-up has adopted it: the copy is
+ * dropped and the held turn takes its row id instead, as `reconcile` does, so the turn shows once
+ * whichever of the two reads gets there first. A copy whose row is already held is dropped too,
+ * since a catch-up may have adopted it since the walk's set was made.
+ */
+function adoptCarried(current: Message[], messages: Message[], sessionId: string) {
+  const held = new Set<number>()
+  for (const m of current) {
+    const row = m.role === "user" ? rowIdOf(m, sessionId) : replyRowOf(m, sessionId)
+    if (row !== undefined) held.add(row)
+  }
+  const taken = new Set<string>()
+  const adopted: Message[] = []
+  const fresh: Message[] = []
+  let skipping = false
+  for (const message of messages) {
+    if (message.role === "user") {
+      skipping = false
+      const row = message.hermesRowId
+      if (row !== undefined && held.has(row)) skipping = true
+      else if (row !== undefined && message.hermesAt !== undefined) {
+        const carried = current.find(
+          (m) =>
+            !taken.has(m.id) &&
+            m.role === "user" &&
+            m.status === "done" &&
+            m.content === message.content &&
+            (m.hermesAt !== undefined
+              ? m.hermesAt === message.hermesAt
+              : Math.abs(m.createdAt - message.hermesAt!) <= CLOCK_SLACK_MS),
+        )
+        if (carried) {
+          taken.add(carried.id)
+          adopted.push({ ...carried, hermesRowId: row, hermesAt: message.hermesAt })
+          skipping = true
+        }
+      }
+    }
+    if (skipping && (message.role === "user" || message.role === "assistant")) continue
+    fresh.push(message)
+  }
+  return { fresh, adopted }
+}
+
 async function reconcile(conversationId: string) {
   const conversation = await db.conversations.get(conversationId)
   if (!conversation) return 0
@@ -1289,7 +1336,12 @@ async function loadEarlier(conversationId: string) {
       // The cut part goes only once the rows that stand for it are in, in the same write.
       if (older.length) {
         if (mend) await db.messages.delete(mend.delete)
-        await db.messages.bulkPut(placeBefore(messages, ceiling))
+        const { fresh, adopted } = adoptCarried(
+          await getMessages(conversationId),
+          messages,
+          sessionId,
+        )
+        await db.messages.bulkPut([...adopted, ...placeBefore(fresh, ceiling)])
       }
       await db.conversations.update(conversationId, { olderThan: next })
     })
