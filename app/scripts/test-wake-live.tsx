@@ -7,7 +7,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { liveTurn, RUN_START_SLACK_S } from "@/lib/history"
+import { liveTurn } from "@/lib/history"
 import type { SessionMessage } from "@/lib/hermes"
 import { connection, serveTranscript, transcriptRows, wakePromptText } from "./component-kit.tsx"
 
@@ -21,9 +21,8 @@ async function replyOf(build: () => SessionMessage[]) {
   reset()
   const rows = build()
   serveTranscript(rows)
-  // The test's rows are a second apart, so the run starts as late as the clock's slack allows.
   const at = rows.find((one) => one.content === REQUEST)!.timestamp!
-  return liveTurn(server, "s", at + RUN_START_SLACK_S)
+  return liveTurn(server, "s", at)
 }
 
 const wakePrompt = () => row("user", wakePromptText())
@@ -95,6 +94,20 @@ test("a wake run is found by when it began, with no user message to ask by", asy
   ]
   serveTranscript(rows)
   const wake = rows.find((one) => one.content?.includes("A finding"))!
-  const reply = await liveTurn(server, "s", wake.timestamp! + RUN_START_SLACK_S)
+  const reply = await liveTurn(server, "s", wake.timestamp!)
   assert.equal(reply?.content, "The finding changes the plan")
+})
+
+test("a turn that began just before the run is not taken for it", async () => {
+  reset()
+  const rows = [
+    row("user", "Earlier ask"),
+    ...pair("terminal", "Earlier work"),
+    row("user", REQUEST),
+  ]
+  rows.push(...pair("patch", "This turn's work"))
+  serveTranscript(rows)
+  const at = rows.find((one) => one.content === REQUEST)!.timestamp!
+  const reply = await liveTurn(server, "s", at)
+  assert.equal(reply?.content, "This turn's work")
 })

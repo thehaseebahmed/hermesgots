@@ -498,6 +498,8 @@ interface TurnSource {
   conversation: Conversation
   /** The run's start in the host's Unix seconds. */
   since: number
+  /** Whether the host said it, rather than this device's clock. */
+  known: boolean
 }
 
 /**
@@ -515,10 +517,15 @@ async function turnSource(turn: Turn) {
           quietly("Reading when the run started"),
         )
       : undefined
-    return { conversation, since: run?.createdAt ?? turn.draft.createdAt / 1000 }
+    // A start this device guessed is not kept: the next read asks the host again.
+    return {
+      conversation,
+      since: run?.createdAt ?? turn.draft.createdAt / 1000,
+      known: run?.createdAt !== undefined,
+    }
   })()
   const source = await turn.source
-  if (!source) turn.source = undefined
+  if (!source?.known) turn.source = undefined
   return source
 }
 
@@ -1907,8 +1914,7 @@ export async function steerQueued(message: Message) {
     )
     if (typeof steered.run_id === "string") runId = steered.run_id
   } else {
-    if (!turn || !runId || !canSteer(carried))
-      throw new HermesError("This reply can't be steered.")
+    if (!turn || !runId || !canSteer(carried)) throw new HermesError("This reply can't be steered.")
     carried = await savedForSteer(message, carried)
     said = attachmentsText(message.content, carried)
     await steerRun(turn.config, runId, said)
