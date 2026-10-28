@@ -1,17 +1,12 @@
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
 import test from "node:test"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { ChatNextPage } from "@/chat-next/page"
+import { recorded } from "./chat-next-fixtures.ts"
 import { find, findAll, json, mount, text } from "./component-kit.tsx"
 
-const fixture = JSON.parse(
-  readFileSync(
-    new URL("../src/chat-next/fixtures/sky-blue.transcript.json", import.meta.url),
-    "utf8",
-  ),
-)
+const fixture = recorded("sky-blue.transcript.json")
 const SESSION = fixture.data[0].session_id
 
 const screen = (query: string) => (

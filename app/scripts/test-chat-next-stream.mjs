@@ -5,13 +5,10 @@
  * late). Frames are cut at awkward sizes, since a network never hands them over whole.
  */
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
 import test from "node:test"
 
 import { followRun } from "../src/chat-next/api.ts"
-
-const recorded = (name) =>
-  readFileSync(new URL(`../src/chat-next/fixtures/${name}`, import.meta.url), "utf8")
+import { fixture as recorded } from "./chat-next-fixtures.ts"
 
 /** Serves `text` as an event stream, `size` bytes at a time. */
 function serve(text, size) {

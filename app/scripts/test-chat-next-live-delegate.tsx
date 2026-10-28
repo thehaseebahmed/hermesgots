@@ -5,20 +5,14 @@
  * transcript that follows, the thread must read the same order live as it does once settled.
  */
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
 import test from "node:test"
 
 import type { RunEvent } from "@/chat-next/api"
 import { initial, reduce, type ThreadState } from "@/chat-next/state"
+import { events as recordedEvents, recorded } from "./chat-next-fixtures.ts"
 
-const fixture = (name: string) =>
-  readFileSync(new URL(`../src/chat-next/fixtures/${name}`, import.meta.url), "utf8")
-
-const events: RunEvent[] = fixture("live.events.sse")
-  .split("\n")
-  .filter((line) => line.startsWith("data: "))
-  .map((line) => JSON.parse(line.slice(6)))
-const rows = JSON.parse(fixture("live.transcript.json")).data
+const events = recordedEvents<RunEvent>("live.events.sse")
+const rows = recorded("live.transcript.json").data
 
 const shape = (state: ThreadState, turn: number) =>
   state.turns[turn].parts.map((part) =>

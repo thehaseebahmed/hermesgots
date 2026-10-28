@@ -3,14 +3,11 @@
  * Hermes 0.22.5.
  */
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
 import test from "node:test"
 
 import type { RunEvent } from "@/chat-next/api"
 import { initial, reduce, type ThreadState } from "@/chat-next/state"
-
-const recorded = (name: string) =>
-  readFileSync(new URL(`../src/chat-next/fixtures/${name}`, import.meta.url), "utf8")
+import { events as recordedEvents, fixture as recorded } from "./chat-next-fixtures.ts"
 
 /** Plays events into a thread that has just sent a turn. */
 function play(events: RunEvent[]): ThreadState {
@@ -44,10 +41,7 @@ test("a call keeps the id the host gave it, so the transcript's row for it is th
     tool_calls?: { id: string }[] | null
   }[]
   const inTranscript = transcript.flatMap((row) => row.tool_calls ?? []).map((call) => call.id)
-  const events = recorded("multi-reader.events.sse")
-    .split("\n")
-    .filter((line) => line.startsWith("data:"))
-    .map((line) => JSON.parse(line.slice(5)) as RunEvent)
+  const events = recordedEvents<RunEvent>("multi-reader.events.sse")
   const state = play(events)
   assert.deepEqual(
     calls(state).map((call) => call.id),
@@ -61,10 +55,7 @@ test("a call keeps the id the host gave it, so the transcript's row for it is th
 })
 
 test("an approval request is a wait until the host says it is settled", () => {
-  const events = recorded("approval-v22.events.sse")
-    .split("\n")
-    .filter((line) => line.startsWith("data:"))
-    .map((line) => JSON.parse(line.slice(5)) as RunEvent)
+  const events = recordedEvents<RunEvent>("approval-v22.events.sse")
   const request = events.findIndex((event) => event.event === "approval.request")
   const settled = events.findIndex((event) => event.event === "approval.settled")
   assert.ok(request >= 0 && settled > request, "the recording has both")
@@ -92,11 +83,9 @@ test("a run's status and its stream describe the same approval, so a late follow
       choices: string[]
     }[]
   }
-  const request = recorded("approval-v22.events.sse")
-    .split("\n")
-    .filter((line) => line.startsWith("data:"))
-    .map((line) => JSON.parse(line.slice(5)) as RunEvent)
-    .find((event) => event.event === "approval.request")!
+  const request = recordedEvents<RunEvent>("approval-v22.events.sse").find(
+    (event) => event.event === "approval.request",
+  )!
   const [pending] = status.pending_controls
   assert.equal(status.status, "waiting_for_approval")
   assert.deepEqual(

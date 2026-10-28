@@ -5,14 +5,11 @@
  * naming the child — and runs a second reply, the wake turn, which has no message of the user's.
  */
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
 import test from "node:test"
 
 import { cardsOf, goalsOf } from "../src/chat-next/agents.ts"
 import { foldTurns } from "../src/chat-next/fold.ts"
-
-const recorded = (name) =>
-  JSON.parse(readFileSync(new URL(`../src/chat-next/fixtures/${name}`, import.meta.url), "utf8"))
+import { recorded } from "./chat-next-fixtures.ts"
 
 const parent = recorded("delegate.parent.transcript.json").data
 const done = recorded("delegate.agents.done.json").agents
