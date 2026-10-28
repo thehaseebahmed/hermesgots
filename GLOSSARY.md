@@ -476,6 +476,14 @@ _Avoid_: dictionary, custom words, hint, keyterms
 The model on a bot's host that hears its speech-to-text. Its size is the trade between waiting and being right.
 _Avoid_: whisper model, fast-whisper, STT model, engine, ASR
 
+**Speech provider**:
+The one backend a bot's Hermes sends audio to. Until it is picked it is **Automatic**, and the host decides — its own model first, then whichever cloud provider it holds a key for.
+_Avoid_: STT backend, engine, speech service, voice provider
+
+**Heard on the host**:
+The path a bot's speech-to-text actually runs: the host's own model, whatever the speech provider says about voice notes elsewhere. Tuning under it is what a take honours.
+_Avoid_: local mode, offline mode, on-device
+
 ## Settings
 
 **Gots setting**:
@@ -485,6 +493,10 @@ _Avoid_: app setting, local setting, device setting
 **Hermes setting**:
 A setting of the bot's Hermes itself: the same knob the Hermes Dashboard shows, named as Hermes names it.
 _Avoid_: bot setting, server setting, config
+
+**Host default**:
+The value a Hermes setting runs at when the bot's host holds none of its own — the default Hermes itself was built with. A row shows it muted, and a reset returns the setting to it.
+_Avoid_: empty, blank, unset value, fallback
 
 ## Testing
 
