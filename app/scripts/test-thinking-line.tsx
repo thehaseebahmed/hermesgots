@@ -171,6 +171,11 @@ test("a working row spins beside its words, and the footer never says it too", a
     const line = onlyThinkingLine()
     assert.equal(lineLabel(line), "Thinking…", "still thinking, so no duration yet")
     assert.ok(spins(line), "with a spinner ahead of its label: the row is at work")
+    assert.equal(
+      line.querySelector("[data-slot=spinner]")?.getAttribute("aria-hidden"),
+      "true",
+      "and the sign says nothing over the name and label that already say it",
+    )
     assert.equal(expanded(line), "false", "its sheet starts shut")
     assert.equal(sheet(), null, "with nothing of the run on the page until it is asked for")
     assert.equal(
@@ -725,7 +730,7 @@ test("a reply stored before runs draws its thinking as one row at the top", asyn
   })
 })
 
-test("while the turn waits on the user, the working line says so beside the waving row", async () => {
+test("while the turn waits on the user, the working line says so beside the spinning row", async () => {
   host()
   const id = "waiting"
   const messages = turn({
