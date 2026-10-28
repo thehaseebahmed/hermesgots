@@ -72,6 +72,7 @@ async function reset(...keys: string[]) {
   await seedSettings()
   await db.drafts.clear()
   await db.dictations.clear()
+  await db.dictationLog.clear()
   for (const key of keys) await db.drafts.put({ id: key, text: "", at: 1 })
 }
 
@@ -127,6 +128,14 @@ test("a Stop lands the tidied take in one write, where the caret was", async () 
       "every piece's transcription carries the bot's vocabulary",
     )
     assert.equal(sent.length, 0, "a Stop puts the words in the field, it does not send them")
+    await settle()
+    await until(
+      async () => (await db.dictationLog.count()) === 1,
+      "the take in the log",
+    )
+    const logged = (await db.dictationLog.toArray())[0]
+    assert.equal(logged.text, TIDIED, "the row keeps the words that landed")
+    assert.equal(logged.heard, HEARD, "and the take as the host heard it, beside them")
     await until(
       async () => (await db.dictations.count()) === 0,
       "a take that ended keeping nothing on the device",
@@ -166,6 +175,11 @@ test("a cleanup that fails lands the words as the host heard them", async () => 
     )
     assert.equal(sent.length, 0, "a Stop lands them in the field")
     assert.equal(alert(), null, "a cleanup that fails is not a failed take")
+    await settle()
+    await until(async () => (await db.dictationLog.count()) === 1, "the take in the log")
+    const logged = (await db.dictationLog.toArray())[0]
+    assert.equal(logged?.heard, HEARD, "a cleanup that failed still kept the words as heard")
+    assert.equal(logged?.text, HEARD, "and they are the words that landed too")
     await until(
       async () => (await db.dictations.count()) === 0,
       "the take ended, keeping nothing",
