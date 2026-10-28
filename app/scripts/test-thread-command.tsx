@@ -147,6 +147,7 @@ test("/thread alone starts an empty thread and opens it", async () => {
     assert.deepEqual(await messagesOf(thread.id), [], "an empty thread, as the command alone says")
     assert.deepEqual(triaged(seen), [], "the host was never asked where it goes")
     assert.deepEqual(runs(seen), [], "and nothing was sent from it")
+    await until(async () => composerField()?.value === "", "the command to leave the field")
     assert.equal(composerField()?.value, "", "the command left the field")
   })
 })
