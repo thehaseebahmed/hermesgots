@@ -7,19 +7,13 @@
  * random output is replaced; the structure is the host's own.
  */
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
 import test from "node:test"
 
 import { cardsOf } from "../src/chat-next/agents.ts"
 import { foldTurns, withArchive } from "../src/chat-next/fold.ts"
+import { family } from "./chat-next-fixtures.ts"
 
-const recorded = (name) =>
-  JSON.parse(
-    readFileSync(
-      new URL(`../src/chat-next/fixtures/delegate-compaction-after.${name}`, import.meta.url),
-      "utf8",
-    ),
-  )
+const recorded = family("delegate-compaction-after")
 
 const live = recorded("live.json").data
 const archive = recorded("archive.json").data

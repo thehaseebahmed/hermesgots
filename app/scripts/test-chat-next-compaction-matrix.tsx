@@ -16,11 +16,10 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { fakeHost } from "./chat-next-host.ts"
-import { openDevice, sendFrom, showsEverything, turn } from "./chat-next-devices.tsx"
+import { openDevice, sendFrom, showsEverything, turn, withDevice } from "./chat-next-devices.tsx"
 
 const setUp = (name: string) => {
   const host = fakeHost(`memento-compaction-${name}`)
-  host.install()
   return host
 }
 
@@ -38,8 +37,7 @@ async function reachesBack(
 test.describe("idle: every turn finished", () => {
   test("stayed open", async () => {
     const host = setUp("idle-open")
-    const phone = await openDevice(host)
-    try {
+    await withDevice(openDevice(host), async (phone) => {
       await turn(phone, host, "one", "First.")
       await turn(phone, host, "two", "Second.", 2)
       await turn(phone, host, "three", "Third.")
@@ -50,9 +48,7 @@ test.describe("idle: every turn finished", () => {
         "the open device draws the compaction when the host makes it",
       )
       await reachesBack(phone, host)
-    } finally {
-      await phone.close()
-    }
+    })
   })
 
   test("never had it", async () => {
@@ -63,19 +59,15 @@ test.describe("idle: every turn finished", () => {
       { user: "three", reply: "Third.", tools: 2 },
     ])
     host.compact()
-    const laptop = await openDevice(host)
-    try {
+    await withDevice(openDevice(host), async (laptop) => {
       await showsEverything(laptop, host, "only what the host holds, the divider above it")
       await reachesBack(laptop, host)
-    } finally {
-      await laptop.close()
-    }
+    })
   })
 
   test("away and back", async () => {
     const host = setUp("idle-away")
-    const phone = await openDevice(host)
-    try {
+    await withDevice(openDevice(host), async (phone) => {
       await turn(phone, host, "one", "First.")
       await turn(phone, host, "two", "Second.")
       host.compact()
@@ -84,9 +76,7 @@ test.describe("idle: every turn finished", () => {
       await reachesBack(phone, host)
       await phone.returns()
       await showsEverything(phone, host, "returning again keeps what was asked for", true)
-    } finally {
-      await phone.close()
-    }
+    })
   })
 
   test("reloaded", async () => {
@@ -96,13 +86,10 @@ test.describe("idle: every turn finished", () => {
     await turn(first, host, "two", "Second.")
     await first.close()
     host.compact()
-    const again = await openDevice(host)
-    try {
+    await withDevice(openDevice(host), async (again) => {
       await showsEverything(again, host, "read back from the host, compacted")
       await reachesBack(again, host)
-    } finally {
-      await again.close()
-    }
+    })
   })
 
   test("compacted twice, the archive holds both dividers", async () => {
@@ -114,34 +101,27 @@ test.describe("idle: every turn finished", () => {
     host.compact()
     host.seed([{ user: "three", reply: "Third.", tools: 1 }])
     host.compact()
-    const phone = await openDevice(host)
-    try {
+    await withDevice(openDevice(host), async (phone) => {
       await showsEverything(phone, host, "one divider above the turn the host kept")
       await reachesBack(phone, host)
-    } finally {
-      await phone.close()
-    }
+    })
   })
 
   test("a chat the host never compacted offers nothing", async () => {
     const host = setUp("idle-never")
-    const phone = await openDevice(host)
-    try {
+    await withDevice(openDevice(host), async (phone) => {
       await turn(phone, host, "one", "First.")
       await showsEverything(phone, host, "everything it made")
       assert.ok(!phone.offersEarlier())
       assert.equal(host.asked.archive, 0, "the archive is not read until it is asked for")
-    } finally {
-      await phone.close()
-    }
+    })
   })
 })
 
 test.describe("streaming here: this device sent the turn and follows it", () => {
   test("stayed open, the host compacting mid-run", async () => {
     const host = setUp("here-open")
-    const phone = await openDevice(host)
-    try {
+    await withDevice(openDevice(host), async (phone) => {
       await turn(phone, host, "earlier", "Earlier.")
       const run = await sendFrom(phone, host, "go")
       run.tool("terminal", "one", '{"exit_code": 0}')
@@ -156,17 +136,14 @@ test.describe("streaming here: this device sent the turn and follows it", () => 
         "the turn carried across the compaction, its request archived",
       )
       await reachesBack(phone, host)
-    } finally {
-      await phone.close()
-    }
+    })
   })
 
   test("never had it", { skip: "a device that never held the chat did not send into it" }, () => {})
 
   test("away and back, the stream dying on the way", async () => {
     const host = setUp("here-away")
-    const phone = await openDevice(host)
-    try {
+    await withDevice(openDevice(host), async (phone) => {
       await turn(phone, host, "earlier", "Earlier.")
       const run = await sendFrom(phone, host, "go")
       run.tool("terminal", "one", '{"exit_code": 0}')
@@ -182,9 +159,7 @@ test.describe("streaming here: this device sent the turn and follows it", () => 
         "the whole turn once the run ends with no stream to say so",
       )
       await reachesBack(phone, host)
-    } finally {
-      await phone.close()
-    }
+    })
   })
 
   test("reloaded in the middle of the run", async () => {
@@ -195,24 +170,20 @@ test.describe("streaming here: this device sent the turn and follows it", () => 
     run.tool("terminal", "one", '{"exit_code": 0}')
     await before.close()
     host.compact()
-    const after = await openDevice(host)
-    try {
+    await withDevice(openDevice(host), async (after) => {
       await showsEverything(after, host, "the carried turn and the call made so far")
       run.tool("terminal", "two", '{"exit_code": 0}')
       run.finish("Finished after the reload.")
       await showsEverything(after, host, "the rest, as the run finishes")
       await reachesBack(after, host)
-    } finally {
-      await after.close()
-    }
+    })
   })
 })
 
 test.describe("streaming elsewhere: another device started the turn", () => {
   test("stayed open", async () => {
     const host = setUp("else-open")
-    const phone = await openDevice(host)
-    try {
+    await withDevice(openDevice(host), async (phone) => {
       await turn(phone, host, "mine", "Mine done.")
       const run = host.startElsewhere("from the laptop")
       run.tool("terminal", "one", '{"exit_code": 0}')
@@ -223,9 +194,7 @@ test.describe("streaming elsewhere: another device started the turn", () => {
       run.finish("Laptop done.")
       await showsEverything(phone, host, "and is whole once it ends")
       await reachesBack(phone, host)
-    } finally {
-      await phone.close()
-    }
+    })
   })
 
   test("never had it", async () => {
@@ -237,21 +206,17 @@ test.describe("streaming elsewhere: another device started the turn", () => {
     const run = host.startElsewhere("in flight")
     run.tool("terminal", "one", '{"exit_code": 0}')
     host.compact()
-    const laptop = await openDevice(host)
-    try {
+    await withDevice(openDevice(host), async (laptop) => {
       await showsEverything(laptop, host, "the turn in flight, its request archived")
       run.finish("Landed.")
       await showsEverything(laptop, host, "all of it once the run ends")
       await reachesBack(laptop, host)
-    } finally {
-      await laptop.close()
-    }
+    })
   })
 
   test("away and back", async () => {
     const host = setUp("else-away")
-    const phone = await openDevice(host)
-    try {
+    await withDevice(openDevice(host), async (phone) => {
       await turn(phone, host, "mine", "Mine done.")
       const run = host.startElsewhere("while away")
       run.tool("terminal", "one", '{"exit_code": 0}')
@@ -261,9 +226,7 @@ test.describe("streaming elsewhere: another device started the turn", () => {
       run.finish("Landed.")
       await showsEverything(phone, host, "all of it once it ends")
       await reachesBack(phone, host)
-    } finally {
-      await phone.close()
-    }
+    })
   })
 
   test("reloaded", async () => {
@@ -274,15 +237,12 @@ test.describe("streaming elsewhere: another device started the turn", () => {
     const run = host.startElsewhere("while closed")
     run.tool("terminal", "one", '{"exit_code": 0}')
     host.compact()
-    const after = await openDevice(host)
-    try {
+    await withDevice(openDevice(host), async (after) => {
       await showsEverything(after, host, "the turn in flight, picked up on open")
       run.finish("Landed.")
       await showsEverything(after, host, "all of it once it ends")
       await reachesBack(after, host)
-    } finally {
-      await after.close()
-    }
+    })
   })
 })
 
@@ -300,8 +260,7 @@ test.describe("finished while away: the reply ended with no device watching", ()
 
   test("away and back", async () => {
     const host = setUp("done-away")
-    const phone = await openDevice(host)
-    try {
+    await withDevice(openDevice(host), async (phone) => {
       await turn(phone, host, "mine", "Mine done.")
       const run = host.startElsewhere("while away")
       run.tool("terminal", "one", '{"exit_code": 0}')
@@ -311,9 +270,7 @@ test.describe("finished while away: the reply ended with no device watching", ()
       await phone.returns()
       await showsEverything(phone, host, "the turn it never saw run, carried across the compaction")
       await reachesBack(phone, host)
-    } finally {
-      await phone.close()
-    }
+    })
   })
 
   test("reloaded", async () => {
@@ -325,12 +282,9 @@ test.describe("finished while away: the reply ended with no device watching", ()
     run.tool("terminal", "one", '{"exit_code": 0}')
     host.compact()
     run.finish("Finished entirely while closed.")
-    const after = await openDevice(host)
-    try {
+    await withDevice(openDevice(host), async (after) => {
       await showsEverything(after, host, "everything the host holds, compacted")
       await reachesBack(after, host)
-    } finally {
-      await after.close()
-    }
+    })
   })
 })

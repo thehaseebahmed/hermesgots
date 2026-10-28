@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from "react"
+import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react"
 import { useSearchParams } from "react-router"
 
 import { Markdown } from "@/components/chat/markdown"
 
-import { cardsOf, DELEGATE, goalsOf, type Card } from "./agents"
+import { cardsByPart, cardsOf, DELEGATE, type Card } from "./agents"
 import {
   atLeast,
   followRun,
@@ -16,7 +16,7 @@ import {
   startRun,
 } from "./api"
 import { foldTurns, type Row, type ToolCall, type Turn } from "./fold"
-import { initial, reduce, type Waiting } from "./state"
+import { initial, reduce, type ThreadEvent, type Waiting } from "./state"
 
 /** The questions a finished `clarify` call got answered, each as "<question> → <answer>". */
 function answered(call: ToolCall): string[] {
@@ -37,6 +37,20 @@ function answered(call: ToolCall): string[] {
     return []
   }
 }
+
+const failure = (error: unknown): ThreadEvent => ({
+  type: "failed",
+  error: error instanceof Error ? error.message : String(error),
+})
+
+const NO_CARDS: Card[] = []
+
+const sameCards = (a: Card[], b: Card[]) =>
+  a.length === b.length &&
+  a.every(
+    (one, at) =>
+      one.goal === b[at].goal && one.status === b[at].status && one.agent === b[at].agent,
+  )
 
 const STATUS_WORDS = {
   starting: "Starting…",
@@ -73,90 +87,93 @@ function AgentCard({ card, onOpen }: { card: Card; onOpen: (card: Card) => void 
   )
 }
 
-function TurnView({
-  turn,
-  cards,
-  goals = {},
-  onOpen,
-}: {
-  turn: Turn
-  cards: Card[]
-  /** What each child was asked, by its id, for the line a wake turn opens with. */
-  goals?: Record<string, string>
-  onOpen: (card: Card) => void
-}) {
-  // Each tools part takes the cards of the delegations it holds, in the order they were asked.
-  const asked = turn.parts.map((part) =>
-    part.kind === "tools" ? part.calls.flatMap(goalsOf).length : 0,
-  )
-  const first = asked.map((_, at) => asked.slice(0, at).reduce((sum, count) => sum + count, 0))
-  return (
-    <section className="space-y-3">
-      {turn.wake ? (
-        <p data-wake className="text-sm text-muted-foreground">
-          {turn.done ? "Resumed after " : "Resuming… "}
-          {turn.delivered.length
-            ? turn.delivered.map((id) => goals[id] ?? "a subagent").join(", ")
-            : "a subagent"}
-          {turn.done ? " finished" : " just finished"}
-        </p>
-      ) : turn.carried ? null : (
-        <p
-          data-user
-          className="ml-auto w-fit max-w-[85%] rounded-2xl bg-muted px-4 py-2 whitespace-pre-wrap"
-        >
-          {turn.user}
-        </p>
-      )}
-      {turn.parts.map((part, at) => {
-        if (part.kind === "compaction")
+const TurnView = memo(
+  function TurnView({
+    turn,
+    cards,
+    goals = {},
+    onOpen = () => {},
+  }: {
+    turn: Turn
+    cards: Card[]
+    /** What each child was asked, by its id, for the line a wake turn opens with. */
+    goals?: Record<string, string>
+    onOpen?: (card: Card) => void
+  }) {
+    const byPart = cardsByPart(turn, cards)
+    return (
+      <section className="space-y-3">
+        {turn.wake ? (
+          <p data-wake className="text-sm text-muted-foreground">
+            {turn.done ? "Resumed after " : "Resuming… "}
+            {turn.delivered.length
+              ? turn.delivered.map((id) => goals[id] ?? "a subagent").join(", ")
+              : "a subagent"}
+            {turn.done ? " finished" : " just finished"}
+          </p>
+        ) : turn.carried ? null : (
+          <p
+            data-user
+            className="ml-auto w-fit max-w-[85%] rounded-2xl bg-muted px-4 py-2 whitespace-pre-wrap"
+          >
+            {turn.user}
+          </p>
+        )}
+        {turn.parts.map((part, at) => {
+          if (part.kind === "compaction")
+            return (
+              <div
+                key={at}
+                data-compaction
+                role="separator"
+                className="flex items-center gap-3 text-xs text-muted-foreground"
+              >
+                <span className="h-px flex-1 bg-border" />
+                Context compacted
+                <span className="h-px flex-1 bg-border" />
+              </div>
+            )
+          if (part.kind === "text")
+            return (
+              <div key={at} data-text>
+                <Markdown>{part.text}</Markdown>
+              </div>
+            )
+          // A question the agent asked, and a subagent it set to work, are drawn as what they are.
+          const plain = part.calls.filter(
+            (call) => call.name !== "clarify" && call.name !== DELEGATE,
+          ).length
           return (
-            <div
-              key={at}
-              data-compaction
-              role="separator"
-              className="flex items-center gap-3 text-xs text-muted-foreground"
-            >
-              <span className="h-px flex-1 bg-border" />
-              Context compacted
-              <span className="h-px flex-1 bg-border" />
+            <div key={at} className="space-y-3">
+              {plain ? (
+                <p data-tools className="text-sm text-muted-foreground">
+                  {plain === 1 ? "1 tool call" : `${plain} tool calls`}
+                </p>
+              ) : null}
+              {part.calls.flatMap(answered).map((line, index) => (
+                <p key={index} data-answered className="rounded-md border px-3 py-2 text-sm">
+                  {line}
+                </p>
+              ))}
+              {byPart[at].map((card, index) => (
+                <AgentCard key={index} card={card} onOpen={onOpen} />
+              ))}
             </div>
           )
-        if (part.kind === "text")
-          return (
-            <div key={at} data-text>
-              <Markdown>{part.text}</Markdown>
-            </div>
-          )
-        // A question the agent asked, and a subagent it set to work, are drawn as what they are.
-        const plain = part.calls.filter(
-          (call) => call.name !== "clarify" && call.name !== DELEGATE,
-        ).length
-        const mine = cards.slice(first[at], first[at] + asked[at])
-        return (
-          <div key={at} className="space-y-3">
-            {plain ? (
-              <p data-tools className="text-sm text-muted-foreground">
-                {plain === 1 ? "1 tool call" : `${plain} tool calls`}
-              </p>
-            ) : null}
-            {part.calls.flatMap(answered).map((line, index) => (
-              <p key={index} data-answered className="rounded-md border px-3 py-2 text-sm">
-                {line}
-              </p>
-            ))}
-            {mine.map((card, index) => (
-              <AgentCard key={index} card={card} onOpen={onOpen} />
-            ))}
-          </div>
-        )
-      })}
-    </section>
-  )
-}
+        })}
+      </section>
+    )
+  },
+  (a, b) =>
+    a.turn === b.turn &&
+    a.goals === b.goals &&
+    a.onOpen === b.onOpen &&
+    sameCards(a.cards, b.cards),
+)
 
 /** A child's own thread, read only: what it was asked and what it did. */
 function ChildThread({ goal, rows, onClose }: { goal: string; rows: Row[]; onClose: () => void }) {
+  const turns = useMemo(() => foldTurns(rows), [rows])
   return (
     <aside data-agent-thread className="space-y-3 rounded-md border p-3">
       <div className="flex items-center justify-between gap-3">
@@ -170,8 +187,8 @@ function ChildThread({ goal, rows, onClose }: { goal: string; rows: Row[]; onClo
           Close
         </button>
       </div>
-      {foldTurns(rows).map((turn, at) => (
-        <TurnView key={at} turn={turn} cards={[]} onOpen={() => {}} />
+      {turns.map((turn, at) => (
+        <TurnView key={at} turn={turn} cards={[]} />
       ))}
     </aside>
   )
@@ -334,11 +351,7 @@ export function ChatNextPage({
             if (listed) dispatch({ type: "agents", agents: listed })
           }
         } catch (error) {
-          if (!alive.current.signal.aborted && mine === reads.current)
-            dispatch({
-              type: "failed",
-              error: error instanceof Error ? error.message : String(error),
-            })
+          if (!alive.current.signal.aborted && mine === reads.current) dispatch(failure(error))
         } finally {
           reading.current = null
         }
@@ -373,12 +386,16 @@ export function ChatNextPage({
   // A child at work, or one that finished whose result the transcript does not hold yet, keeps the
   // chat read at the fast pace too: the card is to follow it and the wake turn is on its way.
   const agents = state.agents ?? []
-  const delivered = state.turns.flatMap((turn) => turn.delivered)
+  const goals = useMemo(
+    () => Object.fromEntries((state.agents ?? []).map((agent) => [agent.id, agent.goal])),
+    [state.agents],
+  )
+  const delivered = useMemo(() => state.turns.flatMap((turn) => turn.delivered), [state.turns])
   const working = agents.some((agent) => agent.status === "running")
   const owed = agents.some((agent) => agent.status !== "running" && !delivered.includes(agent.id))
   // A delegation just dispatched has no child on the list yet; where the host lists children at
   // all, the list is read again until the child shows, whatever else the page is doing.
-  const cards = cardsOf(state.turns, agents)
+  const cards = useMemo(() => cardsOf(state.turns, state.agents ?? []), [state.turns, state.agents])
   const starting =
     state.agents !== undefined &&
     cards.some((list) => list.some((card) => card.status === "starting"))
@@ -408,7 +425,7 @@ export function ChatNextPage({
         )
       } catch (error) {
         if (alive.current.signal.aborted) return
-        dispatch({ type: "failed", error: error instanceof Error ? error.message : String(error) })
+        dispatch(failure(error))
       } finally {
         streaming.current = false
         dispatch({ type: "ended" })
@@ -482,7 +499,10 @@ export function ChatNextPage({
       current = false
     }
   }, [opened, openedStatus, server, key])
-  const open = (card: Card) => card.agent && setOpened({ id: card.agent.id, goal: card.goal })
+  const open = useCallback(
+    (card: Card) => card.agent && setOpened({ id: card.agent.id, goal: card.goal }),
+    [],
+  )
 
   async function send() {
     const text = draft.trim()
@@ -496,7 +516,7 @@ export function ChatNextPage({
     } catch (error) {
       streaming.current = false
       if (alive.current.signal.aborted) return
-      dispatch({ type: "failed", error: error instanceof Error ? error.message : String(error) })
+      dispatch(failure(error))
       await catchUp(true)
     }
   }
@@ -509,7 +529,7 @@ export function ChatNextPage({
       await respond({ server, key }, waiting, value)
       dispatch({ type: "answered" })
     } catch (error) {
-      dispatch({ type: "failed", error: error instanceof Error ? error.message : String(error) })
+      dispatch(failure(error))
     }
   }
 
@@ -555,13 +575,7 @@ export function ChatNextPage({
         </button>
       ) : null}
       {state.turns.map((turn, at) => (
-        <TurnView
-          key={at}
-          turn={turn}
-          cards={cards[at] ?? []}
-          goals={Object.fromEntries(agents.map((agent) => [agent.id, agent.goal]))}
-          onOpen={open}
-        />
+        <TurnView key={at} turn={turn} cards={cards[at] ?? NO_CARDS} goals={goals} onOpen={open} />
       ))}
       {opened && openedRows?.id === opened.id ? (
         <ChildThread

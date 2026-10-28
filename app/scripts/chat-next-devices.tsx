@@ -17,7 +17,21 @@ import { fakeHost, type ExpectedTurn } from "./chat-next-host.ts"
 
 export type Host = ReturnType<typeof fakeHost>
 
-const wait = (ms: number) => act(async () => new Promise((resolve) => setTimeout(resolve, ms)))
+export const wait = (ms: number) =>
+  act(async () => new Promise((resolve) => setTimeout(resolve, ms)))
+
+/** Retries a throwing check while the page settles, and lets it fail with its own message at the end. */
+export async function eventually(check: () => void, what: string) {
+  for (let tries = 0; tries < 60; tries++) {
+    try {
+      return check()
+    } catch {
+      await wait(25)
+    }
+  }
+  check()
+  assert.fail(what)
+}
 
 /**
  * A device is polled at 20ms while the page is busy, and while idle at `idleMs`, which is as fast by
@@ -139,6 +153,19 @@ export async function openDevice(host: Host, { idleMs = 20 }: { idleMs?: number 
 }
 
 export type Device = Awaited<ReturnType<typeof openDevice>>
+
+/** Runs `run` with a device that is closed however it ends. */
+export async function withDevice<T>(
+  open: Promise<Device>,
+  run: (device: Device) => Promise<T> | T,
+) {
+  const device = await open
+  try {
+    return await run(device)
+  } finally {
+    await device.close()
+  }
+}
 
 /** Gives a device the moment it needs to draw what it was told, then holds it to the host's word. */
 export async function showsEverything(device: Device, host: Host, what: string, full = false) {

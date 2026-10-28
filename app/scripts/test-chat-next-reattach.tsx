@@ -8,36 +8,27 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
-import { act } from "react"
 
 import { fakeHost } from "./chat-next-host.ts"
-import { openDevice, sendFrom, showsEverything, type Device } from "./chat-next-devices.tsx"
-
-const wait = (ms: number) => act(async () => new Promise((resolve) => setTimeout(resolve, ms)))
-
-async function eventually(check: () => void, what: string) {
-  for (let tries = 0; tries < 60; tries++) {
-    try {
-      return check()
-    } catch {
-      await wait(25)
-    }
-  }
-  check()
-  assert.fail(what)
-}
+import {
+  eventually,
+  openDevice,
+  sendFrom,
+  showsEverything,
+  type Device,
+  wait,
+  withDevice,
+} from "./chat-next-devices.tsx"
 
 const lastTurn = (device: Device) => device.turns().at(-1)
 
 test("a device that opens mid-run draws the words already written and the ones still coming", async () => {
   const host = fakeHost("memento-reattach-new", { plugin: true })
-  host.install()
   host.seed([{ user: "earlier", reply: "Earlier.", tools: 1 }])
   const run = host.startElsewhere("in flight")
   run.say("\n\nStarting now.")
   run.tool("terminal", "sleep", '{"exit_code": 0}')
-  const laptop = await openDevice(host)
-  try {
+  await withDevice(openDevice(host), async (laptop) => {
     await eventually(
       () =>
         assert.deepEqual(lastTurn(laptop), {
@@ -58,17 +49,13 @@ test("a device that opens mid-run draws the words already written and the ones s
     )
     run.finish("Almost there, done.")
     await showsEverything(laptop, host, "what the host wrote, once the run ends")
-  } finally {
-    await laptop.close()
-  }
+  })
 })
 
 test("a device left open on an idle chat joins a run another device starts", async () => {
   const host = fakeHost("memento-reattach-open", { plugin: true })
-  host.install()
   host.seed([{ user: "earlier", reply: "Earlier.", tools: 0 }])
-  const phone = await openDevice(host)
-  try {
+  await withDevice(openDevice(host), async (phone) => {
     await showsEverything(phone, host, "the finished chat first")
     const run = host.startElsewhere("from the laptop")
     run.say("\n\nTyping this live.")
@@ -78,14 +65,11 @@ test("a device left open on an idle chat joins a run another device starts", asy
     )
     run.finish("Typing this live.")
     await showsEverything(phone, host, "all of it once the run ends")
-  } finally {
-    await phone.close()
-  }
+  })
 })
 
 test("two devices follow one run at once and each draws every word as it is written", async () => {
   const host = fakeHost("memento-reattach-two", { plugin: true })
-  host.install()
   const phone = await openDevice(host)
   const laptop = await openDevice(host)
   try {
@@ -114,9 +98,7 @@ test("two devices follow one run at once and each draws every word as it is writ
 
 test("a stream that dies mid-run is joined again, and the words are not doubled", async () => {
   const host = fakeHost("memento-reattach-drop", { plugin: true })
-  host.install()
-  const phone = await openDevice(host)
-  try {
+  await withDevice(openDevice(host), async (phone) => {
     const run = await sendFrom(phone, host, "go")
     run.say("\n\nFirst part.")
     await eventually(
@@ -132,18 +114,14 @@ test("a stream that dies mid-run is joined again, and the words are not doubled"
     )
     run.finish("First part. Second part.")
     await showsEverything(phone, host, "all of it once the run ends")
-  } finally {
-    await phone.close()
-  }
+  })
 })
 
 // Found in a real browser: a device that returns just as its stream ends starts a second read while
 // the final one is in flight, and the final one was thrown away as stale.
 test("a stream that ends while another read is in flight does not leave the thread stuck", async () => {
   const host = fakeHost("memento-reattach-race", { plugin: true, latency: 80 })
-  host.install()
-  const phone = await openDevice(host)
-  try {
+  await withDevice(openDevice(host), async (phone) => {
     const run = await sendFrom(phone, host, "go")
     run.say("\n\nFirst part.")
     await eventually(
@@ -161,16 +139,12 @@ test("a stream that ends while another read is in flight does not leave the thre
     )
     run.finish("First part. Second part.")
     await showsEverything(phone, host, "all of it once the run ends")
-  } finally {
-    await phone.close()
-  }
+  })
 })
 
 test("words written before and after a stream dies each appear once, with no call between them", async () => {
   const host = fakeHost("memento-reattach-resume", { plugin: true })
-  host.install()
-  const phone = await openDevice(host)
-  try {
+  await withDevice(openDevice(host), async (phone) => {
     const run = await sendFrom(phone, host, "go")
     run.say("\n\nBefore the drop.")
     await eventually(
@@ -185,7 +159,5 @@ test("words written before and after a stream dies each appear once, with no cal
     )
     run.finish("Before the drop. After the drop.")
     await showsEverything(phone, host, "all of it once the run ends")
-  } finally {
-    await phone.close()
-  }
+  })
 })

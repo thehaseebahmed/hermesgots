@@ -47,6 +47,7 @@ export interface Turn {
 export function withArchive(live: Row[], archive: Row[]): Row[] {
   const held = new Set(live.map((row) => row.id))
   const at = new Map(live.map((row, index) => [row.id, index]))
+  const inArchive = new Map(archive.map((row, index) => [row.id, index]))
   const above: Row[] = []
   const after = new Map<number, Row[]>()
   // A turn's request can be a live row (Hermes writes it again when it compacts mid-turn) while the
@@ -57,7 +58,9 @@ export function withArchive(live: Row[], archive: Row[]): Row[] {
     if (held.has(row.id)) {
       request = isRequest(row) ? row.id : undefined
     } else if (request !== undefined) {
-      after.set(request, [...(after.get(request) ?? []), row])
+      const work = after.get(request)
+      if (work) work.push(row)
+      else after.set(request, [row])
     } else above.push(row)
   }
   // The live read opens on the compaction's rows, which stand above that request; the archive has
@@ -65,7 +68,7 @@ export function withArchive(live: Row[], archive: Row[]): Row[] {
   // in the archive but come before the request in the live read move to just after the work.
   const moved = new Map<number, Row[]>()
   for (const [id, work] of after) {
-    const last = archive.findIndex((row) => row.id === work.at(-1)?.id)
+    const last = inArchive.get(work.at(-1)!.id)!
     const rows: Row[] = []
     for (const row of archive.slice(last + 1)) {
       if (!held.has(row.id) || (at.get(row.id) ?? Infinity) > (at.get(id) ?? -1)) break
@@ -174,13 +177,13 @@ export function foldTurns(rows: Row[]): Turn[] {
       seamed = true
       continue
     }
-    turn.done = !row.tool_calls?.length && Boolean(row.finish_reason)
+    turn.done = !asked.length && Boolean(row.finish_reason)
     if (row.content) turn.parts.push({ kind: "text", text: row.content })
-    for (const asked of row.tool_calls ?? []) {
+    for (const one of asked) {
       const call: ToolCall = {
-        id: asked.id,
-        name: asked.function.name,
-        arguments: asked.function.arguments,
+        id: one.id,
+        name: one.function.name,
+        arguments: one.function.arguments,
       }
       callOf.set(call.id, call)
       const last = turn.parts.at(-1)

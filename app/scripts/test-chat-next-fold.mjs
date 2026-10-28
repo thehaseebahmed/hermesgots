@@ -1,12 +1,10 @@
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
 import test from "node:test"
 
 import { foldTurns } from "../src/chat-next/fold.ts"
+import { recorded } from "./chat-next-fixtures.ts"
 
-const fixture = JSON.parse(
-  readFileSync(new URL("../src/chat-next/fixtures/sky-blue.transcript.json", import.meta.url)),
-)
+const fixture = recorded("sky-blue.transcript.json")
 
 const row = (id, role, content, extra = {}) => ({ id, role, content, ...extra })
 
@@ -100,12 +98,7 @@ test("a turn is done only when its last row is an assistant row that made no cal
 })
 
 test("a turn recorded from v0.22.5 folds the same way: four calls with their results, then the reply", () => {
-  const recorded = JSON.parse(
-    readFileSync(
-      new URL("../src/chat-next/fixtures/multi-reader.transcript.json", import.meta.url),
-    ),
-  )
-  const [turn] = foldTurns(recorded.data)
+  const [turn] = foldTurns(recorded("multi-reader.transcript.json").data)
   assert.equal(turn.done, true)
   const calls = turn.parts.flatMap((part) => (part.kind === "tools" ? part.calls : []))
   assert.equal(calls.length, 4)

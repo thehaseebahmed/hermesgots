@@ -5,16 +5,14 @@
  * parent says "Delegated.", and the child's finish arrives as two delivery rows before the wake turn.
  */
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
 import test from "node:test"
 
 import { cardsOf } from "../src/chat-next/agents.ts"
 import { foldTurns } from "../src/chat-next/fold.ts"
+import { recorded } from "./chat-next-fixtures.ts"
 
-const read = (name) =>
-  JSON.parse(readFileSync(new URL(`../src/chat-next/fixtures/${name}`, import.meta.url), "utf8"))
-const rows = read("live.transcript.json").data
-const agents = read("live.agents.json").agents
+const rows = recorded("live.transcript.json").data
+const agents = recorded("live.agents.json").agents
 const turns = foldTurns(rows)
 
 const shape = (turn) =>

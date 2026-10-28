@@ -4,17 +4,13 @@
  * and with `include_compacted=true`); what was said is replaced, the structure is the host's own.
  */
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
 import test from "node:test"
 
 import { foldTurns, withArchive } from "../src/chat-next/fold.ts"
+import { recorded } from "./chat-next-fixtures.ts"
 
-const recorded = (name) =>
-  JSON.parse(readFileSync(new URL(`../src/chat-next/fixtures/${name}`, import.meta.url), "utf8"))
-    .data
-
-const live = recorded("compaction.live.json")
-const archive = recorded("compaction.archive.json")
+const live = recorded("compaction.live.json").data
+const archive = recorded("compaction.archive.json").data
 
 const row = (id, role, content, extra = {}) => ({ id, role, content, ...extra })
 const hidden = (id) => row(id, "user", "", { display_kind: "hidden" })

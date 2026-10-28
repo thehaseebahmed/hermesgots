@@ -7,24 +7,16 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
-import { act } from "react"
 
 import { fakeHost, type Ask } from "./chat-next-host.ts"
-import { openDevice, sendFrom, showsEverything, type Device } from "./chat-next-devices.tsx"
-
-const wait = (ms: number) => act(async () => new Promise((resolve) => setTimeout(resolve, ms)))
-
-async function eventually(check: () => void, what: string) {
-  for (let tries = 0; tries < 60; tries++) {
-    try {
-      return check()
-    } catch {
-      await wait(25)
-    }
-  }
-  check()
-  assert.fail(what)
-}
+import {
+  eventually,
+  openDevice,
+  sendFrom,
+  showsEverything,
+  type Device,
+  withDevice,
+} from "./chat-next-devices.tsx"
 
 const TEA: Ask = {
   question: "Which do you prefer?",
@@ -35,7 +27,6 @@ const asking = { text: "Which do you prefer?", choices: ["tea", "coffee"] }
 
 const setUp = (name: string) => {
   const host = fakeHost(`memento-waiting-${name}`, { plugin: true })
-  host.install()
   return host
 }
 
@@ -51,8 +42,7 @@ const questionOf = (device: Device) => device.waiting().question
 test.describe("a question the agent asked", () => {
   test("the device that sent the turn sees it arrive, answers it, and the run carries on", async () => {
     const host = setUp("q-here")
-    const phone = await openDevice(host)
-    try {
+    await withDevice(openDevice(host), async (phone) => {
       const run = await sendFrom(phone, host, "go")
       const prompt_id = run.ask(TEA)
       await eventually(
@@ -74,15 +64,12 @@ test.describe("a question the agent asked", () => {
       run.say("\n\nTea it is.")
       run.finish("Tea it is.")
       await showsEverything(phone, host, "the turn, with the question and its answer")
-    } finally {
-      await phone.close()
-    }
+    })
   })
 
   test("a second question after the first replaces the card", async () => {
     const host = setUp("q-two")
-    const phone = await openDevice(host)
-    try {
+    await withDevice(openDevice(host), async (phone) => {
       const run = await sendFrom(phone, host, "go")
       run.ask(TEA)
       await eventually(() => assert.deepEqual(questionOf(phone), asking), "the first question")
@@ -96,17 +83,14 @@ test.describe("a question the agent asked", () => {
       await phone.choose("no")
       run.finish("Tea, no sugar.")
       await showsEverything(phone, host, "both questions and their answers")
-    } finally {
-      await phone.close()
-    }
+    })
   })
 
   test("a device that only watches finds it on the run's status and can answer it", async () => {
     const host = setUp("q-watch")
     const run = host.startElsewhere("from the laptop")
     run.ask(TEA)
-    const phone = await openDevice(host)
-    try {
+    await withDevice(openDevice(host), async (phone) => {
       await eventually(
         () => assert.deepEqual(questionOf(phone), asking),
         "the question, read from status",
@@ -115,56 +99,42 @@ test.describe("a question the agent asked", () => {
       await eventually(() => assert.equal(host.answers.length, 1), "the host was given the answer")
       run.finish("Coffee it is.")
       await showsEverything(phone, host, "the turn, with the question and its answer")
-    } finally {
-      await phone.close()
-    }
+    })
   })
 
   test("a device that was away finds the question waiting when it comes back", async () => {
     const host = setUp("q-away")
-    const phone = await openDevice(host)
-    try {
+    await withDevice(openDevice(host), async (phone) => {
       const run = host.startElsewhere("while away")
       run.ask(TEA)
       await phone.returns()
       await eventually(() => assert.deepEqual(questionOf(phone), asking), "the question")
-    } finally {
-      await phone.close()
-    }
+    })
   })
 
   test("a device reloaded while the run waits shows the question again", async () => {
     const host = setUp("q-reload")
-    const before = await openDevice(host)
-    try {
+    await withDevice(openDevice(host), async (before) => {
       const run = await sendFrom(before, host, "go")
       run.ask(TEA)
       await eventually(() => assert.deepEqual(questionOf(before), asking), "the question first")
-    } finally {
-      await before.close()
-    }
-    const after = await openDevice(host)
-    try {
+    })
+    await withDevice(openDevice(host), async (after) => {
       await eventually(() => assert.deepEqual(questionOf(after), asking), "the question again")
-    } finally {
-      await after.close()
-    }
+    })
   })
 
   test("a question another device answered goes from the screen without being answered here", async () => {
     const host = setUp("q-taken")
     const run = host.startElsewhere("from the laptop")
     const prompt_id = run.ask(TEA)
-    const phone = await openDevice(host)
-    try {
+    await withDevice(openDevice(host), async (phone) => {
       await eventually(() => assert.deepEqual(questionOf(phone), asking), "the question")
       await answerElsewhere(host.latest.id!, prompt_id, "tea")
       await eventually(() => assert.equal(questionOf(phone), undefined), "the card goes")
       run.finish("Tea it is.")
       await showsEverything(phone, host, "the turn, with the answer the other device gave")
-    } finally {
-      await phone.close()
-    }
+    })
   })
 })
 
@@ -174,8 +144,7 @@ test.describe("a command that needs approval", () => {
 
   test("the device that sent the turn sees it, denies it, and the run carries on", async () => {
     const host = setUp("a-here")
-    const phone = await openDevice(host)
-    try {
+    await withDevice(openDevice(host), async (phone) => {
       const run = await sendFrom(phone, host, "go")
       run.requestApproval(COMMAND, "delete in root path")
       await eventually(
@@ -190,17 +159,14 @@ test.describe("a command that needs approval", () => {
       await eventually(() => assert.equal(phone.waiting().approval, undefined), "the card goes")
       run.finish("It was denied.")
       await showsEverything(phone, host, "the turn, the denied call counted")
-    } finally {
-      await phone.close()
-    }
+    })
   })
 
   test("a device that only watches finds it on the run's status and can answer it", async () => {
     const host = setUp("a-watch")
     const run = host.startElsewhere("from the laptop")
     run.requestApproval(COMMAND, "delete in root path")
-    const phone = await openDevice(host)
-    try {
+    await withDevice(openDevice(host), async (phone) => {
       await eventually(
         () => assert.deepEqual(phone.waiting().approval, asked),
         "the command, read from status",
@@ -212,29 +178,21 @@ test.describe("a command that needs approval", () => {
       )
       run.finish("It ran.")
       await showsEverything(phone, host, "the turn, with the approved call counted")
-    } finally {
-      await phone.close()
-    }
+    })
   })
 
   test("a device reloaded while the run waits shows the approval again", async () => {
     const host = setUp("a-reload")
-    const before = await openDevice(host)
-    try {
+    await withDevice(openDevice(host), async (before) => {
       const run = await sendFrom(before, host, "go")
       run.requestApproval(COMMAND, "delete in root path")
       await eventually(
         () => assert.deepEqual(before.waiting().approval, asked),
         "the command first",
       )
-    } finally {
-      await before.close()
-    }
-    const after = await openDevice(host)
-    try {
+    })
+    await withDevice(openDevice(host), async (after) => {
       await eventually(() => assert.deepEqual(after.waiting().approval, asked), "the command again")
-    } finally {
-      await after.close()
-    }
+    })
   })
 })
