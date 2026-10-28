@@ -3,10 +3,11 @@ import { useCallback, useEffect, useState } from "react"
 import { connectionKey } from "@/lib/connection"
 import { db } from "@/lib/db"
 import { READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
-import { getSpeechSettings, setSpeechSettings } from "@/lib/hermes"
-import { usePluginFeatureOn } from "@/lib/features"
+import { getSpeechSettings, setSpeechSettings, setSttSetting } from "@/lib/hermes"
+import { usePluginFeatureAnswers } from "@/lib/features"
 import { noteFailure } from "@/lib/report"
 import { readSpeech, SPEECH_MODEL, type SpeechPick, type SpeechSettings } from "@/lib/speech"
+import { STT_SETTINGS, type SttValue } from "@/lib/stt-settings"
 
 type Server = { baseUrl: string; apiKey: string }
 
@@ -49,7 +50,14 @@ export function useSpeech(profile?: (Server & { id?: string; speechModel?: strin
   const key = connectionKey({ baseUrl, apiKey })
   const [state, setState] = useState<{ key: string; settings: SpeechSettings }>()
   const [failed, setFailed] = useState("")
-  const supported = usePluginFeatureOn({ baseUrl, apiKey }, SPEECH_MODEL)
+  // One read answers both questions — whether this host has the speech rows at all, and whether it
+  // carries the rest of its speech settings, which a host too old for draws the model alone.
+  const features = usePluginFeatureAnswers(
+    { baseUrl, apiKey },
+    { speech: SPEECH_MODEL, stt: STT_SETTINGS },
+  )
+  const supported = features.speech === "yes"
+  const sttSupport = features.stt === "yes"
   const [saving, setSaving] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
 
@@ -70,27 +78,46 @@ export function useSpeech(profile?: (Server & { id?: string; speechModel?: strin
     }
   }, [key, id, baseUrl, apiKey, supported])
 
+  /** One write's brackets: the page greys while it is out, and the host's words land on it if not. */
+  const save = useCallback(async <T>(work: () => Promise<T>): Promise<T | undefined> => {
+    setSaving(true)
+    setProblem(null)
+    try {
+      return await work()
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : String(error))
+      return undefined
+    } finally {
+      setSaving(false)
+    }
+  }, [])
+
   const write = useCallback(
     async (patch: { model?: string; cleanup_model?: SpeechPick | null }) => {
-      setSaving(true)
-      setProblem(null)
-      try {
-        const settings = await setSpeech(
-          { baseUrl, apiKey },
-          patch,
-          AbortSignal.timeout(WRITE_TIMEOUT_MS),
-        )
-        setState({ key, settings })
-        void rememberSpeech(id, settings.model)
-        return true
-      } catch (error) {
-        setProblem(error instanceof Error ? error.message : String(error))
-        return false
-      } finally {
-        setSaving(false)
-      }
+      const settings = await save(() =>
+        setSpeech({ baseUrl, apiKey }, patch, AbortSignal.timeout(WRITE_TIMEOUT_MS)),
+      )
+      if (!settings) return false
+      setState({ key, settings })
+      void rememberSpeech(id, settings.model)
+      return true
     },
-    [key, id, baseUrl, apiKey],
+    [save, key, id, baseUrl, apiKey],
+  )
+
+  /** One speech setting, written on its own: the host answers the whole block it now holds. */
+  const writeStt = useCallback(
+    async (setting: string, value: SttValue) => {
+      const stt = await save(() =>
+        setSttSetting({ baseUrl, apiKey }, setting, value, AbortSignal.timeout(WRITE_TIMEOUT_MS)),
+      )
+      if (stt)
+        setState((held) =>
+          held?.key === key ? { key, settings: { ...held.settings, stt } } : held,
+        )
+      return Boolean(stt)
+    },
+    [save, key, baseUrl, apiKey],
   )
 
   const settled = state?.key === key
@@ -105,9 +132,12 @@ export function useSpeech(profile?: (Server & { id?: string; speechModel?: strin
     model,
     check,
     supported,
+    /** Whether the host carries the rest of its speech settings on this page (ADR 0063). */
+    stt: supported && sttSupport,
     saving,
     problem,
     choose: (model: string) => write({ model }),
     chooseCleanup: (model: SpeechPick | null) => write({ cleanup_model: model }),
+    writeStt,
   }
 }

@@ -10,12 +10,63 @@ across a restart. No faster-whisper, no network.
 
 from __future__ import annotations
 
+import json
+import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
 
 from plugin import speech
+
+# Hermes's own ``DEFAULT_CONFIG["stt"]``, as the read is answered from: every key the page draws.
+DEFAULTS = {
+    "enabled": True,
+    "echo_transcripts": True,
+    "language": "en",
+    "streaming": False,
+    "cloud_trim_silence": True,
+    "cloud_trim_threshold_db": -40,
+    "cloud_trim_keep_ms": 300,
+    "local": {
+        "model": "base",
+        "language": "",
+        "initial_prompt": "",
+        "vad": True,
+        "vad_min_silence_ms": 500,
+        "no_speech_prob_threshold": 0.6,
+        "logprob_threshold": -1.0,
+        "unload_after_idle_seconds": 0,
+    },
+    "groq": {"model": "whisper-large-v3-turbo", "language": ""},
+    "openai": {
+        "model": "whisper-1",
+        "streaming_model": "gpt-live-transcribe",
+        "language": "",
+        "timeout": 60,
+        "max_retries": 1,
+    },
+    "mistral": {"model": "voxtral-mini-latest", "language": ""},
+    "xai": {"model": "", "language": ""},
+    "elevenlabs": {
+        "model_id": "scribe_v2",
+        "language_code": "",
+        "tag_audio_events": False,
+        "diarize": False,
+    },
+    "deepinfra": {"model": ""},
+}
+
+# Hermes's ``STT_MODEL_CATALOG``: DeepInfra has none, which is what keeps its page unlisted.
+CATALOGUES = {
+    "local": ["base", "tiny", "small", "medium", "large-v3", "turbo"],
+    "groq": ["whisper-large-v3-turbo"],
+    "openai": ["whisper-1", "gpt-4o-transcribe"],
+    "mistral": ["voxtral-mini-latest"],
+    "xai": ["grok-voice-transcribe-2.0"],
+    "elevenlabs": ["scribe_v2", "scribe_v1"],
+}
 
 
 def stt(model="base", **extra):
@@ -234,5 +285,243 @@ class CleanupTest(TempStore):
         self.assertEqual(same, {"provider": "acme", "model": "fast"})
 
 
+class SttHost:
+    """The host modules ``speech.stt_settings`` and ``set_stt_value`` reach for, scripted.
+
+    ``defaults`` is Hermes's ``DEFAULT_CONFIG["stt"]``, ``catalogues`` its ``STT_MODEL_CATALOG``,
+    ``resolved`` what its own resolver answers, and ``keys`` which provider variables the host
+    holds. The writer applies a dotted path the way Hermes's round-trip writer does — one path in,
+    a value set or a key removed — so a test can show what a page's write leaves beside it.
+    """
+
+    def __init__(
+        self,
+        section=None,
+        defaults=None,
+        catalogues=None,
+        resolved="local",
+        keys=None,
+    ):
+        self.section = {} if section is None else section
+        self.defaults = DEFAULTS if defaults is None else defaults
+        self.catalogues = CATALOGUES if catalogues is None else catalogues
+        self.resolved = resolved
+        self.keys = keys if keys is not None else {}
+        self.writes = []
+
+    def __enter__(self):
+        self._stt = mock.patch.object(speech, "_stt", lambda path, strict=False: dict(self.section))
+        self._stt.start()
+        self._modules = mock.patch.dict(sys.modules, self._host_modules())
+        self._modules.start()
+        return self
+
+    def __exit__(self, *rest):
+        self._modules.stop()
+        self._stt.stop()
+        return False
+
+    def _host_modules(self):
+        defaults = types.ModuleType("hermes_cli.config_defaults")
+        defaults.DEFAULT_CONFIG = {"stt": self.defaults}
+        common = types.ModuleType("tools.transcription_common")
+        common.STT_MODEL_CATALOG = self.catalogues
+        tools = types.ModuleType("tools.transcription_tools")
+        tools._get_provider = lambda section: self.resolved
+        pool = types.ModuleType("agent.credential_pool")
+        pool.get_env_prefer_dotenv = lambda name: self.keys.get(name, "")
+        utils = types.ModuleType("utils")
+        utils.atomic_roundtrip_yaml_update = self._write
+        return {
+            "hermes_cli": types.ModuleType("hermes_cli"),
+            "hermes_cli.config_defaults": defaults,
+            "tools": types.ModuleType("tools"),
+            "tools.transcription_common": common,
+            "tools.transcription_tools": tools,
+            "agent": types.ModuleType("agent"),
+            "agent.credential_pool": pool,
+            "utils": utils,
+        }
+
+    def _write(self, path, key, value):
+        self.writes.append((key, value))
+        # The whole file is the config; only its ``stt`` section is this harness's dict.
+        keys = key.split(".")
+        if keys[0] != "stt":
+            raise AssertionError(f"a write outside the stt section: {key}")
+        target = self.section
+        for name in keys[1:-1]:
+            target = target.setdefault(name, {})
+        if value is None:
+            target.pop(keys[-1], None)
+        else:
+            target[keys[-1]] = value
+
+
+class SttReadTest(TempStore):
+    def test_the_read_answers_the_page_in_one_block(self) -> None:
+        section = {"enabled": True, "language": "es", "local": {"model": "small"}}
+        with SttHost(section):
+            block = speech.stt_settings(self.config)
+        self.assertEqual(block["values"]["stt.language"], "es", "an explicit value is read")
+        self.assertEqual(block["values"]["stt.local.model"], "small")
+        self.assertNotIn("stt.provider", block["values"], "an absent pick is absent, not a value")
+        self.assertEqual(block["defaults"]["stt.language"], "en", "the default rides beside it")
+        self.assertEqual(block["provider"], {"name": "local", "reason": None, "explicit": None})
+        self.assertEqual(
+            [row["name"] for row in block["providers"]],
+            ["groq", "openai", "mistral", "xai", "elevenlabs", "deepinfra"],
+            "every provider the host declares but local, in its own order",
+        )
+        self.assertEqual(block["models"]["groq"], ["whisper-large-v3-turbo"], "the catalogues too")
+
+    def test_the_one_read_carries_the_page(self) -> None:
+        """The tab's read answers its own rows and the page's, from one read of the file."""
+        section = {"enabled": True, "language": "es", "local": {"model": "small"}}
+        with SttHost(section):
+            both = speech.read(self.config, self.path, {}, with_stt=True)
+            plain = speech.read(self.config, self.path, {})
+        self.assertEqual(both["model"], "small", "the tab's own rows are still there")
+        self.assertEqual(both["stt"]["values"]["stt.language"], "es", "and the page's beside them")
+        self.assertNotIn("stt", plain, "a caller that asks for the old rows alone gets no block")
+
+    def test_a_host_with_no_defaults_answers_its_old_rows(self) -> None:
+        with SttHost({}, defaults={}):
+            payload = speech.read(self.config, self.path, {}, with_stt=True)
+        self.assertNotIn("stt", payload, "no defaults is the feature absent, not a failed read")
+
+    def test_only_the_keys_the_page_carries_are_read(self) -> None:
+        section = {
+            "local": {"model": "base", "device": "cuda", "compute_type": "int8"},
+            "openai": {"api_key": "sk-not-for-a-phone", "base_url": "http://mine"},
+            "providers": {"mine": {"command": "hear"}},
+        }
+        with SttHost(section):
+            block = speech.stt_settings(self.config)
+        self.assertNotIn("stt.local.device", block["values"], "a key the schema doesn't declare")
+        self.assertNotIn("stt.openai.api_key", block["values"], "never a secret")
+        self.assertNotIn("stt.openai.base_url", block["values"], "never a URL")
+        self.assertNotIn("base_url", json.dumps(block["defaults"]), "the defaults carry none either")
+
+    def test_a_provider_pick_is_read_with_what_it_resolves_to(self) -> None:
+        section = {"provider": "groq"}
+        with SttHost(section, resolved="groq"):
+            block = speech.stt_settings(self.config)
+        self.assertEqual(block["provider"]["explicit"], "groq")
+        self.assertEqual(block["provider"]["name"], "groq")
+        self.assertIsNone(block["provider"]["reason"])
+
+    def test_nothing_usable_is_said_in_the_host_s_words(self) -> None:
+        with SttHost({}, resolved="none"):
+            self.assertEqual(
+                speech.stt_settings(self.config)["provider"],
+                {"name": "none", "reason": speech.NOTHING_USABLE, "explicit": None},
+            )
+        with SttHost({"enabled": False}, resolved="none"):
+            self.assertEqual(
+                speech.stt_settings(self.config)["provider"]["reason"],
+                speech.TURNED_OFF,
+                "a host turned off says that, not that it has no backend",
+            )
+
+    def test_a_provider_is_reported_by_presence_and_never_by_value(self) -> None:
+        secret = "gsk_the-website-never-holds-this"
+        with SttHost({}, keys={"GROQ_API_KEY": secret, "ELEVENLABS_API_KEY": ""}):
+            block = speech.stt_settings(self.config)
+        rows = {row["name"]: row for row in block["providers"]}
+        self.assertIs(rows["groq"]["key_set"], True, "a boolean, not the key")
+        self.assertIs(rows["elevenlabs"]["key_set"], False, "a provider with no key says so")
+        self.assertIs(rows["deepinfra"]["key_set"], False)
+        self.assertNotIn(secret, json.dumps(block), "the value is never anywhere in the answer")
+
+    def test_a_host_that_declares_no_defaults_has_no_page(self) -> None:
+        with SttHost({}, defaults={}):
+            self.assertFalse(speech.stt_available(), "the feature is absent, not broken")
+            with self.assertRaises(ImportError):
+                speech.stt_settings(self.config)
+
+    def test_no_resolver_asked_means_no_provider_named(self) -> None:
+        with SttHost({}):
+            with mock.patch.dict(sys.modules, {"tools.transcription_tools": None}):
+                block = speech.stt_settings(self.config)
+        self.assertEqual(block["provider"], {"name": "", "reason": None, "explicit": None})
+
+
+class SttWriteTest(TempStore):
+    def test_one_key_is_written_and_its_siblings_stay(self) -> None:
+        section = {
+            "enabled": True,
+            "local": {"model": "base", "device": "cuda"},
+            "providers": {"mine": {"command": "hear"}},
+        }
+        with SttHost(section) as host:
+            speech.set_stt_value(self.config, "stt.local.vad", False)
+        self.assertEqual(host.writes, [("stt.local.vad", False)], "one dotted path, one value")
+        self.assertEqual(section["local"]["vad"], False)
+        self.assertEqual(section["local"]["model"], "base", "the key beside it stays")
+        self.assertEqual(section["local"]["device"], "cuda", "so does one the page doesn't draw")
+        self.assertEqual(section["providers"], {"mine": {"command": "hear"}})
+
+    def test_a_switch_can_be_turned_on_and_a_number_written(self) -> None:
+        with SttHost({}) as host:
+            speech.set_stt_value(self.config, "stt.streaming", True)
+            speech.set_stt_value(self.config, "stt.local.vad_min_silence_ms", 750)
+        self.assertEqual(
+            host.writes, [("stt.streaming", True), ("stt.local.vad_min_silence_ms", 750)]
+        )
+
+    def test_clearing_a_key_removes_only_that_key(self) -> None:
+        section = {"language": "es", "local": {"model": "base", "language": "es"}}
+        with SttHost(section) as host:
+            speech.set_stt_value(self.config, "stt.language", None)
+        self.assertEqual(host.writes, [("stt.language", None)], "a reset writes a deletion")
+        self.assertNotIn("language", section, "the key left the file")
+        self.assertEqual(section["local"], {"model": "base", "language": "es"}, "the nested one stays")
+
+    def test_the_provider_pick_is_written_and_cleared(self) -> None:
+        with SttHost({}) as host:
+            speech.set_stt_value(self.config, "stt.provider", " groq ")
+            speech.set_stt_value(self.config, "stt.provider", None)
+        self.assertEqual(host.writes, [("stt.provider", "groq"), ("stt.provider", None)])
+
+    def test_an_unknown_key_is_refused_before_anything_is_written(self) -> None:
+        with SttHost({}) as host:
+            with self.assertRaisesRegex(ValueError, "isn't a speech setting"):
+                speech.set_stt_value(self.config, "stt.local.device", "cuda")
+        self.assertEqual(host.writes, [])
+
+    def test_a_secret_or_a_url_is_never_writable(self) -> None:
+        with SttHost({}) as host:
+            for key in ("stt.openai.api_key", "stt.openai.base_url", "tts.enabled"):
+                with self.assertRaises(ValueError):
+                    speech.set_stt_value(self.config, key, "x")
+        self.assertEqual(host.writes, [])
+
+    def test_a_value_the_key_cannot_hold_is_refused(self) -> None:
+        with SttHost({}) as host:
+            for key, value in (
+                ("stt.local.vad", "yes"),
+                ("stt.local.vad_min_silence_ms", "soon"),
+                ("stt.language", 3),
+                ("stt.provider", ""),
+            ):
+                with self.assertRaises(ValueError, msg=key):
+                    speech.set_stt_value(self.config, key, value)
+        self.assertEqual(host.writes, [])
+
+    def test_a_file_the_host_refuses_is_left_as_it_was(self) -> None:
+        section = {"local": {"model": "base"}}
+        refused = types.ModuleType("utils")
+        refused.atomic_roundtrip_yaml_update = mock.Mock(
+            side_effect=OSError("config.yaml is read-only")
+        )
+        with SttHost(section):
+            with mock.patch.dict(sys.modules, {"utils": refused}):
+                with self.assertRaisesRegex(OSError, "read-only"):
+                    speech.set_stt_value(self.config, "stt.local.model", "small")
+        self.assertEqual(section["local"]["model"], "base")
+
+
 if __name__ == "__main__":
     unittest.main()
+

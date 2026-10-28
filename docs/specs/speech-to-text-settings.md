@@ -1,8 +1,9 @@
 # A bot's Speech-to-text page edits every speech setting its host carries
 
 Status: ready for a human to read. Design: [ADR 0063](../adr/0063-a-bots-speech-to-text-page-edits-every-speech-setting-its-host-carries.md).
-Placement follows [bot settings restructure](./bot-settings-restructure.md): Gots's own settings
-above, the bot's Hermes below.
+Placement departs from [bot settings restructure](./bot-settings-restructure.md)'s rule that a page
+is captioned by ownership: this page captions its cards by what the settings are about, and marks
+Gots's own two rows with a **Gots** tag (ADR 0063).
 
 ## Problem Statement
 
@@ -15,12 +16,13 @@ Spanish, a longer pause tolerance, or a different provider has to find a laptop.
 ## Solution
 
 The page mirrors the Dashboard's Speech-to-Text form and writes the bot's own `config.yaml`, one key
-at a time. Under **Hermes**: the provider pick, the speech model, *Enabled*, then the take's own
-tuning inline (language, local language, initial prompt, VAD, the three thresholds, idle unload),
-then the settings that shape Hermes's speech elsewhere (streaming, echo transcripts, the silence trim
-and its two numbers), then *Other providers* — a page listing every provider but local, each opening
-its own page of that provider's model and language (and, for OpenAI and ElevenLabs, their few extra
-knobs). No secrets, no `base_url`, no invented ranges.
+at a time. It draws four cards, captioned by what their settings are about — **General** (*Enabled*,
+the provider pick, echo transcripts, and Gots's own cleanup model), **Local** (the speech model, the
+local language, the initial prompt with Gots's vocabulary under it, VAD, its minimum silence, the two
+decode thresholds, idle unload), **Cloud** (the language hint, streaming, the silence trim and its
+two numbers), and **Providers** (one row per provider but local, each opening that provider's own
+page of its model and language, and for OpenAI and ElevenLabs their few extra knobs). No secrets, no
+`base_url`, no invented ranges.
 
 ## User Stories
 
@@ -33,41 +35,58 @@ knobs). No secrets, no `base_url`, no invented ranges.
 4. As someone whose Hermes keeps loading the wrong backend, I want to pick the provider (or say
    Automatic) from my phone, so that voice notes elsewhere stop failing.
 5. As someone tuning a cloud provider, I want that provider's model, language and timeouts on their
-   own page, so that the list of providers stays a list.
+   own page, so that the page keeps one row per provider rather than their rows.
 6. As someone who changed a setting and wants it back, I want a reset to the host's own default, so
    that I never have to remember what it was.
-7. As someone whose provider has no key on the host, I want the list to say so, so that I know why a
+7. As someone whose provider has no key on the host, I want its row to say so, so that I know why a
    pick will fail before I make it.
+8. As someone who can't tell which rows are the app's and which are the host's, I want the app's own
+   two rows marked, so that I know whose setting I'm changing.
 
 ## Implementation Decisions
 
-**What the page draws**, in order under **Hermes**. Every key below is written as Hermes spells it.
-Thirty-one keys are the schema's own defaults; `stt.provider` is the thirty-second and the one the
-Dashboard's form never draws — its choices never merged, because the key is deliberately unseeded —
-so this row is the first readable place to make that pick.
+**What the page draws**, in four cards, each captioned by what its settings are about rather than by
+who owns them, and each in the order a take is heard. Every key below is written as Hermes spells
+it. Thirty-one keys are the schema's own defaults; `stt.provider` is the thirty-second and the one
+the Dashboard's form never draws — its choices never merged, because the key is deliberately
+unseeded — so this row is the first readable place to make that pick.
 
-| Key | Row | Control |
-| --- | --- | --- |
-| `stt.provider` | Provider | pick: *Automatic*, then every provider the host declares |
-| `stt.local.model` | Speech model | pick (existing row, unchanged) |
-| `stt.enabled` | Enabled | switch |
-| `stt.language` | Language | text field |
-| `stt.local.language` | Local language | text field |
-| `stt.local.initial_prompt` | Initial prompt | multi-line field |
-| `stt.local.vad` | VAD | switch |
-| `stt.local.vad_min_silence_ms` | VAD min silence | numeric field |
-| `stt.local.no_speech_prob_threshold` | No-speech threshold | numeric field |
-| `stt.local.logprob_threshold` | Logprob threshold | numeric field |
-| `stt.local.unload_after_idle_seconds` | Unload after idle | numeric field |
-| `stt.streaming` | Streaming | switch |
-| `stt.echo_transcripts` | Echo transcripts | switch |
-| `stt.cloud_trim_silence` | Trim silence | switch |
-| `stt.cloud_trim_threshold_db` | Trim threshold | numeric field |
-| `stt.cloud_trim_keep_ms` | Trim keep | numeric field |
+| Card | Key | Row | Control |
+| --- | --- | --- | --- |
+| General | `stt.enabled` | Enabled | switch |
+| General | `stt.provider` | Provider | pick: *Automatic*, then every provider the host declares |
+| General | `stt.echo_transcripts` | Echo transcripts | switch |
+| General | — | Cleanup model | pick (Gots's own row, tagged **Gots**) |
+| Local | `stt.local.model` | Speech model | pick (existing row, unchanged) |
+| Local | `stt.local.language` | Local language | text field |
+| Local | `stt.local.initial_prompt` | Initial prompt | multi-line field |
+| Local | — | Vocabulary | drill-in list (Gots's own row, tagged **Gots**) |
+| Local | `stt.local.vad` | VAD | switch |
+| Local | `stt.local.vad_min_silence_ms` | VAD min silence | numeric field |
+| Local | `stt.local.no_speech_prob_threshold` | No-speech threshold | numeric field |
+| Local | `stt.local.logprob_threshold` | Logprob threshold | numeric field |
+| Local | `stt.local.unload_after_idle_seconds` | Unload after idle | numeric field |
+| Cloud | `stt.language` | Language | text field |
+| Cloud | `stt.streaming` | Streaming | switch |
+| Cloud | `stt.cloud_trim_silence` | Trim silence | switch |
+| Cloud | `stt.cloud_trim_threshold_db` | Trim threshold | numeric field |
+| Cloud | `stt.cloud_trim_keep_ms` | Trim keep | numeric field |
 
-**Other providers** opens a page listing every provider the host declares except `local`; each row
-is the provider's name over the model it holds, marked where it is the one Hermes is using, and
-saying *Key not set* where the host holds no key for it. A provider page holds:
+Where each setting sits, and why:
+
+- **Enabled leads**, because it decides whether any of the rest is read at all.
+- **`stt.language` is a cloud setting.** It is a global hint the local model never reads — local
+  takes its own `language` — and a provider's own language overrides it, so it sits with the
+  settings only a cloud backend reads, ahead of the trims it applies last.
+- **Vocabulary sits under Initial prompt**, because the plugin appends it to the local decoder
+  prompt straight after `initial_prompt`: the two are one instruction.
+- **Echo transcripts stays in General.** It echoes a gateway chat's voice note, so it is neither
+  the local model's nor a cloud provider's.
+
+**Providers** is a caption and a card on the page itself, not a screen: one row per provider the
+host declares except `local`, each the provider's name over the model it holds, marked *In use*
+where Hermes is using it and *Key not set* where the host holds no key for it. A row opens that
+provider's own page, whose **Done** returns to the page. Those pages hold:
 
 | Provider | Rows |
 | --- | --- |

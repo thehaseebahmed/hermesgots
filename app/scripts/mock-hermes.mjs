@@ -3058,6 +3058,66 @@ const SPEECH_MODELS = [
 const SPEECH_DENIED =
   "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable memento`."
 const speech = { model: "small", cleanup: null, downloaded: new Set(["tiny", "base", "small"]) }
+// plugin/speech.py's whole `stt` section (ADR 0063): Hermes's own defaults, one key at a time. The
+// values start empty, so the page draws every default as the host's own, and a write lands in the
+// file this stands in for.
+const STT_DEFAULTS = {
+  "stt.enabled": true,
+  "stt.echo_transcripts": true,
+  "stt.language": "en",
+  "stt.streaming": false,
+  "stt.cloud_trim_silence": true,
+  "stt.cloud_trim_threshold_db": -40,
+  "stt.cloud_trim_keep_ms": 300,
+  "stt.local.model": "small",
+  "stt.local.language": "",
+  "stt.local.initial_prompt": "",
+  "stt.local.vad": true,
+  "stt.local.vad_min_silence_ms": 500,
+  "stt.local.no_speech_prob_threshold": 0.6,
+  "stt.local.logprob_threshold": -1,
+  "stt.local.unload_after_idle_seconds": 0,
+  "stt.groq.model": "whisper-large-v3-turbo",
+  "stt.groq.language": "",
+  "stt.openai.model": "whisper-1",
+  "stt.openai.streaming_model": "gpt-live-transcribe",
+  "stt.openai.language": "",
+  "stt.openai.timeout": 60,
+  "stt.openai.max_retries": 1,
+  "stt.mistral.model": "voxtral-mini-latest",
+  "stt.mistral.language": "",
+  "stt.xai.model": "",
+  "stt.xai.language": "",
+  "stt.elevenlabs.model_id": "scribe_v2",
+  "stt.elevenlabs.language_code": "",
+  "stt.elevenlabs.tag_audio_events": false,
+  "stt.elevenlabs.diarize": false,
+  "stt.deepinfra.model": "",
+}
+const STT_PROVIDERS = ["groq", "openai", "mistral", "xai", "elevenlabs", "deepinfra"]
+// The key a provider needs on the host, and the providers that have one here: the page asks only
+// whether a key is set, so this is the whole of what it can learn about a secret.
+const STT_KEYS_SET = new Set(["groq", "elevenlabs"])
+const STT_CATALOGUES = {
+  local: SPEECH_MODELS.map((entry) => entry.name),
+  groq: ["whisper-large-v3-turbo", "whisper-large-v3"],
+  openai: ["whisper-1", "gpt-4o-transcribe", "gpt-live-transcribe"],
+  mistral: ["voxtral-mini-latest"],
+  xai: ["grok-voice-transcribe-2.0"],
+  elevenlabs: ["scribe_v2", "scribe_v1"],
+}
+const stt = { values: {} }
+function sttReading() {
+  const explicit =
+    typeof stt.values["stt.provider"] === "string" ? stt.values["stt.provider"] : null
+  return {
+    values: { ...stt.values },
+    defaults: STT_DEFAULTS,
+    provider: { name: explicit ?? "local", explicit, reason: null },
+    providers: STT_PROVIDERS.map((name) => ({ name, key_set: STT_KEYS_SET.has(name) })),
+    models: STT_CATALOGUES,
+  }
+}
 function speechReading() {
   return {
     model: speech.model,
@@ -3072,6 +3132,7 @@ function speechReading() {
       allowed: RESEARCH_WRITERS,
       reason: RESEARCH_WRITERS ? null : SPEECH_DENIED,
     },
+    stt: sttReading(),
   }
 }
 // plugin/moves.py: the messages triage moved out of each Main session, for its Moved markers.
@@ -3707,6 +3768,7 @@ http
           "dictation",
           ...(DICTATIONS ? ["dictations"] : []),
           "speech_model",
+          "stt_settings",
           "afk",
           "afk_switch",
           "afk_skills",
@@ -5091,6 +5153,43 @@ http
         text: "um Let's ship the dictation feature today.",
         ms: 700,
       })
+    }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/stt") {
+      if (req.method === "POST") {
+        const body = await readBody(req).catch(() => ({}))
+        const key = body?.key
+        const known = typeof key === "string" && (key === "stt.provider" || key in STT_DEFAULTS)
+        if (!known)
+          return json(res, 400, {
+            error: { message: `${String(key)} isn't a speech setting this page can write.` },
+          })
+        // A null clears the key, so the file holds nothing and the row reads the host's default
+        // again — one key alone, as the plugin writes it.
+        if (body.value === null || body.value === undefined) delete stt.values[key]
+        else if (key === "stt.provider") {
+          const name = typeof body.value === "string" ? body.value.trim() : ""
+          if (!STT_PROVIDERS.includes(name))
+            return json(res, 400, { error: { message: "That isn't a provider this host declares." } })
+          stt.values[key] = name
+        } else if (typeof STT_DEFAULTS[key] === "number") {
+          if (typeof body.value !== "number" || Number.isNaN(body.value))
+            return json(res, 400, { error: { message: `${key} takes a number.` } })
+          stt.values[key] = body.value
+        } else if (typeof STT_DEFAULTS[key] === "boolean") {
+          if (typeof body.value !== "boolean")
+            return json(res, 400, {
+              error: { message: `${key} is a switch, so its value is true or false.` },
+            })
+          stt.values[key] = body.value
+        } else {
+          if (typeof body.value !== "string")
+            return json(res, 400, { error: { message: `${key} takes text.` } })
+          stt.values[key] = body.value
+        }
+        // The model is the one key the rest of the mock reads: the pick's own rows follow it.
+        if (key === "stt.local.model") speech.model = stt.values[key] ?? STT_DEFAULTS[key]
+        return json(res, 200, { object: "memento.stt", stt: sttReading() })
+      }
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/speech") {
       if (req.method === "GET")

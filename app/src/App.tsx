@@ -116,7 +116,7 @@ function AppRoutes() {
         <Route path="routines" element={<RoutinesPage />} />
         <Route path="research" element={<ResearchPage />} />
         <Route path="research/:id" element={<MissionPage />} />
-        <Route path="settings/:section?/:botId?/:tab?/:sub?" element={<SettingsPage />} />
+        <Route path="settings/:section?/:botId?/:tab?/:sub?/:leaf?" element={<SettingsPage />} />
         <Route path="bots" element={<BotsPage />} />
         <Route path="share" element={<SharePage />} />
         <Route path="*" element={<ChatPage slot="route" />} />
