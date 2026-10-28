@@ -93,12 +93,22 @@ test("the line counts what runs, and nothing when nothing does", async () => {
   }
 })
 
-test("the line is blue wherever it lands, its loader included", async () => {
+test("the line is blue wherever it lands, and its loader rides inside that colour", async () => {
   const line = await mount(<SubagentLine count={2} onOpen={() => {}} />)
   try {
     const button = findAll("button")[0]
-    assert.match(button.className, /(^|\s)text-info(\s|$)/, "delegated work reads in the blue, not the reply's grey")
-    assert.ok(button.querySelector('[data-slot="spinner"]'), "with its loader beside it")
+    assert.match(
+      button.className,
+      /(^|\s)text-info(\s|$)/,
+      "delegated work reads in the blue, not the reply's grey",
+    )
+    const loader = button.querySelector('[data-slot="spinner"]')
+    assert.ok(loader, "with its loader beside it")
+    assert.doesNotMatch(
+      loader?.getAttribute("class") ?? "",
+      /text-(primary|muted-foreground|foreground)/,
+      "and no colour of its own to override the line's",
+    )
   } finally {
     await line.close()
   }

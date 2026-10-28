@@ -692,7 +692,11 @@ export const MessageItem = memo(function MessageItem({
       <StatusLine key="status" text={activity} waiting={waiting}>
         {shown && onShowSubagents && (
           <>
-            {activity && <span aria-hidden>·</span>}
+            {activity && (
+              <span aria-hidden data-slot="status-separator" className="text-info">
+                ·
+              </span>
+            )}
             <SubagentLine
               count={subagentCount}
               onOpen={onShowSubagents}

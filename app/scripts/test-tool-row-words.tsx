@@ -69,7 +69,7 @@ test("a failed group wears no mark before its words, and its reason stands flush
       assert.ok(!row?.querySelector('[aria-label="Failed"]'), "and no mark precedes them")
       assert.match(
         row?.getAttribute("aria-label") ?? "",
-        /a call failed/,
+        /(^|,\s)failed$/,
         "the row's own name is what says it failed",
       )
       const reason = find('[data-slot="tool-group-reason"]')

@@ -45,3 +45,19 @@ test("a reply never told how many there are says nothing about them", async () =
   const body = await drawn({ subagents: undefined, subagentsInline: false })
   assert.doesNotMatch(body, /subagent/i, `no subagent line in "${body}"`)
 })
+
+test("the dot parting the words from the count takes the count's blue", async () => {
+  let dot: Element | null = null
+  await mount(
+    <MessageItem message={reply} showStats onShowSubagents={() => {}} subagents={2} subagentsInline />,
+    async () => {
+      dot = document.querySelector('[data-slot="status-separator"]')
+    },
+  )
+  assert.equal(dot?.textContent, "·", "the words and the count are parted by a dot")
+  assert.match(
+    dot?.getAttribute("class") ?? "",
+    /(^|\s)text-info(\s|$)/,
+    "and it belongs to the blue line, not to the accent words",
+  )
+})

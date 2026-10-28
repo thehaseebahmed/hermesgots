@@ -12,8 +12,9 @@ space a reply's work rows wear, and they are only worth deciding together.
 
 **A work row wears no mark.** The tool group drew a red X before its label when one of its calls had
 failed — the only mark any work row wore, and the only prefix icon the thread had. It goes. A
-failure is already said twice without it: the row's accessible name gains a word for it ("a call
-failed", or how many did), and the reason stands under the label in the same red. An icon at the head
+failure is already said twice without it: the row's accessible name gains the word `failed`, and the
+reason stands under the label in the same red — the host's own words for one call, and how many failed
+for several, so a count is never announced twice. An icon at the head
 of a row says *this row is special* before it says which row; the thread reads as one passage of
 work, and the row that failed reads as that passage with a line under it. `WorkRow` loses its
 `before` slot with it, so no row can regain a prefix by accident.

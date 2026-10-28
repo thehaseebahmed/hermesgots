@@ -298,17 +298,12 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
   if (detail && detail !== last) setLast(detail)
   const shownDetail = detail ?? last
   const failedCount = failures.length
-  const failureWords = !failed
-    ? undefined
-    : failedCount === 1
-      ? "a call failed"
-      : `${failedCount} calls failed`
   return (
     <>
       <WorkRow
         ref={row}
         data-slot="tool-group"
-        aria-label={failureWords ? `${full}, ${failureWords}` : full}
+        aria-label={failed ? `${full}, failed` : full}
         onClick={() => setOpen(true)}
         after={
           <>
@@ -323,7 +318,7 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
       </WorkRow>
       {failed && (
         <WorkNote className="text-destructive" data-slot="tool-group-reason">
-          {failedCount === 1 ? whyFailed(failures[0]) : failureWords}
+          {failedCount === 1 ? whyFailed(failures[0]) : `${failedCount} calls failed`}
         </WorkNote>
       )}
       <Popup
