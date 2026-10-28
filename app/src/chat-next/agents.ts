@@ -53,29 +53,44 @@ export function goalsOf(call: ToolCall): string[] {
     .filter(Boolean)
 }
 
+/** The host lists a goal on one line and cut short, so a long goal of several lines is its prefix. */
+const words = (goal: string) => goal.replace(/\s+/g, " ").trim()
+
 const statusOf = (agent: Agent): CardStatus =>
   agent.status === "running" ? "running" : agent.status === "stopped" ? "stopped" : "done"
 
 /**
  * The cards each turn draws, one list per turn in call order. A call finds its child by goal — the
- * call's arguments and the child's record carry the same words, and a preview's cut goal is a prefix
- * of them — taking the earliest-started child no earlier call took, so two children given the same
+ * call's arguments and the child's record carry the same words, the record on one line and cut
+ * short and a preview cut too, so whichever is shorter is a prefix of the other — taking the earliest-started child no earlier call took, so two children given the same
  * goal are each found once. A call whose child has no record yet is starting.
  */
 export function cardsOf(turns: Turn[], agents: Agent[]): Card[][] {
   const pool = [...agents].sort((a, b) => a.started_at - b.started_at)
   const taken = new Set<string>()
-  return turns.map((turn) =>
+  const cards = turns.map((turn) =>
     turn.parts.flatMap((part) =>
       part.kind !== "tools"
         ? []
         : part.calls.flatMap(goalsOf).map((goal): Card => {
-            const agent = pool.find(
-              (one) => !taken.has(one.id) && (one.goal === goal || one.goal.startsWith(goal)),
-            )
+            const asked = words(goal)
+            const agent = pool.find((one) => {
+              const listed = words(one.goal)
+              return !taken.has(one.id) && (listed.startsWith(asked) || asked.startsWith(listed))
+            })
             if (agent) taken.add(agent.id)
             return { goal, status: agent ? statusOf(agent) : "starting", agent }
           }),
     ),
   )
+  // A compaction can archive the call that set children to work, leaving their reply as the turn
+  // whose request is gone. The children the host lists and no call claims are that turn's.
+  const carried = turns.findIndex((turn) => turn.carried)
+  if (carried >= 0)
+    cards[carried].push(
+      ...pool
+        .filter((one) => !taken.has(one.id))
+        .map((agent): Card => ({ goal: agent.goal, status: statusOf(agent), agent })),
+    )
+  return cards
 }
