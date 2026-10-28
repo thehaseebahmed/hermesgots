@@ -91,6 +91,14 @@ def _text(value: Any, name: str, limit: int) -> Optional[str]:
     return value or None
 
 
+def _bool(value: Any, name: str) -> bool:
+    if value is None:
+        return False
+    if not isinstance(value, bool):
+        raise ValueError(f"{name} must be true or false.")
+    return value
+
+
 def _identity_env(hermes_home: Path, tree: str) -> Dict[str, str]:
     """The host's git identity, else the GitHub account's no-reply address, so a commit never
     stops on "Please tell me who you are"."""
@@ -290,7 +298,7 @@ def ship(
     title: Optional[str],
     body: Optional[str],
     open_pr: bool,
-    force: bool,
+    force: Any,
 ) -> List[Dict[str, Any]]:
     """Commits each worktree's changes with ``message``, pushes its branch and, with ``open_pr``,
     opens a draft pull request where the branch has none open. ``force`` replaces the branch's
@@ -299,6 +307,7 @@ def ship(
     message = _text(message, "message", MAX_MESSAGE)
     title = _text(title, "title", MAX_TITLE)
     body = _text(body, "body", MAX_BODY)
+    force = _bool(force, "force")
     lock = _lock(session_id)
     if not lock.acquire(blocking=False):
         raise ShipError("This session's changes are already being pushed.", 409)
@@ -517,9 +526,6 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
         )
     if action not in ACTIONS:
         return json.dumps({"error": "action is required: ship, push, update or status."})
-    force = args.get("force")
-    if force is not None and not isinstance(force, bool):
-        return json.dumps({"error": "force must be true or false."})
     path, home = sessions._paths()
     record = sessions.record_for_call(path, home, task_id, session_id)
     if not record:
@@ -542,7 +548,7 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
                 args.get("title"),
                 args.get("body"),
                 open_pr=action == "ship",
-                force=bool(force),
+                force=args.get("force"),
             )
     except (ValueError, ShipError, WorkspaceError) as error:
         return json.dumps({"error": str(error)})
