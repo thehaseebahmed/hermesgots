@@ -29,7 +29,7 @@ export interface Card {
  * A control call — list, steer, stop — asks for none.
  */
 export function goalsOf(call: ToolCall): string[] {
-  if (call.name !== DELEGATE) return []
+  if (call.name !== DELEGATE || failed(call)) return []
   if (call.arguments) {
     try {
       const args = JSON.parse(call.arguments) as {
@@ -55,6 +55,14 @@ export function goalsOf(call: ToolCall): string[] {
 
 /** The host lists a goal on one line and cut short, so a long goal of several lines is its prefix. */
 const words = (goal: string) => goal.replace(/\s+/g, " ").trim()
+
+/**
+ * A call the host refused spawned nothing: its result is an error object (cut short when it is
+ * long, so read by its start, not parsed) or the one-line summary of one.
+ */
+const failed = (call: ToolCall) =>
+  /^\{\s*"error"\s*:/.test(call.result ?? "") ||
+  /^\[\w+\] .*\(\d[\d,]* chars result\) FAILED\b/.test(call.result ?? "")
 
 const statusOf = (agent: Agent): CardStatus =>
   agent.status === "running" ? "running" : agent.status === "stopped" ? "stopped" : "done"
@@ -83,14 +91,21 @@ export function cardsOf(turns: Turn[], agents: Agent[]): Card[][] {
           }),
     ),
   )
-  // A compaction can archive the call that set children to work, leaving their reply as the turn
-  // whose request is gone. The children the host lists and no call claims are that turn's.
-  const carried = turns.findIndex((turn) => turn.carried)
-  if (carried >= 0)
-    cards[carried].push(
-      ...pool
-        .filter((one) => !taken.has(one.id))
-        .map((agent): Card => ({ goal: agent.goal, status: statusOf(agent), agent })),
+  // A compaction can archive the call that set children to work. What it leaves is the turn whose
+  // request is gone, or the turn's refused attempts at the call; the children the host lists and no
+  // call claims are that turn's.
+  const left = pool.filter((one) => !taken.has(one.id))
+  const home = turns.some((turn) => turn.carried)
+    ? turns.findIndex((turn) => turn.carried)
+    : turns.findLastIndex((turn) =>
+        turn.parts.some(
+          (part) =>
+            part.kind === "tools" && part.calls.some((c) => c.name === DELEGATE && failed(c)),
+        ),
+      )
+  if (home >= 0 && left.length)
+    cards[home].push(
+      ...left.map((agent): Card => ({ goal: agent.goal, status: statusOf(agent), agent })),
     )
   return cards
 }

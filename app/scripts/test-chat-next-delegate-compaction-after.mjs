@@ -16,7 +16,7 @@ import { foldTurns, withArchive } from "../src/chat-next/fold.ts"
 const recorded = (name) =>
   JSON.parse(
     readFileSync(
-      new URL(`../src/chat-next/fixtures/delegate-compaction.${name}`, import.meta.url),
+      new URL(`../src/chat-next/fixtures/delegate-compaction-after.${name}`, import.meta.url),
       "utf8",
     ),
   )

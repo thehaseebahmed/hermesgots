@@ -1,0 +1,66 @@
+: open
+
+: keepalive
+
+id: 0
+data: {"event": "tool.started", "run_id": "run_aa05a9f0e3d24019b2188785019a86db", "timestamp": 1793218422.949551, "tool": "delegate_task", "preview": "4 tasks: Run exactly this terminal command: `s... | Run exactly this terminal command: `s... | Run exactly this terminal command: `s... | Run exactly this terminal command: `s...", "tool_call_id": "call-20e2be95-688f-46b3-badb-fe815ce25dca", "seq": 0}
+
+id: 1
+data: {"event": "tool.completed", "run_id": "run_aa05a9f0e3d24019b2188785019a86db", "timestamp": 1793218423.1894436, "tool": "delegate_task", "duration": 0, "error": true, "tool_call_id": "call-20e2be95-688f-46b3-badb-fe815ce25dca", "preview": "", "seq": 1}
+
+id: 2
+data: {"event": "tool.started", "run_id": "run_aa05a9f0e3d24019b2188785019a86db", "timestamp": 1793218430.3173475, "tool": "delegate_task", "preview": "4 tasks: Run exactly this terminal command: `s... | Run exactly this terminal command: `s... | Run exactly this terminal command: `s... | Run exactly this terminal command: `s...", "tool_call_id": "call-bb7976d2-af61-4b03-972c-916998c37cc7", "seq": 2}
+
+id: 3
+data: {"event": "tool.completed", "run_id": "run_aa05a9f0e3d24019b2188785019a86db", "timestamp": 1793218430.384423, "tool": "delegate_task", "duration": 0, "error": true, "tool_call_id": "call-bb7976d2-af61-4b03-972c-916998c37cc7", "preview": "", "seq": 3}
+
+id: 4
+data: {"event": "message.delta", "run_id": "run_aa05a9f0e3d24019b2188785019a86db", "timestamp": 1793218434.453643, "delta": "\n\nThe `output_s", "seq": 4}
+
+id: 5
+data: {"event": "message.delta", "run_id": "run_aa05a9f0e3d24019b2188785019a86db", "timestamp": 1793218434.4602225, "delta": "chema` field", "seq": 5}
+
+id: 6
+data: {"event": "message.delta", "run_id": "run_aa05a9f0e3d24019b2188785019a86db", "timestamp": 1793218434.5034258, "delta": " is being mangled by the", "seq": 6}
+
+id: 7
+data: {"event": "message.delta", "run_id": "run_aa05a9f0e3d24019b2188785019a86db", "timestamp": 1793218434.5463307, "delta": " validator, so I'l", "seq": 7}
+
+id: 8
+data: {"event": "message.delta", "run_id": "run_aa05a9f0e3d24019b2188785019a86db", "timestamp": 1793218434.553244, "delta": "l drop it and let", "seq": 8}
+
+id: 9
+data: {"event": "message.delta", "run_id": "run_aa05a9f0e3d24019b2188785019a86db", "timestamp": 1793218434.5731752, "delta": " the goal text ca", "seq": 9}
+
+id: 10
+data: {"event": "message.delta", "run_id": "run_aa05a9f0e3d24019b2188785019a86db", "timestamp": 1793218434.580276, "delta": "rry the reporting", "seq": 10}
+
+id: 11
+data: {"event": "message.delta", "run_id": "run_aa05a9f0e3d24019b2188785019a86db", "timestamp": 1793218434.6285944, "delta": " requirement.", "seq": 11}
+
+id: 12
+data: {"event": "tool.started", "run_id": "run_aa05a9f0e3d24019b2188785019a86db", "timestamp": 1793218443.5260408, "tool": "delegate_task", "preview": "4 tasks: Run exactly this terminal command: `s... | Run exactly this terminal command: `s... | Run exactly this terminal command: `s... | Run exactly this terminal command: `s...", "tool_call_id": "call-62b45511-7343-4786-9cae-f0be99ee9a99", "seq": 12}
+
+id: 13
+data: {"event": "tool.completed", "run_id": "run_aa05a9f0e3d24019b2188785019a86db", "timestamp": 1793218443.9704974, "tool": "delegate_task", "duration": 0, "error": false, "tool_call_id": "call-62b45511-7343-4786-9cae-f0be99ee9a99", "preview": "", "seq": 13}
+
+id: 14
+data: {"event": "message.delta", "run_id": "run_aa05a9f0e3d24019b2188785019a86db", "timestamp": 1793218445.8948553, "delta": "\n\nI delegated four sub", "seq": 14}
+
+id: 15
+data: {"event": "message.delta", "run_id": "run_aa05a9f0e3d24019b2188785019a86db", "timestamp": 1793218445.8981931, "delta": "agents in parallel,", "seq": 15}
+
+id: 16
+data: {"event": "message.delta", "run_id": "run_aa05a9f0e3d24019b2188785019a86db", "timestamp": 1793218445.9100425, "delta": " each running `", "seq": 16}
+
+id: 17
+data: {"event": "message.delta", "run_id": "run_aa05a9f0e3d24019b2188785019a86db", "timestamp": 1793218445.9133637, "delta": "sleep 8 && echo", "seq": 17}
+
+id: 18
+data: {"event": "message.delta", "run_id": "run_aa05a9f0e3d24019b2188785019a86db", "timestamp": 1793218445.9585145, "delta": " agent-N`.", "seq": 18}
+
+id: 19
+data: {"event": "run.completed", "run_id": "run_aa05a9f0e3d24019b2188785019a86db", "timestamp": 1793218446.3182523, "output": "I delegated four subagents in parallel, each running `sleep 8 && echo agent-N`.", "usage": {"input_tokens": 113023, "output_tokens": 3371, "total_tokens": 116394}, "runtime": {"provider": "", "model": "", "route_source": "global"}, "completed": true, "partial": false, "interrupted": false, "seq": 19}
+
+: stream closed
+
