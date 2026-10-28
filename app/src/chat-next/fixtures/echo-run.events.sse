@@ -1,0 +1,14 @@
+data: {"event": "tool.started", "run_id": "run_2afd05ebc2d4429f8d7968e73dd48112", "timestamp": 1793190488.509896, "tool": "terminal", "preview": "echo hi"}
+
+data: {"event": "tool.completed", "run_id": "run_2afd05ebc2d4429f8d7968e73dd48112", "timestamp": 1793190488.9509227, "tool": "terminal", "duration": 0.406, "error": false, "preview": "{\"output\": \"hi\", \"exit_code\": 0, \"error\": null}"}
+
+data: {"event": "message.delta", "run_id": "run_2afd05ebc2d4429f8d7968e73dd48112", "timestamp": 1793190490.1739967, "delta": "\n\nThe command printed"}
+
+data: {"event": "message.delta", "run_id": "run_2afd05ebc2d4429f8d7968e73dd48112", "timestamp": 1793190490.181805, "delta": " \"hi\" as expected."}
+
+data: {"event": "reasoning.available", "run_id": "run_2afd05ebc2d4429f8d7968e73dd48112", "timestamp": 1793190490.3326695, "text": "The command printed \"hi\" as expected."}
+
+data: {"event": "run.completed", "run_id": "run_2afd05ebc2d4429f8d7968e73dd48112", "timestamp": 1793190490.421655, "output": "The command printed \"hi\" as expected.", "usage": {"input_tokens": 58138, "output_tokens": 37, "total_tokens": 58175, "cache_read_tokens": 29249, "cache_write_tokens": 0}, "runtime": {"provider": "ollama-cloud", "model": "minimax-m3.1-flash", "route_source": "global"}, "completed": true, "partial": false, "interrupted": false}
+
+: stream closed
+

@@ -1,0 +1,75 @@
+{
+  "object": "list",
+  "session_id": "memento-fixture-events-1",
+  "data": [
+    {
+      "id": 76401,
+      "session_id": "memento-fixture-events-1",
+      "role": "user",
+      "content": "Run the terminal command `echo hi` and then reply with one short sentence.",
+      "tool_call_id": null,
+      "tool_calls": null,
+      "tool_name": null,
+      "timestamp": 1793190486.254817,
+      "token_count": null,
+      "finish_reason": null,
+      "reasoning": null,
+      "reasoning_content": null,
+      "display_kind": null
+    },
+    {
+      "id": 76402,
+      "session_id": "memento-fixture-events-1",
+      "role": "assistant",
+      "content": "",
+      "tool_call_id": null,
+      "tool_calls": [
+        {
+          "id": "call_function_thh0uoj7ho32_1",
+          "call_id": "call_function_thh0uoj7ho32_1",
+          "response_item_id": "fc_function_thh0uoj7ho32_1",
+          "type": "function",
+          "function": { "name": "terminal", "arguments": "{\"command\":\"echo hi\"}" }
+        }
+      ],
+      "tool_name": null,
+      "timestamp": 1793190488.445877,
+      "token_count": null,
+      "finish_reason": "tool_calls",
+      "reasoning": null,
+      "reasoning_content": null,
+      "display_kind": null
+    },
+    {
+      "id": 76403,
+      "session_id": "memento-fixture-events-1",
+      "role": "tool",
+      "content": "{\"output\": \"hi\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "call_function_thh0uoj7ho32_1",
+      "tool_calls": null,
+      "tool_name": "terminal",
+      "timestamp": 1793190488.9277189,
+      "token_count": null,
+      "finish_reason": null,
+      "reasoning": null,
+      "reasoning_content": null,
+      "display_kind": null
+    },
+    {
+      "id": 76404,
+      "session_id": "memento-fixture-events-1",
+      "role": "assistant",
+      "content": "The command printed \"hi\" as expected.",
+      "tool_call_id": null,
+      "tool_calls": null,
+      "tool_name": null,
+      "timestamp": 1793190490.333183,
+      "token_count": null,
+      "finish_reason": "stop",
+      "reasoning": null,
+      "reasoning_content": null,
+      "display_kind": null
+    }
+  ],
+  "pagination": { "limit": 50, "offset": 0, "order": "latest", "returned": 4 }
+}
