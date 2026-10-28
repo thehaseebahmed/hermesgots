@@ -29,6 +29,8 @@ test("a session opened by address draws its request, its words and its calls fro
     // The version check comes first and asks for no key, as Hermes's `/health` does.
     if (url.pathname === "/health")
       return json({ status: "ok", platform: "hermes-agent", version: "0.22.5" })
+    // The plugin's list of children is a route this host does not have.
+    if (url.pathname.startsWith("/api/plugins/")) return json({ error: {} }, 404)
     asked.push({ url, authorization: new Headers(init?.headers).get("authorization") })
     return json(fixture)
   }) as typeof fetch

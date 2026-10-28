@@ -1,0 +1,78 @@
+{
+  "object": "list",
+  "session_id": "20261028_151415_fe71dd",
+  "data": [
+    {
+      "id": 76491,
+      "session_id": "20261028_151415_fe71dd",
+      "role": "user",
+      "content": "Run the shell command `sleep 12 && echo hello from the subagent` in the terminal and report its exact output.",
+      "tool_call_id": null,
+      "tool_calls": null,
+      "tool_name": null,
+      "timestamp": 1793200455.961107,
+      "token_count": null,
+      "finish_reason": null,
+      "reasoning": null,
+      "reasoning_content": null,
+      "display_kind": null
+    },
+    {
+      "id": 76494,
+      "session_id": "20261028_151415_fe71dd",
+      "role": "assistant",
+      "content": "",
+      "tool_call_id": null,
+      "tool_calls": [
+        {
+          "id": "call_function_yhc06lgr419j_1",
+          "call_id": "call_function_yhc06lgr419j_1",
+          "response_item_id": "fc_function_yhc06lgr419j_1",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\":\"sleep 12 \\u0026\\u0026 echo hello from the subagent\",\"timeout\":60,\"workdir\":\"/opt/data\"}"
+          }
+        }
+      ],
+      "tool_name": null,
+      "timestamp": 1793200457.9941854,
+      "token_count": null,
+      "finish_reason": "tool_calls",
+      "reasoning": null,
+      "reasoning_content": null,
+      "display_kind": null
+    },
+    {
+      "id": 76495,
+      "session_id": "20261028_151415_fe71dd",
+      "role": "tool",
+      "content": "{\"output\": \"hello from the subagent\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "call_function_yhc06lgr419j_1",
+      "tool_calls": null,
+      "tool_name": "terminal",
+      "timestamp": 1793200470.3965604,
+      "token_count": null,
+      "finish_reason": null,
+      "reasoning": null,
+      "reasoning_content": null,
+      "display_kind": null
+    },
+    {
+      "id": 76496,
+      "session_id": "20261028_151415_fe71dd",
+      "role": "assistant",
+      "content": "**Output:** `hello from the subagent`\n**Exit code:** 0\n\n- Ran `sleep 12 && echo hello from the subagent` in `/opt/data`\n- stdout was exactly `hello from the subagent` (trailing newline), exit code 0, no stderr\n- No files created or modified, no network calls, no configuration changes",
+      "tool_call_id": null,
+      "tool_calls": null,
+      "tool_name": null,
+      "timestamp": 1793200479.0250762,
+      "token_count": null,
+      "finish_reason": "stop",
+      "reasoning": null,
+      "reasoning_content": null,
+      "display_kind": null
+    }
+  ],
+  "pagination": { "limit": 50, "offset": 0, "order": "latest", "returned": 4 }
+}

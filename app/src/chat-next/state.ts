@@ -1,9 +1,12 @@
+import type { Agent } from "./agents"
 import type { RunEvent } from "./api"
 import { foldTurns, type Part, type Row, type Turn } from "./fold"
 
 export interface ThreadState {
   status: "loading" | "ready" | "failed"
   turns: Turn[]
+  /** The children the session delegated to, as the plugin last listed them; none before it has. */
+  agents?: Agent[]
   /** This device has a turn running; while it does, what the host's transcript says waits. */
   running: boolean
   /** What the run is held up on, until the user's answer or someone else's takes it away. */
@@ -37,6 +40,7 @@ export type ThreadEvent =
   | { type: "attach" }
   | { type: "answered" }
   | { type: "ended" }
+  | { type: "agents"; agents: Agent[] }
   | { type: "run"; event: RunEvent }
   | { type: "failed"; error: string }
 
@@ -53,7 +57,11 @@ function live(turn: Turn, event: RunEvent): Turn {
     else parts.push({ kind: "text", text: event.delta.trimStart() })
   } else if (event.event === "tool.started" && event.tool) {
     // The host names the call, and the transcript's row for it carries the same id.
-    const call = { id: event.tool_call_id ?? `live-${parts.length}-${event.seq}`, name: event.tool }
+    const call = {
+      id: event.tool_call_id ?? `live-${parts.length}-${event.seq}`,
+      name: event.tool,
+      label: event.preview,
+    }
     if (last?.kind === "tools") last.calls.push(call)
     else parts.push({ kind: "tools", calls: [call] })
   } else if (event.event === "tool.completed" && event.tool_call_id) {
@@ -100,6 +108,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       return {
         status: "ready",
         turns,
+        agents: state.agents,
         running: false,
         // A finished turn waits on nothing, and the end of a followed run settles what it was on.
         waiting: event.final || turns.at(-1)?.done ? undefined : state.waiting,
@@ -109,7 +118,8 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       return {
         status: "ready",
         running: true,
-        turns: [...state.turns, { user: event.user, parts: [], done: false }],
+        agents: state.agents,
+        turns: [...state.turns, { user: event.user, parts: [], done: false, delivered: [] }],
       }
     case "attach":
       // The run's events are replayed from its start, so the turn, and what it waits on, are drawn
@@ -122,6 +132,10 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
           at === state.turns.length - 1 ? { ...turn, parts: [], done: false } : turn,
         ),
       }
+    case "agents":
+      return JSON.stringify(state.agents) === JSON.stringify(event.agents)
+        ? state
+        : { ...state, agents: event.agents }
     case "ended":
       // The stream is over, however it ended, so the thread is no longer held by it. What the turn
       // was comes from the transcript, which a later read may supply if the one for this end was

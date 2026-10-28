@@ -19,7 +19,12 @@ export type Host = ReturnType<typeof fakeHost>
 
 const wait = (ms: number) => act(async () => new Promise((resolve) => setTimeout(resolve, ms)))
 
-export async function openDevice(host: Host) {
+/**
+ * A device is polled at 20ms while the page is busy, and while idle at `idleMs`, which is as fast by
+ * default so a test needs no waiting. A test about what keeps the page busy gives it a slow one, so
+ * that only the busy poll can have done the reading.
+ */
+export async function openDevice(host: Host, { idleMs = 20 }: { idleMs?: number } = {}) {
   const container = document.createElement("div")
   document.body.append(container)
   const root = createRoot(container)
@@ -28,7 +33,7 @@ export async function openDevice(host: Host) {
     root.render(
       <MemoryRouter initialEntries={[`/next?${query}`]}>
         <Routes>
-          <Route path="/next" element={<ChatNextPage pollMs={20} idleMs={20} />} />
+          <Route path="/next" element={<ChatNextPage pollMs={20} idleMs={idleMs} />} />
         </Routes>
       </MemoryRouter>,
     ),
@@ -47,7 +52,32 @@ export async function openDevice(host: Host) {
           .map((line) => Number(/^(\d+) tool/.exec(line.textContent ?? "")?.[1] ?? 0))
           .reduce((sum, count) => sum + count, 0),
         asks: [...section.querySelectorAll("[data-answered]")].map((ask) => ask.textContent ?? ""),
+        agents: [...section.querySelectorAll("[data-agent]")].map((card) => ({
+          goal: card.querySelector("[data-agent-goal]")?.textContent ?? "",
+          status: card.getAttribute("data-status") ?? "",
+        })),
       })),
+    /** The child's own thread, once a card has been opened. */
+    thread: () => {
+      const open = one("[data-agent-thread]")
+      return open
+        ? [...open.querySelectorAll("section")].map((section) => ({
+            user: section.querySelector("[data-user]")?.textContent ?? "",
+            texts: [...section.querySelectorAll("[data-text]")].map(
+              (text) => text.textContent ?? "",
+            ),
+          }))
+        : undefined
+    },
+    async openAgent(goal: string) {
+      const card = [...container.querySelectorAll("[data-agent]")].find(
+        (one) => one.querySelector("[data-agent-goal]")?.textContent === goal,
+      )
+      await click(card?.querySelector("[data-open-agent]") ?? null)
+    },
+    async closeAgent() {
+      await click(one("[data-close-agent]"))
+    },
     /** What the screen is waiting on the user for, as a card with its words and its buttons. */
     waiting: () => {
       const question = one("[data-question]")

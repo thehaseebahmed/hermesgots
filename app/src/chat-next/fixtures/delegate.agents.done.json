@@ -1,0 +1,16 @@
+{
+  "object": "memento.agents",
+  "session_id": "memento-fixture-delegate-1",
+  "agents": [
+    {
+      "id": "20261028_151415_fe71dd",
+      "goal": "Run the shell command `sleep 12 && echo hello from the subagent` in the terminal and report its exact output.",
+      "model": "minimax-m3.1-flash",
+      "started_at": 1793200456.0930603,
+      "ended_at": 1793200479.411218,
+      "end_reason": "agent_close",
+      "tool_calls": 1,
+      "status": "done"
+    }
+  ]
+}

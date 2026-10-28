@@ -38,6 +38,29 @@ export interface ExpectedTurn {
   tools: number
   /** Questions the user answered, each as "<question> → <answer>". */
   asks: string[]
+  /** Subagents the turn set to work, each with what its child is doing. */
+  agents: { goal: string; status: "running" | "done" }[]
+}
+
+/** A subagent the host is running for a `delegate_task` call. */
+export interface Child {
+  id: string
+  /**
+   * The child finishes: its record closes, Hermes writes the delivery rows into the parent's
+   * transcript and starts the wake turn, which is returned to be played out.
+   */
+  finish(result: string): Run
+}
+
+interface AgentRecord {
+  id: string
+  goal: string
+  model: string
+  started_at: number
+  ended_at: number | null
+  end_reason: string | null
+  tool_calls: number
+  status: "running" | "done"
 }
 
 export interface Ask {
@@ -69,6 +92,11 @@ export interface Run {
   ask(question: Ask): string
   /** A command needs the user's say: `tool.started`, `approval.request`, then the run waits. */
   requestApproval(command: string, description: string): string
+  /**
+   * The agent hands work to subagents in the background: `delegate_task` returns "dispatched" at
+   * once, and each child works on after this turn ends.
+   */
+  delegate(goals: string | string[]): Child[]
   /** A call the agent makes: `tool.started`, its row, then `tool.completed` with its result. */
   tool(name: string, preview: string, result: string): void
   /** Streamed words, as the host sends them while the reply is being written. */
@@ -113,9 +141,13 @@ export function fakeHost(
   const approvals: { run: string; choice: string }[] = []
   const asked = { transcript: 0, runs: 0, subscriptions: 0, health: 0 }
   const latest: { run?: Run; id?: string } = {}
+  const agents: AgentRecord[] = []
+  const children = new Map<string, Row[]>()
   let nextId = 1000
   let nextRun = 0
   let nextPrompt = 0
+  let nextChild = 0
+  let nextDelegation = 0
   let clock = 1_800_000_000
 
   const write = (role: string, content: string | null, extra: Partial<Row> = {}) =>
@@ -133,7 +165,8 @@ export function fakeHost(
       ...extra,
     })
 
-  function start(input: string): { id: string; run: Run } {
+  /** A turn: the user's message, or `null` for a wake turn, which answers no message of theirs. */
+  function start(input: string | null): { id: string; run: Run } {
     const id = `run_${++nextRun}`
     const state: RunState = { events: [], listeners: new Set(), done: false }
     runs.set(id, state)
@@ -142,16 +175,16 @@ export function fakeHost(
       state.events.push(sent)
       state.listeners.forEach((listen) => listen(sent))
     }
-    write("user", input)
-    expected.push({ user: input, texts: [], tools: 0, asks: [] })
+    if (input !== null) write("user", input)
+    expected.push({ user: input ?? "", texts: [], tools: 0, asks: [], agents: [] })
     const turn = expected.at(-1)!
     let calls = 0
 
-    const callRow = (name: string) => {
+    const callRow = (name: string, args = "{}") => {
       const call = `call_${id}_${++calls}`
       write("assistant", "", {
         finish_reason: "tool_calls",
-        tool_calls: [{ id: call, type: "function", function: { name, arguments: "{}" } }],
+        tool_calls: [{ id: call, type: "function", function: { name, arguments: args } }],
       })
       return call
     }
@@ -243,6 +276,60 @@ export function fakeHost(
         )
         return prompt_id
       },
+      delegate(goals) {
+        const list = Array.isArray(goals) ? goals : [goals]
+        const call = callRow(
+          "delegate_task",
+          JSON.stringify({ tasks: list.map((goal) => ({ goal })) }),
+        )
+        // The preview Hermes gives while the call runs: the count, then each goal cut short.
+        const cut = list.map((goal) => (goal.length > 45 ? `${goal.slice(0, 45)}...` : goal))
+        push("tool.started", {
+          tool: "delegate_task",
+          preview: `${list.length} tasks: ${cut.join(" | ")}`,
+          tool_call_id: call,
+        })
+        const delegation = `deleg_${++nextDelegation}`
+        const born = list.map((goal): AgentRecord => ({
+          id: `child_${++nextChild}`,
+          goal,
+          model: "test-model",
+          started_at: ++clock,
+          ended_at: null,
+          end_reason: null,
+          tool_calls: 0,
+          status: "running",
+        }))
+        born.forEach((agent) => {
+          agents.push(agent)
+          children.set(agent.id, [childRow(agent.id, "user", agent.goal)])
+        })
+        write(
+          "tool",
+          JSON.stringify({
+            status: "dispatched",
+            mode: "background",
+            count: list.length,
+            delegation_id: delegation,
+            goals: list,
+            subagent_ids: born.map((agent) => agent.id),
+          }),
+          { tool_call_id: call, tool_name: "delegate_task" },
+        )
+        push("tool.completed", {
+          tool: "delegate_task",
+          duration: 0,
+          error: false,
+          tool_call_id: call,
+          preview: "",
+        })
+        const cards = born.map((agent) => ({ goal: agent.goal, status: "running" as const }))
+        turn.agents.push(...cards)
+        return born.map((agent, at): Child => ({
+          id: agent.id,
+          finish: (result) => finishChild(agent, cards[at], result, delegation, born),
+        }))
+      },
       tool(name, preview, result) {
         const call = callRow(name)
         push("tool.started", { tool: name, preview, tool_call_id: call })
@@ -266,6 +353,68 @@ export function fakeHost(
       },
     }
     return { id, run }
+  }
+
+  const childRow = (
+    child: string,
+    role: string,
+    content: string | null,
+    extra: Partial<Row> = {},
+  ): Row => ({
+    id: ++nextId,
+    session_id: child,
+    role,
+    content,
+    tool_call_id: null,
+    tool_calls: null,
+    tool_name: null,
+    timestamp: ++clock,
+    display_kind: null,
+    finish_reason: null,
+    ...extra,
+  })
+
+  /**
+   * What Hermes does when a background child ends: its own transcript closes, and the parent's gets
+   * the unit's batch row once the last of its children is in, then this child's notice, and a wake
+   * turn starts to answer them.
+   */
+  function finishChild(
+    agent: AgentRecord,
+    card: { status: "running" | "done" },
+    result: string,
+    delegation: string,
+    siblings: AgentRecord[],
+  ): Run {
+    const call = `${agent.id}_call`
+    children.get(agent.id)!.push(
+      childRow(agent.id, "assistant", "", {
+        finish_reason: "tool_calls",
+        tool_calls: [
+          { id: call, type: "function", function: { name: "terminal", arguments: "{}" } },
+        ],
+      }),
+      childRow(agent.id, "tool", '{"output": "ok", "exit_code": 0, "error": null}', {
+        tool_call_id: call,
+        tool_name: "terminal",
+      }),
+      childRow(agent.id, "assistant", result, { finish_reason: "stop" }),
+    )
+    agent.ended_at = ++clock
+    agent.end_reason = "agent_close"
+    agent.status = "done"
+    agent.tool_calls = 1
+    card.status = "done"
+    if (siblings.every((one) => one.status === "done"))
+      write("user", `[ASYNC DELEGATION BATCH COMPLETE — ${delegation}]\nThe unit has finished.`, {
+        display_kind: "async_delegation_complete",
+      })
+    write(
+      "user",
+      `[ASYNC DELEGATION COMPLETE — ${agent.id}]\nOriginal goal: ${agent.goal}\n--- RESULT ---\n${result}`,
+      { display_kind: "internal_notification" },
+    )
+    return start(null).run
   }
 
   const frame = (sent: { seq: number }) => `id: ${sent.seq}\ndata: ${JSON.stringify(sent)}\n\n`
@@ -336,9 +485,18 @@ export function fakeHost(
         sessions: live ? { [session]: "running" } : {},
         run_ids: live ? { [session]: live[0] } : {},
         waiting: {},
-        subagents: {},
+        subagents: agents.some((agent) => agent.status === "running")
+          ? { [session]: agents.filter((agent) => agent.status === "running").length }
+          : {},
       })
     }
+    // The plugin's list of the children a session delegated to.
+    if (plugin && path === `/api/plugins/memento/sessions/${session}/agents`)
+      return reply({ object: "memento.agents", session_id: session, agents })
+    // A child is a session of its own, read like any other.
+    const child = /^\/api\/sessions\/([^/]+)\/messages$/.exec(path)
+    if (child && children.has(child[1]))
+      return reply({ object: "list", session_id: child[1], data: children.get(child[1]) })
     // Hermes's own routes for answering a prompt.
     const responding = /^\/v1\/runs\/([^/]+)\/(approval|clarify)$/.exec(path)
     if (responding && init?.method === "POST") {
@@ -411,6 +569,7 @@ export function fakeHost(
     asked,
     answers,
     approvals,
+    agents,
     rows,
     latest,
     session,

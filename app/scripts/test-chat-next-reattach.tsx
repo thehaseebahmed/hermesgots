@@ -45,6 +45,7 @@ test("a device that opens mid-run draws the words already written and the ones s
           texts: ["Starting now."],
           tools: 1,
           asks: [],
+          agents: [],
         }),
       "the words written before the device arrived, replayed with the call",
     )

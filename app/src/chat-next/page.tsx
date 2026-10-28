@@ -3,17 +3,19 @@ import { useSearchParams } from "react-router"
 
 import { Markdown } from "@/components/chat/markdown"
 
+import { cardsOf, DELEGATE, goalsOf, type Card } from "./agents"
 import {
   atLeast,
   followRun,
   MIN_HERMES,
+  readAgents,
   readLiveRun,
   readTranscript,
   readVersion,
   respond,
   startRun,
 } from "./api"
-import type { ToolCall, Turn } from "./fold"
+import { foldTurns, type Row, type ToolCall, type Turn } from "./fold"
 import { initial, reduce, type Waiting } from "./state"
 
 /** The questions a finished `clarify` call got answered, each as "<question> → <answer>". */
@@ -36,15 +38,65 @@ function answered(call: ToolCall): string[] {
   }
 }
 
-function TurnView({ turn }: { turn: Turn }) {
+const STATUS_WORDS = {
+  starting: "Starting…",
+  running: "Working…",
+  done: "Done",
+  stopped: "Stopped",
+}
+
+/** One subagent a turn set to work: what it was asked, how it is doing, and a way into its thread. */
+function AgentCard({ card, onOpen }: { card: Card; onOpen: (card: Card) => void }) {
+  return (
+    <div
+      data-agent
+      data-status={card.status}
+      className="flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm"
+    >
+      <div className="min-w-0">
+        <p data-agent-goal className="truncate">
+          {card.goal}
+        </p>
+        <p className="text-xs text-muted-foreground">{STATUS_WORDS[card.status]}</p>
+      </div>
+      {card.agent ? (
+        <button
+          type="button"
+          data-open-agent
+          className="rounded-md border px-2 py-1"
+          onClick={() => onOpen(card)}
+        >
+          View
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
+function TurnView({
+  turn,
+  cards,
+  onOpen,
+}: {
+  turn: Turn
+  cards: Card[]
+  onOpen: (card: Card) => void
+}) {
+  // Each tools part takes the cards of the delegations it holds, in the order they were asked.
+  const asked = turn.parts.map((part) =>
+    part.kind === "tools" ? part.calls.flatMap(goalsOf).length : 0,
+  )
+  const first = asked.map((_, at) => asked.slice(0, at).reduce((sum, count) => sum + count, 0))
   return (
     <section className="space-y-3">
-      <p
-        data-user
-        className="ml-auto w-fit max-w-[85%] rounded-2xl bg-muted px-4 py-2 whitespace-pre-wrap"
-      >
-        {turn.user}
-      </p>
+      {turn.wake ? null : (
+        <p
+          data-user
+          className="ml-auto w-fit max-w-[85%] rounded-2xl bg-muted px-4 py-2 whitespace-pre-wrap"
+        >
+          {turn.user}
+        </p>
+      )}
       {turn.parts.map((part, at) => {
         if (part.kind === "text")
           return (
@@ -52,8 +104,11 @@ function TurnView({ turn }: { turn: Turn }) {
               <Markdown>{part.text}</Markdown>
             </div>
           )
-        // A question the agent asked is drawn as what it was and what was said, not as a call.
-        const plain = part.calls.filter((call) => call.name !== "clarify").length
+        // A question the agent asked, and a subagent it set to work, are drawn as what they are.
+        const plain = part.calls.filter(
+          (call) => call.name !== "clarify" && call.name !== DELEGATE,
+        ).length
+        const mine = cards.slice(first[at], first[at] + asked[at])
         return (
           <div key={at} className="space-y-3">
             {plain ? (
@@ -66,10 +121,35 @@ function TurnView({ turn }: { turn: Turn }) {
                 {line}
               </p>
             ))}
+            {mine.map((card, index) => (
+              <AgentCard key={index} card={card} onOpen={onOpen} />
+            ))}
           </div>
         )
       })}
     </section>
+  )
+}
+
+/** A child's own thread, read only: what it was asked and what it did. */
+function ChildThread({ goal, rows, onClose }: { goal: string; rows: Row[]; onClose: () => void }) {
+  return (
+    <aside data-agent-thread className="space-y-3 rounded-md border p-3">
+      <div className="flex items-center justify-between gap-3">
+        <p className="min-w-0 truncate text-sm font-medium">{goal}</p>
+        <button
+          type="button"
+          data-close-agent
+          className="rounded-md border px-2 py-1 text-sm"
+          onClick={onClose}
+        >
+          Close
+        </button>
+      </div>
+      {foldTurns(rows).map((turn, at) => (
+        <TurnView key={at} turn={turn} cards={[]} onOpen={() => {}} />
+      ))}
+    </aside>
   )
 }
 
@@ -162,6 +242,7 @@ function ApprovalCard({
 
 const POLL_MS = 2_000
 const IDLE_MS = 15_000
+const AGENTS_COOLDOWN_MS = 60_000
 /** A turn that has written nothing for this long is not waited on any more. */
 const STALL_MS = 5 * 60_000
 
@@ -194,6 +275,9 @@ export function ChatNextPage({
   const reading = useRef<Promise<void> | null>(null)
   const queued = useRef<{ final: boolean } | null>(null)
   const alive = useRef(new AbortController())
+  // A host without the plugin has no list of children; once it has said so it is not asked again
+  // for a while.
+  const noAgentsUntil = useRef(0)
 
   useEffect(() => {
     if (!server || !key) return
@@ -214,8 +298,16 @@ export function ChatNextPage({
       const mine = reads.current
       reading.current = (async () => {
         try {
-          const rows = await readTranscript({ server, key }, session, alive.current.signal)
-          if (mine === reads.current) dispatch({ type: "transcript", rows, final })
+          const asking = Date.now() >= noAgentsUntil.current
+          const [rows, listed] = await Promise.all([
+            readTranscript({ server, key }, session, alive.current.signal),
+            asking ? readAgents({ server, key }, session, alive.current.signal) : undefined,
+          ])
+          if (asking && !listed) noAgentsUntil.current = Date.now() + AGENTS_COOLDOWN_MS
+          if (mine === reads.current) {
+            dispatch({ type: "transcript", rows, final })
+            if (listed) dispatch({ type: "agents", agents: listed })
+          }
         } catch (error) {
           if (!alive.current.signal.aborted && mine === reads.current)
             dispatch({
@@ -253,12 +345,26 @@ export function ChatNextPage({
   // where the plugin names the run and by the transcript where it cannot.
   const last = state.turns.at(-1)
   const following = state.status !== "loading" && !state.running && last !== undefined && !last.done
+  // A child at work, or one that finished whose result the transcript does not hold yet, keeps the
+  // chat read at the fast pace too: the card is to follow it and the wake turn is on its way.
+  const agents = state.agents ?? []
+  const delivered = state.turns.flatMap((turn) => turn.delivered)
+  const working = agents.some((agent) => agent.status === "running")
+  const owed = agents.some((agent) => agent.status !== "running" && !delivered.includes(agent.id))
+  // A delegation just dispatched has no child on the list yet; where the host lists children at
+  // all, the list is read again until the child shows, whatever else the page is doing.
+  const cards = cardsOf(state.turns, agents)
+  const starting =
+    state.agents !== undefined &&
+    cards.some((list) => list.some((card) => card.status === "starting"))
+  const busy = following || working || owed || starting
   const progress = useRef({ shape: "", at: 0 })
-  const shape = state.turns
-    .map((turn) =>
-      turn.parts.map((part) => (part.kind === "tools" ? part.calls.length : "t")).join(),
-    )
-    .join("|")
+  const shape =
+    state.turns
+      .map((turn) =>
+        turn.parts.map((part) => (part.kind === "tools" ? part.calls.length : "t")).join(),
+      )
+      .join("|") + agents.map((agent) => `${agent.id}${agent.status}`).join()
   useEffect(() => {
     progress.current = { shape, at: Date.now() }
   }, [shape])
@@ -295,8 +401,15 @@ export function ChatNextPage({
     if (!ready) return
     const timer = setInterval(
       async () => {
-        if (document.visibilityState !== "visible" || streaming.current) return
-        if (following && Date.now() - progress.current.at > stallMs) return
+        if (document.visibilityState !== "visible") return
+        if (streaming.current) {
+          if (starting && server && key && session)
+            void readAgents({ server, key }, session, alive.current.signal).then(
+              (listed) => listed && dispatch({ type: "agents", agents: listed }),
+            )
+          return
+        }
+        if (busy && Date.now() - progress.current.at > stallMs) return
         if (following && server && key && session) {
           streaming.current = true
           const run = await readLiveRun({ server, key }, session, alive.current.signal)
@@ -309,10 +422,42 @@ export function ChatNextPage({
         }
         void catchUp()
       },
-      following ? pollMs : idleMs,
+      busy ? pollMs : idleMs,
     )
     return () => clearInterval(timer)
-  }, [ready, following, catchUp, follow, server, key, session, pollMs, idleMs, stallMs])
+  }, [
+    ready,
+    following,
+    busy,
+    starting,
+    catchUp,
+    follow,
+    server,
+    key,
+    session,
+    pollMs,
+    idleMs,
+    stallMs,
+  ])
+
+  // A card opened shows its child's own transcript, read again as the child's state moves.
+  const [opened, setOpened] = useState<{ id: string; goal: string }>()
+  // The rows are kept with the child they belong to, so a card opened after another never shows the
+  // first one's thread while its own is being read.
+  const [openedRows, setOpenedRows] = useState<{ id: string; rows: Row[] }>()
+  const openedStatus = agents.find((agent) => agent.id === opened?.id)?.status
+  useEffect(() => {
+    if (!opened || !server || !key) return
+    let current = true
+    readTranscript({ server, key }, opened.id).then(
+      (rows) => current && setOpenedRows({ id: opened.id, rows }),
+      () => undefined,
+    )
+    return () => {
+      current = false
+    }
+  }, [opened, openedStatus, server, key])
+  const open = (card: Card) => card.agent && setOpened({ id: card.agent.id, goal: card.goal })
 
   async function send() {
     const text = draft.trim()
@@ -359,8 +504,15 @@ export function ChatNextPage({
     <main className="mx-auto w-full max-w-3xl space-y-6 p-4">
       {state.status === "failed" ? <p role="alert">{state.error}</p> : null}
       {state.turns.map((turn, at) => (
-        <TurnView key={at} turn={turn} />
+        <TurnView key={at} turn={turn} cards={cards[at] ?? []} onOpen={open} />
       ))}
+      {opened && openedRows?.id === opened.id ? (
+        <ChildThread
+          goal={opened.goal}
+          rows={openedRows.rows}
+          onClose={() => setOpened(undefined)}
+        />
+      ) : null}
       {state.waiting?.kind === "question" ? (
         <QuestionCard
           key={state.waiting.promptId}

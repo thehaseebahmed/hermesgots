@@ -1,3 +1,4 @@
+import type { Agent } from "./agents"
 import type { Row } from "./fold"
 import type { Waiting } from "./state"
 
@@ -134,6 +135,28 @@ export async function readLiveRun(
     if (!response.ok) return undefined
     const { run_ids } = (await response.json()) as { run_ids?: Record<string, string> }
     return run_ids?.[session]
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * The children a session delegated to, by the Gots plugin's list of them. A host without the plugin
+ * has no answer, and a card can then only say what the transcript does.
+ */
+export async function readAgents(
+  connection: Connection,
+  session: string,
+  signal?: AbortSignal,
+): Promise<Agent[] | undefined> {
+  try {
+    const response = await fetch(
+      `${root(connection)}/api/plugins/memento/sessions/${encodeURIComponent(session)}/agents`,
+      { headers: headers(connection), signal: within(signal) },
+    )
+    if (!response.ok) return undefined
+    const { agents } = (await response.json()) as { agents?: Agent[] }
+    return Array.isArray(agents) ? agents : undefined
   } catch {
     return undefined
   }
