@@ -11,6 +11,13 @@ import { cn } from "@/lib/utils"
 export const WORK_ROW_CLASS =
   "relative flex min-h-[29px] w-full items-center gap-2 text-left text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
 
+/**
+ * The pull a note takes to stand flush under a row's label rather than on a line's worth of space:
+ * the row's 29px box centres its label, leaving half a line under the words (ADR 0062). It lives
+ * beside the height it answers to, so the two can't drift apart.
+ */
+export const WORK_LABEL_FLUSH = "-mt-1"
+
 /** The wave's own name: the class the stylesheet turns into a light, and the slot the tests read. */
 const WAVE = "work-wave"
 

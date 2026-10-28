@@ -13,7 +13,7 @@ import { thinkingLabel } from "../../src/lib/thinking.ts"
 
 /** The reply's own item on the page: its rows, its calls and the sheet are all drawn inside it. */
 const ITEM = "[data-slot=message-scroller-item]"
-const WORKING = '[aria-live="polite"]'
+const WORKING = "[data-slot=status-line]"
 const THINKING = /^(Thinking…|Thought it through|Thought for \d+[sm])/
 const SPAN = /^Thought for \d+s$/
 const ROW = "[data-slot=thinking-line]"
@@ -473,22 +473,27 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   // The footer names what the turn is doing beside a loader: the words land whole rather than typed,
   // so a moment later the line still reads the same. The label, the dots and the held box the typing
   // needed are gone with it (ADR 0062).
+  // The accent as this theme resolves it, read once before the wait: it cannot change inside a flow,
+  // and a poll that re-derived it would colour a span on the live chat at every turn of the wait.
+  const accent = await page.evaluate(() => {
+    const probe = document.createElement("span")
+    probe.style.color = "var(--color-primary)"
+    document.body.append(probe)
+    const colour = getComputedStyle(probe).color
+    probe.remove()
+    return colour
+  })
   const lineState = () =>
     page.evaluate(
       ({ line, words }) => {
         const box = document.querySelector(line)
         if (!box) return null
-        // The accent as this theme resolves it, so the check holds in light and in dark alike.
-        const probe = document.createElement("span")
-        probe.style.color = "var(--color-primary)"
-        document.body.appendChild(probe)
-        const accent = getComputedStyle(probe).color
-        probe.remove()
+        const span = box.querySelector(words)
         return {
-          words: box.querySelector(words)?.textContent ?? "",
+          words: span?.textContent ?? "",
           loader: Boolean(box.querySelector("[data-slot=spinner]")),
           colour: getComputedStyle(box).color,
-          accent,
+          wordsColour: span ? getComputedStyle(span).color : "",
         }
       },
       { line: WORKING, words: STATUS_WORDS },
@@ -502,11 +507,8 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     "the footer's line to say the turn is writing",
   )
   assert.ok(writing.loader, "a loader turns beside the words")
-  assert.equal(
-    writing.colour,
-    writing.accent,
-    "the loader and its words both read in the accent colour",
-  )
+  assert.equal(writing.colour, accent, "the loader and its words both read in the accent colour")
+  assert.equal(writing.wordsColour, accent, "the words' own text takes it too, not just the row")
   await page.waitForTimeout(600)
   const steady = await lineState()
   assert.equal(steady?.words, "Writing…", "the words stand whole: nothing types itself in")

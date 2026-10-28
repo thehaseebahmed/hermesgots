@@ -7,6 +7,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { MessageItem } from "@/components/chat/message-item"
+import { WORK_LABEL_FLUSH } from "@/components/chat/work-row"
 import type { Message, ToolEvent } from "@/lib/db"
 import { PR_TOOL } from "@/lib/tools"
 import { click, findAll, find, mount } from "./component-kit.tsx"
@@ -73,13 +74,12 @@ test("a failed group wears no mark before its words, and its reason stands flush
         /a call failed/,
         "the row's own name is what says it failed",
       )
-      const reason = find(".text-destructive")
+      const reason = find('[data-slot="tool-group-reason"]')
       assert.equal(reason?.textContent, "Exited 2", "the host's reason stands under the label")
-      assert.match(reason?.className ?? "", /-mt-1/, "flush under the words rather than on a gap")
-      assert.doesNotMatch(
+      assert.match(
         reason?.className ?? "",
-        /pl-6/,
-        "and at the row's own left edge, not dented past a mark that is gone",
+        new RegExp(`(^|\\s)${WORK_LABEL_FLUSH}(\\s|$)`),
+        "flush under the words rather than on a gap",
       )
     },
   )

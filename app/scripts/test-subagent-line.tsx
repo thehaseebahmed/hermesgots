@@ -97,7 +97,7 @@ test("the line is blue wherever it lands, its loader included", async () => {
   const line = await mount(<SubagentLine count={2} onOpen={() => {}} />)
   try {
     const button = findAll("button")[0]
-    assert.match(button.className, /text-info/, "delegated work reads in the blue, not the reply's grey")
+    assert.match(button.className, /(^|\s)text-info(\s|$)/, "delegated work reads in the blue, not the reply's grey")
     assert.ok(button.querySelector('[data-slot="spinner"]'), "with its loader beside it")
   } finally {
     await line.close()

@@ -26,7 +26,7 @@ export function SubagentLine({
       type="button"
       onClick={onOpen}
       className={cn(
-        "flex min-h-11 min-w-0 items-center gap-1.5 rounded-full text-sm text-info outline-none hover:text-info/80 focus-visible:ring-2 focus-visible:ring-ring",
+        "flex min-h-11 min-w-0 items-center gap-1.5 rounded-full text-sm text-info underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring",
         className,
       )}
     >

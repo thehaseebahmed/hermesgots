@@ -418,8 +418,9 @@ function FailedActions({ message }: { message: Message }) {
 
 /**
  * The row under a reply saying what the turn is doing: a loader and the words it says, both in the
- * accent colour while the turn works. Waiting on the reader is not work in progress — the line says
- * its words whole and muted with no loader, because nothing is running (ADR 0062).
+ * accent colour while the turn works. It is the turn's live region, so those words are announced as
+ * they change; while the turn waits on the reader nothing is running, so the words stand muted with
+ * no loader beside them (ADR 0062).
  */
 function StatusLine({
   text,
@@ -440,8 +441,9 @@ function StatusLine({
         working ? "text-primary" : "text-muted-foreground",
       )}
       aria-live="polite"
+      data-slot="status-line"
     >
-      {working && <Spinner className="size-4" aria-hidden />}
+      {working && <Spinner aria-hidden />}
       {text && (
         <span className="min-w-0 truncate" data-slot="status-words">
           {text}
@@ -497,7 +499,7 @@ export const MessageItem = memo(function MessageItem({
   const storedContent = message.content
   const storedStatusText = message.statusText
   // The turn's own state, read once: a reply waiting on the reader is not at work, so the row above
-  // it stands down and its line says its words whole rather than typing them.
+  // it stands down and its line stands whole, with no loader.
   const approval = message.approval
   const awaitingApproval = Boolean(approval && !approval.resolved)
   const awaitingClarify = Boolean(message.clarify && !message.clarify.resolved)

@@ -103,11 +103,11 @@ async function screen(
 }
 
 /** The footer's working line: what the turn is doing, said under the reply. It never thinks. */
-const workingLine = () => find('[aria-live="polite"]')
+const workingLine = () => find("[data-slot=status-line]")
 
 /** The words on that line, and the loader that turns beside them while the turn works. */
 const statusWords = () => find("[data-slot=status-words]")?.textContent ?? ""
-const statusLoader = () => find('[aria-live="polite"] [data-slot=spinner]')
+const statusLoader = () => workingLine()?.querySelector('[data-slot="spinner"]')
 
 /** The open sheet's body: a row's words are on the page only while its sheet is open. */
 const sheet = () => find("[data-slot=thinking-body]")
@@ -492,7 +492,7 @@ test("the footer names what the turn is doing beside a loader, and a thought row
     assert.ok(statusLoader(), "and a loader turns beside them")
     assert.match(
       line!.className,
-      /text-primary/,
+      /(^|\s)text-primary(\s|$)/,
       "the loader and the words it sits by take the accent colour",
     )
 
@@ -754,7 +754,7 @@ test("while the turn waits on the user, the working line says so beside the wavi
     assert.ok(!statusLoader(), "and no loader turns, because nothing is running")
     assert.match(
       workingLine()!.className,
-      /text-muted-foreground/,
+      /(^|\s)text-muted-foreground(\s|$)/,
       "the waiting line stands muted rather than in the accent colour",
     )
   })
