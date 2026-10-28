@@ -1,0 +1,216 @@
+{
+  "object": "list",
+  "session_id": "memento-fixture-multi-1",
+  "data": [
+    {
+      "id": 76447,
+      "session_id": "memento-fixture-multi-1",
+      "role": "user",
+      "content": "Reply with the sentence: Starting now. Then run these four terminal commands, one per tool call, one after another: `sleep 6 && echo a`, `sleep 6 && echo b`, `sleep 6 && echo c`, `sleep 6 && echo d`. Then reply with one short sentence.",
+      "tool_call_id": null,
+      "tool_calls": null,
+      "tool_name": null,
+      "timestamp": 1793197544.728434,
+      "token_count": null,
+      "finish_reason": null,
+      "reasoning": null,
+      "reasoning_content": null,
+      "display_kind": "internal_notification"
+    },
+    {
+      "id": 76448,
+      "session_id": "memento-fixture-multi-1",
+      "role": "assistant",
+      "content": "Starting now.",
+      "tool_call_id": null,
+      "tool_calls": [
+        {
+          "id": "call_function_jhh47luynweh_1",
+          "call_id": "call_function_jhh47luynweh_1",
+          "response_item_id": "fc_function_jhh47luynweh_1",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\":\"sleep 6 \\u0026\\u0026 echo a\"}"
+          }
+        }
+      ],
+      "tool_name": null,
+      "timestamp": 1793197551.394188,
+      "token_count": null,
+      "finish_reason": "tool_calls",
+      "reasoning": null,
+      "reasoning_content": null,
+      "display_kind": null
+    },
+    {
+      "id": 76449,
+      "session_id": "memento-fixture-multi-1",
+      "role": "tool",
+      "content": "{\"output\": \"a\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "call_function_jhh47luynweh_1",
+      "tool_calls": null,
+      "tool_name": "terminal",
+      "timestamp": 1793197558.1187818,
+      "token_count": null,
+      "finish_reason": null,
+      "reasoning": null,
+      "reasoning_content": null,
+      "display_kind": null
+    },
+    {
+      "id": 76450,
+      "session_id": "memento-fixture-multi-1",
+      "role": "assistant",
+      "content": "",
+      "tool_call_id": null,
+      "tool_calls": [
+        {
+          "id": "call_function_1kppth6wxse2_1",
+          "call_id": "call_function_1kppth6wxse2_1",
+          "response_item_id": "fc_function_1kppth6wxse2_1",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\":\"sleep 6 \\u0026\\u0026 echo b\"}"
+          }
+        }
+      ],
+      "tool_name": null,
+      "timestamp": 1793197559.1845832,
+      "token_count": null,
+      "finish_reason": "tool_calls",
+      "reasoning": null,
+      "reasoning_content": null,
+      "display_kind": null
+    },
+    {
+      "id": 76451,
+      "session_id": "memento-fixture-multi-1",
+      "role": "tool",
+      "content": "{\"output\": \"b\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "call_function_1kppth6wxse2_1",
+      "tool_calls": null,
+      "tool_name": "terminal",
+      "timestamp": 1793197565.4657876,
+      "token_count": null,
+      "finish_reason": null,
+      "reasoning": null,
+      "reasoning_content": null,
+      "display_kind": null
+    },
+    {
+      "id": 76452,
+      "session_id": "memento-fixture-multi-1",
+      "role": "assistant",
+      "content": "",
+      "tool_call_id": null,
+      "tool_calls": [
+        {
+          "id": "call_function_0kfakcx3fkxs_1",
+          "call_id": "call_function_0kfakcx3fkxs_1",
+          "response_item_id": "fc_function_0kfakcx3fkxs_1",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\":\"sleep 6 \\u0026\\u0026 echo c\"}"
+          }
+        }
+      ],
+      "tool_name": null,
+      "timestamp": 1793197566.9240985,
+      "token_count": null,
+      "finish_reason": "tool_calls",
+      "reasoning": null,
+      "reasoning_content": null,
+      "display_kind": null
+    },
+    {
+      "id": 76453,
+      "session_id": "memento-fixture-multi-1",
+      "role": "tool",
+      "content": "{\"output\": \"c\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "call_function_0kfakcx3fkxs_1",
+      "tool_calls": null,
+      "tool_name": "terminal",
+      "timestamp": 1793197573.2180693,
+      "token_count": null,
+      "finish_reason": null,
+      "reasoning": null,
+      "reasoning_content": null,
+      "display_kind": null
+    },
+    {
+      "id": 76454,
+      "session_id": "memento-fixture-multi-1",
+      "role": "assistant",
+      "content": "",
+      "tool_call_id": null,
+      "tool_calls": [
+        {
+          "id": "call_function_ca8qdjr69ihu_1",
+          "call_id": "call_function_ca8qdjr69ihu_1",
+          "response_item_id": "fc_function_ca8qdjr69ihu_1",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{\"command\":\"sleep 6 \\u0026\\u0026 echo d\"}"
+          }
+        }
+      ],
+      "tool_name": null,
+      "timestamp": 1793197574.6377244,
+      "token_count": null,
+      "finish_reason": "tool_calls",
+      "reasoning": null,
+      "reasoning_content": null,
+      "display_kind": null
+    },
+    {
+      "id": 76455,
+      "session_id": "memento-fixture-multi-1",
+      "role": "tool",
+      "content": "{\"output\": \"d\", \"exit_code\": 0, \"error\": null}",
+      "tool_call_id": "call_function_ca8qdjr69ihu_1",
+      "tool_calls": null,
+      "tool_name": "terminal",
+      "timestamp": 1793197580.9413676,
+      "token_count": null,
+      "finish_reason": null,
+      "reasoning": null,
+      "reasoning_content": null,
+      "display_kind": null
+    },
+    {
+      "id": 76456,
+      "session_id": "memento-fixture-multi-1",
+      "role": "assistant",
+      "content": "All four commands ran successfully in order, printing a, b, c, and d.",
+      "tool_call_id": null,
+      "tool_calls": null,
+      "tool_name": null,
+      "timestamp": 1793197582.1213903,
+      "token_count": null,
+      "finish_reason": "stop",
+      "reasoning": null,
+      "reasoning_content": null,
+      "display_kind": null
+    },
+    {
+      "id": 76457,
+      "session_id": "memento-fixture-multi-1",
+      "role": "session_meta",
+      "content": null,
+      "tool_call_id": null,
+      "tool_calls": null,
+      "tool_name": null,
+      "timestamp": 1793197582.304571,
+      "token_count": null,
+      "finish_reason": null,
+      "reasoning": null,
+      "reasoning_content": null,
+      "display_kind": null
+    }
+  ],
+  "pagination": { "limit": 50, "offset": 0, "order": "latest", "returned": 11 }
+}

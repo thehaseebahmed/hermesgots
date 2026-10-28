@@ -36,6 +36,9 @@ export async function openDevice(host: Host) {
   await settle()
   const one = (selector: string) => container.querySelector(selector)
   return {
+    /** The notice an unsupported host is given in place of the chat. */
+    notice: () => one("[data-unsupported]")?.textContent ?? undefined,
+    composer: () => Boolean(one("[data-composer]")),
     turns: (): ExpectedTurn[] =>
       [...container.querySelectorAll("main > section")].map((section) => ({
         user: section.querySelector("[data-user]")?.textContent ?? "",
@@ -43,7 +46,40 @@ export async function openDevice(host: Host) {
         tools: [...section.querySelectorAll("[data-tools]")]
           .map((line) => Number(/^(\d+) tool/.exec(line.textContent ?? "")?.[1] ?? 0))
           .reduce((sum, count) => sum + count, 0),
+        asks: [...section.querySelectorAll("[data-answered]")].map((ask) => ask.textContent ?? ""),
       })),
+    /** What the screen is waiting on the user for, as a card with its words and its buttons. */
+    waiting: () => {
+      const question = one("[data-question]")
+      const approval = one("[data-approval]")
+      return {
+        question: question
+          ? {
+              text: question.querySelector("[data-question-text]")?.textContent ?? "",
+              choices: [...question.querySelectorAll("[data-choice]")].map(
+                (c) => c.textContent ?? "",
+              ),
+            }
+          : undefined,
+        approval: approval
+          ? {
+              command: approval.querySelector("[data-command]")?.textContent ?? "",
+              choices: [...approval.querySelectorAll("[data-approve]")].map(
+                (button) => button.getAttribute("data-approve") ?? "",
+              ),
+            }
+          : undefined,
+      }
+    },
+    async choose(choice: string) {
+      const button = [...container.querySelectorAll("[data-choice]")].find(
+        (one) => one.textContent === choice,
+      )
+      await click(button ?? null)
+    },
+    async approve(choice: string) {
+      await click(one(`[data-approve="${choice}"]`))
+    },
     async send(text: string) {
       await type(one("[data-composer]"), text)
       await click(one("[data-send]"))

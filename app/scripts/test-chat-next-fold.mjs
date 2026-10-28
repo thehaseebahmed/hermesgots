@@ -98,3 +98,20 @@ test("a turn is done only when its last row is an assistant row that made no cal
   assert.equal(done(user, calling, result, stop), true, "the reply is written")
   assert.equal(foldTurns(fixture.data)[0].done, true, "the recorded session's one turn")
 })
+
+test("a turn recorded from v0.22.5 folds the same way: four calls with their results, then the reply", () => {
+  const recorded = JSON.parse(
+    readFileSync(
+      new URL("../src/chat-next/fixtures/multi-reader.transcript.json", import.meta.url),
+    ),
+  )
+  const [turn] = foldTurns(recorded.data)
+  assert.equal(turn.done, true)
+  const calls = turn.parts.flatMap((part) => (part.kind === "tools" ? part.calls : []))
+  assert.equal(calls.length, 4)
+  assert.ok(
+    calls.every((call) => typeof call.result === "string"),
+    "each call has its result",
+  )
+  assert.equal(turn.parts.at(-1).kind, "text", "the turn ends on its reply")
+})

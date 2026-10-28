@@ -25,16 +25,17 @@ const screen = (query: string) => (
 test("a session opened by address draws its request, its words and its calls from the host's transcript", async () => {
   const asked: { url: URL; authorization: string | null }[] = []
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    asked.push({
-      url: new URL(String(input)),
-      authorization: new Headers(init?.headers).get("authorization"),
-    })
+    const url = new URL(String(input))
+    // The version check comes first and asks for no key, as Hermes's `/health` does.
+    if (url.pathname === "/health")
+      return json({ status: "ok", platform: "hermes-agent", version: "0.22.5" })
+    asked.push({ url, authorization: new Headers(init?.headers).get("authorization") })
     return json(fixture)
   }) as typeof fetch
 
   const query = `server=${encodeURIComponent("http://hermes.test")}&key=secret&session=${SESSION}`
   await mount(screen(query), async () => {
-    assert.equal(asked.length, 1, "one read")
+    assert.equal(asked.length, 1, "one read of the chat")
     assert.equal(asked[0].url.pathname, `/api/sessions/${SESSION}/messages`)
     assert.equal(asked[0].authorization, "Bearer secret")
 

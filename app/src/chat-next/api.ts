@@ -1,19 +1,32 @@
 import type { Row } from "./fold"
+import type { Waiting } from "./state"
 
 export interface Connection {
   server: string
   key: string
 }
 
-/** What a live run says as it goes; the fields are the ones Hermes v0.21.5 sends, and no more. */
+/** The oldest Hermes this screen works with: it shares a run's events between every follower. */
+export const MIN_HERMES = "0.22.5"
+
+/** What a live run says as it goes; the fields are the ones Hermes v0.22.5 sends, and no more. */
 export interface RunEvent {
   event: string
-  /** Only a host whose events can be shared numbers them. */
+  run_id?: string
   seq?: number
   delta?: string
   tool?: string
   preview?: string
+  tool_call_id?: string
   error?: boolean | string
+  /** A prompt the run is held up on (`approval.request`, `clarify.request`) and its end (`*.settled`). */
+  prompt_id?: string
+  execution_generation?: number
+  command?: string
+  description?: string
+  question?: string
+  choices?: string[]
+  multi_select?: boolean
 }
 
 const READ_TIMEOUT_MS = 15_000
@@ -25,6 +38,33 @@ const within = (signal?: AbortSignal) =>
   signal
     ? AbortSignal.any([signal, AbortSignal.timeout(READ_TIMEOUT_MS)])
     : AbortSignal.timeout(READ_TIMEOUT_MS)
+
+/** Whether `version` ("0.22.5", "0.23.0-rc1") is `min` or newer, comparing the numbers it opens with. */
+export function atLeast(version: string, min = MIN_HERMES): boolean {
+  const parts = (text: string) =>
+    (/^v?(\d+(?:\.\d+)*)/.exec(text.trim())?.[1] ?? "").split(".").map(Number)
+  const have = parts(version)
+  const need = parts(min)
+  if (Number.isNaN(have[0]) || (have.length === 1 && !/\d/.test(version))) return false
+  for (let at = 0; at < Math.max(have.length, need.length); at++) {
+    const a = have[at] ?? 0
+    const b = need[at] ?? 0
+    if (a !== b) return a > b
+  }
+  return true
+}
+
+/** The Hermes version the host reports on `/health`, which asks for no key. */
+export async function readVersion(connection: Connection, signal?: AbortSignal) {
+  try {
+    const response = await fetch(`${root(connection)}/health`, { signal: within(signal) })
+    if (!response.ok) return undefined
+    const { version } = (await response.json()) as { version?: string }
+    return typeof version === "string" ? version : undefined
+  } catch {
+    return undefined
+  }
+}
 
 /**
  * A session's whole transcript, oldest row first. The host pages newest-first by offset, so older
@@ -97,6 +137,29 @@ export async function readLiveRun(
   } catch {
     return undefined
   }
+}
+
+/**
+ * Answers the prompt a run is held up on through Hermes's own route. It takes exactly the prompt's
+ * id, its generation and the one field for the kind: `choice` for an approval, `answer` for a
+ * question.
+ */
+export async function respond(connection: Connection, waiting: Waiting, value: string) {
+  const kind = waiting.kind === "approval" ? "approval" : "clarify"
+  const response = await fetch(
+    `${root(connection)}/v1/runs/${encodeURIComponent(waiting.run)}/${kind}`,
+    {
+      method: "POST",
+      headers: { ...headers(connection), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        request_id: waiting.promptId,
+        execution_generation: waiting.generation,
+        [kind === "approval" ? "choice" : "answer"]: value,
+      }),
+      signal: within(),
+    },
+  )
+  if (!response.ok) throw new Error(`The host answered ${response.status}.`)
 }
 
 /** Follows a run's events until the host closes the stream. */
