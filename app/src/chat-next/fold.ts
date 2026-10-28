@@ -4,6 +4,7 @@ export interface Row {
   role: string
   content: string | null
   tool_call_id?: string | null
+  finish_reason?: string | null
   tool_calls?: { id: string; function: { name: string; arguments: string } }[] | null
 }
 
@@ -19,6 +20,8 @@ export type Part = { kind: "text"; text: string } | { kind: "tools"; calls: Tool
 export interface Turn {
   user: string
   parts: Part[]
+  /** The host has written the reply's last row: an assistant row that makes no more calls and says why it stopped. */
+  done: boolean
 }
 
 /** Cuts a transcript at each user row and folds the rows after it into that turn's ordered parts. */
@@ -27,7 +30,7 @@ export function foldTurns(rows: Row[]): Turn[] {
   const callOf = new Map<string, ToolCall>()
   for (const row of rows) {
     if (row.role === "user") {
-      turns.push({ user: row.content ?? "", parts: [] })
+      turns.push({ user: row.content ?? "", parts: [], done: false })
       continue
     }
     const turn = turns.at(-1)
@@ -38,6 +41,7 @@ export function foldTurns(rows: Row[]): Turn[] {
       continue
     }
     if (row.role !== "assistant") continue
+    turn.done = !row.tool_calls?.length && Boolean(row.finish_reason)
     if (row.content) turn.parts.push({ kind: "text", text: row.content })
     for (const asked of row.tool_calls ?? []) {
       const call: ToolCall = { id: asked.id, name: asked.function.name }

@@ -1,93 +1,11 @@
 /**
  * One chat, several devices: every device that looks at it must draw all of it, whichever way it
- * came to hold the chat. A device here is its own mount of the page with its own state; the host
- * is the only thing they share (`chat-next-host.ts`), and what it authored is what each must show.
- *
- * The contract the page is held to, beyond what slice 1 drew: a composer (`[data-composer]`, its
- * send button `[data-send]`), a turn is a `main > section`, and a device that comes back to the
- * foreground (`visibilitychange`) reads the chat again.
+ * came to hold the chat. What each must show is what the host authored (`chat-next-host.ts`).
  */
-import assert from "node:assert/strict"
 import test from "node:test"
-import { act } from "react"
-import { createRoot } from "react-dom/client"
-import { MemoryRouter, Route, Routes } from "react-router"
 
-import { ChatNextPage } from "@/chat-next/page"
-import { click, settle, type } from "./component-kit.tsx"
-import { fakeHost, type ExpectedTurn } from "./chat-next-host.ts"
-
-type Host = ReturnType<typeof fakeHost>
-
-async function openDevice(host: Host) {
-  const container = document.createElement("div")
-  document.body.append(container)
-  const root = createRoot(container)
-  const query = `server=${encodeURIComponent("http://hermes.test")}&key=k&session=${host.session}`
-  await act(async () =>
-    root.render(
-      <MemoryRouter initialEntries={[`/next?${query}`]}>
-        <Routes>
-          <Route path="/next" element={<ChatNextPage />} />
-        </Routes>
-      </MemoryRouter>,
-    ),
-  )
-  await settle()
-  const one = (selector: string) => container.querySelector(selector)
-  return {
-    turns: (): ExpectedTurn[] =>
-      [...container.querySelectorAll("main > section")].map((section) => ({
-        user: section.querySelector("[data-user]")?.textContent ?? "",
-        texts: [...section.querySelectorAll("[data-text]")].map((text) => text.textContent ?? ""),
-        tools: [...section.querySelectorAll("[data-tools]")]
-          .map((line) => Number(/^(\d+) tool/.exec(line.textContent ?? "")?.[1] ?? 0))
-          .reduce((sum, count) => sum + count, 0),
-      })),
-    async send(text: string) {
-      await type(one("[data-composer]"), text)
-      await click(one("[data-send]"))
-    },
-    async returns() {
-      await act(async () => void document.dispatchEvent(new Event("visibilitychange")))
-      await settle()
-    },
-    async close() {
-      await act(async () => root.unmount())
-      container.remove()
-    },
-  }
-}
-
-type Device = Awaited<ReturnType<typeof openDevice>>
-
-/** Gives a device the moment it needs to draw what it was told, then holds it to the host's word. */
-async function showsEverything(device: Device, host: Host, what: string) {
-  for (let tries = 0; tries < 40; tries++) {
-    try {
-      assert.deepEqual(device.turns(), host.expected)
-      break
-    } catch {
-      await act(async () => new Promise((resolve) => setTimeout(resolve, 25)))
-    }
-  }
-  assert.deepEqual(device.turns(), host.expected, what)
-}
-
-/** Sends from a device and plays the host's side of the turn: calls, streamed words, the reply. */
-async function turn(device: Device, host: Host, user: string, reply: string, tools = 1) {
-  const before = host.asked.runs
-  await device.send(user)
-  for (let tries = 0; host.asked.runs === before && tries < 40; tries++)
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 25)))
-  assert.equal(host.asked.runs, before + 1, `the host was asked to run "${user}"`)
-  const run = host.latest.run!
-  for (let at = 0; at < tools; at++) run.tool("terminal", `echo ${at}`, '{"exit_code": 0}')
-  run.say(`\n\n${reply.slice(0, 4)}`)
-  run.say(reply.slice(4))
-  run.finish(reply)
-  await settle()
-}
+import { fakeHost } from "./chat-next-host.ts"
+import { openDevice, showsEverything, turn } from "./chat-next-devices.tsx"
 
 test("1: a chat left open on the device that started it shows every turn it made", async () => {
   const host = fakeHost("memento-one")

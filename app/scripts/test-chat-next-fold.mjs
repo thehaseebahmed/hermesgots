@@ -81,3 +81,20 @@ test("each user row starts the next turn", () => {
     ],
   )
 })
+
+// The states recorded from a real host while a run was going (session memento-fixture-events-2).
+test("a turn is done only when its last row is an assistant row that made no call and says why it stopped", () => {
+  const user = row(1, "user", "go")
+  const calling = row(2, "assistant", "", {
+    finish_reason: "tool_calls",
+    tool_calls: [{ id: "a", type: "function", function: { name: "terminal", arguments: "{}" } }],
+  })
+  const result = row(3, "tool", "{}", { tool_call_id: "a", tool_name: "terminal" })
+  const stop = row(4, "assistant", "done", { finish_reason: "stop" })
+  const done = (...rows) => foldTurns(rows)[0].done
+  assert.equal(done(user), false, "only the request written")
+  assert.equal(done(user, calling), false, "a call made, no result yet")
+  assert.equal(done(user, calling, result), false, "a result in, no reply yet")
+  assert.equal(done(user, calling, result, stop), true, "the reply is written")
+  assert.equal(foldTurns(fixture.data)[0].done, true, "the recorded session's one turn")
+})

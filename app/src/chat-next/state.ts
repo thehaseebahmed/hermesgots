@@ -50,7 +50,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       return {
         status: "ready",
         running: true,
-        turns: [...state.turns, { user: event.user, parts: [] }],
+        turns: [...state.turns, { user: event.user, parts: [], done: false }],
       }
     case "run":
       return {

@@ -31,8 +31,21 @@ function TurnView({ turn }: { turn: Turn }) {
   )
 }
 
+const POLL_MS = 2_000
+const IDLE_MS = 15_000
+/** A turn that has written nothing for this long is not waited on any more. */
+const STALL_MS = 5 * 60_000
+
 /** A session read from the host and drawn, opened by `?server=&key=&session=`. */
-export function ChatNextPage() {
+export function ChatNextPage({
+  pollMs = POLL_MS,
+  idleMs = IDLE_MS,
+  stallMs = STALL_MS,
+}: {
+  pollMs?: number
+  idleMs?: number
+  stallMs?: number
+}) {
   const [params] = useSearchParams()
   const server = params.get("server")
   const key = params.get("key")
@@ -74,6 +87,33 @@ export function ChatNextPage() {
       alive.current.abort()
     }
   }, [catchUp])
+
+  // A turn the host has not finished and this device is not streaming is followed by reading the
+  // transcript, which is all a device that did not start it has to go on.
+  const last = state.turns.at(-1)
+  const following = state.status !== "loading" && !state.running && last !== undefined && !last.done
+  const progress = useRef({ shape: "", at: 0 })
+  const shape = state.turns
+    .map((turn) =>
+      turn.parts.map((part) => (part.kind === "tools" ? part.calls.length : "t")).join(),
+    )
+    .join("|")
+  useEffect(() => {
+    progress.current = { shape, at: Date.now() }
+  }, [shape])
+  // An open chat is read now and then even when it looks finished, since another device may have
+  // started a turn; a page nobody is looking at asks nothing.
+  useEffect(() => {
+    const timer = setInterval(
+      () => {
+        if (document.visibilityState !== "visible") return
+        if (following && Date.now() - progress.current.at > stallMs) return
+        void catchUp()
+      },
+      following ? pollMs : idleMs,
+    )
+    return () => clearInterval(timer)
+  }, [following, catchUp, pollMs, idleMs, stallMs])
 
   async function send() {
     const text = draft.trim()

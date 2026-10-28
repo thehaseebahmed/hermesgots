@@ -20,6 +20,7 @@ interface Row {
   tool_name: string | null
   timestamp: number
   display_kind: string | null
+  finish_reason: string | null
 }
 
 export interface ExpectedTurn {
@@ -59,6 +60,7 @@ export function fakeHost(session: string) {
       tool_name: null,
       timestamp: ++clock,
       display_kind: null,
+      finish_reason: null,
       ...extra,
     })
 
@@ -84,6 +86,7 @@ export function fakeHost(session: string) {
         const call = `call_${id}_${++calls}`
         push("tool.started", { tool: name, preview })
         write("assistant", "", {
+          finish_reason: "tool_calls",
           tool_calls: [{ id: call, type: "function", function: { name, arguments: "{}" } }],
         })
         write("tool", result, { tool_call_id: call, tool_name: name })
@@ -92,7 +95,7 @@ export function fakeHost(session: string) {
       },
       say: (delta) => push("message.delta", { delta }),
       finish(output) {
-        write("assistant", output)
+        write("assistant", output, { finish_reason: "stop" })
         turn.texts.push(output)
         push("run.completed", { output, usage: { input_tokens: 1, output_tokens: 1 } })
         state.done = true
@@ -176,5 +179,16 @@ export function fakeHost(session: string) {
     }
   }
 
-  return { install, seed, expected, asked, rows, latest, session }
+  /** Every open event stream dies without a word, as a phone's does when it goes to sleep. */
+  function dropConnections() {
+    for (const state of runs.values()) {
+      state.listeners.forEach((listen) => listen(null))
+      state.listeners.clear()
+    }
+  }
+
+  /** A turn another device sent: the host runs it with no screen of ours watching. */
+  const startElsewhere = (input: string) => start(input).run
+
+  return { install, seed, expected, asked, rows, latest, session, dropConnections, startElsewhere }
 }
