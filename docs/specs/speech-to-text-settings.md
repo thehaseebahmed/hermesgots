@@ -42,6 +42,9 @@ knobs). No secrets, no `base_url`, no invented ranges.
 ## Implementation Decisions
 
 **What the page draws**, in order under **Hermes**. Every key below is written as Hermes spells it.
+Thirty-one keys are the schema's own defaults; `stt.provider` is the thirty-second and the one the
+Dashboard's form never draws — its choices never merged, because the key is deliberately unseeded —
+so this row is the first readable place to make that pick.
 
 | Key | Row | Control |
 | --- | --- | --- |
@@ -129,6 +132,10 @@ saying *Key not set* where the host holds no key for it. A provider page holds:
 ## Out of Scope
 
 - `base_url` overrides, and every API key: both belong to the Dashboard and to `.env`.
+- The keys the host's runtime reads and its schema never declares — `stt.local.device`,
+  `stt.local.compute_type`, `stt.prompt`, `stt.providers.*`, and the per-provider `base_url` and
+  `api_key`. The page carries what the schema declares plus the provider pick, and invents nothing to
+  fill a gap.
 - A "test this provider" action, and any per-provider "use this one" button — the provider pick is
   the only place the choice is made.
 - Hermes's own text-to-speech section (`tts.*`), and the `voice` section above it.
