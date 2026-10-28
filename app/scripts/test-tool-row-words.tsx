@@ -1,7 +1,8 @@
 /**
  * What a tool row puts beside its verb: the call's own words, and never the arguments a transcript
  * row fell back to. The decision is whether the label reads as an envelope, not whether it opens on
- * a brace — a command that starts with `{` is the words it is.
+ * a brace — a command that starts with `{` is the words it is. A failed group draws here too: no
+ * mark, its failure in the row's name, and the host's reason under it.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -65,7 +66,7 @@ test("a failed group wears no mark before its words, and its reason stands flush
     async () => {
       const row = find('[data-slot="tool-group"]')
       assert.equal(row?.firstElementChild?.tagName, "SPAN", "the words lead the row")
-      assert.equal(row?.querySelector('[aria-label="Failed"]'), null, "and no mark precedes them")
+      assert.ok(!row?.querySelector('[aria-label="Failed"]'), "and no mark precedes them")
       assert.match(
         row?.getAttribute("aria-label") ?? "",
         /a call failed/,

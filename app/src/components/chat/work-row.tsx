@@ -57,9 +57,10 @@ export const WorkRow = forwardRef<
 })
 
 /**
- * A note a row says under itself, starting where the label ends rather than on a line's worth of
- * gap: the row's 29px box centres a 20px line, so the pull takes back the half-line left under it.
- * The row's height and the note's offset live in one file, so they move together (ADR 0058).
+ * A note a row says under itself, standing flush at the row's own left edge and starting where its
+ * label ends: the row's 29px box centres a 20px line, so the pull takes back the half-line left
+ * under it (ADR 0062). The row's height and the note's offset live in one file, so they move
+ * together.
  */
 export function WorkNote({ className, ...props }: ComponentProps<"p">) {
   return <p className={cn("-mt-1 truncate pb-1 text-sm", className)} {...props} />

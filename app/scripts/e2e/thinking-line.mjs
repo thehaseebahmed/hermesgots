@@ -20,6 +20,8 @@ const ROW = "[data-slot=thinking-line]"
 const SHEET = "[data-slot=thinking-sheet]"
 const BODY = "[data-slot=thinking-body]"
 const STATUS_WORDS = "[data-slot=status-words]"
+/** How long the line is watched after its words land: a line still typing would move inside it. */
+const STEADY_MS = 600
 /** The share of the viewport height the deleted `max-h-[30dvh]` cap held: a sheet body outgrows it. */
 const FORMER_CAP_SHARE = 0.3
 const FIRST = "working-out, not just the answer"
@@ -505,7 +507,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   assert.ok(writing.loader, "a loader turns beside the words")
   assert.equal(writing.colour, accent, "the loader and its words both read in the accent colour")
   assert.equal(writing.wordsColour, accent, "the words' own text takes it too, not just the row")
-  await page.waitForTimeout(600)
+  await page.waitForTimeout(STEADY_MS)
   const steady = await lineState()
   assert.equal(steady?.words, "Writing…", "the words stand whole: nothing types itself in")
   assert.equal(steady?.colour, writing.colour, "and the line holds the colour it works in")

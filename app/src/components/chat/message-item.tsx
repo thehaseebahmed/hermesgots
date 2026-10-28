@@ -422,6 +422,7 @@ function StatusLine({
   children,
 }: {
   text?: string
+  /** The turn wants the reader, not the host: its words stand and no loader turns beside them. */
   waiting?: boolean
   children?: ReactNode
 }) {
