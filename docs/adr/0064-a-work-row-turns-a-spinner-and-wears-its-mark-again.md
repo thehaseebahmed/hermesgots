@@ -52,8 +52,10 @@ does not reach it. The wave was the only thing this pair of decisions shared.
 ## Consequences
 
 - `WorkRow` carries `before` again, and `WORK_LABEL_DENT` returns with it, so a reason line and the
-  label it explains stand under one left edge. `WorkLabel` and the `.work-wave` keyframe go, along
-  with the `useReducedMotion` hook whose only reader was the wave.
+  label it explains stand under one left edge. The note loses the pull ADR 0062 gave it at the same
+  moment: that pull closed the half-line a row with no mark left under its label, and with the dent
+  back the note's own line box is the only gap it needs. `WorkLabel` and the `.work-wave` keyframe go,
+  along with the `useReducedMotion` hook whose only reader was the wave.
 - A working thought row, the row a turn wears before a word of thinking arrives, and a tool group
   while any of its calls run each draw a spinner before their label; a group whose calls failed draws
   the X where it is not running. Reduced motion is the spinner's own: `motion-safe:animate-spin`
