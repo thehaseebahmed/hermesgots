@@ -49,32 +49,56 @@ export type ThreadEvent =
 
 export const initial: ThreadState = { status: "loading", turns: [], running: false }
 
-/** One live event's change to the turn it belongs to. */
+/** One live event's change to the turn it belongs to; only the part it touches is a new object. */
 function live(turn: Turn, event: RunEvent): Turn {
-  const parts: Part[] = turn.parts.map((part) =>
-    part.kind === "tools" ? { ...part, calls: part.calls.map((call) => ({ ...call })) } : part,
-  )
+  const { parts } = turn
   const last = parts.at(-1)
+  const replaceLast = (part: Part): Turn => ({ ...turn, parts: [...parts.slice(0, -1), part] })
   if (event.event === "message.delta" && event.delta) {
-    if (last?.kind === "text") parts[parts.length - 1] = { ...last, text: last.text + event.delta }
-    else parts.push({ kind: "text", text: event.delta.trimStart() })
-  } else if (event.event === "tool.started" && event.tool) {
+    if (last?.kind === "text") return replaceLast({ ...last, text: last.text + event.delta })
+    return { ...turn, parts: [...parts, { kind: "text", text: event.delta.trimStart() }] }
+  }
+  if (event.event === "tool.started" && event.tool) {
     // The host names the call, and the transcript's row for it carries the same id.
     const call = {
       id: event.tool_call_id ?? `live-${parts.length}-${event.seq}`,
       name: event.tool,
       label: event.preview,
     }
-    if (last?.kind === "tools") last.calls.push(call)
-    else parts.push({ kind: "tools", calls: [call] })
-  } else if (event.event === "tool.completed" && event.tool_call_id) {
-    const call = parts
-      .flatMap((part) => (part.kind === "tools" ? part.calls : []))
-      .find((one) => one.id === event.tool_call_id)
-    if (call) call.result = event.preview ?? ""
+    if (last?.kind === "tools") return replaceLast({ ...last, calls: [...last.calls, call] })
+    return { ...turn, parts: [...parts, { kind: "tools", calls: [call] }] }
   }
-  return { ...turn, parts }
+  if (event.event === "tool.completed" && event.tool_call_id) {
+    const at = parts.findIndex(
+      (part) => part.kind === "tools" && part.calls.some((one) => one.id === event.tool_call_id),
+    )
+    const part = parts[at]
+    if (part?.kind !== "tools") return turn
+    const calls = part.calls.map((one) =>
+      one.id === event.tool_call_id ? { ...one, result: event.preview ?? "" } : one,
+    )
+    return { ...turn, parts: parts.with(at, { ...part, calls }) }
+  }
+  return turn
 }
+
+/** The turns just read, each the very object already held where it says the same. */
+function shared(held: Turn[], read: Turn[]): Turn[] {
+  return read.map((turn, at) =>
+    held[at] && JSON.stringify(held[at]) === JSON.stringify(turn) ? held[at] : turn,
+  )
+}
+
+const sameAgents = (a: Agent[] | undefined, b: Agent[]) =>
+  a?.length === b.length &&
+  a.every(
+    (one, at) =>
+      one.id === b[at].id &&
+      one.status === b[at].status &&
+      one.goal === b[at].goal &&
+      one.ended_at === b[at].ended_at &&
+      one.tool_calls === b[at].tool_calls,
+  )
 
 const SETTLED = ["approval.settled", "clarify.settled"]
 const ENDINGS = ["run.completed", "run.failed", "run.cancelled", "run.interrupted"]
@@ -107,7 +131,10 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
   switch (event.type) {
     case "transcript": {
       if (state.running && !event.final) return state
-      const turns = foldTurns(state.archived ? withArchive(event.rows, state.archived) : event.rows)
+      const turns = shared(
+        state.turns,
+        foldTurns(state.archived ? withArchive(event.rows, state.archived) : event.rows),
+      )
       return {
         status: "ready",
         turns,
@@ -141,9 +168,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         ),
       }
     case "agents":
-      return JSON.stringify(state.agents) === JSON.stringify(event.agents)
-        ? state
-        : { ...state, agents: event.agents }
+      return sameAgents(state.agents, event.agents) ? state : { ...state, agents: event.agents }
     case "ended":
       // The stream is over, however it ended, so the thread is no longer held by it. What the turn
       // was comes from the transcript, which a later read may supply if the one for this end was
@@ -152,14 +177,14 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
     case "answered":
       // The card goes at once; the host's `*.settled` event confirms it.
       return { ...state, waiting: undefined }
-    case "run":
-      return {
-        ...state,
-        waiting: waitingAfter(state.waiting, event.event),
-        turns: state.turns.map((turn, at) =>
-          at === state.turns.length - 1 ? live(turn, event.event) : turn,
-        ),
-      }
+    case "run": {
+      const waiting = waitingAfter(state.waiting, event.event)
+      const at = state.turns.length - 1
+      const turn = state.turns[at]
+      const next = turn && live(turn, event.event)
+      if (waiting === state.waiting && next === turn) return state
+      return { ...state, waiting, turns: next === turn ? state.turns : state.turns.with(at, next) }
+    }
     case "failed":
       return { ...state, status: "failed", running: false, waiting: undefined, error: event.error }
   }
