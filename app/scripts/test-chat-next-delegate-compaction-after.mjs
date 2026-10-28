@@ -81,10 +81,21 @@ test("the work archived under the second request follows it, not the turn above"
   assert.ok(ids.indexOf(76732) < ids.indexOf(76763))
 })
 
-test("with the archive, the first turn is whole again, its compaction after it, and the carried copy adds nothing", () => {
+test("the compaction's rows follow the work done before it, where the host compacted", () => {
+  const ids = withArchive(live, archive).map((row) => row.id)
+  assert.ok(ids.indexOf(76744) < ids.indexOf(76761), "after the last archived row of turn 2")
+  assert.ok(ids.indexOf(76761) < ids.indexOf(76764), "before the work carried past it")
+  assert.deepEqual(
+    ids,
+    [...archive.map((row) => row.id)],
+    "the archive's order, which holds every live row",
+  )
+})
+
+test("with the archive, the first turn is whole again with its call, and the carried copy adds nothing", () => {
   const [first, second, ...rest] = foldTurns(withArchive(live, archive))
   assert.match(first.user, FIRST)
-  assert.deepEqual(kinds(first), ["tools", "text", "compaction"])
+  assert.deepEqual(kinds(first), ["tools", "text"], "the compaction happened later, in turn 2")
   assert.equal(first.parts[0].calls[0].name, "delegate_task")
   assert.match(
     first.parts[0].calls[0].result,
@@ -100,10 +111,10 @@ test("with the archive, the first turn is whole again, its compaction after it, 
   assert.equal(replies.length, 1)
 })
 
-test("with the archive, the second turn draws every call once, its carried copies dropped", () => {
+test("with the archive, the second turn draws every call once, with the divider where the host compacted", () => {
   const second = foldTurns(withArchive(live, archive))[1]
   assert.match(second.user, SECOND)
-  assert.deepEqual(kinds(second), ["tools", "text"])
+  assert.deepEqual(kinds(second), ["tools", "compaction", "text"])
   assert.equal(second.parts[0].calls.length, 3, "the terminal calls, not their carried copies")
   assert.deepEqual(
     second.parts[0].calls.map((call) => call.id),
