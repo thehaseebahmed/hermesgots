@@ -604,7 +604,14 @@ export interface DictationRecord {
   id: string
   /** The `connectionKey` of the bot that heard it. */
   connection: string
+  /** The words as they landed in the composer, after Cleanup. */
   text: string
+  /**
+   * The words as the host heard them, before Cleanup — the take's pieces joined, so the sheet can set
+   * the two texts beside each other (ADR 0062). Kept on every take; missing on a row written before
+   * the field existed, and on one whose host is too old to keep it.
+   */
+  heard?: string
   words: number
   /** How long the words took to say, with the pauses left out. */
   ms: number

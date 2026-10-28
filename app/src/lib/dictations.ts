@@ -13,6 +13,7 @@ import {
   clearedAway,
   countWords,
   fingerprintOf,
+  heardOf,
   orderOf,
   sumTotals,
   toUpsert,
@@ -62,12 +63,29 @@ function stored(row: RowFields): DictationRecord {
   return { ...row, loggedAt: orderOf(row) }
 }
 
-function entryOf(connection: string, text: string, ms: number, at = Date.now()): DictationRecord {
-  return stored({ id: randomId(), connection, text, words: countWords(text), ms, at, posted: false })
+function entryOf(connection: string, text: string, ms: number, heard?: string): DictationRecord {
+  const asHeard = heardOf(heard)
+  return stored({
+    id: randomId(),
+    connection,
+    text,
+    ...(asHeard ? { heard: asHeard } : {}),
+    words: countWords(text),
+    ms,
+    at: Date.now(),
+    posted: false,
+  })
 }
 
 function hostOf(row: DictationRecord): DictationWrite {
-  return { id: row.id, text: row.text, words: row.words, ms: row.ms, at: row.at }
+  return {
+    id: row.id,
+    text: row.text,
+    ...(row.heard ? { heard: row.heard } : {}),
+    words: row.words,
+    ms: row.ms,
+    at: row.at,
+  }
 }
 
 /** Refusals about the take itself: the same words would be refused on every open, so they are final. */
@@ -99,7 +117,10 @@ function settledBy({ row, answer, refused }: Posting): DictationRecord | null {
   if (!answer) return null
   // Its answer is the row as it stored it: its clock heard the take, and its `at` is the one it kept —
   // a device clock in the future is clamped to that, so the sheet shows a time that can exist.
-  return stored({ ...row, posted: true, at: answer.at, seenAt: answer.seenAt })
+  const settled = stored({ ...row, posted: true, at: answer.at, seenAt: answer.seenAt })
+  if (answer.heard === undefined) delete settled.heard
+  else settled.heard = answer.heard
+  return settled
 }
 
 /** Writes what a batch of hand-overs came to in one write, and answers what each row became. */
@@ -159,10 +180,15 @@ async function askStats(config: HermesConfig, key: string): Promise<HostAnswer |
  * copy is fired without being awaited, so a host that is away — or too old to have the routes —
  * costs the take nothing, and a take the host never confirmed is posted again at the next reconcile.
  */
-export async function writeDictation(config: HermesConfig, text: string, ms: number) {
+export async function writeDictation(
+  config: HermesConfig,
+  text: string,
+  ms: number,
+  heard?: string,
+) {
   const trimmed = text.trim()
   if (!trimmed) return
-  const row = entryOf(connectionKey(config), trimmed, ms)
+  const row = entryOf(connectionKey(config), trimmed, ms, heard)
   await db.dictationLog.put(row).catch(quietly("Logging a dictation on this device"))
   void post(config, row)
     .then((posting) => applyPostings([posting]))

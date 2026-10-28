@@ -13,6 +13,8 @@ import {
   pooledRate,
   spokenOf,
   sumTotals,
+  heardOf,
+  textsOf,
   toUpsert,
   wordsLabel,
 } from "../src/lib/dictation-log.ts"
@@ -128,6 +130,27 @@ test("a page upserts only what the mirror is missing or holds older", () => {
   assert.deepEqual(toUpsert([], page).map((row) => row.id), ["b", "c"], "an empty mirror takes the page")
 })
 
+test("a page takes back the words as heard its host doesn't hold", () => {
+  const mirror = [{ id: "a", at: 10, heard: "um, the words" }]
+  const page = [{ id: "a", at: 10, text: "The words." }]
+  assert.deepEqual(
+    toUpsert(mirror, page).map((row) => row.id),
+    ["a"],
+    "a host too old to keep them heals the mirror rather than being defended by it",
+  )
+  const kept = [{ id: "a", at: 10, heard: "um, the words" }]
+  assert.deepEqual(
+    toUpsert([{ id: "a", at: 10 }], kept).map((row) => row.id),
+    ["a"],
+    "and a host that keeps them gives the mirror the ones it has",
+  )
+  assert.deepEqual(
+    toUpsert(mirror, [{ id: "a", at: 10, heard: "um, the words" }]).map((row) => row.id),
+    [],
+    "a row both sides hold as the same is not written again",
+  )
+})
+
 test("totals add up across the bots that reported", () => {
   assert.deepEqual(
     sumTotals([
@@ -137,6 +160,42 @@ test("totals add up across the bots that reported", () => {
     { words: 150, ms: 90_000, count: 3 },
   )
   assert.deepEqual(sumTotals([]), { words: 0, ms: 0, count: 0 })
+})
+
+test("a take's texts are set apart only where the cleanup changed them", () => {
+  const said = "um, draft the reply"
+  assert.deepEqual(
+    textsOf({ text: "Draft the reply.", heard: said }),
+    { heard: said, tidied: "Draft the reply." },
+    "two blocks where the cleanup changed anything",
+  )
+  assert.deepEqual(
+    textsOf({ text: "Send it as it is.", heard: "Send it as it is." }),
+    { heard: "Send it as it is." },
+    "one block, named Heard, where the cleanup left the words alone",
+  )
+  assert.deepEqual(
+    textsOf({ text: "Send it as it is." }),
+    { tidied: "Send it as it is." },
+    "one unlabelled block on a row from before the field",
+  )
+  assert.deepEqual(
+    textsOf({ text: "As it is.", heard: "   " }),
+    { tidied: "As it is." },
+    "a blank heard is none at all",
+  )
+  assert.deepEqual(
+    textsOf({ text: " As it is. ", heard: "  As it is.  " }),
+    { heard: "As it is." },
+    "the two are compared as they are read, not as they were stored",
+  )
+})
+
+test("the words as heard are kept trimmed, and a blank is nothing at all", () => {
+  assert.equal(heardOf("  um, draft the reply  "), "um, draft the reply")
+  assert.equal(heardOf("   "), undefined, "a blank leaves the row as one text")
+  assert.equal(heardOf(undefined), undefined)
+  assert.equal(heardOf(null), undefined, "a host that sent no words sent no words")
 })
 
 test("the rate is pooled over the totals, not averaged over takes", () => {

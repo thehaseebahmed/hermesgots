@@ -61,6 +61,13 @@ on each open, and the last stats answer per bot is cached so the menu row draws 
   pauses are left out. Those spans ride on the pieces, so a take restored after a reload still reports
   its own minutes; a take whose words land in parts is still one entry, its pieces joined and their
   spans summed. A take cancelled or failed before any words landed writes nothing.
+- **The row keeps both texts.** `heard` is the same take as the host's speech model wrote it, its
+  pieces joined, which is exactly what the cleanup was given; `text` is what that cleanup answered,
+  and the two are the same string when it changed nothing or never answered (ADR 0062). It is stored
+  on every take, display-only — the count, the preview line and the totals all read the landed text —
+  and never a reason to refuse a row: a `heard` that isn't text or is past the bound is dropped and the
+  row written anyway. The sheet draws **Heard** above **Tidied**, the second only where it differs, so
+  a row from before the field reads exactly as it did.
 - **The plugin gains five routes behind a `dictations` feature**: `POST dictations`,
   `DELETE dictations/<id>`, `DELETE dictations`, `GET dictations?before&before_id&limit`, and
   `GET dictations/stats` returning the totals plus count, newest, oldest and `clearedAt`. The paged

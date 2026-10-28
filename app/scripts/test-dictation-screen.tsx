@@ -16,7 +16,7 @@ import { act } from "react"
 import { DictationSettings, PAGE_ROWS } from "@/components/settings/dictation"
 import { Screen } from "@/components/settings-chrome"
 import { connectionKey } from "@/lib/connection"
-import { spelledCount, monthLabel } from "@/lib/dictation-log"
+import { monthLabel, orderOf, spelledCount } from "@/lib/dictation-log"
 import { db } from "@/lib/db"
 import {
   botProfile,
@@ -26,12 +26,12 @@ import {
   find,
   findAll,
   json,
+  lineLabel,
   mount,
   seedSettings,
   text,
   until,
 } from "./component-kit.tsx"
-import { orderOf } from "@/lib/dictation-log"
 
 const at = (year: number, month: number, day: number, hour = 9) =>
   new Date(year, month - 1, day, hour).getTime()
@@ -218,6 +218,9 @@ const rows = () => findAll("[data-dictation-history] button[data-dictation]")
 const rowText = (index: number) => (rows()[index]?.textContent ?? "").trim()
 
 const sheet = () => find("[data-dictation-text]")
+const heardBlock = () => find("[data-dictation-heard]")
+/** A block's heading and its words, as one string: the heading is inside the paragraph. */
+const blockText = (node: Element | null) => (node ? lineLabel(node) : "")
 const copyButton = () => find("[data-dictation-copy]")
 const deleteButton = () => find("[data-dictation-delete]")
 /** A button inside the destructive confirmation, never the one that opened it. */
@@ -332,15 +335,20 @@ test("a take is placed by when its host heard it, and shows when it was said", a
 
 test("a row opens its dictation whole, a Copy that copies it", async () => {
   copied = []
-  const text = "Draft the reply to Haseeb and keep it to two lines.\nThen send it."
+  const said = "Draft the reply to Haseeb and keep it to two lines.\nThen send it."
   await seed([
-    { name: "a", label: "Aria", features: ["dictations"], rows: [{ id: "one", text, words: 12, ms: 6_000, at: at(2026, 10, 24) }] },
+    { name: "a", label: "Aria", features: ["dictations"], rows: [{ id: "one", text: said, words: 12, ms: 6_000, at: at(2026, 10, 24) }] },
   ])
   await mount(screen(), async () => {
     await until(async () => rows().length === 1, "the dictation")
     await click(rows()[0] ?? null)
     await until(async () => Boolean(sheet()), "the dictation's sheet")
-    assert.equal(sheet()?.textContent, text, "the sheet holds every word, the line break included")
+    assert.equal(sheet()?.textContent, said, "the sheet holds every word, the line break included")
+    assert.equal(
+      heardBlock(),
+      null,
+      "a take kept before the words as heard existed draws no block for them",
+    )
     assert.equal(
       find("[data-dictation-text]")?.nextElementSibling?.textContent?.trim(),
       "Aria · 12 words · 6.0s spoken",
@@ -353,8 +361,75 @@ test("a row opens its dictation whole, a Copy that copies it", async () => {
     )
     await click(copyButton())
     await until(async () => copied.length === 1, "the copy")
-    assert.deepEqual(copied, [text], "the whole dictation is what went to the clipboard")
+    assert.deepEqual(copied, [said], "the whole dictation is what went to the clipboard")
     await until(async () => (copyButton()?.textContent ?? "").includes("Copied"), "the button to say it copied")
+  })
+})
+
+test("a dictation draws the words as heard over the tidied ones, and Copy takes the tidied", async () => {
+  copied = []
+  const heard = "um, draft the reply to haseeb um keep it to two lines"
+  const tidied = "Draft the reply to Haseeb, keep it to two lines."
+  await seed([
+    {
+      name: "a",
+      label: "Aria",
+      features: ["dictations"],
+      rows: [{ id: "one", text: tidied, heard, words: 9, ms: 6_000, at: at(2026, 10, 24) }],
+    },
+  ])
+  await mount(screen(), async () => {
+    await until(async () => rows().length === 1, "the dictation")
+    await click(rows()[0] ?? null)
+    await until(async () => Boolean(sheet()), "the dictation's sheet")
+    assert.ok(
+      blockText(heardBlock()).startsWith("Heard") && blockText(heardBlock()).endsWith(heard),
+      "the words the host heard, under their own heading",
+    )
+    assert.ok(
+      blockText(sheet()).startsWith("Cleaned up") && blockText(sheet()).endsWith(tidied),
+      "and the tidied text under its own, set apart from it",
+    )
+    assert.ok(
+      heardBlock()?.compareDocumentPosition(sheet() ?? heardBlock()!) ===
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      "as heard first, tidied under it",
+    )
+    await click(copyButton())
+    await until(async () => copied.length === 1, "the copy")
+    assert.deepEqual(copied, [tidied], "what went to the clipboard is the tidied text")
+  })
+})
+
+test("a take the cleanup left alone reads as one block, named Heard", async () => {
+  copied = []
+  const words = "Send it as it is."
+  await seed([
+    {
+      name: "a",
+      label: "Aria",
+      features: ["dictations"],
+      rows: [{ id: "one", text: words, heard: words, words: 5, ms: 1_800, at: at(2026, 10, 24) }],
+    },
+  ])
+  await mount(screen(), async () => {
+    await until(async () => rows().length === 1, "the dictation")
+    await click(rows()[0] ?? null)
+    await until(async () => Boolean(heardBlock()), "the dictation's sheet")
+    assert.ok(blockText(heardBlock()).startsWith("Heard"), "the one block says what it is")
+    assert.equal(
+      sheet(),
+      null,
+      "the same words are never drawn twice under a heading the cleanup didn't earn",
+    )
+    assert.equal(
+      heardBlock()?.nextElementSibling?.textContent?.trim(),
+      "Aria · 5 words · 1.8s spoken",
+      "the count and the bot stay under the words",
+    )
+    await click(copyButton())
+    await until(async () => copied.length === 1, "the copy")
+    assert.deepEqual(copied, [words], "the take's words are what went to the clipboard")
   })
 })
 
