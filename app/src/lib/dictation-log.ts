@@ -114,12 +114,20 @@ export function clearedAway<T extends { at: number; seenAt?: number }>(
 }
 
 /** The rows a page carries that the mirror's copy no longer matches, or never had. */
-export function toUpsert<T extends { id: string; at: number }>(
-  mirror: { id: string; at: number }[],
+export function toUpsert<T extends { id: string; at: number; heard?: string }>(
+  mirror: { id: string; at: number; heard?: string }[],
   page: T[],
 ): T[] {
-  const known = new Map(mirror.map((row) => [row.id, row.at]))
-  return page.filter((row) => known.get(row.id) !== row.at)
+  const known = new Map(mirror.map((row) => [row.id, stampOf(row)]))
+  return page.filter((row) => known.get(row.id) !== stampOf(row))
+}
+
+/**
+ * What one row says that another can disagree with: its clock, and the words as heard it kept — so a
+ * mirror holding a `heard` its host answered without takes the host's row instead (ADR 0062).
+ */
+function stampOf(row: { at: number; heard?: string }): string {
+  return `${row.at}\u0000${row.heard ?? ""}`
 }
 
 export interface Totals {
@@ -158,4 +166,22 @@ export function spelledCount(value: number): string {
 /** That count with its noun: "1 word", "1,204 words". */
 export function wordsLabel(words: number): string {
   return `${spelledCount(words)} ${words === 1 ? "word" : "words"}`
+}
+
+/** The words as heard that can be kept: trimmed, and nothing at all where there are none. */
+export function heardOf(value: unknown): string | undefined {
+  const heard = typeof value === "string" ? value.trim() : ""
+  return heard || undefined
+}
+
+/** The texts one take draws, as the sheet sets them apart: { heard }, { tidied } or both (ADR 0062). */
+export function textsOf(row: { text: string; heard?: string }): {
+  heard?: string
+  tidied?: string
+} {
+  const tidied = row.text.trim()
+  const heard = heardOf(row.heard)
+  if (!heard) return { tidied }
+  if (heard === tidied) return { heard }
+  return { heard, tidied }
 }

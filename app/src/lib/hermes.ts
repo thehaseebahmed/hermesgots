@@ -1,4 +1,5 @@
 import { connectionKey } from "@/lib/connection"
+import { heardOf } from "@/lib/dictation-log"
 import { READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
 import type {
   ApprovalChoice,
@@ -3817,6 +3818,8 @@ function dictationRoot(config: HermesConfig, entryId?: string) {
 export interface HostDictation {
   id: string
   text: string
+  /** The words as the host heard them, before Cleanup: absent where this host kept none (ADR 0062). */
+  heard?: string
   words: number
   ms: number
   at: number
@@ -3835,9 +3838,11 @@ function dictationRow(value: unknown): HostDictation | null {
   const row = value as Partial<HostDictation> | null
   if (!row || typeof row.id !== "string" || !row.id || typeof row.text !== "string") return null
   const at = finite(row.at) ?? 0
+  const heard = heardOf(row.heard)
   return {
     id: row.id,
     text: row.text,
+    ...(heard ? { heard } : {}),
     words: finite(row.words) ?? 0,
     ms: finite(row.ms) ?? 0,
     at,

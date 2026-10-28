@@ -26,8 +26,9 @@ logger = logging.getLogger(__name__)
 # 44 adds the dictation log and the clock a clear stamps (ADR 0060), both new tables. 45 rebuilds the
 # log keyed per profile, and 46 adds the clock its reads order on, so both of those are PRAGMA-guarded
 # or `IF NOT EXISTS`: a store already carrying them has to reach 47 without re-running either. 47
-# replaces the log's index with the one every read asks for.
-SCHEMA_VERSION = 47
+# replaces the log's index with the one every read asks for. 48 adds `heard`, the words as the host
+# heard them beside the words that landed (ADR 0062).
+SCHEMA_VERSION = 48
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -145,6 +146,7 @@ CREATE_DICTATIONS = """CREATE TABLE IF NOT EXISTS dictations (
                    id TEXT NOT NULL,
                    profile TEXT NOT NULL DEFAULT '',
                    text TEXT NOT NULL,
+                   heard TEXT,
                    words INTEGER NOT NULL DEFAULT 0,
                    ms INTEGER NOT NULL DEFAULT 0,
                    at INTEGER NOT NULL,
@@ -726,4 +728,6 @@ def _migrate(conn: sqlite3.Connection) -> None:
         # v47: one index for all three reads of the log (CREATE_DICTATION_READ).
         conn.execute("DROP INDEX IF EXISTS dictation_order")
         conn.execute(CREATE_DICTATION_READ)
+        if "heard" not in dictation_columns:
+            conn.execute("ALTER TABLE dictations ADD COLUMN heard TEXT")
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

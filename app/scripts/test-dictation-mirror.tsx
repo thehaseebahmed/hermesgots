@@ -9,8 +9,14 @@ import test from "node:test"
 
 import { connectionKey, serverConfig } from "@/lib/connection"
 import { db } from "@/lib/db"
-import { PAGE, clearDictationLog, reconcileDictations, removeDictation } from "@/lib/dictations"
-import { botProfile, dictationPage, dictationTotals, json } from "./component-kit.tsx"
+import {
+  PAGE,
+  clearDictationLog,
+  reconcileDictations,
+  removeDictation,
+  writeDictation,
+} from "@/lib/dictations"
+import { botProfile, dictationPage, dictationTotals, json, until } from "./component-kit.tsx"
 
 const AT = new Date(2026, 9, 20, 9).getTime()
 /** The host's own clock, well clear of the stamps these takes carry. */
@@ -24,11 +30,26 @@ const row = (id: string, at: number) => ({
   seenAt: at,
 })
 
-type Held = { id: string; text: string; words: number; ms: number; at: number; seenAt: number }
+type Held = {
+  id: string
+  text: string
+  heard?: string
+  words: number
+  ms: number
+  at: number
+  seenAt: number
+}
 
 /** A host that answers what the test says, and records what it was asked. */
 function host(
-  script: { holds?: Held[]; count?: number; refuse?: number; down?: boolean; cap?: number } = {},
+  script: {
+    holds?: Held[]
+    count?: number
+    refuse?: number
+    down?: boolean
+    cap?: number
+    old?: boolean
+  } = {},
 ) {
   const held = [...(script.holds ?? [])]
   let heard = HEARD
@@ -50,6 +71,7 @@ function host(
         return json({ error: { message: "That dictation is too long to keep." } }, script.refuse)
       posts.push({ ...body, seenAt: 0 })
       const stored = { ...body, at: Math.min(body.at, heard), seenAt: heard++ }
+      if (script.old) delete stored.heard
       if (!held.some((one) => one.id === stored.id)) held.unshift(stored)
       return json({ dictation: stored }, 201)
     }
@@ -304,4 +326,50 @@ test("a delete takes the row it asked for, and not one filed under another bot",
   const kept = await db.dictationLog.get("shared")
   assert.ok(kept, "the row another bot filed under that id stays where it is")
   assert.equal(kept.connection, otherKey)
+})
+
+test("a take is written with the words its host heard, on the device and on the host", async () => {
+  const server = host()
+  const { profile } = await fresh()
+
+  await writeDictation(serverConfig(profile), "Tidy words.", 4_200, "  um tidy words ")
+  await until(async () => (await mirror()).length === 1, "the mirror's row")
+  const written = (await mirror())[0]
+  assert.equal(written?.text, "Tidy words.")
+  assert.equal(written?.heard, "um tidy words", "trimmed, as the words that landed are")
+
+  await until(async () => server.posts.length === 1, "the post")
+  assert.equal(
+    server.posts[0]?.heard,
+    "um tidy words",
+    "the host is told the words as it heard them",
+  )
+  assert.equal(server.posts[0]?.text, "Tidy words.", "and the ones that landed, as before")
+})
+
+test("a take with no words as heard is written without them", async () => {
+  const server = host()
+  const { profile } = await fresh()
+
+  await writeDictation(serverConfig(profile), "Only what landed.", 900)
+  await until(async () => server.posts.length === 1, "the post")
+
+  assert.equal("heard" in ((await mirror())[0] ?? {}), false)
+  assert.equal("heard" in (server.posts[0] ?? {}), false)
+})
+
+test("a host that keeps no words as heard takes them off the mirror's copy", async () => {
+  const server = host({ old: true })
+  const { profile } = await fresh()
+
+  await writeDictation(serverConfig(profile), "Tidy words.", 4_200, "um tidy words")
+  await until(async () => server.posts.length === 1, "the post")
+  await until(
+    async () => (await mirror())[0]?.heard === undefined,
+    "the words as heard to go with the host's answer",
+  )
+
+  const kept = (await mirror())[0]
+  assert.equal(kept?.text, "Tidy words.", "the words that landed stay")
+  assert.equal(kept?.heard, undefined, "and the heard ones go, since this host keeps none")
 })

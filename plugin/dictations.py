@@ -1,9 +1,11 @@
 """A bot's dictations: one row per finished speech-to-text take, as the app wrote it.
 
 The words land in the composer on the device, and the app posts the entry here at that same moment
-(ADR 0060). This is the durable copy of the log — the device keeps a mirror and draws every screen from
-it — so the pages and totals here exist to fill or repair a mirror, and the totals are what the
-Dictation screen counts.
+(ADR 0060). The row carries two texts: `text`, the words that landed after Cleanup, and `heard`, the
+same take as the host's speech model wrote it down — the app's sheet shows both, since they differ by
+exactly what the cleanup did (ADR 0062). This is the durable copy of the log — the device keeps a
+mirror and draws every screen from it — so the pages and totals here exist to fill or repair a mirror,
+and the totals are what the Dictation screen counts.
 
 A dictation belongs to one profile: it was heard by one bot, and ``profile`` is what keeps two bots on
 one store apart. ``dictation_state`` carries the clock a clear stamped, so a device compares one number
@@ -22,7 +24,7 @@ from .store import now_ms, open_rows
 
 logger = logging.getLogger(__name__)
 
-FIELDS = ("id", "text", "words", "ms", "at", "seen_at")
+FIELDS = ("id", "text", "heard", "words", "ms", "at", "seen_at")
 # One take's words are a handful of sentences; this is a bound on a body, not a shape a person writes.
 MAX_TEXT = 20000
 MAX_LIMIT = 200
@@ -82,6 +84,8 @@ def _whole(value: Any, field: str, default: Optional[int] = None) -> int:
 def _row(row: sqlite3.Row) -> Dict[str, Any]:
     """One row as the app reads it: `at` when the words were said, `seenAt` when the host heard them."""
     entry = {field: row[field] for field in FIELDS if field != "seen_at"}
+    if entry["heard"] is None:
+        del entry["heard"]
     entry["seenAt"] = row["seen_at"]
     return entry
 
@@ -89,6 +93,16 @@ def _row(row: sqlite3.Row) -> Dict[str, Any]:
 def count_words(text: str) -> int:
     """The app's own count (``countWords`` in ``app/src/lib/dictation-log.ts``): whitespace splits."""
     return len(text.split())
+
+
+def _heard(value: Any) -> Optional[str]:
+    """The words as the host heard them, or None where this host can't keep them (ADR 0062)."""
+    if not isinstance(value, str):
+        return None
+    heard = value.strip()
+    if not heard or len(heard) > MAX_TEXT:
+        return None
+    return heard
 
 
 def record(path: Path, profile: Optional[str], body: Dict[str, Any]) -> Dict[str, Any]:
@@ -104,6 +118,7 @@ def record(path: Path, profile: Optional[str], body: Dict[str, Any]) -> Dict[str
     row = {
         "id": entry_id.strip(),
         "text": text,
+        "heard": _heard(body.get("heard")),
         "words": _whole(body.get("words"), "words", count_words(text)),
         "ms": _whole(body.get("ms"), "ms", 0),
         "at": _whole(body.get("at"), "at", now_ms()),
@@ -118,12 +133,13 @@ def record(path: Path, profile: Optional[str], body: Dict[str, Any]) -> Dict[str
             if row["at"] > seen_at:
                 row["at"] = seen_at
             conn.execute(
-                "INSERT OR IGNORE INTO dictations (id, profile, text, words, ms, at, seen_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT OR IGNORE INTO dictations (id, profile, text, heard, words, ms, at, seen_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     row["id"],
                     name,
                     row["text"],
+                    row["heard"],
                     row["words"],
                     row["ms"],
                     row["at"],
