@@ -36,9 +36,10 @@ const PAGE = 50
 const root = ({ server }: Connection) => server.replace(/\/+$/, "")
 const headers = ({ key }: Connection) => ({ Authorization: `Bearer ${key}` })
 const within = (signal?: AbortSignal) =>
-  signal
-    ? AbortSignal.any([signal, AbortSignal.timeout(READ_TIMEOUT_MS)])
-    : AbortSignal.timeout(READ_TIMEOUT_MS)
+  AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(READ_TIMEOUT_MS)])
+const ensure = (response: Response) => {
+  if (!response.ok) throw new Error(`The host answered ${response.status}.`)
+}
 
 /** Whether `version` ("0.22.5", "0.23.0-rc1") is `min` or newer, comparing the numbers it opens with. */
 export function atLeast(version: string, min = MIN_HERMES): boolean {
@@ -89,7 +90,7 @@ export async function readTranscript(
       const code = (await response.json().catch(() => null))?.error?.code
       if (code === "session_not_found") return []
     }
-    if (!response.ok) throw new Error(`The host answered ${response.status}.`)
+    ensure(response)
     const { data } = (await response.json()) as { data: Row[] }
     pages.unshift(data)
     if (data.length < PAGE) break
@@ -116,7 +117,7 @@ export async function startRun(
     body: JSON.stringify({ session_id: session, input }),
     signal: within(signal),
   })
-  if (!response.ok) throw new Error(`The host answered ${response.status}.`)
+  ensure(response)
   return ((await response.json()) as { run_id: string }).run_id
 }
 
@@ -184,7 +185,7 @@ export async function respond(connection: Connection, waiting: Waiting, value: s
       signal: within(),
     },
   )
-  if (!response.ok) throw new Error(`The host answered ${response.status}.`)
+  ensure(response)
 }
 
 /** Follows a run's events until the host closes the stream. */

@@ -174,13 +174,13 @@ export function foldTurns(rows: Row[]): Turn[] {
       seamed = true
       continue
     }
-    turn.done = !row.tool_calls?.length && Boolean(row.finish_reason)
+    turn.done = !asked.length && Boolean(row.finish_reason)
     if (row.content) turn.parts.push({ kind: "text", text: row.content })
-    for (const asked of row.tool_calls ?? []) {
+    for (const one of asked) {
       const call: ToolCall = {
-        id: asked.id,
-        name: asked.function.name,
-        arguments: asked.function.arguments,
+        id: one.id,
+        name: one.function.name,
+        arguments: one.function.arguments,
       }
       callOf.set(call.id, call)
       const last = turn.parts.at(-1)

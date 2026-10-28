@@ -17,7 +17,21 @@ import { fakeHost, type ExpectedTurn } from "./chat-next-host.ts"
 
 export type Host = ReturnType<typeof fakeHost>
 
-const wait = (ms: number) => act(async () => new Promise((resolve) => setTimeout(resolve, ms)))
+export const wait = (ms: number) =>
+  act(async () => new Promise((resolve) => setTimeout(resolve, ms)))
+
+/** Retries a throwing check while the page settles, and lets it fail with its own message at the end. */
+export async function eventually(check: () => void, what: string) {
+  for (let tries = 0; tries < 60; tries++) {
+    try {
+      return check()
+    } catch {
+      await wait(25)
+    }
+  }
+  check()
+  assert.fail(what)
+}
 
 /**
  * A device is polled at 20ms while the page is busy, and while idle at `idleMs`, which is as fast by

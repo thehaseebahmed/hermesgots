@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react"
 import { useSearchParams } from "react-router"
 
 import { Markdown } from "@/components/chat/markdown"
@@ -16,7 +16,7 @@ import {
   startRun,
 } from "./api"
 import { foldTurns, type Row, type ToolCall, type Turn } from "./fold"
-import { initial, reduce, type Waiting } from "./state"
+import { initial, reduce, type ThreadEvent, type Waiting } from "./state"
 
 /** The questions a finished `clarify` call got answered, each as "<question> → <answer>". */
 function answered(call: ToolCall): string[] {
@@ -37,6 +37,11 @@ function answered(call: ToolCall): string[] {
     return []
   }
 }
+
+const failure = (error: unknown): ThreadEvent => ({
+  type: "failed",
+  error: error instanceof Error ? error.message : String(error),
+})
 
 const STATUS_WORDS = {
   starting: "Starting…",
@@ -77,13 +82,13 @@ function TurnView({
   turn,
   cards,
   goals = {},
-  onOpen,
+  onOpen = () => {},
 }: {
   turn: Turn
   cards: Card[]
   /** What each child was asked, by its id, for the line a wake turn opens with. */
   goals?: Record<string, string>
-  onOpen: (card: Card) => void
+  onOpen?: (card: Card) => void
 }) {
   // Each tools part takes the cards of the delegations it holds, in the order they were asked.
   const asked = turn.parts.map((part) =>
@@ -157,6 +162,7 @@ function TurnView({
 
 /** A child's own thread, read only: what it was asked and what it did. */
 function ChildThread({ goal, rows, onClose }: { goal: string; rows: Row[]; onClose: () => void }) {
+  const turns = useMemo(() => foldTurns(rows), [rows])
   return (
     <aside data-agent-thread className="space-y-3 rounded-md border p-3">
       <div className="flex items-center justify-between gap-3">
@@ -170,8 +176,8 @@ function ChildThread({ goal, rows, onClose }: { goal: string; rows: Row[]; onClo
           Close
         </button>
       </div>
-      {foldTurns(rows).map((turn, at) => (
-        <TurnView key={at} turn={turn} cards={[]} onOpen={() => {}} />
+      {turns.map((turn, at) => (
+        <TurnView key={at} turn={turn} cards={[]} />
       ))}
     </aside>
   )
@@ -334,11 +340,7 @@ export function ChatNextPage({
             if (listed) dispatch({ type: "agents", agents: listed })
           }
         } catch (error) {
-          if (!alive.current.signal.aborted && mine === reads.current)
-            dispatch({
-              type: "failed",
-              error: error instanceof Error ? error.message : String(error),
-            })
+          if (!alive.current.signal.aborted && mine === reads.current) dispatch(failure(error))
         } finally {
           reading.current = null
         }
@@ -408,7 +410,7 @@ export function ChatNextPage({
         )
       } catch (error) {
         if (alive.current.signal.aborted) return
-        dispatch({ type: "failed", error: error instanceof Error ? error.message : String(error) })
+        dispatch(failure(error))
       } finally {
         streaming.current = false
         dispatch({ type: "ended" })
@@ -496,7 +498,7 @@ export function ChatNextPage({
     } catch (error) {
       streaming.current = false
       if (alive.current.signal.aborted) return
-      dispatch({ type: "failed", error: error instanceof Error ? error.message : String(error) })
+      dispatch(failure(error))
       await catchUp(true)
     }
   }
@@ -509,7 +511,7 @@ export function ChatNextPage({
       await respond({ server, key }, waiting, value)
       dispatch({ type: "answered" })
     } catch (error) {
-      dispatch({ type: "failed", error: error instanceof Error ? error.message : String(error) })
+      dispatch(failure(error))
     }
   }
 

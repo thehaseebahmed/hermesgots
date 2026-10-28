@@ -8,24 +8,16 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
-import { act } from "react"
 
 import { fakeHost } from "./chat-next-host.ts"
-import { openDevice, sendFrom, showsEverything, type Device } from "./chat-next-devices.tsx"
-
-const wait = (ms: number) => act(async () => new Promise((resolve) => setTimeout(resolve, ms)))
-
-async function eventually(check: () => void, what: string) {
-  for (let tries = 0; tries < 60; tries++) {
-    try {
-      return check()
-    } catch {
-      await wait(25)
-    }
-  }
-  check()
-  assert.fail(what)
-}
+import {
+  eventually,
+  openDevice,
+  sendFrom,
+  showsEverything,
+  type Device,
+  wait,
+} from "./chat-next-devices.tsx"
 
 const lastTurn = (device: Device) => device.turns().at(-1)
 
