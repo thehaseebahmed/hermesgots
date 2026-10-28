@@ -1,6 +1,7 @@
 import { forwardRef, type ComponentProps, type ReactNode } from "react"
+import { XIcon } from "lucide-react"
 
-import { useReducedMotion } from "@/lib/media"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 
 /**
@@ -11,45 +12,54 @@ import { cn } from "@/lib/utils"
 export const WORK_ROW_CLASS =
   "relative flex min-h-[29px] w-full items-center gap-2 text-left text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
 
-/** The wave's own name: the class the stylesheet turns into a light, and the slot the tests read. */
-const WAVE = "work-wave"
+/** The sign's own box: the 16px `WORK_LABEL_DENT` clears along with the row's 8px gap. */
+const SIGN = "size-4 shrink-0"
 
 /**
- * A work row's words, carrying the wave while the row works — a light travelling through them, a lap
- * every 1.4 seconds (ADR 0061). It is decoration over words the reader can already read: nothing
- * announces it, and where the reader asked for reduced motion the words are plain.
- *
- * The wave is its own span so the gradient fills the words and nothing else: `truncate`'s ellipsis
- * would otherwise be painted with the same transparent fill, and so would a row's marks.
+ * The dent a note takes to stand under a row's label rather than under the sign ahead of it: the
+ * sign's box and the gap after it (ADR 0058, ADR 0064).
  */
-export const WorkLabel = forwardRef<HTMLSpanElement, ComponentProps<"span"> & { wave?: boolean }>(
-  function WorkLabel({ wave, className, children, ...props }, ref) {
-    const reduced = useReducedMotion()
-    const moving = Boolean(wave) && !reduced
-    return (
-      <span ref={ref} className={cn("min-w-0 truncate", className)} {...props}>
-        {moving ? (
-          <span className={WAVE} data-slot={WAVE}>
-            {children}
-          </span>
-        ) : (
-          children
-        )}
-      </span>
-    )
-  },
-)
+const WORK_LABEL_DENT = "pl-6"
+
+/**
+ * The sign a work row wears ahead of its label — a spinner while the row works, the mark a group
+ * whose calls failed wears in the same slot (ADR 0064). It is hidden from assistive tech: the row's
+ * own name and its label already say what it is doing, and `Spinner` would announce itself.
+ */
+export function WorkSign({ failed }: { failed?: boolean }) {
+  if (!failed) return <Spinner aria-hidden className={SIGN} />
+  return (
+    <XIcon
+      data-slot="work-sign"
+      aria-hidden
+      className={cn(SIGN, "text-destructive")}
+      strokeWidth={3}
+    />
+  )
+}
+
+/**
+ * A work row's words: the one box they are bounded by, whichever row draws them, so a long label
+ * truncates in the row's shape rather than pushing what follows it (ADR 0050).
+ */
+export const WorkLabel = forwardRef<HTMLSpanElement, ComponentProps<"span">>(function WorkLabel(
+  { className, ...props },
+  ref,
+) {
+  return <span ref={ref} className={cn("min-w-0 truncate", className)} {...props} />
+})
 
 /**
  * The row button over that shape: what follows the label (a ruler, a chevron) belongs to the row
- * itself, so each caller keeps its own.
+ * itself, so each caller keeps its own, and the sign before it is `WorkSign`.
  */
 export const WorkRow = forwardRef<
   HTMLButtonElement,
-  ComponentProps<"button"> & { after?: ReactNode }
->(function WorkRow({ after, children, className, ...props }, ref) {
+  ComponentProps<"button"> & { before?: ReactNode; after?: ReactNode }
+>(function WorkRow({ before, after, children, className, ...props }, ref) {
   return (
     <button ref={ref} type="button" className={cn(WORK_ROW_CLASS, className)} {...props}>
+      {before}
       {children}
       {after}
     </button>
@@ -57,11 +67,9 @@ export const WorkRow = forwardRef<
 })
 
 /**
- * A note a row says under itself, standing flush at the row's own left edge and starting where its
- * label ends: the row's 29px box centres a 20px line, so the pull takes back the half-line left
- * under it (ADR 0062). The row's height and the note's offset live in one file, so they move
- * together.
+ * A note a row says under itself, dented past the row's sign so it stands under the words it
+ * explains — whether the row above it wears a spinner or a failure's mark (ADR 0064).
  */
 export function WorkNote({ className, ...props }: ComponentProps<"p">) {
-  return <p className={cn("-mt-1 truncate pb-1 text-sm", className)} {...props} />
+  return <p className={cn(WORK_LABEL_DENT, "truncate pb-1 text-sm", className)} {...props} />
 }

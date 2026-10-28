@@ -1,5 +1,11 @@
 # A work row wears no mark and the status line loads
 
+**Superseded in its mark-free row and in what it says about 0061's wave, by
+[ADR 0064](0064-a-work-row-turns-a-spinner-and-wears-its-mark-again.md)**: a work row turns a spinner
+ahead of its label again, a failed group wears its X with the reason dented under it, and the wave
+this ADR kept standing (below, and in its consequences) is gone. What this ADR decided about the
+status line stands.
+
 ADR 0061 took the spinner off every row a reply draws and gave the row's own words the movement
 instead: a wave on a thought row's label, on the tool group's row while a call ran, and a typed
 label on the status line under the reply. It put the wave in the right place — the words that say

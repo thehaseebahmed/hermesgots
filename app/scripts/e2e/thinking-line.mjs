@@ -42,7 +42,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   const item = page.locator(ITEM).last()
   const rows = item.locator(ROW).locator("button")
 
-  // Everything the reply draws that only the browser has: each row's label and whether it waves,
+  // Everything the reply draws that only the browser has: each row's label and whether it spins,
   // the order the rows and calls are drawn in, the sheet when one is open — its words, its box and
   // where it is scrolled to — and whether a cap, a fade or a Show more survives anywhere.
   const threadState = () =>
@@ -81,7 +81,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
             return {
               label: control?.textContent?.trim() ?? null,
               expanded: control?.getAttribute("aria-expanded") ?? null,
-              wave: Boolean(control?.querySelector("[data-slot=work-wave]")),
+              spins: Boolean(control?.querySelector("[data-slot=spinner]")),
             }
           }),
           // The reply's drawn things in the order they are drawn: a thinking row is a button whose
@@ -97,6 +97,11 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
             groups: parts("tool-group").map(edge),
             text: parts("markdown").map(edge),
           },
+          // Asked of the row, not of the reply: the footer's own loader is a spinner too, and it
+          // stands down only while a row names the work.
+          groupSpins: parts("tool-group").map((one) =>
+            Boolean(one.querySelector("[data-slot=spinner]")),
+          ),
           group: own?.querySelector("[data-slot=tool-group]")?.getAttribute("aria-label") ?? null,
           groups: own?.querySelectorAll("[data-slot=tool-group]").length ?? 0,
           // The sheet is one pop-up wherever a row opened it: its body holds the whole markdown.
@@ -258,7 +263,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   }
 
   // The turn's own pause and lead-in: nothing has arrived, so the row carries the turn — its words
-  // waving on screen from the first moment the reply works, before a word of thinking arrives.
+  // spinning on screen from the first moment the reply works, before a word of thinking arrives.
   // The store is waited on first (the row and the footer's line are drawn in one render), then the
   // row itself through the thread's own probe, which is where every other reading of it comes from.
   await until(
@@ -281,7 +286,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     "the row carrying the turn before any thinking lands",
   )
   assert.equal(before.rows.length, 1, "the row is on screen from the first moment the turn works")
-  assert.equal(before.rows[0].wave, true, "its words waving, before a word of thinking arrives")
+  assert.equal(before.rows[0].spins, true, "its spinner turning, before a word of thinking arrives")
   assert.equal(
     before.rows[0].expanded,
     null,
@@ -291,7 +296,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   const says = await page.evaluate((sel) => document.querySelector(sel)?.textContent ?? "", WORKING)
   assert.ok(!/Writing…|Thinking…/.test(says), "the footer says nothing while the row says it")
   await shot("working")
-  pass("the row's words wave from the turn's first working moment, the footer silent")
+  pass("the row spins from the turn's first working moment, the footer silent")
 
   // The first stretch landing with more of it still to come, and nothing said: a single block would
   // have put the whole working-out on the row at once, which is what the mock is told not to do.
@@ -312,7 +317,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     5_000,
     "the thinking to reach the row",
   )
-  assert.equal(streaming.rows[0].wave, true, "the row's words wave: it is still thinking")
+  assert.equal(streaming.rows[0].spins, true, "the row spins: it is still thinking")
   assert.equal(streaming.rows[0].expanded, "false", "and its words are shut in the sheet")
   assert.equal(streaming.sheet, null, "with no sheet open")
   await inThread(FIRST, "while the turn thinks")
@@ -335,7 +340,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   await shut()
 
   // A call ends that stretch. The stretch after the call joins the row above it — a tool row never
-  // lands between two thought rows — so the row keeps waving over both.
+  // lands between two thought rows — so the row keeps spinning over both.
   const latched = await until(
     async () => {
       const reply = await lastReply(chatId)
@@ -351,7 +356,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     "Thinking…",
     "the row reads the turn's thinking while the stretch after the call arrives",
   )
-  assert.equal(latched.rows[0].wave, true, "its words waving while that stretch streams")
+  assert.equal(latched.rows[0].spins, true, "its spinner turning while that stretch streams")
   assert.deepEqual(
     latched.order.map((one) => one.kind),
     ["thinking", "tool"],
@@ -359,7 +364,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   )
   await inThread(MEASURED, "after the first call")
   await shot("latched")
-  pass("the call draws no second row: the row above it keeps waving while the next stretch streams")
+  pass("the call draws no second row: the row above it keeps spinning while the next stretch streams")
 
   // A second call, straight after the first with nothing said between them: the two draw as ONE tool
   // group, and every stretch of the turn's thinking sits above it as one row holding all their
@@ -424,7 +429,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     20_000,
     "the turn's last thinking piece to land with the row still thinking",
   )
-  pass("the turn thinks to its last piece with the one row above its calls still waving")
+  pass("the turn thinks to its last piece with the one row above its calls still spinning")
 
   // What the row may read now that its spans are frozen: the sum of every stretch it holds — never
   // the part of it this device measured for one of them.
@@ -461,13 +466,12 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     "nor the two that followed the first call",
   )
   assert.ok(
-    frozen.rows.every((one) => one.wave === false),
-    "with the wave gone from the row the turn thought in",
+    frozen.rows.every((one) => one.spins === false),
+    "with nothing spinning in the row the turn thought in",
   )
-  assert.equal(
-    await item.locator("[data-slot=work-wave]").count(),
-    0,
-    "and neither the row nor the tool group under it waves once both have landed",
+  assert.ok(
+    frozen.groupSpins.length > 0 && frozen.groupSpins.every((spinning) => !spinning),
+    "nor in the calls' row under it, once both have landed",
   )
   assert.equal(frozen.sheet, null, "the answer closes no sheet: none was open")
 
@@ -594,7 +598,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     10_000,
     "the long run's row",
   )
-  assert.equal(opening.rows[0].wave, true, "whose words wave while its run streams")
+  assert.equal(opening.rows[0].spins, true, "whose spinner turns while its run streams")
   await inThread(LONG_FIRST, "with a long run streaming")
   await uncapped("with a long run streaming")
 
