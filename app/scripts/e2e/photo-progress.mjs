@@ -2,16 +2,9 @@
 // whose events stream the browser can't read, so the app follows the turn in the transcript.
 import { assert, flow, pass } from "./lib.mjs"
 
-await flow("photo-progress", async ({ page, newChat, until, shot }) => {
+await flow("photo-progress", async ({ page, newChat, photo, until, shot }) => {
   const chatId = await newChat({ title: "Photo" })
-  await page.evaluate(async (id) => {
-    const { prepareAttachment } = await import("/src/lib/attachments.ts")
-    const { sendMessage } = await import("/src/lib/chat.ts")
-    const canvas = Object.assign(document.createElement("canvas"), { width: 8, height: 8 })
-    const blob = await new Promise((done) => canvas.toBlob(done, "image/png"))
-    const photo = await prepareAttachment(new File([blob], "photo.png", { type: "image/png" }))
-    void sendMessage(id, "what's in this photo?", { attachments: [photo] })
-  }, chatId)
+  await photo(chatId, "what's in this photo?")
   const reply = await until(
     () =>
       page.evaluate(async (id) => {

@@ -4,28 +4,12 @@
 // where the compaction happened rather than at the top of a truncated window (ADR 0058). The reach
 // replaces a button, so what only a browser can say is that nothing above the window is on the
 // device before the reader gets to the pane's top and the whole archive is there after it.
-import { app, assert, flow, mock, pass, runId } from "./lib.mjs"
+import { app, assert, flow, mock, pass, runId, runStatus, startRun } from "./lib.mjs"
 
 const auth = { Authorization: "Bearer mock-key", "Content-Type": "application/json" }
 
 /** Turns written straight to the host's transcript, so the archive spans more than one page. */
 const BULK = 300
-
-/** Starts a turn straight on the host, as another device would. */
-async function startRun(sessionId, input) {
-  const res = await fetch(`${mock}/v1/runs`, {
-    method: "POST",
-    headers: auth,
-    body: JSON.stringify({ session_id: sessionId, input }),
-  })
-  assert.equal(res.status, 202, `the host starts "${input}"`)
-  return (await res.json()).run_id
-}
-
-async function runStatus(id) {
-  const res = await fetch(`${mock}/v1/runs/${id}`, { headers: auth })
-  return (await res.json()).status
-}
 
 /** What this device holds of the chat, oldest first. */
 const thread = (page, chatId) =>
