@@ -529,7 +529,7 @@ test("the tool group's row spins while a call runs, and is still once it lands",
   )
 })
 
-test("reduced motion stills the ring rather than taking it away", async () => {
+test("reduced motion stills the ring rather than taking the sign away", async () => {
   host()
   const id = "still-ring"
   await withReducedMotion(async () => {
@@ -537,7 +537,13 @@ test("reduced motion stills the ring rather than taking it away", async () => {
       await stream(id)
       const line = onlyThinkingLine()
       assert.equal(lineLabel(line), "Thinking…", "the row still says what the turn is doing")
-      assert.ok(spins(line), "the sign stays drawn: the ring stills in CSS, it does not go")
+      const ring = line.querySelector("[data-slot=spinner]")
+      assert.ok(ring, "the sign stays drawn rather than going with the preference")
+      assert.match(
+        ring?.getAttribute("class") ?? "",
+        /motion-safe:animate-spin/,
+        "and the stillness is motion-safe's to say, which is the one place it is decided",
+      )
     })
   })
 })

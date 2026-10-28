@@ -66,7 +66,7 @@ test("a failed group is marked at its head, and its reason stands under the word
     async () => {
       const row = find('[data-slot="tool-group"]')
       const mark = row?.firstElementChild
-      assert.equal(mark?.tagName.toLowerCase(), "svg", "the mark leads the row")
+      assert.equal(mark?.getAttribute("data-slot"), "work-sign", "the mark leads the row")
       assert.match(mark?.getAttribute("class") ?? "", /text-destructive/, "in the failure's colour")
       assert.equal(mark?.getAttribute("aria-hidden"), "true", "and says nothing over the row's name")
       assert.match(

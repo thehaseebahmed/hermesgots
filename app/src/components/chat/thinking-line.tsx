@@ -2,9 +2,8 @@ import { memo, useCallback, useEffect, useRef, useState } from "react"
 import { ChevronRightIcon } from "lucide-react"
 
 import { Markdown } from "@/components/chat/markdown"
-import { WORK_ROW_CLASS, WorkRow } from "@/components/chat/work-row"
+import { WORK_ROW_CLASS, WorkLabel, WorkRow, WorkSign } from "@/components/chat/work-row"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
-import { Spinner } from "@/components/ui/spinner"
 import { COLUMN } from "@/lib/layout"
 import { prefersReducedMotion } from "@/lib/media"
 import { thinkingLabel } from "@/lib/thinking"
@@ -146,8 +145,8 @@ export const ThinkingLine = memo(function ThinkingLine({
         // The turn's own stretch has not arrived: the row names what the turn is doing and offers
         // no tap — under this same key, the run's row takes over the moment its words land.
         <div className={WORK_ROW_CLASS} data-slot="thinking-pending">
-          <Spinner aria-hidden className="size-4 shrink-0" />
-          {label}
+          <WorkSign />
+          <WorkLabel>{label}</WorkLabel>
         </div>
       ) : (
         <WorkRow
@@ -155,10 +154,10 @@ export const ThinkingLine = memo(function ThinkingLine({
           aria-expanded={open}
           aria-label={label}
           onClick={() => setOpen(true)}
-          before={thinking ? <Spinner aria-hidden className="size-4 shrink-0" /> : null}
+          before={thinking ? <WorkSign /> : null}
           after={<ChevronRightIcon className="size-4 shrink-0" aria-hidden />}
         >
-          {label}
+          <WorkLabel>{label}</WorkLabel>
         </WorkRow>
       )}
       {!pending && (

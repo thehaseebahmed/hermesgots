@@ -97,6 +97,9 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
             groups: parts("tool-group").map(edge),
             text: parts("markdown").map(edge),
           },
+          // Whether a calls' row is spinning, asked of the row rather than of the reply: the footer's
+          // own loader is a spinner too, and it stands down only while a row names the work.
+          groupSpins: parts("tool-group").map((one) => Boolean(one.querySelector("[data-slot=spinner]"))),
           group: own?.querySelector("[data-slot=tool-group]")?.getAttribute("aria-label") ?? null,
           groups: own?.querySelectorAll("[data-slot=tool-group]").length ?? 0,
           // The sheet is one pop-up wherever a row opened it: its body holds the whole markdown.
@@ -464,14 +467,9 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     frozen.rows.every((one) => one.spins === false),
     "with nothing spinning in the row the turn thought in",
   )
-  // The footer's own loader is the status line's, and the reply may still be writing beside a row
-  // that has landed: what must be still is the row and the calls' row.
-  assert.equal(
-    await item
-      .locator("[data-slot=thinking-line] [data-slot=spinner], [data-slot=tool-group] [data-slot=spinner]")
-      .count(),
-    0,
-    "and neither the row nor the tool group under it spins once both have landed",
+  assert.ok(
+    frozen.groupSpins.length > 0 && frozen.groupSpins.every((spinning) => !spinning),
+    "nor in the calls' row under it, once both have landed",
   )
   assert.equal(frozen.sheet, null, "the answer closes no sheet: none was open")
 
