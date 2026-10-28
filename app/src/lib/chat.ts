@@ -54,6 +54,7 @@ import { refreshChatProviderUsage } from "@/lib/provider-usage"
 import {
   foldTranscriptDetails,
   liveTurn,
+  RUN_START_SLACK_S,
   summaryRowsOf,
   noteFollowUps,
   patchStats,
@@ -168,7 +169,7 @@ interface Turn {
   resumed: boolean
   /** Stops flushing and saves the draft one last time. */
   close: () => Promise<void>
-  /** The user message and session a transcript read is asked by, resolved once. */
+  /** The session and run start a transcript read is asked by, resolved once. */
   source?: Promise<TurnSource | undefined>
   /** The transcript read out now, and whether a caller asked for another pass while it was. */
   read?: { pending?: Promise<Message | undefined>; again?: boolean }
@@ -492,29 +493,29 @@ const retryable = (error: unknown) =>
   error.status >= 500 ||
   [408, 429].includes(error.status)
 
-/** The turn's own user message and the chat's session, as the chat holds them. */
+/** The chat's session and when the turn's run began, as a transcript read is asked by them. */
 interface TurnSource {
   conversation: Conversation
-  user: Message
+  /** The run's start in the host's Unix seconds. */
+  since: number
 }
 
 /**
- * What a read of the transcript is asked by: the turn's own user message and the chat's session,
- * read once per turn since neither changes under it. Undefined for a chat with no session row or a
- * turn whose message is gone — asked again next time, since a chat may gain either.
+ * What a read of the transcript is asked by: the chat's session and when the turn's run began, read
+ * once per turn since neither changes under it. The run's own start where the host answers it, else
+ * when this device made the reply. Undefined for a chat with no session row — asked again next time,
+ * since a chat may gain one.
  */
 async function turnSource(turn: Turn) {
   turn.source ??= (async () => {
     const conversation = await db.conversations.get(turn.conversationId)
-    const messages = await getMessages(turn.conversationId)
-    const index = messages.findIndex((m) => m.id === turn.draft.id)
-    let user: Message | undefined
-    for (let at = (index < 0 ? messages.length : index) - 1; at >= 0; at--)
-      if (messages[at].role === "user") {
-        user = messages[at]
-        break
-      }
-    return conversation && user ? { conversation, user } : undefined
+    if (!conversation) return undefined
+    const run = turn.draft.runId
+      ? await getRun(turn.config, turn.draft.runId, AbortSignal.timeout(READ_TIMEOUT_MS)).catch(
+          quietly("Reading when the run started"),
+        )
+      : undefined
+    return { conversation, since: run?.createdAt ?? turn.draft.createdAt / 1000 }
   })()
   const source = await turn.source
   if (!source) turn.source = undefined
@@ -543,7 +544,7 @@ function transcriptOf(turn: Turn, signal: AbortSignal) {
       reply = await liveTurn(
         turn.config,
         source.conversation.hermesSessionId,
-        source.user.content,
+        source.since,
         signal,
         summaryRowsOf(source.conversation.compactions),
       )
@@ -1382,9 +1383,6 @@ export async function reattachRun(conversationId: string) {
   if (!stale.runId) await db.messages.update(stale.id, { runId })
   await resumeReply({ ...stale, runId })
 }
-
-// How far apart the host's and the transcript's clocks may read for one turn.
-const RUN_START_SLACK_S = 5
 
 /**
  * Follows a run this device didn't start (another device's, the plugin's queue, the wake run a

@@ -687,16 +687,19 @@ function withReplyDetails(local: Message, reply: Message | undefined) {
 }
 
 /**
- * The reply so far of the running turn that `userContent` started, from the transcript Hermes
- * writes after every tool round. For a client that can't read the run's events.
+ * The reply so far of the running turn that began at `since` (the run's start, in the host's Unix
+ * seconds), from the transcript Hermes writes after every tool round. For a client that can't read
+ * the run's events. The run is found by when it began rather than by the words that opened it, so a
+ * wake run, which has no user message, and the same words asked twice need no case of their own.
  */
 export async function liveTurn(
   config: HermesConfig,
   sessionId: string,
-  userContent: string,
+  since: number,
   signal?: AbortSignal,
   summaries?: SummaryRows,
 ) {
+  const from = since - RUN_START_SLACK_S
   const rows = new Map<number, SessionMessage>()
   for (let page = 0; page <= MAX_SKIPS; page++) {
     const batch = await listSessionMessages(config, sessionId, {
@@ -709,11 +712,23 @@ export async function liveTurn(
       [...rows.values()].sort((a, b) => a.id - b.id),
       summaries,
     )
-    // The row carries the attachments' lines after the text the user typed, and a compaction
-    // restates the request under its header: both are the same turn.
-    const turn = turns.findLast(
-      (t) => t.request && splitAttachments(seamText(t.request.content ?? "")).text === userContent,
-    )
+    // The run is the one whose opening row — a request, its restatement or a wake prompt — sits
+    // nearest the run's start, among those the slack lets in: a turn that began just before is farther
+    // off. Rows a compaction carried forward keep their old times, so only that row is placed by the
+    // clock; the work under it follows in the transcript's own order.
+    let turn: Turn | undefined
+    let found: SessionMessage[] | undefined
+    let nearest = Infinity
+    for (const t of turns)
+      for (const run of t.runs) {
+        const at = run[0].timestamp
+        if (!isTurnStart(run[0], summaries) || typeof at !== "number" || at < from) continue
+        if (Math.abs(at - since) < nearest) {
+          nearest = Math.abs(at - since)
+          turn = t
+          found = run
+        }
+      }
     // A restated request follows the work the compaction carried forward, which sits under a summary
     // an older page holds: the read goes on until it is in.
     const carriedAbove =
@@ -723,7 +738,7 @@ export async function liveTurn(
     const last = turns.at(-1)
     const resumed =
       !turn && last && last.summaryAt >= 0 ? last.rows.slice(last.summaryAt + 1) : undefined
-    const run = turn ? turn.runs.at(-1) : resumed && runsOf(resumed).at(-1)
+    const run = found ?? (resumed && runsOf(resumed).at(-1))
     if (run)
       return foldRows("", sessionId, run, { live: true, summaries }).find(
         (m) => m.role === "assistant",
@@ -732,6 +747,9 @@ export async function liveTurn(
   }
   return undefined
 }
+
+// How far apart the host's and the transcript's clocks may read for one turn.
+export const RUN_START_SLACK_S = 5
 
 async function connection(conversation: Conversation) {
   const profile = await db.profiles.get(conversation.profileId)
