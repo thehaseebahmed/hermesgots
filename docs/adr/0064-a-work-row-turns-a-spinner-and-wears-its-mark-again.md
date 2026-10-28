@@ -2,7 +2,8 @@
 
 **Supersedes [ADR 0061](0061-a-working-row-waves-and-the-status-line-types-itself.md) and
 [ADR 0062](0062-a-work-row-wears-no-mark-and-the-status-line-loads.md)** — all of 0061, and 0062's
-mark-free row with it. What 0062 decided about the status line under a reply stands.
+mark-free row with it. What 0062 decided about the status line's words, its colour and its waiting
+state stands; its "on that one row only" does not, since the rows turn one again.
 
 ADR 0061 took the spinner off every row a reply draws for its own work and put the movement into the
 row's words instead: a wave travelling through a thought row's label, and through the tool group's
@@ -28,8 +29,9 @@ label lines up under the words, past the mark (ADR 0058).
 
 **The spinner says nothing to assistive tech.** The row's own name and its label already say what it
 is doing, so the restored spinner is `aria-hidden` rather than the `Thinking…` it announced before
-0061 — 0062's rule that a thing is said once, applied to the slot. That is the one place this ADR is
-not a plain restore.
+0061 — 0062's rule that a thing is said once, applied to the slot. The X comes back the same way: it
+carried `aria-label="Failed"` before 0061 and now says nothing either, because a failed group's name
+already ends in `failed`. Those two are where this ADR is not a plain restore.
 
 **The status line is untouched.** A loader beside words that stand whole, both in the accent colour,
 muted with no loader while the turn waits on the reader: that is ADR 0062's decision and this ADR
@@ -42,6 +44,11 @@ does not reach it. The wave was the only thing this pair of decisions shared.
 - **A mark that is not a spinner** — a dot, a bar, the chevron lit. Rejected: a new glyph in a slot
   every other app fills with a spinner passes the cost onto the reader to learn, and the app already
   draws a spinner in that slot in lists and sheets.
+- **The loader on every row again — the state 0062 named and rejected.** Its objection was three rings
+  turning inside one reply. This build never draws them: the status line stands down while a call runs
+  and while a row above says the turn is thinking, so at most one mark is on screen at a time — the
+  row's while it thinks, the calls' row while a call runs, the line's while neither does. The count
+  0062 was right about belonged to a screen that no longer exists.
 - **Rows with no sign at all, the status line alone moving.** Rejected: while a thought row names the
   thinking the status line says nothing (ADR 0050), so a turn whose thinking is arriving would show
   nothing moving anywhere on the screen.
