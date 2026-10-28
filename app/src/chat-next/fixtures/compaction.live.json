@@ -1,0 +1,373 @@
+{
+  "object": "list",
+  "session_id": "fixture-compaction",
+  "data": [
+    {
+      "id": 63823,
+      "role": "user",
+      "content": "",
+      "tool_call_id": null,
+      "tool_name": null,
+      "timestamp": 1789297167.933491,
+      "display_kind": "hidden",
+      "session_id": "fixture-compaction"
+    },
+    {
+      "id": 63824,
+      "role": "assistant",
+      "content": "Working, step 1.",
+      "tool_call_id": null,
+      "tool_calls": [
+        {
+          "id": "call_s1cr5w4l",
+          "type": "function",
+          "function": {
+            "name": "web_extract",
+            "arguments": "{}"
+          }
+        }
+      ],
+      "tool_name": null,
+      "timestamp": 1789247730.8436182,
+      "finish_reason": "tool_calls",
+      "display_kind": null,
+      "session_id": "fixture-compaction"
+    },
+    {
+      "id": 63825,
+      "role": "tool",
+      "content": "{\"ok\": true}",
+      "tool_call_id": "call_s1cr5w4l",
+      "tool_calls": null,
+      "tool_name": "web_extract",
+      "timestamp": 1789247734.7278764,
+      "finish_reason": null,
+      "display_kind": null,
+      "session_id": "fixture-compaction"
+    },
+    {
+      "id": 63826,
+      "role": "assistant",
+      "content": "Working, step 2.",
+      "tool_call_id": null,
+      "tool_calls": [
+        {
+          "id": "call_ttz9lr04",
+          "type": "function",
+          "function": {
+            "name": "web_extract",
+            "arguments": "{}"
+          }
+        }
+      ],
+      "tool_name": null,
+      "timestamp": 1789247736.382165,
+      "finish_reason": "tool_calls",
+      "display_kind": null,
+      "session_id": "fixture-compaction"
+    },
+    {
+      "id": 63827,
+      "role": "tool",
+      "content": "{\"ok\": true}",
+      "tool_call_id": "call_ttz9lr04",
+      "tool_calls": null,
+      "tool_name": "web_extract",
+      "timestamp": 1789247741.258598,
+      "finish_reason": null,
+      "display_kind": null,
+      "session_id": "fixture-compaction"
+    },
+    {
+      "id": 63828,
+      "role": "assistant",
+      "content": "Finished the request.",
+      "tool_call_id": null,
+      "tool_calls": null,
+      "tool_name": null,
+      "timestamp": 1789247751.1309028,
+      "finish_reason": "stop",
+      "display_kind": null,
+      "session_id": "fixture-compaction"
+    },
+    {
+      "id": 63829,
+      "role": "user",
+      "content": "User message 1.",
+      "tool_call_id": null,
+      "tool_calls": null,
+      "tool_name": null,
+      "timestamp": 1789287979.0816417,
+      "finish_reason": null,
+      "display_kind": null,
+      "session_id": "fixture-compaction"
+    },
+    {
+      "id": 63830,
+      "role": "assistant",
+      "content": "Reply 3.",
+      "tool_call_id": null,
+      "tool_calls": null,
+      "tool_name": null,
+      "timestamp": 1789287985.9117782,
+      "finish_reason": "stop",
+      "display_kind": null,
+      "session_id": "fixture-compaction"
+    },
+    {
+      "id": 63831,
+      "role": "user",
+      "content": "User message 2.",
+      "tool_call_id": null,
+      "tool_calls": null,
+      "tool_name": null,
+      "timestamp": 1789288017.3581026,
+      "finish_reason": null,
+      "display_kind": null,
+      "session_id": "fixture-compaction"
+    },
+    {
+      "id": 63832,
+      "role": "assistant",
+      "content": "Reply 4.",
+      "tool_call_id": null,
+      "tool_calls": null,
+      "tool_name": null,
+      "timestamp": 1789288021.939175,
+      "finish_reason": "stop",
+      "display_kind": null,
+      "session_id": "fixture-compaction"
+    },
+    {
+      "id": 63833,
+      "role": "user",
+      "content": "[System: The active model for this chat has changed to model-b via provider provider-b.]",
+      "tool_call_id": null,
+      "tool_calls": null,
+      "tool_name": null,
+      "timestamp": 1789297167.9335005,
+      "finish_reason": null,
+      "display_kind": "model_switch",
+      "session_id": "fixture-compaction"
+    },
+    {
+      "id": 63834,
+      "role": "user",
+      "content": "User message 3.",
+      "tool_call_id": null,
+      "tool_calls": null,
+      "tool_name": null,
+      "timestamp": 1789297465.501603,
+      "finish_reason": null,
+      "display_kind": null,
+      "session_id": "fixture-compaction"
+    },
+    {
+      "id": 63835,
+      "role": "user",
+      "content": "[System: The active model for this chat has changed to model-b via provider provider-b.]",
+      "tool_call_id": null,
+      "tool_calls": null,
+      "tool_name": null,
+      "timestamp": 1789297484.0485637,
+      "finish_reason": null,
+      "display_kind": "model_switch",
+      "session_id": "fixture-compaction"
+    },
+    {
+      "id": 63836,
+      "role": "user",
+      "content": "User message 4.",
+      "tool_call_id": null,
+      "tool_calls": null,
+      "tool_name": null,
+      "timestamp": 1789297503.6166344,
+      "finish_reason": null,
+      "display_kind": null,
+      "session_id": "fixture-compaction"
+    },
+    {
+      "id": 63837,
+      "role": "assistant",
+      "content": "Reply 5.",
+      "tool_call_id": null,
+      "tool_calls": null,
+      "tool_name": null,
+      "timestamp": 1789297513.732878,
+      "finish_reason": "stop",
+      "display_kind": null,
+      "session_id": "fixture-compaction"
+    },
+    {
+      "id": 63838,
+      "role": "user",
+      "content": "User message 5.",
+      "tool_call_id": null,
+      "tool_calls": null,
+      "tool_name": null,
+      "timestamp": 1789298110.740555,
+      "finish_reason": null,
+      "display_kind": "internal_notification",
+      "session_id": "fixture-compaction"
+    },
+    {
+      "id": 63839,
+      "role": "assistant",
+      "content": "Reply 6.",
+      "tool_call_id": null,
+      "tool_calls": null,
+      "tool_name": null,
+      "timestamp": 1789298115.823176,
+      "finish_reason": "stop",
+      "display_kind": null,
+      "session_id": "fixture-compaction"
+    },
+    {
+      "id": 63840,
+      "role": "user",
+      "content": "User message 6.",
+      "tool_call_id": null,
+      "tool_calls": null,
+      "tool_name": null,
+      "timestamp": 1789298204.0,
+      "finish_reason": null,
+      "display_kind": null,
+      "session_id": "fixture-compaction"
+    },
+    {
+      "id": 63841,
+      "role": "assistant",
+      "content": "Working, step 7.",
+      "tool_call_id": null,
+      "tool_calls": [
+        {
+          "id": "call_function_r0qitrusvkhv_1",
+          "type": "function",
+          "function": {
+            "name": "patch",
+            "arguments": "{}"
+          }
+        }
+      ],
+      "tool_name": null,
+      "timestamp": 1789298211.1033447,
+      "finish_reason": "tool_calls",
+      "display_kind": null,
+      "session_id": "fixture-compaction"
+    },
+    {
+      "id": 63842,
+      "role": "tool",
+      "content": "{\"ok\": true}",
+      "tool_call_id": "call_function_r0qitrusvkhv_1",
+      "tool_calls": null,
+      "tool_name": "patch",
+      "timestamp": 1789298211.146629,
+      "finish_reason": null,
+      "display_kind": null,
+      "session_id": "fixture-compaction"
+    },
+    {
+      "id": 63843,
+      "role": "assistant",
+      "content": "Working, step 8.",
+      "tool_call_id": null,
+      "tool_calls": [
+        {
+          "id": "call_function_jt38efhs380m_1",
+          "type": "function",
+          "function": {
+            "name": "write_file",
+            "arguments": "{}"
+          }
+        }
+      ],
+      "tool_name": null,
+      "timestamp": 1789298216.1876545,
+      "finish_reason": "tool_calls",
+      "display_kind": null,
+      "session_id": "fixture-compaction"
+    },
+    {
+      "id": 63844,
+      "role": "tool",
+      "content": "{\"ok\": true}",
+      "tool_call_id": "call_function_jt38efhs380m_1",
+      "tool_calls": null,
+      "tool_name": "write_file",
+      "timestamp": 1789298216.271106,
+      "finish_reason": null,
+      "display_kind": null,
+      "session_id": "fixture-compaction"
+    },
+    {
+      "id": 63845,
+      "role": "assistant",
+      "content": "Reply 9.",
+      "tool_call_id": null,
+      "tool_calls": null,
+      "tool_name": null,
+      "timestamp": 1789298220.5593107,
+      "finish_reason": "stop",
+      "display_kind": null,
+      "session_id": "fixture-compaction"
+    },
+    {
+      "id": 63846,
+      "role": "user",
+      "content": "User message 7.",
+      "tool_call_id": null,
+      "tool_calls": null,
+      "tool_name": null,
+      "timestamp": 1789298654.0,
+      "finish_reason": null,
+      "display_kind": null,
+      "session_id": "fixture-compaction"
+    },
+    {
+      "id": 63847,
+      "role": "assistant",
+      "content": "Working, step 10.",
+      "tool_call_id": null,
+      "tool_calls": [
+        {
+          "id": "call_function_9ls6uv5e0evn_1",
+          "type": "function",
+          "function": {
+            "name": "terminal",
+            "arguments": "{}"
+          }
+        }
+      ],
+      "tool_name": null,
+      "timestamp": 1789298658.4504573,
+      "finish_reason": "tool_calls",
+      "display_kind": null,
+      "session_id": "fixture-compaction"
+    },
+    {
+      "id": 63848,
+      "role": "tool",
+      "content": "{\"ok\": true}",
+      "tool_call_id": "call_function_9ls6uv5e0evn_1",
+      "tool_calls": null,
+      "tool_name": "terminal",
+      "timestamp": 1789298658.537057,
+      "finish_reason": null,
+      "display_kind": null,
+      "session_id": "fixture-compaction"
+    },
+    {
+      "id": 63849,
+      "role": "assistant",
+      "content": "Reply 11.",
+      "tool_call_id": null,
+      "tool_calls": null,
+      "tool_name": null,
+      "timestamp": 1789298659.792159,
+      "finish_reason": "stop",
+      "display_kind": null,
+      "session_id": "fixture-compaction"
+    }
+  ]
+}

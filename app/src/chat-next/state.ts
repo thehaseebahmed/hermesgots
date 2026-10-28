@@ -1,12 +1,14 @@
 import type { Agent } from "./agents"
 import type { RunEvent } from "./api"
-import { foldTurns, type Part, type Row, type Turn } from "./fold"
+import { foldTurns, withArchive, type Part, type Row, type Turn } from "./fold"
 
 export interface ThreadState {
   status: "loading" | "ready" | "failed"
   turns: Turn[]
   /** The children the session delegated to, as the plugin last listed them; none before it has. */
   agents?: Agent[]
+  /** The rows a compaction archived, once the reader has asked for them; kept across every read. */
+  archived?: Row[]
   /** This device has a turn running; while it does, what the host's transcript says waits. */
   running: boolean
   /** What the run is held up on, until the user's answer or someone else's takes it away. */
@@ -36,6 +38,7 @@ export type Waiting =
 
 export type ThreadEvent =
   | { type: "transcript"; rows: Row[]; final?: boolean }
+  | { type: "earlier"; rows: Row[] }
   | { type: "sent"; user: string }
   | { type: "attach" }
   | { type: "answered" }
@@ -104,20 +107,25 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
   switch (event.type) {
     case "transcript": {
       if (state.running && !event.final) return state
-      const turns = foldTurns(event.rows)
+      const turns = foldTurns(state.archived ? withArchive(event.rows, state.archived) : event.rows)
       return {
         status: "ready",
         turns,
+        archived: state.archived,
         agents: state.agents,
         running: false,
         // A finished turn waits on nothing, and the end of a followed run settles what it was on.
         waiting: event.final || turns.at(-1)?.done ? undefined : state.waiting,
       }
     }
+    case "earlier":
+      // Drawn by the next read of the transcript, which folds the archive in with the live rows.
+      return { ...state, archived: event.rows }
     case "sent":
       return {
         status: "ready",
         running: true,
+        archived: state.archived,
         agents: state.agents,
         turns: [...state.turns, { user: event.user, parts: [], done: false, delivered: [] }],
       }

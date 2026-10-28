@@ -1,0 +1,121 @@
+: open
+
+id: 0
+data: {"event": "tool.started", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216147.0270882, "tool": "terminal", "preview": "base64 /dev/urandom", "tool_call_id": "call_29232a12b4d0", "seq": 0}
+
+id: 1
+data: {"event": "tool.completed", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216147.1602132, "tool": "terminal", "duration": 0, "error": false, "tool_call_id": "call_29232a12b4d0", "preview": "", "seq": 1}
+
+id: 2
+data: {"event": "tool.started", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216147.1797626, "tool": "terminal", "preview": "seq 1 6000 | tr '\\n' ' '", "tool_call_id": "call_292089fc6e40", "seq": 2}
+
+id: 3
+data: {"event": "tool.completed", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216147.3259735, "tool": "terminal", "duration": 0, "error": false, "tool_call_id": "call_292089fc6e40", "preview": "", "seq": 3}
+
+id: 4
+data: {"event": "tool.started", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216156.6126397, "tool": "terminal", "preview": "base64 /dev/urandom", "tool_call_id": "chatcmpl-tool-84ddbe8442351f6b", "seq": 4}
+
+id: 5
+data: {"event": "tool.completed", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216156.8680563, "tool": "terminal", "duration": 0, "error": false, "tool_call_id": "chatcmpl-tool-84ddbe8442351f6b", "preview": "", "seq": 5}
+
+: keepalive
+
+: keepalive
+
+: keepalive
+
+id: 6
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.0361614, "delta": "\n\nThree separate", "seq": 6}
+
+id: 7
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.0482042, "delta": " terminal calls, each running", "seq": 7}
+
+id: 8
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.0582309, "delta": " the command verbatim", "seq": 8}
+
+id: 9
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.073019, "delta": ":\n\n1. `base64 /", "seq": 9}
+
+id: 10
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.0890176, "delta": "dev/urandom |", "seq": 10}
+
+id: 11
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.1739373, "delta": " head -c 30000", "seq": 11}
+
+id: 12
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.186103, "delta": "` \u2014 full", "seq": 12}
+
+id: 13
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.1870105, "delta": " 300", "seq": 13}
+
+id: 14
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.188222, "delta": "00-character random base64 blob", "seq": 14}
+
+id: 15
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.18944, "delta": " printed.\n2. `base64 /", "seq": 15}
+
+id: 16
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.1906927, "delta": "dev/urandom | head -c", "seq": 16}
+
+id: 17
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.1953406, "delta": " 30000` again", "seq": 17}
+
+id: 18
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.2173998, "delta": " \u2014 a second,", "seq": 18}
+
+id: 19
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.226178, "delta": " different", "seq": 19}
+
+id: 20
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.2377055, "delta": " 30000-character blob.\n3.", "seq": 20}
+
+id: 21
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.2505178, "delta": " `seq 1 ", "seq": 21}
+
+id: 22
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.3066275, "delta": "6000 | tr '\\n'", "seq": 22}
+
+id: 23
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.3143492, "delta": " ' '` \u2014 the full", "seq": 23}
+
+id: 24
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.3155732, "delta": " run from", "seq": 24}
+
+id: 25
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.3169906, "delta": " 1 through ", "seq": 25}
+
+id: 26
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.3346393, "delta": "6000, space", "seq": 26}
+
+id: 27
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.3366318, "delta": "-separated.\n\nThe last number", "seq": 27}
+
+id: 28
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.3616316, "delta": " printed is 6000.\n\nThe", "seq": 28}
+
+id: 29
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.3762295, "delta": " four subagents are still chewing", "seq": 29}
+
+id: 30
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.4000192, "delta": " on", "seq": 30}
+
+id: 31
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.4014635, "delta": " their `sleep 240`", "seq": 31}
+
+id: 32
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.4180005, "delta": "; I'll", "seq": 32}
+
+id: 33
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.4364715, "delta": " report each", "seq": 33}
+
+id: 34
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.4432402, "delta": " one's", "seq": 34}
+
+id: 35
+data: {"event": "message.delta", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.473019, "delta": " stdout verbatim once they land.", "seq": 35}
+
+id: 36
+data: {"event": "run.completed", "run_id": "run_4191a037c0314329bcb068a948372b6a", "timestamp": 1793216188.9021838, "output": "Three separate terminal calls, each running the command verbatim:\n\n1. `base64 /dev/urandom | head -c 30000` \u2014 full 30000-character random base64 blob printed.\n2. `base64 /dev/urandom | head -c 30000` again \u2014 a second, different 30000-character blob.\n3. `seq 1 6000 | tr '\\n' ' '` \u2014 the full run from 1 through 6000, space-separated.\n\nThe last number printed is 6000.\n\nThe four subagents are still chewing on their `sleep 240`; I'll report each one's stdout verbatim once they land.", "usage": {"input_tokens": 160849, "output_tokens": 1348, "total_tokens": 162197}, "runtime": {"provider": "", "model": "", "route_source": "global"}, "completed": true, "partial": false, "interrupted": false, "seq": 36}
+
+: stream closed
+

@@ -1,0 +1,46 @@
+{
+  "object": "memento.agents",
+  "session_id": "memento-fixture-delegate-compaction-before",
+  "agents": [
+    {
+      "id": "20261028_201403_9feee8",
+      "goal": "Run exactly this terminal command: `sleep 8 && echo agent-1` . Then report the exact stdout it produced, verbatim, with no paraphrasing. If the command fails, report the exact error instead. Your final answer must be the exact stdout string, e.g. `agent-1`.",
+      "model": "minimax-m3.1-flash",
+      "started_at": 1793218444.131881,
+      "ended_at": 1793218459.312315,
+      "end_reason": "agent_close",
+      "tool_calls": 1,
+      "status": "done"
+    },
+    {
+      "id": "20261028_201403_69450c",
+      "goal": "Run exactly this terminal command: `sleep 8 && echo agent-2` . Then report the exact stdout it produced, verbatim, with no paraphrasing. If the command fails, report the exact error instead. Your final answer must be the exact stdout string, e.g. `agent-2`.",
+      "model": "minimax-m3.1-flash",
+      "started_at": 1793218444.1407175,
+      "ended_at": 1793218458.030818,
+      "end_reason": "agent_close",
+      "tool_calls": 1,
+      "status": "done"
+    },
+    {
+      "id": "20261028_201403_12acd8",
+      "goal": "Run exactly this terminal command: `sleep 8 && echo agent-3` . Then report the exact stdout it produced, verbatim, with no paraphrasing. If the command fails, report the exact error instead. Your final answer must be the exact stdout string, e.g. `agent-3`.",
+      "model": "minimax-m3.1-flash",
+      "started_at": 1793218444.157937,
+      "ended_at": 1793218456.9646795,
+      "end_reason": "agent_close",
+      "tool_calls": 1,
+      "status": "done"
+    },
+    {
+      "id": "20261028_201403_97d54e",
+      "goal": "Run exactly this terminal command: `sleep 8 && echo agent-4` . Then report the exact stdout it produced, verbatim, with no paraphrasing. If the command fails, report the exact error instead. Your final answer must be the exact stdout string, e.g. `agent-4`.",
+      "model": "minimax-m3.1-flash",
+      "started_at": 1793218444.2369134,
+      "ended_at": 1793218458.267477,
+      "end_reason": "agent_close",
+      "tool_calls": 1,
+      "status": "done"
+    }
+  ]
+}

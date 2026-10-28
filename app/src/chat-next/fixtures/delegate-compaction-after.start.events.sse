@@ -1,0 +1,21 @@
+: open
+
+: keepalive
+
+id: 0
+data: {"event": "tool.started", "run_id": "run_41a48674e61240e2a6d04cfb40a0a7ec", "timestamp": 1793216133.159276, "tool": "delegate_task", "preview": "4 tasks: Run this exact terminal command and r... | Run this exact terminal command and r... | Run this exact terminal command and r... | Run this exact terminal command and r...", "tool_call_id": "chatcmpl-tool-b24250bb4c172f10", "seq": 0}
+
+id: 1
+data: {"event": "tool.completed", "run_id": "run_41a48674e61240e2a6d04cfb40a0a7ec", "timestamp": 1793216133.3764331, "tool": "delegate_task", "duration": 0, "error": false, "tool_call_id": "chatcmpl-tool-b24250bb4c172f10", "preview": "", "seq": 1}
+
+id: 2
+data: {"event": "message.delta", "run_id": "run_41a48674e61240e2a6d04cfb40a0a7ec", "timestamp": 1793216136.3068423, "delta": "\n\nI delegated four subagents, each running its own `sleep 240 && echo agent-N` in", "seq": 2}
+
+id: 3
+data: {"event": "message.delta", "run_id": "run_41a48674e61240e2a6d04cfb40a0a7ec", "timestamp": 1793216136.464555, "delta": " parallel; results will arrive here as they finish.", "seq": 3}
+
+id: 4
+data: {"event": "run.completed", "run_id": "run_41a48674e61240e2a6d04cfb40a0a7ec", "timestamp": 1793216136.841663, "output": "I delegated four subagents, each running its own `sleep 240 && echo agent-N` in parallel; results will arrive here as they finish.", "usage": {"input_tokens": 54159, "output_tokens": 1184, "total_tokens": 55343}, "runtime": {"provider": "", "model": "", "route_source": "global"}, "completed": true, "partial": false, "interrupted": false, "seq": 4}
+
+: stream closed
+

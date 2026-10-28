@@ -1,0 +1,46 @@
+{
+  "object": "memento.agents",
+  "session_id": "memento-fixture-delegate-compaction",
+  "agents": [
+    {
+      "id": "20261028_193533_326935",
+      "goal": "Run this exact terminal command and report its exact stdout, verbatim: sleep 240 && echo agent-1 Your final answer must contain the literal stdout text produced by the command (expected: \"agent-1\"), with no extra commentary, no markdown, and no paraphrase. If the command failed, ",
+      "model": "minimax-m3.1-flash",
+      "started_at": 1793216133.5441396,
+      "ended_at": 1793216377.0315428,
+      "end_reason": "agent_close",
+      "tool_calls": 1,
+      "status": "done"
+    },
+    {
+      "id": "20261028_193533_38acc0",
+      "goal": "Run this exact terminal command and report its exact stdout, verbatim: sleep 240 && echo agent-4 Your final answer must contain the literal stdout text produced by the command (expected: \"agent-4\"), with no extra commentary, no markdown, and no paraphrase. If the command failed, ",
+      "model": "minimax-m3.1-flash",
+      "started_at": 1793216133.5767083,
+      "ended_at": 1793216379.449821,
+      "end_reason": "agent_close",
+      "tool_calls": 1,
+      "status": "done"
+    },
+    {
+      "id": "20261028_193533_b8f5f1",
+      "goal": "Run this exact terminal command and report its exact stdout, verbatim: sleep 240 && echo agent-2 Your final answer must contain the literal stdout text produced by the command (expected: \"agent-2\"), with no extra commentary, no markdown, and no paraphrase. If the command failed, ",
+      "model": "minimax-m3.1-flash",
+      "started_at": 1793216133.586986,
+      "ended_at": 1793216378.9633613,
+      "end_reason": "agent_close",
+      "tool_calls": 1,
+      "status": "done"
+    },
+    {
+      "id": "20261028_193533_1c8792",
+      "goal": "Run this exact terminal command and report its exact stdout, verbatim: sleep 240 && echo agent-3 Your final answer must contain the literal stdout text produced by the command (expected: \"agent-3\"), with no extra commentary, no markdown, and no paraphrase. If the command failed, ",
+      "model": "minimax-m3.1-flash",
+      "started_at": 1793216133.6195116,
+      "ended_at": 1793216379.4372916,
+      "end_reason": "agent_close",
+      "tool_calls": 1,
+      "status": "done"
+    }
+  ]
+}

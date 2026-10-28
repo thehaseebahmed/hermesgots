@@ -20,10 +20,16 @@ export interface ToolCall {
 }
 
 /** A reply in the order the host wrote it: its words, then the run of calls it made, then more words. */
-export type Part = { kind: "text"; text: string } | { kind: "tools"; calls: ToolCall[] }
+export type Part =
+  | { kind: "text"; text: string }
+  | { kind: "tools"; calls: ToolCall[] }
+  /** The host compacted the conversation here; the rows above are summarised in what follows. */
+  | { kind: "compaction" }
 
 export interface Turn {
   user: string
+  /** The host archived this turn's request when it compacted: what is left is the work, from the seam on. */
+  carried?: boolean
   parts: Part[]
   /** The host has written the reply's last row: an assistant row that makes no more calls and says why it stopped. */
   done: boolean
@@ -33,8 +39,72 @@ export interface Turn {
   delivered: string[]
 }
 
+/**
+ * A transcript with the rows a compaction archived put back above it. The archive read holds the
+ * live rows too, in the conversation's order rather than by id, so only the rows the live read lacks
+ * are added, in the order the host gave them.
+ */
+export function withArchive(live: Row[], archive: Row[]): Row[] {
+  const held = new Set(live.map((row) => row.id))
+  const at = new Map(live.map((row, index) => [row.id, index]))
+  const above: Row[] = []
+  const after = new Map<number, Row[]>()
+  // A turn's request can be a live row (Hermes writes it again when it compacts mid-turn) while the
+  // work it started before the compaction is archived: the archive lists that work right after the
+  // request, and the work follows it here rather than ending up under an earlier turn.
+  let request: number | undefined
+  for (const row of archive) {
+    if (held.has(row.id)) {
+      request = isRequest(row) ? row.id : undefined
+    } else if (request !== undefined) {
+      after.set(request, [...(after.get(request) ?? []), row])
+    } else above.push(row)
+  }
+  // The live read opens on the compaction's rows, which stand above that request; the archive has
+  // them after the work, which is where the compaction happened. The live rows that follow the work
+  // in the archive but come before the request in the live read move to just after the work.
+  const moved = new Map<number, Row[]>()
+  for (const [id, work] of after) {
+    const last = archive.findIndex((row) => row.id === work.at(-1)?.id)
+    const rows: Row[] = []
+    for (const row of archive.slice(last + 1)) {
+      if (!held.has(row.id) || (at.get(row.id) ?? Infinity) > (at.get(id) ?? -1)) break
+      rows.push(row)
+    }
+    moved.set(
+      id,
+      rows.map((row) => live[at.get(row.id)!]),
+    )
+  }
+  const gone = new Set([...moved.values()].flat().map((row) => row.id))
+  return [
+    ...above,
+    ...live.flatMap((row) =>
+      gone.has(row.id) ? [] : [row, ...(after.get(row.id) ?? []), ...(moved.get(row.id) ?? [])],
+    ),
+  ]
+}
+
+const isRequest = (row: Row) =>
+  row.role === "user" &&
+  row.display_kind !== "hidden" &&
+  row.display_kind !== "model_switch" &&
+  !DELIVERY.test(row.content ?? "") &&
+  !RESTATED.test(row.content ?? "")
+
+/**
+ * The line Hermes opens the active request's restatement with after a compaction. The request it
+ * restates is already the turn above it, and what follows is the work carried forward.
+ */
+const RESTATED = /^\[STILL IN PROGRESS — [^\]]*\]/
+/**
+ * What Hermes leaves in a carried call's result where it pruned the output to save context: a
+ * notice, or a one-line summary of the call (`[terminal] ran ... (2,204 chars result)`).
+ */
+const PRUNED = /^\[(Old tool output cleared|Duplicate tool output|[a-z_]+\] )/
+
 /** What Hermes writes in place of the user when a background subagent finishes. */
-const DELIVERY = /^\[ASYNC DELEGATION/
+const DELIVERY = /^\[(ASYNC DELEGATION|IMPORTANT: \d+ background process)/
 const CHILD = /^\[ASYNC DELEGATION COMPLETE — (\S+?)\]/
 
 /**
@@ -46,8 +116,28 @@ const CHILD = /^\[ASYNC DELEGATION COMPLETE — (\S+?)\]/
 export function foldTurns(rows: Row[]): Turn[] {
   const turns: Turn[] = []
   const callOf = new Map<string, ToolCall>()
+  /** The rows just read are a compaction, or the carried copy of work already drawn: the next reply may be the copy of one too. */
+  let seamed = false
   for (const row of rows) {
     if (row.role === "user") {
+      // The host's own rows are the model's input, never the user's words. A compaction leaves one,
+      // empty, where the summary went; a model switch is a note to the model.
+      if (row.display_kind === "model_switch") continue
+      if (RESTATED.test(row.content ?? "")) continue
+      if (row.display_kind === "hidden") {
+        seamed = true
+        const last = turns.at(-1)
+        if (!last)
+          turns.push({
+            user: "",
+            parts: [{ kind: "compaction" }],
+            done: true,
+            carried: true,
+            delivered: [],
+          })
+        else if (last.parts.at(-1)?.kind !== "compaction") last.parts.push({ kind: "compaction" })
+        continue
+      }
       const content = row.content ?? ""
       if (DELIVERY.test(content)) {
         const last = turns.at(-1)
@@ -66,10 +156,24 @@ export function foldTurns(rows: Row[]): Turn[] {
     if (!turn) continue
     if (row.role === "tool") {
       const call = row.tool_call_id ? callOf.get(row.tool_call_id) : undefined
-      if (call) call.result = row.content ?? ""
+      // A carried copy of a call can hold the cleared notice where the original kept its output.
+      if (call && !(call.result && PRUNED.test(row.content ?? ""))) call.result = row.content ?? ""
       continue
     }
     if (row.role !== "assistant") continue
+    // After a compaction Hermes writes the work it carried forward again, under the ids it had: a
+    // call already drawn is that call, and the first reply back is the one already given.
+    const asked = row.tool_calls ?? []
+    const first = seamed
+    seamed = false
+    if (asked.length && asked.every((one) => callOf.has(one.id))) {
+      seamed = true
+      continue
+    }
+    if (first && !asked.length && row.content && repeatsEarlier(turns, row.content)) {
+      seamed = true
+      continue
+    }
     turn.done = !row.tool_calls?.length && Boolean(row.finish_reason)
     if (row.content) turn.parts.push({ kind: "text", text: row.content })
     for (const asked of row.tool_calls ?? []) {
@@ -84,5 +188,16 @@ export function foldTurns(rows: Row[]): Turn[] {
       else turn.parts.push({ kind: "tools", calls: [call] })
     }
   }
+  // Only the last turn can still be running. A copy Hermes carried across a compaction has lost the
+  // reason its reply stopped, so an earlier turn is finished by what follows it.
+  for (const turn of turns.slice(0, -1)) turn.done = true
   return turns
+}
+
+/** Whether a reply already drawn ended on these very words. */
+function repeatsEarlier(turns: Turn[], text: string): boolean {
+  return turns.some((turn) => {
+    const last = turn.parts.findLast((part) => part.kind === "text")
+    return last?.kind === "text" && last.text === text
+  })
 }
