@@ -12,6 +12,7 @@ export interface ThreadState {
 export type ThreadEvent =
   | { type: "transcript"; rows: Row[]; final?: boolean }
   | { type: "sent"; user: string }
+  | { type: "attach" }
   | { type: "run"; event: RunEvent }
   | { type: "failed"; error: string }
 
@@ -51,6 +52,15 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         status: "ready",
         running: true,
         turns: [...state.turns, { user: event.user, parts: [], done: false }],
+      }
+    case "attach":
+      // The run's events are replayed from its start, so the turn is drawn again from nothing.
+      return {
+        ...state,
+        running: true,
+        turns: state.turns.map((turn, at) =>
+          at === state.turns.length - 1 ? { ...turn, parts: [], done: false } : turn,
+        ),
       }
     case "run":
       return {

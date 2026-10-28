@@ -38,7 +38,7 @@ export interface Run {
   finish(output: string): void
 }
 
-export function fakeHost(session: string) {
+export function fakeHost(session: string, { plugin = false }: { plugin?: boolean } = {}) {
   const rows: Row[] = []
   const expected: ExpectedTurn[] = []
   const runs = new Map<
@@ -156,6 +156,17 @@ export function fakeHost(session: string) {
         const { id, run } = start(text)
         latest.run = run
         return json({ run_id: id, status: "started", replayed: false }, 202)
+      }
+      // The Gots plugin's one read a device needs to find a run it did not start.
+      if (plugin && path === "/api/plugins/memento/runs/live") {
+        const live = [...runs].filter(([, state]) => !state.done).at(-1)
+        return json({
+          object: "memento.runs",
+          sessions: live ? { [session]: "running" } : {},
+          run_ids: live ? { [session]: live[0] } : {},
+          waiting: {},
+          subagents: {},
+        })
       }
       const stream = /^\/v1\/runs\/([^/]+)\/events$/.exec(path)
       if (stream && runs.has(stream[1])) return events(stream[1])

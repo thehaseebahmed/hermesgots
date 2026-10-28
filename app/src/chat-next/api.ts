@@ -75,6 +75,28 @@ export async function startRun(
   return ((await response.json()) as { run_id: string }).run_id
 }
 
+/**
+ * The run the host is working on for a session, by the Gots plugin's account of live runs. A host
+ * without the plugin, or one that cannot say, has no answer, and the transcript is all there is.
+ */
+export async function readLiveRun(
+  connection: Connection,
+  session: string,
+  signal?: AbortSignal,
+): Promise<string | undefined> {
+  try {
+    const response = await fetch(`${root(connection)}/api/plugins/memento/runs/live`, {
+      headers: headers(connection),
+      signal: within(signal),
+    })
+    if (!response.ok) return undefined
+    const { run_ids } = (await response.json()) as { run_ids?: Record<string, string> }
+    return run_ids?.[session]
+  } catch {
+    return undefined
+  }
+}
+
 /** Follows a run's events until the host closes the stream. */
 export async function followRun(
   connection: Connection,

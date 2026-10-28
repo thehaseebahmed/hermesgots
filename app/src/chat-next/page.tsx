@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router"
 
 import { Markdown } from "@/components/chat/markdown"
 
-import { followRun, readTranscript, startRun } from "./api"
+import { followRun, readLiveRun, readTranscript, startRun } from "./api"
 import type { Turn } from "./fold"
 import { initial, reduce } from "./state"
 
@@ -101,43 +101,71 @@ export function ChatNextPage({
   useEffect(() => {
     progress.current = { shape, at: Date.now() }
   }, [shape])
+  // One run's events at a time, whoever started it.
+  const streaming = useRef(false)
+  const follow = useCallback(
+    async (run: string) => {
+      if (!server || !key || !session) return
+      streaming.current = true
+      try {
+        await followRun(
+          { server, key },
+          run,
+          (event) => dispatch({ type: "run", event }),
+          alive.current.signal,
+        )
+      } catch (error) {
+        if (alive.current.signal.aborted) return
+        dispatch({ type: "failed", error: error instanceof Error ? error.message : String(error) })
+      } finally {
+        streaming.current = false
+      }
+      // Whatever the stream said, the host's transcript is what the turn was.
+      await catchUp(true)
+    },
+    [server, key, session, catchUp],
+  )
+
   // An open chat is read now and then even when it looks finished, since another device may have
-  // started a turn; a page nobody is looking at asks nothing.
+  // started a turn; a page nobody is looking at asks nothing. A turn still being written is joined
+  // where the host can say which run it is, so its words are drawn as they come.
   useEffect(() => {
     const timer = setInterval(
-      () => {
-        if (document.visibilityState !== "visible") return
+      async () => {
+        if (document.visibilityState !== "visible" || streaming.current) return
         if (following && Date.now() - progress.current.at > stallMs) return
+        if (following && server && key && session) {
+          streaming.current = true
+          const run = await readLiveRun({ server, key }, session, alive.current.signal)
+          if (run) {
+            reads.current++
+            dispatch({ type: "attach" })
+            return void follow(run)
+          }
+          streaming.current = false
+        }
         void catchUp()
       },
       following ? pollMs : idleMs,
     )
     return () => clearInterval(timer)
-  }, [following, catchUp, pollMs, idleMs, stallMs])
+  }, [following, catchUp, follow, server, key, session, pollMs, idleMs, stallMs])
 
   async function send() {
     const text = draft.trim()
     if (!text || !server || !key || !session) return
     setDraft("")
     reads.current++
+    streaming.current = true
     dispatch({ type: "sent", user: text })
-    const connection = { server, key }
     try {
-      const run = await startRun(connection, session, text, alive.current.signal)
-      await followRun(
-        connection,
-        run,
-        (event) => {
-          dispatch({ type: "run", event })
-        },
-        alive.current.signal,
-      )
+      follow(await startRun({ server, key }, session, text, alive.current.signal))
     } catch (error) {
+      streaming.current = false
       if (alive.current.signal.aborted) return
       dispatch({ type: "failed", error: error instanceof Error ? error.message : String(error) })
+      await catchUp(true)
     }
-    // Whatever the stream said, the host's transcript is what the turn was.
-    await catchUp(true)
   }
 
   if (!server || !key || !session)
