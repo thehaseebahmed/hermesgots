@@ -449,8 +449,16 @@ One speech-to-text run as the app holds it — from the tap that starts it to th
 _Avoid_: session, stream, job, recording
 
 **Dictation**:
-One finished take as the log keeps it: the words as they landed in the composer, the bot that heard them, when, how many words and how long they took to say. It is kept on that bot's host and mirrored on the device, which is what the Dictation screen's History lists by month and its Stats count.
+One finished take as the log keeps it: the bot that heard it, when, how many words and how long they took to say, and two texts — **Heard**, the words the host's speech model wrote down, and **Cleaned up**, the words as they landed in the composer after Cleanup. It is kept on that bot's host and mirrored on the device, which is what the Dictation screen's History lists by month and its Stats count.
 _Avoid_: recording, transcript, entry, voice note
+
+**Heard**:
+The words a take's host speech model wrote down, before Cleanup: one text, its pieces joined in the order they were cut. A dictation keeps it beside the words that landed, and the two are the same text when the cleanup found nothing to change or never answered.
+_Avoid_: raw, raw transcript, uncorrected text, whisper output
+
+**Cleaned up**:
+The words a take landed in the composer once Cleanup had its say: the dictation's own text, the one its words are counted on and Copy copies. It is the same text as **Heard** where the cleanup found nothing to change or never answered, and the sheet then draws one block rather than two.
+_Avoid_: tidied, cleaned, corrected text, polished
 
 **Piece**:
 The unit a take uploads: one stretch of its recording, cut at a pause or at its length cap, transcribed by the host while the rest is still being spoken.

@@ -3090,6 +3090,9 @@ const dictationCleanups = []
 // a real host counts for itself is the words and the spoken span of each, and the fingerprint beside
 // them (ADR 0060).
 const DICTATION_CLEARED_AT = { at: 0 }
+// One take's words, as the plugin bounds them (dictations.py's `MAX_TEXT`): a body past it is refused,
+// and the words set beside them are dropped rather than costing the row (ADR 0062).
+const MAX_DICTATION_TEXT = 20_000
 // Each row carries two clocks, as the host's table does: `seenAt` is when this host heard the take,
 // which is what it orders and pages by, and `at` is when the device said it was said, kept for what
 // the screen draws (ADR 0060).
@@ -3097,6 +3100,7 @@ const dictationLog = [
   {
     id: "dict-mock-1",
     text: "Remind me to send the invoice to Nadia before the call.",
+    heard: "Um, remind me to send the invoice to, uh, Nadia before the call.",
     words: 11,
     ms: 4_200,
     at: Date.now() - 3 * 60 * 60 * 1000,
@@ -5021,15 +5025,18 @@ http
         const text = typeof body.text === "string" ? body.text : ""
         if (!text.trim())
           return json(res, 400, { error: { message: "A dictation needs its words." } })
-        if (text.length > 20000)
+        if (text.length > MAX_DICTATION_TEXT)
           return json(res, 413, { error: { message: "That dictation is too long to keep." } })
         // Two clocks: this host's, stamped as the take lands and what the log is ordered by, and the
         // device's, kept unless it claims a time after the host heard it.
         const seenAt = Date.now()
         const asked = Number(body.at) || seenAt
+        const asHeard = typeof body.heard === "string" ? body.heard.trim() : ""
+        const heard = asHeard && asHeard.length <= MAX_DICTATION_TEXT ? asHeard : undefined
         const row = {
           id,
           text,
+          ...(heard ? { heard } : {}),
           words: Number(body.words) || text.trim().split(/\s+/).length,
           ms: Number(body.ms) || 0,
           at: Math.min(asked, seenAt),

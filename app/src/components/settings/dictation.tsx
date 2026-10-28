@@ -3,7 +3,7 @@
  * it adds up to. The screen draws from this device's mirror, so nothing here waits on a host; opening
  * it reconciles every bot in the background and caches the totals it reads (ADR 0060).
  */
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState, type ComponentProps } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { CheckIcon, CopyIcon, Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
@@ -26,7 +26,7 @@ import { connectionKey } from "@/lib/connection"
 import { useCopied } from "@/lib/copied"
 import { listProfiles, type DictationRecord, type Profile } from "@/lib/db"
 import { useDictationInfo } from "@/lib/dictation"
-import { byMonth, pooledRate, spelledCount, wordsLabel } from "@/lib/dictation-log"
+import { byMonth, pooledRate, spelledCount, textsOf, wordsLabel } from "@/lib/dictation-log"
 import {
   clearDictationLog,
   reconcileAll,
@@ -223,6 +223,21 @@ function HistoryTab({ profiles }: { profiles: Profile[] }) {
   )
 }
 
+function Words({
+  label,
+  text,
+  ...rest
+}: { label: string | null; text: string } & ComponentProps<"p">) {
+  return (
+    <p className="text-base whitespace-pre-wrap" {...rest}>
+      {label && (
+        <span className="mb-1.5 block text-[13px] font-medium text-muted-foreground">{label}</span>
+      )}
+      {text}
+    </p>
+  )
+}
+
 /** One dictation, whole: its words, what it was, a Copy and a way to delete it. */
 function EntrySheet({
   row,
@@ -236,6 +251,7 @@ function EntrySheet({
   onDelete: () => void
 }) {
   const { copied, noteCopied } = useCopied()
+  const { heard, tidied } = textsOf(row)
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(row.text)
@@ -251,9 +267,8 @@ function EntrySheet({
           <PopupTitle>{clockOf(row.at)}</PopupTitle>
         </PopupHeader>
         <div className="flex min-h-0 flex-col gap-4 overflow-y-auto px-4 pb-4">
-          <p className="text-base whitespace-pre-wrap" data-dictation-text>
-            {row.text}
-          </p>
+          {heard && <Words label="Heard" text={heard} data-dictation-heard />}
+          {tidied && <Words label={heard ? "Cleaned up" : null} text={tidied} data-dictation-text />}
           <p className="text-sm text-muted-foreground">
             {[bot, wordsLabel(row.words), spokenLabel(row.ms)].filter(Boolean).join(" · ")}
           </p>

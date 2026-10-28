@@ -304,12 +304,51 @@ function withoutRepeatedRestatements(rows: SessionMessage[], summaries?: Summary
   })
 }
 
-/** A transcript's rows in the order a turn reads: ordered around each compaction, each turn once. */
-function turnRows(rows: SessionMessage[], summaries?: SummaryRows) {
+/**
+ * One turn of a transcript, in the order it reads. Its `rows` open with the request when it has one
+ * (a turn a wake run opened, or rows before the first request, has none), carry the work a
+ * compaction brought forward, the summary where it falls and the work after it. `runs` are those
+ * rows cut at each wake prompt, the first run holding the request. `summaryAt` is the last summary
+ * row's place in `rows`, or -1.
+ */
+export type Turn = {
+  rows: SessionMessage[]
+  request?: SessionMessage
+  runs: SessionMessage[][]
+  summaryAt: number
+}
+
+/** Rows cut into runs: each wake prompt opens one, so a wake run is told apart from the turn before it. */
+function runsOf(rows: SessionMessage[]) {
+  const runs: SessionMessage[][] = []
+  for (const row of rows) {
+    if (isWakePrompt(row) || !runs.length) runs.push([row])
+    else runs[runs.length - 1].push(row)
+  }
+  return runs
+}
+
+/**
+ * The one reading of a transcript's rows as turns: ordered around each compaction, a repeated
+ * restatement dropped, and cut at each request. Every reader of a turn asks this, so a new shape of
+ * compaction is taught here and nowhere else.
+ */
+export function turnsFromRows(rows: SessionMessage[], summaries?: SummaryRows): Turn[] {
   // Most transcripts hold no compaction at all: the scan that finds one is also the check that
   // leaves them as they came, rather than copying every read for nothing.
-  if (!rows.some((row) => isRestatement(row) || isSummaryRow(row, summaries))) return rows
-  return withoutRepeatedRestatements(seamOrder(rows, summaries), summaries)
+  if (rows.some((row) => isRestatement(row) || isSummaryRow(row, summaries)))
+    rows = withoutRepeatedRestatements(seamOrder(rows, summaries), summaries)
+  const groups: SessionMessage[][] = []
+  for (const row of rows) {
+    if ((isTurnStart(row, summaries) && !isWakePrompt(row)) || !groups.length) groups.push([row])
+    else groups[groups.length - 1].push(row)
+  }
+  return groups.map((group) => ({
+    rows: group,
+    request: isTurnStart(group[0], summaries) && !isWakePrompt(group[0]) ? group[0] : undefined,
+    runs: runsOf(group),
+    summaryAt: group.findLastIndex((row) => isSummaryRow(row, summaries)),
+  }))
 }
 
 /**
@@ -322,10 +361,19 @@ export function toMessages(
   rows: SessionMessage[],
   options: { live?: boolean; summaries?: SummaryRows } = {},
 ) {
+  return turnsFromRows(rows, options.summaries).flatMap((turn) =>
+    foldRows(conversationId, sessionId, turn.rows, options),
+  )
+}
+
+/** Folds rows already in a turn's order: nothing is reordered here. */
+function foldRows(
+  conversationId: string,
+  sessionId: string,
+  rows: SessionMessage[],
+  options: { live?: boolean; summaries?: SummaryRows },
+) {
   const { summaries } = options
-  // The live read and the archive's display read both hold a compaction as summary, carried copies,
-  // then what came after: one order serves both.
-  rows = turnRows(rows, summaries)
   const messages: Message[] = []
   let reply: Message | undefined
   // Where the reply's text since its last tool call starts, and the notice that text was cut by.
@@ -639,18 +687,6 @@ function withReplyDetails(local: Message, reply: Message | undefined) {
 }
 
 /**
- * The rows of the run the turn is on now. A wake run draws no user message, so it is asked for by the
- * turn before it: its rows follow that turn's own, and the reply being written is the wake run's, not
- * the one the turn already finished. A later user message is another turn, whichever device sent it.
- */
-function newestRun(turn: SessionMessage[], summaries?: SummaryRows) {
-  const end = turn.findIndex((row, i) => i > 0 && isTurnStart(row, summaries) && !isWakePrompt(row))
-  const own = end < 0 ? turn : turn.slice(0, end)
-  const wake = own.findLastIndex((row) => isWakePrompt(row))
-  return wake < 0 ? own : own.slice(wake)
-}
-
-/**
  * The reply so far of the running turn that `userContent` started, from the transcript Hermes
  * writes after every tool round. For a client that can't read the run's events.
  */
@@ -669,33 +705,27 @@ export async function liveTurn(
       signal,
     })
     for (const row of batch) rows.set(row.id, row)
-    const sorted = turnRows(
+    const turns = turnsFromRows(
       [...rows.values()].sort((a, b) => a.id - b.id),
       summaries,
     )
     // The row carries the attachments' lines after the text the user typed, and a compaction
     // restates the request under its header: both are the same turn.
-    const start = sorted.findLastIndex(
-      (row) =>
-        isTurnStart(row, summaries) &&
-        splitAttachments(seamText(row.content ?? "")).text === userContent,
+    const turn = turns.findLast(
+      (t) => t.request && splitAttachments(seamText(t.request.content ?? "")).text === userContent,
     )
-    const summary = sorted.findLastIndex((row) => isSummaryRow(row, summaries))
     // A restated request follows the work the compaction carried forward, which sits under a summary
     // an older page holds: the read goes on until it is in.
-    const carriedAbove = start >= 0 && isRestatement(sorted[start]) && summary < 0
-    // A compaction can archive the request altogether: the turn is then what follows the summary.
-    const resumed =
-      start < 0 &&
-      summary >= 0 &&
-      !sorted.some((row, i) => i > summary && isTurnStart(row, summaries))
-    // Past the last page the turn is read from its request, as it was before the summary mattered.
+    const carriedAbove =
+      turn?.request && isRestatement(turn.request) && !turns.some((t) => t.summaryAt >= 0)
     if (carriedAbove && batch.length === PAGE && page < MAX_SKIPS) continue
-    let turn: SessionMessage[] | undefined
-    if (start >= 0) turn = sorted.slice(start)
-    else if (resumed) turn = sorted.slice(summary + 1)
-    if (turn)
-      return toMessages("", sessionId, newestRun(turn, summaries), { live: true, summaries }).find(
+    // A compaction can archive the request altogether: the turn is then what follows the summary.
+    const last = turns.at(-1)
+    const resumed =
+      !turn && last && last.summaryAt >= 0 ? last.rows.slice(last.summaryAt + 1) : undefined
+    const run = turn ? turn.runs.at(-1) : resumed && runsOf(resumed).at(-1)
+    if (run)
+      return foldRows("", sessionId, run, { live: true, summaries }).find(
         (m) => m.role === "assistant",
       )
     if (batch.length < PAGE) return undefined
@@ -849,14 +879,10 @@ function turnsOf(
   liveTail = false,
   summaries?: SummaryRows,
 ) {
-  const groups: SessionMessage[][] = []
-  for (const row of turnRows(rows, summaries)) {
-    if (isTurnStart(row, summaries) || !groups.length) groups.push([row])
-    else groups[groups.length - 1].push(row)
-  }
+  const groups = turnsFromRows(rows, summaries).flatMap((turn) => turn.runs)
   return groups.map((group, i) => {
     const live = liveTail && i === groups.length - 1
-    const messages = toMessages(conversationId, sessionId, group, { live, summaries })
+    const messages = foldRows(conversationId, sessionId, group, { live, summaries })
     const user = messages.find((m) => m.role === "user")
     const reply = messages.find((m) => m.role === "assistant")
     // A catch-up keeps one reply per turn. The turn a wake run opened has no user message at all, and
