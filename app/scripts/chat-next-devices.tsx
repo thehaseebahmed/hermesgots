@@ -108,7 +108,11 @@ export async function showsEverything(device: Device, host: Host, what: string) 
       await wait(25)
     }
   }
-  assert.deepEqual(device.turns(), host.expected, what)
+  assert.deepEqual(
+    device.turns(),
+    host.expected,
+    `${what}\n  device:   ${JSON.stringify(device.turns())}\n  expected: ${JSON.stringify(host.expected)}`,
+  )
 }
 
 /** Sends from a device and waits for the host to be asked, returning the run it started. */

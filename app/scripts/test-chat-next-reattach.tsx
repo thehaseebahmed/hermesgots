@@ -135,6 +135,35 @@ test("a stream that dies mid-run is joined again, and the words are not doubled"
   }
 })
 
+// Found in a real browser: a device that returns just as its stream ends starts a second read while
+// the final one is in flight, and the final one was thrown away as stale.
+test("a stream that ends while another read is in flight does not leave the thread stuck", async () => {
+  const host = fakeHost("memento-reattach-race", { plugin: true, latency: 80 })
+  host.install()
+  const phone = await openDevice(host)
+  try {
+    const run = await sendFrom(phone, host, "go")
+    run.say("\n\nFirst part.")
+    await eventually(
+      () => assert.deepEqual(lastTurn(phone)?.texts, ["First part."]),
+      "the words as they stream",
+    )
+    host.dropConnections()
+    await wait(20) // the stream has ended and the final read is on its way
+    await phone.returns() // and the device comes back, starting another
+    run.tool("terminal", "one", '{"exit_code": 0}')
+    run.say("\n\nSecond part.")
+    await eventually(
+      () => assert.deepEqual(lastTurn(phone)?.texts, ["First part.", "Second part."]),
+      "the run joined again, rather than the thread left waiting on a stream that is over",
+    )
+    run.finish("First part. Second part.")
+    await showsEverything(phone, host, "all of it once the run ends")
+  } finally {
+    await phone.close()
+  }
+})
+
 test("words written before and after a stream dies each appear once, with no call between them", async () => {
   const host = fakeHost("memento-reattach-resume", { plugin: true })
   host.install()

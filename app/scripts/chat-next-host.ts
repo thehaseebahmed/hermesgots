@@ -94,10 +94,17 @@ const reply = (body: unknown, status = 200) =>
     headers: { "content-type": "application/json" },
   })
 
-/** `plugin` serves the Gots plugin's `runs/live`; `version` is what `/health` says Hermes is. */
+/**
+ * `plugin` serves the Gots plugin's `runs/live`; `version` is what `/health` says Hermes is;
+ * `latency` is how long, in ms, a transcript read takes to be answered.
+ */
 export function fakeHost(
   session: string,
-  { plugin = false, version = "0.22.5" }: { plugin?: boolean; version?: string } = {},
+  {
+    plugin = false,
+    version = "0.22.5",
+    latency = 0,
+  }: { plugin?: boolean; version?: string; latency?: number } = {},
 ) {
   const rows: Row[] = []
   const expected: ExpectedTurn[] = []
@@ -296,6 +303,7 @@ export function fakeHost(
     }
     if (path === `/api/sessions/${session}/messages`) {
       asked.transcript++
+      if (latency) await new Promise((resolve) => setTimeout(resolve, latency))
       if (!rows.length)
         return reply(
           { error: { message: `Session not found: ${session}`, code: "session_not_found" } },

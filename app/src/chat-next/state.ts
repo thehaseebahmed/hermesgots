@@ -36,6 +36,7 @@ export type ThreadEvent =
   | { type: "sent"; user: string }
   | { type: "attach" }
   | { type: "answered" }
+  | { type: "ended" }
   | { type: "run"; event: RunEvent }
   | { type: "failed"; error: string }
 
@@ -121,6 +122,11 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
           at === state.turns.length - 1 ? { ...turn, parts: [], done: false } : turn,
         ),
       }
+    case "ended":
+      // The stream is over, however it ended, so the thread is no longer held by it. What the turn
+      // was comes from the transcript, which a later read may supply if the one for this end was
+      // superseded.
+      return { ...state, running: false }
     case "answered":
       // The card goes at once; the host's `*.settled` event confirms it.
       return { ...state, waiting: undefined }

@@ -187,8 +187,12 @@ export function ChatNextPage({
   const [draft, setDraft] = useState("")
   const [host, setHost] = useState<"checking" | "ok" | { version?: string }>("checking")
   const ready = host === "ok"
-  // Only the newest read may land: one begun before a send, or before a later read, is stale.
+  // A read begun before a send or a joined run is stale and does not land. Reads of the transcript
+  // run one at a time, and a request that comes while one is out waits for it and is answered by
+  // one more read after it, so a read that takes longer than the poll interval still lands.
   const reads = useRef(0)
+  const reading = useRef<Promise<void> | null>(null)
+  const queued = useRef<{ final: boolean } | null>(null)
   const alive = useRef(new AbortController())
 
   useEffect(() => {
@@ -201,19 +205,31 @@ export function ChatNextPage({
   }, [server, key])
 
   const catchUp = useCallback(
-    async (final = false) => {
+    async function read(final = false): Promise<void> {
       if (!server || !key || !session) return
-      const mine = ++reads.current
-      try {
-        const rows = await readTranscript({ server, key }, session, alive.current.signal)
-        if (mine === reads.current) dispatch({ type: "transcript", rows, final })
-      } catch (error) {
-        if (!alive.current.signal.aborted && mine === reads.current)
-          dispatch({
-            type: "failed",
-            error: error instanceof Error ? error.message : String(error),
-          })
+      if (reading.current) {
+        queued.current = { final: final || Boolean(queued.current?.final) }
+        return reading.current
       }
+      const mine = reads.current
+      reading.current = (async () => {
+        try {
+          const rows = await readTranscript({ server, key }, session, alive.current.signal)
+          if (mine === reads.current) dispatch({ type: "transcript", rows, final })
+        } catch (error) {
+          if (!alive.current.signal.aborted && mine === reads.current)
+            dispatch({
+              type: "failed",
+              error: error instanceof Error ? error.message : String(error),
+            })
+        } finally {
+          reading.current = null
+        }
+      })()
+      await reading.current
+      const next = queued.current
+      queued.current = null
+      if (next) await read(next.final)
     },
     [server, key, session],
   )
@@ -264,6 +280,7 @@ export function ChatNextPage({
         dispatch({ type: "failed", error: error instanceof Error ? error.message : String(error) })
       } finally {
         streaming.current = false
+        dispatch({ type: "ended" })
       }
       // Whatever the stream said, the host's transcript is what the turn was.
       await catchUp(true)
