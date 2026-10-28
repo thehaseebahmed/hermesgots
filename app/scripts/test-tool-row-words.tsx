@@ -7,7 +7,6 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { MessageItem } from "@/components/chat/message-item"
-import { WORK_LABEL_FLUSH } from "@/components/chat/work-row"
 import type { Message, ToolEvent } from "@/lib/db"
 import { PR_TOOL } from "@/lib/tools"
 import { click, findAll, find, mount } from "./component-kit.tsx"
@@ -65,8 +64,6 @@ test("a failed group wears no mark before its words, and its reason stands flush
     />,
     async () => {
       const row = find('[data-slot="tool-group"]')
-      // No row a reply draws wears a mark of its own (ADR 0062): the label is the row's first child,
-      // so nothing can sit in front of the words without this failing.
       assert.equal(row?.firstElementChild?.tagName, "SPAN", "the words lead the row")
       assert.equal(row?.querySelector('[aria-label="Failed"]'), null, "and no mark precedes them")
       assert.match(
@@ -76,10 +73,10 @@ test("a failed group wears no mark before its words, and its reason stands flush
       )
       const reason = find('[data-slot="tool-group-reason"]')
       assert.equal(reason?.textContent, "Exited 2", "the host's reason stands under the label")
-      assert.match(
-        reason?.className ?? "",
-        new RegExp(`(^|\\s)${WORK_LABEL_FLUSH}(\\s|$)`),
-        "flush under the words rather than on a gap",
+      assert.equal(
+        reason?.previousElementSibling?.getAttribute("data-slot"),
+        "tool-group",
+        "and it follows the row it explains",
       )
     },
   )

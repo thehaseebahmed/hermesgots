@@ -20,9 +20,10 @@ work, and the row that failed reads as that passage with a line under it. `WorkR
 
 **A failure's reason stands flush under its label.** ADR 0058 dented the reason by the icon slot so
 it lined up under the words rather than under the mark. With the mark gone there is nothing to line
-up past: `WORK_LABEL_DENT` goes, and the reason takes a negative top margin that eats the half of
-the row's 29px box its centred label leaves under itself, so the label and its reason read one under
-the other with their own line boxes as the only spacing. The row keeps its 29px.
+up past: `WORK_LABEL_DENT` goes, and the note takes a pull that eats the half of the row's 29px box
+its centred label leaves under itself, so the label and its reason read one under the other with
+their own line boxes as the only spacing. That pull lives in `WorkNote`, beside `WorkRow` and the
+height it answers to, rather than at the call site. The row keeps its 29px.
 
 **The status line turns a loader again, in the accent colour.** The spinner returns, on that one row
 only, beside words that stand whole. The row and its loader take `--primary` — the colour this

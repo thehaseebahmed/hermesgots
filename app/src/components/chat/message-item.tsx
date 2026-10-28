@@ -416,19 +416,12 @@ function FailedActions({ message }: { message: Message }) {
   )
 }
 
-/**
- * The row under a reply saying what the turn is doing: a loader and the words it says, both in the
- * accent colour while the turn works. It is the turn's live region, so those words are announced as
- * they change; while the turn waits on the reader nothing is running, so the words stand muted with
- * no loader beside them (ADR 0062).
- */
 function StatusLine({
   text,
   waiting,
   children,
 }: {
   text?: string
-  /** The turn waits on the reader, so the words stand plain and no loader turns. */
   waiting?: boolean
   children?: ReactNode
 }) {
@@ -695,8 +688,6 @@ export const MessageItem = memo(function MessageItem({
   // once a line shows.
   const footerLines = [
     (activity || shown) && (
-      // Waiting on the reader is not work in progress: the line says its words whole and still, and
-      // the reply already knows it waits, so it is told rather than left to read its own label.
       <StatusLine key="status" text={activity} waiting={waiting}>
         {shown && onShowSubagents && (
           <>

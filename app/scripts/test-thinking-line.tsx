@@ -105,7 +105,6 @@ async function screen(
 /** The footer's working line: what the turn is doing, said under the reply. It never thinks. */
 const workingLine = () => find("[data-slot=status-line]")
 
-/** The words on that line, and the loader that turns beside them while the turn works. */
 const statusWords = () => find("[data-slot=status-words]")?.textContent ?? ""
 const statusLoader = () => workingLine()?.querySelector('[data-slot="spinner"]')
 

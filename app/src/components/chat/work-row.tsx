@@ -11,13 +11,6 @@ import { cn } from "@/lib/utils"
 export const WORK_ROW_CLASS =
   "relative flex min-h-[29px] w-full items-center gap-2 text-left text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
 
-/**
- * The pull a note takes to stand flush under a row's label rather than on a line's worth of space:
- * the row's 29px box centres its label, leaving half a line under the words (ADR 0062). It lives
- * beside the height it answers to, so the two can't drift apart.
- */
-export const WORK_LABEL_FLUSH = "-mt-1"
-
 /** The wave's own name: the class the stylesheet turns into a light, and the slot the tests read. */
 const WAVE = "work-wave"
 
@@ -49,8 +42,7 @@ export const WorkLabel = forwardRef<HTMLSpanElement, ComponentProps<"span"> & { 
 
 /**
  * The row button over that shape: what follows the label (a ruler, a chevron) belongs to the row
- * itself, so each caller keeps its own. Nothing goes before the label — no row a reply draws wears
- * a mark of its own, so a failure is said in the row's name and the line under it (ADR 0062).
+ * itself, so each caller keeps its own.
  */
 export const WorkRow = forwardRef<
   HTMLButtonElement,
@@ -63,3 +55,12 @@ export const WorkRow = forwardRef<
     </button>
   )
 })
+
+/**
+ * A note a row says under itself, starting where the label ends rather than on a line's worth of
+ * gap: the row's 29px box centres a 20px line, so the pull takes back the half-line left under it.
+ * The row's height and the note's offset live in one file, so they move together (ADR 0058).
+ */
+export function WorkNote({ className, ...props }: ComponentProps<"p">) {
+  return <p className={cn("-mt-1 truncate pb-1 text-sm", className)} {...props} />
+}

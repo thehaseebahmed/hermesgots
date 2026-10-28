@@ -19,7 +19,7 @@ import {
 
 import { StepRail } from "@/components/chat/step-rail"
 import { Details } from "@/components/chat/tool-card"
-import { WorkRow, WORK_LABEL_FLUSH, WorkLabel } from "@/components/chat/work-row"
+import { WorkRow, WorkNote, WorkLabel } from "@/components/chat/work-row"
 import { Button } from "@/components/ui/button"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { usePopupDrawer, usePopupForm } from "@/lib/popup-form"
@@ -36,10 +36,6 @@ import {
   type Kind,
   type KindId,
 } from "@/lib/tools"
-import { cn } from "@/lib/utils"
-
-/** How a failed call's own reason reads: in the list its sheet draws, and under the group's row. */
-const FAILED_REASON = "truncate text-sm text-destructive"
 
 function useElapsed(tool: ToolEvent) {
   const [now, setNow] = useState(() => Date.now())
@@ -268,7 +264,7 @@ function ToolList({
                       </>
                     )}
                   </span>
-                  {reason && <span className={FAILED_REASON}>{reason}</span>}
+                  {reason && <span className="truncate text-sm text-destructive">{reason}</span>}
                 </span>
                 <DiffBadge tool={tool} />
               </button>
@@ -301,8 +297,6 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
   const [last, setLast] = useState<ToolEvent | undefined>()
   if (detail && detail !== last) setLast(detail)
   const shownDetail = detail ?? last
-  // A failed group says so in its own name — where a screen reader hears it as part of the button —
-  // and again under its label: the host's reason for one call, a count for several.
   const failedCount = failures.length
   const failureWords = !failed
     ? undefined
@@ -328,12 +322,9 @@ export function ToolGroup({ tools }: { tools: ToolEvent[] }) {
         </WorkLabel>
       </WorkRow>
       {failed && (
-        <p
-          className={cn(FAILED_REASON, WORK_LABEL_FLUSH, "pb-1")}
-          data-slot="tool-group-reason"
-        >
+        <WorkNote className="text-destructive" data-slot="tool-group-reason">
           {failedCount === 1 ? whyFailed(failures[0]) : failureWords}
-        </p>
+        </WorkNote>
       )}
       <Popup
         open={open}

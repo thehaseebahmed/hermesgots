@@ -19,7 +19,6 @@ const SPAN = /^Thought for \d+s$/
 const ROW = "[data-slot=thinking-line]"
 const SHEET = "[data-slot=thinking-sheet]"
 const BODY = "[data-slot=thinking-body]"
-/** The footer's line: the words it says, and the loader that turns beside them (ADR 0062). */
 const STATUS_WORDS = "[data-slot=status-words]"
 /** The share of the viewport height the deleted `max-h-[30dvh]` cap held: a sheet body outgrows it. */
 const FORMER_CAP_SHARE = 0.3
@@ -470,9 +469,6 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   )
   assert.equal(frozen.sheet, null, "the answer closes no sheet: none was open")
 
-  // The footer names what the turn is doing beside a loader: the words land whole rather than typed,
-  // so a moment later the line still reads the same. The label, the dots and the held box the typing
-  // needed are gone with it (ADR 0062).
   // The accent as this theme resolves it, read once before the wait: it cannot change inside a flow,
   // and a poll that re-derived it would colour a span on the live chat at every turn of the wait.
   const accent = await page.evaluate(() => {

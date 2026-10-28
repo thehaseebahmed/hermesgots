@@ -6,8 +6,7 @@ import { cn } from "@/lib/utils"
  * How many subagents a session has at work, as a line of its own: drawn by whichever row the thread
  * ends on, so it rides beside a streaming reply's activity words and stands at the thread's foot
  * under anything sent since. Pressing it opens the subagent sheet — the only way to reach subagents
- * whose cards the thread no longer shows. It is blue wherever it lands, the loader included, so a
- * delegated job never reads as the reply's own work (ADR 0062).
+ * whose cards the thread no longer shows.
  */
 export function SubagentLine({
   count,
@@ -30,7 +29,7 @@ export function SubagentLine({
         className,
       )}
     >
-      {spinner && <Spinner className="size-4" />}
+      {spinner && <Spinner aria-hidden />}
       <span className="truncate">{subagentsLine(count)}</span>
     </button>
   )
