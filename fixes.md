@@ -1215,6 +1215,22 @@ typed, and it is the one row in the thread that no device ever sent.
 
 ### 3. A restatement can draw the request it restates a second time
 
+**Applied since.** The reporter's own transcript of the case — 214 rows, a session compacted mid-turn
+on a phone and opened for the first time on a desktop — holds the request twice: the row the user sent,
+still standing above the boundary because the host kept it, and the boundary's restatement of it, a copy
+of that row carrying its time as well as its words. `seamOrder` now reads the copy off that pair and
+drops it, so the turn keeps its one request and its work stays one reply; and `fetchTail` asks the fold
+where a turn starts and pages past a turn opening on a restated request, because a read that stopped at
+the copy cut the turn in half and the older half arrived later through the window as a second copy —
+which is what the reporter saw as their message and their tool calls each drawn twice. `captured()` in
+`scripts/test-compaction-seam.tsx` is that transcript in small, and its two cases (the fold, and a chat
+caught up on a device that never saw it) both drew the request twice before the change. The pairing is
+narrow on purpose: the copy is recognised by the same time *and* words as the last request above the
+summary, so the host's two-turn case (`test-compaction-live.tsx`: the same words asked twice, the second
+turn's request archived away) still draws two turns. What it does not cover is a host that stamps the
+replay at the boundary instead of copying its time — a later build does exactly that, and drops the
+duplicate from the transcript itself.
+
 The host drops the restated row's timestamp on purpose, so `carried` — the pairing added for the
 re-emitted compaction rows, which matches a copy to the turn it repeats by time — cannot recognise it.
 When the device already holds the original request's row and the transcript also carries the
@@ -2314,3 +2330,31 @@ without it; splitting further would trade one long function for four that each t
 ---
 
 Found by the review pass on the archive drain (ADR 0058). None of it blocks the pull request.
+
+---
+
+# Deferred: the carried turn `history-generations` draws twice, on the base commit too
+
+`history-generations` fails on this branch and on the base commit it started from, with the same
+assertion: after the mock compacts a chat in place, `the carried turn still shows once` reads eight
+messages — both turns, twice each. It reproduces at `071abe35` too, so it is older than the fold
+refactor in `e263e606` and is not this branch's to fix.
+
+The shape is the one `carried` was written for: the compaction re-emits the tail under fresh row ids
+and the device already holds those turns under the old ones, so catch-up is meant to pair each copy to
+the message it repeats by `hermesAt` and adopt it instead of appending a new turn. The mock's read
+returns the summary, the notice and the copies (the archived originals are filtered), so the pairing is
+what decides the count, and it is not matching. What was not established is which half of the pair
+misses: the copy's `timestamp`, the device's `createdAt` for a turn a first catch-up inserted, or the
+adoption being spent by an earlier row.
+
+Cost: the flow is red in this environment, so it cannot stand as evidence for a change that touches
+catch-up — which is why the reporter's case is proved at the component tier instead
+(`captured()` in `scripts/test-compaction-seam.tsx`). Suggested fix: log the pairing's two sides for the
+first copy and read which value parts. Why it is deferred: it needs its own red loop against the mock's
+compaction and it is not on the path this branch changes.
+
+---
+
+Found by the pass on the reporter's phone-to-desktop transcript; it does not block the pull request.
+

@@ -8,7 +8,8 @@ grouping `turnsOf` already had. The passes could disagree, and the reorder had t
 it ran again on rows another reader had already ordered.
 
 `turnsFromRows` in `history.ts` is now the one reading. It orders the rows around each compaction, drops
-a restatement of the request the turn already restated, and cuts at each request. A `Turn` has its
+a restatement of a request the turn already holds — one the boundary restated again, or one whose own
+row still stands above the summary — and cuts at each request. A `Turn` has its
 `request` (none for a turn a wake run opened), its `rows` in reading order, its `runs` (the rows cut at
 each wake prompt) and `summaryAt`, where its last summary falls. Then:
 

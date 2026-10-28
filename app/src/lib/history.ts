@@ -34,8 +34,14 @@ import { mayHoldArchive, nextWindow, type WindowCursor } from "@/lib/history-win
  */
 
 const PAGE = 50
-/** Pages to skip past rows sent since the last load, before giving up on finding older ones. */
+/**
+ * Pages a read may walk: past the rows sent since the last load, and back to the request a boundary
+ * restated, where a read that runs out keeps the turn it last saw instead of a window mid-turn.
+ */
 const MAX_SKIPS = 10
+
+/** The rows a cold read may hold, so a test can build a turn that outruns them. */
+export const TAIL_ROWS = PAGE * (MAX_SKIPS + 1)
 
 /** Where Hermes names no primary argument: the first of these the call carried is its label. */
 const FALLBACK_ARGS = ["query", "text", "command", "path", "name", "prompt", "code", "goal"]
@@ -242,6 +248,30 @@ const dropsFromThread = (row: SessionMessage, summaries?: SummaryRows) =>
   isSubagentResult(row) || isSeamScaffolding(row) || isSummaryRow(row, summaries)
 
 /**
+ * Whether a boundary's restatement is a copy of a request the transcript still holds above it: the
+ * host that keeps the in-flight request when it survives above the boundary writes the replay as a
+ * copy of that very row, its own time included (`_fresh_compaction_message_copy`). A later host
+ * stamps the replay at the boundary and drops the duplicate instead, so this answers only for the
+ * transcripts that hold the same request twice.
+ */
+function restatesOpenRequest(
+  rows: SessionMessage[],
+  summaryAt: number,
+  restatement: SessionMessage,
+  summaries?: SummaryRows,
+) {
+  const time = restatement.timestamp
+  if (!time) return false
+  const words = seamText(restatement.content ?? "")
+  for (let i = summaryAt - 1; i >= 0; i--) {
+    const row = rows[i]
+    if (!isTurnStart(row, summaries)) continue
+    return row.timestamp === time && seamText(row.content ?? "") === words
+  }
+  return false
+}
+
+/**
  * The host writes a compaction as its summary, the work it carried forward (under their old times),
  * the turn's restated request, then what came after. Read in that order the request closes a reply
  * that isn't its own and the summary sits above work done before it. The request moves up to open
@@ -264,10 +294,16 @@ function seamOrder(rows: SessionMessage[], summaries?: SummaryRows) {
       // Rows the thread draws nothing of, and steers, are part of the carried work, not a turn.
       if (row.role !== "user" || isNotice(row) || dropsFromThread(row, summaries) || isSteer(row))
         continue
+      const restatement = isRestatement(row)
+      if (restatement && restatesOpenRequest(out, s, row, summaries)) {
+        out.splice(r, 1)
+        r--
+        continue
+      }
       // A summary the host folded into a call of its own stays with that call's results: only the
       // request moves up, to open the turn above it.
-      if (isRestatement(row) && calls) out.splice(s, r - s + 1, row, ...out.slice(s, r))
-      else if (isRestatement(row)) {
+      if (restatement && calls) out.splice(s, r - s + 1, row, ...out.slice(s, r))
+      else if (restatement) {
         out.splice(s, r - s + 1, row, ...out.slice(s + 1, r), summary)
         at = r
       }
@@ -859,6 +895,44 @@ const byRowId = (rows: Map<number, SessionMessage>) =>
 /** Whether a chat shows anything for a row: hidden and system rows aren't worth a "Load earlier". */
 const isShown = (row: SessionMessage) => row.display_kind !== "hidden" && row.role !== "system"
 
+function turnStartIds(rows: SessionMessage[], summaries?: SummaryRows) {
+  const starts = new Set<number>()
+  for (const turn of turnsFromRows(rows, summaries))
+    if (isTurnStart(turn.rows[0], summaries)) starts.add(turn.rows[0].id)
+  return starts
+}
+
+/**
+ * The row a turn opens on, or -1. The fold stops a row opening a turn only when it repeats a request
+ * the rows above already draw, so a row the seam doesn't read as a restatement answers itself, and
+ * only a candidate that one does is put to the fold.
+ */
+function turnStartIn(rows: SessionMessage[], tip: number | undefined, summaries?: SummaryRows) {
+  const at = (opens: (row: SessionMessage) => boolean) =>
+    tip === undefined
+      ? rows.findIndex(opens)
+      : rows.findLastIndex((row) => row.id <= tip && opens(row))
+  const start = at((row) => isTurnStart(row, summaries))
+  if (start < 0 || !isRestatement(rows[start])) return start
+  const starts = turnStartIds(rows, summaries)
+  return at((row) => starts.has(row.id))
+}
+
+/**
+ * Whether a read holding a restated head can say what it is: the copy a boundary repeats carries the
+ * request's own time, which was written before the summary it was cut at, so a head stamped at that
+ * summary or later pairs with nothing, and any other waits for the turn above the summary.
+ */
+function resolvedHead(rows: SessionMessage[], head: number, summaries?: SummaryRows) {
+  const summary = rows.findLastIndex((row, at) => at < head && isSummaryRow(row, summaries))
+  if (summary < 0) return false
+  const time = rows[head].timestamp
+  const cut = rows[summary].timestamp
+  if (!time || (cut && time >= cut)) return true
+  const first = rows.findIndex((row) => isTurnStart(row, summaries))
+  return first >= 0 && first < summary
+}
+
 /**
  * The rows from the start of the turn holding `tip` to the newest, or for an empty chat the newest
  * whole turns: a reply is named after its first row, so one cut by the page edge would load again,
@@ -871,22 +945,26 @@ async function fetchTail(
   summaries: SummaryRows | undefined,
 ) {
   const rows = new Map<number, SessionMessage>()
+  let sorted: SessionMessage[] = []
+  let from = 0
+  let end = false
   for (let page = 0; page <= MAX_SKIPS; page++) {
     const batch = await listSessionMessages(config, sessionId, { limit: PAGE, offset: page * PAGE })
     for (const row of batch) rows.set(row.id, row)
-    const sorted = byRowId(rows)
-    const start =
-      tip === undefined
-        ? sorted.findIndex((row) => isTurnStart(row, summaries))
-        : sorted.findLastIndex((row) => row.id <= tip && isTurnStart(row, summaries))
-    const end = batch.length < PAGE
-    if (start >= 0 || end) {
-      const from = Math.max(start, 0)
-      const full = tip === undefined && (!end || sorted.slice(0, from).some(isShown))
-      return { rows: sorted.slice(from), full }
-    }
+    sorted = byRowId(rows)
+    end = batch.length < PAGE
+    const head = turnStartIn(sorted, tip, summaries)
+    from = Math.max(head, 0)
+    // A page opening on a restated request is the turn cut in half, its own request above the
+    // summary: the read goes on until it can say which that row is.
+    const whole =
+      head >= 0 && (!isRestatement(sorted[head]) || resolvedHead(sorted, head, summaries))
+    if (whole || end) break
   }
-  return { rows: byRowId(rows), full: tip === undefined }
+  return {
+    rows: sorted.slice(from),
+    full: tip === undefined && (!end || sorted.slice(0, from).some(isShown)),
+  }
 }
 
 /** With `liveTail`, the last turn is still running: its calls without a result are still at work. */
@@ -1225,18 +1303,20 @@ async function loadEarlier(conversationId: string) {
   /** The turn `cut` belongs to, read whole: a window an older version left at a page edge starts
    *  with a reply whose turn began above it, and the live numbering's offset starts past that
    *  start. The rows are at the newest end, so the read starts there and pages back until the next
-   *  turn's start is in. */
+   *  turn's start is in — as the fold reads a start, since a restatement the boundary repeated
+   *  opens no turn there. */
   const summaries = summaryRowsOf(compactions)
   async function turnFrom(cut: number) {
     const rows = new Map<number, SessionMessage>()
     for (let page = 0; page <= MAX_SKIPS; page++) {
       for (const row of await list(page * STEP)) if (row.id >= cut) rows.set(row.id, row)
       const sorted = byRowId(rows)
-      if (sorted[0]?.id <= cut && sorted.some((row) => row.id > cut && isTurnStart(row, summaries)))
-        break
+      const starts = turnStartIds(sorted, summaries)
+      if (sorted[0]?.id <= cut && sorted.some((row) => row.id > cut && starts.has(row.id))) break
     }
     const sorted = byRowId(rows)
-    const next = sorted.findIndex((row) => row.id > cut && isTurnStart(row, summaries))
+    const starts = turnStartIds(sorted, summaries)
+    const next = sorted.findIndex((row) => row.id > cut && starts.has(row.id))
     return next < 0 ? sorted : sorted.slice(0, next)
   }
   const local = await getMessages(conversationId)
