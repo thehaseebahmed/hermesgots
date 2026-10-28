@@ -1,7 +1,10 @@
+import { pluginRoot, serverRoot } from "../lib/host-url.ts"
+
 import type { Agent } from "./agents"
 import type { Row } from "./fold"
 import type { Waiting } from "./state"
 
+/** A bot's server, as its base URL (`/v1` or not, `/p/<profile>` or not) and key. */
 export interface Connection {
   server: string
   key: string
@@ -33,7 +36,9 @@ export interface RunEvent {
 const READ_TIMEOUT_MS = 15_000
 const PAGE = 50
 
-const root = ({ server }: Connection) => server.replace(/\/+$/, "")
+const root = ({ server }: Connection) => serverRoot(server)
+// A bot served at `/p/<profile>` reaches its plugin inside the plugin's own prefix.
+const plugin = ({ server }: Connection) => pluginRoot(server)
 const headers = ({ key }: Connection) => ({ Authorization: `Bearer ${key}` })
 const within = (signal?: AbortSignal) =>
   AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(READ_TIMEOUT_MS)])
@@ -143,7 +148,7 @@ export async function readLiveRun(
   signal?: AbortSignal,
 ): Promise<string | undefined> {
   try {
-    const response = await fetch(`${root(connection)}/api/plugins/memento/runs/live`, {
+    const response = await fetch(`${plugin(connection)}/runs/live`, {
       headers: headers(connection),
       signal: within(signal),
     })
@@ -166,7 +171,7 @@ export async function readAgents(
 ): Promise<Agent[] | undefined> {
   try {
     const response = await fetch(
-      `${root(connection)}/api/plugins/memento/sessions/${encodeURIComponent(session)}/agents`,
+      `${plugin(connection)}/sessions/${encodeURIComponent(session)}/agents`,
       { headers: headers(connection), signal: within(signal) },
     )
     if (!response.ok) return undefined
