@@ -498,34 +498,29 @@ interface TurnSource {
   conversation: Conversation
   /** The run's start in the host's Unix seconds. */
   since: number
-  /** Whether the host said it, rather than this device's clock. */
-  known: boolean
 }
 
 /**
  * What a read of the transcript is asked by: the chat's session and when the turn's run began, read
- * once per turn since neither changes under it. The run's own start where the host answers it, else
- * when this device made the reply. Undefined for a chat with no session row — asked again next time,
- * since a chat may gain one.
+ * once per turn since neither changes under it. The start is the host's own, for a run: this device's
+ * clock can't place it among the transcript's rows (a queued message is made before the turn ahead
+ * of it ends), so a host that doesn't answer leaves the read for the next round. A chat-completions
+ * turn has no run, and its reply was made when it was sent. Undefined for a chat with no session row
+ * or a run whose start isn't known — asked again next time, since either may change.
  */
 async function turnSource(turn: Turn) {
   turn.source ??= (async () => {
     const conversation = await db.conversations.get(turn.conversationId)
     if (!conversation) return undefined
-    const run = turn.draft.runId
-      ? await getRun(turn.config, turn.draft.runId, AbortSignal.timeout(READ_TIMEOUT_MS)).catch(
-          quietly("Reading when the run started"),
-        )
-      : undefined
-    // A start this device guessed is not kept: the next read asks the host again.
-    return {
-      conversation,
-      since: run?.createdAt ?? turn.draft.createdAt / 1000,
-      known: run?.createdAt !== undefined,
-    }
+    const { runId } = turn.draft
+    if (!runId) return { conversation, since: turn.draft.createdAt / 1000 }
+    const run = await getRun(turn.config, runId, AbortSignal.timeout(READ_TIMEOUT_MS)).catch(
+      quietly("Reading when the run started"),
+    )
+    return run?.createdAt === undefined ? undefined : { conversation, since: run.createdAt }
   })()
   const source = await turn.source
-  if (!source?.known) turn.source = undefined
+  if (!source) turn.source = undefined
   return source
 }
 
