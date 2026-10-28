@@ -28,10 +28,10 @@ still counts as what landed. A `heard` the host cannot take — not a string, or
 bound the words carry — is dropped and the row is written anyway: the dictation is what every other
 screen reads, and a malformed second copy is never a reason to lose it.
 
-The sheet draws the heard text under a **Heard** heading whenever the row has one, and the tidied
-text under **Tidied** only where it differs — so a take the cleanup left alone reads as one block,
-and a row from before this change (or from a host that never kept it) reads exactly as the sheet read
-before. Both blocks are drawn at reading size, whole, in the sheet's one scroll: a scroll area inside
+The sheet draws the heard text under a **Heard** heading whenever the row has one, and the words that
+landed under **Cleaned up** only where they differ — so a take the cleanup left alone reads as one
+block, and a row from before this change (or from a host that never kept it) reads exactly as the
+sheet read before. Both blocks are drawn at reading size, whole, in the sheet's one scroll: a scroll area inside
 a bottom sheet is a trap on a phone, and a reader who scrolled this far meant to read the text. Copy
 still takes the landed words — the ones you would paste — with both blocks left selectable.
 

@@ -387,7 +387,7 @@ test("a dictation draws the words as heard over the tidied ones, and Copy takes 
       "the words the host heard, under their own heading",
     )
     assert.ok(
-      blockText(sheet()).startsWith("Tidied") && blockText(sheet()).endsWith(tidied),
+      blockText(sheet()).startsWith("Cleaned up") && blockText(sheet()).endsWith(tidied),
       "and the tidied text under its own, set apart from it",
     )
     assert.ok(

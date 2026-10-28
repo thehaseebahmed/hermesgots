@@ -268,7 +268,7 @@ function EntrySheet({
         </PopupHeader>
         <div className="flex min-h-0 flex-col gap-4 overflow-y-auto px-4 pb-4">
           {heard && <Words label="Heard" text={heard} data-dictation-heard />}
-          {tidied && <Words label={heard ? "Tidied" : null} text={tidied} data-dictation-text />}
+          {tidied && <Words label={heard ? "Cleaned up" : null} text={tidied} data-dictation-text />}
           <p className="text-sm text-muted-foreground">
             {[bot, wordsLabel(row.words), spokenLabel(row.ms)].filter(Boolean).join(" · ")}
           </p>
