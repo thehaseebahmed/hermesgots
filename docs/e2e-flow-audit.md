@@ -23,8 +23,8 @@ takes them rather than by the registry's order, so the count is the thing to che
 
 | Verdict | Keys |
 | --------- | ------ |
-| stay | 18 |
-| component | 56 |
+| stay | 19 |
+| component | 55 |
 | plugin | 2 |
 | delete | 2 |
 | **total** | **78** |
@@ -46,7 +46,7 @@ Two things in that arithmetic did not hold, and both are checkable:
   nothing today.
 
 Eleven keys have arrived since: five are components by the same rule — `delegation-model` (#318),
-`afk-skills` (#327), `afk-stage` (#328), `pipeline-pill` (#330) and `afk-prompt` (#359) — and five
+`afk-skills` (#327), `afk-stage` (#328), `pipeline-pill` (#330) and `afk-prompt` (#359) — and six
 are stays, for what no lower tier can watch: `thinking-line` (#368), the app's line following a
 host's own reasoning as it arrives; `openui` (#389), an interface's geometry at two widths and a
 scroll offset a patch must not move; `openui-map` (#490), a map's fitted geometry and the gesture
@@ -55,13 +55,14 @@ layout has not got; `question-during-delegation` (#471), the question card takin
 place while a subagent still runs, its delivery drawing nothing of the thread while its wake turn
 lands after it; and
 `card-widths` (#497), because a card's width and the offset of the column beside it are geometry,
-which no DOM without a layout engine has. The eleventh, `bot-threads` (#422), is a component by the
-same rule as the five: every rule it walks — a card's place in Main, `/thread` with text, the
-marker a moved message keeps — is a component test's, and what the browser adds is that they
-compose. So the registry holds 59 + 11 = **70** keys, the component verdicts are the plan's 48 less
-the key it counted twice, plus those six: **53**, and the stays are the plan's 7 plus those five:
-**12**.
-#299's own criterion still says 48; the 53 above
+which no DOM without a layout engine has. The eleventh, `bot-threads` (#422), is a stay as well: the
+rules it walks — a card's place in Main, `/thread` with text, the marker a moved message keeps —
+are component tests', but its laptop leg measures its thread header's geometry (the title on its
+pane's centre, the actions ending on the row's right edge), which a DOM without layout cannot, and
+ADR 0019 sends that to the sweep. So the registry holds 59 + 11 = **70** keys, the component
+verdicts are the plan's 48 less the key it counted twice, plus those five: **52**, and the stays are
+the plan's 7 plus those six: **13**.
+#299's own criterion still says 48; the 52 above
 supersedes it for the reason just given, and nothing else in the ticket's split moves.
 A twelfth key has arrived since, with #478's media drawing: `file-message`, a stay, because the
 browser's own download — the file saved under the name the message kept — is a mechanism no DOM
@@ -71,33 +72,33 @@ pop-up of the app's. So the registry holds 59 + 12 = **71** keys, less `image-vi
 And a thirteenth with #536: `code-list`, a stay, because where an unread dot sits on an icon's
 corner is geometry, and that opening the thread clears it while new activity brings it back with
 no reload is wiring no DOM test has. So the registry holds 59 + 13 = 72 keys, less
-`image-viewer`'s own: **71**. The component verdicts are still **53**, the stays are the plan's 7
-plus seven: **14**, and the deletes are **3** less one: **2**.
+`image-viewer`'s own: **71**. The component verdicts are still **52**, the stays are the plan's 7
+plus eight: **15**, and the deletes are **3** less one: **2**.
 Three keys have arrived since, with #525: `skills-list`, `skills-sheet` and `skills-remove` are
 components by the same rule, since the tab's sections, a row's health, the sheet's fields and a
 removal's refusals are all rules over the plugin's answers, and only the tab's fifth width and the
 sheet's own box are geometry. So the registry holds 71 + 3 = **74** keys, the component verdicts are
-the 53 above plus those three: **56**, and the stays are unchanged at **14**.
+the 52 above plus those three: **55**, and the stays are unchanged at **15**.
 A fifteenth key has arrived with #584: `bot-settings`, a stay, because the settings restructure's
 two claims are geometry and history — the pane a page swaps into beside the list at a laptop's
 width, and the screens a phone pushes and presses back out of. So the registry holds 74 + 1 = **75**
-keys, the component verdicts are still **56**, and the stays are **15**.
+keys, the component verdicts are still **55**, and the stays are **16**.
 A key has also arrived with #625: `chat-title`, a stay, because a chat's title converging on the
 host's title is a race with a clock — Hermes titles at its own pace, and the change can land while
 the app's change stream is closed, which is exactly the leg no faked boundary keeps honest: the flow
 ends the stream, holds the next one and the chat's own title reads back, lets the title land at the
 host, opens the stream and asserts the replayed event brought it — and a host with no stream at all
 leaves the app's own timed checks the only path. So the registry holds 77 + 1 = **78** keys, the
-component verdicts unchanged at **56**, the plugin verdicts **2**, the deletes **2**, and the stays
-are 17 + 1: **18**.
+component verdicts unchanged at **55**, the plugin verdicts **2**, the deletes **2**, and the stays
+are 18 + 1: **19**.
 A sixteenth key has arrived since, with the wake window (ADR 0057): `wake-window`, a stay, because
 the claim is a wall-clock one — that the card reads working through the whole span between a run
 ending and the owed wake turn starting, sampled again and again while the host's own clock holds the
 wake back — across a navigation to another screen, on a real poll reacting to a real end. A
 component test rules the state right in the steps its fake gives it; it cannot let the run end, the
 wake wait and the screen move in wall-clock order and catch a card that fell to at rest between two
-of them. So the registry holds 75 + 1 = **76** keys, the component verdicts unchanged at **56**,
-and the stays are 15 + 1: **16**.
+of them. So the registry holds 75 + 1 = **76** keys, the component verdicts unchanged at **55**,
+and the stays are 16 + 1: **17**.
 A seventeenth key has arrived with the compacted chat's archive (ADR 0058): `chat-archive`, a stay,
 because the claim is where a window grows from — a chat opens on its live window with nothing of the
 archive on the device, and the archived turns arrive when the pane's scroll reaches its top, growing
@@ -105,19 +106,19 @@ the thread above the reader. A component test over the same seeded rows rules th
 each turn is there once, that the divider stands where the compaction happened); it cannot make a
 scroll happen or measure a height that changed, so it would pass had the archive come on a button,
 on the chat's open, or not at all. So the registry holds 76 + 1 = **77** keys, the component
-verdicts unchanged at **56**, and the stays are 16 + 1: **17**.
+verdicts unchanged at **55**, and the stays are 17 + 1: **18**.
 
 `app/scripts/test-e2e-registry.mjs`, a unit test, holds the registry and this page to each other:
 a key with no row here, a row with no key, a verdict outside the four, a count in the table above
-that its rows don't add up to, or a stay beyond the seventeen fails the app's gates. A new flow is then
+that its rows don't add up to, or a stay beyond the nineteen fails the app's gates. A new flow is then
 an argument this page has to carry, never a default (ADR 0019).
 
 Check any of it in one line:
 
 ```bash
 grep -c '^| `' docs/e2e-flow-audit.md                           # 78 rows, one per registry key
-grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 18
-grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 56
+grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 19
+grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 55
 grep -c '^| `[a-z0-9-]*` | delete |' docs/e2e-flow-audit.md    # 2
 grep -c '^| `[a-z0-9-]*` | plugin |' docs/e2e-flow-audit.md    # 2
 cd app && pnpm -s e2e list | wc -l                             # 76 keys in the registry
@@ -303,13 +304,13 @@ One key, the only one that walks the whole feature: #417–#421 each brought the
 
 | Key | Verdict | What it asserts today | Why it moves | What replaces it |
 | ------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bot-threads` | component | A bot opens its Main from home; its threads are cards at their start times, the first between the messages written either side of it and the last closing the flow; a card opens its thread and back returns to Main; `/thread` with text opens a thread holding that message, whose card is back on Main at its start and drawn without a marker. Then, on a mock answering `MOCK_TRIAGE=new`, the message leaves Main as its new thread's card carrying Undo and no marker; on one answering `MOCK_TRIAGE=thread` it keeps the Moved marker, linking the older thread it went to, with no card carrying the move. Last, at tablet width with the dark theme, a card, Main's day heading and the Moved line still draw, and the move's Undo is still there. Then the switch itself is sampled a painted frame at a time, on the pane the shell names, with a second bot added beside the first: a card's thread opened and back on a phone, and a bot's Main switched from the sidebar and back on a laptop, the thread beside it sampled through the same two switches — its lane only ever drawing the thread of the bot being left, the one asked for, or nothing while that one answers, never a lane calling the bot thread-less while its list is still answering. Every painted frame between the two chats is the one left, the one asked for, or the pane waiting on it — inert, untitled and carrying neither chat's words — never the setup copy, a `New chat` header or the new-chat hero, and never the chat left once a frame has left it; a long chat asked for may open on its newest rows, its title over rows of its own, and is drawn whole by the time the switch settles; the frame the arriving scroller holds itself invisible on, while it places the chat and its items still stand at their `content-visibility` estimate, is not a painted one and does not count, and from the first frame it does paint the arriving chat's content the last thing drawn there never moves: the reader is left at the end, and still. The chat is also read and captured ready, at 390, 768 and 1440px, light and dark. | Every rule it walks is a component test's — a card's place in Main (#417), the marker and the triage-opened card's Undo (#419), `/thread` and the name the switch picks (#420) — and none of them needs a browser's layout. What the flow adds is that they compose: a real route change, a real reload onto the mock's chat list, and the mock's own triage and moves answering a send. | `app/scripts/test-main-cards.tsx`, `test-card-undo.tsx`, `test-main-triage.tsx` and `test-slash.mjs` carry the rules, and #417–#421 landed them green. The flow stays in the registry as the one proof the path holds end to end, which no component test mounts. |
+| `bot-threads` | stay | A bot opens its Main from home; its threads are cards at their start times, the first between the messages written either side of it and the last closing the flow; a card opens its thread and back returns to Main; `/thread` with text opens a thread holding that message, whose card is back on Main at its start and drawn without a marker. Then, on a mock answering `MOCK_TRIAGE=new`, the message leaves Main as its new thread's card carrying Undo and no marker; on one answering `MOCK_TRIAGE=thread` it keeps the Moved marker, linking the older thread it went to, with no card carrying the move. Last, at tablet width with the dark theme, a card, Main's day heading and the Moved line still draw, and the move's Undo is still there. Then the switch itself is sampled a painted frame at a time, on the pane the shell names, with a second bot added beside the first: a card's thread opened and back on a phone, and a bot's Main switched from the sidebar and back on a laptop, the thread beside it sampled through the same two switches — its lane only ever drawing the thread of the bot being left, the one asked for, or nothing while that one answers, never a lane calling the bot thread-less while its list is still answering. Every painted frame between the two chats is the one left, the one asked for, or the pane waiting on it — inert, untitled and carrying neither chat's words — never the setup copy, a `New chat` header or the new-chat hero, and never the chat left once a frame has left it; a long chat asked for may open on its newest rows, its title over rows of its own, and is drawn whole by the time the switch settles; the frame the arriving scroller holds itself invisible on, while it places the chat and its items still stand at their `content-visibility` estimate, is not a painted one and does not count, and from the first frame it does paint the arriving chat's content the last thing drawn there never moves: the reader is left at the end, and still. The chat is also read and captured ready, at 390, 768 and 1440px, light and dark. On a laptop, a thread's header holds its title on its pane's centre and its actions ending on the row's right edge, each within 2px. | Every rule it walks is a component test's — a card's place in Main (#417), the marker and the triage-opened card's Undo (#419), `/thread` and the name the switch picks (#420) — and the flow leaves them there. What stays a browser's is the layout those tests cannot measure — on a laptop a thread's header puts its title on its pane's centre and its actions at the row's right edge — and that they compose: a real route change, a real reload onto the mock's chat list, and the mock's own triage and moves answering a send. | `app/scripts/test-main-cards.tsx`, `test-card-undo.tsx`, `test-main-triage.tsx` and `test-slash.mjs` carry the rules, and #417–#421 landed them green. The flow stays in the registry as the one proof the path holds end to end, which no component test mounts. |
 
-## The eighteen that stay, and why only a browser can assert each
+## The nineteen that stay, and why only a browser can assert each
 
 Every one of these earns its browser by a mechanism no lower tier reproduces, and a stay is
-replaced by itself. With `bot-settings`, whose row is in its own family above — #584 landed after
-this page counted them — they are what the end-to-end registry holds once the other 60 keys leave
+replaced by itself. With `bot-settings` and `bot-threads`, whose rows are in their own families above
+— #584 and #422 landed after this page counted them — they are what the end-to-end registry holds once the other 60 keys leave
 (#314).
 
 | Key | Verdict | What it asserts today | Why only a browser can assert it |
