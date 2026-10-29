@@ -506,7 +506,7 @@ The value a Hermes setting runs at when the bot's host holds none of its own —
 _Avoid_: empty, blank, unset value, fallback
 
 **Progress reminder**:
-A note Gots puts in front of the bot asking it to say, briefly, what it has done and what is next. A bot's reminders are set per bot — Off, Normal or Frequent — and none of them promise the bot will speak: how much it says is the model's own choice.
+A note Gots puts in front of the bot asking it to say, briefly, what it has done and what is next. A bot's reminders are set per bot, on its General page under Progress updates, as Off, Normal or Frequent — and none of them promise the bot will speak: how much it says is the model's own choice.
 _Avoid_: nudge, check-in, status ping, chattiness, verbosity, quiet mode
 
 ## Testing

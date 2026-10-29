@@ -169,7 +169,7 @@ function MutedSetting({ profile }: { profile: Profile }) {
   )
 }
 
-/** The three words the reminders row offers; the counts behind them are the host's (ADR 0066). */
+/** The three words the progress updates row offers; the counts behind them are the host's (ADR 0066). */
 const REMINDER_LEVELS: { id: ReminderLevel; label: string }[] = [
   { id: "off", label: "Off" },
   { id: "normal", label: "Normal" },
@@ -241,7 +241,7 @@ function RemindersSetting({ profile }: { profile: Profile }) {
       data-setting="reminders"
     >
       <span className="flex min-w-0 flex-col gap-1">
-        <span className="text-base">Progress reminders</span>
+        <span className="text-base">Progress updates</span>
         <span className="text-sm text-muted-foreground">
           How often Gots asks the bot to say what it&apos;s doing. How much it says is still the
           bot&apos;s call.
@@ -253,7 +253,7 @@ function RemindersSetting({ profile }: { profile: Profile }) {
         )}
       </span>
       <Segmented
-        label="Progress reminders"
+        label="Progress updates"
         options={REMINDER_LEVELS}
         value={shown}
         onChange={(next) => void choose(next)}

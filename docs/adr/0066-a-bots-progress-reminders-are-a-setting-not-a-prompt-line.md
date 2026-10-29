@@ -22,8 +22,8 @@ discipline at all, and their transcript is what the user reads the morning after
 Frequent say how often Gots asks. They cannot say how often the bot reports, because that is the
 model's choice and no setting can promise it: a bot told nothing may still narrate everything, and
 one asked every ten calls may answer in one clause. Naming the levels Quiet, Normal and Chatty read
-as a promise about the bot that the system cannot keep, so the row is Progress reminders, its values
-are Off, Normal and Frequent, and a line under it says the bot still decides how much to say.
+as a promise about the bot that the system cannot keep, so the row is Progress updates, its values
+are Off, Normal and Frequent, and a line under it says how much the bot says is still its own call.
 
 **The numbers stay on the host and are never shown.** Normal asks every twenty tool calls and
 Frequent every ten; Off asks never. Twenty and ten are counts of tool calls — an implementation

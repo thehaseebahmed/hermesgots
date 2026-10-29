@@ -556,7 +556,7 @@ test("the reminders row is chosen where it sits, and shows no count", async () =
   ])
   await mount(general(), async () => {
     await until(() => Boolean(row("reminders")), "the reminders row")
-    assert.match(rowText("reminders"), /Progress reminders/, "the row names the thing it sets")
+    assert.match(rowText("reminders"), /Progress updates/, "the row names what the setting is for")
     assert.match(
       rowText("reminders"),
       /How much it says is still the bot's call/,
@@ -597,6 +597,6 @@ test("a plugin that doesn't advertise reminders draws no row", async () => {
   await seed("general-no-reminders", { hostId: "host-1" })
   await mount(general(), async () => {
     assert.equal(row("reminders"), null, "no row to set a setting this host doesn't have")
-    assert.doesNotMatch(words(page()), /Progress reminders/)
+    assert.doesNotMatch(words(page()), /Progress updates/)
   })
 })
