@@ -505,6 +505,10 @@ _Avoid_: bot setting, server setting, config
 The value a Hermes setting runs at when the bot's host holds none of its own — the default Hermes itself was built with. A row shows it muted, and a reset returns the setting to it.
 _Avoid_: empty, blank, unset value, fallback
 
+**Progress reminder**:
+A note Gots puts in front of the bot asking it to say, briefly, what it has done and what is next. A bot's reminders are set per bot — Off, Normal or Frequent — and none of them promise the bot will speak: how much it says is the model's own choice.
+_Avoid_: nudge, check-in, status ping, chattiness, verbosity, quiet mode
+
 ## Testing
 
 **Tier**:

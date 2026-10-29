@@ -1,43 +1,43 @@
-"""A check-in for a long tool loop: after many tool calls with nothing said, the agent is told to
-update the user before it goes on.
+"""Progress reminders: a bot that works for a long time without saying anything is asked to post a
+short update, at the rate its own level sets.
 
 A run that reads, greps, patches and tests for minutes shows the user tool cards and no words, and
-the prompt's own "post a short update between checkpoints" is the only thing asking for them — a
-model deep in a loop skips it. Hermes hands the plugin the hooks that make the count honest:
-``post_tool_call`` after every tool, carrying its status, and ``post_api_request`` after every model
-call, carrying ``assistant_content_chars``. So the count is of calls that ran — a call plan mode or
-a guardrail blocked never became work the user waited on and is not counted — and a model call that
-produced text restarts it, since that text is words the user reads. A turn's own start restarts it
-too, so a new turn never inherits yesterday's count.
+nothing in its prompt asks it to narrate — telling it so on every turn would cost every bot tokens
+and could not change mid-run. So the ask comes from the hooks instead. ``post_tool_call`` counts
+each tool call that ran (a call a policy blocked never became work the user waited on),
+``post_api_request`` restarts the count on any reply that carried text, and a turn's own start
+restarts it too.
 
-When the count reaches :data:`CHECK_IN_AFTER`, the next call is blocked with a message telling the
-agent to post a short update and then make the call again — the same directive plan mode uses, so
-the tool result carries the ask and the loop goes on. The count restarts at the ask: a model that
-ignores it gets its tool back and is asked again after another :data:`CHECK_IN_AFTER` calls, never
-stuck at a wall.
+How often that count earns a reminder is the bot's own setting — Off, Normal or Frequent, read on
+every tool call so a change lands on the next one. At that count the next call is blocked with a
+message asking for a short update, the same directive plan mode uses, and the call is then made
+again: a model that ignores the reminder is asked again after another stretch, never wedged.
 """
 
 from __future__ import annotations
 
 import logging
 import threading
+from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from . import sessions
 
 logger = logging.getLogger(__name__)
 
-# Tool calls allowed between check-ins, counted from the agent's last update or the last ask.
-CHECK_IN_AFTER = 20
+# The bot's reminders, kept per bot in its profile's own settings store: Off asks never, Normal is
+# what every bot did before the level existed, and Frequent asks twice as often.
+LEVEL_KEY = "progress_reminders"
+AFTER: Dict[str, Optional[int]] = {"off": None, "normal": 20, "frequent": 10}
+DEFAULT_LEVEL = "normal"
+OBJECT = "memento.progress_reminders"
+
 # Counts kept at once: the sessions at work in one process. A stale one is only a number, so the
 # oldest is dropped rather than the table growing for as long as the gateway runs.
 KEEP_SESSIONS = 512
-# An AFK run works a task with nobody watching: its own prompt already asks for a checkpoint update
-# between stages, and a blocked call there buys the user nothing. See afk.new_session_id.
-AFK_PREFIX = f"{sessions.MEMENTO_ID_PREFIX}afk-"
 
-CHECK_IN_BLOCK = (
-    "Progress check-in: {count} tool calls in this turn with nothing said to the user. Reply with a"
+REMINDER = (
+    "Progress reminder: {count} tool calls in this turn with nothing said to the user. Reply with a"
     " short update now — what has landed and what is next, a sentence or two, not a replay of the"
     " calls — then make this tool call again."
 )
@@ -49,16 +49,51 @@ _calls: Dict[Tuple[str, str], int] = {}
 def _session(kwargs: Dict[str, Any]) -> Optional[str]:
     """The session this hook call belongs to, or None for one with no user to update.
 
-    Gots mints its chats' ids (``createConversation`` in the app). A delegated child is a fresh
-    session of its own, whose reply reaches its parent rather than the user, and an AFK run works
-    unattended — neither has a reader waiting on this turn.
+    Gots mints its chats' ids (``createConversation`` in the app), and a delegated child is a fresh
+    session of its own whose reply reaches its parent rather than the user — so the prefix separates
+    the chats a reader waits on from everything else.
     """
     session_id = kwargs.get("session_id") or ""
     if not isinstance(session_id, str) or not session_id.startswith(sessions.MEMENTO_ID_PREFIX):
         return None
-    if session_id.startswith(AFK_PREFIX):
-        return None
     return session_id
+
+
+def level(path: Optional[Path]) -> str:
+    """The bot's reminder level as its host holds it: Normal unless a stored value says otherwise.
+
+    A store that can't be read answers Normal, the way a failed read fails open everywhere else
+    here: a host that can't answer must not take the reminders away from every bot.
+    """
+    if path is None:
+        return DEFAULT_LEVEL
+    try:
+        from .store import get_setting
+
+        value = get_setting(path, LEVEL_KEY)
+    except Exception:
+        logger.debug("memento: couldn't read the reminders level", exc_info=True)
+        return DEFAULT_LEVEL
+    return value if isinstance(value, str) and value in AFTER else DEFAULT_LEVEL
+
+
+def set_level(path: Path, value: Any) -> str:
+    """Stores the bot's level and answers what the store now holds.
+
+    A value the host doesn't know is refused rather than written: a row every read would then ignore
+    reads back as Normal while claiming to hold something else.
+    """
+    if not isinstance(value, str) or value not in AFTER:
+        raise ValueError(f"level must be one of {', '.join(AFTER)}")
+    from .store import put_setting
+
+    put_setting(path, LEVEL_KEY, value)
+    return level(path)
+
+
+def record(value: str) -> Dict[str, Any]:
+    """The route pair's answer: the level, and the levels a client may send."""
+    return {"object": OBJECT, "level": value, "levels": list(AFTER)}
 
 
 def _key(kwargs: Dict[str, Any]) -> Optional[Tuple[str, str]]:
@@ -85,8 +120,8 @@ def _room() -> None:
 
 
 def before_tool(**kwargs: Any) -> Optional[Dict[str, str]]:
-    """The ``pre_tool_call`` hook: after :data:`CHECK_IN_AFTER` calls with no update in between,
-    blocks this one with the ask.
+    """The ``pre_tool_call`` hook: once the bot's level's worth of calls have run with no update in
+    between, blocks this one with the reminder.
 
     The counting is ``after_tool``'s, so a call another hook blocked before it ran is never counted.
     Never raises: it runs inside Hermes's tool loop, and a policy hook that raises blocks the call.
@@ -94,7 +129,7 @@ def before_tool(**kwargs: Any) -> Optional[Dict[str, str]]:
     try:
         return _before_tool(kwargs)
     except Exception:
-        logger.debug("memento: progress check-in failed", exc_info=True)
+        logger.debug("memento: progress reminder failed", exc_info=True)
         return None
 
 
@@ -102,13 +137,27 @@ def _before_tool(kwargs: Dict[str, Any]) -> Optional[Dict[str, str]]:
     key = _key(kwargs)
     if key is None:
         return None
+    after = _threshold()
+    if after is None:
+        return None
     with _lock:
         count = _calls.get(key, 0)
-        if count < CHECK_IN_AFTER:
+        if count < after:
             return None
-        # The ask is what starts a new stretch: the model that ignores it still gets its tool back.
+        # The reminder is what starts a new stretch: the model that ignores it still gets its tool
+        # back.
         del _calls[key]
-    return {"action": "block", "message": CHECK_IN_BLOCK.format(count=count)}
+    return {"action": "block", "message": REMINDER.format(count=count)}
+
+
+def _threshold() -> Optional[int]:
+    """How many calls this bot allows before a reminder, or None when it asked for none.
+
+    Read on every tool call, from the level its host holds: a bot switched to Off mid-run stops
+    being asked on the next call, which is what the user meant by switching it.
+    """
+    path, _ = sessions._paths()
+    return AFTER[level(path)]
 
 
 def after_tool(**kwargs: Any) -> None:
@@ -128,7 +177,7 @@ def after_tool(**kwargs: Any) -> None:
             _calls[key] = _calls.get(key, 0) + 1
             _room()
     except Exception:
-        logger.debug("memento: progress check-in count failed", exc_info=True)
+        logger.debug("memento: progress reminder count failed", exc_info=True)
 
 
 def after_model_call(**kwargs: Any) -> None:
@@ -143,7 +192,7 @@ def after_model_call(**kwargs: Any) -> None:
             with _lock:
                 _calls.pop(key, None)
     except Exception:
-        logger.debug("memento: progress check-in reset failed", exc_info=True)
+        logger.debug("memento: progress reminder reset failed", exc_info=True)
 
 
 def _spoke(kwargs: Dict[str, Any]) -> bool:
@@ -166,4 +215,4 @@ def turn_started(**kwargs: Any) -> None:
         if session_id is not None:
             _forget(session_id)
     except Exception:
-        logger.debug("memento: progress check-in turn reset failed", exc_info=True)
+        logger.debug("memento: progress reminder turn reset failed", exc_info=True)

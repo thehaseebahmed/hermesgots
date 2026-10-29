@@ -1216,6 +1216,38 @@ export async function setTriageModel(
   return pickOf((await response.json())?.triage_model)
 }
 
+/** The words a bot's reminders level is chosen from, `off` asking never. */
+export type ReminderLevel = "off" | "normal" | "frequent"
+
+/**
+ * How often Gots asks this bot to say what it is doing (`progress.py`, ADR 0066): `off`, `normal`
+ * or `frequent`, held per bot on its host, which owns the counts behind them. A host from before
+ * the route answers nothing, which reads as the level every bot had.
+ */
+export async function getReminderLevel(config: HermesConfig, signal?: AbortSignal) {
+  const response = await request(`${pluginRoot(config.baseUrl)}/reminders`, {
+    headers: headers(config),
+    signal,
+  })
+  const level = (await response.json())?.level
+  return (level === "off" || level === "frequent" ? level : "normal") as ReminderLevel
+}
+
+/** Writes the bot's level, and answers the host's record as it now stands. */
+export async function setReminderLevel(
+  config: HermesConfig,
+  level: ReminderLevel,
+  signal?: AbortSignal,
+) {
+  const response = await request(`${pluginRoot(config.baseUrl)}/reminders`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ level }),
+    signal,
+  })
+  return ((await response.json())?.level ?? level) as ReminderLevel
+}
+
 /**
  * The host's speech settings (`speech.py`): its speech model, the models a pick can be made from
  * with their size and speed, the last pick that didn't load, and the model a phrase's cleanup runs

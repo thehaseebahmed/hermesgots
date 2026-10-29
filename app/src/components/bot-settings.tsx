@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   AudioLinesIcon,
@@ -19,6 +19,7 @@ import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { BOTS } from "@/components/bots"
 import { CodingTab } from "@/components/bot-coding-tab"
+import { Segmented } from "@/components/segmented"
 import { DictationTab } from "@/components/bot-dictation-tab"
 import { McpsTab } from "@/components/mcps-tab"
 import { SkillsTab } from "@/components/skills-tab"
@@ -35,6 +36,7 @@ import {
   SwitchRow,
   ValueRow,
   linkRowClass,
+  rowClass,
   useHeaderAction,
 } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
@@ -56,10 +58,17 @@ import { useDelegationModel } from "@/lib/delegation"
 import { DICTATION } from "@/lib/dictation"
 import { MAX_FALLBACKS } from "@/lib/fallback-list"
 import { useFallbackModels } from "@/lib/fallbacks"
-import { usePluginFeatureAnswers } from "@/lib/features"
+import { usePluginFeatureAnswers, usePluginFeatureOn } from "@/lib/features"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
 import { formatRelative } from "@/lib/format"
-import { checkHealth, getPluginVersion, listModels } from "@/lib/hermes"
+import {
+  checkHealth,
+  getPluginVersion,
+  getReminderLevel,
+  listModels,
+  setReminderLevel,
+  type ReminderLevel,
+} from "@/lib/hermes"
 import { useLarge } from "@/lib/media"
 import { MCP_FEATURES } from "@/lib/mcps"
 import { botModel, fullModel, setDefaultModel, useModelInfo } from "@/lib/model-info"
@@ -157,6 +166,100 @@ function MutedSetting({ profile }: { profile: Profile }) {
       checked={Boolean(profile.muted)}
       onCheckedChange={(checked) => void setBotMuted(profile.id, checked)}
     />
+  )
+}
+
+/** The three words the reminders row offers; the counts behind them are the host's (ADR 0066). */
+const REMINDER_LEVELS: { id: ReminderLevel; label: string }[] = [
+  { id: "off", label: "Off" },
+  { id: "normal", label: "Normal" },
+  { id: "frequent", label: "Frequent" },
+]
+
+/**
+ * How often Gots asks this bot to say what it is doing (`progress.py`, ADR 0066): a value held per
+ * bot on its host, set where the switches beside it are set, since a control that acts where it
+ * sits is what the row is (ADR 0055).
+ *
+ * The words name what Gots does, not what the bot will do: however often it is asked, how much it
+ * says is the model's own choice, and the line under the row tells the reader so. Nothing here
+ * shows a count — twenty calls and ten are the loop's business, not the reader's.
+ */
+function RemindersSetting({ profile }: { profile: Profile }) {
+  const supported = usePluginFeatureOn(profile, "progress_reminders")
+  // The profile is the host the level lives on, so its own connection says which host answered:
+  // held still on those two parts, since a profiles write makes a new object for the same host.
+  const config = useMemo(
+    () => ({ baseUrl: profile.baseUrl, apiKey: profile.apiKey }),
+    [profile.baseUrl, profile.apiKey],
+  )
+  const [level, setLevel] = useState<ReminderLevel | null>(null)
+  const [failed, setFailed] = useState(false)
+  // The level a write is carrying until its answer lands: a refused one drops it, so nothing reads
+  // as saved that the host never kept.
+  const [draft, setDraft] = useState<ReminderLevel | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (!supported) return
+    let cancelled = false
+    setFailed(false)
+    void getReminderLevel(config, AbortSignal.timeout(READ_TIMEOUT_MS))
+      .then((answer) => {
+        if (!cancelled) setLevel(answer)
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [config, supported])
+
+  if (!supported) return null
+
+  const shown = draft ?? level ?? "normal"
+
+  const choose = async (next: ReminderLevel) => {
+    if (saving || failed || next === shown) return
+    setDraft(next)
+    setSaving(true)
+    try {
+      setLevel(await setReminderLevel(config, next))
+    } catch (failure) {
+      toast.error(failure instanceof Error ? failure.message : "Couldn't save that reminder level.")
+    } finally {
+      setDraft(null)
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div
+      className={cn(rowClass, "flex-col items-stretch gap-3")}
+      aria-busy={saving || undefined}
+      data-setting="reminders"
+    >
+      <span className="flex min-w-0 flex-col gap-1">
+        <span className="text-base">Progress reminders</span>
+        <span className="text-sm text-muted-foreground">
+          How often Gots asks the bot to say what it&apos;s doing. How much it says is still the
+          bot&apos;s call.
+        </span>
+        {failed && (
+          <span className="text-sm text-destructive">
+            Couldn&apos;t read this bot&apos;s setting.
+          </span>
+        )}
+      </span>
+      <Segmented
+        label="Progress reminders"
+        options={REMINDER_LEVELS}
+        value={shown}
+        onChange={(next) => void choose(next)}
+        disabled={saving || failed || level === null}
+      />
+    </div>
   )
 }
 
@@ -501,6 +604,7 @@ function GeneralPage({
       <Group>
         {linked && <EnabledSetting profile={profile} />}
         <MutedSetting profile={profile} />
+        <RemindersSetting profile={profile} />
       </Group>
 
       <Caption>Bot Profile</Caption>
