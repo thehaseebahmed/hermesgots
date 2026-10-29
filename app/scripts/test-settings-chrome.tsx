@@ -540,16 +540,7 @@ test(
 )
 
 test("a pick surface says what it is picking and holds the list", async () => {
-  await mount(
-    <PickSurface open onOpenChange={() => {}} title="Image">
-      <PickList
-        label="Image"
-        searchable={false}
-        options={[{ id: "gots", label: "Gots" }]}
-        onPick={() => {}}
-      />
-    </PickSurface>,
-    async () => {
+  await mount(aPick, async () => {
       assert.match(text(), /Image/, "the surface carries the setting's name")
       assert.ok(find('[data-pick-list="Image"]'), "with the list inside it")
     },

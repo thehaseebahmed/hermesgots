@@ -466,15 +466,14 @@ test("Cleanup level is one row that names the level, and its sheet offers all fo
     },
   )
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
-    const row = () => find('[data-setting="cleanup-level"]')
-    await until(async () => Boolean(row()), "the Cleanup level row")
+    await until(async () => Boolean(row("cleanup-level")), "the Cleanup level row")
     assert.deepEqual(
-      lines(row()),
+      lines(row("cleanup-level")),
       ["Cleanup level", "Gots", "How much the tidying changes in a take", "Light"],
       "a title, its mark, what it decides, and the level in play",
     )
     assert.deepEqual(levelCards(), [], "no cards on the page itself: they live in the sheet")
-    await click(row())
+    await click(row("cleanup-level"))
     await until(async () => levelCards().length === 4, "the four levels")
     assert.equal(
       find('[data-slot="sheet-title"]')?.textContent,
@@ -494,7 +493,7 @@ test("Cleanup level is one row that names the level, and its sheet offers all fo
     )
     await click(find('[data-cleanup-level="high"]'))
     assert.deepEqual(calls[0]?.body, { cleanup_level: "high" }, "one level, written to the host")
-    await until(async () => lines(row())[3] === "High", "the row naming the level the host now runs")
+    await until(async () => lines(row("cleanup-level"))[3] === "High", "the row naming the level the host now runs")
     assert.deepEqual(levelCards(), [], "and the sheet closed behind the pick")
   })
 })
