@@ -180,7 +180,10 @@ jobs:
             exit 1
           fi
           notes="$RUNNER_TEMP/release-notes.txt"
-          { echo "$ANDROID_VERSION_NAME ($REF_NAME)"; echo; git log -1 --format=%B "$GITHUB_SHA"; } > "$notes"
+          # The notes name the change by its subject, which a squash merge sets to the PR's title. The
+          # body is every commit's message, and App Distribution refuses notes past an undocumented
+          # length after the APK is already uploaded, which failed the job once.
+          { echo "$ANDROID_VERSION_NAME ($REF_NAME)"; echo; git log -1 --format=%s "$GITHUB_SHA"; } > "$notes"
           apk=$(ls android/app/build/outputs/apk/debug/*.apk | head -n1)
           status=0
           npx --yes firebase-tools@15.31.0 appdistribution:distribute "$apk" \
