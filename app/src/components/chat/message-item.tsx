@@ -39,7 +39,7 @@ import { attachmentSources, mediaRead, useMediaSources } from "@/lib/media-sourc
 import { mediaImages } from "@/lib/media-tags"
 import { openuiParts } from "@/lib/openui-block.ts"
 import type { InterfaceDraw, ThreadBlock } from "@/lib/openui-thread.ts"
-import { mergeThoughtRows, thinkingRows, type RunPart } from "@/lib/thinking"
+import { holdsPlace, mergeThoughtRows, thinkingRows, type RunPart } from "@/lib/thinking"
 import { cn } from "@/lib/utils"
 import { useReveal } from "@/lib/reveal"
 import { isPlanApproval } from "@/lib/workspace"
@@ -649,16 +649,13 @@ export const MessageItem = memo(function MessageItem({
     !awaitingClarify &&
     drawn.some((parts) => parts.some((part) => part.kind === "thinking" && part.thinking))
   const statusLine = streaming && !runningTool && !rowSaysThinking
-  // The row a quiet turn draws between calls goes while one runs, and the thread, held at its end,
-  // would step by a row each time a call starts and ends: its place is kept while the call runs.
-  const lastTool = tools.at(-1)
-  const reserve =
-    streaming &&
-    runningTool &&
-    !waiting &&
-    !storedStatusText &&
-    lastTool !== undefined &&
-    (lastTool.contentOffset ?? 0) >= storedContent.length
+  const reserve = holdsPlace({
+    status: message.status,
+    content: storedContent,
+    statusText: storedStatusText,
+    waiting,
+    tools: storedTools,
+  })
   // A subagent at work is the chat's news even while a tool card speaks for this reply. A count is
   // data rather than a word: `0 && <line/>` is the numeral 0, which React would draw, so the line
   // is asked for by comparing the count.

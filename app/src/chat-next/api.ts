@@ -341,8 +341,8 @@ export async function followRun(
     headers: headers(connection),
     signal,
   })
-  if (!response.ok || !response.body)
-    throw new HostAnswered(`The host answered ${response.status}.`)
+  ensure(response)
+  if (!response.body) throw new Error("The host sent no stream.")
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
   let pending = ""
   for (;;) {

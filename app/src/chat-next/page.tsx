@@ -553,7 +553,8 @@ export function ChatNextPage(options: ThreadOptions) {
 
 /**
  * A session read from the host and drawn. It works with the Hermes that shares a run's events
- * between every follower (`MIN_HERMES`), which the plugin's own manifest holds it to. `server` is the bot's base URL, `/v1` or not.
+ * between every follower, which the plugin's manifest requires. `server` is the bot's base URL,
+ * `/v1` or not.
  */
 export function ChatNextThread({
   pollMs = POLL_MS,
@@ -976,12 +977,17 @@ export function ChatNextThread({
     const run = knownLiveRun({ baseUrl: server, apiKey: key }, session)?.runId
     if (run) join(run)
   }, [ready, hostRun, server, key, session, join])
+  // Held in a ref so a new `join` never asks the host again: this is one read per open.
+  const joining = useRef(join)
+  useEffect(() => {
+    joining.current = join
+  })
   useEffect(() => {
     if (!ready || !server || !key || !session) return
     void readLiveRun({ server, key }, session, alive.current.signal).then((run) => {
-      if (run && !alive.current.signal.aborted) join(run)
+      if (run && !alive.current.signal.aborted) void joining.current(run)
     })
-  }, [ready, server, key, session, join])
+  }, [ready, server, key, session])
 
   // A card opened shows its child's own transcript, read again as the child's state moves.
   const [opened, setOpened] = useState<{ id: string; goal: string }>()
