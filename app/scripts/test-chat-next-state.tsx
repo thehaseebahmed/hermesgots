@@ -6,7 +6,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import type { RunEvent } from "@/chat-next/api"
-import { initial, reduce, type ThreadState } from "@/chat-next/state"
+import { initial, reduce, threadTurns, type ThreadState } from "@/chat-next/state"
 import { events as recordedEvents, fixture as recorded } from "./chat-next-fixtures.ts"
 
 /** Plays events into a thread that has just sent a turn. */
@@ -18,7 +18,9 @@ function play(events: RunEvent[]): ThreadState {
 }
 
 const calls = (state: ThreadState) =>
-  state.turns.at(-1)!.parts.flatMap((part) => (part.kind === "tools" ? part.calls : []))
+  threadTurns(state)
+    .at(-1)!
+    .parts.flatMap((part) => (part.kind === "tools" ? part.calls : []))
 
 test("a call's result lands on the call it names, whichever order the calls complete in", () => {
   const state = play([

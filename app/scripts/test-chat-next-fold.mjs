@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { foldTurns } from "../src/chat-next/fold.ts"
+import { attachmentsText } from "../src/lib/attachment-text.ts"
 import { recorded } from "./chat-next-fixtures.ts"
 
 const fixture = recorded("sky-blue.transcript.json")
@@ -107,4 +108,57 @@ test("a turn recorded from v0.22.5 folds the same way: four calls with their res
     "each call has its result",
   )
   assert.equal(turn.parts.at(-1).kind, "text", "the turn ends on its reply")
+})
+
+test("a request's attachment markers are its files, not its words", () => {
+  const photo = {
+    id: "a",
+    name: "sky.jpg",
+    type: "image/jpeg",
+    size: 2048,
+    image: true,
+    path: "/h/sky.jpg",
+  }
+  const notes = { id: "b", name: "notes.md", type: "text/markdown", size: 512, path: "/h/notes.md" }
+  // Written the way every send writes it, then kept by the host as the request's own row.
+  const content = attachmentsText("What's in these?", [photo, notes])
+  const [turn] = foldTurns([
+    row(1, "user", content),
+    row(2, "assistant", "A sky and a list.", { finish_reason: "stop" }),
+  ])
+  assert.equal(turn.user, "What's in these?")
+  assert.deepEqual(turn.files, [
+    { name: "sky.jpg", type: "image/jpeg", size: 2048, image: true, path: "/h/sky.jpg" },
+    { name: "notes.md", type: "text/markdown", size: 512, image: false, path: "/h/notes.md" },
+  ])
+})
+
+test("a request with no attachments carries no files", () => {
+  const [turn] = foldTurns([row(1, "user", "Just words.")])
+  assert.equal(turn.files, undefined)
+})
+
+test("a steer goes on the reply it steered, without the marker Hermes wraps it in", () => {
+  const turns = foldTurns([
+    row(1, "user", "Write a poem"),
+    row(2, "assistant", "", {
+      tool_calls: [{ id: "c1", function: { name: "terminal", arguments: "{}" } }],
+    }),
+    row(3, "tool", "{}", { tool_call_id: "c1" }),
+    row(
+      4,
+      "user",
+      "[OUT-OF-BAND USER MESSAGE — sent while you worked]\nMake it rhyme\n[/OUT-OF-BAND USER MESSAGE]",
+      {
+        display_kind: "steer",
+      },
+    ),
+    row(5, "assistant", "Roses are red.", { finish_reason: "stop" }),
+  ])
+  assert.equal(turns.length, 1, "a steer opens no turn")
+  assert.deepEqual(
+    turns[0].parts.map((part) => part.kind),
+    ["tools", "steer", "text"],
+  )
+  assert.equal(turns[0].parts[1].text, "Make it rhyme")
 })

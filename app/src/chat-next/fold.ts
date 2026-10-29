@@ -1,3 +1,6 @@
+import { splitAttachments } from "../lib/attachment-text.ts"
+import { steerText } from "../lib/steer.ts"
+
 /** A transcript row as `GET /api/sessions/{id}/messages` returns it; only what a turn is built from. */
 export interface Row {
   id: number
@@ -7,6 +10,8 @@ export interface Row {
   finish_reason?: string | null
   display_kind?: string | null
   tool_calls?: { id: string; function: { name: string; arguments: string } }[] | null
+  /** When the host wrote the row, in Unix seconds. */
+  timestamp?: number | null
 }
 
 export interface ToolCall {
@@ -17,6 +22,9 @@ export interface ToolCall {
   arguments?: string
   /** What the host says of a call while it runs: the argument it previews, cut short. */
   label?: string
+  /** When the call was made and when its result came back, in ms, where the host or the stream said. */
+  startedAt?: number
+  endedAt?: number
 }
 
 /** A reply in the order the host wrote it: its words, then the run of calls it made, then more words. */
@@ -24,10 +32,25 @@ export type Part =
   | { kind: "text"; text: string }
   | { kind: "tools"; calls: ToolCall[] }
   /** The host compacted the conversation here; the rows above are summarised in what follows. */
-  | { kind: "compaction" }
+  | { kind: "compaction"; row?: number; at?: number }
+  /** A message the user sent while the reply ran, which the agent read after its calls. */
+  | { kind: "steer"; text: string }
+
+/** A file a message carried, as its marker line names it: never its bytes. */
+export interface SentFile {
+  name: string
+  type: string
+  size: number
+  image: boolean
+  path?: string
+}
 
 export interface Turn {
   user: string
+  /** When the request was written, in ms, where the host said. */
+  at?: number
+  /** What the request carried, read off its marker lines, which are not the user's words. */
+  files?: SentFile[]
   /** The host archived this turn's request when it compacted: what is left is the work, from the seam on. */
   carried?: boolean
   parts: Part[]
@@ -91,6 +114,7 @@ export function withArchive(live: Row[], archive: Row[]): Row[] {
 const isRequest = (row: Row) =>
   row.role === "user" &&
   row.display_kind !== "hidden" &&
+  row.display_kind !== "steer" &&
   row.display_kind !== "model_switch" &&
   !DELIVERY.test(row.content ?? "") &&
   !RESTATED.test(row.content ?? "")
@@ -116,6 +140,8 @@ const CHILD = /^\[ASYNC DELEGATION COMPLETE — (\S+?)\]/
  * reply, belong to. The match is on the text, since Hermes marks the user's own first row with the
  * same `display_kind` it gives a notification.
  */
+const msOf = (row: Row) => (typeof row.timestamp === "number" ? row.timestamp * 1000 : undefined)
+
 export function foldTurns(rows: Row[]): Turn[] {
   const turns: Turn[] = []
   const callOf = new Map<string, ToolCall>()
@@ -126,19 +152,30 @@ export function foldTurns(rows: Row[]): Turn[] {
       // The host's own rows are the model's input, never the user's words. A compaction leaves one,
       // empty, where the summary went; a model switch is a note to the model.
       if (row.display_kind === "model_switch") continue
+      // A steer is the user's, but it goes on the reply it steered rather than opening a turn.
+      if (row.display_kind === "steer") {
+        turns.at(-1)?.parts.push({ kind: "steer", text: steerText(row.content ?? "") })
+        continue
+      }
       if (RESTATED.test(row.content ?? "")) continue
       if (row.display_kind === "hidden") {
         seamed = true
         const last = turns.at(-1)
+        const at = msOf(row)
+        const seam = {
+          kind: "compaction" as const,
+          row: row.id,
+          ...(at !== undefined ? { at } : {}),
+        }
         if (!last)
           turns.push({
             user: "",
-            parts: [{ kind: "compaction" }],
+            parts: [seam],
             done: true,
             carried: true,
             delivered: [],
           })
-        else if (last.parts.at(-1)?.kind !== "compaction") last.parts.push({ kind: "compaction" })
+        else if (last.parts.at(-1)?.kind !== "compaction") last.parts.push(seam)
         continue
       }
       const content = row.content ?? ""
@@ -152,7 +189,26 @@ export function foldTurns(rows: Row[]): Turn[] {
         if (child) wake.delivered.push(child)
         continue
       }
-      turns.push({ user: content, parts: [], done: false, delivered: [] })
+      const { text, attachments } = splitAttachments(content)
+      const at = msOf(row)
+      turns.push({
+        user: text,
+        ...(at !== undefined ? { at } : {}),
+        ...(attachments.length
+          ? {
+              files: attachments.map(({ name, type, size, image, path }) => ({
+                name,
+                type,
+                size,
+                image: Boolean(image),
+                ...(path ? { path } : {}),
+              })),
+            }
+          : {}),
+        parts: [],
+        done: false,
+        delivered: [],
+      })
       continue
     }
     const turn = turns.at(-1)
@@ -160,7 +216,11 @@ export function foldTurns(rows: Row[]): Turn[] {
     if (row.role === "tool") {
       const call = row.tool_call_id ? callOf.get(row.tool_call_id) : undefined
       // A carried copy of a call can hold the cleared notice where the original kept its output.
-      if (call && !(call.result && PRUNED.test(row.content ?? ""))) call.result = row.content ?? ""
+      if (call && !(call.result && PRUNED.test(row.content ?? ""))) {
+        call.result = row.content ?? ""
+        const at = msOf(row)
+        if (at !== undefined) call.endedAt = at
+      }
       continue
     }
     if (row.role !== "assistant") continue
@@ -184,6 +244,7 @@ export function foldTurns(rows: Row[]): Turn[] {
         id: one.id,
         name: one.function.name,
         arguments: one.function.arguments,
+        ...(msOf(row) !== undefined ? { startedAt: msOf(row) } : {}),
       }
       callOf.set(call.id, call)
       const last = turn.parts.at(-1)

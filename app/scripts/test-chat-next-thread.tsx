@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes } from "react-router"
 
 import { ChatNextPage } from "@/chat-next/page"
 import { recorded } from "./chat-next-fixtures.ts"
-import { find, findAll, json, mount, text } from "./component-kit.tsx"
+import { find, findAll, json, mount, settle, text } from "./component-kit.tsx"
 
 const fixture = recorded("sky-blue.transcript.json")
 const SESSION = fixture.data[0].session_id
@@ -35,6 +35,8 @@ test("a session opened by address draws its request, its words and its calls fro
     assert.equal(asked.length, 1, "one read of the chat")
     assert.equal(asked[0].url.pathname, `/api/sessions/${SESSION}/messages`)
     assert.equal(asked[0].authorization, "Bearer secret")
+    // What was read is drawn from the device's copy, a write and a query after the read lands.
+    for (let tries = 0; !find("[data-user]") && tries < 20; tries++) await settle()
 
     assert.match(find("[data-user]")?.textContent ?? "", /^Do these steps in order/)
     const replies = findAll("[data-text]").map((one) => one.textContent ?? "")

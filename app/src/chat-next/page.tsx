@@ -1,22 +1,44 @@
-import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react"
+// A code session's face (`font-code`), declared here so it loads only with chat-next.
+import "@fontsource-variable/jetbrains-mono/index.css"
+import { useLiveQuery } from "dexie-react-hooks"
+import {
+  memo,
+  type ComponentType,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react"
 import { useSearchParams } from "react-router"
 
 import { Markdown } from "@/components/chat/markdown"
+import { db, type Attachment, type SessionDb } from "@/lib/db"
 
-import { cardsByPart, cardsOf, DELEGATE, type Card } from "./agents"
+import { cardsByPart, cardsOf, DELEGATE, type Agent, type Card } from "./agents"
 import {
   atLeast,
   followRun,
   MIN_HERMES,
+  postRun,
+  readQueue,
+  actOnQueued,
   readAgents,
   readLiveRun,
   readTranscript,
   readVersion,
   respond,
   startRun,
+  stopRun,
+  type Connection,
+  type Queued,
 } from "./api"
 import { foldTurns, type Row, type ToolCall, type Turn } from "./fold"
-import { initial, reduce, type ThreadEvent, type Waiting } from "./state"
+import { foldedOf, threadTurns, turnsOf, type ThreadEvent, type Waiting } from "./state"
+import { readRows, storeFor } from "./store"
+import type { PreparedTurn } from "./turn"
 
 /** The questions a finished `clarify` call got answered, each as "<question> → <answer>". */
 function answered(call: ToolCall): string[] {
@@ -44,6 +66,20 @@ const failure = (error: unknown): ThreadEvent => ({
 })
 
 const NO_CARDS: Card[] = []
+const NO_ROWS: Row[] = []
+
+/**
+ * The turns just drawn, each the very object already held where it says the same. A turn the fold
+ * handed back unchanged is the held one by reference, so a streamed word compares only the turn
+ * being written rather than the whole transcript.
+ */
+function shared(held: Turn[], read: Turn[]): Turn[] {
+  return read.map((turn, at) =>
+    held[at] === turn || (held[at] && JSON.stringify(held[at]) === JSON.stringify(turn))
+      ? held[at]
+      : turn,
+  )
+}
 
 const sameCards = (a: Card[], b: Card[]) =>
   a.length === b.length &&
@@ -112,12 +148,25 @@ const TurnView = memo(
             {turn.done ? " finished" : " just finished"}
           </p>
         ) : turn.carried ? null : (
-          <p
-            data-user
-            className="ml-auto w-fit max-w-[85%] rounded-2xl bg-muted px-4 py-2 whitespace-pre-wrap"
-          >
-            {turn.user}
-          </p>
+          <div className="ml-auto w-fit max-w-[85%] space-y-1">
+            {turn.files?.length ? (
+              <ul
+                data-files
+                className="flex flex-wrap justify-end gap-1 text-xs text-muted-foreground"
+              >
+                {turn.files.map((file, at) => (
+                  <li key={at} data-file className="rounded-md border px-2 py-1">
+                    {file.name}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {turn.user ? (
+              <p data-user className="rounded-2xl bg-muted px-4 py-2 whitespace-pre-wrap">
+                {turn.user}
+              </p>
+            ) : null}
+          </div>
         )}
         {turn.parts.map((part, at) => {
           if (part.kind === "compaction")
@@ -137,6 +186,15 @@ const TurnView = memo(
             return (
               <div key={at} data-text>
                 <Markdown>{part.text}</Markdown>
+              </div>
+            )
+          if (part.kind === "steer")
+            return (
+              <div key={at} data-steer className="ml-auto w-fit max-w-[85%] space-y-1 text-right">
+                <p className="rounded-2xl bg-muted px-4 py-2 text-left whitespace-pre-wrap">
+                  {part.text}
+                </p>
+                <p className="text-xs text-muted-foreground">Steered</p>
               </div>
             )
           // A question the agent asked, and a subagent it set to work, are drawn as what they are.
@@ -281,34 +339,222 @@ function ApprovalCard({
   )
 }
 
+/** Everything a thread's view draws; the page decides all of it and the view only lays it out. */
+export interface ThreadViewProps {
+  server: Connection
+  session: string
+  turns: Turn[]
+  /** The last turn is still being written, by this device or one the page follows. */
+  streaming: boolean
+  cards: Card[][]
+  /** What each child was asked, by its id. */
+  goals: Record<string, string>
+  agents: Agent[]
+  /** The host can't be reached: what is drawn is what the device holds. */
+  away: boolean
+  failure?: string
+  /** Offered where a compaction archived rows the reader hasn't asked for. */
+  earlier?: { state: "idle" | "reading" | "failed"; load: () => void }
+  queue?: { items: Queued[]; paused: boolean; act: (id: string, action: "remove" | "send") => void }
+  /** The child whose transcript a card opened. */
+  child?: { goal: string; rows: Row[]; close: () => void }
+  onOpenCard: (card: Card) => void
+  /** The prompt the run is held up on, drawn where the composer goes. */
+  waiting: ReactNode
+  composer: ReactNode
+  /** Sends a turn as the composer does, for what the view offers to send itself. */
+  send: (text: string, attachments: Attachment[]) => Promise<void>
+}
+
+/** chat-next's own markup: the dev route's, and the one its tests read. */
+function PlainView({
+  turns,
+  cards,
+  goals,
+  away,
+  failure,
+  earlier,
+  queue,
+  child,
+  onOpenCard,
+  waiting,
+  composer,
+}: ThreadViewProps) {
+  return (
+    <main className="mx-auto w-full max-w-3xl space-y-6 p-4">
+      {away ? (
+        <p data-away role="status" className="text-sm text-muted-foreground">
+          Can't reach this host right now.
+        </p>
+      ) : null}
+      {failure !== undefined ? <p role="alert">{failure}</p> : null}
+      {earlier ? (
+        <button
+          data-earlier
+          type="button"
+          disabled={earlier.state === "reading"}
+          className="mx-auto block rounded-md border px-3 py-1 text-sm"
+          onClick={earlier.load}
+        >
+          {earlier.state === "failed"
+            ? "Couldn't load earlier messages. Try again"
+            : "Earlier messages"}
+        </button>
+      ) : null}
+      {turns.map((turn, at) => (
+        <TurnView
+          key={at}
+          turn={turn}
+          cards={cards[at] ?? NO_CARDS}
+          goals={goals}
+          onOpen={onOpenCard}
+        />
+      ))}
+      {queue?.items.map((item) => (
+        <div key={item.id} data-queued className="ml-auto w-fit max-w-[85%] space-y-1 text-right">
+          {item.files.length ? (
+            <p className="text-xs text-muted-foreground">{item.files.join(", ")}</p>
+          ) : null}
+          {item.text ? (
+            <p className="rounded-2xl bg-muted px-4 py-2 text-left whitespace-pre-wrap opacity-60">
+              {item.text}
+            </p>
+          ) : null}
+          <div className="flex justify-end gap-3 text-xs text-muted-foreground">
+            <span data-queued-state>{item.error ?? "Queued"}</span>
+            {queue.paused || item.error ? (
+              <button type="button" data-send-queued onClick={() => queue.act(item.id, "send")}>
+                Send now
+              </button>
+            ) : null}
+            <button type="button" data-remove-queued onClick={() => queue.act(item.id, "remove")}>
+              Remove
+            </button>
+          </div>
+        </div>
+      ))}
+      {child ? <ChildThread goal={child.goal} rows={child.rows} onClose={child.close} /> : null}
+      {waiting}
+      {composer}
+    </main>
+  )
+}
+
 const POLL_MS = 2_000
 const IDLE_MS = 15_000
 const AGENTS_COOLDOWN_MS = 60_000
+/** How long the chat keeps its fast pace after the plugin took a message off the queue. */
+const HANDOFF_MS = 10_000
 /** A turn that has written nothing for this long is not waited on any more. */
 const STALL_MS = 5 * 60_000
 
-/**
- * A session read from the host and drawn, opened by `?server=&key=&session=`. It works with the
- * Hermes that shares a run's events between every follower (`MIN_HERMES`), and says so on an older
- * one rather than ask it for anything.
- */
-export function ChatNextPage({
-  pollMs = POLL_MS,
-  idleMs = IDLE_MS,
-  stallMs = STALL_MS,
-}: {
+/** What a composer drawn by the app is handed to drive the thread with. */
+export interface ComposerControls {
+  /** A turn of this device's is running: a message sent now would land in the middle of it. */
+  busy: boolean
+  /** Rejects when nothing reached the host, so the composer can hand the message back. */
+  send: (text: string, attachments: Attachment[]) => Promise<void>
+  /** Hands a message sent mid-reply to the plugin's queue, to start once the reply is over. */
+  queue: (text: string, attachments: Attachment[]) => Promise<void>
+  /** Gives the running reply a message it reads after its current calls. */
+  steer: (text: string, attachments: Attachment[]) => Promise<void>
+  /** Whether a run this thread follows can take a steer at all. */
+  canSteer: boolean
+  stop: () => void
+}
+
+interface ThreadOptions {
+  /** Builds a turn as the app sends one; without it, the message is posted as plain text. */
+  prepareTurn?: (text: string, attachments: Attachment[]) => Promise<PreparedTurn>
+  /** Queues a message on the plugin, as the app builds one; without it, nothing can be queued. */
+  queueTurn?: (text: string, attachments: Attachment[]) => Promise<void>
+  /** Steers the running reply through the plugin's queue; without it, nothing can be steered. */
+  steerTurn?: (text: string, attachments: Attachment[]) => Promise<void>
+  /**
+   * Asks the host where a message belongs before it is sent here (a bot's Main, ADR 0029): answers
+   * the attachments to send it with where it stays, or nothing where the host sent it elsewhere.
+   */
+  triageTurn?: (
+    text: string,
+    attachments: Attachment[],
+    options: { steer: boolean },
+  ) => Promise<Attachment[] | undefined>
+  /**
+   * Called once the thread has read the host (`opened`), and each time a turn has ended (`turn`):
+   * where the app reads again what the plugin holds for the chat beside its transcript.
+   */
+  onSettled?: (reason: "opened" | "turn", thread: { turns: number }) => void
+  /** The app's own composer; without it, a bare text box. */
+  Composer?: ComponentType<{ controls: ComposerControls }>
+  /** What draws the thread; without it, chat-next's own plain markup. */
+  View?: ComponentType<ThreadViewProps>
   pollMs?: number
   idleMs?: number
   stallMs?: number
-}) {
+  /** The device's database; a test gives each device its own (ADR 0065). */
+  database?: SessionDb
+}
+
+/** The dev route: a session opened by `?server=&key=&session=`. */
+export function ChatNextPage(options: ThreadOptions) {
   const [params] = useSearchParams()
-  const server = params.get("server")
-  const key = params.get("key")
-  const session = params.get("session")
-  const [state, dispatch] = useReducer(reduce, initial)
+  return (
+    <ChatNextThread
+      {...options}
+      server={params.get("server")}
+      apiKey={params.get("key")}
+      session={params.get("session")}
+    />
+  )
+}
+
+/**
+ * A session read from the host and drawn. It works with the Hermes that shares a run's events
+ * between every follower (`MIN_HERMES`), and says so on an older one rather than ask it for
+ * anything. `server` is the bot's base URL, `/v1` or not.
+ */
+export function ChatNextThread({
+  pollMs = POLL_MS,
+  idleMs = IDLE_MS,
+  stallMs = STALL_MS,
+  database = db,
+  server,
+  apiKey: key,
+  session,
+  prepareTurn,
+  queueTurn,
+  steerTurn,
+  triageTurn,
+  onSettled,
+  Composer,
+  View = PlainView,
+}: ThreadOptions & { server: string | null; apiKey: string | null; session: string | null }) {
+  // The thread is drawn from the device's copy; the store is the only thing that writes it, and
+  // says what the page is doing.
+  const store = useMemo(() => storeFor(database, session ?? ""), [database, session])
+  const doing = useSyncExternalStore(store.subscribe, store.doing)
+  const dispatch = useCallback((event: ThreadEvent) => void store.apply(event), [store])
+  const rows = useLiveQuery(
+    () => readRows(database, session ?? "", "live"),
+    [database, session],
+    NO_ROWS,
+  )
+  const held = useLiveQuery(() => database.sessionStates.get(session ?? ""), [database, session])
+  const archived = useLiveQuery(
+    () => (held?.archived ? readRows(database, session ?? "", "archive") : undefined),
+    [database, session, held?.archived],
+  )
+  const folded = useMemo(() => foldedOf(rows, archived), [rows, archived])
+  const drawn = useRef<Turn[]>([])
+  const turns = useMemo(
+    () => (drawn.current = shared(drawn.current, turnsOf(folded, held?.live))),
+    [folded, held?.live],
+  )
   const [draft, setDraft] = useState("")
   const [earlier, setEarlier] = useState<"idle" | "reading" | "failed">("idle")
-  const [host, setHost] = useState<"checking" | "ok" | { version?: string }>("checking")
+  const [host, setHost] = useState<"checking" | "ok" | "away" | { version?: string }>("checking")
+  // A host that cannot be reached is asked again, and meanwhile the chat is what the device holds.
+  const [asks, setAsks] = useState(0)
   const ready = host === "ok"
   // A read begun before a send or a joined run is stale and does not land. Reads of the transcript
   // run one at a time, and a request that comes while one is out waits for it and is answered by
@@ -320,15 +566,31 @@ export function ChatNextPage({
   // A host without the plugin has no list of children; once it has said so it is not asked again
   // for a while.
   const noAgentsUntil = useRef(0)
+  const noQueueUntil = useRef(0)
 
   useEffect(() => {
     if (!server || !key) return
     const controller = new AbortController()
     void readVersion({ server, key }, controller.signal).then((version) => {
-      if (!controller.signal.aborted) setHost(version && atLeast(version) ? "ok" : { version })
+      if (controller.signal.aborted) return
+      if (version === "unreachable") setHost("away")
+      else setHost(version && atLeast(version) ? "ok" : { version })
     })
     return () => controller.abort()
-  }, [server, key])
+  }, [server, key, asks])
+
+  useEffect(() => {
+    if (host !== "away") return
+    const again = () => {
+      if (document.visibilityState === "visible") setAsks((n) => n + 1)
+    }
+    const timer = setInterval(again, idleMs)
+    document.addEventListener("visibilitychange", again)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener("visibilitychange", again)
+    }
+  }, [host, idleMs])
 
   const catchUp = useCallback(
     async function read(final = false): Promise<void> {
@@ -341,14 +603,18 @@ export function ChatNextPage({
       reading.current = (async () => {
         try {
           const asking = Date.now() >= noAgentsUntil.current
-          const [rows, listed] = await Promise.all([
+          const askingQueue = Date.now() >= noQueueUntil.current
+          const [rows, listed, queued] = await Promise.all([
             readTranscript({ server, key }, session, alive.current.signal),
             asking ? readAgents({ server, key }, session, alive.current.signal) : undefined,
+            askingQueue ? readQueue({ server, key }, session, alive.current.signal) : undefined,
           ])
           if (asking && !listed) noAgentsUntil.current = Date.now() + AGENTS_COOLDOWN_MS
+          if (askingQueue && !queued) noQueueUntil.current = Date.now() + AGENTS_COOLDOWN_MS
           if (mine === reads.current) {
             dispatch({ type: "transcript", rows, final })
             if (listed) dispatch({ type: "agents", agents: listed })
+            if (queued) dispatch({ type: "queue", ...queued })
           }
         } catch (error) {
           if (!alive.current.signal.aborted && mine === reads.current) dispatch(failure(error))
@@ -361,13 +627,25 @@ export function ChatNextPage({
       queued.current = null
       if (next) await read(next.final)
     },
-    [server, key, session],
+    [server, key, session, dispatch],
   )
 
+  /** How many of the thread's turns the user asked, as the app counts a chat's turns. */
+  const asked = useCallback(
+    () => ({
+      turns: threadTurns(store.get()).filter((turn) => !turn.wake && !turn.carried).length,
+    }),
+    [store],
+  )
+  // Held in a ref, so a caller's new function each render never re-runs the reads that call it.
+  const settled = useRef(onSettled)
+  useEffect(() => {
+    settled.current = onSettled
+  })
   useEffect(() => {
     if (!ready) return
     alive.current = new AbortController()
-    void catchUp()
+    void catchUp().then(() => settled.current?.("opened", asked()))
     // A device that was away missed what the others wrote; it asks again as it comes back.
     const back = () => {
       if (document.visibilityState === "visible") void catchUp()
@@ -377,32 +655,60 @@ export function ChatNextPage({
       document.removeEventListener("visibilitychange", back)
       alive.current.abort()
     }
-  }, [catchUp, ready])
+  }, [catchUp, ready, asked])
 
   // A turn the host has not finished and this device is not streaming is followed, by its events
   // where the plugin names the run and by the transcript where it cannot.
-  const last = state.turns.at(-1)
-  const following = state.status !== "loading" && !state.running && last !== undefined && !last.done
+  const last = turns.at(-1)
+  const following = doing.status !== "loading" && !doing.running && last !== undefined && !last.done
+  // A turn that lands from the host — another device's, or a wake — settles the chat too.
+  // What was settled when the page opened is the open's to read, not a turn's.
+  const settledTurns = last?.done ? turns.length : 0
+  const seenSettled = useRef<number>(undefined)
+  useEffect(() => {
+    if (!ready || doing.status === "loading") return
+    const seen = seenSettled.current
+    seenSettled.current = settledTurns
+    if (seen !== undefined && settledTurns && settledTurns !== seen)
+      settled.current?.("turn", asked())
+  }, [ready, doing.status, settledTurns, asked])
   // A child at work, or one that finished whose result the transcript does not hold yet, keeps the
   // chat read at the fast pace too: the card is to follow it and the wake turn is on its way.
-  const agents = state.agents ?? []
+  const listed = held?.agents
+  const agents = listed ?? []
   const goals = useMemo(
-    () => Object.fromEntries((state.agents ?? []).map((agent) => [agent.id, agent.goal])),
-    [state.agents],
+    () => Object.fromEntries((listed ?? []).map((agent) => [agent.id, agent.goal])),
+    [listed],
   )
-  const delivered = useMemo(() => state.turns.flatMap((turn) => turn.delivered), [state.turns])
+  const delivered = useMemo(() => turns.flatMap((turn) => turn.delivered), [turns])
   const working = agents.some((agent) => agent.status === "running")
   const owed = agents.some((agent) => agent.status !== "running" && !delivered.includes(agent.id))
   // A delegation just dispatched has no child on the list yet; where the host lists children at
   // all, the list is read again until the child shows, whatever else the page is doing.
-  const cards = useMemo(() => cardsOf(state.turns, state.agents ?? []), [state.turns, state.agents])
+  const cards = useMemo(() => cardsOf(turns, listed ?? []), [turns, listed])
   const starting =
-    state.agents !== undefined &&
-    cards.some((list) => list.some((card) => card.status === "starting"))
-  const busy = following || working || owed || starting
+    listed !== undefined && cards.some((list) => list.some((card) => card.status === "starting"))
+  // A message the plugin holds starts once the run before it ends, so the chat is read at the
+  // fast pace until it has: the turn it opens is the next one to follow. The read that finds the
+  // queue emptied can land before the transcript has that turn, so the pace holds until it does.
+  const inQueue = held?.queue?.items.length ?? 0
+  const [handedOff, setHandedOff] = useState(false)
+  const before = useRef({ inQueue, turns: turns.length })
+  useEffect(() => {
+    const was = before.current
+    before.current = { inQueue, turns: turns.length }
+    if (inQueue < was.inQueue) setHandedOff(true)
+    else if (turns.length > was.turns) setHandedOff(false)
+  }, [inQueue, turns.length])
+  useEffect(() => {
+    if (!handedOff) return
+    const timer = setTimeout(() => setHandedOff(false), HANDOFF_MS)
+    return () => clearTimeout(timer)
+  }, [handedOff])
+  const busy = following || working || owed || starting || inQueue > 0 || handedOff
   const progress = useRef({ shape: "", at: 0 })
   const shape =
-    state.turns
+    turns
       .map((turn) =>
         turn.parts.map((part) => (part.kind === "tools" ? part.calls.length : "t")).join(),
       )
@@ -410,12 +716,14 @@ export function ChatNextPage({
   useEffect(() => {
     progress.current = { shape, at: Date.now() }
   }, [shape])
-  // One run's events at a time, whoever started it.
+  // One run's events at a time, whoever started it, and which run that is, for Stop.
   const streaming = useRef(false)
+  const followingRun = useRef<string>(undefined)
   const follow = useCallback(
     async (run: string) => {
       if (!server || !key || !session) return
       streaming.current = true
+      followingRun.current = run
       try {
         await followRun(
           { server, key },
@@ -428,12 +736,15 @@ export function ChatNextPage({
         dispatch(failure(error))
       } finally {
         streaming.current = false
+        if (followingRun.current === run) followingRun.current = undefined
         dispatch({ type: "ended" })
       }
       // Whatever the stream said, the host's transcript is what the turn was.
       await catchUp(true)
+      // A turn that finished settles the chat as it lands; one stopped or failed short never does.
+      if (!threadTurns(store.get()).at(-1)?.done) settled.current?.("turn", asked())
     },
-    [server, key, session, catchUp],
+    [server, key, session, catchUp, dispatch, store, asked],
   )
 
   // An open chat is read now and then even when it looks finished, since another device may have
@@ -474,6 +785,7 @@ export function ChatNextPage({
     starting,
     catchUp,
     follow,
+    dispatch,
     server,
     key,
     session,
@@ -504,21 +816,86 @@ export function ChatNextPage({
     [],
   )
 
-  async function send() {
-    const text = draft.trim()
-    if (!text || !server || !key || !session) return
-    setDraft("")
+  /**
+   * Sends a message as a turn. A send that never reached the host leaves nothing in the thread and
+   * rejects, so the composer that sent it gets the words back.
+   */
+  async function sendTurn(text: string, attachments: Attachment[] = []) {
+    const words = text.trim()
+    if ((!words && !attachments.length) || !server || !key || !session) return
     reads.current++
     streaming.current = true
-    dispatch({ type: "sent", user: text })
+    dispatch({
+      type: "sent",
+      user: words,
+      at: Date.now(),
+      files: attachments.map(({ name, type, size, image }) => ({
+        name,
+        type,
+        size,
+        image: Boolean(image),
+      })),
+    })
+    let prepared: PreparedTurn | undefined
+    let run: string
     try {
-      follow(await startRun({ server, key }, session, text, alive.current.signal))
+      // A message the host sends to a thread leaves this one, as any message the user sent would.
+      const kept = triageTurn ? await triageTurn(words, attachments, { steer: false }) : attachments
+      if (!kept) {
+        streaming.current = false
+        return dispatch({ type: "moved" })
+      }
+      prepared = prepareTurn ? await prepareTurn(words, kept) : undefined
+      run = prepared
+        ? await postRun({ server, key }, prepared.body, prepared.key, alive.current.signal)
+        : await startRun({ server, key }, session, words, alive.current.signal)
     } catch (error) {
       streaming.current = false
+      prepared?.settled(false)
       if (alive.current.signal.aborted) return
-      dispatch(failure(error))
-      await catchUp(true)
+      dispatch({ type: "unsent", error: error instanceof Error ? error.message : String(error) })
+      throw error
     }
+    prepared?.settled(true)
+    void follow(run)
+  }
+
+  async function send() {
+    const text = draft
+    setDraft("")
+    await sendTurn(text).catch(() => setDraft((now) => now || text))
+  }
+
+  // Mid-reply too, a Main's message is triaged first: one for another thread goes there at once,
+  // and the rest queue or steer behind the reply.
+  async function queueMessage(text: string, attachments: Attachment[]) {
+    if (!queueTurn) throw new Error("This bot can't hold a message until the reply is over.")
+    const kept = triageTurn ? await triageTurn(text, attachments, { steer: false }) : attachments
+    if (!kept) return
+    await queueTurn(text, kept)
+    void catchUp()
+  }
+
+  async function steerMessage(text: string, attachments: Attachment[]) {
+    if (!steerTurn) throw new Error("This reply can't be steered.")
+    const kept = triageTurn ? await triageTurn(text, attachments, { steer: true }) : attachments
+    if (!kept) return
+    await steerTurn(text, kept)
+    void catchUp()
+  }
+
+  function onQueued(id: string, action: "remove" | "send") {
+    if (!server || !key || !session) return
+    actOnQueued({ server, key }, session, id, action).then(
+      () => void catchUp(),
+      (error) => dispatch(failure(error)),
+    )
+  }
+
+  function stop() {
+    const run = followingRun.current
+    if (!run || !server || !key) return
+    stopRun({ server, key }, run).catch((error) => dispatch(failure(error)))
   }
 
   // An answer that fails is said so; one that lands takes the card away at once, and the host's
@@ -559,45 +936,33 @@ export function ChatNextPage({
       </p>
     )
 
-  return (
-    <main className="mx-auto w-full max-w-3xl space-y-6 p-4">
-      {state.status === "failed" ? <p role="alert">{state.error}</p> : null}
-      {!state.archived &&
-      state.turns.some((turn) => turn.parts.some((part) => part.kind === "compaction")) ? (
-        <button
-          data-earlier
-          type="button"
-          disabled={earlier === "reading"}
-          className="mx-auto block rounded-md border px-3 py-1 text-sm"
-          onClick={() => void loadEarlier()}
-        >
-          {earlier === "failed" ? "Couldn't load earlier messages. Try again" : "Earlier messages"}
-        </button>
-      ) : null}
-      {state.turns.map((turn, at) => (
-        <TurnView key={at} turn={turn} cards={cards[at] ?? NO_CARDS} goals={goals} onOpen={open} />
-      ))}
-      {opened && openedRows?.id === opened.id ? (
-        <ChildThread
-          goal={opened.goal}
-          rows={openedRows.rows}
-          onClose={() => setOpened(undefined)}
-        />
-      ) : null}
-      {state.waiting?.kind === "question" ? (
-        <QuestionCard
-          key={state.waiting.promptId}
-          waiting={state.waiting}
-          onAnswer={(value) => void answer(state.waiting as Waiting, value)}
-        />
-      ) : null}
-      {state.waiting?.kind === "approval" ? (
-        <ApprovalCard
-          key={state.waiting.promptId}
-          waiting={state.waiting}
-          onChoose={(choice) => void answer(state.waiting as Waiting, choice)}
-        />
-      ) : null}
+  const waitingCard =
+    doing.waiting?.kind === "question" ? (
+      <QuestionCard
+        key={doing.waiting.promptId}
+        waiting={doing.waiting}
+        onAnswer={(value) => void answer(doing.waiting as Waiting, value)}
+      />
+    ) : doing.waiting?.kind === "approval" ? (
+      <ApprovalCard
+        key={doing.waiting.promptId}
+        waiting={doing.waiting}
+        onChoose={(choice) => void answer(doing.waiting as Waiting, choice)}
+      />
+    ) : null
+  const composer =
+    host === "away" ? null : Composer ? (
+      <Composer
+        controls={{
+          busy: doing.running,
+          send: sendTurn,
+          queue: queueMessage,
+          steer: steerMessage,
+          canSteer: doing.running && Boolean(steerTurn),
+          stop,
+        }}
+      />
+    ) : (
       <form
         className="flex gap-2"
         onSubmit={(event) => {
@@ -619,6 +984,39 @@ export function ChatNextPage({
           Send
         </button>
       </form>
-    </main>
+    )
+
+  return (
+    <View
+      server={{ server, key }}
+      session={session}
+      turns={turns}
+      streaming={doing.running || following}
+      cards={cards}
+      goals={goals}
+      agents={agents}
+      away={host === "away"}
+      failure={doing.status === "failed" ? (doing.error ?? "") : undefined}
+      earlier={
+        !held?.archived &&
+        turns.some((turn) => turn.parts.some((part) => part.kind === "compaction"))
+          ? { state: earlier, load: () => void loadEarlier() }
+          : undefined
+      }
+      queue={
+        held?.queue?.items.length
+          ? { items: held.queue.items, paused: held.queue.paused, act: onQueued }
+          : undefined
+      }
+      child={
+        opened && openedRows?.id === opened.id
+          ? { goal: opened.goal, rows: openedRows.rows, close: () => setOpened(undefined) }
+          : undefined
+      }
+      onOpenCard={open}
+      waiting={waitingCard}
+      composer={composer}
+      send={sendTurn}
+    />
   )
 }

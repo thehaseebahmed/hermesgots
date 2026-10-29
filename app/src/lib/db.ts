@@ -1,5 +1,8 @@
-import Dexie, { type EntityTable, type Transaction } from "dexie"
+import Dexie, { type EntityTable, type Table, type Transaction } from "dexie"
 
+import type { Agent } from "@/chat-next/agents"
+import type { Queued } from "@/chat-next/api"
+import type { Row, Turn } from "@/chat-next/fold"
 import { BOTS, LEGACY_BOT_IDS } from "@/components/bots"
 import { connectionKey } from "@/lib/connection"
 import { forgetRead } from "@/lib/read-marks"
@@ -38,6 +41,8 @@ export interface Settings {
   developer?: boolean
   /** The bot-first layout: bots in the sidebar, each chat a thread in its bot. Developer, local. */
   botThreads?: boolean
+  /** A chat opens on chat-next instead of the current screen (ADR 0065). Developer, local. */
+  chatNext?: boolean
   /** Meetings: add a recording or transcript and read the host's notes. Developer, local. */
   meetings?: boolean
   /** AFK's workflow library: a project's Workflow row, its library and its editor. Developer, local. */
@@ -705,6 +710,49 @@ export const DEFAULT_PROFILE = {
   model: "hermes-agent",
 }
 
+/**
+ * A row of a Hermes session's transcript as chat-next read it (ADR 0065): `live` from the
+ * transcript, `archive` from the read that holds what a compaction took out of it too. `pos` is the
+ * row's place in that read, which is the conversation's order rather than the ids'.
+ */
+export interface SessionRow {
+  session: string
+  set: "live" | "archive"
+  id: number
+  pos: number
+  row: Row
+}
+
+/** What chat-next keeps of a session beside its rows; what the page is doing is never kept. */
+export interface SessionState {
+  session: string
+  /** The children the session delegated to, as the plugin last listed them. */
+  agents?: Agent[]
+  /** The reader asked for the rows a compaction archived, so later reads fold them in. */
+  archived?: boolean
+  /** The turn this device streamed, until the host's transcript replaces it. */
+  live?: LiveTurn
+  /** What the plugin holds for the session, as it last listed it. */
+  queue?: { items: Queued[]; paused: boolean }
+}
+
+/** A streamed turn: a new one after the transcript's, or the transcript's last one drawn again. */
+export interface LiveTurn {
+  turn: Turn
+  replaces: boolean
+}
+
+/** chat-next's tables, so a test can give each device a database of its own (ADR 0065). */
+export const SESSION_STORES = {
+  sessionRows: "[session+set+id], [session+set+pos]",
+  sessionStates: "session",
+}
+
+export type SessionDb = Dexie & {
+  sessionRows: Table<SessionRow, [string, string, number]>
+  sessionStates: EntityTable<SessionState, "session">
+}
+
 export const db = new Dexie("memento") as Dexie & {
   settings: EntityTable<Settings, "id">
   profiles: EntityTable<Profile, "id">
@@ -721,6 +769,8 @@ export const db = new Dexie("memento") as Dexie & {
   skills: EntityTable<CachedSkills, "id">
   meetingRecordings: EntityTable<SavedMeetingRecording, "id">
   prompts: EntityTable<PromptEntry, "id">
+  sessionRows: SessionDb["sessionRows"]
+  sessionStates: SessionDb["sessionStates"]
 }
 
 db.version(1).stores({
@@ -998,6 +1048,8 @@ db.version(26)
 // memory only, so every write to the take path paid to update an index nothing read.
 db.version(27).stores({ dictationLog: "id, connection, loggedAt" })
 
+db.version(28).stores(SESSION_STORES)
+
 db.on("populate", (tx) => seedProfile(tx))
 
 export async function getSettings(): Promise<Settings> {
@@ -1212,12 +1264,21 @@ export async function updateConversation(
 }
 
 export async function deleteConversation(id: string, { remote = false } = {}) {
-  const tables = [db.conversations, db.messages, db.tombstones, db.drafts, db.dictations]
+  const tables = [
+    db.conversations,
+    db.messages,
+    db.tombstones,
+    db.drafts,
+    db.dictations,
+    db.sessionRows,
+    db.sessionStates,
+  ]
   const dropped = await db.transaction("rw", tables, async () => {
     const conversation = await db.conversations.get(id)
     // Main goes only when another device says so (`remote`), never from here.
     if (conversation?.main && !remote) return false
     await db.messages.where("conversationId").equals(id).delete()
+    if (conversation?.hermesSessionId) await forgetSession(db, conversation.hermesSessionId)
     await db.drafts.delete(`c:${id}`)
     await db.dictations.delete(`c:${id}`)
     await db.conversations.delete(id)
@@ -1231,6 +1292,13 @@ export async function deleteConversation(id: string, { remote = false } = {}) {
     return true
   })
   if (dropped) forgetRead(id)
+}
+
+/** Drops what chat-next keeps of a session: both reads of its rows and its state. */
+export async function forgetSession(database: SessionDb, session: string) {
+  // Every key that opens with the session sorts after `[session]` and before `[session, []]`.
+  await database.sessionRows.where("[session+set+id]").between([session], [session, []]).delete()
+  await database.sessionStates.delete(session)
 }
 
 export async function getMessages(conversationId: string) {
@@ -1254,6 +1322,8 @@ export async function clearAllData() {
     db.dictationStats,
     db.skills,
     db.meetingRecordings,
+    db.sessionRows,
+    db.sessionStates,
   ]
   await db.transaction("rw", tables, async () => {
     await Promise.all(tables.map((table) => table.clear()))

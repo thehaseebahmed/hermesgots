@@ -1,7 +1,11 @@
+import { pluginRoot, serverRoot } from "../lib/host-url.ts"
+import { READ_TIMEOUT_MS } from "../lib/freshness.ts"
+
 import type { Agent } from "./agents"
 import type { Row } from "./fold"
 import type { Waiting } from "./state"
 
+/** A bot's server, as its base URL (`/v1` or not, `/p/<profile>` or not) and key. */
 export interface Connection {
   server: string
   key: string
@@ -28,12 +32,15 @@ export interface RunEvent {
   question?: string
   choices?: string[]
   multi_select?: boolean
+  /** When the host wrote the event, in Unix seconds. */
+  timestamp?: number
 }
 
-const READ_TIMEOUT_MS = 15_000
 const PAGE = 50
 
-const root = ({ server }: Connection) => server.replace(/\/+$/, "")
+const root = ({ server }: Connection) => serverRoot(server)
+// A bot served at `/p/<profile>` reaches its plugin inside the plugin's own prefix.
+const plugin = ({ server }: Connection) => pluginRoot(server)
 const headers = ({ key }: Connection) => ({ Authorization: `Bearer ${key}` })
 const within = (signal?: AbortSignal) =>
   AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(READ_TIMEOUT_MS)])
@@ -56,11 +63,23 @@ export function atLeast(version: string, min = MIN_HERMES): boolean {
   return true
 }
 
-/** The Hermes version the host reports on `/health`, which asks for no key. */
-export async function readVersion(connection: Connection, signal?: AbortSignal) {
+/**
+ * The Hermes version the host reports on `/health`, which asks for no key. A host that answers
+ * without one has no version; one that cannot be reached at all is `"unreachable"`, which says
+ * nothing about what it runs.
+ */
+export async function readVersion(
+  connection: Connection,
+  signal?: AbortSignal,
+): Promise<string | "unreachable" | undefined> {
+  let response: Response
   try {
-    const response = await fetch(`${root(connection)}/health`, { signal: within(signal) })
-    if (!response.ok) return undefined
+    response = await fetch(`${root(connection)}/health`, { signal: within(signal) })
+  } catch {
+    return "unreachable"
+  }
+  if (!response.ok) return undefined
+  try {
     const { version } = (await response.json()) as { version?: string }
     return typeof version === "string" ? version : undefined
   } catch {
@@ -101,24 +120,45 @@ export async function readTranscript(
 }
 
 /** Starts a turn on the host; it carries on without us, so the run's id is all there is to keep. */
-export async function startRun(
+export function startRun(
   connection: Connection,
   session: string,
   input: string,
   signal?: AbortSignal,
 ): Promise<string> {
+  return postRun(connection, { session_id: session, input }, crypto.randomUUID(), signal)
+}
+
+/**
+ * Starts a turn from a whole `POST /v1/runs` body, as the app builds one. `key` is the request's
+ * `Idempotency-Key`, so a retried post answers the run it already started.
+ */
+export async function postRun(
+  connection: Connection,
+  body: Record<string, unknown>,
+  key: string,
+  signal?: AbortSignal,
+): Promise<string> {
   const response = await fetch(`${root(connection)}/v1/runs`, {
     method: "POST",
-    headers: {
-      ...headers(connection),
-      "Content-Type": "application/json",
-      "Idempotency-Key": crypto.randomUUID(),
-    },
-    body: JSON.stringify({ session_id: session, input }),
+    headers: { ...headers(connection), "Content-Type": "application/json", "Idempotency-Key": key },
+    body: JSON.stringify(body),
     signal: within(signal),
   })
   ensure(response)
-  return ((await response.json()) as { run_id: string }).run_id
+  const { run_id } = (await response.json()) as { run_id?: unknown }
+  if (typeof run_id !== "string") throw new Error("The host didn't start the run.")
+  return run_id
+}
+
+/** Stops a run; the plugin stops the subagents it started (`delegation.sweep_stops`). */
+export async function stopRun(connection: Connection, runId: string) {
+  const response = await fetch(`${root(connection)}/v1/runs/${encodeURIComponent(runId)}/stop`, {
+    method: "POST",
+    headers: headers(connection),
+    signal: within(),
+  })
+  ensure(response)
 }
 
 /**
@@ -131,7 +171,7 @@ export async function readLiveRun(
   signal?: AbortSignal,
 ): Promise<string | undefined> {
   try {
-    const response = await fetch(`${root(connection)}/api/plugins/memento/runs/live`, {
+    const response = await fetch(`${plugin(connection)}/runs/live`, {
       headers: headers(connection),
       signal: within(signal),
     })
@@ -154,7 +194,7 @@ export async function readAgents(
 ): Promise<Agent[] | undefined> {
   try {
     const response = await fetch(
-      `${root(connection)}/api/plugins/memento/sessions/${encodeURIComponent(session)}/agents`,
+      `${plugin(connection)}/sessions/${encodeURIComponent(session)}/agents`,
       { headers: headers(connection), signal: within(signal) },
     )
     if (!response.ok) return undefined
@@ -163,6 +203,73 @@ export async function readAgents(
   } catch {
     return undefined
   }
+}
+
+/** A message the plugin holds for the session, to start once the run before it is over. */
+export interface Queued {
+  id: string
+  text: string
+  files: string[]
+  /** Why the plugin couldn't start it; it waits until it's sent again. */
+  error?: string
+}
+
+/**
+ * The session's queue on the Gots plugin: what waits, and whether a stopped or failed run has paused
+ * it. A host without the plugin, or one that cannot say, has no answer.
+ */
+export async function readQueue(
+  connection: Connection,
+  session: string,
+  signal?: AbortSignal,
+): Promise<{ items: Queued[]; paused: boolean } | undefined> {
+  try {
+    const response = await fetch(
+      `${plugin(connection)}/sessions/${encodeURIComponent(session)}/queue`,
+      {
+        headers: headers(connection),
+        signal: within(signal),
+      },
+    )
+    if (!response.ok) return undefined
+    const body = (await response.json()) as {
+      items?: {
+        id?: unknown
+        text?: unknown
+        attachments?: { name?: unknown }[]
+        error?: unknown
+      }[]
+      paused?: unknown
+    }
+    if (!Array.isArray(body.items)) return undefined
+    return {
+      paused: Boolean(body.paused),
+      items: body.items.map((item) => ({
+        id: String(item.id),
+        text: typeof item.text === "string" ? item.text : "",
+        files: (Array.isArray(item.attachments) ? item.attachments : []).map((file) =>
+          String(file?.name ?? "file"),
+        ),
+        ...(typeof item.error === "string" && item.error ? { error: item.error } : {}),
+      })),
+    }
+  } catch {
+    return undefined
+  }
+}
+
+/** Takes a queued message back, or sends it now while the queue is paused. */
+export async function actOnQueued(
+  connection: Connection,
+  session: string,
+  id: string,
+  action: "remove" | "send",
+) {
+  const response = await fetch(
+    `${plugin(connection)}/sessions/${encodeURIComponent(session)}/queue/${encodeURIComponent(id)}/${action}`,
+    { method: "POST", headers: headers(connection), signal: within() },
+  )
+  ensure(response)
 }
 
 /**

@@ -6,6 +6,12 @@
 
 /** The slow timer a screen keeps when its server streams its changes: a net, not the signal. */
 export const SAFETY_MS = 5 * 60_000
+/**
+ * How often streamed text is written to IndexedDB, by both chat screens. Each write re-runs every
+ * live query over the chat, and `useReveal` paces the text on screen anyway, so a faster write buys
+ * nothing. A tool call, an approval, a question or a status change is written at once.
+ */
+export const FLUSH_INTERVAL_MS = 150
 /** A read that hasn't answered by now is treated as lost, since a dead connection can hang. */
 export const READ_TIMEOUT_MS = 15_000
 /** A write the host hasn't answered by now is given up on as well: a screen waiting on it (the bot

@@ -86,7 +86,7 @@ test.describe("idle: every turn finished", () => {
     await turn(first, host, "two", "Second.")
     await first.close()
     host.compact()
-    await withDevice(openDevice(host), async (again) => {
+    await withDevice(openDevice(host, { database: first.database }), async (again) => {
       await showsEverything(again, host, "read back from the host, compacted")
       await reachesBack(again, host)
     })
@@ -170,7 +170,7 @@ test.describe("streaming here: this device sent the turn and follows it", () => 
     run.tool("terminal", "one", '{"exit_code": 0}')
     await before.close()
     host.compact()
-    await withDevice(openDevice(host), async (after) => {
+    await withDevice(openDevice(host, { database: before.database }), async (after) => {
       await showsEverything(after, host, "the carried turn and the call made so far")
       run.tool("terminal", "two", '{"exit_code": 0}')
       run.finish("Finished after the reload.")
@@ -237,7 +237,7 @@ test.describe("streaming elsewhere: another device started the turn", () => {
     const run = host.startElsewhere("while closed")
     run.tool("terminal", "one", '{"exit_code": 0}')
     host.compact()
-    await withDevice(openDevice(host), async (after) => {
+    await withDevice(openDevice(host, { database: before.database }), async (after) => {
       await showsEverything(after, host, "the turn in flight, picked up on open")
       run.finish("Landed.")
       await showsEverything(after, host, "all of it once it ends")
@@ -282,7 +282,7 @@ test.describe("finished while away: the reply ended with no device watching", ()
     run.tool("terminal", "one", '{"exit_code": 0}')
     host.compact()
     run.finish("Finished entirely while closed.")
-    await withDevice(openDevice(host), async (after) => {
+    await withDevice(openDevice(host, { database: before.database }), async (after) => {
       await showsEverything(after, host, "everything the host holds, compacted")
       await reachesBack(after, host)
     })

@@ -16,7 +16,14 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { fakeHost } from "./chat-next-host.ts"
-import { openDevice, sendFrom, showsEverything, turn, withDevice } from "./chat-next-devices.tsx"
+import {
+  eventually,
+  openDevice,
+  sendFrom,
+  showsEverything,
+  turn,
+  withDevice,
+} from "./chat-next-devices.tsx"
 
 const setUp = (name: string) => {
   const host = fakeHost(`memento-matrix-${name}`)
@@ -58,7 +65,7 @@ test.describe("idle: every turn finished", () => {
     const first = await openDevice(host)
     await turn(first, host, "one", "First.", 2)
     await first.close()
-    await withDevice(openDevice(host), async (again) => {
+    await withDevice(openDevice(host, { database: first.database }), async (again) => {
       await showsEverything(again, host, "everything, read back from the host")
     })
   })
@@ -76,7 +83,11 @@ test.describe("streaming here: this device sent the turn and follows it", () => 
         host,
         "while it streams: the request and the calls so far",
       )
-      assert.match(phone.turns()[0].texts[0] ?? "", /^Half a/, "the words arrive as they stream")
+      // Streamed words reach the device's copy at most every FLUSH_INTERVAL_MS.
+      await eventually(
+        () => assert.match(phone.turns()[0].texts[0] ?? "", /^Half a/),
+        "the words arrive as they stream",
+      )
       run.say(" sentence.")
       run.finish("Half a sentence.")
       await showsEverything(phone, host, "all of it once the reply ends")
@@ -110,7 +121,7 @@ test.describe("streaming here: this device sent the turn and follows it", () => 
     const run = await sendFrom(before, host, "go")
     run.tool("terminal", "one", '{"exit_code": 0}')
     await before.close()
-    await withDevice(openDevice(host), async (after) => {
+    await withDevice(openDevice(host, { database: before.database }), async (after) => {
       await showsEverything(after, host, "the request and the call made so far")
       run.tool("terminal", "two", '{"exit_code": 0}')
       run.finish("Finished after the reload.")
@@ -165,7 +176,7 @@ test.describe("streaming elsewhere: another device started the turn", () => {
     await before.close()
     const run = host.startElsewhere("while closed")
     run.tool("terminal", "one", '{"exit_code": 0}')
-    await withDevice(openDevice(host), async (after) => {
+    await withDevice(openDevice(host, { database: before.database }), async (after) => {
       await showsEverything(after, host, "the turn in flight, picked up on open")
       run.finish("Landed.")
       await showsEverything(after, host, "all of it once it ends")
@@ -205,7 +216,7 @@ test.describe("finished while away: the reply ended with no device watching", ()
     const run = host.startElsewhere("while closed")
     run.tool("terminal", "one", '{"exit_code": 0}')
     run.finish("Finished entirely while closed.")
-    await withDevice(openDevice(host), async (after) => {
+    await withDevice(openDevice(host, { database: before.database }), async (after) => {
       await showsEverything(after, host, "everything, the turn it never saw included")
     })
   })

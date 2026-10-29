@@ -6,7 +6,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { fakeHost } from "./chat-next-host.ts"
-import { openDevice, showsEverything, withDevice } from "./chat-next-devices.tsx"
+import { eventually, openDevice, showsEverything, turn, withDevice } from "./chat-next-devices.tsx"
 
 test("a host older than 0.22.5 is told this screen needs a newer one, and asked for nothing else", async () => {
   const host = fakeHost("memento-gate-old", { plugin: true, version: "0.21.5" })
@@ -44,5 +44,32 @@ test("0.22.5 itself, and a newer host, draw the chat", async () => {
       assert.equal(phone.notice(), undefined, version)
       await showsEverything(phone, host, `the chat on ${version}`)
     })
+  }
+})
+
+test("a host that can't be reached is away, not unsupported: the device draws what it holds", async () => {
+  const host = fakeHost("memento-gate-away", { plugin: true })
+  const first = await openDevice(host)
+  await turn(first, host, "one", "First.")
+  await first.close()
+
+  const answer = globalThis.fetch
+  globalThis.fetch = (async () => {
+    throw new TypeError("Failed to fetch")
+  }) as typeof fetch
+  try {
+    await withDevice(openDevice(host, { database: first.database }), async (again) => {
+      assert.equal(again.notice(), undefined, "it is not told the host is too old")
+      assert.equal(again.away(), true)
+      await showsEverything(again, host, "the chat as this device last saw it")
+      assert.equal(again.composer(), false, "nothing can be sent to a host that isn't there")
+
+      globalThis.fetch = answer
+      await eventually(() => assert.equal(again.away(), false), "the host is asked again")
+      assert.equal(again.composer(), true)
+      await showsEverything(again, host, "and the chat goes on from the host")
+    })
+  } finally {
+    globalThis.fetch = answer
   }
 })

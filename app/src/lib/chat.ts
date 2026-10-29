@@ -1,7 +1,7 @@
 import { toast } from "sonner"
 
 import { serverConfig } from "@/lib/connection"
-import { READ_TIMEOUT_MS, TRIAGE_MS } from "@/lib/freshness"
+import { FLUSH_INTERVAL_MS, READ_TIMEOUT_MS } from "@/lib/freshness"
 import {
   db,
   getActiveProfile,
@@ -14,7 +14,6 @@ import {
   type Message,
   type MessageStats,
   type MessageStatus,
-  type ModelChoice,
   type Profile,
   type ToolEvent,
   updateConversation,
@@ -26,7 +25,6 @@ import {
   getRun,
   getQueue,
   hasPluginFeature,
-  triageMessage,
   HermesError,
   labelSession,
   queueAction,
@@ -38,7 +36,6 @@ import {
   stopRun,
   streamChat,
   supportsRuns,
-  uploadAttachment,
   type ApprovalRequestEvent,
   type ChatMessage,
   type HermesConfig,
@@ -48,7 +45,7 @@ import {
   type TurnUsage,
 } from "@/lib/hermes"
 import { attachmentsText, splitAttachments } from "@/lib/attachment-text"
-import { setUploading, wireContent } from "@/lib/attachments"
+import { wireContent } from "@/lib/attachments"
 import { refreshContext } from "@/lib/context"
 import { refreshChatProviderUsage } from "@/lib/provider-usage"
 import {
@@ -61,18 +58,8 @@ import {
   reconcileHistory,
 } from "@/lib/history"
 import { unknownLastTurn } from "@/lib/model-changes"
-import { botModel, hostChoice, modelInfoFor } from "@/lib/model-info"
-import {
-  chosenOf,
-  modelOf,
-  pickFields,
-  pickOf,
-  pinOf,
-  samePick,
-  storedPick,
-  wantsPin,
-} from "@/lib/model-pick"
-import { refreshMoves } from "@/lib/moves"
+import { modelOf, pickOf, wantsPin } from "@/lib/model-pick"
+import { askTriage, canTriage, triaging } from "@/lib/triage"
 import { takeHostTitle } from "@/lib/title"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { appendThinking, closeRun, forgetRuns, noteRunThinking } from "@/lib/thinking"
@@ -83,6 +70,13 @@ import { needsTranscriptWords } from "@/lib/tool-preview"
 import { randomId } from "@/lib/utils"
 import { knownLiveRun, readLiveRuns } from "@/lib/waiting"
 import { onWake } from "@/lib/wake"
+import {
+  AttachmentError,
+  pinFromHost,
+  pinModel,
+  titleFrom,
+  uploadAttachments,
+} from "@/lib/send-turn"
 import {
   ensureSessionWorkspace,
   refreshLibrary,
@@ -95,12 +89,6 @@ import {
  * The UI renders straight from Dexie live queries, so it never holds stream state itself.
  */
 
-/**
- * How often streamed text is written to IndexedDB. Each write re-runs every live query over the
- * chat, and `useReveal` paces the text on screen anyway, so a faster write buys nothing. A tool
- * call, an approval, a question or a status change is written at once.
- */
-const FLUSH_INTERVAL_MS = 150
 /**
  * How long one status or transcript read of a running turn may take. A connection can die without
  * the request ever failing (a phone that slept, a tunnel that dropped it), which would hold the
@@ -133,11 +121,6 @@ const activeDrafts = new Map<string, { draft: Message; touch: () => void }>()
 
 function estimateTokens(text: string) {
   return Math.max(1, Math.round(text.length / 4))
-}
-
-function titleFrom(text: string) {
-  const line = text.trim().split("\n")[0]
-  return line.length > 48 ? `${line.slice(0, 47).trimEnd()}…` : line || "New chat"
 }
 
 async function syncTitle(conversationId: string, config: HermesConfig, sessionId: string) {
@@ -845,24 +828,37 @@ async function finishTurn(turn: Turn, usage: TurnUsage | undefined, sendFailed =
   // The turn's runs are final: nothing can add to them now, and anything that resumes later notes
   // its run afresh. Freeing the watcher here keeps a long session's entries to its live turns.
   forgetRuns(draft.id)
-  if (!sendFailed) {
-    noteFollowUps(conversationId)
-    void refreshContext(conversationId).catch(quietly("Reading a chat's context"))
-    void refreshChatProviderUsage(conversationId).catch(quietly("Reading provider limits"))
-    void refreshTodos(conversationId)
-  }
   await updateConversation(conversationId, { updatedAt: endedAt })
+  if (sendFailed) return
   const conversation = await db.conversations.get(conversationId)
-  if (conversation?.projectId && !sendFailed) {
-    if (draft.status === "done" && conversation.mode === "plan")
-      await db.conversations.update(conversationId, { planPending: true })
-    // A moment later: the plugin's own hook records the finished plan-mode turn.
-    setTimeout(() => {
-      void refreshWorkspace(conversationId)
-      void refreshPrs(conversationId, { force: true })
-      void refreshLibrary(conversationId)
-    }, PLUGIN_SETTLE_MS)
+  if (conversation?.projectId && draft.status === "done" && conversation.mode === "plan")
+    await db.conversations.update(conversationId, { planPending: true })
+  await readAfterTurn(conversationId)
+}
+
+/**
+ * What a finished turn reads again from the plugin, whichever screen streamed it: the context, the
+ * provider's limits and the todos at once, and a session's workspace, pull requests and library a
+ * moment later, once the plugin's own hooks have recorded the turn.
+ */
+export async function readAfterTurn(conversationId: string, { turn }: { turn?: number } = {}) {
+  noteFollowUps(conversationId)
+  void refreshContext(conversationId).catch(quietly("Reading a chat's context"))
+  void refreshChatProviderUsage(conversationId).catch(quietly("Reading provider limits"))
+  void refreshTodos(conversationId)
+  const conversation = await db.conversations.get(conversationId)
+  // Hermes titles a session over its first turns, so a screen that counts them reads it then too.
+  if (conversation && turn !== undefined && turn <= TITLED_TURNS) {
+    const profile = await db.profiles.get(conversation.profileId)
+    if (profile?.apiKey)
+      void syncTitle(conversationId, serverConfig(profile), conversation.hermesSessionId)
   }
+  if (!conversation?.projectId) return
+  setTimeout(() => {
+    void refreshWorkspace(conversationId)
+    void refreshPrs(conversationId, { force: true })
+    void refreshLibrary(conversationId)
+  }, PLUGIN_SETTLE_MS)
 }
 
 /**
@@ -1036,128 +1032,6 @@ function settleRun(draft: Draft, outcome: RunOutcome) {
 
 async function followTurnRun(turn: Turn, runId: string) {
   return settleRun(turn.draft, await trackRun(turn, runId))
-}
-
-/** A turn that never started because an attachment couldn't be saved on the host. */
-export class AttachmentError extends HermesError {}
-
-const UPLOADS_AT_ONCE = 3
-
-/**
- * Saves each attachment on the Hermes host through the plugin, a few at a time, so the agent can
- * open it on later turns too. An image still goes inline when that fails; a file has no other way
- * to get there.
- */
-async function uploadAttachments(
-  config: HermesConfig,
-  sessionId: string,
-  attachments: Attachment[],
-  plugin: boolean,
-) {
-  const saved = [...attachments]
-  const pending = attachments
-    .map((attachment, index) => ({ attachment, index }))
-    .filter(({ attachment }) => !attachment.path && attachment.blob)
-    .filter(({ attachment }) => plugin || !attachment.image)
-  const missing = pending.find(({ attachment }) => !plugin && !attachment.image)
-  if (missing)
-    throw new AttachmentError(`Attaching ${missing.attachment.name} needs the Gots plugin.`)
-  for (const { attachment } of pending) setUploading(attachment.id, true)
-  try {
-    const upload = async ({ attachment, index }: (typeof pending)[number]) => {
-      try {
-        const path = await uploadAttachment(config, sessionId, {
-          name: attachment.name,
-          blob: attachment.blob!,
-        })
-        saved[index] = { ...attachment, path }
-      } catch (error) {
-        if (!attachment.image) {
-          const reason = error instanceof Error ? error.message : ""
-          throw new AttachmentError(
-            reason.includes(attachment.name)
-              ? reason
-              : `Couldn't attach ${attachment.name}${reason ? `: ${reason.replace(/\.$/, "")}` : ""}.`,
-          )
-        }
-      } finally {
-        setUploading(attachment.id, false)
-      }
-    }
-    const queue = [...pending]
-    await Promise.all(
-      Array.from({ length: Math.min(UPLOADS_AT_ONCE, queue.length) }, async () => {
-        for (let next = queue.shift(); next; next = queue.shift()) await upload(next)
-      }),
-    )
-  } finally {
-    for (const { attachment } of pending) setUploading(attachment.id, false)
-  }
-  return saved
-}
-
-/** A pin this device wrote for a turn, and the one way to take it back. */
-interface Pin {
-  conversation: Conversation
-  release?: () => Promise<void>
-}
-
-/**
- * Fixes a chat's model at its first send, so changing the bot's Default model afterwards leaves it
- * alone. A chat with a pick of its own — the user's, or one an earlier send pinned — has
- * nothing to fix, and neither has Main, which follows the default for as long as it lives.
- *
- * The pick comes from what this device already holds, so no send waits on the host for a model; a
- * chat neither the bot nor the last host read names a model for is asked about after its turn
- * runs (`pinFromHost`). Answers the conversation to send with and the way to take the pin back: a
- * pin belongs to a turn that reached Hermes, so every window that can leave the turn unsent
- * releases it.
- */
-async function pinModel(conversation: Conversation, profile: Profile): Promise<Pin> {
-  const pin = pinOf(conversation, botModel(profile))
-  if (!pin) return { conversation }
-  const kept = await db.transaction("rw", db.conversations, async () => {
-    const row = await db.conversations.get(conversation.id)
-    // A sync that landed meanwhile may have settled the chat: the pick it brought is the one to
-    // send with, not this one.
-    if (!row || row.main || row.modelChoice) return row?.modelChoice
-    await updateConversation(conversation.id, { modelChoice: pin })
-    return pin
-  })
-  if (!kept) return { conversation }
-  return {
-    conversation: { ...conversation, modelChoice: kept },
-    // Only the pick this call wrote is this call's to take back.
-    release: () => unpin(conversation.id, samePick(kept, pin) ? pin : undefined),
-  }
-}
-
-/**
- * Takes back a pin written for a turn that never reached Hermes: left behind, it would hold the
- * chat to a model the user has since set the default away from. Only the pick this device wrote,
- * and only while the row still carries it — a pick the user made is theirs.
- */
-async function unpin(conversationId: string, pin?: ModelChoice) {
-  if (!pin) return
-  await db.transaction("rw", db.conversations, async () => {
-    if (samePick((await db.conversations.get(conversationId))?.modelChoice, pin))
-      await updateConversation(conversationId, { modelChoice: undefined })
-  })
-}
-
-/**
- * Pins the model a chat's first turn ran on, for the one case this device can't answer: neither the
- * bot nor the last host read names a model. The read comes after the turn, never ahead of the
- * message row; a host that names nothing to pin leaves the Default row's marker behind, which
- * records the question as asked so the next send doesn't ask it again.
- */
-async function pinFromHost(conversationId: string, profile: Profile) {
-  const host = hostChoice(await modelInfoFor(profile))
-  await db.transaction("rw", db.conversations, async () => {
-    const row = await db.conversations.get(conversationId)
-    if (!row || !wantsPin(row)) return
-    await updateConversation(conversationId, { modelChoice: storedPick(pinOf(row, host)) })
-  })
 }
 
 /**
@@ -1539,8 +1413,7 @@ export async function sendFromMain(
     host?.conversation.main &&
     content &&
     !triaging.has(conversationId) &&
-    (await hostQueue(host.config)) &&
-    (await hasPluginFeature(host.config, "triage"))
+    (await canTriage(host.config))
   if (!host || !triaged) {
     if (triaging.has(conversationId) && content)
       await queueMessage(conversationId, text, attachments)
@@ -1568,35 +1441,12 @@ export async function sendFromMain(
     }
     heldId = held.id
     await db.messages.add(held)
-    let moved: { threadId: string; created: boolean } | undefined
-    try {
-      const run = runRequest(host.config, {
-        // The ask names the model Main runs on, as this device can resolve it — Main's own pick,
-        // else the bot's default, else the host's remembered model — so a thread triage opens or
-        // fills adopts it instead of following the default for ever. Nothing is named when nothing
-        // can be, and nothing is read from the host here: the send path carries no model read.
-        ...pickFields(chosenOf(host.conversation.modelChoice) ?? botModel(host.profile)),
-        sessionId: host.conversation.hermesSessionId,
-        messages: [{ role: "user", content: await wireContent(content, sent) }],
-      })
-      const files = sent.map(({ name, type, size, path }) => ({ name, type, size, path }))
-      const ask = (ms: number) =>
-        triageMessage(
-          host.config,
-          host.conversation.hermesSessionId,
-          { id: held.id, text: content, run, attachments: files, steer: options.steer },
-          AbortSignal.timeout(ms),
-        )
-      // A dropped answer is asked for again under the same id: the host answers it as it did
-      // before, so a message it already queued on a thread isn't also sent to Main.
-      const answer = await ask(TRIAGE_MS * 0.7).catch(() => ask(TRIAGE_MS * 0.3))
-      if (answer.decision !== "main") {
-        moved = { threadId: answer.threadId, created: answer.decision === "new" }
-        void refreshMoves(conversationId).catch(quietly("Reading a chat's moves"))
-      }
-    } catch {
-      // Main it is.
-    }
+    const moved = await askTriage(host, {
+      content,
+      sent,
+      steer: options.steer,
+      id: held.id,
+    })
     if (moved) return moved
     triaging.delete(conversationId)
     if (controllers.has(conversationId)) {
@@ -1630,9 +1480,6 @@ function steerOrQueue(
     ? steerText(conversationId, content, attachments)
     : queueMessage(conversationId, content, attachments)
 }
-
-/** Chats whose Main message is being triaged on this page. */
-const triaging = new Set<string>()
 
 /**
  * A triaging message that nothing here is deciding on (the page reloaded or closed mid-triage) was

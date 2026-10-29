@@ -1,1 +1,16 @@
-{"object": "memento.agents", "session_id": "memento-fixture-live-1", "agents": [{"id": "20261028_160359_727cdf", "goal": "Run the shell command `sleep 10 && echo live-check` in the terminal and report its exact output.", "model": "minimax-m3.1-flash", "started_at": 1793203439.8092194, "ended_at": 1793203453.0425994, "end_reason": "agent_close", "tool_calls": 1, "status": "done"}]}
+{
+  "object": "memento.agents",
+  "session_id": "memento-fixture-live-1",
+  "agents": [
+    {
+      "id": "20261028_160359_727cdf",
+      "goal": "Run the shell command `sleep 10 && echo live-check` in the terminal and report its exact output.",
+      "model": "minimax-m3.1-flash",
+      "started_at": 1793203439.8092194,
+      "ended_at": 1793203453.0425994,
+      "end_reason": "agent_close",
+      "tool_calls": 1,
+      "status": "done"
+    }
+  ]
+}

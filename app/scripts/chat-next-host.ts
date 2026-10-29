@@ -115,6 +115,8 @@ interface RunState {
   events: { seq: number }[]
   listeners: Set<(event: object | null) => void>
   done: boolean
+  /** `POST /v1/runs/{id}/stop`: the run ends as cancelled and its stream closes. */
+  cancel?: () => void
   waiting?: Prompt
   respond?: (
     body: Record<string, unknown>,
@@ -132,6 +134,25 @@ const reply = (body: unknown, status = 200) =>
  * `plugin` serves the Gots plugin's `runs/live`; `version` is what `/health` says Hermes is;
  * `latency` is how long, in ms, a transcript read takes to be answered.
  */
+/**
+ * The user row Hermes keeps for a run's input: a plain string as it came, or the newest message of a
+ * list, its text parts joined and each inline image kept as the `[screenshot]` line it becomes.
+ */
+function durable(input: unknown): string | null {
+  if (input === null || input === undefined) return null
+  if (typeof input === "string") return input
+  const last = Array.isArray(input) ? input.at(-1) : undefined
+  const content = last?.content
+  if (typeof content === "string") return content
+  if (!Array.isArray(content)) return ""
+  return content
+    .map((part: { type?: string; text?: string }) =>
+      part.type === "text" ? (part.text ?? "") : part.type === "image_url" ? "[screenshot]" : "",
+    )
+    .filter(Boolean)
+    .join("\n")
+}
+
 export function fakeHost(
   session: string,
   {
@@ -145,8 +166,50 @@ export function fakeHost(
   const runs = new Map<string, RunState>()
   const answers: { run: string; prompt_id: string; generation: number; answer: string }[] = []
   const approvals: { run: string; choice: string }[] = []
-  const asked = { transcript: 0, archive: 0, runs: 0, subscriptions: 0, health: 0 }
-  const latest: { run?: Run; id?: string } = {}
+  const asked = { transcript: 0, archive: 0, runs: 0, subscriptions: 0, health: 0, stops: 0 }
+  const latest: { run?: Run; id?: string; body?: Record<string, unknown>; key?: string } = {}
+  /** A project session's record on the plugin: its mode, a plan waiting, and why it can't send. */
+  const workspace = {
+    posts: 0,
+    mode: "accept_edits",
+    planPending: false,
+    planFile: "plans/hermes-x.md",
+    blocked: null as string | null,
+  }
+  /**
+   * What the plugin's triage answers for a Main's message (ADR 0029): stay, or the thread it queued
+   * the message on; and the moves it then lists, as its moves route does.
+   */
+  const triage = {
+    decision: "main" as "main" | "thread" | "new",
+    thread: "",
+    asked: [] as { text: string; steer: boolean }[],
+    moves: [] as Record<string, unknown>[],
+  }
+  /** The title Hermes gave the session; none until it has one. */
+  const titled: { title: string | null } = { title: null }
+  /** The session's todo list as the plugin reads it from the transcript; none until it is set. */
+  const todos: { list: { id: string; content: string; status: string }[] | null; reads: number } = {
+    list: null,
+    reads: 0,
+  }
+  /** What the plugin holds for the session, oldest first, as its queue route lists it. */
+  const queue: {
+    id: string
+    text: string
+    attachments: { name: string }[]
+    body: { input?: unknown }
+  }[] = []
+  let queued = 0
+  /** The plugin's dispatcher: the first waiting message starts once no run of the session is active. */
+  const dispatch = () => {
+    if (!queue.length || [...runs.values()].some((state) => !state.done)) return
+    const item = queue.shift()!
+    const { id, run } = start(durable(item.body.input))
+    latest.run = run
+    latest.id = id
+    latest.body = item.body as Record<string, unknown>
+  }
   const agents: AgentRecord[] = []
   const children = new Map<string, Row[]>()
   const compactions: { row: Row; turn: number; inside: boolean }[] = []
@@ -184,6 +247,12 @@ export function fakeHost(
       const sent = { event, run_id: id, timestamp: ++clock, ...body, seq: state.events.length }
       state.events.push(sent)
       state.listeners.forEach((listen) => listen(sent))
+    }
+    state.cancel = () => {
+      if (state.done) return
+      push("run.cancelled", {})
+      state.done = true
+      state.listeners.forEach((listen) => listen(null))
     }
     if (input !== null) write("user", input)
     expected.push({ user: input ?? "", texts: [], tools: 0, asks: [], agents: [], seams: 0 })
@@ -456,10 +525,14 @@ export function fakeHost(
   async function handle(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     const url = new URL(String(input))
     const path = decodeURIComponent(url.pathname)
+    if (path === "/v1/capabilities")
+      return reply({ features: { run_submission: true, run_events_sse: true, run_steer: true } })
     if (path === "/health") {
       asked.health++
       return reply({ status: "ok", platform: "hermes-agent", version })
     }
+    if (path === `/api/sessions/${session}`)
+      return reply({ session: { id: session, title: titled.title } })
     if (path === `/api/sessions/${session}/messages`) {
       asked.transcript++
       if (latency) await new Promise((resolve) => setTimeout(resolve, latency))
@@ -484,17 +557,121 @@ export function fakeHost(
         pagination: { limit, offset, order: "latest", returned: page.length },
       })
     }
+    const stopping = /^\/v1\/runs\/([^/]+)\/stop$/.exec(path)
+    if (stopping && init?.method === "POST") {
+      asked.stops++
+      const state = runs.get(decodeURIComponent(stopping[1]))
+      if (!state) return reply({ error: { code: "run_not_found" } }, 404)
+      state.cancel?.()
+      return reply({ run_id: stopping[1], status: "stopping" })
+    }
     if (path === "/v1/runs" && init?.method === "POST") {
       asked.runs++
-      const { input: text } = JSON.parse(String(init.body))
-      const { id, run } = start(text)
+      const body = JSON.parse(String(init.body))
+      const { id, run } = start(durable(body.input))
       latest.run = run
       latest.id = id
+      latest.body = body
+      latest.key = new Headers(init.headers).get("idempotency-key") ?? undefined
       return reply({ run_id: id, status: "started", replayed: false }, 202)
+    }
+    if (plugin && path === "/api/plugins/memento/info")
+      return reply({
+        object: "memento.info",
+        version: "0.91.0",
+        features: ["queue", "media", "triage", "moves"],
+      })
+    if (plugin && path === `/api/plugins/memento/sessions/${session}/triage`) {
+      const { text, steer } = JSON.parse(String(init?.body))
+      triage.asked.push({ text, steer: Boolean(steer) })
+      return triage.decision === "main"
+        ? reply({ decision: "main" })
+        : reply({ decision: triage.decision, thread: triage.thread, item: { id: "q_triage" } })
+    }
+    if (plugin && path === `/api/plugins/memento/sessions/${session}/moves`)
+      return reply({ moves: triage.moves })
+    // The plugin's media route, serving any path as the image or file its suffix names.
+    if (plugin && path === "/api/plugins/memento/media") {
+      const file = url.searchParams.get("path") ?? ""
+      const type = file.endsWith(".png") ? "image/png" : "application/octet-stream"
+      return new Response(new Blob(["bytes"], { type }), { headers: { "content-type": type } })
+    }
+    const moding = plugin && path === `/api/plugins/memento/sessions/${session}/mode`
+    if (moding) {
+      // A mode post settles any plan waiting, the way the plugin's does.
+      workspace.mode = JSON.parse(String(init?.body)).mode
+      workspace.planPending = false
+    }
+    if (moding || (plugin && path === `/api/plugins/memento/sessions/${session}/workspace`)) {
+      const posting = !moding && init?.method === "POST"
+      if (posting) {
+        workspace.posts++
+        // A session whose repo was removed is read-only: the plugin refuses the post with why.
+        if (workspace.blocked) return reply({ error: { message: workspace.blocked } }, 409)
+      }
+      return reply({
+        workspace: {
+          session_id: session,
+          project_id: "p1",
+          branch: "hermes/x",
+          repos: [{ name: "me/repo", branch: "hermes/x" }],
+          mode: workspace.mode,
+          plan_pending: workspace.planPending,
+          plan_file: workspace.planFile,
+        },
+        instructions: "Work in the worktree on hermes/x.",
+        blocked: workspace.blocked,
+      })
+    }
+    const queueRoute = `/api/plugins/memento/sessions/${session}/queue`
+    if (plugin && path === queueRoute && init?.method === "POST") {
+      const body = JSON.parse(String(init.body))
+      const item = {
+        id: `q${++queued}`,
+        text: body.text,
+        attachments: body.attachments,
+        body: body.body,
+      }
+      queue.push(item)
+      dispatch()
+      return reply({ item: { id: item.id, text: item.text, attachments: item.attachments } })
+    }
+    if (plugin && path === queueRoute) {
+      dispatch()
+      return reply({
+        items: queue.map(({ id, text, attachments }) => ({ id, text, attachments })),
+        sent: [],
+        paused: false,
+      })
+    }
+    const acting = new RegExp(`^${queueRoute}/([^/]+)/(remove|send|steer)$`).exec(path)
+    if (plugin && acting && init?.method === "POST") {
+      const at = queue.findIndex((item) => item.id === acting[1])
+      if (at < 0) return reply({ error: { code: "not_found" } }, 404)
+      const [item] = queue.splice(at, 1)
+      if (acting[2] === "send") queue.unshift(item)
+      if (acting[2] === "steer") {
+        const live = [...runs].find(([, state]) => !state.done)
+        if (!live) {
+          queue.splice(at, 0, item)
+          return reply({ error: { code: "run_not_running" } }, 409)
+        }
+        write(
+          "user",
+          `[OUT-OF-BAND USER MESSAGE — sent while you worked]\n${item.text}\n[/OUT-OF-BAND USER MESSAGE]`,
+          {
+            display_kind: "steer",
+          },
+        )
+        return reply({ run_id: live[0], status: "steered" })
+      }
+      dispatch()
+      return reply({ ok: true })
     }
     // The Gots plugin's one read a device needs to find a run it did not start. Recorded against
     // 0.22.5, it calls a run held up on a prompt `running` and lists nothing under `waiting`.
     if (plugin && path === "/api/plugins/memento/runs/live") {
+      dispatch()
       const live = [...runs].filter(([, state]) => !state.done).at(-1)
       return reply({
         object: "memento.runs",
@@ -507,6 +684,22 @@ export function fakeHost(
       })
     }
     // The plugin's list of the children a session delegated to.
+    if (plugin && path === `/api/plugins/memento/sessions/${session}/todos`) {
+      todos.reads++
+      const list = todos.list
+      return reply(
+        list
+          ? {
+              revision: 1,
+              todos: list,
+              progress: {
+                done: list.filter((one) => one.status === "completed").length,
+                total: list.filter((one) => one.status !== "cancelled").length,
+              },
+            }
+          : { revision: null, todos: null, progress: null },
+      )
+    }
     if (plugin && path === `/api/plugins/memento/sessions/${session}/agents`)
       return reply({ object: "memento.agents", session_id: session, agents })
     // A child is a session of its own, read like any other.
@@ -648,6 +841,11 @@ export function fakeHost(
     agents,
     rows,
     latest,
+    queue,
+    workspace,
+    todos,
+    titled,
+    triage,
     session,
     dropConnections,
     startElsewhere,

@@ -1,5 +1,6 @@
 import { connectionKey } from "@/lib/connection"
 import { heardOf } from "@/lib/dictation-log"
+import { pluginRoot, serverRoot } from "@/lib/host-url"
 import { READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
 import type {
   ApprovalChoice,
@@ -159,11 +160,6 @@ export class HermesError extends Error {
 
 function endpoint(baseUrl: string, path: string) {
   return `${baseUrl.trim().replace(/\/+$/, "")}${path}`
-}
-
-/** Root of the server (strips a trailing `/v1`), for non-OpenAI routes like `/health`. */
-function serverRoot(baseUrl: string) {
-  return baseUrl.trim().replace(/\/+$/, "").replace(/\/v1$/, "")
 }
 
 function headers(config: HermesConfig, extra?: Record<string, string>) {
@@ -1474,19 +1470,7 @@ export interface CronExecutionRun extends CronExecution {
   delivery_outcome?: string | null
 }
 
-const PLUGIN_ROOT = "/api/plugins/memento"
-
-/**
- * Where the Gots Hermes plugin serves its routes for this bot. Hermes registers its catch-all
- * for `/p/<profile>/...` before plugin routes, so a multiplexed profile's plugin is reached with
- * the profile inside the plugin's own prefix, which Hermes still scopes to that profile.
- */
-export function pluginRoot(baseUrl: string) {
-  const root = serverRoot(baseUrl)
-  const profile = multiplexedProfile(baseUrl)
-  if (!profile) return `${root}${PLUGIN_ROOT}`
-  return `${root.slice(0, -`/p/${profile}`.length)}${PLUGIN_ROOT}/p/${profile}`
-}
+export { pluginRoot }
 
 export const INSTALL_PLUGIN = `hermes plugins install thehaseebahmed/memento/plugin --enable
 hermes gateway restart`
@@ -1957,13 +1941,6 @@ export async function unregisterPush(config: HermesConfig, endpoint: string) {
 export function generateApiKey() {
   const bytes = crypto.getRandomValues(new Uint8Array(32))
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")
-}
-
-/**
- * The profile `name` when the bot is a profile a multiplexing gateway serves at `/p/<name>/`.
- */
-function multiplexedProfile(baseUrl: string) {
-  return serverRoot(baseUrl).match(/\/p\/([^/?#]+)$/)?.[1]
 }
 
 /** Each job's newest runs, newest first. A 404 means the Gots plugin isn't installed. */
