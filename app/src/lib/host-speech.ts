@@ -6,10 +6,24 @@ import { READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
 import { getSpeechSettings, setSpeechSettings, setSttSetting } from "@/lib/hermes"
 import { usePluginFeatureAnswers } from "@/lib/features"
 import { noteFailure } from "@/lib/report"
-import { readSpeech, SPEECH_MODEL, type SpeechPick, type SpeechSettings } from "@/lib/speech"
+import {
+  readSpeech,
+  SPEECH_MODEL,
+  type CleanupLevel,
+  type SpeechPick,
+  type SpeechSettings,
+} from "@/lib/speech"
 import { STT_SETTINGS, type SttValue } from "@/lib/stt-settings"
 
 type Server = { baseUrl: string; apiKey: string }
+
+/** The speech fields a page may write: each is the bot's, and none is the host's own config. */
+export type SpeechPatch = {
+  model?: string
+  cleanup_model?: SpeechPick | null
+  cleanup_level?: CleanupLevel
+  hearing_prompt?: boolean
+}
 
 export async function getSpeech(config: Server, signal?: AbortSignal): Promise<SpeechSettings> {
   return readSpeech(await getSpeechSettings(config, signal))
@@ -32,7 +46,7 @@ export type SpeechCheck = "checking" | "failed" | undefined
 
 export async function setSpeech(
   config: Server,
-  patch: { model?: string; cleanup_model?: SpeechPick | null },
+  patch: SpeechPatch,
   signal?: AbortSignal,
 ): Promise<SpeechSettings> {
   return readSpeech(await setSpeechSettings(config, patch, signal))
@@ -93,7 +107,7 @@ export function useSpeech(profile?: (Server & { id?: string; speechModel?: strin
   }, [])
 
   const write = useCallback(
-    async (patch: { model?: string; cleanup_model?: SpeechPick | null }) => {
+    async (patch: SpeechPatch) => {
       const settings = await save(() =>
         setSpeech({ baseUrl, apiKey }, patch, AbortSignal.timeout(WRITE_TIMEOUT_MS)),
       )
@@ -138,6 +152,8 @@ export function useSpeech(profile?: (Server & { id?: string; speechModel?: strin
     problem,
     choose: (model: string) => write({ model }),
     chooseCleanup: (model: SpeechPick | null) => write({ cleanup_model: model }),
+    chooseLevel: (level: CleanupLevel) => write({ cleanup_level: level }),
+    setHearing: (sent: boolean) => write({ hearing_prompt: sent }),
     writeStt,
   }
 }

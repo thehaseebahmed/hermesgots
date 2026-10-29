@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useLiveQuery } from "dexie-react-hooks"
 import { PlusIcon, XIcon } from "lucide-react"
 import { useNavigate } from "react-router"
 
@@ -18,10 +19,18 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { botSubPath, type BotSub } from "@/lib/bot-subs"
 import { botTabPath } from "@/lib/bot-tabs"
-import { updateProfile, type Profile } from "@/lib/db"
+import { getSettings, updateProfile, type Profile } from "@/lib/db"
 import { useSpeech } from "@/lib/host-speech"
 import { botModel, fullModel, useModelInfo } from "@/lib/model-info"
-import { marked, modelSize, modelSpeed, type SpeechModel, type SpeechSettings } from "@/lib/speech"
+import {
+  CLEANUP_LEVEL_ROWS,
+  marked,
+  modelSize,
+  modelSpeed,
+  type CleanupLevel,
+  type SpeechModel,
+  type SpeechSettings,
+} from "@/lib/speech"
 import {
   effective,
   explicitly,
@@ -62,6 +71,8 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
   const [open, setOpen] = useState<SttSetting>()
   const models = settings ? modelsFor(settings, block) : []
   const otherProviders = block ? providerRows(block) : []
+  // The Hearing prompt row is offered only while Developer is on; the value it writes is the host's.
+  const developer = useLiveQuery(async () => Boolean((await getSettings()).developer), [])
 
   // A detail takes the page's place at either width: below 1024px the route pushed it, and from
   // 1024px it is the pane the page would have drawn in. A provider's page is asked for first, since
@@ -96,12 +107,6 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
             onClick={() => setPick("speech")}
           />
           <VocabularyRow profile={profile} words={words} />
-          <CleanupRow
-            tag="Gots"
-            settings={settings}
-            saving={speech.saving}
-            onClick={() => setPick("cleanup")}
-          />
         </Group>
       )}
 
@@ -139,6 +144,19 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
             ))}
           </Group>
         </section>
+      )}
+
+      {/* The cleanup's own card after the host's: the level a take is tidied at, then its model,
+          then — for a Developer — whether the decode is given a Hearing prompt (ADR 0066, 0067). */}
+      {settings && (
+        <CleanupSection
+          settings={settings}
+          saving={speech.saving}
+          developer={Boolean(developer)}
+          onLevel={(level) => (speech.saving ? undefined : void speech.chooseLevel(level))}
+          onHearing={(sent) => (speech.saving ? undefined : void speech.setHearing(sent))}
+          onPick={() => setPick("cleanup")}
+        />
       )}
 
       {block && (
@@ -223,9 +241,8 @@ function SpeechGroups(props: CardProps) {
 }
 
 /**
- * One card's rows, with the Gots ones in place: Vocabulary under the initial prompt it rides into
- * the decoder with, Cleanup model at the end of General, since a finished transcript is tidied on
- * the bot's own model rather than the host's speech one.
+ * One card's rows, with the Gots row in place: Vocabulary sits under the initial prompt it rides
+ * into the decoder with, and the cleanup's own rows live in the card below the host's.
  */
 function GroupRows({
   group,
@@ -261,14 +278,6 @@ function GroupRows({
       {rows.slice(0, cut).map(draw)}
       {group === "local" && <VocabularyRow profile={profile} words={words} />}
       {rows.slice(cut).map(draw)}
-      {group === "general" && (
-        <CleanupRow
-          tag="Gots"
-          settings={settings}
-          saving={saving}
-          onClick={() => onPick("cleanup")}
-        />
-      )}
     </>
   )
 }
@@ -694,6 +703,79 @@ function CleanupRow({
       onClick={onClick}
       data-setting="cleanup-model"
     />
+  )
+}
+
+/** The cleanup's card: the level a take is tidied at, its model, and the decode's prompt. */
+function CleanupSection({
+  settings,
+  saving,
+  developer,
+  onLevel,
+  onHearing,
+  onPick,
+}: {
+  settings: SpeechSettings
+  saving: boolean
+  developer: boolean
+  onLevel: (level: CleanupLevel) => void
+  onHearing: (sent: boolean) => void
+  onPick: () => void
+}) {
+  return (
+    <section className="flex flex-col gap-2" data-stt-group="cleanup">
+      <Caption>Cleanup</Caption>
+      <CleanupLevels level={settings.cleanup.level} saving={saving} onPick={onLevel} />
+      <Group>
+        <CleanupRow tag="Gots" settings={settings} saving={saving} onClick={onPick} />
+        {developer && (
+          <SwitchRow
+            id="stt-hearing-prompt"
+            title="Hearing prompt"
+            subtitle="Whether the speech model is told this bot's names before it listens"
+            checked={settings.hearing.sent}
+            disabled={saving}
+            onCheckedChange={onHearing}
+            data-setting="hearing-prompt"
+          />
+        )}
+      </Group>
+    </section>
+  )
+}
+
+/** One card per level: what it may change, and the same sentence tidied at it (ADR 0066). */
+function CleanupLevels({
+  level,
+  saving,
+  onPick,
+}: {
+  level: CleanupLevel
+  saving: boolean
+  onPick: (level: CleanupLevel) => void
+}) {
+  return (
+    <div className="grid gap-2 md:grid-cols-4" data-cleanup-levels>
+      {CLEANUP_LEVEL_ROWS.map((row) => (
+        <button
+          key={row.level}
+          type="button"
+          aria-pressed={row.level === level}
+          disabled={saving}
+          onClick={() => onPick(row.level)}
+          data-cleanup-level={row.level}
+          className={`flex flex-col gap-2 rounded-xl border p-3 text-left ${
+            row.level === level ? "border-ring bg-card" : "border-transparent bg-card"
+          }`}
+        >
+          <span className="text-base">{row.name}</span>
+          <span className="text-sm text-muted-foreground">{row.purpose}</span>
+          <span className="mt-auto rounded-lg bg-muted px-2 py-1.5 text-xs text-muted-foreground">
+            {row.sample}
+          </span>
+        </button>
+      ))}
+    </div>
   )
 }
 

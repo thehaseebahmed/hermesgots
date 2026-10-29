@@ -32,13 +32,23 @@ test("the page draws every speech setting its host carries, in cards named for w
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
     assert.deepEqual(
       captions(),
-      ["General", "Local", "Cloud", "Providers"],
-      "four cards, by what their settings are about rather than who owns them",
+      ["General", "Local", "Cloud", "Providers", "Cleanup"],
+      "the host's four cards, then the cleanup's own below them",
     )
     assert.deepEqual(
       titlesIn("General"),
-      ["Enabled", "Provider", "Echo transcripts", "Cleanup model"],
-      "the master switch first, then who hears, then Gots's own cleanup model",
+      ["Enabled", "Provider", "Echo transcripts"],
+      "the master switch first, then who hears",
+    )
+    assert.deepEqual(
+      titlesIn("Cleanup"),
+      ["Cleanup model"],
+      "and the cleanup's model in the card the level picker sits over",
+    )
+    assert.deepEqual(
+      [...findAll("[data-cleanup-level]")].map((card) => card.getAttribute("data-cleanup-level")),
+      ["none", "light", "medium", "high"],
+      "with the four levels above it",
     )
     assert.deepEqual(
       titlesIn("Local"),
@@ -271,7 +281,11 @@ test("a host without stt_settings draws the page it always had", async () => {
     { speech: speech({ stt: STT() }) },
   )
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
-    assert.deepEqual(captions(), [], "no captions over groups a host this old doesn't have")
+    assert.deepEqual(
+      captions(),
+      ["Cleanup"],
+      "one caption, over the cleanup's own card, and none over groups the host doesn't have",
+    )
     assert.deepEqual(
       [...(speechPage()?.querySelectorAll("[data-setting]") ?? [])].map(titleOf),
       ["Speech model", "Vocabulary", "Cleanup model"],

@@ -1,7 +1,13 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { marked, modelSize, modelSpeed, readSpeech } from "../src/lib/speech.ts"
+import {
+  CLEANUP_LEVEL_ROWS,
+  marked,
+  modelSize,
+  modelSpeed,
+  readSpeech,
+} from "../src/lib/speech.ts"
 
 const settings = {
   model: "small",
@@ -34,7 +40,8 @@ const settings = {
       downloading: false,
     },
   ],
-  cleanup: { model: null, allowed: true, reason: null },
+  cleanup: { model: null, allowed: true, reason: null, level: "light" },
+  hearing: { sent: false },
 }
 
 test("a host's answer reads back as the tab draws it", () => {
@@ -50,13 +57,47 @@ test("a host's answer reads back as the tab draws it", () => {
   )
   assert.equal(speech.cleanup.allowed, true)
   assert.equal(speech.cleanup.model, null)
+  assert.equal(speech.cleanup.level, "light")
+  assert.equal(speech.hearing.sent, false)
+})
+
+test("the level and the Hearing prompt read back as the host stored them", () => {
+  const speech = readSpeech({
+    ...settings,
+    cleanup: { model: null, allowed: true, reason: null, level: "high" },
+    hearing: { sent: true },
+  })
+  assert.equal(speech.cleanup.level, "high")
+  assert.equal(speech.hearing.sent, true)
+  assert.equal(
+    readSpeech({ ...settings, cleanup: { level: "loud" } }).cleanup.level,
+    "light",
+    "a level that is not one of the four reads as the default",
+  )
+})
+
+test("the four level cards are in order, each with the same sentence tidied at it", () => {
+  assert.deepEqual(
+    CLEANUP_LEVEL_ROWS.map((row) => [row.level, row.name]),
+    [
+      ["none", "None"],
+      ["light", "Light"],
+      ["medium", "Medium"],
+      ["high", "High"],
+    ],
+  )
+  for (const row of CLEANUP_LEVEL_ROWS) {
+    assert.ok(row.purpose.length > 10, `${row.level} says what it changes`)
+    assert.ok(row.sample.length > 40, `${row.level} shows the sentence at its level`)
+  }
 })
 
 test("a plugin that sends less than the tab knows about is read forgivingly", () => {
   assert.deepEqual(readSpeech(null), {
     model: "",
     models: [],
-    cleanup: { model: null, allowed: false, reason: null },
+    cleanup: { model: null, allowed: false, reason: null, level: "light" },
+    hearing: { sent: false },
   })
   const bare = readSpeech({ models: [{ name: "base" }, { size: 3 }] })
   assert.deepEqual(bare.models, [

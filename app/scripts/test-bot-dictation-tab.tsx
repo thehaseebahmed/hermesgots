@@ -28,6 +28,7 @@ import {
   add,
   draft,
   seed,
+  switchIn,
 } from "./dictation-page-kit.tsx"
 import { click, find, findAll, mount, text, type, until } from "./component-kit.tsx"
 import { db } from "@/lib/db"
@@ -449,4 +450,67 @@ test("a host that withholds the model-override permission says so instead of off
   })
 })
 
-/** The switch a speech setting's row draws. */
+/** The four cards the level picker draws, and which of them the host says is in play. */
+const levelCards = () => findAll("[data-cleanup-level]")
+const pressed = (level: string) =>
+  findAll(`[data-cleanup-level="${level}"]`)[0]?.getAttribute("aria-pressed")
+
+test("the page offers four cleanup levels, Light in play until the bot picks another", async () => {
+  const calls = await seed(
+    "cleanup-levels",
+    ["dictation", "speech_model"],
+    {},
+    {
+      speech: speech(),
+      next: speech({ cleanup: { model: null, allowed: true, reason: null, level: "high" } }),
+    },
+  )
+  await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    assert.deepEqual(
+      levelCards().map((card) => card.getAttribute("data-cleanup-level")),
+      ["none", "light", "medium", "high"],
+      "every level, weakest first",
+    )
+    assert.equal(pressed("light"), "true", "a bot that never picked cleans at Light")
+    assert.equal(pressed("high"), "false", "and only one card is in play")
+    assert.ok(
+      findAll("[data-cleanup-level]").every((card) => (card.textContent ?? "").length > 40),
+      "each card says what it changes and shows the same sentence at its level",
+    )
+    await click(find('[data-cleanup-level="high"]'))
+    assert.deepEqual(calls[0]?.body, { cleanup_level: "high" }, "one level, written to the host")
+    await until(async () => pressed("high") === "true", "the card the host now runs")
+  })
+})
+
+test("the Hearing prompt row is not offered until Developer is on", async () => {
+  await seed("hearing-hidden", ["dictation", "speech_model"], {}, { speech: speech() })
+  await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    assert.equal(row("hearing-prompt"), null, "no Developer switch, no experimental row")
+    assert.ok(row("cleanup-model"), "while the cleanup's own row is still there")
+  })
+})
+
+test("a Developer's Hearing prompt switch is written to the host and read back", async () => {
+  const calls = await seed(
+    "hearing-shown",
+    ["dictation", "speech_model"],
+    {},
+    { speech: speech(), next: speech({ hearing: { sent: true } }) },
+  )
+  await db.settings.update("settings", { developer: true })
+  await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    assert.ok(row("hearing-prompt"), "Developer on draws the row")
+    assert.equal(
+      switchIn("hearing-prompt")?.getAttribute("aria-checked"),
+      "false",
+      "a bot hears its takes unprompted until it says otherwise",
+    )
+    await click(switchIn("hearing-prompt"))
+    assert.deepEqual(calls[0]?.body, { hearing_prompt: true }, "one switch, written to the host")
+    await until(
+      async () => switchIn("hearing-prompt")?.getAttribute("aria-checked") === "true",
+      "the switch reading back on",
+    )
+  })
+})

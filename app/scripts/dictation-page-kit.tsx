@@ -54,7 +54,8 @@ export const speech = (patch: Record<string, unknown> = {}) => ({
       downloading: false,
     },
   ],
-  cleanup: { model: null, allowed: true, reason: null },
+  cleanup: { model: null, allowed: true, reason: null, level: "light" },
+  hearing: { sent: false },
   ...patch,
 })
 
