@@ -694,7 +694,23 @@ export function ChatNextThread({
   // A turn the host has not finished and this device is not streaming is followed, by its events
   // where the plugin names the run and by the transcript where it cannot.
   const last = turns.at(-1)
-  const following = doing.status !== "loading" && !doing.running && last !== undefined && !last.done
+  // Where the thread's work has got to, by the calls each turn holds. A turn Hermes never marked
+  // finished (a reply it wrote with no reason, one stopped or failed short) is followed only until
+  // the host says no run is working it; the thread then draws it at rest until it moves on.
+  const tip = turns
+    .map((turn) => turn.parts.map((part) => (part.kind === "tools" ? part.calls.length : "t")).join())
+    .join("|")
+  const tipNow = useRef(tip)
+  useEffect(() => {
+    tipNow.current = tip
+  })
+  const [hostIdleAt, setHostIdleAt] = useState<string>()
+  const following =
+    doing.status !== "loading" &&
+    !doing.running &&
+    last !== undefined &&
+    !last.done &&
+    hostIdleAt !== tip
   // A turn that lands from the host — another device's, or a wake — settles the chat too.
   // What was settled when the page opened is the open's to read, not a turn's.
   const settledTurns = last?.done ? turns.length : 0
@@ -741,12 +757,7 @@ export function ChatNextThread({
   }, [handedOff])
   const busy = following || working || owed || starting || inQueue > 0 || handedOff
   const progress = useRef({ shape: "", at: 0 })
-  const shape =
-    turns
-      .map((turn) =>
-        turn.parts.map((part) => (part.kind === "tools" ? part.calls.length : "t")).join(),
-      )
-      .join("|") + agents.map((agent) => `${agent.id}${agent.status}`).join()
+  const shape = tip + agents.map((agent) => `${agent.id}${agent.status}`).join()
   useEffect(() => {
     progress.current = { shape, at: Date.now() }
   }, [shape])
@@ -818,6 +829,7 @@ export function ChatNextThread({
             return void follow(run)
           }
           streaming.current = false
+          if (run === null) setHostIdleAt(tipNow.current)
         }
         void catchUp()
       },

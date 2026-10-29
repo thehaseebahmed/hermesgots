@@ -783,7 +783,16 @@ export function fakeHost(
   }
 
   /** Turns already on the host before any device looks: finished, with their calls and reply. */
-  function seed(turns: { user: string; tools?: number; reply: string; thoughts?: string[] }[]) {
+  function seed(
+    turns: {
+      user: string
+      tools?: number
+      reply: string
+      thoughts?: string[]
+      /** The host wrote the reply with no finish reason, as it does for some finished turns. */
+      unmarked?: boolean
+    }[],
+  ) {
     for (const turn of turns) {
       const { run } = start(turn.user)
       const thoughts = [...(turn.thoughts ?? [])]
@@ -793,6 +802,7 @@ export function fakeHost(
       }
       if (thoughts.length) run.think(thoughts[0])
       run.finish(turn.reply)
+      if (turn.unmarked) rows.at(-1)!.finish_reason = null
     }
   }
 

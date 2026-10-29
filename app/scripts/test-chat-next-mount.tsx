@@ -638,6 +638,15 @@ test("the header's line stays put while a reply works; the thread says what it i
   })
 })
 
+test("a reply the host wrote with no finish reason is not drawn as still being written", async () => {
+  const { host } = await onChatNext("c-unmarked", {}, { plugin: true })
+  host.seed([{ user: "Look around", reply: "All done.", unmarked: true }])
+  await mount(chatScreen("c-unmarked"), async () => {
+    await until(() => replies().includes("All done."), "the turn is drawn")
+    await until(() => host.asked.runs === 0 && !text().includes("Writing…"), "and it is at rest")
+  })
+})
+
 test("a reply this device watched keeps what it cost, under the reply, once the transcript has it", async () => {
   const { host } = await onChatNext("c-stats")
   await mount(chatScreen("c-stats"), async () => {

@@ -188,14 +188,15 @@ export async function stopRun(connection: Connection, runId: string) {
 }
 
 /**
- * The run the host is working on for a session, by the Gots plugin's account of live runs. A host
- * without the plugin, or one that cannot say, has no answer, and the transcript is all there is.
+ * The run the host is working on for a session, by the Gots plugin's account of live runs: its id,
+ * or null when the host says none is. A host without the plugin, or one that cannot say, has no
+ * answer, and the transcript is all there is.
  */
 export async function readLiveRun(
   connection: Connection,
   session: string,
   signal?: AbortSignal,
-): Promise<string | undefined> {
+): Promise<string | null | undefined> {
   try {
     const response = await fetch(`${plugin(connection)}/runs/live`, {
       headers: headers(connection),
@@ -203,7 +204,7 @@ export async function readLiveRun(
     })
     if (!response.ok) return undefined
     const { run_ids } = (await response.json()) as { run_ids?: Record<string, string> }
-    return run_ids?.[session]
+    return run_ids ? (run_ids[session] ?? null) : undefined
   } catch {
     return undefined
   }
