@@ -146,6 +146,10 @@ function createStore(database: SessionDb, session: string, drop: () => void): Th
   let timer: ReturnType<typeof setTimeout> | undefined
 
   const loaded = (async () => {
+    const positions = Promise.all([
+      firstPos(database, session, "live"),
+      firstPos(database, session, "archive"),
+    ])
     const record = await database.sessionStates.get(session)
     const rows = await readRows(database, session, "live")
     const archived = record?.archived ? await readRows(database, session, "archive") : undefined
@@ -164,8 +168,8 @@ function createStore(database: SessionDb, session: string, drop: () => void): Th
       archived,
       record,
       bases: {
-        live: await firstPos(database, session, "live"),
-        archive: await firstPos(database, session, "archive"),
+        live: (await positions)[0],
+        archive: (await positions)[1],
       },
     }
   })()

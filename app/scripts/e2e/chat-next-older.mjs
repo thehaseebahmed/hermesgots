@@ -111,33 +111,6 @@ await flow(
     await reply(TURNS - 1)
       .first()
       .waitFor({ timeout: 15_000 })
-      .catch(async (error) => {
-        if (process.env.DEBUG_OLDER)
-          console.log(
-            served,
-            await page.evaluate(async () => {
-              const { db } = await import("/src/lib/db.ts")
-              return JSON.stringify({
-                states: await db.sessionStates.toArray(),
-                rows: await db.sessionRows.count(),
-                text: document.body.innerText.slice(0, 600),
-              })
-            }),
-          )
-        throw error
-      })
-    if (process.env.DEBUG_OLDER)
-      console.log(
-        await page.evaluate(async () => {
-          const { db } = await import("/src/lib/db.ts")
-          return JSON.stringify({
-            states: await db.sessionStates.toArray(),
-            rows: await db.sessionRows.count(),
-            older: document.querySelectorAll("[data-older]").length,
-          })
-        }),
-        served,
-      )
     await until(async () => served.includes(PAGE), 5_000, "the second page to be asked for")
     assert.deepEqual([...new Set(served)], [0, PAGE], "the newest page, then the second asked for")
     assert.equal(await reply(0).count(), 0, "the first turn is not drawn before its page is served")

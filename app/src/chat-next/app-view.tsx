@@ -148,7 +148,9 @@ export function AppThreadView({
     "failed_turn_clear",
   )
   const [retrying, setRetrying] = useState(false)
-  const failedTurn = turns.at(-1)?.failed && !streaming && !waiting ? turns.at(-1) : undefined
+  // A turn whose request is in a page not read yet has nothing to send again.
+  const failedTurn =
+    turns.at(-1)?.failed && !turns.at(-1)?.cut && !streaming && !waiting ? turns.at(-1) : undefined
   const retryId = failedTurn && replyId(chatId, origin + turns.length - 1)
   async function retry() {
     if (!failedTurn?.failed || retrying) return

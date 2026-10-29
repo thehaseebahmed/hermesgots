@@ -15,11 +15,14 @@ export function uniq(rows: Row[]): Row[] {
 /**
  * Where a page joins the held rows: the index of the held row it starts at, when its rows are the
  * held ones from there on and in the same order; -1 when it does not (nothing held, a compaction or
- * an undo changed the newest rows, or rows written since moved the page).
+ * an undo changed the newest rows, or a page of rows written since shares none of the held ones).
  */
 export function joinAt(held: Row[] | undefined, page: Row[]): number {
   const at = held?.findIndex((row) => row.id === page[0]?.id) ?? -1
-  return !held || at < 0 || !page.every((row, i) => held[at + i]?.id === row.id) ? -1 : at
+  // A page that runs past the held rows' end (rows written since) joins on the rows it shares.
+  return !held || at < 0 || !page.every((row, i) => !held[at + i] || held[at + i].id === row.id)
+    ? -1
+    : at
 }
 
 /**
@@ -43,12 +46,13 @@ export function newestRead(
 ): { rows: Row[]; more: boolean | undefined; joined: boolean } | undefined {
   const page = pages[0]
   if (!page) return undefined
-  if (isLast(page)) return { rows: uniq(pages.flat()), more: false, joined: false }
+  const rows = uniq(pages.flat())
+  if (isLast(page)) return { rows, more: false, joined: false }
   const at = joinAt(held, page)
   // Rows written while the pages were read slide into the next offset, so a page that joins the
   // held rows only counts when it also reaches back to the held row it starts at.
-  if (at >= 0) return { rows: uniq(pages.flat()), more: undefined, joined: true }
-  if (!held?.length) return { rows: uniq(pages.flat()), more: true, joined: false }
+  if (at >= 0) return { rows, more: undefined, joined: true }
+  if (!held?.length) return { rows, more: true, joined: false }
   return undefined
 }
 
@@ -59,7 +63,7 @@ export function newestRead(
  */
 export function overlay(held: Row[], read: Row[]): Row[] | undefined {
   const at = held.findIndex((row) => row.id === read[0]?.id)
-  return at < 0 ? undefined : uniq([...held.slice(0, at), ...read])
+  return at < 0 ? undefined : [...held.slice(0, at), ...read]
 }
 
 /** The offset of the next older page: the host counts from its newest row, and the rows held are its newest. */

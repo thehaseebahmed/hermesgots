@@ -687,9 +687,14 @@ export function ChatNextThread({
             signal,
           )
           if (mine !== olderRun.current) return
+          const held = store.get().rows.length
           await store
             .apply({ type: "older", rows: page, last: isLast(page) })
             .catch(() => undefined)
+          // Rows written meanwhile can leave a page of rows already held: the offset is stale, and
+          // asking again at once would ask for the same page, so it waits for the reader's retry.
+          if (store.get().rows.length === held && store.get().partial)
+            throw new Error("The older page held nothing new.")
         }
         if (mine === olderRun.current) setOlder("idle")
       } catch {
@@ -715,7 +720,7 @@ export function ChatNextThread({
       reading.current = (async () => {
         try {
           // What the device holds decides how much is read, so it is in memory before a read begins.
-          await store.loaded()
+          await store.loaded().catch(() => undefined)
           const asking = Date.now() >= noAgentsUntil.current
           const askingQueue = Date.now() >= noQueueUntil.current
           const [read, listed, queued] = await Promise.all([
@@ -769,7 +774,10 @@ export function ChatNextThread({
   /** How many of the thread's turns the user asked, as the app counts a chat's turns. */
   const asked = useCallback(
     () => ({
-      turns: threadTurns(store.get()).filter((turn) => !turn.wake && !turn.carried).length,
+      // While older pages are unread the turns drawn are only the newest: "at least this many".
+      turns: store.get().partial
+        ? Infinity
+        : threadTurns(store.get()).filter((turn) => !turn.wake && !turn.carried).length,
     }),
     [store],
   )

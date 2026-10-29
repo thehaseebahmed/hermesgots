@@ -53,7 +53,7 @@ test("rows written since are added to what is held, reading back to where it joi
     overlay(held, read.rows).map((one) => one.id),
     Array.from({ length: 180 }, (_, at) => at + 1),
   )
-  assert.deepEqual(asked, [0, 50, 100], "the third page is the first that joins the held rows")
+  assert.deepEqual(asked, [0, 50], "the second page is the first that joins the held rows")
 })
 
 test("a transcript whose newest rows are not the held ones is read on to the start", async () => {

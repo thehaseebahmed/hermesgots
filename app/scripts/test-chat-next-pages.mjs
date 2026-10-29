@@ -58,17 +58,25 @@ test("a page that joins the held rows ends the read, and the held rows below it 
 
 test("a page that does not join the held rows asks for the next older one", () => {
   const held = range(1, 120)
-  // Sixty rows written since: the newest page starts above the held rows' end.
-  assert.equal(newestRead([range(81, 130)], held), undefined)
-  const read = newestRead([range(31, 80), range(81, 130)], held)
-  assert.deepEqual(ids(overlay(held, read.rows)), ids(range(1, 130)))
+  // A hundred rows written since: the newest page shares none of the held rows.
+  assert.equal(newestRead([range(121, 170)], held), undefined)
+  const read = newestRead([range(71, 120), range(121, 170)], held)
+  assert.deepEqual(ids(overlay(held, read.rows)), ids(range(1, 170)))
+})
+
+test("a page that runs past the end of the held rows joins on the rows it shares", () => {
+  // Two rows written since, with only the newest page held: one request, not the whole chat.
+  const held = range(1, 50)
+  const read = newestRead([range(3, 52)], held)
+  assert.equal(read.joined, true)
+  assert.deepEqual(ids(overlay(held, read.rows)), ids(range(1, 52)))
 })
 
 test("a page that sits in the held rows but does not match them from there on does not join", () => {
-  const held = [...range(1, 100), row(101)]
-  // Row ids 71..120 against held ids that stop at 101.
-  assert.equal(joinAt(held, range(71, 120)), -1)
-  assert.equal(joinAt(held, range(52, 101)), 51)
+  const held = [...range(1, 60), ...range(2000, 2010)]
+  // Row ids 51..100 against held ids that leave off at 60.
+  assert.equal(joinAt(held, range(51, 100)), -1)
+  assert.equal(joinAt(held, range(11, 60)), 10)
 })
 
 test("held rows that the host no longer has are read over, to the start of the chat", () => {

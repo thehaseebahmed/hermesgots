@@ -277,10 +277,13 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       }
     }
     case "older": {
+      // A page that lands after the chat was made whole (a read of all of it) has nothing to add.
+      if (!state.partial) return state
       // Rows above the ones held change nothing of what the device is doing: no turn, run or wait.
       const rows = prepend(state.rows, event.rows)
-      if (rows === state.rows && !event.last === Boolean(state.partial)) return state
-      return { ...state, rows, partial: event.last ? undefined : true }
+      const partial = event.last ? undefined : true
+      if (rows === state.rows && partial === state.partial) return state
+      return { ...state, rows, partial }
     }
     case "earlier":
       // Drawn by the next read of the transcript, which folds the archive in with the live rows.
