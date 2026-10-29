@@ -1,4 +1,5 @@
 import { useLiveQuery } from "dexie-react-hooks"
+import { RotateCcwIcon } from "lucide-react"
 import {
   type ComponentProps,
   createContext,
@@ -39,17 +40,20 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { AgentsContext, type AgentsSource } from "@/lib/agents"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
+import { attachmentsText } from "@/lib/attachment-text"
 import { compactionMarks } from "@/lib/compactions"
 import { db, type ApprovalChoice, type Message } from "@/lib/db"
 import type { DelegatedAgent } from "@/lib/hermes"
-import { COLUMN_BOX } from "@/lib/layout"
+import { usePluginFeatureOn } from "@/lib/features"
+import { COLUMN_BOX, REPLY_INSET } from "@/lib/layout"
 import { modelChanges } from "@/lib/model-changes"
 import { useDraws } from "@/lib/openui-draws"
 import type { RepoRef } from "@/lib/workspace"
 import { cn } from "@/lib/utils"
 
 import { delegated } from "./agents"
-import { messagesOf, withHeldFiles } from "./messages"
+import { clearFailedTurn } from "./api"
+import { messagesOf, replyId, withHeldFiles } from "./messages"
 import { ChatNextThread, type PromptProps, type ThreadViewProps } from "./page"
 
 /** A bot's Main as chat-next draws it: whose threads are its cards, and which one is open. */
@@ -135,6 +139,32 @@ export function AppThreadView({
     latestSend.current = send
   })
   const ask = useCallback((text: string) => latestSend.current(text, []), [])
+  // A turn the host gave up on can be sent again from where it stands: the host drops the failure
+  // from its transcript where it can, and the thread hides it once the request is asked again.
+  const hostClears = usePluginFeatureOn(
+    { baseUrl: server.server, apiKey: server.key },
+    "failed_turn_clear",
+  )
+  const [retrying, setRetrying] = useState(false)
+  const failedTurn = turns.at(-1)?.failed && !streaming && !waiting ? turns.at(-1) : undefined
+  const retryId = failedTurn && replyId(chatId, turns.length - 1)
+  async function retry() {
+    if (!failedTurn?.failed || retrying) return
+    setRetrying(true)
+    try {
+      if (hostClears) await clearFailedTurn(server, session, failedTurn.failed.row)
+      // The files are on the host already, so the message names their paths; a photo goes as a
+      // file, since the transcript keeps no copy of the image part to send again.
+      const files = (failedTurn.files ?? []).map((file) => ({
+        ...file,
+        id: file.path ?? file.name,
+        image: false,
+      }))
+      await latestSend.current(attachmentsText(failedTurn.user, files), [])
+    } finally {
+      setRetrying(false)
+    }
+  }
   const [shown, setShown] = useState<DelegatedAgent>()
   const [sheet, setSheet] = useState(false)
   const config = useMemo(
@@ -279,6 +309,20 @@ export function AppThreadView({
                             onShowSubagents={() => setSheet(true)}
                             subagentsInline={message.id === lastId && inline}
                           />
+                          {message.id === retryId && (
+                            <div className={cn(COLUMN_BOX, REPLY_INSET)}>
+                              <Button
+                                data-retry
+                                variant="ghost"
+                                size="sm"
+                                disabled={retrying}
+                                onClick={() => void retry()}
+                              >
+                                <RotateCcwIcon data-icon="inline-start" />
+                                Retry
+                              </Button>
+                            </div>
+                          )}
                         </MessageScrollerItem>
                       )
                     })}

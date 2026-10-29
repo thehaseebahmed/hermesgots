@@ -211,6 +211,34 @@ export async function readLiveRun(
 }
 
 /**
+ * Takes a failed turn out of the host's transcript, so a message sent again carries on from its
+ * request. How many rows went; none where the host cannot, which only leaves the failure in the
+ * transcript, and the thread draws as if it were gone.
+ */
+export async function clearFailedTurn(
+  connection: Connection,
+  session: string,
+  row: number,
+  signal?: AbortSignal,
+): Promise<number> {
+  try {
+    const response = await fetch(
+      `${plugin(connection)}/sessions/${encodeURIComponent(session)}/failed-turn/clear`,
+      {
+        method: "POST",
+        headers: { ...headers(connection), "Content-Type": "application/json" },
+        body: JSON.stringify({ row }),
+        signal: within(signal),
+      },
+    )
+    if (!response.ok) return 0
+    return Number((await response.json())?.removed) || 0
+  } catch {
+    return 0
+  }
+}
+
+/**
  * The children a session delegated to, by the Gots plugin's list of them. A host without the plugin
  * has no answer, and a card can then only say what the transcript does.
  */

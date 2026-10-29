@@ -656,6 +656,56 @@ test("a turn the host gave up on is drawn as failed, in the host's words, and no
   })
 })
 
+test("Retry sends a failed turn's request again, the host drops the failure and the thread shows the resend only", async () => {
+  const { host } = await onChatNext("c-retry", {}, { plugin: true })
+  host.seed([{ user: "Look around", reply: "", failed: "Your request was not processed." }])
+  await mount(chatScreen("c-retry"), async () => {
+    await until(() => Boolean(find("[data-retry]")), "the failed turn offers Retry")
+    await click(find("[data-retry]"))
+    await until(() => host.asked.runs === 1, "the request is sent again")
+    assert.equal(host.asked.failedClears, 1, "after the host dropped the failed turn")
+    assert.match(String(JSON.stringify(host.latest.body)), /Look around/)
+    host.latest.run!.say("Looking.")
+    host.latest.run!.finish("Looking.")
+    await until(() => replies().includes("Looking."), "the second try answers")
+    assert.deepEqual(requests(), ["Look around"], "the request shows once")
+    assert.ok(!text().includes("Your request was not processed."), "and the failure is gone")
+    assert.ok(!find("[data-retry]"), "with nothing left to retry")
+  })
+})
+
+test("Retry without the plugin's route still sends again and the thread shows the resend only", async () => {
+  const { host } = await onChatNext("c-retry-bare", {}, { plugin: false })
+  host.seed([{ user: "Look around", reply: "", failed: "Your request was not processed." }])
+  await mount(chatScreen("c-retry-bare"), async () => {
+    await until(() => Boolean(find("[data-retry]")), "the failed turn offers Retry")
+    await click(find("[data-retry]"))
+    await until(() => host.asked.runs === 1, "the request is sent again")
+    assert.equal(host.asked.failedClears, 0, "the host was not asked to drop anything")
+    host.latest.run!.finish("Looking.")
+    await until(() => replies().includes("Looking."), "the second try answers")
+    assert.deepEqual(requests(), ["Look around"], "the request shows once")
+    assert.ok(!text().includes("Your request was not processed."), "and the failure is hidden")
+  })
+})
+
+test("a failed turn the user did not ask again stays, with Retry on the last one only", async () => {
+  const { host } = await onChatNext("c-retry-last", {}, { plugin: true })
+  host.seed([
+    { user: "First", reply: "", failed: "Your request was not processed." },
+    { user: "Second", reply: "", failed: "Your request was not processed." },
+  ])
+  await mount(chatScreen("c-retry-last"), async () => {
+    await until(() => findAll("[data-retry]").length === 1, "one Retry, on the last turn")
+    assert.deepEqual(requests(), ["First", "Second"])
+    assert.equal(
+      (text().match(/Your request was not processed\./g) ?? []).length,
+      2,
+      "both failures are shown",
+    )
+  })
+})
+
 test("a reply this device watched keeps what it cost, under the reply, once the transcript has it", async () => {
   const { host } = await onChatNext("c-stats")
   await mount(chatScreen("c-stats"), async () => {

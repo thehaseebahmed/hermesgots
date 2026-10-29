@@ -73,7 +73,7 @@ export interface Turn {
   /** The host has written the reply's last row: an assistant row that makes no more calls and says why it stopped. */
   done: boolean
   /** The host gave up on the turn (`failed_turn`) and says so in its own words; it is over. */
-  failed?: string
+  failed?: { text: string; row: number }
   /** A reply the host started when a subagent finished: it answers no message of the user's. */
   wake?: boolean
   /** The children whose results this wake turn carries, as the host names them. */
@@ -246,7 +246,7 @@ export function foldTurns(rows: Row[]): Turn[] {
     // A failed turn ends in a row of its own, with no finish reason: it is over, not still writing.
     if (row.display_kind === "failed_turn") {
       turn.done = true
-      turn.failed = row.content || "Hermes couldn't finish this reply."
+      turn.failed = { text: row.content || "Hermes couldn't finish this reply.", row: row.id }
       continue
     }
     // After a compaction Hermes writes the work it carried forward again, under the ids it had: a
@@ -288,7 +288,27 @@ export function foldTurns(rows: Row[]): Turn[] {
   // Only the last turn can still be running. A copy Hermes carried across a compaction has lost the
   // reason its reply stopped, so an earlier turn is finished by what follows it.
   for (const turn of turns.slice(0, -1)) turn.done = true
-  return turns
+  return withoutRepeatedFailures(turns)
+}
+
+const sameRequest = (a: Turn, b: Turn) =>
+  a.user === b.user &&
+  (a.files ?? []).map((f) => f.name).join() === (b.files ?? []).map((f) => f.name).join()
+
+/**
+ * The turns without a failed one the next turn asks again: the user sent the message once more, so
+ * the failure is behind them and the thread reads as if only the second send happened. A failed turn
+ * nothing repeats stays, with the host's words.
+ */
+export function withoutRepeatedFailures(turns: Turn[]): Turn[] {
+  const next = (at: number) => turns[at + 1]
+  return turns.some(
+    (turn, at) => turn.failed && next(at) && !next(at).wake && sameRequest(turn, next(at)),
+  )
+    ? turns.filter(
+        (turn, at) => !(turn.failed && next(at) && !next(at).wake && sameRequest(turn, next(at))),
+      )
+    : turns
 }
 
 /** Whether a reply already drawn ended on these very words. */

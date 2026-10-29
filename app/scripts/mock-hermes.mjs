@@ -3765,6 +3765,7 @@ http
           ...(TRIAGE !== "off" ? ["triage_model"] : []),
           ...(SKILLS ? ["skills", "skills_write", "skills_remove", "skills_view"] : []),
           "queue",
+          "failed_turn_clear",
           "dictation",
           ...(DICTATIONS ? ["dictations"] : []),
           "speech_model",
@@ -5258,6 +5259,26 @@ http
           }),
         ),
       })
+    // plugin/failed_turns.py: a failed turn, from its request to the failure, leaves the transcript.
+    const clearRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/failed-turn\/clear$/.exec(
+      url.pathname,
+    )
+    if (PLUGIN && !profile && req.method === "POST" && clearRoute) {
+      const id = decodeURIComponent(clearRoute[1])
+      const { row } = JSON.parse((await readBody(req)) || "{}")
+      const held = transcripts.get(id) ?? []
+      const failed = held.find((r) => r.id === row && r.display_kind === "failed_turn")
+      const request = held.findLast(
+        (r) => r.id < row && r.role === "user" && !/^(steer|hidden|model_switch)$/.test(r.display_kind ?? ""),
+      )
+      if (!failed || !request) return json(res, 200, { removed: 0 })
+      const kept = held.filter((r) => r.id < request.id || r.id > row)
+      transcripts.set(id, kept)
+      return json(res, 200, {
+        object: "memento.failed_turn.cleared",
+        removed: held.length - kept.length,
+      })
+    }
     const undoRoute = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/moves\/([^/]+)\/undo$/.exec(
       url.pathname,
     )

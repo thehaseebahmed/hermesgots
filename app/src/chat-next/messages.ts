@@ -25,11 +25,17 @@ export function messagesOf(
     const key = `${chat}-${index}-${live}`
     const held = drawn.get(turn)
     if (held?.key === key && held.stats === stats) return held.rows
-    const rows = rowsOf(chat, `${chat}-${index}`, turn, live, stats)
+    const rows = rowsOf(chat, turnId(chat, index), turn, live, stats)
     drawn.set(turn, { key, stats, rows })
     return rows
   })
 }
+
+/** The id a turn's rows are drawn under, from where it stands in the thread. */
+export const turnId = (chat: string, index: number) => `${chat}-${index}`
+
+/** The id of the reply row a turn draws, which is where its failure and Retry are drawn. */
+export const replyId = (chat: string, index: number) => `${turnId(chat, index)}-a`
 
 /**
  * The rows with the bytes this device holds for the files they carry, found by the path the host
@@ -150,7 +156,7 @@ function rowsOf(
       ...(seams.length ? { seams } : {}),
       ...(stats && !live ? { stats } : {}),
       status: live ? "streaming" : turn.failed ? "error" : "done",
-      ...(turn.failed && !live ? { statusText: turn.failed } : {}),
+      ...(turn.failed && !live ? { statusText: turn.failed.text } : {}),
       createdAt,
     })
   return rows

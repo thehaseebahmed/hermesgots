@@ -698,7 +698,9 @@ export function ChatNextThread({
   // finished (a reply it wrote with no reason, one stopped or failed short) is followed only until
   // the host says no run is working it; the thread then draws it at rest until it moves on.
   const tip = turns
-    .map((turn) => turn.parts.map((part) => (part.kind === "tools" ? part.calls.length : "t")).join())
+    .map((turn) =>
+      turn.parts.map((part) => (part.kind === "tools" ? part.calls.length : "t")).join(),
+    )
     .join("|")
   const tipNow = useRef(tip)
   useEffect(() => {

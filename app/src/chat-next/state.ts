@@ -3,7 +3,15 @@ import { measureReply } from "@/lib/reply-stats"
 
 import type { Agent } from "./agents"
 import type { Queued, RunEvent } from "./api"
-import { foldTurns, withArchive, type Part, type Row, type SentFile, type Turn } from "./fold"
+import {
+  foldTurns,
+  withArchive,
+  withoutRepeatedFailures,
+  type Part,
+  type Row,
+  type SentFile,
+  type Turn,
+} from "./fold"
 
 /**
  * A thread as the page knows it. The rows, the archive, the subagents and the streamed turn are what
@@ -78,7 +86,9 @@ export const foldedOf = (rows: Row[], archived?: Row[]) =>
 /** The turns the screen draws: the transcript's, with the streamed one laid over the last. */
 export function turnsOf(folded: Turn[], live?: LiveTurn): Turn[] {
   if (!live) return folded
-  return live.replaces ? [...folded.slice(0, -1), live.turn] : [...folded, live.turn]
+  return withoutRepeatedFailures(
+    live.replaces ? [...folded.slice(0, -1), live.turn] : [...folded, live.turn],
+  )
 }
 
 /** One live event's change to the turn it belongs to; only the part it touches is a new object. */
