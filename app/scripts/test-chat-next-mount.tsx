@@ -383,3 +383,19 @@ test("a chat's first turn takes the title Hermes gave its session", async () => 
     )
   })
 })
+
+test("a reply's MEDIA tag draws as the file it names, read through the chat's own bot", async () => {
+  const { host } = await onChatNext("c-media", {}, { plugin: true })
+  host.seed([{ user: "Draw it", reply: "Here: MEDIA:/home/h/.hermes/chart.png" }])
+  await mount(chatScreen("c-media"), async () => {
+    await until(
+      () => Boolean(find('[data-chat-next] [aria-label="Open chart.png"]')),
+      "the tag is the image's cell",
+    )
+    assert.equal(
+      replies().some((one) => one?.includes("MEDIA:")),
+      false,
+      "and no tag is left as text",
+    )
+  })
+})

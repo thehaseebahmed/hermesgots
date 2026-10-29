@@ -471,6 +471,7 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
           <Suspense fallback={null}>
             <ChatNextThread
               key={chat.hermesSessionId}
+              chatId={id}
               server={bot.baseUrl}
               apiKey={bot.apiKey}
               session={chat.hermesSessionId}

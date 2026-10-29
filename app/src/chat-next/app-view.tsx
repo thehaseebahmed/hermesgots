@@ -41,6 +41,7 @@ const delegated = (agent: Agent): DelegatedAgent => ({
  * in the app's scroller, with the composer — or the prompt the run is held up on — pinned under it.
  */
 export function AppThreadView({
+  chatId,
   server,
   session,
   turns,
@@ -52,10 +53,12 @@ export function AppThreadView({
   queue,
   waiting,
   composer,
-}: ThreadViewProps) {
+}: ThreadViewProps & { chatId: string }) {
+  // The rows are the chat's: what a row reads through its chat — its media, its files, a question
+  // asked again — finds the chat by this id, never by the session's.
   const messages = useMemo(
-    () => messagesOf(session, turns, { streaming }),
-    [session, turns, streaming],
+    () => messagesOf(chatId, turns, { streaming }),
+    [chatId, turns, streaming],
   )
   const [shown, setShown] = useState<DelegatedAgent>()
   const [sheet, setSheet] = useState(false)
@@ -186,6 +189,16 @@ export function AppThreadView({
 }
 
 /** The thread as a chat opens it in the app: chat-next, drawn with the app's rows. */
-export function AppChatNextThread(props: ComponentProps<typeof ChatNextThread>) {
-  return <ChatNextThread {...props} View={AppThreadView} />
+export function AppChatNextThread({
+  chatId,
+  ...props
+}: ComponentProps<typeof ChatNextThread> & { chatId: string }) {
+  const View = useMemo(
+    () =>
+      function ChatView(view: ThreadViewProps) {
+        return <AppThreadView {...view} chatId={chatId} />
+      },
+    [chatId],
+  )
+  return <ChatNextThread {...props} View={View} />
 }

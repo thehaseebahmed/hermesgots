@@ -564,7 +564,13 @@ export function fakeHost(
       return reply({ run_id: id, status: "started", replayed: false }, 202)
     }
     if (plugin && path === "/api/plugins/memento/info")
-      return reply({ object: "memento.info", version: "0.91.0", features: ["queue"] })
+      return reply({ object: "memento.info", version: "0.91.0", features: ["queue", "media"] })
+    // The plugin's media route, serving any path as the image or file its suffix names.
+    if (plugin && path === "/api/plugins/memento/media") {
+      const file = url.searchParams.get("path") ?? ""
+      const type = file.endsWith(".png") ? "image/png" : "application/octet-stream"
+      return new Response(new Blob(["bytes"], { type }), { headers: { "content-type": type } })
+    }
     const moding = plugin && path === `/api/plugins/memento/sessions/${session}/mode`
     if (moding) {
       // A mode post settles any plan waiting, the way the plugin's does.
