@@ -34,7 +34,9 @@ import {
   SEND_CAUGHT_UP_MS,
 } from "@/lib/freshness"
 import { COLUMN_BOX } from "@/lib/layout"
+import type { ComposerControls } from "@/chat-next/page"
 import { opensOnChatNext } from "@/chat-next/route"
+import { prepareTurn } from "@/chat-next/turn"
 import { quietly } from "@/lib/report"
 import { threadCount, threadsLine } from "@/lib/bot-chrome"
 import { repoCap, sessionSubtitle } from "@/lib/repo-line"
@@ -427,6 +429,18 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
     [chat?.profileId],
   )
   const ready = Boolean(chat && bot && chat.id === id)
+  // One component per chat and bot, so the composer keeps its text across the thread's renders:
+  // a write to the bot's row hands back a new object, which mustn't remount it.
+  const botKey = bot?.id
+  const composer = useMemo(
+    () =>
+      botKey
+        ? function ChatNextComposer({ controls }: { controls: ComposerControls }) {
+            return <NextComposer controls={controls} chatId={id} botId={botKey} />
+          }
+        : undefined,
+    [id, botKey],
+  )
   useLayoutEffect(() => {
     if (ready) hold(slot, id)
   })
@@ -452,6 +466,8 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
                 server={bot.baseUrl}
                 apiKey={bot.apiKey}
                 session={chat.hermesSessionId}
+                prepareTurn={(text, attachments) => prepareTurn(id, text, attachments)}
+                Composer={composer}
               />
             </Suspense>
           </div>
@@ -460,6 +476,60 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
         <PendingChat />
       )}
     </div>
+  )
+}
+
+/**
+ * The app's composer driving a chat-next thread. A message sent while a reply runs waits for the
+ * queue, which comes to chat-next next; until then the composer keeps it and says so.
+ */
+function NextComposer({
+  controls,
+  chatId,
+  botId,
+}: {
+  controls: ComposerControls
+  chatId: string
+  botId: string
+}) {
+  const { root } = useNav()
+  const bot = useLiveQuery(() => db.profiles.get(botId), [botId])
+  const filesFeature = usePluginFeature(bot, "attachments")
+  const [cheatsheetOpen, setCheatsheetOpen] = useState(false)
+  const [navShortcuts, setNavShortcuts] = useState(DEFAULT_SETTINGS.navShortcuts)
+  if (!bot) return null
+  return (
+    <>
+      <Composer
+        busy={controls.busy}
+        connection={serverConfig(bot)}
+        botName={bot.name}
+        dictationWords={bot.vocabulary}
+        draftKey={draftKey(chatId)}
+        filesFeature={filesFeature}
+        imagesAvailable={bot.imageInput !== false}
+        onSend={controls.send}
+        onQueue={() => {
+          toast("Wait for the reply to finish before sending another message.")
+          throw new Error("queued")
+        }}
+        onStop={controls.stop}
+        onCommand={async (command) => {
+          if (command === "new") return root("/")
+          if (command === "settings") return root("/settings")
+          if (command === "cheatsheet") {
+            const settings = await getSettings().catch(quietly("Reading the cheatsheet's switch"))
+            setNavShortcuts(settings?.navShortcuts ?? DEFAULT_SETTINGS.navShortcuts)
+            setCheatsheetOpen(true)
+          }
+        }}
+      />
+      <Cheatsheet
+        open={cheatsheetOpen}
+        onOpenChange={setCheatsheetOpen}
+        navShortcuts={navShortcuts}
+      />
+    </>
   )
 }
 

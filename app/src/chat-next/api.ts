@@ -118,24 +118,45 @@ export async function readTranscript(
 }
 
 /** Starts a turn on the host; it carries on without us, so the run's id is all there is to keep. */
-export async function startRun(
+export function startRun(
   connection: Connection,
   session: string,
   input: string,
   signal?: AbortSignal,
 ): Promise<string> {
+  return postRun(connection, { session_id: session, input }, crypto.randomUUID(), signal)
+}
+
+/**
+ * Starts a turn from a whole `POST /v1/runs` body, as the app builds one. `key` is the request's
+ * `Idempotency-Key`, so a retried post answers the run it already started.
+ */
+export async function postRun(
+  connection: Connection,
+  body: Record<string, unknown>,
+  key: string,
+  signal?: AbortSignal,
+): Promise<string> {
   const response = await fetch(`${root(connection)}/v1/runs`, {
     method: "POST",
-    headers: {
-      ...headers(connection),
-      "Content-Type": "application/json",
-      "Idempotency-Key": crypto.randomUUID(),
-    },
-    body: JSON.stringify({ session_id: session, input }),
+    headers: { ...headers(connection), "Content-Type": "application/json", "Idempotency-Key": key },
+    body: JSON.stringify(body),
     signal: within(signal),
   })
   ensure(response)
-  return ((await response.json()) as { run_id: string }).run_id
+  const { run_id } = (await response.json()) as { run_id?: unknown }
+  if (typeof run_id !== "string") throw new Error("The host didn't start the run.")
+  return run_id
+}
+
+/** Stops a run; the plugin stops the subagents it started (`delegation.sweep_stops`). */
+export async function stopRun(connection: Connection, runId: string) {
+  const response = await fetch(`${root(connection)}/v1/runs/${encodeURIComponent(runId)}/stop`, {
+    method: "POST",
+    headers: headers(connection),
+    signal: within(),
+  })
+  ensure(response)
 }
 
 /**

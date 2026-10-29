@@ -2,7 +2,7 @@ import type { LiveTurn } from "@/lib/db"
 
 import type { Agent } from "./agents"
 import type { RunEvent } from "./api"
-import { foldTurns, withArchive, type Part, type Row, type Turn } from "./fold"
+import { foldTurns, withArchive, type Part, type Row, type SentFile, type Turn } from "./fold"
 
 /**
  * A thread as the page knows it. The rows, the archive, the subagents and the streamed turn are what
@@ -49,7 +49,9 @@ export type Waiting =
 export type ThreadEvent =
   | { type: "transcript"; rows: Row[]; final?: boolean }
   | { type: "earlier"; rows: Row[] }
-  | { type: "sent"; user: string }
+  | { type: "sent"; user: string; files?: SentFile[] }
+  /** A send that never reached the host: the message goes back to the composer, not the thread. */
+  | { type: "unsent"; error: string }
   | { type: "attach" }
   | { type: "answered" }
   | { type: "ended" }
@@ -166,10 +168,18 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         archived: state.archived,
         agents: state.agents,
         live: {
-          turn: { user: event.user, parts: [], done: false, delivered: [] },
+          turn: {
+            user: event.user,
+            ...(event.files?.length ? { files: event.files } : {}),
+            parts: [],
+            done: false,
+            delivered: [],
+          },
           replaces: false,
         },
       }
+    case "unsent":
+      return { ...state, live: undefined, running: false, status: "failed", error: event.error }
     case "attach": {
       // The run's events are replayed from its start, so the turn, and what it waits on, are drawn
       // again from nothing.

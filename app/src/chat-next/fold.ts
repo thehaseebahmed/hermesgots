@@ -1,3 +1,5 @@
+import { splitAttachments } from "../lib/attachment-text.ts"
+
 /** A transcript row as `GET /api/sessions/{id}/messages` returns it; only what a turn is built from. */
 export interface Row {
   id: number
@@ -26,8 +28,19 @@ export type Part =
   /** The host compacted the conversation here; the rows above are summarised in what follows. */
   | { kind: "compaction" }
 
+/** A file a message carried, as its marker line names it: never its bytes. */
+export interface SentFile {
+  name: string
+  type: string
+  size: number
+  image: boolean
+  path?: string
+}
+
 export interface Turn {
   user: string
+  /** What the request carried, read off its marker lines, which are not the user's words. */
+  files?: SentFile[]
   /** The host archived this turn's request when it compacted: what is left is the work, from the seam on. */
   carried?: boolean
   parts: Part[]
@@ -152,7 +165,24 @@ export function foldTurns(rows: Row[]): Turn[] {
         if (child) wake.delivered.push(child)
         continue
       }
-      turns.push({ user: content, parts: [], done: false, delivered: [] })
+      const { text, attachments } = splitAttachments(content)
+      turns.push({
+        user: text,
+        ...(attachments.length
+          ? {
+              files: attachments.map(({ name, type, size, image, path }) => ({
+                name,
+                type,
+                size,
+                image: Boolean(image),
+                ...(path ? { path } : {}),
+              })),
+            }
+          : {}),
+        parts: [],
+        done: false,
+        delivered: [],
+      })
       continue
     }
     const turn = turns.at(-1)

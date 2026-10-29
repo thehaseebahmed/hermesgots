@@ -1,6 +1,7 @@
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   memo,
+  type ComponentType,
   useCallback,
   useEffect,
   useMemo,
@@ -11,23 +12,26 @@ import {
 import { useSearchParams } from "react-router"
 
 import { Markdown } from "@/components/chat/markdown"
-import { db, type SessionDb } from "@/lib/db"
+import { db, type Attachment, type SessionDb } from "@/lib/db"
 
 import { cardsByPart, cardsOf, DELEGATE, type Card } from "./agents"
 import {
   atLeast,
   followRun,
   MIN_HERMES,
+  postRun,
   readAgents,
   readLiveRun,
   readTranscript,
   readVersion,
   respond,
   startRun,
+  stopRun,
 } from "./api"
 import { foldTurns, type Row, type ToolCall, type Turn } from "./fold"
 import { foldedOf, turnsOf, type ThreadEvent, type Waiting } from "./state"
 import { readRows, storeFor } from "./store"
+import type { PreparedTurn } from "./turn"
 
 /** The questions a finished `clarify` call got answered, each as "<question> → <answer>". */
 function answered(call: ToolCall): string[] {
@@ -131,12 +135,25 @@ const TurnView = memo(
             {turn.done ? " finished" : " just finished"}
           </p>
         ) : turn.carried ? null : (
-          <p
-            data-user
-            className="ml-auto w-fit max-w-[85%] rounded-2xl bg-muted px-4 py-2 whitespace-pre-wrap"
-          >
-            {turn.user}
-          </p>
+          <div className="ml-auto w-fit max-w-[85%] space-y-1">
+            {turn.files?.length ? (
+              <ul
+                data-files
+                className="flex flex-wrap justify-end gap-1 text-xs text-muted-foreground"
+              >
+                {turn.files.map((file, at) => (
+                  <li key={at} data-file className="rounded-md border px-2 py-1">
+                    {file.name}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {turn.user ? (
+              <p data-user className="rounded-2xl bg-muted px-4 py-2 whitespace-pre-wrap">
+                {turn.user}
+              </p>
+            ) : null}
+          </div>
         )}
         {turn.parts.map((part, at) => {
           if (part.kind === "compaction")
@@ -306,7 +323,20 @@ const AGENTS_COOLDOWN_MS = 60_000
 /** A turn that has written nothing for this long is not waited on any more. */
 const STALL_MS = 5 * 60_000
 
+/** What a composer drawn by the app is handed to drive the thread with. */
+export interface ComposerControls {
+  /** A turn of this device's is running: a message sent now would land in the middle of it. */
+  busy: boolean
+  /** Rejects when nothing reached the host, so the composer can hand the message back. */
+  send: (text: string, attachments: Attachment[]) => Promise<void>
+  stop: () => void
+}
+
 interface ThreadOptions {
+  /** Builds a turn as the app sends one; without it, the message is posted as plain text. */
+  prepareTurn?: (text: string, attachments: Attachment[]) => Promise<PreparedTurn>
+  /** The app's own composer; without it, a bare text box. */
+  Composer?: ComponentType<{ controls: ComposerControls }>
   pollMs?: number
   idleMs?: number
   stallMs?: number
@@ -340,6 +370,8 @@ export function ChatNextThread({
   server,
   apiKey: key,
   session,
+  prepareTurn,
+  Composer,
 }: ThreadOptions & { server: string | null; apiKey: string | null; session: string | null }) {
   // The thread is drawn from the device's copy; the store is the only thing that writes it, and
   // says what the page is doing.
@@ -483,12 +515,14 @@ export function ChatNextThread({
   useEffect(() => {
     progress.current = { shape, at: Date.now() }
   }, [shape])
-  // One run's events at a time, whoever started it.
+  // One run's events at a time, whoever started it, and which run that is, for Stop.
   const streaming = useRef(false)
+  const followingRun = useRef<string>(undefined)
   const follow = useCallback(
     async (run: string) => {
       if (!server || !key || !session) return
       streaming.current = true
+      followingRun.current = run
       try {
         await followRun(
           { server, key },
@@ -501,6 +535,7 @@ export function ChatNextThread({
         dispatch(failure(error))
       } finally {
         streaming.current = false
+        if (followingRun.current === run) followingRun.current = undefined
         dispatch({ type: "ended" })
       }
       // Whatever the stream said, the host's transcript is what the turn was.
@@ -578,21 +613,53 @@ export function ChatNextThread({
     [],
   )
 
-  async function send() {
-    const text = draft.trim()
-    if (!text || !server || !key || !session) return
-    setDraft("")
+  /**
+   * Sends a message as a turn. A send that never reached the host leaves nothing in the thread and
+   * rejects, so the composer that sent it gets the words back.
+   */
+  async function sendTurn(text: string, attachments: Attachment[] = []) {
+    const words = text.trim()
+    if ((!words && !attachments.length) || !server || !key || !session) return
     reads.current++
     streaming.current = true
-    dispatch({ type: "sent", user: text })
+    dispatch({
+      type: "sent",
+      user: words,
+      files: attachments.map(({ name, type, size, image }) => ({
+        name,
+        type,
+        size,
+        image: Boolean(image),
+      })),
+    })
+    let prepared: PreparedTurn | undefined
+    let run: string
     try {
-      follow(await startRun({ server, key }, session, text, alive.current.signal))
+      prepared = prepareTurn ? await prepareTurn(words, attachments) : undefined
+      run = prepared
+        ? await postRun({ server, key }, prepared.body, prepared.key, alive.current.signal)
+        : await startRun({ server, key }, session, words, alive.current.signal)
     } catch (error) {
       streaming.current = false
+      prepared?.settled(false)
       if (alive.current.signal.aborted) return
-      dispatch(failure(error))
-      await catchUp(true)
+      dispatch({ type: "unsent", error: error instanceof Error ? error.message : String(error) })
+      throw error
     }
+    prepared?.settled(true)
+    void follow(run)
+  }
+
+  async function send() {
+    const text = draft
+    setDraft("")
+    await sendTurn(text).catch(() => setDraft((now) => now || text))
+  }
+
+  function stop() {
+    const run = followingRun.current
+    if (!run || !server || !key) return
+    stopRun({ server, key }, run).catch((error) => dispatch(failure(error)))
   }
 
   // An answer that fails is said so; one that lands takes the card away at once, and the host's
@@ -677,7 +744,9 @@ export function ChatNextThread({
           onChoose={(choice) => void answer(doing.waiting as Waiting, choice)}
         />
       ) : null}
-      {host === "away" ? null : (
+      {host === "away" ? null : Composer ? (
+        <Composer controls={{ busy: doing.running, send: sendTurn, stop }} />
+      ) : (
         <form
           className="flex gap-2"
           onSubmit={(event) => {

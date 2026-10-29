@@ -115,6 +115,8 @@ interface RunState {
   events: { seq: number }[]
   listeners: Set<(event: object | null) => void>
   done: boolean
+  /** `POST /v1/runs/{id}/stop`: the run ends as cancelled and its stream closes. */
+  cancel?: () => void
   waiting?: Prompt
   respond?: (
     body: Record<string, unknown>,
@@ -132,6 +134,25 @@ const reply = (body: unknown, status = 200) =>
  * `plugin` serves the Gots plugin's `runs/live`; `version` is what `/health` says Hermes is;
  * `latency` is how long, in ms, a transcript read takes to be answered.
  */
+/**
+ * The user row Hermes keeps for a run's input: a plain string as it came, or the newest message of a
+ * list, its text parts joined and each inline image kept as the `[screenshot]` line it becomes.
+ */
+function durable(input: unknown): string | null {
+  if (input === null || input === undefined) return null
+  if (typeof input === "string") return input
+  const last = Array.isArray(input) ? input.at(-1) : undefined
+  const content = last?.content
+  if (typeof content === "string") return content
+  if (!Array.isArray(content)) return ""
+  return content
+    .map((part: { type?: string; text?: string }) =>
+      part.type === "text" ? (part.text ?? "") : part.type === "image_url" ? "[screenshot]" : "",
+    )
+    .filter(Boolean)
+    .join("\n")
+}
+
 export function fakeHost(
   session: string,
   {
@@ -145,8 +166,8 @@ export function fakeHost(
   const runs = new Map<string, RunState>()
   const answers: { run: string; prompt_id: string; generation: number; answer: string }[] = []
   const approvals: { run: string; choice: string }[] = []
-  const asked = { transcript: 0, archive: 0, runs: 0, subscriptions: 0, health: 0 }
-  const latest: { run?: Run; id?: string } = {}
+  const asked = { transcript: 0, archive: 0, runs: 0, subscriptions: 0, health: 0, stops: 0 }
+  const latest: { run?: Run; id?: string; body?: Record<string, unknown>; key?: string } = {}
   const agents: AgentRecord[] = []
   const children = new Map<string, Row[]>()
   const compactions: { row: Row; turn: number; inside: boolean }[] = []
@@ -184,6 +205,12 @@ export function fakeHost(
       const sent = { event, run_id: id, timestamp: ++clock, ...body, seq: state.events.length }
       state.events.push(sent)
       state.listeners.forEach((listen) => listen(sent))
+    }
+    state.cancel = () => {
+      if (state.done) return
+      push("run.cancelled", {})
+      state.done = true
+      state.listeners.forEach((listen) => listen(null))
     }
     if (input !== null) write("user", input)
     expected.push({ user: input ?? "", texts: [], tools: 0, asks: [], agents: [], seams: 0 })
@@ -484,12 +511,22 @@ export function fakeHost(
         pagination: { limit, offset, order: "latest", returned: page.length },
       })
     }
+    const stopping = /^\/v1\/runs\/([^/]+)\/stop$/.exec(path)
+    if (stopping && init?.method === "POST") {
+      asked.stops++
+      const state = runs.get(decodeURIComponent(stopping[1]))
+      if (!state) return reply({ error: { code: "run_not_found" } }, 404)
+      state.cancel?.()
+      return reply({ run_id: stopping[1], status: "stopping" })
+    }
     if (path === "/v1/runs" && init?.method === "POST") {
       asked.runs++
-      const { input: text } = JSON.parse(String(init.body))
-      const { id, run } = start(text)
+      const body = JSON.parse(String(init.body))
+      const { id, run } = start(durable(body.input))
       latest.run = run
       latest.id = id
+      latest.body = body
+      latest.key = new Headers(init.headers).get("idempotency-key") ?? undefined
       return reply({ run_id: id, status: "started", replayed: false }, 202)
     }
     // The Gots plugin's one read a device needs to find a run it did not start. Recorded against
