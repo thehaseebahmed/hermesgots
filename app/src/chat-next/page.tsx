@@ -15,9 +15,15 @@ import {
 import { useSearchParams } from "react-router"
 
 import { Markdown } from "@/components/chat/markdown"
-import { db, type Attachment, type SessionDb } from "@/lib/db"
+import { stopSubagents } from "@/lib/agents"
+import { connectionKey } from "@/lib/connection"
+import { usePluginFeatureOn } from "@/lib/features"
+import { SAFETY_MS } from "@/lib/freshness"
+import { onSessionMoved, useLive } from "@/lib/live"
+import { db, type Attachment, type MessageStats, type SessionDb } from "@/lib/db"
 
-import { cardsByPart, cardsOf, DELEGATE, type Agent, type Card } from "./agents"
+import { equal } from "./equal"
+import { cardsByPart, cardsOf, DELEGATE, delegated, type Agent, type Card } from "./agents"
 import {
   atLeast,
   followRun,
@@ -75,9 +81,7 @@ const NO_ROWS: Row[] = []
  */
 function shared(held: Turn[], read: Turn[]): Turn[] {
   return read.map((turn, at) =>
-    held[at] === turn || (held[at] && JSON.stringify(held[at]) === JSON.stringify(turn))
-      ? held[at]
-      : turn,
+    held[at] === turn || (held[at] && equal(held[at], turn)) ? held[at] : turn,
   )
 }
 
@@ -185,7 +189,12 @@ const TurnView = memo(
           if (part.kind === "text")
             return (
               <div key={at} data-text>
-                <Markdown>{part.text}</Markdown>
+                {part.thought ? (
+                  <p data-thought className="text-sm text-muted-foreground italic">
+                    {part.thought}
+                  </p>
+                ) : null}
+                {part.text ? <Markdown>{part.text}</Markdown> : null}
               </div>
             )
           if (part.kind === "steer")
@@ -362,6 +371,8 @@ export interface ThreadViewProps {
   /** The prompt the run is held up on, drawn where the composer goes. */
   waiting: ReactNode
   composer: ReactNode
+  /** What the turns this device watched cost, by the id of the row that opened each. */
+  stats?: Record<string, MessageStats>
   /** Sends a turn as the composer does, for what the view offers to send itself. */
   send: (text: string, attachments: Attachment[]) => Promise<void>
 }
@@ -448,6 +459,15 @@ const HANDOFF_MS = 10_000
 /** A turn that has written nothing for this long is not waited on any more. */
 const STALL_MS = 5 * 60_000
 
+/** What a prompt drawn by the app is handed: the wait, and how to answer it. */
+export interface PromptProps {
+  waiting: Waiting
+  /** Rejects when the host did not take the answer, so the card can say so. */
+  answer: (value: string) => Promise<void>
+  /** The tool the reply was running when it asked, where the host names none. */
+  asker?: string
+}
+
 /** What a composer drawn by the app is handed to drive the thread with. */
 export interface ComposerControls {
   /** A turn of this device's is running: a message sent now would land in the middle of it. */
@@ -460,6 +480,9 @@ export interface ComposerControls {
   steer: (text: string, attachments: Attachment[]) => Promise<void>
   /** Whether a run this thread follows can take a steer at all. */
   canSteer: boolean
+  /** How many of the session's subagents are still at work, which keep it Stop rather than Send. */
+  subagents: number
+  /** Ends the running reply and every subagent the session holds. */
   stop: () => void
 }
 
@@ -486,6 +509,8 @@ interface ThreadOptions {
   onSettled?: (reason: "opened" | "turn", thread: { turns: number }) => void
   /** The app's own composer; without it, a bare text box. */
   Composer?: ComponentType<{ controls: ComposerControls }>
+  /** What draws the prompt a run is held up on; without it, chat-next's own bare cards. */
+  Prompt?: ComponentType<PromptProps>
   /** What draws the thread; without it, chat-next's own plain markup. */
   View?: ComponentType<ThreadViewProps>
   pollMs?: number
@@ -527,6 +552,7 @@ export function ChatNextThread({
   triageTurn,
   onSettled,
   Composer,
+  Prompt,
   View = PlainView,
 }: ThreadOptions & { server: string | null; apiKey: string | null; session: string | null }) {
   // The thread is drawn from the device's copy; the store is the only thing that writes it, and
@@ -605,7 +631,15 @@ export function ChatNextThread({
           const asking = Date.now() >= noAgentsUntil.current
           const askingQueue = Date.now() >= noQueueUntil.current
           const [rows, listed, queued] = await Promise.all([
-            readTranscript({ server, key }, session, alive.current.signal),
+            // A turn's end reads the whole transcript: rows older than the ones that join what is held
+            // can only have changed then, and a read that joins is the cheap one in between.
+            readTranscript(
+              { server, key },
+              session,
+              alive.current.signal,
+              false,
+              final ? undefined : store.get().rows,
+            ),
             asking ? readAgents({ server, key }, session, alive.current.signal) : undefined,
             askingQueue ? readQueue({ server, key }, session, alive.current.signal) : undefined,
           ])
@@ -627,7 +661,7 @@ export function ChatNextThread({
       queued.current = null
       if (next) await read(next.final)
     },
-    [server, key, session, dispatch],
+    [server, key, session, dispatch, store],
   )
 
   /** How many of the thread's turns the user asked, as the app counts a chat's turns. */
@@ -660,7 +694,25 @@ export function ChatNextThread({
   // A turn the host has not finished and this device is not streaming is followed, by its events
   // where the plugin names the run and by the transcript where it cannot.
   const last = turns.at(-1)
-  const following = doing.status !== "loading" && !doing.running && last !== undefined && !last.done
+  // Where the thread's work has got to, by the calls each turn holds. A turn Hermes never marked
+  // finished (a reply it wrote with no reason, one stopped or failed short) is followed only until
+  // the host says no run is working it; the thread then draws it at rest until it moves on.
+  const tip = turns
+    .map((turn) =>
+      turn.parts.map((part) => (part.kind === "tools" ? part.calls.length : "t")).join(),
+    )
+    .join("|")
+  const tipNow = useRef(tip)
+  useEffect(() => {
+    tipNow.current = tip
+  })
+  const [hostIdleAt, setHostIdleAt] = useState<string>()
+  const following =
+    doing.status !== "loading" &&
+    !doing.running &&
+    last !== undefined &&
+    !last.done &&
+    hostIdleAt !== tip
   // A turn that lands from the host — another device's, or a wake — settles the chat too.
   // What was settled when the page opened is the open's to read, not a turn's.
   const settledTurns = last?.done ? turns.length : 0
@@ -707,12 +759,7 @@ export function ChatNextThread({
   }, [handedOff])
   const busy = following || working || owed || starting || inQueue > 0 || handedOff
   const progress = useRef({ shape: "", at: 0 })
-  const shape =
-    turns
-      .map((turn) =>
-        turn.parts.map((part) => (part.kind === "tools" ? part.calls.length : "t")).join(),
-      )
-      .join("|") + agents.map((agent) => `${agent.id}${agent.status}`).join()
+  const shape = tip + agents.map((agent) => `${agent.id}${agent.status}`).join()
   useEffect(() => {
     progress.current = { shape, at: Date.now() }
   }, [shape])
@@ -728,7 +775,7 @@ export function ChatNextThread({
         await followRun(
           { server, key },
           run,
-          (event) => dispatch({ type: "run", event }),
+          (event) => dispatch({ type: "run", event, at: Date.now() }),
           alive.current.signal,
         )
       } catch (error) {
@@ -746,6 +793,18 @@ export function ChatNextThread({
     },
     [server, key, session, catchUp, dispatch, store, asked],
   )
+
+  // A server that streams its changes says when this session moved, so the timer below only has to
+  // be a safety net while the stream is open.
+  const streamOpen = useLive(server && key ? { baseUrl: server, apiKey: key } : undefined)
+  useEffect(() => {
+    if (!ready || !server || !key) return
+    const mine = connectionKey({ baseUrl: server, apiKey: key })
+    return onSessionMoved((heard, moved) => {
+      if (heard !== mine || (moved && moved !== session) || streaming.current) return
+      if (document.visibilityState === "visible") void catchUp()
+    })
+  }, [ready, server, key, session, catchUp])
 
   // An open chat is read now and then even when it looks finished, since another device may have
   // started a turn; a page nobody is looking at asks nothing. A turn still being written is joined
@@ -772,10 +831,11 @@ export function ChatNextThread({
             return void follow(run)
           }
           streaming.current = false
+          if (run === null) setHostIdleAt(tipNow.current)
         }
         void catchUp()
       },
-      busy ? pollMs : idleMs,
+      busy ? pollMs : streamOpen ? Math.max(idleMs, SAFETY_MS) : idleMs,
     )
     return () => clearInterval(timer)
   }, [
@@ -792,6 +852,7 @@ export function ChatNextThread({
     pollMs,
     idleMs,
     stallMs,
+    streamOpen,
   ])
 
   // A card opened shows its child's own transcript, read again as the child's state moves.
@@ -892,10 +953,20 @@ export function ChatNextThread({
     )
   }
 
+  const hostStopsAll = usePluginFeatureOn(
+    { baseUrl: server ?? "", apiKey: key ?? "" },
+    "subagents_stop_all",
+  )
+  const subagents = agents.filter((agent) => agent.status === "running").length
+  /** The session's Stop: the run it follows, and every subagent it holds, whichever turn began them. */
   function stop() {
+    if (!server || !key) return
     const run = followingRun.current
-    if (!run || !server || !key) return
-    stopRun({ server, key }, run).catch((error) => dispatch(failure(error)))
+    if (run) stopRun({ server, key }, run).catch((error) => dispatch(failure(error)))
+    if (!session || !subagents) return
+    stopSubagents({ baseUrl: server, apiKey: key }, session, agents.map(delegated), {
+      stopAll: hostStopsAll,
+    }).catch(() => dispatch(failure(new Error("Couldn't stop the subagents."))))
   }
 
   // An answer that fails is said so; one that lands takes the card away at once, and the host's
@@ -936,8 +1007,24 @@ export function ChatNextThread({
       </p>
     )
 
+  const asker = turns
+    .at(-1)
+    ?.parts.findLast((part) => part.kind === "tools")
+    ?.calls.at(-1)?.name
   const waitingCard =
-    doing.waiting?.kind === "question" ? (
+    doing.waiting && Prompt ? (
+      <Prompt
+        key={doing.waiting.promptId}
+        waiting={doing.waiting}
+        asker={asker}
+        answer={async (value) => {
+          const asked = doing.waiting as Waiting
+          if (!server || !key) return
+          await respond({ server, key }, asked, value)
+          dispatch({ type: "answered" })
+        }}
+      />
+    ) : doing.waiting?.kind === "question" ? (
       <QuestionCard
         key={doing.waiting.promptId}
         waiting={doing.waiting}
@@ -959,6 +1046,7 @@ export function ChatNextThread({
           queue: queueMessage,
           steer: steerMessage,
           canSteer: doing.running && Boolean(steerTurn),
+          subagents,
           stop,
         }}
       />
@@ -1016,6 +1104,7 @@ export function ChatNextThread({
       onOpenCard={open}
       waiting={waitingCard}
       composer={composer}
+      stats={held?.stats}
       send={sendTurn}
     />
   )

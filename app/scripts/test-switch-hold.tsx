@@ -10,7 +10,8 @@ import { db, ensureMainThread, mainThreadId } from "@/lib/db"
 import { GREETINGS } from "@/lib/greeting"
 import { forgetHeldChats } from "@/lib/chat-hold"
 import { lastThreadKey, useThreads } from "@/lib/threads"
-import { ChatPage, FIRST_ROWS, SETUP_COPY } from "@/routes/chat"
+import { FIRST_ROWS } from "@/components/chat/first-rows"
+import { ChatPage, SETUP_COPY } from "@/routes/chat"
 import {
   botProfile,
   click,

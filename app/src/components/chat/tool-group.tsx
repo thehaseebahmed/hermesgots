@@ -17,6 +17,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 
+import { useCodeFace, useMonoFace } from "@/components/chat/code-face"
 import { StepRail } from "@/components/chat/step-rail"
 import { Details } from "@/components/chat/tool-card"
 import { WorkRow, WorkNote, WorkLabel, WorkSign } from "@/components/chat/work-row"
@@ -36,6 +37,7 @@ import {
   type Kind,
   type KindId,
 } from "@/lib/tools"
+import { cn } from "@/lib/utils"
 
 function useElapsed(tool: ToolEvent) {
   const [now, setNow] = useState(() => Date.now())
@@ -156,9 +158,10 @@ const fixedNoun = (kind: Kind, tool: ToolEvent) =>
   typeof kind.title === "string" ? kind.title : tool.tool
 
 function DiffBadge({ tool }: { tool: ToolEvent }) {
+  const mono = useMonoFace()
   if (tool.added === undefined) return null
   return (
-    <span className="flex shrink-0 overflow-hidden rounded-md font-mono text-sm tabular-nums">
+    <span className={cn("flex shrink-0 overflow-hidden rounded-md text-sm tabular-nums", mono)}>
       <span className="bg-success/15 px-2 py-0.5 text-success">+{tool.added}</span>
       <span className="bg-destructive/15 px-2 py-0.5 text-destructive">−{tool.removed ?? 0}</span>
     </span>
@@ -222,6 +225,8 @@ function ToolList({
   tip: string
   onSelect: (index: number) => void
 }) {
+  const face = useCodeFace()
+  const mono = useMonoFace()
   return (
     <>
       <PopupHeader className="pb-2">
@@ -239,7 +244,10 @@ function ToolList({
               </StepRail>
               <button
                 type="button"
-                className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-lg text-left text-[15px] outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                className={cn(
+                  "flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-lg text-left text-[15px] outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                  face,
+                )}
                 onClick={() => onSelect(index)}
               >
                 <span className="flex min-w-0 flex-1 flex-col py-2">
@@ -255,7 +263,7 @@ function ToolList({
                       <>
                         <span>{tool.status === "running" ? kind.doing : kind.verb}</span>{" "}
                         {target ? (
-                          <span className="font-mono text-[13px] text-muted-foreground">
+                          <span className={cn(mono, "text-[13px] text-muted-foreground")}>
                             {target}
                           </span>
                         ) : (

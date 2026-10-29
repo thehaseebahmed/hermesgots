@@ -84,7 +84,9 @@ test("a reply not begun still draws while it streams, so the thread shows it wor
 })
 
 test("a request's files are its attachments, and its marker lines are not its words", () => {
-  const files = [{ id: "a", name: "a.png", type: "image/png", size: 3, image: true, path: "/h/a.png" }]
+  const files = [
+    { id: "a", name: "a.png", type: "image/png", size: 3, image: true, path: "/h/a.png" },
+  ]
   const rows = [row(1, "user", attachmentsText("Look", files))]
   const [user] = messagesOf("chat", foldTurns(rows))
   assert.equal(user.content, "Look")
@@ -107,9 +109,10 @@ test("a steer sits where it was sent, and a wake turn draws no request", () => {
     drawn.map((one) => one.role),
     ["user", "assistant", "assistant"],
   )
-  assert.deepEqual(drawn[1].steers.map(({ text, contentOffset }) => [text, contentOffset]), [
-    ["also this", "Working.".length],
-  ])
+  assert.deepEqual(
+    drawn[1].steers.map(({ text, contentOffset }) => [text, contentOffset]),
+    [["also this", "Working.".length]],
+  )
 })
 
 test("a compaction inside a reply is a seam naming the summary's row", () => {
@@ -124,4 +127,86 @@ test("a compaction inside a reply is a seam naming the summary's row", () => {
     reply.seams.map(({ row, contentOffset, at }) => [row, contentOffset, at]),
     [[3, "Before.".length, 50_000]],
   )
+})
+
+test("a row's thinking leads the call or the words it came with, and follows the call before it", () => {
+  const rows = [
+    row(1, "user", "go"),
+    row(2, "assistant", "", {
+      reasoning: "Look first.",
+      tool_calls: [call("a", "terminal", { command: "ls" })],
+    }),
+    row(3, "tool", "files", { tool_call_id: "a" }),
+    row(4, "assistant", "All done.", { reasoning: "Now say so.", finish_reason: "stop" }),
+  ]
+  const [, reply] = messagesOf("chat", foldTurns(rows))
+  assert.deepEqual(reply.reasoningRuns, [
+    { text: "Look first." },
+    { text: "Now say so.", afterToolId: "a" },
+  ])
+  assert.equal(reply.content, "All done.")
+})
+
+test("thinking with no words or calls after it still draws as a reply", () => {
+  const rows = [row(1, "user", "go"), row(2, "assistant", "", { reasoning: "Hmm." })]
+  const [, reply] = messagesOf("chat", foldTurns(rows))
+  assert.deepEqual(reply.reasoningRuns, [{ text: "Hmm." }])
+})
+
+test("a live turn's unplaced thinking draws as the run still to come", () => {
+  const turn = { user: "go", parts: [], done: false, delivered: [], pendingThought: "Hmm." }
+  const [, reply] = messagesOf("chat", [turn], { streaming: true })
+  assert.deepEqual(reply.reasoningRuns, [{ text: "Hmm." }])
+})
+
+import { withHeldFiles } from "../src/chat-next/messages.ts"
+
+test("a file this device holds draws from its bytes, found by the path the host saved it at", () => {
+  const photo = new Blob(["x"])
+  const rows = [
+    {
+      id: "a-u",
+      conversationId: "c",
+      role: "user",
+      content: "look",
+      status: "done",
+      createdAt: 1,
+      attachments: [
+        { id: "f0", name: "a.png", type: "image/png", size: 1, image: true, path: "/h/a.png" },
+        { id: "f1", name: "b.png", type: "image/png", size: 1, image: true, path: "/h/b.png" },
+      ],
+    },
+    {
+      id: "a-a",
+      conversationId: "c",
+      role: "assistant",
+      content: "ok",
+      status: "done",
+      createdAt: 2,
+    },
+  ]
+  const drawn = withHeldFiles(rows, new Map([["/h/a.png", photo]]))
+  assert.equal(drawn[0].attachments[0].blob, photo)
+  assert.equal(drawn[0].attachments[1].blob, undefined, "a file nothing is held for is left alone")
+  assert.equal(drawn[1], rows[1], "and a row that carries nothing held is the very row given")
+  assert.equal(withHeldFiles(rows, new Map()), rows)
+})
+
+test("until the device has said what it holds, a file has no path to read from the host by", () => {
+  const rows = [
+    {
+      id: "a-u",
+      conversationId: "c",
+      role: "user",
+      content: "look",
+      status: "done",
+      createdAt: 1,
+      attachments: [
+        { id: "f0", name: "a.png", type: "image/png", size: 1, image: true, path: "/h/a.png" },
+      ],
+    },
+  ]
+  const drawn = withHeldFiles(rows, undefined)
+  assert.equal(drawn[0].attachments[0].path, undefined)
+  assert.equal(drawn[0].attachments[0].name, "a.png")
 })

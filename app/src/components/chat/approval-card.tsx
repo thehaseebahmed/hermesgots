@@ -2,6 +2,7 @@ import { useState } from "react"
 import { ShieldAlertIcon } from "lucide-react"
 import { toast } from "sonner"
 
+import { useMonoFace } from "@/components/chat/code-face"
 import { CARD_BASE } from "@/components/chat/session-cards"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
@@ -24,7 +25,15 @@ const RESOLVED: Record<string, string> = {
   expired: "No longer waiting for an answer",
 }
 
-export function ApprovalCard({ message }: { message: Message }) {
+export function ApprovalCard({
+  message,
+  onAnswer = (choice) => answerApproval(message, choice),
+}: {
+  message: Message
+  /** Where an answer goes; the chat's own engine unless the screen drawing the card answers itself. */
+  onAnswer?: (choice: ApprovalChoice) => Promise<void>
+}) {
+  const mono = useMonoFace()
   const approval = message.approval!
   const [pending, setPending] = useState<ApprovalChoice | null>(null)
   const resolved = approval.resolved
@@ -35,7 +44,7 @@ export function ApprovalCard({ message }: { message: Message }) {
   const answer = async (choice: ApprovalChoice) => {
     setPending(choice)
     try {
-      await answerApproval(message, choice)
+      await onAnswer(choice)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't send your answer.")
     } finally {
@@ -65,7 +74,10 @@ export function ApprovalCard({ message }: { message: Message }) {
           // the thread and its own buttons off the screen.
           <pre
             tabIndex={0}
-            className="max-h-[30dvh] overflow-y-auto overscroll-contain rounded-2xl bg-muted px-4 py-3 font-mono text-[13px] wrap-anywhere whitespace-pre-wrap"
+            className={cn(
+              mono,
+              "max-h-[30dvh] overflow-y-auto overscroll-contain rounded-2xl bg-muted px-4 py-3 text-[13px] wrap-anywhere whitespace-pre-wrap",
+            )}
           >
             {approval.command}
           </pre>

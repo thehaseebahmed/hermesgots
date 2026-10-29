@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react"
+import { createContext, useContext, useState, type ReactNode } from "react"
 import {
   ArchiveXIcon,
   CheckCircle2Icon,
@@ -229,6 +229,14 @@ function readClarify(tool: ToolEvent): { asked: Asked[]; outcome?: string } {
 const ASK_AGAIN = "Ask me that again."
 
 /**
+ * Where a card sends a message of its own to the chat it is in (Ask again); a screen that sends a
+ * turn some other way than `sendMessage` provides it, and the chat's own engine is the default.
+ */
+export const AskAgainContext = createContext<((text: string) => Promise<void>) | undefined>(
+  undefined,
+)
+
+/**
  * How a clarify call ended: what the card calls it, and whether an answer was still owed. Everything
  * else Hermes says — an outcome this app doesn't know, or none at all — reads as no answer.
  */
@@ -251,6 +259,7 @@ export function ClarifyCard({
   busy?: boolean
 }) {
   const running = tool.status === "running"
+  const send = useContext(AskAgainContext)
   const [asking, setAsking] = useState(false)
   const { asked, outcome } = readClarify(tool)
   const answered = asked.some((a) => a.answers.length > 0)
@@ -262,7 +271,7 @@ export function ClarifyCard({
   const askAgain = async () => {
     setAsking(true)
     try {
-      await sendMessage(conversationId, ASK_AGAIN)
+      await (send ?? ((text: string) => sendMessage(conversationId, text)))(ASK_AGAIN)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't ask that again.")
     } finally {

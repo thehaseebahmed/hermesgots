@@ -24,6 +24,7 @@ interface Row {
   session_id: string
   role: string
   content: string | null
+  reasoning?: string | null
   tool_call_id: string | null
   tool_calls: { id: string; type: string; function: { name: string; arguments: string } }[] | null
   tool_name: string | null
@@ -103,6 +104,8 @@ export interface Run {
    * once, and each child works on after this turn ends.
    */
   delegate(goals: string | string[]): Child[]
+  /** The model thinks: the next row the host writes carries it as `reasoning`, and the stream says so. */
+  think(text: string): void
   /** A call the agent makes: `tool.started`, its row, then `tool.completed` with its result. */
   tool(name: string, preview: string, result: string): void
   /** Streamed words, as the host sends them while the reply is being written. */
@@ -166,7 +169,17 @@ export function fakeHost(
   const runs = new Map<string, RunState>()
   const answers: { run: string; prompt_id: string; generation: number; answer: string }[] = []
   const approvals: { run: string; choice: string }[] = []
-  const asked = { transcript: 0, archive: 0, runs: 0, subscriptions: 0, health: 0, stops: 0 }
+  const asked = {
+    transcript: 0,
+    archive: 0,
+    runs: 0,
+    subscriptions: 0,
+    health: 0,
+    stops: 0,
+    agentStops: 0,
+    failedClears: 0,
+    info: 0,
+  }
   const latest: { run?: Run; id?: string; body?: Record<string, unknown>; key?: string } = {}
   /** A project session's record on the plugin: its mode, a plan waiting, and why it can't send. */
   const workspace = {
@@ -259,9 +272,17 @@ export function fakeHost(
     const turn = expected.at(-1)!
     let calls = 0
 
+    /** Thinking heard since the last row, which the next row the host writes carries. */
+    let thought: string | undefined
+    const reasoning = () => {
+      const held = thought
+      thought = undefined
+      return held ? { reasoning: held } : {}
+    }
     const callRow = (name: string, args = "{}") => {
       const call = `call_${id}_${++calls}`
       write("assistant", "", {
+        ...reasoning(),
         finish_reason: "tool_calls",
         tool_calls: [{ id: call, type: "function", function: { name, arguments: args } }],
       })
@@ -422,9 +443,13 @@ export function fakeHost(
         })
         turn.tools++
       },
+      think(text) {
+        thought = thought ? `${thought}\n\n${text}` : text
+        push("reasoning.available", { text })
+      },
       say: (delta) => push("message.delta", { delta }),
       finish(output) {
-        write("assistant", output, { finish_reason: "stop" })
+        write("assistant", output, { ...reasoning(), finish_reason: "stop" })
         turn.texts.push(output)
         push("run.completed", { output, usage: { input_tokens: 1, output_tokens: 1 } })
         state.done = true
@@ -575,12 +600,14 @@ export function fakeHost(
       latest.key = new Headers(init.headers).get("idempotency-key") ?? undefined
       return reply({ run_id: id, status: "started", replayed: false }, 202)
     }
-    if (plugin && path === "/api/plugins/memento/info")
+    if (plugin && path === "/api/plugins/memento/info") {
+      asked.info++
       return reply({
         object: "memento.info",
         version: "0.91.0",
-        features: ["queue", "media", "triage", "moves"],
+        features: ["queue", "media", "triage", "moves", "subagents_stop_all", "failed_turn_clear"],
       })
+    }
     if (plugin && path === `/api/plugins/memento/sessions/${session}/triage`) {
       const { text, steer } = JSON.parse(String(init?.body))
       triage.asked.push({ text, steer: Boolean(steer) })
@@ -683,6 +710,23 @@ export function fakeHost(
           : {},
       })
     }
+    // The plugin takes a failed turn, from its request to the failure, out of the transcript.
+    if (
+      plugin &&
+      path === `/api/plugins/memento/sessions/${session}/failed-turn/clear` &&
+      init?.method === "POST"
+    ) {
+      asked.failedClears++
+      const { row } = JSON.parse(String(init.body)) as { row: number }
+      const failed = rows.find((one) => one.id === row && one.display_kind === "failed_turn")
+      const request = rows.findLast(
+        (one) => one.id < row && one.role === "user" && !one.display_kind?.match(/steer|hidden/),
+      )
+      if (!failed || !request) return reply({ removed: 0 })
+      const before = rows.length
+      rows.splice(0, rows.length, ...rows.filter((one) => one.id < request.id || one.id > row))
+      return reply({ object: "memento.failed_turn.cleared", removed: before - rows.length })
+    }
     // The plugin's list of the children a session delegated to.
     if (plugin && path === `/api/plugins/memento/sessions/${session}/todos`) {
       todos.reads++
@@ -699,6 +743,21 @@ export function fakeHost(
             }
           : { revision: null, todos: null, progress: null },
       )
+    }
+    // The session's Stop for every child still at work, in the plugin's one call.
+    if (
+      plugin &&
+      path === `/api/plugins/memento/sessions/${session}/agents/stop` &&
+      init?.method === "POST"
+    ) {
+      asked.agentStops++
+      const running = agents.filter((agent) => agent.status === "running")
+      running.forEach((agent) => (agent.status = "done"))
+      return reply({
+        object: "memento.agents_stop",
+        stopped: running.length,
+        agents: running.map((agent) => ({ id: agent.id, stopped: true })),
+      })
     }
     if (plugin && path === `/api/plugins/memento/sessions/${session}/agents`)
       return reply({ object: "memento.agents", session_id: session, agents })
@@ -742,11 +801,34 @@ export function fakeHost(
   }
 
   /** Turns already on the host before any device looks: finished, with their calls and reply. */
-  function seed(turns: { user: string; tools?: number; reply: string }[]) {
+  function seed(
+    turns: {
+      user: string
+      tools?: number
+      reply: string
+      thoughts?: string[]
+      /** The host wrote the reply with no finish reason, as it does for some finished turns. */
+      unmarked?: boolean
+      /** The host gave up on the turn and wrote its own words for it, as a `failed_turn` row. */
+      failed?: string
+    }[],
+  ) {
     for (const turn of turns) {
       const { run } = start(turn.user)
-      for (let at = 0; at < (turn.tools ?? 0); at++) run.tool("terminal", `step ${at}`, "{}")
+      const thoughts = [...(turn.thoughts ?? [])]
+      for (let at = 0; at < (turn.tools ?? 0); at++) {
+        if (thoughts.length > 1) run.think(thoughts.shift()!)
+        run.tool("terminal", `step ${at}`, "{}")
+      }
+      if (thoughts.length) run.think(thoughts[0])
       run.finish(turn.reply)
+      if (turn.unmarked) rows.at(-1)!.finish_reason = null
+      if (turn.failed !== undefined)
+        Object.assign(rows.at(-1)!, {
+          finish_reason: null,
+          display_kind: "failed_turn",
+          content: turn.failed,
+        })
     }
   }
 

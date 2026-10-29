@@ -51,6 +51,8 @@ const kept = (row: Row): Row => ({
   display_kind: row.display_kind,
   tool_calls: row.tool_calls,
   timestamp: row.timestamp,
+  reasoning: row.reasoning,
+  reasoning_content: row.reasoning_content,
 })
 
 const sameRow = (a: Row, b: Row) =>
@@ -60,6 +62,8 @@ const sameRow = (a: Row, b: Row) =>
   a.finish_reason === b.finish_reason &&
   a.display_kind === b.display_kind &&
   a.timestamp === b.timestamp &&
+  a.reasoning === b.reasoning &&
+  a.reasoning_content === b.reasoning_content &&
   JSON.stringify(a.tool_calls) === JSON.stringify(b.tool_calls)
 
 /**
@@ -96,6 +100,7 @@ const recordOf = (session: string, state: ThreadState): SessionState => ({
   archived: state.archived ? true : undefined,
   live: state.live,
   queue: state.queue,
+  stats: state.stats,
 })
 
 const sameRecord = (a: SessionState | undefined, b: SessionState) =>
@@ -103,7 +108,8 @@ const sameRecord = (a: SessionState | undefined, b: SessionState) =>
   a.agents === b.agents &&
   Boolean(a.archived) === Boolean(b.archived) &&
   a.live === b.live &&
-  a.queue === b.queue
+  a.queue === b.queue &&
+  a.stats === b.stats
 
 function createStore(database: SessionDb, session: string, drop: () => void): ThreadStore {
   let state = initial
@@ -128,6 +134,7 @@ function createStore(database: SessionDb, session: string, drop: () => void): Th
       agents: record?.agents,
       live: record?.live,
       queue: record?.queue,
+      stats: record?.stats,
     }
     written = { rows, archived, record }
   })()

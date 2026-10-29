@@ -8,8 +8,12 @@ import test from "node:test"
 import { act } from "react"
 
 import { readAgents, readLiveRun } from "@/chat-next/api"
+import { attachmentsText } from "@/lib/attachment-text"
+import { BreakReminderActivityContext } from "@/components/break-reminder-context"
+import { FIRST_ROWS } from "@/components/chat/first-rows"
 import { db, type Profile, type Settings } from "@/lib/db"
 import { fakeHost } from "./chat-next-host.ts"
+import { SALES, block, cardOf, codeOf, drawn, replyRow, warm } from "./openui-kit.tsx"
 import {
   botProfile,
   chatScreen,
@@ -21,6 +25,7 @@ import {
   pressEnter,
   seedChats,
   settle,
+  text,
   type,
 } from "./component-kit.tsx"
 
@@ -312,18 +317,53 @@ test("a plan waiting is approved from its card: the mode moves and the plan's ru
   })
 })
 
-test("a code session reads in JetBrains Mono, and a chat keeps the app's face", async () => {
-  await sessionOnChatNext("c-mono")
+/** Whether an element reads in the code face, from itself or any ancestor. */
+const inCodeFace = (element: Element | null, what: string) => {
+  assert.ok(element, `${what} is on screen`)
+  return Boolean(element.closest(".font-code"))
+}
+
+test("a code session reads the agent's output in JetBrains Mono, and nothing else", async () => {
+  const host = await sessionOnChatNext("c-mono")
+  host.seed([{ user: "Look around", reply: "Found it.", tools: 1 }])
   await mount(chatScreen("c-mono"), async () => {
-    await until(
-      () => find("[data-chat-next]")?.classList.contains("font-code") ?? false,
-      "the session's pane reads in the code face",
+    await until(() => replies().length > 0, "the turn is drawn")
+    const pane = find("[data-chat-next]")
+    assert.equal(pane?.classList.contains("font-code"), false, "the pane is not in the face")
+    assert.equal(inCodeFace(find('[data-slot="header-row"]'), "the header"), false, "the header")
+    assert.equal(inCodeFace(composerField(), "the composer"), false, "the composer")
+    assert.equal(
+      inCodeFace(find('[data-chat-next] [data-slot="bubble-content"]'), "the user's bubble"),
+      false,
+      "the user's bubble",
+    )
+    assert.ok(
+      inCodeFace(find('[data-chat-next] [data-slot="markdown"]'), "the reply"),
+      "the reply's words",
+    )
+    const row = find('[data-chat-next] [data-slot="tool-group"]')
+    assert.ok(row?.querySelector(".font-code"), "the tool call's row label")
+
+    await click(row)
+    assert.equal(
+      inCodeFace(find('[data-slot="sheet-title"]'), "the sheet's heading"),
+      false,
+      "the sheet's heading",
+    )
+    const call = findAll("ol button")[0] ?? null
+    assert.ok(inCodeFace(call, "the call"), "the call in the sheet's list")
+    await click(call)
+    assert.ok(inCodeFace(find("pre"), "the call's output"), "the call's input or output")
+    assert.equal(
+      inCodeFace(find('[data-slot="sheet-title"]'), "the sheet's heading"),
+      false,
+      "the detail's heading",
     )
   })
   await onChatNext("c-sans")
   await mount(chatScreen("c-sans"), async () => {
     await until(() => Boolean(composerField()), "the chat has loaded")
-    assert.equal(find("[data-chat-next]")!.classList.contains("font-code"), false, "a plain chat")
+    assert.equal(findAll(".font-code").length, 0, "a plain chat has the face nowhere")
   })
 })
 
@@ -398,4 +438,351 @@ test("a reply's MEDIA tag draws as the file it names, read through the chat's ow
       "and no tag is left as text",
     )
   })
+})
+
+test("a reply's thinking draws as the thought rows the app's thread draws everywhere", async () => {
+  const { host } = await onChatNext("c-think")
+  host.seed([
+    {
+      user: "Look around",
+      reply: "Found it.",
+      tools: 1,
+      thoughts: ["I should look first.", "Now say so."],
+    },
+  ])
+  await mount(chatScreen("c-think"), async () => {
+    await until(() => replies().length > 0, "the turn is drawn")
+    // Stretches only a tool call separates are one row, as everywhere else the app draws a reply.
+    const rows = findAll('[data-chat-next] [data-slot="thinking-line"]')
+    assert.equal(rows.length, 1)
+    await click(rows[0].querySelector("button"))
+    const body = find('[data-slot="thinking-body"]')?.textContent ?? ""
+    assert.match(body, /I should look first\./)
+    assert.match(body, /Now say so\./)
+  })
+})
+
+test("an approval and a question are the app's own cards, answered where chat-next answers", async () => {
+  const { host } = await onChatNext("c-prompts")
+  await mount(chatScreen("c-prompts"), async () => {
+    const run = await midReply(host, "Clean up")
+    run.requestApproval("rm -rf /tmp/x", "delete in root path")
+    await until(() => Boolean(button("Allow once")), "the approval card, with its choices")
+    assert.match(text(), /Approval needed/)
+    assert.match(text(), /rm -rf \/tmp\/x/)
+    assert.ok(button("Deny") && button("Allow in chat") && button("Always allow"))
+    await click(button("Allow once"))
+    await until(() => host.approvals.length === 1, "the host was given the answer")
+    assert.deepEqual(host.approvals[0].choice, "once")
+
+    run.ask({ question: "Which do you prefer?", choices: ["tea", "coffee"], multi_select: false })
+    await until(() => /Which do you prefer\?/.test(text()), "the question card")
+    await click(findAll("button").find((one) => one.textContent?.includes("coffee")) ?? null)
+    await click(button("Send"))
+    await until(() => host.answers.length === 1, "the host was given the answer")
+    assert.equal(host.answers[0].answer, "coffee")
+  })
+})
+
+test("while a subagent works the composer is Stop, and one press stops the session's children", async () => {
+  const { host } = await onChatNext("c-stop-all", {}, { plugin: true })
+  await mount(chatScreen("c-stop-all"), async () => {
+    await sendFromComposer("Fan out")
+    await until(() => host.asked.runs === 1, "the turn is running")
+    host.latest.run!.delegate("look into it")
+    host.latest.run!.finish("Dispatched.")
+    await until(() => host.asked.info > 0, "the plugin has said what it can do")
+    await until(
+      () => /subagent/i.test(text()) && !find('button[aria-label="Send"]'),
+      "the child is listed and keeps the composer on Stop",
+    )
+    await until(() => Boolean(find('button[aria-label="Stop"]')), "Stop stays while a child works")
+    await click(find('button[aria-label="Stop"]'))
+    await until(() => host.asked.agentStops === 1, "the plugin was asked to stop the children")
+  })
+})
+
+test("a missed question's Ask again sends through the thread's own send", async () => {
+  const { host } = await onChatNext("c-ask-again")
+  await mount(chatScreen("c-ask-again"), async () => {
+    const run = await midReply(host, "Pick for me")
+    const missed = JSON.stringify({
+      responses: [{ question: "Tea or coffee?", choices_offered: [], timed_out: true }],
+      outcome: "timed_out",
+    })
+    run.tool("clarify", "Tea or coffee?", missed)
+    run.finish("No answer came.")
+    await until(() => Boolean(button("Ask again")), "the missed question offers Ask again")
+    await until(() => !find('button[aria-label="Stop"]'), "the first turn is over")
+    await click(button("Ask again"))
+    await until(() => host.asked.runs === 2, "the thread sent the message as a turn")
+    assert.match(JSON.stringify(host.latest.body), /Ask me that again\./)
+  })
+})
+
+test("the composer carries the chat's model pill, which names the model the chat runs on", async () => {
+  const { host } = await onChatNext("c-pill")
+  await mount(chatScreen("c-pill"), async () => {
+    await until(() => Boolean(composerField()), "the composer is drawn")
+    assert.ok(find('button[aria-label^="Model:"]'), "the model pill is in the composer")
+    await sendFromComposer("Why is the sky blue?")
+    await until(() => host.asked.runs === 1, "the turn was sent")
+    await until(
+      () => /claude-sonnet-5-5/.test(find('button[aria-label^="Model:"]')?.textContent ?? ""),
+      "the pill names the pinned model",
+    )
+  })
+})
+
+test("the header's options rename a chat and delete it, as the current screen's do", async () => {
+  await onChatNext("c-options")
+  await db.sentFiles.put({ session: "memento-c-options", path: "/h/a.png", blob: new Blob(["x"]) })
+  await mount(chatScreen("c-options"), async () => {
+    await until(() => Boolean(find('button[aria-label="Chat options"]')), "the options button")
+    await click(find('button[aria-label="Chat options"]'))
+    await click(
+      findAll('[role="menuitem"]').find((one) => one.textContent?.includes("Rename")) ?? null,
+    )
+    const field = find('input[aria-label="Chat title"]') as HTMLInputElement | null
+    assert.ok(field, "the rename dialog")
+    await type(field, "Renamed chat")
+    await click(button("Save"))
+    await until(
+      () => find('[data-slot="header-title"]')?.textContent?.trim() === "Renamed chat",
+      "the header carries the new title",
+    )
+    assert.equal((await db.conversations.get("c-options"))?.titleEdited, true)
+
+    await click(find('button[aria-label="Chat options"]'))
+    await click(
+      findAll('[role="menuitem"]').find((one) => one.textContent?.includes("Delete")) ?? null,
+    )
+    await click(button("Delete"))
+    await settle()
+    assert.equal(await db.conversations.get("c-options"), undefined, "the chat is deleted")
+    assert.equal(await db.sentFiles.count(), 0, "and the files it sent go with it")
+  })
+})
+
+test("the dividers the plugin's record places are drawn between the turns", async () => {
+  const { host } = await onChatNext("c-dividers")
+  host.seed([
+    { user: "First", reply: "One." },
+    { user: "Second", reply: "Two." },
+  ])
+  await db.conversations.update("c-dividers", {
+    compactions: [{ at: 0, tokens: 168_000, window: 200_000 }],
+  })
+  await mount(chatScreen("c-dividers"), async () => {
+    await until(() => replies().length === 2, "both turns are drawn")
+    await until(
+      () => Boolean(find('[role="separator"][aria-label="Compaction · 168k of 200k (84%)"]')),
+      "the compaction's divider, with how full the context was",
+    )
+  })
+})
+
+test("a long chat opens on its last rows and draws the rest a beat later", async () => {
+  const { host } = await onChatNext("c-long")
+  host.seed(Array.from({ length: 40 }, (_, at) => ({ user: `Ask ${at}`, reply: `Answer ${at}` })))
+  await mount(chatScreen("c-long"), async () => {
+    const rows = () => findAll('[data-chat-next] [data-slot="message"]').length
+    for (let tries = 0; !rows() && tries < 400; tries++)
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 5)))
+    const first = rows()
+    assert.ok(first > 0 && first <= FIRST_ROWS, `the first frame drew ${first} rows`)
+    await until(() => rows() === 80, "the rest of the chat follows")
+  })
+})
+
+test("an account near its limit warns above the composer, and View usage opens the sheet", async () => {
+  await onChatNext("c-limit", {
+    providerUsage: {
+      provider: "anthropic",
+      at: Date.now(),
+      windows: [{ label: "Session", usedPercent: 94, resetsAt: Date.now() + 3 * 3_600_000 }],
+    },
+  })
+  await mount(chatScreen("c-limit"), async () => {
+    await until(() => Boolean(button("View usage")), "the limit banner, with a way to the usage")
+    await click(button("View usage"))
+    await until(() => /Context/.test(text()), "the usage sheet")
+  })
+})
+
+test("an interface a reply wrote draws as the app's own card, not as its code", async () => {
+  const { host } = await onChatNext("c-interface")
+  host.seed([{ user: "Show sales", reply: block(SALES) }])
+  await warm()
+  await mount(chatScreen("c-interface"), async () => {
+    await until(() => findAll("[data-slot=message]").length === 2, "the turn is drawn")
+    await drawn(
+      () => Boolean(cardOf(replyRow("Quarterly sales"))),
+      "the interface draws as the library's card",
+    )
+    assert.equal(codeOf(replyRow("Quarterly sales")), null, "and not as the code it came as")
+  })
+})
+
+test("the header's line stays put while a reply works; the thread says what it is doing", async () => {
+  const host = await sessionOnChatNext("c-activity")
+  await mount(chatScreen("c-activity"), async () => {
+    const line = () => find('[data-slot="header-line"]')?.textContent ?? ""
+    await sendFromComposer("Look around")
+    await until(() => host.asked.runs === 1, "the turn is running")
+    host.latest.run!.say("Looking.")
+    await until(() => text().includes("Writing…"), "the thread says the reply is being written")
+    await until(() => line().includes("repo"), "the header names the bot and its repos")
+    assert.ok(!line().includes("Writing…"), "and never what the reply is doing")
+    host.latest.run!.finish("Looking.")
+  })
+})
+
+test("a reply the host wrote with no finish reason is not drawn as still being written", async () => {
+  const { host } = await onChatNext("c-unmarked", {}, { plugin: true })
+  host.seed([{ user: "Look around", reply: "All done.", unmarked: true }])
+  await mount(chatScreen("c-unmarked"), async () => {
+    await until(() => replies().includes("All done."), "the turn is drawn")
+    await until(() => host.asked.runs === 0 && !text().includes("Writing…"), "and it is at rest")
+  })
+})
+
+test("a turn the host gave up on is drawn as failed, in the host's words, and not as writing", async () => {
+  const { host } = await onChatNext("c-failed", {}, { plugin: true })
+  host.seed([{ user: "Look around", reply: "", failed: "Your request was not processed." }])
+  await mount(chatScreen("c-failed"), async () => {
+    await until(() => text().includes("Your request was not processed."), "the host's words show")
+    assert.ok(!text().includes("Writing…"), "and the turn is at rest")
+  })
+})
+
+test("Retry sends a failed turn's request again, the host drops the failure and the thread shows the resend only", async () => {
+  const { host } = await onChatNext("c-retry", {}, { plugin: true })
+  host.seed([{ user: "Look around", reply: "", failed: "Your request was not processed." }])
+  await mount(chatScreen("c-retry"), async () => {
+    await until(() => Boolean(find("[data-retry]")), "the failed turn offers Retry")
+    await click(find("[data-retry]"))
+    await until(() => host.asked.runs === 1, "the request is sent again")
+    assert.equal(host.asked.failedClears, 1, "after the host dropped the failed turn")
+    assert.match(String(JSON.stringify(host.latest.body)), /Look around/)
+    host.latest.run!.say("Looking.")
+    host.latest.run!.finish("Looking.")
+    await until(() => replies().includes("Looking."), "the second try answers")
+    assert.deepEqual(requests(), ["Look around"], "the request shows once")
+    assert.ok(!text().includes("Your request was not processed."), "and the failure is gone")
+    assert.ok(!find("[data-retry]"), "with nothing left to retry")
+  })
+})
+
+test("Retry without the plugin's route still sends again and the thread shows the resend only", async () => {
+  const { host } = await onChatNext("c-retry-bare", {}, { plugin: false })
+  host.seed([{ user: "Look around", reply: "", failed: "Your request was not processed." }])
+  await mount(chatScreen("c-retry-bare"), async () => {
+    await until(() => Boolean(find("[data-retry]")), "the failed turn offers Retry")
+    await click(find("[data-retry]"))
+    await until(() => host.asked.runs === 1, "the request is sent again")
+    assert.equal(host.asked.failedClears, 0, "the host was not asked to drop anything")
+    host.latest.run!.finish("Looking.")
+    await until(() => replies().includes("Looking."), "the second try answers")
+    assert.deepEqual(requests(), ["Look around"], "the request shows once")
+    assert.ok(!text().includes("Your request was not processed."), "and the failure is hidden")
+  })
+})
+
+test("a failed turn the user did not ask again stays, with Retry on the last one only", async () => {
+  const { host } = await onChatNext("c-retry-last", {}, { plugin: true })
+  host.seed([
+    { user: "First", reply: "", failed: "Your request was not processed." },
+    { user: "Second", reply: "", failed: "Your request was not processed." },
+  ])
+  await mount(chatScreen("c-retry-last"), async () => {
+    await until(() => findAll("[data-retry]").length === 1, "one Retry, on the last turn")
+    assert.deepEqual(requests(), ["First", "Second"])
+    assert.equal(
+      (text().match(/Your request was not processed\./g) ?? []).length,
+      2,
+      "both failures are shown",
+    )
+  })
+})
+
+test("a reply this device watched keeps what it cost, under the reply, once the transcript has it", async () => {
+  const { host } = await onChatNext("c-stats")
+  await mount(chatScreen("c-stats"), async () => {
+    const run = await midReply(host, "Why is the sky blue?")
+    run.say("Rayleigh scattering.")
+    run.finish("Rayleigh scattering.")
+    await until(() => /\b1 tokens\b/.test(text()), "the turn's tokens and time, under the reply")
+    // The host's transcript replaced the streamed turn; the figures stay with the row that opened it.
+    await until(() => !find('button[aria-label="Stop"]'), "the turn is over")
+    await settle()
+    assert.match(text(), /\b1 tokens\b/)
+    const kept = (await db.sessionStates.get("memento-c-stats"))?.stats
+    assert.equal(Object.keys(kept ?? {}).length, 1, "and the device keeps them across a reload")
+  })
+})
+
+test("a reply the run carries on without the app counts toward the break reminder, until it waits", async () => {
+  const { host } = await onChatNext("c-break")
+  const states: boolean[] = []
+  await mount(
+    <BreakReminderActivityContext.Provider value={(active) => states.push(active)}>
+      {chatScreen("c-break")}
+    </BreakReminderActivityContext.Provider>,
+    async () => {
+      const run = await midReply(host, "Clean up")
+      await until(() => states.at(-1) === true, "a running reply is background-safe work")
+      run.requestApproval("rm -rf /tmp/x", "delete")
+      await until(() => states.at(-1) === false, "a reply waiting on the user is not")
+    },
+  )
+})
+
+test("a file this device sent downloads from the bytes it holds, with no read of the host", async () => {
+  const { host } = await onChatNext("c-held", {}, { plugin: true })
+  const file = {
+    id: "f0",
+    name: "field notes.txt",
+    type: "text/plain",
+    size: 5,
+    image: false,
+    path: "/host/files/field notes.txt",
+  }
+  host.seed([{ user: attachmentsText("Read this", [file]), reply: "Read." }])
+  await db.sentFiles.put({ session: "memento-c-held", path: file.path, blob: new Blob(["notes"]) })
+  const saved: string[] = []
+  const reads: string[] = []
+  const anchor = window.HTMLAnchorElement.prototype
+  const real = { create: URL.createObjectURL, revoke: URL.revokeObjectURL, click: anchor.click }
+  const fetched = globalThis.fetch
+  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).includes("/media")) reads.push(String(input))
+    return fetched(input, init)
+  }) as typeof fetch
+  URL.createObjectURL = () => "blob:held"
+  URL.revokeObjectURL = () => {}
+  anchor.click = function (this: HTMLAnchorElement) {
+    saved.push(this.download)
+  }
+  try {
+    await mount(chatScreen("c-held"), async () => {
+      const row = () =>
+        findAll("button").find(
+          (one) => one.getAttribute("aria-label") === `Download ${file.name}`,
+        ) ?? null
+      await until(() => row() !== null, "the file's row")
+      // The row is there a moment before the device has read what it holds.
+      for (let tries = 0; !saved.length && tries < 40; tries++) {
+        await click(row())
+        await settle()
+      }
+      assert.deepEqual(saved, [file.name], "the download, under the file's own name")
+      assert.deepEqual(reads, [], "the bytes were the device's own, so the host was not asked")
+    })
+  } finally {
+    globalThis.fetch = fetched
+    URL.createObjectURL = real.create
+    URL.revokeObjectURL = real.revoke
+    anchor.click = real.click
+  }
 })

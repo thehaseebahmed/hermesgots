@@ -127,3 +127,34 @@ test("a question is a wait until the host says it is settled", () => {
   })
   assert.equal(after.waiting, undefined)
 })
+
+test("a block of thinking waits for the word or call it led to, and leads it", () => {
+  const state = play([
+    { event: "reasoning.available", text: "I should look first." },
+    { event: "tool.started", tool: "terminal", tool_call_id: "A" },
+    { event: "reasoning.available", text: "Now the answer." },
+    { event: "message.delta", delta: "Done." },
+  ])
+  const turn = threadTurns(state).at(-1)!
+  assert.equal(turn.pendingThought, undefined, "nothing is left waiting")
+  assert.equal(calls(state)[0].thought, "I should look first.")
+  const text = turn.parts.at(-1)
+  assert.equal(text?.kind === "text" && text.thought, "Now the answer.")
+})
+
+test("thinking heard before anything follows it is kept on the turn", () => {
+  const turn = threadTurns(play([{ event: "reasoning.available", text: "Thinking." }])).at(-1)!
+  assert.equal(turn.pendingThought, "Thinking.")
+})
+
+test("an interim line the deltas did not carry is words of the reply, and one they did is not", () => {
+  const state = play([
+    { event: "message.interim", text: "Looking into it." },
+    { event: "message.interim", text: "Already seen.", already_streamed: true },
+    { event: "message.delta", delta: "Done." },
+  ])
+  const texts = threadTurns(state)
+    .at(-1)!
+    .parts.flatMap((part) => (part.kind === "text" ? [part.text] : []))
+  assert.deepEqual(texts, ["Looking into it.\n\nDone."])
+})

@@ -1,8 +1,9 @@
 import {
+  createContext,
   lazy,
-  startTransition,
   Suspense,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -12,17 +13,6 @@ import {
 import { useLiveQuery } from "dexie-react-hooks"
 import { matchPath, useLocation, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
-import {
-  ArchiveXIcon,
-  BellIcon,
-  BellOffIcon,
-  CheckIcon,
-  EllipsisIcon,
-  PencilIcon,
-  RotateCcwIcon,
-  SettingsIcon,
-  Trash2Icon,
-} from "lucide-react"
 
 import {
   CATCH_UP_MS,
@@ -35,7 +25,6 @@ import {
 import { COLUMN_BOX } from "@/lib/layout"
 import type { ComposerControls } from "@/chat-next/page"
 import { opensOnChatNext } from "@/chat-next/route"
-import { cn } from "@/lib/utils"
 import { prepareTurn, queueTurn, startTurn, steerTurn, triageTurn } from "@/chat-next/turn"
 import { quietly } from "@/lib/report"
 import { threadCount, threadsLine } from "@/lib/bot-chrome"
@@ -44,6 +33,9 @@ import { useBreakReminderEligibility } from "@/components/break-reminder-context
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { ChatHeader } from "@/components/chat/chat-header"
+import { ChatActions, LimitNotice, useChatUsage } from "@/components/chat/chat-actions"
+import { FollowAfterApproval, FollowOnSend } from "@/components/chat/follow"
+import { useFirstRows } from "@/components/chat/first-rows"
 import { Composer } from "@/components/chat/composer"
 import { MessageItem } from "@/components/chat/message-item"
 import { Compacted, ModelChange } from "@/components/chat/model-change"
@@ -65,40 +57,12 @@ import {
 import { TodosPill, TodosSheet } from "@/components/chat/todos"
 import { ModelMenu } from "@/components/chat/model-picker"
 import {
-  LimitBanner,
-  ContextIcon,
-  ContextPercent,
-  ContextRing,
-  UsageSheet,
-  type ContextUsage,
-} from "@/components/chat/usage-sheet"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
-import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { Input } from "@/components/ui/input"
-import {
   MessageScroller,
   MessageScrollerButton,
   MessageScrollerContent,
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
-  useMessageScroller,
   useMessageScrollerScrollable,
 } from "@/components/ui/message-scroller"
 import { Spinner } from "@/components/ui/spinner"
@@ -122,7 +86,6 @@ import {
   type ModelChoice,
   createConversation,
   db,
-  deleteConversation,
   ensureMainThread,
   getActiveProfile,
   getMessages,
@@ -143,7 +106,6 @@ import {
   reconcileHistory,
   refreshChatDetails,
 } from "@/lib/history"
-import { contextWindow } from "@/lib/context"
 import { useLive, watchChat } from "@/lib/live"
 import { useLiveRun, useLiveSubagents } from "@/lib/waiting"
 import { runFinished } from "@/lib/session-work"
@@ -154,19 +116,10 @@ import { markRead } from "@/lib/read-marks"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
-import { setBotMuted, setThreadMuted } from "@/lib/push"
 import { useStagedPipeline } from "@/lib/afk-workflows"
 import { modelChanges } from "@/lib/model-changes"
-import { botModel, fullModel, useModelInfo } from "@/lib/model-info"
 import { chosenOf, samePick, storedPick } from "@/lib/model-pick"
-import { syncContextWindow, useModelCatalog } from "@/lib/models"
 import { useDraws } from "@/lib/openui-draws"
-import {
-  effectiveProvider,
-  limitNotice,
-  limitNoticeKey,
-  refreshProviderUsage,
-} from "@/lib/provider-usage"
 import {
   planApprovalMessage,
   projectRepos,
@@ -174,7 +127,6 @@ import {
   refreshLibrary,
   refreshPrs,
   refreshWorkspace,
-  closeSessionWork,
   setSessionMode,
   type RepoRef,
 } from "@/lib/workspace"
@@ -189,6 +141,7 @@ import { announceMove } from "@/lib/triage"
 import { useMainFlow } from "@/components/chat/main-flow"
 
 export { SETUP_COPY } from "@/components/chat/empty-states"
+import { dictationHint } from "@/lib/dictation-hint"
 import { draftKey } from "@/lib/drafts"
 import { AgentsContext, runningAgents, stopSubagents, useSessionAgents } from "@/lib/agents"
 import { spawnInFlight } from "@/lib/spawn"
@@ -203,15 +156,6 @@ const NO_ROWS: Message[] = []
 const hasNoMessages = async (chat: Conversation) =>
   !(chat.updatedAt > chat.createdAt) &&
   (await db.messages.where("conversationId").equals(chat.id).count()) === 0
-// The rows a chat draws in the commit it opens with: the end the reader lands on. Every row's
-// markdown is parsed as it mounts, so drawing a long transcript whole kept a switch blank for
-// hundreds of milliseconds on a phone; the rows above follow in a transition.
-export const FIRST_ROWS = 8
-// The least height a row and its gap take: a chat with more rows than fit the window this way
-// overflows it once drawn whole, so its last row ends where the opening frame put it.
-const LEAST_ROW = 44
-const REST_AFTER_MS = 250
-
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
 function PendingChat() {
@@ -221,28 +165,6 @@ function PendingChat() {
       <div className="flex-1" />
     </>
   )
-}
-
-/** An approval or question card temporarily replaces the composer; once answered, follow the reply again. */
-function FollowAfterApproval({ pending }: { pending: boolean }) {
-  const { scrollToEnd } = useMessageScroller()
-  const wasPending = useRef(pending)
-  useEffect(() => {
-    if (wasPending.current && !pending) scrollToEnd({ behavior: "smooth" })
-    wasPending.current = pending
-  }, [pending, scrollToEnd])
-  return null
-}
-
-/** Sending jumps back to the end, even if you'd scrolled up to read. */
-function FollowOnSend({ lastUserId }: { lastUserId?: string }) {
-  const { scrollToEnd } = useMessageScroller()
-  const previous = useRef(lastUserId)
-  useEffect(() => {
-    if (lastUserId !== previous.current) scrollToEnd({ behavior: "smooth" })
-    previous.current = lastUserId
-  }, [lastUserId, scrollToEnd])
-  return null
 }
 
 /** Steps one edge gets before the reader has to leave the top and come back. */
@@ -465,121 +387,133 @@ function NextChat({
   useLayoutEffect(() => {
     if (ready) hold(slot, id)
   })
-  const actions = mainOn && bot && (
-    <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button
-            variant="outline"
-            size="icon-lg"
-            className="size-11 rounded-full bg-background/80 backdrop-blur"
-            aria-label="Bot options"
-          />
-        }
-      >
-        <EllipsisIcon />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-44">
-        <DropdownMenuItem onClick={() => void setBotMuted(bot.id, !bot.muted)}>
-          {bot.muted ? <BellIcon /> : <BellOffIcon />}
-          {bot.muted ? "Unmute notifications" : "Mute notifications"}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => root("/settings/bots")}>
-          <SettingsIcon />
-          Bot settings
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+  const { usage, providerUsage, notice, provider, noticeDismissed } = useChatUsage(
+    chat,
+    bot,
+    chosenOf(chat?.modelChoice),
+  )
+  const [usageOpen, setUsageOpen] = useState(false)
+  const limit = useMemo(
+    () => ({ usage: { notice, provider, noticeDismissed }, onView: () => setUsageOpen(true) }),
+    [notice, provider, noticeDismissed],
+  )
+  const actions = chat && bot && (
+    <ChatActions
+      chat={chat}
+      profile={bot}
+      session={session}
+      mainChrome={mainOn}
+      wide={wide}
+      usage={usage}
+      providerUsage={providerUsage}
+      usageOpen={usageOpen}
+      onUsageOpenChange={setUsageOpen}
+      onDeleted={() => (session ? up("/code") : root(mainPath ?? "/"))}
+    />
   )
   return (
-    <div
-      data-slot="chat-pane"
-      data-pane={slot}
-      data-chat-next
-      data-code-session={chat?.projectId ? "" : undefined}
-      // A code session reads in JetBrains Mono, a chat in the app's own face.
-      className={cn("relative flex min-h-0 flex-1 flex-col", chat?.projectId && "font-code")}
-      inert={!ready}
-    >
-      {chat && bot && ready ? (
-        <>
-          <ChatHeader
-            // Main is the bot's face, so its title is the bot's name, which Bot settings edits.
-            // A session not started has no title yet, and its bot is the big one in the middle.
-            title={unstarted ? "" : mainOn ? bot.name || chat.title : chat.title}
-            subtitle={
-              mainOn && threadList
-                ? threadsLine(threadCount(threadList))
-                : session && !unstarted
-                  ? sessionSubtitle({
-                      botName: bot.name,
-                      names: sessionRepos.map((repo) => repo.name),
-                      cap: repoCap({ wide, xlarge: xl }),
-                    })
-                  : undefined
-            }
-            botId={bot.botId}
-            muted={Boolean(chat.muted || bot.muted)}
-            centered={Boolean(session) || besideMain}
-            showBot={!session && !besideMain}
-            actions={actions}
-            leading={
-              // Beside Main the bot is on screen with the thread; below `xl` the thread leads back.
-              // A session leads back to Code, unless it is drawn beside Code's list.
-              mainPath && !besideMain ? (
-                <HeaderBack label={`Back to ${bot.name || "bot"}`} onClick={() => up(mainPath)} />
-              ) : (
-                underCode && <HeaderBack label="Back to Code" onClick={() => void leave()} />
-              )
-            }
-          />
-          <Suspense fallback={null}>
-            <ChatNextThread
-              key={chat.hermesSessionId}
-              chatId={id}
-              blank={unstarted ? { botId: bot.botId, repos: sessionRepos } : undefined}
-              main={
-                mainOn
-                  ? {
-                      profileId: chat.profileId,
-                      botId: bot.botId,
-                      openThread: routeThread ?? paneThread,
-                      beside: Boolean(routeThread),
-                      routeChat,
-                    }
-                  : undefined
+    <LimitContext.Provider value={limit}>
+      <div
+        data-slot="chat-pane"
+        data-pane={slot}
+        data-chat-next
+        data-code-session={chat?.projectId ? "" : undefined}
+        className="relative flex min-h-0 flex-1 flex-col"
+        inert={!ready}
+      >
+        {chat && bot && ready ? (
+          <>
+            <ChatHeader
+              // Main is the bot's face, so its title is the bot's name, which Bot settings edits.
+              // A session not started has no title yet, and its bot is the big one in the middle.
+              title={unstarted ? "" : mainOn ? bot.name || chat.title : chat.title}
+              // The header never follows the reply: what the thread is doing is drawn in the thread.
+              subtitle={
+                mainOn && threadList
+                  ? threadsLine(threadCount(threadList))
+                  : session && !unstarted
+                    ? sessionSubtitle({
+                        botName: bot.name,
+                        names: sessionRepos.map((repo) => repo.name),
+                        cap: repoCap({ wide, xlarge: xl }),
+                      })
+                    : undefined
               }
-              server={bot.baseUrl}
-              apiKey={bot.apiKey}
-              session={chat.hermesSessionId}
-              prepareTurn={(text, attachments) => prepareTurn(id, text, attachments)}
-              queueTurn={async (text, attachments) => void (await queueTurn(id, text, attachments))}
-              steerTurn={(text, attachments) => steerTurn(id, text, attachments)}
-              // Only Main's messages are triaged; a thread and a project session never are.
-              triageTurn={
-                mainOn
-                  ? (text, attachments, options) => triageTurn(id, text, attachments, options)
-                  : undefined
+              botId={bot.botId}
+              muted={Boolean(chat.muted || bot.muted)}
+              centered={Boolean(session) || besideMain}
+              showBot={!session && !besideMain}
+              actions={actions}
+              leading={
+                // Beside Main the bot is on screen with the thread; below `xl` the thread leads back.
+                // A session leads back to Code, unless it is drawn beside Code's list.
+                mainPath && !besideMain ? (
+                  <HeaderBack label={`Back to ${bot.name || "bot"}`} onClick={() => up(mainPath)} />
+                ) : (
+                  underCode && <HeaderBack label="Back to Code" onClick={() => void leave()} />
+                )
               }
-              // What the plugin holds beside the transcript — the title, the context, the todos, a
-              // session's workspace, pull requests and library — read as every chat reads it.
-              onSettled={(reason, thread) =>
-                reason === "turn"
-                  ? void readAfterTurn(id, { turn: thread.turns })
-                  : refreshChatDetails(id)
-              }
-              Composer={composer}
             />
-          </Suspense>
-          {leaveDialog}
-        </>
-      ) : (
-        <PendingChat />
-      )}
-    </div>
+            <Suspense fallback={null}>
+              <ChatNextThread
+                key={chat.hermesSessionId}
+                chatId={id}
+                code={Boolean(chat.projectId)}
+                blank={unstarted ? { botId: bot.botId, repos: sessionRepos } : undefined}
+                main={
+                  mainOn
+                    ? {
+                        profileId: chat.profileId,
+                        botId: bot.botId,
+                        openThread: routeThread ?? paneThread,
+                        beside: Boolean(routeThread),
+                        routeChat,
+                      }
+                    : undefined
+                }
+                server={bot.baseUrl}
+                apiKey={bot.apiKey}
+                session={chat.hermesSessionId}
+                prepareTurn={(text, attachments) => prepareTurn(id, text, attachments)}
+                queueTurn={async (text, attachments) =>
+                  void (await queueTurn(id, text, attachments))
+                }
+                steerTurn={(text, attachments) => steerTurn(id, text, attachments)}
+                // Only Main's messages are triaged; a thread and a project session never are.
+                triageTurn={
+                  mainOn
+                    ? (text, attachments, options) => triageTurn(id, text, attachments, options)
+                    : undefined
+                }
+                // What the plugin holds beside the transcript — the title, the context, the todos, a
+                // session's workspace, pull requests and library — read as every chat reads it.
+                onSettled={(reason, thread) =>
+                  reason === "turn"
+                    ? void readAfterTurn(id, { turn: thread.turns })
+                    : refreshChatDetails(id)
+                }
+                Composer={composer}
+              />
+            </Suspense>
+            {leaveDialog}
+          </>
+        ) : (
+          <PendingChat />
+        )}
+      </div>
+    </LimitContext.Provider>
   )
 }
+
+/**
+ * What the pane knows of the account's limits and how to open the usage sheet, for the composer to
+ * warn with: the composer is one component for the chat's life, so it reads this rather than being
+ * handed it, and a change in the limits never remounts it.
+ */
+const LimitContext = createContext<{
+  usage: Pick<ReturnType<typeof useChatUsage>, "notice" | "provider" | "noticeDismissed">
+  onView: () => void
+} | null>(null)
 
 /**
  * The app's composer driving a chat-next thread. A message sent while a reply runs goes to the
@@ -594,8 +528,10 @@ function NextComposer(props: {
   main: boolean
   home?: string
 }) {
+  const limit = useContext(LimitContext)
   return (
     <>
+      {limit && <LimitNotice usage={limit.usage} profileId={props.botId} onView={limit.onView} />}
       <NextPills chatId={props.chatId} botId={props.botId} busy={props.controls.busy} />
       <NextComposerBody {...props} />
     </>
@@ -716,10 +652,19 @@ function NextComposerBody({
   const { root } = useNav()
   const navigate = useNavigate()
   const bot = useLiveQuery(() => db.profiles.get(botId), [botId])
-  const session = useLiveQuery(async () => {
-    const chat = await db.conversations.get(chatId)
-    return chat?.projectId ? chat : null
-  }, [chatId])
+  const chat = useLiveQuery(() => db.conversations.get(chatId), [chatId])
+  const session = chat?.projectId ? chat : null
+  const kept = chat?.modelChoice
+  // What the dictation hears best with: the chat's title, its project and the repos it works in.
+  const projects = useProjects(
+    session && bot ? { baseUrl: bot.baseUrl, apiKey: bot.apiKey } : undefined,
+  )
+  const project = projects?.find((one) => one.id === session?.projectId)
+  const repos = session?.worktree?.repos.length
+    ? session.worktree.repos
+    : project
+      ? projectRepos(project)
+      : []
   // `/thread` from Main: a thread of its own, with Main's pick and the message as its first turn.
   const startThread = async (text: string, attachments: Attachment[]) => {
     try {
@@ -736,9 +681,17 @@ function NextComposerBody({
   const [cheatsheetOpen, setCheatsheetOpen] = useState(false)
   const [navShortcuts, setNavShortcuts] = useState(DEFAULT_SETTINGS.navShortcuts)
   const steerByDefault = useLiveQuery(async () => (await getSettings()).steerByDefault, [])
-  if (!bot || session === undefined) return null
+  if (!bot || !chat) return null
   // Without a key nothing on the host answers for Auto, so the session runs as Accept edits.
   const tracked = Boolean(bot.apiKey && !bot.disabled)
+  // The chat's model pill: the composer's, and the plan-ready card's while a plan waits on it.
+  const chooseModel = (choice: ModelChoice | undefined) => {
+    const stored = storedPick(choice)
+    // Re-picking the model the chat already holds would wake every query over its row for nothing.
+    if (!samePick(kept, stored)) void updateConversation(chatId, { modelChoice: stored })
+  }
+  const modelPill = (extra: { display?: "pill" | "block"; disabled?: boolean }) =>
+    tracked && <ModelMenu profile={bot} choice={chosenOf(kept)} onChoose={chooseModel} {...extra} />
   const said =
     (go: (text: string, attachments: Attachment[]) => Promise<void>) =>
     async (text: string, attachments: Attachment[]) => {
@@ -759,6 +712,7 @@ function NextComposerBody({
     return (
       <PlanReadyCard
         autoAvailable={tracked}
+        model={modelPill({ display: "block" })}
         onApprove={async (mode) => {
           await setSessionMode(session.id, mode)
           await controls.send(planApprovalMessage(session.planFile), [])
@@ -773,6 +727,7 @@ function NextComposerBody({
         connection={serverConfig(bot)}
         botName={bot.name}
         dictationWords={bot.vocabulary}
+        dictationHint={dictationHint({ title: chat.title, project: project?.name, repos })}
         draftKey={draftKey(chatId)}
         filesFeature={filesFeature}
         imagesAvailable={bot.imageInput !== false}
@@ -780,7 +735,9 @@ function NextComposerBody({
         onQueue={said(controls.queue)}
         onSteer={said(controls.steer)}
         canSteer={controls.canSteer}
+        model={modelPill({ disabled: controls.busy })}
         steerByDefault={Boolean(steerByDefault)}
+        subagentsRunning={controls.subagents}
         onStop={controls.stop}
         session={
           session
@@ -859,10 +816,6 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   const profile = owners && owners.id === id ? owners.profile : undefined
   const threads = useLiveQuery(async () => ({ id, rows: id ? await getMessages(id) : [] }), [id])
   const messages = threads && threads.id === id ? threads.rows : undefined
-  const [renaming, setRenaming] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-  const [discarding, setDiscarding] = useState(false)
-  const [title, setTitle] = useState("")
   const [usageOpen, setUsageOpen] = useState(false)
   // A new chat's pick, held until its first message makes the chat; it follows the chosen bot.
   const [pendingModel, setPendingModel] = useState<{ profileId?: string; choice?: ModelChoice }>()
@@ -932,20 +885,7 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   useLayoutEffect(() => {
     if (answered) readyRef.current = { id }
   })
-  // The chat this pane has drawn whole. A long one opens on its last rows and draws the rest in a
-  // transition; one short enough to be sure of not overflowing the window is cheap to draw at once,
-  // so it is whole from its first frame, with no second commit to disturb its placing.
-  const [whole, setWhole] = useState<string>()
-  const long = flow.length > Math.max(FIRST_ROWS, window.innerHeight / LEAST_ROW)
-  if (answered && whole !== (id ?? "") && !long) setWhole(id ?? "")
-  const cut = answered && whole !== (id ?? "") && long
-  useEffect(() => {
-    if (!cut) return
-    // A beat later, so a reader moving straight on to another chat never waits behind these rows.
-    const timer = window.setTimeout(() => startTransition(() => setWhole(id ?? "")), REST_AFTER_MS)
-    return () => window.clearTimeout(timer)
-  }, [cut, id])
-  const drawn = cut ? flow.slice(-FIRST_ROWS) : flow
+  const { drawn, cut } = useFirstRows(id ?? "", flow, answered)
   // Where this chat's model changed, as the host recorded it: the divider each turn below carries.
   const changes = useMemo(
     () => modelChanges(thread ?? [], conversation?.modelChanges),
@@ -987,7 +927,6 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   const activity = streaming && describeActivity(streaming)
   // Only the plugin sees each model call; Hermes's API sums a turn's calls, so nothing else is exact.
   const tracked = Boolean(profile?.apiKey && !profile.disabled)
-  const live = conversation?.liveContext
   const todos = (tracked && conversation?.todos?.items) || []
   const todoProgress = tracked ? conversation?.todos?.progress : undefined
   // A session of a Hermes Project: works in its worktree, with a mode, a PR and a resolved state.
@@ -1037,40 +976,12 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
       <ModelMenu profile={profile} choice={modelChoice} onChoose={chooseModel} {...extra} />
     )
   // What this chat runs next: its own pick, the bot's default, else what the host last reported.
-  const hostInfo = useModelInfo(profile)
-  const catalog = useModelCatalog()
-  const currentModel = modelChoice ?? (profile ? botModel(profile, hostInfo) : undefined)
-  const usage: ContextUsage = {
-    tracked,
-    tokens: tracked ? live?.tokens : undefined,
-    // The window belongs to the model the next turn runs, not the one the last call did: a switch
-    // shows at once, rather than after the new model's first call.
-    window: contextWindow(live, profile ?? undefined, currentModel, catalog),
-    model: currentModel ? fullModel(currentModel) : undefined,
-  }
-  const provider = effectiveProvider(conversation ?? undefined, profile ?? undefined)
-  const providerUsage =
-    profile?.providerUsage && profile.providerUsage.provider === provider
-      ? profile.providerUsage
-      : undefined
-  const notice = limitNotice(providerUsage)
-  const noticeDismissed =
-    Boolean(notice && provider) && profile?.limitDismissed === limitNoticeKey(provider!, notice!)
-
-  // Picks up a model changed on the server (only when the connection does, not on every write);
-  // the ring follows via the live query.
+  const { usage, provider, providerUsage, notice, noticeDismissed } = useChatUsage(
+    conversation,
+    profile,
+    modelChoice,
+  )
   const profileId = profile?.id
-  useEffect(() => {
-    if (!profileId) return
-    void db.profiles.get(profileId).then((current) => current && syncContextWindow(current))
-  }, [profileId, baseUrl, apiKey])
-
-  // The provider's limits are read when the chat opens and when its provider changes; after that,
-  // with the chat's other details at the end of a turn and when it catches up (`followUps`).
-  useEffect(() => {
-    if (!profileId) return
-    void refreshProviderUsage(profileId, provider).catch(quietly("Reading provider limits"))
-  }, [profileId, baseUrl, apiKey, provider])
 
   // The plugin holds a session's mode and pending plan; an empty session never catches up below.
   const sessionId = session?.id
@@ -1278,18 +1189,6 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
     })
   }, [mainPath, up])
 
-  /** Before a session is deleted or discarded: its run, worktrees, pull requests and branches. */
-  const closeSession = async () => {
-    if (!session) return
-    stopMessage(session.id)
-    const { kept, errors } = await closeSessionWork(session.id)
-    for (const tree of kept)
-      toast.info(
-        `Kept ${tree.name}: it has ${tree.reason === "dirty" ? "uncommitted" : "unpushed"} changes.`,
-      )
-    for (const error of errors) toast.error(error)
-  }
-
   // Main's messages are triaged even while its reply runs, so one for another thread goes there at
   // once; the rest steer or queue behind the reply.
   const sendMidReply = (id: string, steer: boolean, text: string, attachments: Attachment[] = []) =>
@@ -1347,106 +1246,18 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
 
   const mainChrome = Boolean(botThreads && isMain && profile)
   const actions = conversation && (
-    <div className="flex items-center gap-2">
-      {/* Main carries no reading of the context window: it belongs to a chat, and Main is the bot's
-          face — the account's own notice below the composer still answers for the account. */}
-      {wide && configured && !isMain && (
-        <ContextRing usage={usage} onClick={() => setUsageOpen(true)} />
-      )}
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <Button
-              variant="outline"
-              size="icon-lg"
-              className="size-11 rounded-full bg-background/80 backdrop-blur"
-              aria-label={mainChrome ? "Bot options" : "Chat options"}
-            />
-          }
-        >
-          <EllipsisIcon />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="min-w-44">
-          {configured && !wide && !isMain && (
-            <>
-              <DropdownMenuItem onClick={() => setUsageOpen(true)}>
-                <ContextIcon usage={usage} />
-                Context
-                <ContextPercent usage={usage} />
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-            </>
-          )}
-          {/* Main has no title of its own to give: its header carries the bot's name, which Bot
-              settings edits. */}
-          {!isMain && (
-            <DropdownMenuItem
-              onClick={() => {
-                setTitle(conversation.title)
-                setRenaming(true)
-              }}
-            >
-              <PencilIcon />
-              {session ? "Edit" : "Rename"}
-            </DropdownMenuItem>
-          )}
-          {mainChrome && profile ? (
-            <>
-              <DropdownMenuItem onClick={() => void setBotMuted(profile.id, !profile.muted)}>
-                {profile.muted ? <BellIcon /> : <BellOffIcon />}
-                {profile.muted ? "Unmute notifications" : "Mute notifications"}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => root("/settings/bots")}>
-                <SettingsIcon />
-                Bot settings
-              </DropdownMenuItem>
-            </>
-          ) : (
-            <>
-              <DropdownMenuItem
-                onClick={() => void setThreadMuted(conversation.id, !conversation.muted)}
-              >
-                {conversation.muted ? <BellIcon /> : <BellOffIcon />}
-                {conversation.muted ? "Unmute notifications" : "Mute notifications"}
-              </DropdownMenuItem>
-              {session &&
-                !session.discardedAt &&
-                (session.resolvedAt ? (
-                  <DropdownMenuItem
-                    onClick={() => updateConversation(session.id, { resolvedAt: undefined })}
-                  >
-                    <RotateCcwIcon />
-                    Reopen
-                  </DropdownMenuItem>
-                ) : (
-                  <DropdownMenuItem
-                    onClick={() => updateConversation(session.id, { resolvedAt: Date.now() })}
-                  >
-                    <CheckIcon />
-                    Resolve
-                  </DropdownMenuItem>
-                ))}
-              {!conversation.main && (
-                <>
-                  <DropdownMenuSeparator />
-                  {session && !session.discardedAt && (
-                    <DropdownMenuItem onClick={() => setDiscarding(true)}>
-                      <ArchiveXIcon />
-                      Discard
-                    </DropdownMenuItem>
-                  )}
-                  <DropdownMenuItem variant="destructive" onClick={() => setDeleting(true)}>
-                    <Trash2Icon />
-                    Delete
-                  </DropdownMenuItem>
-                </>
-              )}
-            </>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </div>
+    <ChatActions
+      chat={conversation}
+      profile={profile}
+      session={session}
+      mainChrome={mainChrome}
+      wide={wide}
+      usage={usage}
+      providerUsage={providerUsage}
+      usageOpen={usageOpen}
+      onUsageOpenChange={setUsageOpen}
+      onDeleted={() => (codePath ? up(codePath) : root(mainPath ?? "/"))}
+    />
   )
 
   // A session is a place in a project, and a thread beside Main is a place within the bot, so both
@@ -1646,20 +1457,11 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
             <BotPicker profile={profile} />
           </div>
         )}
-        {notice && provider && !noticeDismissed && (
-          <div className={`${COLUMN_BOX} pb-2`} data-toast-above>
-            <LimitBanner
-              notice={notice}
-              onDismiss={() =>
-                profileId &&
-                void db.profiles
-                  .update(profileId, { limitDismissed: limitNoticeKey(provider, notice) })
-                  .catch(() => undefined)
-              }
-              onView={() => setUsageOpen(true)}
-            />
-          </div>
-        )}
+        <LimitNotice
+          usage={{ notice, provider, noticeDismissed }}
+          profileId={profileId}
+          onView={() => setUsageOpen(true)}
+        />
         {session?.discardedAt ? (
           <DiscardedCard />
         ) : session?.resolvedAt ? (
@@ -1728,13 +1530,11 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
             connection={serverConfig(profile)}
             botName={profile?.name}
             dictationWords={profile?.vocabulary}
-            dictationHint={[
-              conversation?.title,
-              project?.name,
-              ...sessionRepos.map((repo) => repo.name.split("/").pop()),
-            ]
-              .filter(Boolean)
-              .join(", ")}
+            dictationHint={dictationHint({
+              title: conversation?.title,
+              project: project?.name,
+              repos: sessionRepos,
+            })}
             session={
               session && {
                 // Without the plugin nothing answers for Auto, so the session runs as Accept edits.
@@ -1756,12 +1556,6 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
         )}
       </div>
 
-      <UsageSheet
-        open={usageOpen}
-        onOpenChange={setUsageOpen}
-        usage={usage}
-        providerUsage={providerUsage}
-      />
       {stagedPipeline && (
         <PipelineSheet
           open={pipelineOpen}
@@ -1802,95 +1596,7 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
         />
       )}
 
-      <AlertDialog open={renaming} onOpenChange={setRenaming}>
-        <AlertDialogContent>
-          <form
-            className="contents"
-            onSubmit={async (event) => {
-              event.preventDefault()
-              if (id && title.trim())
-                await updateConversation(id, { title: title.trim(), titleEdited: true })
-              setRenaming(false)
-            }}
-          >
-            <AlertDialogHeader>
-              <AlertDialogTitle>{session ? "Edit session" : "Rename chat"}</AlertDialogTitle>
-            </AlertDialogHeader>
-            <Input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              autoFocus
-              aria-label="Chat title"
-            />
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction type="submit">Save</AlertDialogAction>
-            </AlertDialogFooter>
-          </form>
-        </AlertDialogContent>
-      </AlertDialog>
-
       {leaveDialog}
-
-      <AlertDialog open={deleting} onOpenChange={setDeleting}>
-        <AlertDialogContent size="sm">
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {session ? "Delete this session?" : "Delete this chat?"}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {session
-                ? "Its pull request is closed and its branch deleted on GitHub, and it's removed from the app. Hermes keeps its own copy of the session."
-                : "It's removed from this device. Hermes keeps its own copy of the session."}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={async () => {
-                if (id) {
-                  if (session) await closeSession()
-                  else stopMessage(id)
-                  await deleteConversation(id)
-                }
-                setDeleting(false)
-                if (codePath) up(codePath)
-                else root(mainPath ?? "/")
-              }}
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={discarding} onOpenChange={setDiscarding}>
-        <AlertDialogContent size="sm">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Discard this session?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Its pull request is closed and its branch deleted on GitHub. The session moves to
-              Discarded.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={async () => {
-                if (session) {
-                  await closeSession()
-                  await updateConversation(session.id, { discardedAt: Date.now() })
-                }
-                setDiscarding(false)
-              }}
-            >
-              Discard
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </>
   ) : null
 

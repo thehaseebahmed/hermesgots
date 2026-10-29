@@ -20,6 +20,12 @@ export interface RunEvent {
   run_id?: string
   seq?: number
   delta?: string
+  /** A whole block of thinking (`reasoning.available`), from providers that don't stream it. */
+  text?: string
+  /** What the run cost, on its end (`run.completed`). */
+  usage?: { input_tokens?: number; output_tokens?: number }
+  /** An interim line (`message.interim`) the deltas already carried. */
+  already_streamed?: boolean
   tool?: string
   preview?: string
   tool_call_id?: string
@@ -92,14 +98,26 @@ export async function readVersion(
  * out of it too, in the conversation's order rather than the ids'. The host pages newest-first by offset, so older
  * pages are read until one comes back short. A session the host has not heard of yet is an empty
  * chat, not a failure.
+ *
+ * With `held` (the live rows the device has) the read stops at the first page that joins them: its
+ * rows are the ones held from some row on, in the same order, so what is older is what the device
+ * already has. A thread that has not moved costs the one page it is asked for, and a compaction or
+ * an undo, which change the newest rows, fail that join and read on.
+ * What is older than the join is trusted as held: a row edited in place without a new id is seen at the
+ * next read of the whole transcript, which the end of a turn asks for.
  */
 export async function readTranscript(
   connection: Connection,
   session: string,
   signal?: AbortSignal,
   archived = false,
+  held?: Row[],
 ): Promise<Row[]> {
   const pages: Row[][] = []
+  const joins = (page: Row[]) => {
+    const at = held?.findIndex((row) => row.id === page[0]?.id) ?? -1
+    return at < 0 || !held ? -1 : page.every((row, i) => held[at + i]?.id === row.id) ? at : -1
+  }
   for (let offset = 0; ; offset += PAGE) {
     const response = await fetch(
       `${root(connection)}/api/sessions/${encodeURIComponent(session)}/messages?order=latest&limit=${PAGE}&offset=${offset}${archived ? "&include_compacted=true" : ""}`,
@@ -111,6 +129,14 @@ export async function readTranscript(
     }
     ensure(response)
     const { data } = (await response.json()) as { data: Row[] }
+    // Rows written while the pages were read slide into the next offset, so a page that joins the
+    // held rows only counts when it also reaches back to the held row it starts at.
+    const at = data.length === PAGE ? joins(data) : -1
+    if (at >= 0 && held) {
+      pages.unshift(data)
+      pages.unshift(held.slice(0, at))
+      break
+    }
     pages.unshift(data)
     if (data.length < PAGE) break
   }
@@ -162,14 +188,15 @@ export async function stopRun(connection: Connection, runId: string) {
 }
 
 /**
- * The run the host is working on for a session, by the Gots plugin's account of live runs. A host
- * without the plugin, or one that cannot say, has no answer, and the transcript is all there is.
+ * The run the host is working on for a session, by the Gots plugin's account of live runs: its id,
+ * or null when the host says none is. A host without the plugin, or one that cannot say, has no
+ * answer, and the transcript is all there is.
  */
 export async function readLiveRun(
   connection: Connection,
   session: string,
   signal?: AbortSignal,
-): Promise<string | undefined> {
+): Promise<string | null | undefined> {
   try {
     const response = await fetch(`${plugin(connection)}/runs/live`, {
       headers: headers(connection),
@@ -177,9 +204,37 @@ export async function readLiveRun(
     })
     if (!response.ok) return undefined
     const { run_ids } = (await response.json()) as { run_ids?: Record<string, string> }
-    return run_ids?.[session]
+    return run_ids ? (run_ids[session] ?? null) : undefined
   } catch {
     return undefined
+  }
+}
+
+/**
+ * Takes a failed turn out of the host's transcript, so a message sent again carries on from its
+ * request. How many rows went; none where the host cannot, which only leaves the failure in the
+ * transcript, and the thread draws as if it were gone.
+ */
+export async function clearFailedTurn(
+  connection: Connection,
+  session: string,
+  row: number,
+  signal?: AbortSignal,
+): Promise<number> {
+  try {
+    const response = await fetch(
+      `${plugin(connection)}/sessions/${encodeURIComponent(session)}/failed-turn/clear`,
+      {
+        method: "POST",
+        headers: { ...headers(connection), "Content-Type": "application/json" },
+        body: JSON.stringify({ row }),
+        signal: within(signal),
+      },
+    )
+    if (!response.ok) return 0
+    return Number((await response.json())?.removed) || 0
+  } catch {
+    return 0
   }
 }
 

@@ -1,5 +1,8 @@
 import { splitAttachments } from "../lib/attachment-text.ts"
+import type { MessageStats } from "../lib/db.ts"
 import { steerText } from "../lib/steer.ts"
+
+import type { Timing } from "../lib/reply-stats.ts"
 
 /** A transcript row as `GET /api/sessions/{id}/messages` returns it; only what a turn is built from. */
 export interface Row {
@@ -12,6 +15,9 @@ export interface Row {
   tool_calls?: { id: string; function: { name: string; arguments: string } }[] | null
   /** When the host wrote the row, in Unix seconds. */
   timestamp?: number | null
+  /** The model's thinking before the row's words and calls; some providers name it `reasoning_content`. */
+  reasoning?: string | null
+  reasoning_content?: string | null
 }
 
 export interface ToolCall {
@@ -25,11 +31,13 @@ export interface ToolCall {
   /** When the call was made and when its result came back, in ms, where the host or the stream said. */
   startedAt?: number
   endedAt?: number
+  /** The thinking that came before this call, where it opens a stretch of its own. */
+  thought?: string
 }
 
 /** A reply in the order the host wrote it: its words, then the run of calls it made, then more words. */
 export type Part =
-  | { kind: "text"; text: string }
+  | { kind: "text"; text: string; thought?: string }
   | { kind: "tools"; calls: ToolCall[] }
   /** The host compacted the conversation here; the rows above are summarised in what follows. */
   | { kind: "compaction"; row?: number; at?: number }
@@ -46,6 +54,8 @@ export interface SentFile {
 }
 
 export interface Turn {
+  /** The id of the row that opened the turn, where the transcript has it. */
+  row?: number
   user: string
   /** When the request was written, in ms, where the host said. */
   at?: number
@@ -54,8 +64,16 @@ export interface Turn {
   /** The host archived this turn's request when it compacted: what is left is the work, from the seam on. */
   carried?: boolean
   parts: Part[]
+  /** A turn this device sent and watches from its start, which is what its stats are measured by. */
+  timing?: Timing
+  /** What the turn cost, measured as its run ended; only a turn measured so has any. */
+  stats?: MessageStats
+  /** Thinking a live turn has heard that no word or call has followed yet. */
+  pendingThought?: string
   /** The host has written the reply's last row: an assistant row that makes no more calls and says why it stopped. */
   done: boolean
+  /** The host gave up on the turn (`failed_turn`) and says so in its own words; it is over. */
+  failed?: { text: string; row: number }
   /** A reply the host started when a subagent finished: it answers no message of the user's. */
   wake?: boolean
   /** The children whose results this wake turn carries, as the host names them. */
@@ -192,6 +210,7 @@ export function foldTurns(rows: Row[]): Turn[] {
       const { text, attachments } = splitAttachments(content)
       const at = msOf(row)
       turns.push({
+        row: row.id,
         user: text,
         ...(at !== undefined ? { at } : {}),
         ...(attachments.length
@@ -224,6 +243,12 @@ export function foldTurns(rows: Row[]): Turn[] {
       continue
     }
     if (row.role !== "assistant") continue
+    // A failed turn ends in a row of its own, with no finish reason: it is over, not still writing.
+    if (row.display_kind === "failed_turn") {
+      turn.done = true
+      turn.failed = { text: row.content || "Hermes couldn't finish this reply.", row: row.id }
+      continue
+    }
     // After a compaction Hermes writes the work it carried forward again, under the ids it had: a
     // call already drawn is that call, and the first reply back is the one already given.
     const asked = row.tool_calls ?? []
@@ -238,14 +263,22 @@ export function foldTurns(rows: Row[]): Turn[] {
       continue
     }
     turn.done = !asked.length && Boolean(row.finish_reason)
-    if (row.content) turn.parts.push({ kind: "text", text: row.content })
+    // The row's thinking goes before whatever the row says or does first, so it follows the call
+    // before it and is read with the words or the call it led to.
+    let thought = row.reasoning ?? row.reasoning_content ?? undefined
+    if (row.content || (thought && !asked.length)) {
+      turn.parts.push({ kind: "text", text: row.content ?? "", ...(thought ? { thought } : {}) })
+      thought = undefined
+    }
     for (const one of asked) {
       const call: ToolCall = {
         id: one.id,
         name: one.function.name,
         arguments: one.function.arguments,
         ...(msOf(row) !== undefined ? { startedAt: msOf(row) } : {}),
+        ...(thought ? { thought } : {}),
       }
+      thought = undefined
       callOf.set(call.id, call)
       const last = turn.parts.at(-1)
       if (last?.kind === "tools") last.calls.push(call)
@@ -255,7 +288,27 @@ export function foldTurns(rows: Row[]): Turn[] {
   // Only the last turn can still be running. A copy Hermes carried across a compaction has lost the
   // reason its reply stopped, so an earlier turn is finished by what follows it.
   for (const turn of turns.slice(0, -1)) turn.done = true
-  return turns
+  return withoutRepeatedFailures(turns)
+}
+
+const sameRequest = (a: Turn, b: Turn) =>
+  a.user === b.user &&
+  (a.files ?? []).map((f) => f.name).join() === (b.files ?? []).map((f) => f.name).join()
+
+/**
+ * The turns without a failed one the next turn asks again: the user sent the message once more, so
+ * the failure is behind them and the thread reads as if only the second send happened. A failed turn
+ * nothing repeats stays, with the host's words.
+ */
+export function withoutRepeatedFailures(turns: Turn[]): Turn[] {
+  const next = (at: number) => turns[at + 1]
+  return turns.some(
+    (turn, at) => turn.failed && next(at) && !next(at).wake && sameRequest(turn, next(at)),
+  )
+    ? turns.filter(
+        (turn, at) => !(turn.failed && next(at) && !next(at).wake && sameRequest(turn, next(at))),
+      )
+    : turns
 }
 
 /** Whether a reply already drawn ended on these very words. */
