@@ -9,7 +9,7 @@ import test from "node:test"
 
 import { MessageItem } from "@/components/chat/message-item"
 import type { Message, ToolEvent } from "@/lib/db"
-import { mount, text } from "./component-kit.tsx"
+import { findAll, mount, text } from "./component-kit.tsx"
 
 const QUESTION = "Which logs should I count as old?"
 
@@ -48,7 +48,11 @@ test("a question still waiting says so in one line, with no card of its own", as
     `one waiting line, not two: "${body}"`,
   )
   assert.doesNotMatch(body, new RegExp(QUESTION), `the question is the composer's: "${body}"`)
-  assert.doesNotMatch(body, /^Question$/, `no question card in the thread: "${body}"`)
+  assert.equal(
+    findAll("[data-slot=card]").length,
+    0,
+    `no card of the question's own in the thread: "${body}"`,
+  )
   assert.doesNotMatch(body, /Ask again/, `nothing was missed: "${body}"`)
 })
 

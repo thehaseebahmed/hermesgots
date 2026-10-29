@@ -1,7 +1,10 @@
 // The question the agent asks, on the new chat screen (chat-next): its form is the composer's, so
 // the thread says only that it waits — reported once as the same question drawn twice, a card in
-// the thread beside the form under it. Answered, the thread's card reads the answer: a call whose
-// result only the transcript holds used to read "No answer", with Ask again, until the turn ended.
+// the thread beside the form under it. Answered, the thread's card reads the answer, and keeps
+// reading it after a reload from the host's transcript. That the card reads the answer the moment
+// it is given, rather than a beat later when the transcript lands, is the reducer's claim
+// (`scripts/test-chat-next-state.tsx`): here the mock's transcript answers too promptly to hold
+// the window open, so this flow proves the shape of the thread, not the instant.
 import { app, assert, flow, pass, runId, settled } from "./lib.mjs"
 
 const QUESTION = "Which logs should I count as old?"

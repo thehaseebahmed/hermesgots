@@ -2027,7 +2027,11 @@ async function playTurn(req, body, last, out) {
         ? { notice: "This client can't show questions on this turn; ask in your reply instead." }
         : {}),
     })
-    out.tool({ tool: "clarify", toolCallId: id, status: "completed", result })
+    // The served turn ends a call with `tool.completed` carrying no result: its preview is empty and
+    // the transcript's own row is where a result is read from. The thread's card reads the answer
+    // the app writes when the user gives it, and the mock leaves this empty so a client that only
+    // reads the stream is not quietly helped.
+    out.tool({ tool: "clarify", toolCallId: id, status: "completed", result: "" })
     record(req, { role: "tool", tool_call_id: id, tool_name: "clarify", content: result })
     return { answers, outcome }
   }
@@ -3039,8 +3043,9 @@ const wakePending = new Map()
 let wakeDelayMs = Number(process.env.MOCK_WAKE_DELAY_MS ?? 0)
 const PLUGIN_VERSION = process.env.MOCK_PLUGIN_VERSION || "0.29.1"
 // The Hermes version the host reports on /health, which is how a screen knows the host is new
-// enough for it (chat-next needs 0.22.5). A host older than that answers with its own.
-const HERMES_VERSION = process.env.MOCK_HERMES_VERSION || "0.25.0"
+// enough for it (the new chat screen needs 0.22.5). A host older than that answers with its own;
+// the mock models one host and says so.
+const HERMES_VERSION = "0.25.0"
 const DICTATION = process.env.MOCK_DICTATION ?? "on"
 let DICTATION_TIDY = process.env.MOCK_DICTATION_TIDY ?? "ok"
 const TIDY_MS = 400
