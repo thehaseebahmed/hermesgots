@@ -1,3 +1,5 @@
+import type { DelegatedAgent } from "../lib/hermes.ts"
+
 import type { ToolCall, Turn } from "./fold"
 
 export const DELEGATE = "delegate_task"
@@ -13,6 +15,17 @@ export interface Agent {
   tool_calls?: number
   status: string
 }
+
+/** A child as the app's agent cards read one: the plugin's row, in the app's own words. */
+export const delegated = (agent: Agent): DelegatedAgent => ({
+  id: agent.id,
+  goal: agent.goal,
+  model: agent.model ?? null,
+  startedAt: agent.started_at ?? null,
+  endedAt: agent.ended_at ?? null,
+  toolCalls: agent.tool_calls ?? 0,
+  status: agent.status === "running" || agent.status === "stopped" ? agent.status : "done",
+})
 
 export type CardStatus = "starting" | "running" | "done" | "stopped"
 

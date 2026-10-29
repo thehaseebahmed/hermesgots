@@ -21,6 +21,7 @@ import {
   pressEnter,
   seedChats,
   settle,
+  text,
   type,
 } from "./component-kit.tsx"
 
@@ -454,5 +455,63 @@ test("a reply's thinking draws as the thought rows the app's thread draws everyw
     const body = find('[data-slot="thinking-body"]')?.textContent ?? ""
     assert.match(body, /I should look first\./)
     assert.match(body, /Now say so\./)
+  })
+})
+
+test("an approval and a question are the app's own cards, answered where chat-next answers", async () => {
+  const { host } = await onChatNext("c-prompts")
+  await mount(chatScreen("c-prompts"), async () => {
+    const run = await midReply(host, "Clean up")
+    run.requestApproval("rm -rf /tmp/x", "delete in root path")
+    await until(() => Boolean(button("Allow once")), "the approval card, with its choices")
+    assert.match(text(), /Approval needed/)
+    assert.match(text(), /rm -rf \/tmp\/x/)
+    assert.ok(button("Deny") && button("Allow in chat") && button("Always allow"))
+    await click(button("Allow once"))
+    await until(() => host.approvals.length === 1, "the host was given the answer")
+    assert.deepEqual(host.approvals[0].choice, "once")
+
+    run.ask({ question: "Which do you prefer?", choices: ["tea", "coffee"], multi_select: false })
+    await until(() => /Which do you prefer\?/.test(text()), "the question card")
+    await click(findAll("button").find((one) => one.textContent?.includes("coffee")) ?? null)
+    await click(button("Send"))
+    await until(() => host.answers.length === 1, "the host was given the answer")
+    assert.equal(host.answers[0].answer, "coffee")
+  })
+})
+
+test("while a subagent works the composer is Stop, and one press stops the session's children", async () => {
+  const { host } = await onChatNext("c-stop-all", {}, { plugin: true })
+  await mount(chatScreen("c-stop-all"), async () => {
+    await sendFromComposer("Fan out")
+    await until(() => host.asked.runs === 1, "the turn is running")
+    host.latest.run!.delegate("look into it")
+    host.latest.run!.finish("Dispatched.")
+    await until(() => host.asked.info > 0, "the plugin has said what it can do")
+    await until(
+      () => /subagent/i.test(text()) && !find('button[aria-label="Send"]'),
+      "the child is listed and keeps the composer on Stop",
+    )
+    await until(() => Boolean(find('button[aria-label="Stop"]')), "Stop stays while a child works")
+    await click(find('button[aria-label="Stop"]'))
+    await until(() => host.asked.agentStops === 1, "the plugin was asked to stop the children")
+  })
+})
+
+test("a missed question's Ask again sends through the thread's own send", async () => {
+  const { host } = await onChatNext("c-ask-again")
+  await mount(chatScreen("c-ask-again"), async () => {
+    const run = await midReply(host, "Pick for me")
+    const missed = JSON.stringify({
+      responses: [{ question: "Tea or coffee?", choices_offered: [], timed_out: true }],
+      outcome: "timed_out",
+    })
+    run.tool("clarify", "Tea or coffee?", missed)
+    run.finish("No answer came.")
+    await until(() => Boolean(button("Ask again")), "the missed question offers Ask again")
+    await until(() => !find('button[aria-label="Stop"]'), "the first turn is over")
+    await click(button("Ask again"))
+    await until(() => host.asked.runs === 2, "the thread sent the message as a turn")
+    assert.match(JSON.stringify(host.latest.body), /Ask me that again\./)
   })
 })

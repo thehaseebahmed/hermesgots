@@ -25,7 +25,14 @@ const RESOLVED: Record<string, string> = {
   expired: "No longer waiting for an answer",
 }
 
-export function ApprovalCard({ message }: { message: Message }) {
+export function ApprovalCard({
+  message,
+  onAnswer = (choice) => answerApproval(message, choice),
+}: {
+  message: Message
+  /** Where an answer goes; the chat's own engine unless the screen drawing the card answers itself. */
+  onAnswer?: (choice: ApprovalChoice) => Promise<void>
+}) {
   const mono = useMonoFace()
   const approval = message.approval!
   const [pending, setPending] = useState<ApprovalChoice | null>(null)
@@ -37,7 +44,7 @@ export function ApprovalCard({ message }: { message: Message }) {
   const answer = async (choice: ApprovalChoice) => {
     setPending(choice)
     try {
-      await answerApproval(message, choice)
+      await onAnswer(choice)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't send your answer.")
     } finally {

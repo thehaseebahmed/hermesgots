@@ -45,6 +45,7 @@ export type Waiting =
       promptId: string
       generation: number
       command: string
+      description?: string
       choices: string[]
     }
 
@@ -175,7 +176,13 @@ function waitingAfter(waiting: Waiting | undefined, event: RunEvent): Waiting | 
       multiSelect: Boolean(event.multi_select),
     }
   if (event.event === "approval.request" && event.prompt_id)
-    return { kind: "approval", ...base, command: event.command ?? "", choices: event.choices ?? [] }
+    return {
+      kind: "approval",
+      ...base,
+      command: event.command ?? "",
+      ...(event.description ? { description: event.description } : {}),
+      choices: event.choices ?? [],
+    }
   // A prompt that settles is the one on screen, or an old one the screen has moved on from.
   if (SETTLED.includes(event.event))
     return event.prompt_id === waiting?.promptId ? undefined : waiting

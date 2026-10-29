@@ -165,7 +165,14 @@ const motion = () =>
  * in the thread (`ClarifyCard`). One question is a plain form. Two or more are pages of one card
  * (swipe, or Skip and Next), so five questions never outgrow the screen.
  */
-export function QuestionCard({ message }: { message: Message }) {
+export function QuestionCard({
+  message,
+  onAnswer = (answers) => answerClarify(message, answers),
+}: {
+  message: Message
+  /** Where the answers go; the chat's own engine unless the screen drawing the card answers itself. */
+  onAnswer?: (answers: ClarifyAnswers) => Promise<void>
+}) {
   const { questions } = message.clarify!
   const paged = questions.length > 1
   const [pending, setPending] = useState(false)
@@ -228,7 +235,7 @@ export function QuestionCard({ message }: { message: Message }) {
   const send = async (given: ClarifyAnswers = answers) => {
     setPending(true)
     try {
-      await answerClarify(message, given)
+      await onAnswer(given)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't send your answer.")
     } finally {

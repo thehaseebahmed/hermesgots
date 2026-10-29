@@ -780,6 +780,7 @@ function NextComposerBody({
         onSteer={said(controls.steer)}
         canSteer={controls.canSteer}
         steerByDefault={Boolean(steerByDefault)}
+        subagentsRunning={controls.subagents}
         onStop={controls.stop}
         session={
           session

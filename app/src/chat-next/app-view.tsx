@@ -3,11 +3,14 @@ import { type ComponentProps, createContext, useContext, useMemo, useState } fro
 
 import { Banner } from "@/components/banner"
 import { AgentPopup } from "@/components/chat/agent-card"
+import { ApprovalCard } from "@/components/chat/approval-card"
 import { CodeFaceProvider } from "@/components/chat/code-face"
 import { DayHeading } from "@/components/chat/day-heading"
 import { EmptyState, MainEmptyState } from "@/components/chat/empty-states"
 import { useMainFlow } from "@/components/chat/main-flow"
 import { MessageItem } from "@/components/chat/message-item"
+import { QuestionCard } from "@/components/chat/question-card"
+import { AskAgainContext } from "@/components/chat/session-cards"
 import { SubagentLine } from "@/components/chat/subagent-line"
 import { SubagentsSheet } from "@/components/chat/subagents"
 import { ThreadCard } from "@/components/chat/thread-card"
@@ -22,26 +25,15 @@ import {
 } from "@/components/ui/message-scroller"
 import { Spinner } from "@/components/ui/spinner"
 import { AgentsContext, type AgentsSource } from "@/lib/agents"
-import { db } from "@/lib/db"
+import { db, type ApprovalChoice, type Message } from "@/lib/db"
 import type { DelegatedAgent } from "@/lib/hermes"
 import { COLUMN_BOX } from "@/lib/layout"
 import type { RepoRef } from "@/lib/workspace"
 import { cn } from "@/lib/utils"
 
-import type { Agent } from "./agents"
+import { delegated } from "./agents"
 import { messagesOf } from "./messages"
-import { ChatNextThread, type ThreadViewProps } from "./page"
-
-/** A child as the app's agent cards read one: the plugin's row, in the app's own words. */
-const delegated = (agent: Agent): DelegatedAgent => ({
-  id: agent.id,
-  goal: agent.goal,
-  model: agent.model ?? null,
-  startedAt: agent.started_at ?? null,
-  endedAt: agent.ended_at ?? null,
-  toolCalls: agent.tool_calls ?? 0,
-  status: agent.status === "running" || agent.status === "stopped" ? agent.status : "done",
-})
+import { ChatNextThread, type PromptProps, type ThreadViewProps } from "./page"
 
 /** A bot's Main as chat-next draws it: whose threads are its cards, and which one is open. */
 export interface MainView {
@@ -122,147 +114,225 @@ export function AppThreadView({
   const inline = running > 0 && messages.at(-1)?.status === "streaming"
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      {unstarted && blank ? (
-        <EmptyState botId={blank.botId} configured session={{ repos: blank.repos }} id={chatId} />
-      ) : empty && main ? (
-        <MainEmptyState botId={main.botId} id={chatId} onSend={(text) => send(text, [])} />
-      ) : (
-        <MessageScrollerProvider autoScroll defaultScrollPosition="end">
-          <MessageScroller className="flex-1">
-            <MessageScrollerViewport aria-label="Messages">
-              <MessageScrollerContent className="w-full gap-6 px-4 pt-32 pb-6">
-                {away && (
-                  <div className={COLUMN_BOX} data-away role="status">
-                    <Banner tone="info">Can't reach this host right now.</Banner>
-                  </div>
-                )}
-                {failure !== undefined && (
-                  <div className={COLUMN_BOX} role="alert">
-                    <Banner tone="error">{failure || "Something went wrong."}</Banner>
-                  </div>
-                )}
-                {earlier && (
-                  <div className="flex shrink-0 justify-center">
-                    <Button
-                      data-earlier
-                      variant="ghost"
-                      size="sm"
-                      disabled={earlier.state === "reading"}
-                      onClick={earlier.load}
-                    >
-                      {earlier.state === "reading" ? (
-                        <Spinner className="size-4" />
-                      ) : earlier.state === "failed" ? (
-                        "Couldn't load earlier messages. Try again"
-                      ) : (
-                        "Earlier messages"
-                      )}
-                    </Button>
-                  </div>
-                )}
-                <AgentsContext.Provider value={source}>
-                  {flow.map((entry) => {
-                    if (entry.kind === "heading")
-                      return <DayHeading key={`day-${entry.at}`} day={entry.day} />
-                    if (entry.kind === "card")
-                      return (
-                        <ThreadCard
-                          key={`card-${entry.thread.chat.id}`}
-                          thread={entry.thread}
-                          botId={main?.botId}
-                          profileId={main?.profileId ?? ""}
-                          open={entry.thread.chat.id === main?.openThread}
-                          beside={Boolean(main?.beside)}
-                          current={entry.thread.chat.id === main?.routeChat}
-                          move={moveThatOpenedThread.get(entry.thread.chat.id)}
-                          onUndo={undo}
-                        />
-                      )
-                    const message = entry.message
-                    return (
-                      <MessageScrollerItem key={message.id} messageId={message.id}>
-                        {moved.before.get(message.id)?.map(marker)}
-                        <MessageItem
-                          message={message}
-                          showStats={false}
-                          busy={streaming}
-                          subagents={message.id === lastId ? running : undefined}
-                          onShowSubagents={() => setSheet(true)}
-                          subagentsInline={message.id === lastId && inline}
-                        />
-                      </MessageScrollerItem>
-                    )
-                  })}
-                  {moved.trailing.map(marker)}
-                  {running > 0 && !inline && (
-                    <SubagentLine count={running} onOpen={() => setSheet(true)} className="px-1" />
+    <AskAgainContext.Provider value={(text) => send(text, [])}>
+      <div className="flex min-h-0 flex-1 flex-col">
+        {unstarted && blank ? (
+          <EmptyState botId={blank.botId} configured session={{ repos: blank.repos }} id={chatId} />
+        ) : empty && main ? (
+          <MainEmptyState botId={main.botId} id={chatId} onSend={(text) => send(text, [])} />
+        ) : (
+          <MessageScrollerProvider autoScroll defaultScrollPosition="end">
+            <MessageScroller className="flex-1">
+              <MessageScrollerViewport aria-label="Messages">
+                <MessageScrollerContent className="w-full gap-6 px-4 pt-32 pb-6">
+                  {away && (
+                    <div className={COLUMN_BOX} data-away role="status">
+                      <Banner tone="info">Can't reach this host right now.</Banner>
+                    </div>
                   )}
-                </AgentsContext.Provider>
-                {queue?.items.map((item) => (
-                  <div
-                    key={item.id}
-                    data-queued
-                    className={cn(COLUMN_BOX, "flex flex-col items-end gap-1")}
-                  >
-                    {item.files.length > 0 && (
-                      <p className="text-xs text-muted-foreground">{item.files.join(", ")}</p>
-                    )}
-                    {item.text && (
-                      <p className="max-w-[85%] rounded-3xl bg-muted px-4 py-2.5 whitespace-pre-wrap opacity-60">
-                        {item.text}
-                      </p>
-                    )}
-                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                      <span data-queued-state className="px-2">
-                        {item.error ?? "Queued"}
-                      </span>
-                      {(queue.paused || item.error) && (
-                        <Button
-                          data-send-queued
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => queue.act(item.id, "send")}
-                        >
-                          Send now
-                        </Button>
-                      )}
+                  {failure !== undefined && (
+                    <div className={COLUMN_BOX} role="alert">
+                      <Banner tone="error">{failure || "Something went wrong."}</Banner>
+                    </div>
+                  )}
+                  {earlier && (
+                    <div className="flex shrink-0 justify-center">
                       <Button
-                        data-remove-queued
+                        data-earlier
                         variant="ghost"
                         size="sm"
-                        onClick={() => queue.act(item.id, "remove")}
+                        disabled={earlier.state === "reading"}
+                        onClick={earlier.load}
                       >
-                        Remove
+                        {earlier.state === "reading" ? (
+                          <Spinner className="size-4" />
+                        ) : earlier.state === "failed" ? (
+                          "Couldn't load earlier messages. Try again"
+                        ) : (
+                          "Earlier messages"
+                        )}
                       </Button>
                     </div>
-                  </div>
-                ))}
-              </MessageScrollerContent>
-            </MessageScrollerViewport>
-            <MessageScrollerButton />
-          </MessageScroller>
-        </MessageScrollerProvider>
-      )}
-      <div
-        data-slot="composer-slot"
-        data-toast-above
-        className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4"
-      >
-        {waiting ? <div className={COLUMN_BOX}>{waiting}</div> : composer}
+                  )}
+                  <AgentsContext.Provider value={source}>
+                    {flow.map((entry) => {
+                      if (entry.kind === "heading")
+                        return <DayHeading key={`day-${entry.at}`} day={entry.day} />
+                      if (entry.kind === "card")
+                        return (
+                          <ThreadCard
+                            key={`card-${entry.thread.chat.id}`}
+                            thread={entry.thread}
+                            botId={main?.botId}
+                            profileId={main?.profileId ?? ""}
+                            open={entry.thread.chat.id === main?.openThread}
+                            beside={Boolean(main?.beside)}
+                            current={entry.thread.chat.id === main?.routeChat}
+                            move={moveThatOpenedThread.get(entry.thread.chat.id)}
+                            onUndo={undo}
+                          />
+                        )
+                      const message = entry.message
+                      return (
+                        <MessageScrollerItem key={message.id} messageId={message.id}>
+                          {moved.before.get(message.id)?.map(marker)}
+                          <MessageItem
+                            message={message}
+                            showStats={false}
+                            busy={streaming}
+                            subagents={message.id === lastId ? running : undefined}
+                            onShowSubagents={() => setSheet(true)}
+                            subagentsInline={message.id === lastId && inline}
+                          />
+                        </MessageScrollerItem>
+                      )
+                    })}
+                    {moved.trailing.map(marker)}
+                    {running > 0 && !inline && (
+                      <SubagentLine
+                        count={running}
+                        onOpen={() => setSheet(true)}
+                        className="px-1"
+                      />
+                    )}
+                  </AgentsContext.Provider>
+                  {queue?.items.map((item) => (
+                    <div
+                      key={item.id}
+                      data-queued
+                      className={cn(COLUMN_BOX, "flex flex-col items-end gap-1")}
+                    >
+                      {item.files.length > 0 && (
+                        <p className="text-xs text-muted-foreground">{item.files.join(", ")}</p>
+                      )}
+                      {item.text && (
+                        <p className="max-w-[85%] rounded-3xl bg-muted px-4 py-2.5 whitespace-pre-wrap opacity-60">
+                          {item.text}
+                        </p>
+                      )}
+                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <span data-queued-state className="px-2">
+                          {item.error ?? "Queued"}
+                        </span>
+                        {(queue.paused || item.error) && (
+                          <Button
+                            data-send-queued
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => queue.act(item.id, "send")}
+                          >
+                            Send now
+                          </Button>
+                        )}
+                        <Button
+                          data-remove-queued
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => queue.act(item.id, "remove")}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </MessageScrollerContent>
+              </MessageScrollerViewport>
+              <MessageScrollerButton />
+            </MessageScroller>
+          </MessageScrollerProvider>
+        )}
+        <div
+          data-slot="composer-slot"
+          data-toast-above
+          className="px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-4"
+        >
+          {waiting ? <div className={COLUMN_BOX}>{waiting}</div> : composer}
+        </div>
+        <AgentPopup
+          agent={shown}
+          server={config}
+          open={Boolean(shown)}
+          onOpenChange={(open) => !open && setShown(undefined)}
+        />
+        <SubagentsSheet open={sheet} onOpenChange={setSheet} source={source} />
       </div>
-      <AgentPopup
-        agent={shown}
-        server={config}
-        open={Boolean(shown)}
-        onOpenChange={(open) => !open && setShown(undefined)}
-      />
-      <SubagentsSheet open={sheet} onOpenChange={setSheet} source={source} />
-    </div>
+    </AskAgainContext.Provider>
   )
 }
 
 /** The thread as a chat opens it in the app: chat-next, drawn with the app's rows. */
+const APPROVAL_CHOICES: ApprovalChoice[] = ["once", "session", "always", "deny"]
+
+/**
+ * The prompt a run is held up on, drawn as the app draws one everywhere: the approval card with the
+ * tool that asked and every choice the host offers, and the question card with its choices and an
+ * Other. The cards read a message, so the wait is dressed as the reply it interrupts, and an answer
+ * goes where chat-next sends it rather than through the old engine.
+ */
+export function AppPrompt({ waiting, answer, asker }: PromptProps) {
+  const message = useMemo((): Message => {
+    const base = {
+      id: `prompt-${waiting.promptId}`,
+      conversationId: "",
+      role: "assistant" as const,
+      content: "",
+      status: "streaming" as const,
+      createdAt: 0,
+    }
+    if (waiting.kind === "approval")
+      return {
+        ...base,
+        approval: {
+          runId: waiting.run,
+          command: waiting.command,
+          ...(waiting.description ? { description: waiting.description } : {}),
+          choices: waiting.choices.filter((choice): choice is ApprovalChoice =>
+            APPROVAL_CHOICES.includes(choice as ApprovalChoice),
+          ),
+        },
+        ...(asker
+          ? {
+              tools: [
+                {
+                  toolCallId: "asker",
+                  tool: asker,
+                  label: "",
+                  status: "running" as const,
+                  startedAt: 0,
+                  contentOffset: 0,
+                },
+              ],
+            }
+          : {}),
+      }
+    return {
+      ...base,
+      clarify: {
+        runId: waiting.run,
+        clarifyId: waiting.promptId,
+        questions: [
+          {
+            id: "q0",
+            question: waiting.question,
+            ...(waiting.choices.length ? { choices: waiting.choices } : {}),
+            ...(waiting.multiSelect ? { multiSelect: true } : {}),
+          },
+        ],
+      },
+    }
+  }, [waiting, asker])
+  if (waiting.kind === "approval") return <ApprovalCard message={message} onAnswer={answer} />
+  return (
+    <QuestionCard
+      message={message}
+      onAnswer={(answers) => {
+        const given = answers.q0
+        return answer(Array.isArray(given) ? given.join(", ") : (given ?? ""))
+      }}
+    />
+  )
+}
+
 export function AppChatNextThread({
   chatId,
   main,
@@ -290,7 +360,7 @@ export function AppChatNextThread({
   return (
     <CodeFaceProvider value={code ? "font-code" : undefined}>
       <ChatOf.Provider value={chat}>
-        <ChatNextThread {...props} View={AppThreadView} />
+        <ChatNextThread {...props} View={AppThreadView} Prompt={AppPrompt} />
       </ChatOf.Provider>
     </CodeFaceProvider>
   )

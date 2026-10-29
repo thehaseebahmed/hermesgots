@@ -169,7 +169,16 @@ export function fakeHost(
   const runs = new Map<string, RunState>()
   const answers: { run: string; prompt_id: string; generation: number; answer: string }[] = []
   const approvals: { run: string; choice: string }[] = []
-  const asked = { transcript: 0, archive: 0, runs: 0, subscriptions: 0, health: 0, stops: 0 }
+  const asked = {
+    transcript: 0,
+    archive: 0,
+    runs: 0,
+    subscriptions: 0,
+    health: 0,
+    stops: 0,
+    agentStops: 0,
+    info: 0,
+  }
   const latest: { run?: Run; id?: string; body?: Record<string, unknown>; key?: string } = {}
   /** A project session's record on the plugin: its mode, a plan waiting, and why it can't send. */
   const workspace = {
@@ -590,12 +599,14 @@ export function fakeHost(
       latest.key = new Headers(init.headers).get("idempotency-key") ?? undefined
       return reply({ run_id: id, status: "started", replayed: false }, 202)
     }
-    if (plugin && path === "/api/plugins/memento/info")
+    if (plugin && path === "/api/plugins/memento/info") {
+      asked.info++
       return reply({
         object: "memento.info",
         version: "0.91.0",
-        features: ["queue", "media", "triage", "moves"],
+        features: ["queue", "media", "triage", "moves", "subagents_stop_all"],
       })
+    }
     if (plugin && path === `/api/plugins/memento/sessions/${session}/triage`) {
       const { text, steer } = JSON.parse(String(init?.body))
       triage.asked.push({ text, steer: Boolean(steer) })
@@ -714,6 +725,21 @@ export function fakeHost(
             }
           : { revision: null, todos: null, progress: null },
       )
+    }
+    // The session's Stop for every child still at work, in the plugin's one call.
+    if (
+      plugin &&
+      path === `/api/plugins/memento/sessions/${session}/agents/stop` &&
+      init?.method === "POST"
+    ) {
+      asked.agentStops++
+      const running = agents.filter((agent) => agent.status === "running")
+      running.forEach((agent) => (agent.status = "done"))
+      return reply({
+        object: "memento.agents_stop",
+        stopped: running.length,
+        agents: running.map((agent) => ({ id: agent.id, stopped: true })),
+      })
     }
     if (plugin && path === `/api/plugins/memento/sessions/${session}/agents`)
       return reply({ object: "memento.agents", session_id: session, agents })
