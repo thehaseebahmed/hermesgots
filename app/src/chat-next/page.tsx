@@ -356,6 +356,8 @@ export interface ThreadViewProps {
   /** The prompt the run is held up on, drawn where the composer goes. */
   waiting: ReactNode
   composer: ReactNode
+  /** Sends a turn as the composer does, for what the view offers to send itself. */
+  send: (text: string, attachments: Attachment[]) => Promise<void>
 }
 
 /** chat-next's own markup: the dev route's, and the one its tests read. */
@@ -463,6 +465,15 @@ interface ThreadOptions {
   /** Steers the running reply through the plugin's queue; without it, nothing can be steered. */
   steerTurn?: (text: string, attachments: Attachment[]) => Promise<void>
   /**
+   * Asks the host where a message belongs before it is sent here (a bot's Main, ADR 0029): answers
+   * the attachments to send it with where it stays, or nothing where the host sent it elsewhere.
+   */
+  triageTurn?: (
+    text: string,
+    attachments: Attachment[],
+    options: { steer: boolean },
+  ) => Promise<Attachment[] | undefined>
+  /**
    * Called once the thread has read the host (`opened`), and each time a turn has ended (`turn`):
    * where the app reads again what the plugin holds for the chat beside its transcript.
    */
@@ -507,6 +518,7 @@ export function ChatNextThread({
   prepareTurn,
   queueTurn,
   steerTurn,
+  triageTurn,
   onSettled,
   Composer,
   View = PlainView,
@@ -821,7 +833,13 @@ export function ChatNextThread({
     let prepared: PreparedTurn | undefined
     let run: string
     try {
-      prepared = prepareTurn ? await prepareTurn(words, attachments) : undefined
+      // A message the host sends to a thread leaves this one, as any message the user sent would.
+      const kept = triageTurn ? await triageTurn(words, attachments, { steer: false }) : attachments
+      if (!kept) {
+        streaming.current = false
+        return dispatch({ type: "moved" })
+      }
+      prepared = prepareTurn ? await prepareTurn(words, kept) : undefined
       run = prepared
         ? await postRun({ server, key }, prepared.body, prepared.key, alive.current.signal)
         : await startRun({ server, key }, session, words, alive.current.signal)
@@ -842,15 +860,21 @@ export function ChatNextThread({
     await sendTurn(text).catch(() => setDraft((now) => now || text))
   }
 
+  // Mid-reply too, a Main's message is triaged first: one for another thread goes there at once,
+  // and the rest queue or steer behind the reply.
   async function queueMessage(text: string, attachments: Attachment[]) {
     if (!queueTurn) throw new Error("This bot can't hold a message until the reply is over.")
-    await queueTurn(text, attachments)
+    const kept = triageTurn ? await triageTurn(text, attachments, { steer: false }) : attachments
+    if (!kept) return
+    await queueTurn(text, kept)
     void catchUp()
   }
 
   async function steerMessage(text: string, attachments: Attachment[]) {
     if (!steerTurn) throw new Error("This reply can't be steered.")
-    await steerTurn(text, attachments)
+    const kept = triageTurn ? await triageTurn(text, attachments, { steer: true }) : attachments
+    if (!kept) return
+    await steerTurn(text, kept)
     void catchUp()
   }
 
@@ -986,6 +1010,7 @@ export function ChatNextThread({
       onOpenCard={open}
       waiting={waitingCard}
       composer={composer}
+      send={sendTurn}
     />
   )
 }

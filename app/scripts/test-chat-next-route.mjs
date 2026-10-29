@@ -1,4 +1,4 @@
-/** Which chats chat-next takes while its switch is on: plain chats with a bot it can call. */
+/** Which chats chat-next takes while its switch is on: every chat with a bot it can call. */
 import assert from "node:assert/strict"
 import test from "node:test"
 
@@ -19,11 +19,11 @@ test("a project session opens on chat-next too, which posts its workspace before
   assert.equal(opensOnChatNext(true, { projectId: "p1" }, bot), true)
 })
 
-test("a bot's Main stays, since its messages are triaged before they send", () => {
-  assert.equal(opensOnChatNext(true, { main: true }, bot), false)
+test("a bot's Main opens on chat-next too, which triages its messages before they send", () => {
+  assert.equal(opensOnChatNext(true, { main: true }, bot), true)
 })
 
-test("a chat not started, or one whose bot can't be called, stays", () => {
+test("a new chat with no record yet, or one whose bot can't be called, stays", () => {
   assert.equal(opensOnChatNext(true, null, bot), false)
   assert.equal(opensOnChatNext(true, undefined, bot), false)
   assert.equal(opensOnChatNext(true, chat, { ...bot, apiKey: "" }), false)

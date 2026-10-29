@@ -37,7 +37,7 @@ import { COLUMN_BOX } from "@/lib/layout"
 import type { ComposerControls } from "@/chat-next/page"
 import { opensOnChatNext } from "@/chat-next/route"
 import { cn } from "@/lib/utils"
-import { prepareTurn, queueTurn, steerTurn } from "@/chat-next/turn"
+import { prepareTurn, queueTurn, startTurn, steerTurn, triageTurn } from "@/chat-next/turn"
 import { quietly } from "@/lib/report"
 import { threadCount, threadsLine } from "@/lib/bot-chrome"
 import { repoCap, sessionSubtitle } from "@/lib/repo-line"
@@ -181,7 +181,7 @@ import {
 } from "@/lib/workspace"
 import { lastActivityAt } from "@/lib/session-work"
 import { hold, type HoldSlot } from "@/lib/chat-hold"
-import { useBotThreads } from "@/lib/threads"
+import { useBotThreads, useThreads } from "@/lib/threads"
 import { EmptyState, MainEmptyState } from "@/components/chat/empty-states"
 import { useMainFlow } from "@/components/chat/main-flow"
 
@@ -324,7 +324,14 @@ export function ChatPage(props: ChatPageProps) {
   // keeps drawing: the current screen holds the chat it left until the new one is ready.
   const kind = verdict?.split("\n")[0]
   if (kind === "next" && verdict === `next\n${id}` && id)
-    return <NextChat id={id} slot={props.slot} />
+    return (
+      <NextChat
+        id={id}
+        slot={props.slot}
+        pinned={Boolean(props.chatId)}
+        paneThread={props.paneThread}
+      />
+    )
   if (kind === "current") return <CurrentChatPage {...props} />
   return (
     <div
@@ -338,14 +345,56 @@ export function ChatPage(props: ChatPageProps) {
   )
 }
 
-/** A chat drawn by chat-next, under the chat's own header. */
-function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
+/**
+ * A chat drawn by chat-next, under the chat's own header. A bot's Main is drawn as the current screen
+ * draws it: under the bot's name and its count of threads, with its threads as cards in its flow,
+ * and every message it sends triaged by the host first (ADR 0029); a thread of it leads back to it.
+ */
+function NextChat({
+  id,
+  slot,
+  pinned,
+  paneThread,
+}: {
+  id: string
+  slot: HoldSlot
+  /** This instance draws a chat the address may not name: a Main beside its thread. */
+  pinned: boolean
+  paneThread?: string
+}) {
   const chat = useLiveQuery(() => db.conversations.get(id), [id])
   const bot = useLiveQuery(
     async () => (chat ? db.profiles.get(chat.profileId) : undefined),
     [chat?.profileId],
   )
   const ready = Boolean(chat && bot && chat.id === id)
+  const botThreads = useBotThreads()
+  const { pathname } = useLocation()
+  const { root, up } = useNav()
+  const routeChat = matchPath("/c/:id", pathname)?.params.id
+  const isMain = Boolean(chat?.main)
+  const mainOn = Boolean(botThreads && isMain)
+  const threadList = useThreads(mainOn ? chat?.profileId : undefined)
+  // The thread the address names when this instance is a Main drawn beside it.
+  const routeThread =
+    pinned && routeChat && routeChat !== id && !mainThreadProfile(routeChat) ? routeChat : undefined
+  const mainPath =
+    botThreads && chat && !chat.projectId && !isMain
+      ? `/c/${mainThreadId(chat.profileId)}`
+      : undefined
+  const xl = useXLarge()
+  const besideMain = Boolean(mainPath) && xl
+  useEffect(() => {
+    if (!mainPath) return
+    return setBackGuard(() => {
+      up(mainPath)
+      return true
+    })
+  }, [mainPath, up])
+  const mainOf = isMain ? chat?.profileId : undefined
+  useEffect(() => {
+    if (mainOf) void setActiveProfile(mainOf)
+  }, [mainOf])
   // One component per chat and bot, so the composer keeps its text across the thread's renders:
   // a write to the bot's row hands back a new object, which mustn't remount it.
   const botKey = bot?.id
@@ -353,14 +402,49 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
     () =>
       botKey
         ? function ChatNextComposer({ controls }: { controls: ComposerControls }) {
-            return <NextComposer controls={controls} chatId={id} botId={botKey} />
+            return (
+              <NextComposer
+                controls={controls}
+                chatId={id}
+                botId={botKey}
+                main={mainOn}
+                home={mainPath}
+              />
+            )
           }
         : undefined,
-    [id, botKey],
+    [id, botKey, mainOn, mainPath],
   )
   useLayoutEffect(() => {
     if (ready) hold(slot, id)
   })
+  const actions = mainOn && bot && (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant="outline"
+            size="icon-lg"
+            className="size-11 rounded-full bg-background/80 backdrop-blur"
+            aria-label="Bot options"
+          />
+        }
+      >
+        <EllipsisIcon />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-44">
+        <DropdownMenuItem onClick={() => void setBotMuted(bot.id, !bot.muted)}>
+          {bot.muted ? <BellIcon /> : <BellOffIcon />}
+          {bot.muted ? "Unmute notifications" : "Mute notifications"}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => root("/settings/bots")}>
+          <SettingsIcon />
+          Bot settings
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
   return (
     <div
       data-slot="chat-pane"
@@ -374,20 +458,57 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
       {chat && bot && ready ? (
         <>
           <ChatHeader
-            title={chat.title}
+            // Main is the bot's face, so its title is the bot's name, which Bot settings edits.
+            title={mainOn ? bot.name || chat.title : chat.title}
+            subtitle={mainOn && threadList ? threadsLine(threadCount(threadList)) : undefined}
             botId={bot.botId}
             muted={Boolean(chat.muted || bot.muted)}
+            centered={besideMain}
+            showBot={!besideMain}
+            actions={actions}
+            leading={
+              // Beside Main the bot is on screen with the thread; below `xl` the thread leads back.
+              mainPath &&
+              !besideMain && (
+                <Button
+                  variant="outline"
+                  size="icon-lg"
+                  className="size-11 rounded-full bg-background/80 backdrop-blur"
+                  onClick={() => up(mainPath)}
+                  aria-label={`Back to ${bot.name || "bot"}`}
+                >
+                  <ArrowLeftIcon />
+                </Button>
+              )
+            }
           />
           <Suspense fallback={null}>
             <ChatNextThread
               key={chat.hermesSessionId}
               chatId={id}
+              main={
+                mainOn
+                  ? {
+                      profileId: chat.profileId,
+                      botId: bot.botId,
+                      openThread: routeThread ?? paneThread,
+                      beside: Boolean(routeThread),
+                      routeChat,
+                    }
+                  : undefined
+              }
               server={bot.baseUrl}
               apiKey={bot.apiKey}
               session={chat.hermesSessionId}
               prepareTurn={(text, attachments) => prepareTurn(id, text, attachments)}
               queueTurn={async (text, attachments) => void (await queueTurn(id, text, attachments))}
               steerTurn={(text, attachments) => steerTurn(id, text, attachments)}
+              // Only Main's messages are triaged; a thread and a project session never are.
+              triageTurn={
+                mainOn
+                  ? (text, attachments, options) => triageTurn(id, text, attachments, options)
+                  : undefined
+              }
               // What the plugin holds beside the transcript — the title, the context, the todos, a
               // session's workspace, pull requests and library — read as every chat reads it.
               onSettled={(reason, thread) =>
@@ -412,7 +533,13 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
  * handed back to the field. A project session's own cards take its place in the order the current
  * screen draws them: closed, blocked, then a plan waiting to be approved.
  */
-function NextComposer(props: { controls: ComposerControls; chatId: string; botId: string }) {
+function NextComposer(props: {
+  controls: ComposerControls
+  chatId: string
+  botId: string
+  main: boolean
+  home?: string
+}) {
   return (
     <>
       <NextPills chatId={props.chatId} botId={props.botId} busy={props.controls.busy} />
@@ -521,17 +648,36 @@ function NextComposerBody({
   controls,
   chatId,
   botId,
+  main,
+  home,
 }: {
   controls: ComposerControls
   chatId: string
   botId: string
+  /** A bot's Main: `/thread` starts a thread of it. */
+  main: boolean
+  /** Where `/new` goes: a thread's Main, else home. */
+  home?: string
 }) {
   const { root } = useNav()
+  const navigate = useNavigate()
   const bot = useLiveQuery(() => db.profiles.get(botId), [botId])
   const session = useLiveQuery(async () => {
     const chat = await db.conversations.get(chatId)
     return chat?.projectId ? chat : null
   }, [chatId])
+  // `/thread` from Main: a thread of its own, with Main's pick and the message as its first turn.
+  const startThread = async (text: string, attachments: Attachment[]) => {
+    try {
+      const from = await db.conversations.get(chatId)
+      const thread = await createConversation(botId, { modelChoice: chosenOf(from?.modelChoice) })
+      navigate(`/c/${thread.id}`, { state: { bot: botId } })
+      if (text.trim() || attachments.length) await startTurn(thread.id, text, attachments)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Couldn't start the thread.")
+      throw error
+    }
+  }
   const filesFeature = usePluginFeature(bot, "attachments")
   const [cheatsheetOpen, setCheatsheetOpen] = useState(false)
   const [navShortcuts, setNavShortcuts] = useState(DEFAULT_SETTINGS.navShortcuts)
@@ -599,8 +745,11 @@ function NextComposerBody({
               }
             : undefined
         }
-        onCommand={async (command) => {
-          if (command === "new") return root("/")
+        main={main}
+        onCommand={async (command, message) => {
+          if (command === "thread")
+            return startThread(message?.text ?? "", message?.attachments ?? [])
+          if (command === "new") return root(home ?? "/")
           if (command === "settings") return root("/settings")
           if (command === "cheatsheet") {
             const settings = await getSettings().catch(quietly("Reading the cheatsheet's switch"))

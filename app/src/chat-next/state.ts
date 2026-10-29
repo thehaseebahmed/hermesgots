@@ -54,6 +54,8 @@ export type ThreadEvent =
   | { type: "sent"; user: string; files?: SentFile[]; at?: number }
   /** A send that never reached the host: the message goes back to the composer, not the thread. */
   | { type: "unsent"; error: string }
+  /** A message the host sent somewhere else (triage, ADR 0029): it leaves this thread, unfailed. */
+  | { type: "moved" }
   | { type: "attach" }
   | { type: "answered" }
   | { type: "ended" }
@@ -194,6 +196,8 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       }
     case "unsent":
       return { ...state, live: undefined, running: false, status: "failed", error: event.error }
+    case "moved":
+      return { ...state, live: undefined, running: false }
     case "attach": {
       // The run's events are replayed from its start, so the turn, and what it waits on, are drawn
       // again from nothing.

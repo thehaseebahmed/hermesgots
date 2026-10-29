@@ -1,12 +1,12 @@
 /**
- * Which chats open on chat-next while its Developer switch is on (ADR 0065): a chat or a project
- * session with a bot it can call. A bot's Main is triaged before it sends, which chat-next doesn't
- * do yet, and a chat not started has no session to read; both stay on the current screen.
+ * Which chats open on chat-next while its Developer switch is on (ADR 0065): a chat, a project
+ * session or a bot's Main, with a bot it can call. A new chat has no record yet and stays on the
+ * current screen until its first message makes one.
  */
 export function opensOnChatNext(
   on: boolean,
-  chat: { main?: boolean } | null | undefined,
+  chat: object | null | undefined,
   bot: { baseUrl: string; apiKey: string } | null | undefined,
 ): boolean {
-  return Boolean(on && chat && !chat.main && bot?.apiKey && bot.baseUrl.trim())
+  return Boolean(on && chat && bot?.apiKey && bot.baseUrl.trim())
 }
