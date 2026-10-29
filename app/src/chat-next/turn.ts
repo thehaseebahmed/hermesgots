@@ -12,6 +12,14 @@ import { ensureSessionWorkspace } from "@/lib/workspace"
 import { randomId } from "@/lib/utils"
 import { toast } from "sonner"
 
+/** Keeps the bytes of the files a turn sends, by the path the host saved each at. */
+async function keepSent(session: string, sent: Attachment[]) {
+  const files = sent.flatMap((file) =>
+    file.path && file.blob ? [{ session, path: file.path, blob: file.blob }] : [],
+  )
+  if (files.length) await db.sentFiles.bulkPut(files).catch(quietly("Keeping a file that was sent"))
+}
+
 /** A turn ready to post: its run's body and key, and what to do once the post is settled. */
 export interface PreparedTurn {
   body: Record<string, unknown>
@@ -57,6 +65,7 @@ async function built(chatId: string, text: string, attachments: Attachment[]) {
     const sent = attachments.length
       ? await uploadAttachments(config, chat.hermesSessionId, attachments, Boolean(bot.apiKey))
       : attachments
+    await keepSent(chat.hermesSessionId, sent)
     const body = runRequest(config, {
       ...modelOf(pinned, bot),
       sessionId: chat.hermesSessionId,
@@ -162,6 +171,7 @@ export async function triageTurn(
     const sent = attachments.length
       ? await uploadAttachments(config, conversation.hermesSessionId, attachments, true)
       : attachments
+    await keepSent(conversation.hermesSessionId, sent)
     const moved = await askTriage({ conversation, profile, config }, { content, sent, steer })
     if (!moved) return sent
     void announceMove(moved)

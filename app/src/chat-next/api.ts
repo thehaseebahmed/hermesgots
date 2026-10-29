@@ -3,6 +3,7 @@ import { READ_TIMEOUT_MS } from "../lib/freshness.ts"
 
 import type { Agent } from "./agents"
 import type { Row } from "./fold"
+import type { Usage } from "./stats"
 import type { Waiting } from "./state"
 
 /** A bot's server, as its base URL (`/v1` or not, `/p/<profile>` or not) and key. */
@@ -22,6 +23,10 @@ export interface RunEvent {
   delta?: string
   /** A whole block of thinking (`reasoning.available`), from providers that don't stream it. */
   text?: string
+  /** What the run cost, on its end (`run.completed`). */
+  usage?: Usage
+  /** An interim line (`message.interim`) the deltas already carried. */
+  already_streamed?: boolean
   tool?: string
   preview?: string
   tool_call_id?: string

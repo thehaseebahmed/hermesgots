@@ -38,7 +38,7 @@ import type { RepoRef } from "@/lib/workspace"
 import { cn } from "@/lib/utils"
 
 import { delegated } from "./agents"
-import { messagesOf } from "./messages"
+import { messagesOf, withHeldFiles } from "./messages"
 import { ChatNextThread, type PromptProps, type ThreadViewProps } from "./page"
 
 /** A bot's Main as chat-next draws it: whose threads are its cards, and which one is open. */
@@ -95,14 +95,24 @@ export function AppThreadView({
   queue,
   waiting,
   composer,
+  stats,
   send,
 }: ThreadViewProps) {
   const { chatId, main, blank, onStatus } = useContext(ChatOf)
   // The rows are the chat's: what a row reads through its chat — its media, its files, a question
   // asked again — finds the chat by this id, never by the session's.
+  // The files this device sent keep their bytes, so its own photos draw with the host away.
+  const sentFiles = useLiveQuery(
+    () => db.sentFiles.where("[session+path]").between([session], [session, []]).toArray(),
+    [session],
+  )
   const messages = useMemo(
-    () => messagesOf(chatId, turns, { streaming }),
-    [chatId, turns, streaming],
+    () =>
+      withHeldFiles(
+        messagesOf(chatId, turns, { streaming, stats }),
+        new Map(sentFiles?.map((file) => [file.path, file.blob])),
+      ),
+    [chatId, turns, streaming, stats, sentFiles],
   )
   const streamingReply = messages.findLast((message) => message.status === "streaming")
   const activity = streamingReply && describeActivity(streamingReply)
@@ -234,7 +244,7 @@ export function AppThreadView({
                             // conversation write would wake every row's memo.
                             compactions={message.seams?.length ? record?.compactions : undefined}
                             blocks={draws.get(message.id)}
-                            showStats={false}
+                            showStats
                             busy={streaming}
                             subagents={message.id === lastId ? running : undefined}
                             onShowSubagents={() => setSheet(true)}

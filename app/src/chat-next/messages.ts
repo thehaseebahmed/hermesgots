@@ -1,4 +1,4 @@
-import type { Attachment, Message, Seam, Steer, ToolEvent } from "../lib/db.ts"
+import type { Attachment, Message, MessageStats, Seam, Steer, ToolEvent } from "../lib/db.ts"
 import { actionOf, spawnStamp } from "../lib/spawn.ts"
 import { clip, describeCall, parseArgs, patchStats, writeStats } from "../lib/tool-calls.ts"
 import { appendThinking, type ReasoningRun } from "../lib/thinking.ts"
@@ -15,23 +15,52 @@ import type { ToolCall, Turn } from "./fold.ts"
 export function messagesOf(
   chat: string,
   turns: Turn[],
-  options: { streaming?: boolean } = {},
+  options: { streaming?: boolean; stats?: Record<string, MessageStats> } = {},
 ): Message[] {
   return turns.flatMap((turn, index) => {
     const live = Boolean(options.streaming) && index === turns.length - 1 && !turn.done
+    // What a turn cost: as it was just measured, else as the device kept it with the row that opened it.
+    const stats = turn.stats ?? (turn.row !== undefined ? options.stats?.[turn.row] : undefined)
     // The page hands back the very turn it drew where nothing in it moved, so its rows are too.
-    const key = `${chat}-${index}-${live}`
+    const key = `${chat}-${index}-${live}-${stats ? JSON.stringify(stats) : ""}`
     const held = drawn.get(turn)
     if (held?.key === key) return held.rows
-    const rows = rowsOf(chat, `${chat}-${index}`, turn, live)
+    const rows = rowsOf(chat, `${chat}-${index}`, turn, live, stats)
     drawn.set(turn, { key, rows })
     return rows
   })
 }
 
+/**
+ * The rows with the bytes this device holds for the files they carry, found by the path the host
+ * saved each at: the transcript holds a marker and no bytes, and the device's own photos draw from
+ * these while the host is away. A row that carries nothing held is the very row given.
+ */
+export function withHeldFiles(messages: Message[], held: ReadonlyMap<string, Blob>): Message[] {
+  if (!held.size) return messages
+  return messages.map((message) => {
+    if (!message.attachments?.some((file) => file.path && !file.blob && held.has(file.path)))
+      return message
+    return {
+      ...message,
+      attachments: message.attachments.map((file) =>
+        file.path && !file.blob && held.has(file.path)
+          ? { ...file, blob: held.get(file.path) }
+          : file,
+      ),
+    }
+  })
+}
+
 const drawn = new WeakMap<Turn, { key: string; rows: Message[] }>()
 
-function rowsOf(chat: string, id: string, turn: Turn, live: boolean): Message[] {
+function rowsOf(
+  chat: string,
+  id: string,
+  turn: Turn,
+  live: boolean,
+  stats?: MessageStats,
+): Message[] {
   const createdAt = turn.at ?? 0
   const rows: Message[] = []
   // A wake turn answers no message of the user's, and a carried one's request went with the archive.
@@ -97,6 +126,7 @@ function rowsOf(chat: string, id: string, turn: Turn, live: boolean): Message[] 
       ...(thinking ? { reasoningRuns: thinking } : {}),
       ...(steers.length ? { steers } : {}),
       ...(seams.length ? { seams } : {}),
+      ...(stats && !live ? { stats } : {}),
       status: live ? "streaming" : "done",
       createdAt,
     })

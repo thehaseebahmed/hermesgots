@@ -154,9 +154,7 @@ export interface Conversation {
    * wrote that shape — and an absent kind is the live transcript's, because that is the only thing a
    * cursor could have been then.
    */
-  olderThan?:
-    | { kind?: "live"; id: number; offset: number }
-    | { kind: "archive"; id: number }
+  olderThan?: { kind?: "live"; id: number; offset: number } | { kind: "archive"; id: number }
   /**
    * The session's latest model call, as the Gots plugin recorded it: its prompt tokens, the
    * model that ran it, and the window Hermes compresses against. Local only; every device reads it
@@ -723,6 +721,16 @@ export interface SessionRow {
   row: Row
 }
 
+/**
+ * A file this device sent into a session, kept by the path the host saved it at: the transcript
+ * holds only the marker, so these bytes are what draws the photo while the host is away.
+ */
+export interface SentFile {
+  session: string
+  path: string
+  blob: Blob
+}
+
 /** What chat-next keeps of a session beside its rows; what the page is doing is never kept. */
 export interface SessionState {
   session: string
@@ -732,6 +740,8 @@ export interface SessionState {
   archived?: boolean
   /** The turn this device streamed, until the host's transcript replaces it. */
   live?: LiveTurn
+  /** What the turns this device watched cost, by the id of the row that opened each. */
+  stats?: Record<string, MessageStats>
   /** What the plugin holds for the session, as it last listed it. */
   queue?: { items: Queued[]; paused: boolean }
 }
@@ -746,11 +756,13 @@ export interface LiveTurn {
 export const SESSION_STORES = {
   sessionRows: "[session+set+id], [session+set+pos]",
   sessionStates: "session",
+  sentFiles: "[session+path]",
 }
 
 export type SessionDb = Dexie & {
   sessionRows: Table<SessionRow, [string, string, number]>
   sessionStates: EntityTable<SessionState, "session">
+  sentFiles: Table<SentFile, [string, string]>
 }
 
 export const db = new Dexie("memento") as Dexie & {
@@ -771,6 +783,7 @@ export const db = new Dexie("memento") as Dexie & {
   prompts: EntityTable<PromptEntry, "id">
   sessionRows: SessionDb["sessionRows"]
   sessionStates: SessionDb["sessionStates"]
+  sentFiles: SessionDb["sentFiles"]
 }
 
 db.version(1).stores({
@@ -1048,7 +1061,12 @@ db.version(26)
 // memory only, so every write to the take path paid to update an index nothing read.
 db.version(27).stores({ dictationLog: "id, connection, loggedAt" })
 
-db.version(28).stores(SESSION_STORES)
+db.version(28).stores({
+  sessionRows: SESSION_STORES.sessionRows,
+  sessionStates: SESSION_STORES.sessionStates,
+})
+// v29: the files this device sent into a session, kept to draw them with the host away.
+db.version(29).stores({ sentFiles: SESSION_STORES.sentFiles })
 
 db.on("populate", (tx) => seedProfile(tx))
 
@@ -1272,6 +1290,7 @@ export async function deleteConversation(id: string, { remote = false } = {}) {
     db.dictations,
     db.sessionRows,
     db.sessionStates,
+    db.sentFiles,
   ]
   const dropped = await db.transaction("rw", tables, async () => {
     const conversation = await db.conversations.get(id)
@@ -1299,6 +1318,7 @@ export async function forgetSession(database: SessionDb, session: string) {
   // Every key that opens with the session sorts after `[session]` and before `[session, []]`.
   await database.sessionRows.where("[session+set+id]").between([session], [session, []]).delete()
   await database.sessionStates.delete(session)
+  await database.sentFiles.where("[session+path]").between([session], [session, []]).delete()
 }
 
 export async function getMessages(conversationId: string) {
@@ -1324,6 +1344,7 @@ export async function clearAllData() {
     db.meetingRecordings,
     db.sessionRows,
     db.sessionStates,
+    db.sentFiles,
   ]
   await db.transaction("rw", tables, async () => {
     await Promise.all(tables.map((table) => table.clear()))

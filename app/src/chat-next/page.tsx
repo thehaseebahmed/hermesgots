@@ -20,7 +20,7 @@ import { connectionKey } from "@/lib/connection"
 import { usePluginFeatureOn } from "@/lib/features"
 import { SAFETY_MS } from "@/lib/freshness"
 import { onSessionMoved, useLive } from "@/lib/live"
-import { db, type Attachment, type SessionDb } from "@/lib/db"
+import { db, type Attachment, type MessageStats, type SessionDb } from "@/lib/db"
 
 import { equal } from "./equal"
 import { cardsByPart, cardsOf, DELEGATE, delegated, type Agent, type Card } from "./agents"
@@ -371,6 +371,8 @@ export interface ThreadViewProps {
   /** The prompt the run is held up on, drawn where the composer goes. */
   waiting: ReactNode
   composer: ReactNode
+  /** What the turns this device watched cost, by the id of the row that opened each. */
+  stats?: Record<string, MessageStats>
   /** Sends a turn as the composer does, for what the view offers to send itself. */
   send: (text: string, attachments: Attachment[]) => Promise<void>
 }
@@ -752,7 +754,7 @@ export function ChatNextThread({
         await followRun(
           { server, key },
           run,
-          (event) => dispatch({ type: "run", event }),
+          (event) => dispatch({ type: "run", event, at: Date.now() }),
           alive.current.signal,
         )
       } catch (error) {
@@ -1080,6 +1082,7 @@ export function ChatNextThread({
       onOpenCard={open}
       waiting={waitingCard}
       composer={composer}
+      stats={held?.stats}
       send={sendTurn}
     />
   )

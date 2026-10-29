@@ -146,3 +146,15 @@ test("thinking heard before anything follows it is kept on the turn", () => {
   const turn = threadTurns(play([{ event: "reasoning.available", text: "Thinking." }])).at(-1)!
   assert.equal(turn.pendingThought, "Thinking.")
 })
+
+test("an interim line the deltas did not carry is words of the reply, and one they did is not", () => {
+  const state = play([
+    { event: "message.interim", text: "Looking into it." },
+    { event: "message.interim", text: "Already seen.", already_streamed: true },
+    { event: "message.delta", delta: "Done." },
+  ])
+  const texts = threadTurns(state)
+    .at(-1)!
+    .parts.flatMap((part) => (part.kind === "text" ? [part.text] : []))
+  assert.deepEqual(texts, ["Looking into it.\n\nDone."])
+})

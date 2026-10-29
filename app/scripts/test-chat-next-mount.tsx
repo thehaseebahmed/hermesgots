@@ -534,6 +534,7 @@ test("the composer carries the chat's model pill, which names the model the chat
 
 test("the header's options rename a chat and delete it, as the current screen's do", async () => {
   await onChatNext("c-options")
+  await db.sentFiles.put({ session: "memento-c-options", path: "/h/a.png", blob: new Blob(["x"]) })
   await mount(chatScreen("c-options"), async () => {
     await until(() => Boolean(find('button[aria-label="Chat options"]')), "the options button")
     await click(find('button[aria-label="Chat options"]'))
@@ -557,6 +558,7 @@ test("the header's options rename a chat and delete it, as the current screen's 
     await click(button("Delete"))
     await settle()
     assert.equal(await db.conversations.get("c-options"), undefined, "the chat is deleted")
+    assert.equal(await db.sentFiles.count(), 0, "and the files it sent go with it")
   })
 })
 
@@ -635,5 +637,21 @@ test("a session's header line says what the reply is doing while it works", asyn
       () => !(find('[data-slot="header-line"]')?.textContent ?? "").includes("Writing…"),
       "and stops saying so when the reply is done",
     )
+  })
+})
+
+test("a reply this device watched keeps what it cost, under the reply, once the transcript has it", async () => {
+  const { host } = await onChatNext("c-stats")
+  await mount(chatScreen("c-stats"), async () => {
+    const run = await midReply(host, "Why is the sky blue?")
+    run.say("Rayleigh scattering.")
+    run.finish("Rayleigh scattering.")
+    await until(() => /\b1 tokens\b/.test(text()), "the turn's tokens and time, under the reply")
+    // The host's transcript replaced the streamed turn; the figures stay with the row that opened it.
+    await until(() => !find('button[aria-label="Stop"]'), "the turn is over")
+    await settle()
+    assert.match(text(), /\b1 tokens\b/)
+    const kept = (await db.sessionStates.get("memento-c-stats"))?.stats
+    assert.equal(Object.keys(kept ?? {}).length, 1, "and the device keeps them across a reload")
   })
 })

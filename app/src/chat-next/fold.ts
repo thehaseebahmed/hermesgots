@@ -1,5 +1,8 @@
 import { splitAttachments } from "../lib/attachment-text.ts"
+import type { MessageStats } from "../lib/db.ts"
 import { steerText } from "../lib/steer.ts"
+
+import type { Timing } from "./stats.ts"
 
 /** A transcript row as `GET /api/sessions/{id}/messages` returns it; only what a turn is built from. */
 export interface Row {
@@ -51,6 +54,8 @@ export interface SentFile {
 }
 
 export interface Turn {
+  /** The id of the row that opened the turn, where the transcript has it. */
+  row?: number
   user: string
   /** When the request was written, in ms, where the host said. */
   at?: number
@@ -59,6 +64,10 @@ export interface Turn {
   /** The host archived this turn's request when it compacted: what is left is the work, from the seam on. */
   carried?: boolean
   parts: Part[]
+  /** A turn this device sent and watches from its start, which is what its stats are measured by. */
+  timing?: Timing
+  /** What the turn cost, measured as its run ended; only a turn measured so has any. */
+  stats?: MessageStats
   /** Thinking a live turn has heard that no word or call has followed yet. */
   pendingThought?: string
   /** The host has written the reply's last row: an assistant row that makes no more calls and says why it stopped. */
@@ -199,6 +208,7 @@ export function foldTurns(rows: Row[]): Turn[] {
       const { text, attachments } = splitAttachments(content)
       const at = msOf(row)
       turns.push({
+        row: row.id,
         user: text,
         ...(at !== undefined ? { at } : {}),
         ...(attachments.length

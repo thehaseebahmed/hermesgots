@@ -1,7 +1,8 @@
-import type { LiveTurn } from "@/lib/db"
+import type { LiveTurn, MessageStats } from "@/lib/db"
 
 import type { Agent } from "./agents"
 import type { Queued, RunEvent } from "./api"
+import { measureTurn } from "./stats"
 import { foldTurns, withArchive, type Part, type Row, type SentFile, type Turn } from "./fold"
 
 /**
@@ -17,6 +18,8 @@ export interface ThreadState {
   agents?: Agent[]
   /** The rows a compaction archived, once the reader has asked for them; kept across every read. */
   archived?: Row[]
+  /** What the turns this device watched cost, by the id of the row that opened each. */
+  stats?: Record<string, MessageStats>
   /** What the plugin holds for the session, drawn after the thread; none before it has said. */
   queue?: { items: Queued[]; paused: boolean }
   /** The turn this device is streaming, drawn over the transcript's until the host's replaces it. */
@@ -62,7 +65,8 @@ export type ThreadEvent =
   | { type: "ended" }
   | { type: "agents"; agents: Agent[] }
   | { type: "queue"; items: Queued[]; paused: boolean }
-  | { type: "run"; event: RunEvent }
+  /** `at` is this device's clock as the event arrived, which a turn it sent is timed by. */
+  | { type: "run"; event: RunEvent; at?: number }
   | { type: "failed"; error: string }
 
 export const initial: ThreadState = { status: "loading", rows: [], running: false }
@@ -78,28 +82,38 @@ export function turnsOf(folded: Turn[], live?: LiveTurn): Turn[] {
 }
 
 /** One live event's change to the turn it belongs to; only the part it touches is a new object. */
-function live(turn: Turn, event: RunEvent): Turn {
+function live(turn: Turn, event: RunEvent, now?: number): Turn {
   const { parts } = turn
   const at = typeof event.timestamp === "number" ? event.timestamp * 1000 : undefined
   const last = parts.at(-1)
   const replaceLast = (part: Part): Turn => ({ ...turn, parts: [...parts.slice(0, -1), part] })
+  // The first word of a turn this device sent starts the clock its speed is read by.
+  const stamp = (next: Turn): Turn =>
+    next.timing && next.timing.firstTokenAt === undefined && now !== undefined
+      ? { ...next, timing: { ...next.timing, firstTokenAt: now } }
+      : next
   if (event.event === "reasoning.available" && event.text) {
     const pendingThought = turn.pendingThought
       ? `${turn.pendingThought}\n\n${event.text}`
       : event.text
     return { ...turn, pendingThought }
   }
-  if (event.event === "message.delta" && event.delta) {
+  // An interim line is words the agent said between calls, which the deltas did not carry when the
+  // provider does not stream.
+  const words =
+    event.event === "message.delta"
+      ? event.delta
+      : event.event === "message.interim" && event.text && !event.already_streamed
+        ? `${event.text}\n\n`
+        : undefined
+  if (words) {
     const { pendingThought: thought, ...rest } = turn
     if (last?.kind === "text" && !thought)
-      return replaceLast({ ...last, text: last.text + event.delta })
-    return {
+      return stamp(replaceLast({ ...last, text: last.text + words }))
+    return stamp({
       ...rest,
-      parts: [
-        ...parts,
-        { kind: "text", text: event.delta.trimStart(), ...(thought ? { thought } : {}) },
-      ],
-    }
+      parts: [...parts, { kind: "text", text: words.trimStart(), ...(thought ? { thought } : {}) }],
+    })
   }
   if (event.event === "tool.started" && event.tool) {
     // The host names the call, and the transcript's row for it carries the same id.
@@ -131,6 +145,21 @@ function live(turn: Turn, event: RunEvent): Turn {
         : one,
     )
     return { ...turn, parts: parts.with(at, { ...part, calls }) }
+  }
+  // The end of a run this device watched from its start says what the reply cost.
+  if (event.event === "run.completed" && turn.timing && now !== undefined) {
+    const text = parts.flatMap((part) => (part.kind === "text" ? [part.text] : [])).join("")
+    if (text || event.usage)
+      return {
+        ...turn,
+        stats: measureTurn({
+          text,
+          toolsUsed: parts.some((part) => part.kind === "tools"),
+          usage: event.usage,
+          timing: turn.timing,
+          endedAt: now,
+        }),
+      }
   }
   return turn
 }
@@ -194,13 +223,22 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
   switch (event.type) {
     case "transcript": {
       if (state.running && !event.final) return state
-      const done = foldedOf(event.rows, state.archived).at(-1)?.done
+      const last = foldedOf(event.rows, state.archived).at(-1)
+      const done = last?.done
+      // What the turn this device watched cost goes with the row that opened it, which the
+      // transcript has now written.
+      const measured = state.live?.turn.stats
+      const stats =
+        measured && last?.row !== undefined && last.user === state.live?.turn.user
+          ? { ...state.stats, [last.row]: measured }
+          : state.stats
       return {
         status: "ready",
         rows: event.rows,
         archived: state.archived,
         agents: state.agents,
         queue: state.queue,
+        stats,
         running: false,
         // A finished turn waits on nothing, and the end of a followed run settles what it was on.
         waiting: event.final || done ? undefined : state.waiting,
@@ -217,10 +255,11 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         archived: state.archived,
         agents: state.agents,
         queue: state.queue,
+        stats: state.stats,
         live: {
           turn: {
             user: event.user,
-            ...(event.at !== undefined ? { at: event.at } : {}),
+            ...(event.at !== undefined ? { at: event.at, timing: { startedAt: event.at } } : {}),
             ...(event.files?.length ? { files: event.files } : {}),
             parts: [],
             done: false,
@@ -261,7 +300,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
     case "run": {
       const waiting = waitingAfter(state.waiting, event.event)
       const held = state.live
-      const turn = held && live(held.turn, event.event)
+      const turn = held && live(held.turn, event.event, event.at)
       const moved = held && turn && turn !== held.turn ? { ...held, turn } : held
       if (waiting === state.waiting && moved === held) return state
       return { ...state, waiting, live: moved }
