@@ -72,7 +72,13 @@ import { needsTranscriptWords } from "@/lib/tool-preview"
 import { randomId } from "@/lib/utils"
 import { knownLiveRun, readLiveRuns } from "@/lib/waiting"
 import { onWake } from "@/lib/wake"
-import { AttachmentError, pinFromHost, pinModel, uploadAttachments } from "@/lib/send-turn"
+import {
+  AttachmentError,
+  pinFromHost,
+  pinModel,
+  titleFrom,
+  uploadAttachments,
+} from "@/lib/send-turn"
 import {
   ensureSessionWorkspace,
   refreshLibrary,
@@ -117,11 +123,6 @@ const activeDrafts = new Map<string, { draft: Message; touch: () => void }>()
 
 function estimateTokens(text: string) {
   return Math.max(1, Math.round(text.length / 4))
-}
-
-function titleFrom(text: string) {
-  const line = text.trim().split("\n")[0]
-  return line.length > 48 ? `${line.slice(0, 47).trimEnd()}…` : line || "New chat"
 }
 
 async function syncTitle(conversationId: string, config: HermesConfig, sessionId: string) {

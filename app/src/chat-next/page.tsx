@@ -358,6 +358,11 @@ interface ThreadOptions {
   queueTurn?: (text: string, attachments: Attachment[]) => Promise<void>
   /** Steers the running reply through the plugin's queue; without it, nothing can be steered. */
   steerTurn?: (text: string, attachments: Attachment[]) => Promise<void>
+  /**
+   * Called once the thread has read the host and after each run it followed has ended: where the
+   * app reads again what the plugin holds for the chat beside its transcript.
+   */
+  onSettled?: () => void
   /** The app's own composer; without it, a bare text box. */
   Composer?: ComponentType<{ controls: ComposerControls }>
   pollMs?: number
@@ -396,6 +401,7 @@ export function ChatNextThread({
   prepareTurn,
   queueTurn,
   steerTurn,
+  onSettled,
   Composer,
 }: ThreadOptions & { server: string | null; apiKey: string | null; session: string | null }) {
   // The thread is drawn from the device's copy; the store is the only thing that writes it, and
@@ -499,10 +505,15 @@ export function ChatNextThread({
     [server, key, session, dispatch],
   )
 
+  // Held in a ref, so a caller's new function each render never re-runs the reads that call it.
+  const settled = useRef(onSettled)
+  useEffect(() => {
+    settled.current = onSettled
+  })
   useEffect(() => {
     if (!ready) return
     alive.current = new AbortController()
-    void catchUp()
+    void catchUp().then(() => settled.current?.())
     // A device that was away missed what the others wrote; it asks again as it comes back.
     const back = () => {
       if (document.visibilityState === "visible") void catchUp()
@@ -587,6 +598,7 @@ export function ChatNextThread({
       }
       // Whatever the stream said, the host's transcript is what the turn was.
       await catchUp(true)
+      settled.current?.()
     },
     [server, key, session, catchUp, dispatch],
   )

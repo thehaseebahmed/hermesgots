@@ -73,21 +73,6 @@ test("with the switch off, the same chat stays on the current screen", async () 
   })
 })
 
-test("a project session stays on the current screen, switch or not", async () => {
-  await seedChats([{ id: "c-code", title: "A session", messages: ["held by the old screen"] }], {
-    bots: [bot],
-    settings: { chatNext: true },
-  })
-  await db.conversations.update("c-code", { projectId: "p1" })
-  await mount(chatScreen("c-code"), async () => {
-    await until(
-      () => Boolean(find('[data-pane="route"]')?.textContent?.includes("held by the old screen")),
-      "the current screen drew the session",
-    )
-    assert.equal(find("[data-chat-next]"), null)
-  })
-})
-
 test("a bot served at /p/<profile> reaches its plugin inside the plugin's own prefix", async () => {
   const asked: string[] = []
   globalThis.fetch = (async (input: RequestInfo | URL) => {
@@ -272,5 +257,57 @@ test("a bot whose plugin can't queue hands a mid-reply message back", async () =
     await pressEnter()
     await until(() => composerField()?.value === "Hold this", "the words are back in the field")
     assert.equal(host.asked.runs, 1, "and no second run was started")
+  })
+})
+
+/** A project session on chat-next, with its host's plugin answering for it. */
+async function sessionOnChatNext(id: string) {
+  const { host } = await onChatNext(id, {}, { plugin: true })
+  await db.conversations.update(id, { projectId: "p1" })
+  return host
+}
+
+const button = (label: string) =>
+  findAll("button").find((one) => one.textContent?.trim() === label) ?? null
+
+test("a project session opens on chat-next and posts its workspace before the turn", async () => {
+  const host = await sessionOnChatNext("c-code")
+  await mount(chatScreen("c-code"), async () => {
+    await until(() => Boolean(find("[data-chat-next]")), "the session opens on chat-next")
+    await sendFromComposer("Fix the build")
+    await until(() => host.asked.runs === 1, "the turn started")
+    assert.ok(host.workspace.posts >= 1, "the workspace was posted before it")
+    assert.match(
+      String(host.latest.body!.instructions),
+      /Work in the worktree on hermes\/x\./,
+      "and the run is told where it works",
+    )
+  })
+})
+
+test("a session whose repo is gone is read-only: the card says why and nothing can be sent", async () => {
+  const host = await sessionOnChatNext("c-blocked")
+  host.workspace.blocked = "The repo me/repo was removed from the project."
+  await mount(chatScreen("c-blocked"), async () => {
+    await until(
+      () =>
+        find("[data-chat-next]")?.textContent?.includes("was removed from the project") ?? false,
+      "the session says why it is read-only",
+    )
+    assert.equal(composerField(), null, "and has no composer")
+  })
+})
+
+test("a plan waiting is approved from its card: the mode moves and the plan's run starts", async () => {
+  const host = await sessionOnChatNext("c-plan")
+  host.workspace.mode = "plan"
+  host.workspace.planPending = true
+  await mount(chatScreen("c-plan"), async () => {
+    await until(() => Boolean(button("Accept edits")), "the plan waits on its card")
+    await click(button("Accept edits"))
+    await until(() => host.asked.runs === 1, "approving starts the plan's run")
+    assert.equal(host.workspace.mode, "accept_edits", "in the mode it was approved in")
+    const input = host.latest.body!.input as { content: string }[]
+    assert.match(input.at(-1)!.content, /plans\/hermes-x\.md/, "told to work through that plan")
   })
 })

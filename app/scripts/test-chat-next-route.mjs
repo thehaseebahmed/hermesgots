@@ -15,8 +15,8 @@ test("with the switch off, every chat stays where it was", () => {
   assert.equal(opensOnChatNext(false, chat, bot), false)
 })
 
-test("a project session stays, since its turns need the workspace posted first", () => {
-  assert.equal(opensOnChatNext(true, { projectId: "p1" }, bot), false)
+test("a project session opens on chat-next too, which posts its workspace before every turn", () => {
+  assert.equal(opensOnChatNext(true, { projectId: "p1" }, bot), true)
 })
 
 test("a bot's Main stays, since its messages are triaged before they send", () => {

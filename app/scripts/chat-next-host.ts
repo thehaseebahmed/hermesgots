@@ -168,6 +168,14 @@ export function fakeHost(
   const approvals: { run: string; choice: string }[] = []
   const asked = { transcript: 0, archive: 0, runs: 0, subscriptions: 0, health: 0, stops: 0 }
   const latest: { run?: Run; id?: string; body?: Record<string, unknown>; key?: string } = {}
+  /** A project session's record on the plugin: its mode, a plan waiting, and why it can't send. */
+  const workspace = {
+    posts: 0,
+    mode: "accept_edits",
+    planPending: false,
+    planFile: "plans/hermes-x.md",
+    blocked: null as string | null,
+  }
   /** What the plugin holds for the session, oldest first, as its queue route lists it. */
   const queue: {
     id: string
@@ -548,6 +556,33 @@ export function fakeHost(
     }
     if (plugin && path === "/api/plugins/memento/info")
       return reply({ object: "memento.info", version: "0.91.0", features: ["queue"] })
+    const moding = plugin && path === `/api/plugins/memento/sessions/${session}/mode`
+    if (moding) {
+      // A mode post settles any plan waiting, the way the plugin's does.
+      workspace.mode = JSON.parse(String(init?.body)).mode
+      workspace.planPending = false
+    }
+    if (moding || (plugin && path === `/api/plugins/memento/sessions/${session}/workspace`)) {
+      const posting = !moding && init?.method === "POST"
+      if (posting) {
+        workspace.posts++
+        // A session whose repo was removed is read-only: the plugin refuses the post with why.
+        if (workspace.blocked) return reply({ error: { message: workspace.blocked } }, 409)
+      }
+      return reply({
+        workspace: {
+          session_id: session,
+          project_id: "p1",
+          branch: "hermes/x",
+          repos: [{ name: "me/repo", branch: "hermes/x" }],
+          mode: workspace.mode,
+          plan_pending: workspace.planPending,
+          plan_file: workspace.planFile,
+        },
+        instructions: "Work in the worktree on hermes/x.",
+        blocked: workspace.blocked,
+      })
+    }
     const queueRoute = `/api/plugins/memento/sessions/${session}/queue`
     if (plugin && path === queueRoute && init?.method === "POST") {
       const body = JSON.parse(String(init.body))
@@ -751,6 +786,7 @@ export function fakeHost(
     rows,
     latest,
     queue,
+    workspace,
     session,
     dropConnections,
     startElsewhere,

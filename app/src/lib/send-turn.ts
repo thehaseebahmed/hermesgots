@@ -137,3 +137,9 @@ export async function pinFromHost(conversationId: string, profile: Profile) {
     await updateConversation(conversationId, { modelChoice: storedPick(pinOf(row, host)) })
   })
 }
+
+/** A chat's title from its first message: the first line, cut to fit a row. */
+export function titleFrom(text: string) {
+  const line = text.trim().split("\n")[0]
+  return line.length > 48 ? `${line.slice(0, 47).trimEnd()}…` : line || "New chat"
+}

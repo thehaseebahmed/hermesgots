@@ -471,6 +471,8 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
                   void (await queueTurn(id, text, attachments))
                 }
                 steerTurn={(text, attachments) => steerTurn(id, text, attachments)}
+                // A project session's mode, its plan and whether it can still send are the plugin's.
+                onSettled={() => void refreshWorkspace(id)}
                 Composer={composer}
               />
             </Suspense>
@@ -486,7 +488,8 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
 /**
  * The app's composer driving a chat-next thread. A message sent while a reply runs goes to the
  * plugin's queue, or steers the reply where the user asked to; one that can't go is said so and
- * handed back to the field.
+ * handed back to the field. A project session's own cards take its place in the order the current
+ * screen draws them: closed, blocked, then a plan waiting to be approved.
  */
 function NextComposer({
   controls,
@@ -499,11 +502,17 @@ function NextComposer({
 }) {
   const { root } = useNav()
   const bot = useLiveQuery(() => db.profiles.get(botId), [botId])
+  const session = useLiveQuery(async () => {
+    const chat = await db.conversations.get(chatId)
+    return chat?.projectId ? chat : null
+  }, [chatId])
   const filesFeature = usePluginFeature(bot, "attachments")
   const [cheatsheetOpen, setCheatsheetOpen] = useState(false)
   const [navShortcuts, setNavShortcuts] = useState(DEFAULT_SETTINGS.navShortcuts)
   const steerByDefault = useLiveQuery(async () => (await getSettings()).steerByDefault, [])
-  if (!bot) return null
+  if (!bot || session === undefined) return null
+  // Without a key nothing on the host answers for Auto, so the session runs as Accept edits.
+  const tracked = Boolean(bot.apiKey && !bot.disabled)
   const said =
     (go: (text: string, attachments: Attachment[]) => Promise<void>) =>
     async (text: string, attachments: Attachment[]) => {
@@ -514,6 +523,23 @@ function NextComposer({
         throw error
       }
     }
+  if (session?.discardedAt) return <DiscardedCard />
+  if (session?.resolvedAt)
+    return (
+      <ResolvedCard onReopen={() => updateConversation(session.id, { resolvedAt: undefined })} />
+    )
+  if (session?.blocked && !controls.busy) return <BlockedCard reason={session.blocked} />
+  if (session?.planPending && session.mode === "plan" && !controls.busy)
+    return (
+      <PlanReadyCard
+        autoAvailable={tracked}
+        onApprove={async (mode) => {
+          await setSessionMode(session.id, mode)
+          await controls.send(planApprovalMessage(session.planFile), [])
+        }}
+        onKeepPlanning={() => setSessionMode(session.id, "plan")}
+      />
+    )
   return (
     <>
       <Composer
@@ -530,6 +556,23 @@ function NextComposer({
         canSteer={controls.canSteer}
         steerByDefault={Boolean(steerByDefault)}
         onStop={controls.stop}
+        session={
+          session
+            ? {
+                mode:
+                  session.mode === "auto" && !tracked
+                    ? "accept_edits"
+                    : (session.mode ?? "accept_edits"),
+                autoAvailable: tracked,
+                onMode: (mode) =>
+                  setSessionMode(session.id, mode).catch((error) =>
+                    toast.error(
+                      error instanceof Error ? error.message : "Couldn't change the mode.",
+                    ),
+                  ),
+              }
+            : undefined
+        }
         onCommand={async (command) => {
           if (command === "new") return root("/")
           if (command === "settings") return root("/settings")

@@ -1,10 +1,11 @@
 import { wireContent } from "@/lib/attachments"
 import { serverConfig } from "@/lib/connection"
-import { db, type Attachment } from "@/lib/db"
+import { db, updateConversation, type Attachment } from "@/lib/db"
 import { addToQueue, hasPluginFeature, queueAction, runRequest } from "@/lib/hermes"
 import { modelOf, wantsPin } from "@/lib/model-pick"
 import { quietly } from "@/lib/report"
-import { pinFromHost, pinModel, uploadAttachments } from "@/lib/send-turn"
+import { pinFromHost, pinModel, titleFrom, uploadAttachments } from "@/lib/send-turn"
+import { ensureSessionWorkspace } from "@/lib/workspace"
 import { randomId } from "@/lib/utils"
 import { toast } from "sonner"
 
@@ -37,22 +38,41 @@ async function built(chatId: string, text: string, attachments: Attachment[]) {
   const { conversation: pinned, release } = await pinModel(chat, bot)
   try {
     const config = serverConfig(bot)
+    const words = text.trim()
+    // A project session works in its worktrees; the plugin can't be told about them any other way,
+    // and a session whose repo is gone is refused here, before anything is posted.
+    const workspace = await ensureSessionWorkspace(chatId, words || attachments[0]?.name || "")
+    // Read before the turn lands: the chat's first send is the one that titles it. Nothing sent in
+    // on any device (the app's own test) and nothing held here, so a chat whose transcript this
+    // device hasn't read yet keeps its title.
+    const first =
+      chat.updatedAt === chat.createdAt &&
+      !(await db.sessionRows
+        .where("[session+set+id]")
+        .between([chat.hermesSessionId], [chat.hermesSessionId, []])
+        .count())
     const sent = attachments.length
       ? await uploadAttachments(config, chat.hermesSessionId, attachments, Boolean(bot.apiKey))
       : attachments
     const body = runRequest(config, {
       ...modelOf(pinned, bot),
       sessionId: chat.hermesSessionId,
-      messages: [{ role: "user", content: await wireContent(text.trim(), sent) }],
+      messages: [{ role: "user", content: await wireContent(words, sent) }],
+      workspaceInstructions: workspace?.instructions,
     })
     const ask = wantsPin(pinned)
     const turn: PreparedTurn = {
       body,
       key: randomId(),
       settled: (reached) => {
-        if (!reached) void release?.()
+        if (!reached) return void release?.()
+        // The chat moved: its list row, the Code screen and sync go by this clock.
+        void updateConversation(chatId, {
+          updatedAt: Date.now(),
+          ...(first && !chat.titleEdited ? { title: titleFrom(words || attachments[0].name) } : {}),
+        }).catch(quietly("Marking a chat as sent in"))
         // Nothing on the device named the model this turn ran: the host's answer is the one to keep.
-        else if (ask) void pinFromHost(chatId, bot).catch(quietly("Pinning a chat's model"))
+        if (ask) void pinFromHost(chatId, bot).catch(quietly("Pinning a chat's model"))
       },
     }
     return { turn, config, session: chat.hermesSessionId, sent }
