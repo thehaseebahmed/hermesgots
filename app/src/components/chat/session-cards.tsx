@@ -11,11 +11,12 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
+import { StatusLine } from "@/components/chat/status-line"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { Spinner } from "@/components/ui/spinner"
 import { sendMessage } from "@/lib/chat"
 import type { ToolEvent } from "@/lib/db"
+import { WAITING_FOR_ANSWER } from "@/lib/format"
 import { COLUMN_BOX } from "@/lib/layout"
 
 /**
@@ -267,7 +268,7 @@ export function ClarifyCard({
   // The window closed on this question: it was neither answered nor skipped, so it can be asked
   // again. Nothing resumes the expired call — the agent asks afresh, in a new turn.
   const missed = !running && !answered && ended.owed
-  const title = running ? "Question" : answered ? "Answered" : ended.title
+  const title = answered ? "Answered" : ended.title
   const askAgain = async () => {
     setAsking(true)
     try {
@@ -278,17 +279,12 @@ export function ClarifyCard({
       setAsking(false)
     }
   }
+  // While the run waits the form itself is in the composer slot, so the thread says only that it
+  // waits: a card there would repeat the question beside the one being answered.
+  if (running) return <StatusLine text={WAITING_FOR_ANSWER} waiting />
   return (
     <ExchangeCard icon={<MessageCircleQuestionIcon className="size-4" />} title={title}>
-      {running ? (
-        <>
-          {asked[0]?.question && <p>{asked[0].question}</p>}
-          <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Spinner className="size-3.5" />
-            Waiting for an answer…
-          </p>
-        </>
-      ) : missed ? (
+      {missed ? (
         <>
           {asked[0]?.question && <p>{asked[0].question}</p>}
           <Button

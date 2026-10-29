@@ -126,12 +126,12 @@ an argument this page has to carry, never a default (ADR 0019).
 Check any of it in one line:
 
 ```bash
-grep -c '^| `' docs/e2e-flow-audit.md                           # 78 rows, one per registry key
-grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 19
+grep -c '^| `' docs/e2e-flow-audit.md                           # 79 rows, one per registry key
+grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 20
 grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 55
 grep -c '^| `[a-z0-9-]*` | delete |' docs/e2e-flow-audit.md    # 2
 grep -c '^| `[a-z0-9-]*` | plugin |' docs/e2e-flow-audit.md    # 2
-cd app && pnpm -s e2e list | wc -l                             # 76 keys in the registry
+cd app && pnpm -s e2e list | wc -l                             # 79 keys in the registry
 git show 8a4e842^:app/scripts/e2e/cli.mjs |
   sed -n '/^const FLOWS = {/,/^}$/p' | grep -c '^  [a-z"-]*: {'  # 61, before goal mode left
 ```
@@ -181,6 +181,7 @@ reads, and a question whose window closed.
 | `clarify-polling` | component | An answered question survives two stale transcript reads, the turn's completion and a reload. | The settle rule over stale rows; the reload is a remount. | The one clarify test (#312): an answered card after two stale transcript reads and a stale run status. |
 | `clarify-transcript` | component | A fresh transcript reads as Answered, No answer, Not answered or Skipped, with the answers the card holds. | A mapping from a tool row to a title and its answers, plus a render. | The same test: the four outcomes (the mapping itself a unit test), single- and multi-select answers, on one shared fixture. |
 | `clarify-missed` | component | A question whose window closed stays as a No answer card with the question it asked, and Ask again starts a new turn that asks afresh. | The expired card's render and its retry wiring; nothing resumes the expired call, so no host behaviour is at stake. | The same test: an expired card offers Ask again and sends a new turn. |
+| `question-card` | stay | On the new chat screen (chat-next) a waiting question is the composer's form alone: the thread says it in one line and draws no card of the question, and once answered the thread's card reads the answer — never "No answer" — and reads it again from the host's transcript after a reload. | The new screen is only drawn through the app (`ChatPage` picks it, the settings switch and the Developer switch decide), and the claim is one question in two places at two widths: the device harness draws chat-next's own plain markup, never `AppChatNextThread`'s rows, so no component tier can stand in. | Nothing yet — it is the only flow that drives the new screen, and the tier it would move to waits for a harness that mounts `AppChatNextThread` over a fake host. |
 
 ### The composer — #308
 

@@ -81,7 +81,8 @@ export type ThreadEvent =
   /** A message the host sent somewhere else (triage, ADR 0029): it leaves this thread, unfailed. */
   | { type: "moved" }
   | { type: "attach" }
-  | { type: "answered" }
+  /** The card goes; `result` is what the answer makes the question's call return, where it asked one. */
+  | { type: "answered"; result?: string }
   | { type: "ended" }
   | { type: "agents"; agents: Agent[] }
   | { type: "queue"; items: Queued[]; paused: boolean }
@@ -90,6 +91,26 @@ export type ThreadEvent =
   | { type: "failed"; error: string }
 
 export const initial: ThreadState = { status: "loading", rows: [], running: false }
+
+/**
+ * The answer the app just gave, written onto the call the question was asked by. Hermes's served
+ * turn sends `tool.completed` with no result, so nothing else fills it in: without this the
+ * thread's card would read "No answer", with Ask again, until the transcript's own row for the
+ * call lands at the end of the turn.
+ */
+function withClarifyResult(turn: Turn, result: string): Turn {
+  // The served turn's completion sets an empty preview rather than leaving it out, so a call that
+  // carries nothing is one still waiting for its answer.
+  const asked = (call: { name: string; result?: string }) => call.name === "clarify" && !call.result
+  const at = turn.parts.findLastIndex(
+    (part) => part.kind === "tools" && part.calls.some((call) => asked(call)),
+  )
+  const part = turn.parts[at]
+  if (part?.kind !== "tools") return turn
+  const callAt = part.calls.findLastIndex((call) => asked(call))
+  const calls = part.calls.with(callAt, { ...part.calls[callAt], result })
+  return { ...turn, parts: turn.parts.with(at, { ...part, calls }) }
+}
 
 /** The transcript's turns, the archive folded in where the reader has asked for it. */
 export const foldedOf = (rows: Row[], archived?: Row[], partial?: boolean) =>
@@ -336,9 +357,17 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       // was comes from the transcript, which a later read may supply if the one for this end was
       // superseded.
       return { ...state, running: false }
-    case "answered":
-      // The card goes at once; the host's `*.settled` event confirms it.
-      return { ...state, waiting: undefined }
+    case "answered": {
+      // The card goes at once; the host's `*.settled` event confirms it. A question's call reads
+      // the answer from here until the transcript's own result reaches it.
+      const given =
+        state.live && event.result ? withClarifyResult(state.live.turn, event.result) : undefined
+      const live =
+        state.live && given && given !== state.live.turn
+          ? { ...state.live, turn: given }
+          : state.live
+      return { ...state, waiting: undefined, ...(live ? { live } : {}) }
+    }
     case "run": {
       const waiting = waitingAfter(state.waiting, event.event)
       const held = state.live

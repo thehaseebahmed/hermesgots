@@ -69,6 +69,24 @@ function answered(call: ToolCall): string[] {
   }
 }
 
+/**
+ * What Hermes's `clarify` tool returns for the one answer given, so the thread's card reads the
+ * same live as it will from the transcript: `{ responses, outcome }`, one response.
+ */
+function clarifyResult(waiting: Extract<Waiting, { kind: "question" }>, answer: string) {
+  return JSON.stringify({
+    responses: [
+      {
+        question: waiting.question,
+        choices_offered: waiting.choices.length ? waiting.choices : null,
+        status: answer ? "answered" : "skipped",
+        user_response: answer || null,
+      },
+    ],
+    outcome: "submitted",
+  })
+}
+
 const failure = (error: unknown): ThreadEvent => ({
   type: "failed",
   error: error instanceof Error ? error.message : String(error),
@@ -1082,12 +1100,17 @@ export function ChatNextThread({
   }
 
   // An answer that fails is said so; one that lands takes the card away at once, and the host's
-  // `*.settled` event follows.
+  // `*.settled` event follows. A question's answer is written onto its call here, since the
+  // served turn's `tool.completed` carries no result: the thread reads the answer straight away
+  // rather than "No answer" until the transcript's row lands.
   async function answer(waiting: Waiting, value: string) {
     if (!server || !key) return
     try {
       await respond({ server, key }, waiting, value)
-      dispatch({ type: "answered" })
+      dispatch({
+        type: "answered",
+        ...(waiting.kind === "question" ? { result: clarifyResult(waiting, value) } : {}),
+      })
     } catch (error) {
       dispatch(failure(error))
     }
@@ -1136,9 +1159,7 @@ export function ChatNextThread({
         asker={asker}
         answer={async (value) => {
           const asked = doing.waiting as Waiting
-          if (!server || !key) return
-          await respond({ server, key }, asked, value)
-          dispatch({ type: "answered" })
+          await answer(asked, value)
         }}
       />
     ) : doing.waiting?.kind === "question" ? (

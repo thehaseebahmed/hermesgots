@@ -33,9 +33,12 @@ export function formatRelative(timestamp: number, now: number) {
   return relative.format(seconds, "second")
 }
 
+/** What the chat says while the run waits on a question: its status line and the thread's own. */
+export const WAITING_FOR_ANSWER = "Waiting for your answer"
+
 /** One line saying what the bot is doing right now. */
 export function describeActivity(message: Message) {
-  if (message.clarify && !message.clarify.resolved) return "Waiting for your answer"
+  if (message.clarify && !message.clarify.resolved) return WAITING_FOR_ANSWER
   if (message.approval && !message.approval.resolved) return "Waiting for approval"
   const tool = message.tools?.findLast((t) => t.status === "running")
   if (tool) return `${activityOf(tool)}…`

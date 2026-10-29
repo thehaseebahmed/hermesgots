@@ -17,12 +17,12 @@ import { SubagentLine } from "@/components/chat/subagent-line"
 import { MediaTag } from "@/components/chat/media-image"
 import { Compacted } from "@/components/chat/model-change"
 import { ClarifyCard, PlanApprovedCard } from "@/components/chat/session-cards"
+import { StatusLine } from "@/components/chat/status-line"
 import { ThinkingLine } from "@/components/chat/thinking-line"
 import { ToolGroup } from "@/components/chat/tool-group"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Button } from "@/components/ui/button"
 import { Message as MessageRow, MessageContent } from "@/components/ui/message"
-import { Spinner } from "@/components/ui/spinner"
 import { spawnedAgent } from "@/lib/spawn"
 import { attachmentUrl } from "@/lib/attachment-url"
 import { downloadAttachment } from "@/lib/attachments"
@@ -413,38 +413,6 @@ function FailedActions({ message }: { message: Message }) {
       send={{ label: "Retry", icon: <RotateCcwIcon data-icon="inline-start" /> }}
       dismiss="Cancel failed message"
     />
-  )
-}
-
-function StatusLine({
-  text,
-  waiting,
-  children,
-}: {
-  text?: string
-  /** The turn wants the reader, not the host: its words stand and no loader turns beside them. */
-  waiting?: boolean
-  children?: ReactNode
-}) {
-  const working = Boolean(text) && !waiting
-  return (
-    <div
-      className={cn(
-        REPLY_INSET,
-        "flex items-center gap-2 text-sm",
-        working ? "text-primary" : "text-muted-foreground",
-      )}
-      aria-live="polite"
-      data-slot="status-line"
-    >
-      {working && <Spinner aria-hidden />}
-      {text && (
-        <span className="min-w-0 truncate" data-slot="status-words">
-          {text}
-        </span>
-      )}
-      {children}
-    </div>
   )
 }
 

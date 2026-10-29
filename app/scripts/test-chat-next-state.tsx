@@ -129,6 +129,47 @@ test("a question is a wait until the host says it is settled", () => {
   assert.equal(after.waiting, undefined)
 })
 
+test("the answer the app gave is the call's result, since the served turn's completion carries none", () => {
+  const state = play([
+    { event: "tool.started", tool: "clarify", tool_call_id: "c1" } as RunEvent,
+    {
+      event: "clarify.request",
+      run_id: "r",
+      prompt_id: "p1",
+      execution_generation: 1,
+      question: "Tea?",
+      choices: ["yes", "no"],
+    } as RunEvent,
+    // Hermes's served turn says only that the call ended: its event carries no result.
+    { event: "tool.completed", tool: "clarify", tool_call_id: "c1", preview: "" } as RunEvent,
+  ])
+  assert.deepEqual(
+    calls(state).map((call) => call.result),
+    [""],
+    "nothing but the stream's own (empty) preview so far",
+  )
+  const result = JSON.stringify({
+    responses: [
+      {
+        question: "Tea?",
+        choices_offered: ["yes", "no"],
+        status: "answered",
+        user_response: "yes",
+      },
+    ],
+    outcome: "submitted",
+  })
+  const after = reduce(state, { type: "answered", result })
+  assert.equal(after.waiting, undefined, "the card goes")
+  assert.deepEqual(
+    calls(after).map((call) => call.result),
+    [result],
+    "the answer is what the thread's card reads",
+  )
+  // The transcript's own row is what the next read takes, so nothing here outlives the turn.
+  assert.equal(state.live?.turn.parts.length, after.live?.turn.parts.length)
+})
+
 test("a block of thinking waits for the word or call it led to, and leads it", () => {
   const state = play([
     { event: "reasoning.available", text: "I should look first." },

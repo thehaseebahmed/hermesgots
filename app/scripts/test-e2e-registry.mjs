@@ -59,6 +59,6 @@ test("the audit's own counts are what its rows add up to", () => {
   assert.equal(Number(total?.[1]), all.length, "the total")
 })
 
-test("the flows that stay are the nineteen the audit argues for", () => {
+test("the flows that stay are the twenty the audit argues for", () => {
   assert.equal(rows().filter((row) => row.verdict === "stay").length, STAYS)
 })
