@@ -226,7 +226,7 @@ function ToolList({
   onSelect: (index: number) => void
 }) {
   const face = useCodeFace()
-  const mono = face ?? "font-mono"
+  const mono = useMonoFace()
   return (
     <>
       <PopupHeader className="pb-2">
