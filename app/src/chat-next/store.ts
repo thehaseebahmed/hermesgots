@@ -50,6 +50,7 @@ const kept = (row: Row): Row => ({
   finish_reason: row.finish_reason,
   display_kind: row.display_kind,
   tool_calls: row.tool_calls,
+  timestamp: row.timestamp,
 })
 
 const sameRow = (a: Row, b: Row) =>
@@ -58,6 +59,7 @@ const sameRow = (a: Row, b: Row) =>
   a.tool_call_id === b.tool_call_id &&
   a.finish_reason === b.finish_reason &&
   a.display_kind === b.display_kind &&
+  a.timestamp === b.timestamp &&
   JSON.stringify(a.tool_calls) === JSON.stringify(b.tool_calls)
 
 /** Writes a read's rows: only the ones that are new, moved or changed, and drops the ones gone. */

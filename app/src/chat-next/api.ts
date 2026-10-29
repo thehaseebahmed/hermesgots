@@ -31,6 +31,8 @@ export interface RunEvent {
   question?: string
   choices?: string[]
   multi_select?: boolean
+  /** When the host wrote the event, in Unix seconds. */
+  timestamp?: number
 }
 
 const READ_TIMEOUT_MS = 15_000

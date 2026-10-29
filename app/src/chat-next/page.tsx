@@ -4,6 +4,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import {
   memo,
   type ComponentType,
+  type ReactNode,
   useCallback,
   useEffect,
   useMemo,
@@ -16,7 +17,7 @@ import { useSearchParams } from "react-router"
 import { Markdown } from "@/components/chat/markdown"
 import { db, type Attachment, type SessionDb } from "@/lib/db"
 
-import { cardsByPart, cardsOf, DELEGATE, type Card } from "./agents"
+import { cardsByPart, cardsOf, DELEGATE, type Agent, type Card } from "./agents"
 import {
   atLeast,
   followRun,
@@ -31,6 +32,8 @@ import {
   respond,
   startRun,
   stopRun,
+  type Connection,
+  type Queued,
 } from "./api"
 import { foldTurns, type Row, type ToolCall, type Turn } from "./fold"
 import { foldedOf, turnsOf, type ThreadEvent, type Waiting } from "./state"
@@ -330,6 +333,105 @@ function ApprovalCard({
   )
 }
 
+/** Everything a thread's view draws; the page decides all of it and the view only lays it out. */
+export interface ThreadViewProps {
+  server: Connection
+  session: string
+  turns: Turn[]
+  /** The last turn is still being written, by this device or one the page follows. */
+  streaming: boolean
+  cards: Card[][]
+  /** What each child was asked, by its id. */
+  goals: Record<string, string>
+  agents: Agent[]
+  /** The host can't be reached: what is drawn is what the device holds. */
+  away: boolean
+  failure?: string
+  /** Offered where a compaction archived rows the reader hasn't asked for. */
+  earlier?: { state: "idle" | "reading" | "failed"; load: () => void }
+  queue?: { items: Queued[]; paused: boolean; act: (id: string, action: "remove" | "send") => void }
+  /** The child whose transcript a card opened. */
+  child?: { goal: string; rows: Row[]; close: () => void }
+  onOpenCard: (card: Card) => void
+  /** The prompt the run is held up on, drawn where the composer goes. */
+  waiting: ReactNode
+  composer: ReactNode
+}
+
+/** chat-next's own markup: the dev route's, and the one its tests read. */
+function PlainView({
+  turns,
+  cards,
+  goals,
+  away,
+  failure,
+  earlier,
+  queue,
+  child,
+  onOpenCard,
+  waiting,
+  composer,
+}: ThreadViewProps) {
+  return (
+    <main className="mx-auto w-full max-w-3xl space-y-6 p-4">
+      {away ? (
+        <p data-away role="status" className="text-sm text-muted-foreground">
+          Can't reach this host right now.
+        </p>
+      ) : null}
+      {failure !== undefined ? <p role="alert">{failure}</p> : null}
+      {earlier ? (
+        <button
+          data-earlier
+          type="button"
+          disabled={earlier.state === "reading"}
+          className="mx-auto block rounded-md border px-3 py-1 text-sm"
+          onClick={earlier.load}
+        >
+          {earlier.state === "failed"
+            ? "Couldn't load earlier messages. Try again"
+            : "Earlier messages"}
+        </button>
+      ) : null}
+      {turns.map((turn, at) => (
+        <TurnView
+          key={at}
+          turn={turn}
+          cards={cards[at] ?? NO_CARDS}
+          goals={goals}
+          onOpen={onOpenCard}
+        />
+      ))}
+      {queue?.items.map((item) => (
+        <div key={item.id} data-queued className="ml-auto w-fit max-w-[85%] space-y-1 text-right">
+          {item.files.length ? (
+            <p className="text-xs text-muted-foreground">{item.files.join(", ")}</p>
+          ) : null}
+          {item.text ? (
+            <p className="rounded-2xl bg-muted px-4 py-2 text-left whitespace-pre-wrap opacity-60">
+              {item.text}
+            </p>
+          ) : null}
+          <div className="flex justify-end gap-3 text-xs text-muted-foreground">
+            <span data-queued-state>{item.error ?? "Queued"}</span>
+            {queue.paused || item.error ? (
+              <button type="button" data-send-queued onClick={() => queue.act(item.id, "send")}>
+                Send now
+              </button>
+            ) : null}
+            <button type="button" data-remove-queued onClick={() => queue.act(item.id, "remove")}>
+              Remove
+            </button>
+          </div>
+        </div>
+      ))}
+      {child ? <ChildThread goal={child.goal} rows={child.rows} onClose={child.close} /> : null}
+      {waiting}
+      {composer}
+    </main>
+  )
+}
+
 const POLL_MS = 2_000
 const IDLE_MS = 15_000
 const AGENTS_COOLDOWN_MS = 60_000
@@ -367,6 +469,8 @@ interface ThreadOptions {
   onSettled?: () => void
   /** The app's own composer; without it, a bare text box. */
   Composer?: ComponentType<{ controls: ComposerControls }>
+  /** What draws the thread; without it, chat-next's own plain markup. */
+  View?: ComponentType<ThreadViewProps>
   pollMs?: number
   idleMs?: number
   stallMs?: number
@@ -405,6 +509,7 @@ export function ChatNextThread({
   steerTurn,
   onSettled,
   Composer,
+  View = PlainView,
 }: ThreadOptions & { server: string | null; apiKey: string | null; session: string | null }) {
   // The thread is drawn from the device's copy; the store is the only thing that writes it, and
   // says what the page is doing.
@@ -686,6 +791,7 @@ export function ChatNextThread({
     dispatch({
       type: "sent",
       user: words,
+      at: Date.now(),
       files: attachments.map(({ name, type, size, image }) => ({
         name,
         type,
@@ -781,107 +887,86 @@ export function ChatNextThread({
       </p>
     )
 
-  return (
-    <main className="mx-auto w-full max-w-3xl space-y-6 p-4">
-      {host === "away" ? (
-        <p data-away role="status" className="text-sm text-muted-foreground">
-          Can't reach this host right now.
-        </p>
-      ) : null}
-      {doing.status === "failed" ? <p role="alert">{doing.error}</p> : null}
-      {!held?.archived &&
-      turns.some((turn) => turn.parts.some((part) => part.kind === "compaction")) ? (
+  const waitingCard =
+    doing.waiting?.kind === "question" ? (
+      <QuestionCard
+        key={doing.waiting.promptId}
+        waiting={doing.waiting}
+        onAnswer={(value) => void answer(doing.waiting as Waiting, value)}
+      />
+    ) : doing.waiting?.kind === "approval" ? (
+      <ApprovalCard
+        key={doing.waiting.promptId}
+        waiting={doing.waiting}
+        onChoose={(choice) => void answer(doing.waiting as Waiting, choice)}
+      />
+    ) : null
+  const composer =
+    host === "away" ? null : Composer ? (
+      <Composer
+        controls={{
+          busy: doing.running,
+          send: sendTurn,
+          queue: queueMessage,
+          steer: steerMessage,
+          canSteer: doing.running && Boolean(steerTurn),
+          stop,
+        }}
+      />
+    ) : (
+      <form
+        className="flex gap-2"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void send()
+        }}
+      >
+        <textarea
+          data-composer
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          className="min-h-10 flex-1 rounded-md border bg-background px-3 py-2"
+        />
         <button
-          data-earlier
-          type="button"
-          disabled={earlier === "reading"}
-          className="mx-auto block rounded-md border px-3 py-1 text-sm"
-          onClick={() => void loadEarlier()}
+          data-send
+          type="submit"
+          className="rounded-md bg-primary px-4 text-primary-foreground"
         >
-          {earlier === "failed" ? "Couldn't load earlier messages. Try again" : "Earlier messages"}
+          Send
         </button>
-      ) : null}
-      {turns.map((turn, at) => (
-        <TurnView key={at} turn={turn} cards={cards[at] ?? NO_CARDS} goals={goals} onOpen={open} />
-      ))}
-      {held?.queue?.items.map((item) => (
-        <div key={item.id} data-queued className="ml-auto w-fit max-w-[85%] space-y-1 text-right">
-          {item.files.length ? (
-            <p className="text-xs text-muted-foreground">{item.files.join(", ")}</p>
-          ) : null}
-          {item.text ? (
-            <p className="rounded-2xl bg-muted px-4 py-2 text-left whitespace-pre-wrap opacity-60">
-              {item.text}
-            </p>
-          ) : null}
-          <div className="flex justify-end gap-3 text-xs text-muted-foreground">
-            <span data-queued-state>{item.error ?? "Queued"}</span>
-            {held.queue?.paused || item.error ? (
-              <button type="button" data-send-queued onClick={() => onQueued(item.id, "send")}>
-                Send now
-              </button>
-            ) : null}
-            <button type="button" data-remove-queued onClick={() => onQueued(item.id, "remove")}>
-              Remove
-            </button>
-          </div>
-        </div>
-      ))}
-      {opened && openedRows?.id === opened.id ? (
-        <ChildThread
-          goal={opened.goal}
-          rows={openedRows.rows}
-          onClose={() => setOpened(undefined)}
-        />
-      ) : null}
-      {doing.waiting?.kind === "question" ? (
-        <QuestionCard
-          key={doing.waiting.promptId}
-          waiting={doing.waiting}
-          onAnswer={(value) => void answer(doing.waiting as Waiting, value)}
-        />
-      ) : null}
-      {doing.waiting?.kind === "approval" ? (
-        <ApprovalCard
-          key={doing.waiting.promptId}
-          waiting={doing.waiting}
-          onChoose={(choice) => void answer(doing.waiting as Waiting, choice)}
-        />
-      ) : null}
-      {host === "away" ? null : Composer ? (
-        <Composer
-          controls={{
-            busy: doing.running,
-            send: sendTurn,
-            queue: queueMessage,
-            steer: steerMessage,
-            canSteer: doing.running && Boolean(steerTurn),
-            stop,
-          }}
-        />
-      ) : (
-        <form
-          className="flex gap-2"
-          onSubmit={(event) => {
-            event.preventDefault()
-            void send()
-          }}
-        >
-          <textarea
-            data-composer
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            className="min-h-10 flex-1 rounded-md border bg-background px-3 py-2"
-          />
-          <button
-            data-send
-            type="submit"
-            className="rounded-md bg-primary px-4 text-primary-foreground"
-          >
-            Send
-          </button>
-        </form>
-      )}
-    </main>
+      </form>
+    )
+
+  return (
+    <View
+      server={{ server, key }}
+      session={session}
+      turns={turns}
+      streaming={doing.running || following}
+      cards={cards}
+      goals={goals}
+      agents={agents}
+      away={host === "away"}
+      failure={doing.status === "failed" ? (doing.error ?? "") : undefined}
+      earlier={
+        !held?.archived &&
+        turns.some((turn) => turn.parts.some((part) => part.kind === "compaction"))
+          ? { state: earlier, load: () => void loadEarlier() }
+          : undefined
+      }
+      queue={
+        held?.queue?.items.length
+          ? { items: held.queue.items, paused: held.queue.paused, act: onQueued }
+          : undefined
+      }
+      child={
+        opened && openedRows?.id === opened.id
+          ? { goal: opened.goal, rows: openedRows.rows, close: () => setOpened(undefined) }
+          : undefined
+      }
+      onOpenCard={open}
+      waiting={waitingCard}
+      composer={composer}
+    />
   )
 }

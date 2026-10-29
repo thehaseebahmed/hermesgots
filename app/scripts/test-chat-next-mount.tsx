@@ -26,6 +26,17 @@ import {
 
 const bot = botProfile("hermes")
 
+/** The thread's own requests, as the app's rows draw them: a steer's bubble is its reply's. */
+const requests = () =>
+  findAll('[data-chat-next] [data-message-id$="-u"] [data-slot="bubble-content"]').map(
+    (one) => one.textContent ?? "",
+  )
+/** Each reply's words, without the rows its calls draw. */
+const replies = () =>
+  findAll('[data-chat-next] [data-slot="message"][data-align="start"] [data-slot="markdown"]').map(
+    (one) => one.textContent,
+  )
+
 /** Waits on the screen as a person would: the real screen polls at its real pace, so up to 6s. */
 async function until(check: () => boolean, what: string) {
   const by = Date.now() + 6_000
@@ -44,13 +55,11 @@ test("with the switch on, a plain chat opens on chat-next, read from its bot and
   const host = fakeHost("memento-c-next")
   host.seed([{ user: "Why is the sky blue?", reply: "Rayleigh scattering.", tools: 1 }])
   await mount(chatScreen("c-next"), async () => {
-    await until(() => Boolean(find("[data-chat-next] main > section")), "chat-next drew the turn")
+    await until(() => requests().length > 0, "chat-next drew the turn")
     assert.equal(find('[data-slot="header-title"]')?.textContent?.trim(), "Sky colours")
-    assert.equal(find("[data-chat-next] [data-user]")?.textContent, "Why is the sky blue?")
-    assert.deepEqual(
-      findAll("[data-chat-next] [data-text]").map((one) => one.textContent),
-      ["Rayleigh scattering."],
-    )
+    assert.deepEqual(requests(), ["Why is the sky blue?"])
+    assert.deepEqual(replies(), ["Rayleigh scattering."])
+    assert.ok(find('[data-chat-next] [data-slot="tool-group"]'), "its call drawn as a tool row")
     assert.ok(host.asked.transcript > 0, "the chat's own session was read from its bot's host")
     assert.equal(
       find('[data-pane="route"]')?.textContent?.includes("held by the old screen"),
@@ -125,19 +134,13 @@ test("the app's composer sends a turn the way every send goes, and pins the chat
     assert.match(String(body.instructions), /todo_list/, "with the instructions every send carries")
     assert.ok(host.latest.key, "under a key, so a retried post can't start a second run")
     await until(
-      () => find("[data-chat-next] [data-user]")?.textContent === "Why is the sky blue?",
+      () => requests()[0] === "Why is the sky blue?",
       "the message is drawn as the turn's request",
     )
     const chat = await db.conversations.get("c-send")
     assert.deepEqual(chat?.modelChoice, defaultPick, "the first send fixes the chat's model")
     host.latest.run!.finish("Rayleigh scattering.")
-    await until(
-      () =>
-        findAll("[data-chat-next] [data-text]").some(
-          (one) => one.textContent === "Rayleigh scattering.",
-        ),
-      "the reply lands",
-    )
+    await until(() => replies().includes("Rayleigh scattering."), "the reply lands")
   })
 })
 
@@ -151,7 +154,7 @@ test("a send the host refuses hands the words back and pins nothing", async () =
   await mount(chatScreen("c-refused"), async () => {
     await sendFromComposer("Will this go?")
     await until(() => composerField()?.value === "Will this go?", "the words are back in the field")
-    assert.equal(find("[data-chat-next] [data-user]"), null, "and nothing was drawn as sent")
+    assert.deepEqual(requests(), [], "and nothing was drawn as sent")
     assert.equal((await db.conversations.get("c-refused"))?.modelChoice, undefined)
   })
 })
@@ -198,10 +201,7 @@ test("a message sent mid-reply goes to the plugin's queue and runs once the repl
     await until(() => host.queue.length === 0 && host.latest.run !== first, "the plugin started it")
     host.latest.run!.finish("Second answer.")
     await until(
-      () =>
-        findAll("[data-chat-next] [data-user]")
-          .map((one) => one.textContent)
-          .join("|") === "First question|And then this",
+      () => requests().join("|") === "First question|And then this",
       "both turns are drawn, in order",
     )
     await until(() => find("[data-queued]") === null, "and nothing is left waiting")
@@ -238,14 +238,13 @@ test("with Steer by default, a message sent mid-reply steers it and is drawn in 
     assert.equal(host.queue.length, 0, "and holds nothing back")
     run.finish("Roses are red.")
     await until(
-      () => find("[data-chat-next] [data-steer]")?.textContent?.includes("Make it rhyme") ?? false,
+      () =>
+        findAll('[data-chat-next] [data-message-id$="-a"] [data-slot="bubble-content"]').some(
+          (one) => one.textContent === "Make it rhyme",
+        ),
       "the steer is drawn inside the reply it steered",
     )
-    assert.deepEqual(
-      findAll("[data-chat-next] [data-user]").map((one) => one.textContent),
-      ["Write a poem"],
-      "and opens no turn of its own",
-    )
+    assert.deepEqual(requests(), ["Write a poem"], "and opens no turn of its own")
   })
 })
 
@@ -324,5 +323,29 @@ test("a code session reads in JetBrains Mono, and a chat keeps the app's face", 
   await mount(chatScreen("c-sans"), async () => {
     await until(() => Boolean(composerField()), "the chat has loaded")
     assert.equal(find("[data-chat-next]")!.classList.contains("font-code"), false, "a plain chat")
+  })
+})
+
+test("a delegation draws as the app's agent card, which follows its child to done", async () => {
+  const { host } = await onChatNext("c-agents", {}, { plugin: true })
+  await mount(chatScreen("c-agents"), async () => {
+    const run = await midReply(host, "Look into it")
+    const [child] = run.delegate("Check the weather in Lisbon")
+    run.finish("Delegated.")
+    await until(
+      () =>
+        find('[data-chat-next] [data-slot="agent-card"]')?.getAttribute("data-agent") === child.id,
+      "the call is the app's card for its child",
+    )
+    child.finish("The weather is mild.").finish("It is mild, the subagent says.")
+    await until(
+      () => replies().includes("It is mild, the subagent says."),
+      "the wake turn lands under it",
+    )
+    assert.match(
+      find('[data-chat-next] [data-slot="agent-card"]')?.textContent ?? "",
+      /Lisbon|weather/i,
+      "and the card still names what its child was asked",
+    )
   })
 })

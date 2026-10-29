@@ -9,6 +9,8 @@ export interface Row {
   finish_reason?: string | null
   display_kind?: string | null
   tool_calls?: { id: string; function: { name: string; arguments: string } }[] | null
+  /** When the host wrote the row, in Unix seconds. */
+  timestamp?: number | null
 }
 
 export interface ToolCall {
@@ -19,6 +21,9 @@ export interface ToolCall {
   arguments?: string
   /** What the host says of a call while it runs: the argument it previews, cut short. */
   label?: string
+  /** When the call was made and when its result came back, in ms, where the host or the stream said. */
+  startedAt?: number
+  endedAt?: number
 }
 
 /** A reply in the order the host wrote it: its words, then the run of calls it made, then more words. */
@@ -26,7 +31,7 @@ export type Part =
   | { kind: "text"; text: string }
   | { kind: "tools"; calls: ToolCall[] }
   /** The host compacted the conversation here; the rows above are summarised in what follows. */
-  | { kind: "compaction" }
+  | { kind: "compaction"; row?: number; at?: number }
   /** A message the user sent while the reply ran, which the agent read after its calls. */
   | { kind: "steer"; text: string }
 
@@ -41,6 +46,8 @@ export interface SentFile {
 
 export interface Turn {
   user: string
+  /** When the request was written, in ms, where the host said. */
+  at?: number
   /** What the request carried, read off its marker lines, which are not the user's words. */
   files?: SentFile[]
   /** The host archived this turn's request when it compacted: what is left is the work, from the seam on. */
@@ -132,6 +139,8 @@ const CHILD = /^\[ASYNC DELEGATION COMPLETE — (\S+?)\]/
  * reply, belong to. The match is on the text, since Hermes marks the user's own first row with the
  * same `display_kind` it gives a notification.
  */
+const msOf = (row: Row) => (typeof row.timestamp === "number" ? row.timestamp * 1000 : undefined)
+
 export function foldTurns(rows: Row[]): Turn[] {
   const turns: Turn[] = []
   const callOf = new Map<string, ToolCall>()
@@ -151,15 +160,17 @@ export function foldTurns(rows: Row[]): Turn[] {
       if (row.display_kind === "hidden") {
         seamed = true
         const last = turns.at(-1)
+        const at = msOf(row)
+        const seam = { kind: "compaction" as const, row: row.id, ...(at !== undefined ? { at } : {}) }
         if (!last)
           turns.push({
             user: "",
-            parts: [{ kind: "compaction" }],
+            parts: [seam],
             done: true,
             carried: true,
             delivered: [],
           })
-        else if (last.parts.at(-1)?.kind !== "compaction") last.parts.push({ kind: "compaction" })
+        else if (last.parts.at(-1)?.kind !== "compaction") last.parts.push(seam)
         continue
       }
       const content = row.content ?? ""
@@ -174,8 +185,10 @@ export function foldTurns(rows: Row[]): Turn[] {
         continue
       }
       const { text, attachments } = splitAttachments(content)
+      const at = msOf(row)
       turns.push({
         user: text,
+        ...(at !== undefined ? { at } : {}),
         ...(attachments.length
           ? {
               files: attachments.map(({ name, type, size, image, path }) => ({
@@ -198,7 +211,11 @@ export function foldTurns(rows: Row[]): Turn[] {
     if (row.role === "tool") {
       const call = row.tool_call_id ? callOf.get(row.tool_call_id) : undefined
       // A carried copy of a call can hold the cleared notice where the original kept its output.
-      if (call && !(call.result && PRUNED.test(row.content ?? ""))) call.result = row.content ?? ""
+      if (call && !(call.result && PRUNED.test(row.content ?? ""))) {
+        call.result = row.content ?? ""
+        const at = msOf(row)
+        if (at !== undefined) call.endedAt = at
+      }
       continue
     }
     if (row.role !== "assistant") continue
@@ -222,6 +239,7 @@ export function foldTurns(rows: Row[]): Turn[] {
         id: one.id,
         name: one.function.name,
         arguments: one.function.arguments,
+        ...(msOf(row) !== undefined ? { startedAt: msOf(row) } : {}),
       }
       callOf.set(call.id, call)
       const last = turn.parts.at(-1)

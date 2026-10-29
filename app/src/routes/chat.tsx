@@ -379,7 +379,7 @@ function LoadOlderWindow({
 }
 
 const ChatNextThread = lazy(() =>
-  import("@/chat-next/page").then((m) => ({ default: m.ChatNextThread })),
+  import("@/chat-next/app-view").then((m) => ({ default: m.AppChatNextThread })),
 )
 
 interface ChatPageProps {
@@ -462,24 +462,20 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
             botId={bot.botId}
             muted={Boolean(chat.muted || bot.muted)}
           />
-          <div className="min-h-0 flex-1 overflow-y-auto pt-16">
-            <Suspense fallback={null}>
-              <ChatNextThread
-                key={chat.hermesSessionId}
-                server={bot.baseUrl}
-                apiKey={bot.apiKey}
-                session={chat.hermesSessionId}
-                prepareTurn={(text, attachments) => prepareTurn(id, text, attachments)}
-                queueTurn={async (text, attachments) =>
-                  void (await queueTurn(id, text, attachments))
-                }
-                steerTurn={(text, attachments) => steerTurn(id, text, attachments)}
-                // A project session's mode, its plan and whether it can still send are the plugin's.
-                onSettled={() => void refreshWorkspace(id)}
-                Composer={composer}
-              />
-            </Suspense>
-          </div>
+          <Suspense fallback={null}>
+            <ChatNextThread
+              key={chat.hermesSessionId}
+              server={bot.baseUrl}
+              apiKey={bot.apiKey}
+              session={chat.hermesSessionId}
+              prepareTurn={(text, attachments) => prepareTurn(id, text, attachments)}
+              queueTurn={async (text, attachments) => void (await queueTurn(id, text, attachments))}
+              steerTurn={(text, attachments) => steerTurn(id, text, attachments)}
+              // A project session's mode, its plan and whether it can still send are the plugin's.
+              onSettled={() => void refreshWorkspace(id)}
+              Composer={composer}
+            />
+          </Suspense>
         </>
       ) : (
         <PendingChat />

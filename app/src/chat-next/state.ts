@@ -51,7 +51,7 @@ export type Waiting =
 export type ThreadEvent =
   | { type: "transcript"; rows: Row[]; final?: boolean }
   | { type: "earlier"; rows: Row[] }
-  | { type: "sent"; user: string; files?: SentFile[] }
+  | { type: "sent"; user: string; files?: SentFile[]; at?: number }
   /** A send that never reached the host: the message goes back to the composer, not the thread. */
   | { type: "unsent"; error: string }
   | { type: "attach" }
@@ -77,6 +77,7 @@ export function turnsOf(folded: Turn[], live?: LiveTurn): Turn[] {
 /** One live event's change to the turn it belongs to; only the part it touches is a new object. */
 function live(turn: Turn, event: RunEvent): Turn {
   const { parts } = turn
+  const at = typeof event.timestamp === "number" ? event.timestamp * 1000 : undefined
   const last = parts.at(-1)
   const replaceLast = (part: Part): Turn => ({ ...turn, parts: [...parts.slice(0, -1), part] })
   if (event.event === "message.delta" && event.delta) {
@@ -89,6 +90,7 @@ function live(turn: Turn, event: RunEvent): Turn {
       id: event.tool_call_id ?? `live-${parts.length}-${event.seq}`,
       name: event.tool,
       label: event.preview,
+      ...(at !== undefined ? { startedAt: at } : {}),
     }
     if (last?.kind === "tools") return replaceLast({ ...last, calls: [...last.calls, call] })
     return { ...turn, parts: [...parts, { kind: "tools", calls: [call] }] }
@@ -100,7 +102,13 @@ function live(turn: Turn, event: RunEvent): Turn {
     const part = parts[at]
     if (part?.kind !== "tools") return turn
     const calls = part.calls.map((one) =>
-      one.id === event.tool_call_id ? { ...one, result: event.preview ?? "" } : one,
+      one.id === event.tool_call_id
+        ? {
+            ...one,
+            result: event.preview ?? "",
+            ...(at !== undefined ? { endedAt: at } : {}),
+          }
+        : one,
     )
     return { ...turn, parts: parts.with(at, { ...part, calls }) }
   }
@@ -175,6 +183,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         live: {
           turn: {
             user: event.user,
+            ...(event.at !== undefined ? { at: event.at } : {}),
             ...(event.files?.length ? { files: event.files } : {}),
             parts: [],
             done: false,
