@@ -183,10 +183,11 @@ import { lastActivityAt } from "@/lib/session-work"
 import { hold, type HoldSlot } from "@/lib/chat-hold"
 import { useBotThreads, useThreads } from "@/lib/threads"
 import { EmptyState, MainEmptyState } from "@/components/chat/empty-states"
+import { isUnsent, settleLeft } from "@/chat-next/unsent"
 import { useMainFlow } from "@/components/chat/main-flow"
 
 export { SETUP_COPY } from "@/components/chat/empty-states"
-import { draftKey } from "@/lib/drafts"
+import { draftKey, loadDraft } from "@/lib/drafts"
 import { AgentsContext, runningAgents, stopSubagents, useSessionAgents } from "@/lib/agents"
 import { spawnInFlight } from "@/lib/spawn"
 import { usePluginFeature, usePluginFeatureOn } from "@/lib/features"
@@ -383,6 +384,7 @@ function NextChat({
       ? `/c/${mainThreadId(chat.profileId)}`
       : undefined
   const xl = useXLarge()
+  const wide = useWide()
   const besideMain = Boolean(mainPath) && xl
   useEffect(() => {
     if (!mainPath) return
@@ -391,6 +393,62 @@ function NextChat({
       return true
     })
   }, [mainPath, up])
+  // A session is a place in a project: it sits under Code, unless it is drawn beside Code's list,
+  // and a session nothing was sent in isn't kept.
+  const session = chat?.projectId ? chat : undefined
+  const beside = Boolean(useCodePane()) && Boolean(session)
+  useRememberOpened("code", session?.id)
+  const [leavingWithDraft, setLeavingWithDraft] = useState(false)
+  const leave = async () => {
+    if (!session) return
+    if (!(await isUnsent(session))) return up("/code")
+    if ((await loadDraft(draftKey(session.id))).trim()) return setLeavingWithDraft(true)
+    void deleteConversation(session.id)
+    up("/code")
+  }
+  const leaveRef = useRef(leave)
+  useEffect(() => {
+    leaveRef.current = leave
+  })
+  const underCode = Boolean(session) && !beside
+  useEffect(() => {
+    if (!underCode) return
+    return setBackGuard(() => {
+      void leaveRef.current()
+      return true
+    })
+  }, [underCode])
+  // Beside Code's list another session can be picked straight away, with no chance to ask, so a
+  // session left unsent goes, or is kept as a draft when something was typed.
+  const shown = useRef(id)
+  useEffect(() => {
+    const left = shown.current
+    shown.current = id
+    if (left && left !== id) void settleLeft(left)
+  }, [id])
+  // The repos a session not started yet will work in; the project screen hands its project over.
+  const handed = (useLocation().state as { project?: HermesProject } | null)?.project
+  const projectId = session?.projectId
+  const projects = useProjects(
+    projectId && bot?.baseUrl && bot.apiKey !== undefined
+      ? { baseUrl: bot.baseUrl, apiKey: bot.apiKey }
+      : undefined,
+  )
+  const project = [projects?.find((p) => p.id === projectId), handed].find(
+    (p) => p && p.id === projectId,
+  )
+  const sessionRepos: RepoRef[] = session?.worktree?.repos.length
+    ? session.worktree.repos
+    : project
+      ? projectRepos(project)
+      : []
+  const unstarted = Boolean(session) && !(session!.updatedAt > session!.createdAt)
+  const botBase = bot?.baseUrl
+  const botKeyOf = bot?.apiKey
+  useEffect(() => {
+    if (!projectId || !unstarted || !botBase || botKeyOf === undefined) return
+    readProjects({ baseUrl: botBase, apiKey: botKeyOf }).catch(quietly("Reading projects"))
+  }, [projectId, unstarted, botBase, botKeyOf])
   const mainOf = isMain ? chat?.profileId : undefined
   useEffect(() => {
     if (mainOf) void setActiveProfile(mainOf)
@@ -459,17 +517,28 @@ function NextChat({
         <>
           <ChatHeader
             // Main is the bot's face, so its title is the bot's name, which Bot settings edits.
-            title={mainOn ? bot.name || chat.title : chat.title}
-            subtitle={mainOn && threadList ? threadsLine(threadCount(threadList)) : undefined}
+            // A session not started has no title yet, and its bot is the big one in the middle.
+            title={unstarted ? "" : mainOn ? bot.name || chat.title : chat.title}
+            subtitle={
+              mainOn && threadList
+                ? threadsLine(threadCount(threadList))
+                : session && !unstarted
+                  ? sessionSubtitle({
+                      botName: bot.name,
+                      names: sessionRepos.map((repo) => repo.name),
+                      cap: repoCap({ wide, xlarge: xl }),
+                    })
+                  : undefined
+            }
             botId={bot.botId}
             muted={Boolean(chat.muted || bot.muted)}
-            centered={besideMain}
-            showBot={!besideMain}
+            centered={Boolean(session) || besideMain}
+            showBot={!session && !besideMain}
             actions={actions}
             leading={
               // Beside Main the bot is on screen with the thread; below `xl` the thread leads back.
-              mainPath &&
-              !besideMain && (
+              // A session leads back to Code, unless it is drawn beside Code's list.
+              mainPath && !besideMain ? (
                 <Button
                   variant="outline"
                   size="icon-lg"
@@ -479,6 +548,18 @@ function NextChat({
                 >
                   <ArrowLeftIcon />
                 </Button>
+              ) : (
+                underCode && (
+                  <Button
+                    variant="outline"
+                    size="icon-lg"
+                    className="size-11 rounded-full bg-background/80 backdrop-blur"
+                    onClick={() => void leave()}
+                    aria-label="Back to Code"
+                  >
+                    <ArrowLeftIcon />
+                  </Button>
+                )
               )
             }
           />
@@ -486,6 +567,7 @@ function NextChat({
             <ChatNextThread
               key={chat.hermesSessionId}
               chatId={id}
+              blank={unstarted ? { botId: bot.botId, repos: sessionRepos } : undefined}
               main={
                 mainOn
                   ? {
@@ -519,6 +601,38 @@ function NextChat({
               Composer={composer}
             />
           </Suspense>
+          <AlertDialog open={leavingWithDraft} onOpenChange={setLeavingWithDraft}>
+            <AlertDialogContent size="sm">
+              <AlertDialogHeader>
+                <AlertDialogTitle>Save your draft?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This session hasn't started. Save the draft to pick it up later, or delete the
+                  session.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogAction
+                  variant="outline"
+                  onClick={async () => {
+                    if (!session) return
+                    await deleteConversation(session.id)
+                    up("/code")
+                  }}
+                >
+                  Delete
+                </AlertDialogAction>
+                <AlertDialogAction
+                  onClick={async () => {
+                    if (!session) return
+                    await updateConversation(session.id, { draftAt: Date.now() })
+                    up("/code")
+                  }}
+                >
+                  Save draft
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </>
       ) : (
         <PendingChat />

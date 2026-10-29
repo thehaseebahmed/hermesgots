@@ -4,7 +4,7 @@ import { type ComponentProps, createContext, useContext, useMemo, useState } fro
 import { Banner } from "@/components/banner"
 import { AgentPopup } from "@/components/chat/agent-card"
 import { DayHeading } from "@/components/chat/day-heading"
-import { MainEmptyState } from "@/components/chat/empty-states"
+import { EmptyState, MainEmptyState } from "@/components/chat/empty-states"
 import { useMainFlow } from "@/components/chat/main-flow"
 import { MessageItem } from "@/components/chat/message-item"
 import { SubagentLine } from "@/components/chat/subagent-line"
@@ -24,6 +24,7 @@ import { AgentsContext, type AgentsSource } from "@/lib/agents"
 import { db } from "@/lib/db"
 import type { DelegatedAgent } from "@/lib/hermes"
 import { COLUMN_BOX } from "@/lib/layout"
+import type { RepoRef } from "@/lib/workspace"
 import { cn } from "@/lib/utils"
 
 import type { Agent } from "./agents"
@@ -59,7 +60,15 @@ export interface MainView {
  * in the app's scroller, with the composer — or the prompt the run is held up on — pinned under it.
  */
 /** The chat a view draws, and its Main where it is one: a context, so the view is one component. */
-const ChatOf = createContext<{ chatId: string; main?: MainView }>({ chatId: "" })
+const ChatOf = createContext<{ chatId: string; main?: MainView; blank?: BlankView }>({
+  chatId: "",
+})
+
+/** A project session not started yet: its bot and the repos it will work in, said in its place. */
+export interface BlankView {
+  botId?: string
+  repos: RepoRef[]
+}
 
 export function AppThreadView({
   server,
@@ -75,7 +84,7 @@ export function AppThreadView({
   composer,
   send,
 }: ThreadViewProps) {
-  const { chatId, main } = useContext(ChatOf)
+  const { chatId, main, blank } = useContext(ChatOf)
   // The rows are the chat's: what a row reads through its chat — its media, its files, a question
   // asked again — finds the chat by this id, never by the session's.
   const messages = useMemo(
@@ -106,13 +115,16 @@ export function AppThreadView({
     routeChat: main?.routeChat,
   })
   const empty = Boolean(main) && !flow.length && !moved.trailing.length && !streaming
+  const unstarted = Boolean(blank) && !messages.length && !streaming && !queue?.items.length
   const running = source.agents.filter((agent) => agent.status === "running").length
   const lastId = messages.at(-1)?.id
   const inline = running > 0 && messages.at(-1)?.status === "streaming"
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {empty && main ? (
+      {unstarted && blank ? (
+        <EmptyState botId={blank.botId} configured session={{ repos: blank.repos }} id={chatId} />
+      ) : empty && main ? (
         <MainEmptyState botId={main.botId} id={chatId} onSend={(text) => send(text, [])} />
       ) : (
         <MessageScrollerProvider autoScroll defaultScrollPosition="end">
@@ -253,13 +265,23 @@ export function AppThreadView({
 export function AppChatNextThread({
   chatId,
   main,
+  blank,
   ...props
-}: ComponentProps<typeof ChatNextThread> & { chatId: string; main?: MainView }) {
+}: ComponentProps<typeof ChatNextThread> & {
+  chatId: string
+  main?: MainView
+  blank?: BlankView
+}) {
   // Held by its fields, so a parent's render that changes nothing about Main draws nothing again.
   const mainKey = main ? JSON.stringify(main) : ""
+  const blankKey = blank ? JSON.stringify(blank) : ""
   const chat = useMemo(
-    () => ({ chatId, main: mainKey ? (JSON.parse(mainKey) as MainView) : undefined }),
-    [chatId, mainKey],
+    () => ({
+      chatId,
+      main: mainKey ? (JSON.parse(mainKey) as MainView) : undefined,
+      blank: blankKey ? (JSON.parse(blankKey) as BlankView) : undefined,
+    }),
+    [chatId, mainKey, blankKey],
   )
   return (
     <ChatOf.Provider value={chat}>
