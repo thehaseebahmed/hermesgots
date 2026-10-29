@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { PlusIcon, XIcon } from "lucide-react"
+import { CheckIcon, PlusIcon, XIcon } from "lucide-react"
 import { useNavigate } from "react-router"
 
 import { Banner } from "@/components/banner"
@@ -50,6 +50,7 @@ import {
   type SttValue,
 } from "@/lib/stt-settings"
 import { plural } from "@/lib/tools"
+import { cn } from "@/lib/utils"
 import { MAX_WORD, addWord, cleanWord, readVocabulary, removeWord } from "@/lib/vocabulary"
 
 /**
@@ -66,7 +67,7 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
   const words = readVocabulary(profile.vocabulary)
   const info = useModelInfo(profile)
   const own = botModel(profile, info)
-  const [pick, setPick] = useState<"speech" | "cleanup">()
+  const [pick, setPick] = useState<"speech" | "cleanup" | "level">()
   // The row whose form is open, wherever it sits on the page: one surface serves them all.
   const [open, setOpen] = useState<SttSetting>()
   const models = settings ? modelsFor(settings, block) : []
@@ -154,7 +155,7 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
           saving={speech.saving}
           levels={speech.levels}
           developer={Boolean(developer)}
-          onLevel={(level) => (speech.saving ? undefined : void speech.chooseLevel(level))}
+          onLevel={() => setPick("level")}
           onHearing={(sent) => (speech.saving ? undefined : void speech.setHearing(sent))}
           onPick={() => setPick("cleanup")}
         />
@@ -187,6 +188,23 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
             }))}
             onPick={(name) => {
               if (name !== settings.model) void speech.choose(name)
+              setPick(undefined)
+            }}
+          />
+        </PickSurface>
+      )}
+
+      {settings && (
+        <PickSurface
+          open={pick === "level"}
+          onOpenChange={(open) => !open && setPick(undefined)}
+          title="Cleanup level"
+        >
+          <LevelPick
+            level={settings.cleanup.level}
+            saving={speech.saving}
+            onPick={(level) => {
+              if (!speech.saving) void speech.chooseLevel(level)
               setPick(undefined)
             }}
           />
@@ -707,6 +725,11 @@ function CleanupRow({
   )
 }
 
+/** A level's name as the row reads it: `Light`, not `light`. */
+function levelName(level: CleanupLevel): string {
+  return CLEANUP_LEVEL_ROWS.find((row) => row.level === level)?.name ?? "Light"
+}
+
 /** The cleanup's card: the level a take is tidied at, its model, and the decode's prompt. */
 function CleanupSection({
   settings,
@@ -721,15 +744,25 @@ function CleanupSection({
   saving: boolean
   levels: boolean
   developer: boolean
-  onLevel: (level: CleanupLevel) => void
+  onLevel: () => void
   onHearing: (sent: boolean) => void
   onPick: () => void
 }) {
   return (
     <section className="flex flex-col gap-2" data-stt-group="cleanup">
       <Caption>Cleanup</Caption>
-      {levels && <CleanupLevels level={settings.cleanup.level} saving={saving} onPick={onLevel} />}
       <Group>
+        {levels && (
+          <ValueRow
+            title="Cleanup level"
+            tag="Gots"
+            purpose="How much the tidying changes in a take"
+            value={levelName(settings.cleanup.level)}
+            disabled={saving}
+            onClick={onLevel}
+            data-setting="cleanup-level"
+          />
+        )}
         <CleanupRow tag="Gots" settings={settings} saving={saving} onClick={onPick} />
         {levels && developer && (
           <SwitchRow
@@ -747,8 +780,8 @@ function CleanupSection({
   )
 }
 
-/** One card per level: what it may change, and the same sentence tidied at it (ADR 0066). */
-function CleanupLevels({
+/** The four levels as the sheet lists them: one setting card each, chosen one marked (ADR 0066). */
+function LevelPick({
   level,
   saving,
   onPick,
@@ -758,26 +791,33 @@ function CleanupLevels({
   onPick: (level: CleanupLevel) => void
 }) {
   return (
-    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4" data-cleanup-levels>
-      {CLEANUP_LEVEL_ROWS.map((row) => (
-        <button
-          key={row.level}
-          type="button"
-          aria-pressed={row.level === level}
-          disabled={saving}
-          onClick={() => onPick(row.level)}
-          data-cleanup-level={row.level}
-          className={`flex flex-col gap-2 rounded-xl border p-3 text-left ${
-            row.level === level ? "border-ring bg-card" : "border-transparent bg-card"
-          }`}
-        >
-          <span className="text-base">{row.name}</span>
-          <span className="text-sm text-muted-foreground">{row.purpose}</span>
-          <span className="mt-auto rounded-lg bg-muted px-2 py-1.5 text-xs text-muted-foreground">
-            {row.sample}
-          </span>
-        </button>
-      ))}
+    <div className="flex min-h-0 flex-col gap-1.5 overflow-y-auto" data-cleanup-levels>
+      {CLEANUP_LEVEL_ROWS.map((row) => {
+        const chosen = row.level === level
+        return (
+          <button
+            key={row.level}
+            type="button"
+            aria-pressed={chosen}
+            disabled={saving}
+            onClick={() => onPick(row.level)}
+            data-cleanup-level={row.level}
+            className={cn(
+              "flex flex-col gap-1.5 rounded-xl border p-3 text-left transition-colors",
+              chosen ? "border-ring bg-card" : "border-border bg-card hover:bg-muted/40",
+            )}
+          >
+            <span className="flex items-center gap-2">
+              <span className="text-base">{row.name}</span>
+              {chosen && <CheckIcon className="size-4 shrink-0 text-primary" aria-hidden />}
+            </span>
+            <span className="text-sm text-muted-foreground">{row.purpose}</span>
+            <span className="rounded-lg bg-muted px-3 py-2 text-xs leading-snug text-muted-foreground">
+              {row.sample}
+            </span>
+          </button>
+        )
+      })}
     </div>
   )
 }

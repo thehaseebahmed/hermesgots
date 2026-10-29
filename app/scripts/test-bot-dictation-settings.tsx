@@ -42,13 +42,13 @@ test("the page draws every speech setting its host carries, in cards named for w
     )
     assert.deepEqual(
       titlesIn("Cleanup"),
-      ["Cleanup model"],
-      "and the cleanup's model in the card the level picker sits over",
+      ["Cleanup level", "Cleanup model"],
+      "the level in play, then the model that does the tidying",
     )
     assert.deepEqual(
-      [...findAll("[data-cleanup-level]")].map((card) => card.getAttribute("data-cleanup-level")),
-      ["none", "light", "medium", "high"],
-      "with the four levels above it",
+      findAll("[data-cleanup-level]"),
+      [],
+      "the levels themselves are the level row's sheet, not this page",
     )
     assert.deepEqual(
       titlesIn("Local"),
