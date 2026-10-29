@@ -21,23 +21,41 @@ Run `pnpm e2e idle-requests` and `pnpm e2e stream-writes` with chat-next on, and
 - Subscribe to `lib/live.ts` (`onChanges` / `useLive`) so a chat catches up when the plugin's stream says the session moved and polls only at `SAFETY_MS` while a stream is open.
 - Tests: unit for the "what to read next" rule; component tests over a seeded device with the HTTP boundary faked, asserting a poll that finds nothing writes nothing and asks for one row; `idle-requests` back inside budget.
 
-### 3. Thinking (blocks retiring)
+### 3. The code face belongs to the agent's work only
+Not a parity gap: a change to what chat-next already does. In a code session JetBrains Mono (`font-code`) should read only as the agent's own output, and nothing else in the UI.
+
+**Today.** `routes/chat.tsx:502` puts `font-code` on the whole chat pane when `chat.projectId` is set, so the header, composer, pills, approval and question cards, and every card in the thread are in it. Sheets and drawers are portaled out of the pane, so they inherit nothing: a tool call's input and output (drawn with `font-mono`, which is not JetBrains Mono, in `tool-card.tsx` and `markdown-renderer.tsx`) never get the code face.
+
+**Wanted.**
+- In the face: the reply's text, the thinking rows' words, the tool calls' rows, and a tool call's input and output wherever they are drawn, including inside its sheet. Inline code and fenced blocks in a reply follow the same face.
+- Not in the face: everything else, a sheet's title and other headings included, the header, the composer, the pills, the user's own bubble (assumed, to confirm), the day headings and dividers, and the cards for approvals and questions.
+
+**How.**
+- Drop `font-code` from the pane root. Keep `data-code-session`.
+- A small context (`CodeFace`, provided where the page knows `projectId`) read by the components that draw the agent's output. React context crosses a portal, which a class on an ancestor does not, so the sheets that open from a tool group or a thought row get it without their heading ever being inside the scope.
+- Apply `font-code` at the leaves that draw agent output (reply markdown, `thinking-line.tsx` and its sheet body, `tool-group.tsx` rows, `tool-card.tsx` input and output, the delegated agent's sub-thread transcript), and replace their `font-mono` with the code face when the context is on. The current screen has no `font-code` and stays as it is.
+- `@fontsource-variable/jetbrains-mono` is imported in `chat-next/page.tsx`, so it already loads with chat-next's chunk. Nothing new ships at startup.
+- Update the `AGENTS.md` Layout row that says a code session reads in JetBrains Mono.
+
+**Tests.** Component tier, replacing `test-chat-next-mount.tsx`'s "a code session reads in JetBrains Mono": assert the code face on a reply, a thought row, a tool row and, with its sheet open, the call's input and output; assert it is absent on the header, composer, a sheet's title and the user's bubble; and that a plain chat has it nowhere. A DOM without layout can't measure the glyphs, so these assert the class and the context, not the rendered face.
+
+### 4. Thinking (blocks retiring)
 - Stop `kept()` dropping `reasoning`; read it in `fold.ts`; handle `reasoning.available` on the run's events.
 - Grow runs with `appendThinking` into `reasoningRuns`, draw through `thinkingRows` (ADR 0054, 0064).
 - Tests: unit on the fold; component test that a transcript with reasoning draws thought rows.
 
-### 4. Stop, approvals, questions (blocks retiring)
+### 5. Stop, approvals, questions (blocks retiring)
 - Stop: add `stopSubagents` beside `stopRun` (`subagents_stop_all`, ADR 0051); pass `subagentsRunning` to the composer.
 - Feed the app's `ApprovalCard` and `QuestionCard` from `Waiting`, answering through `respond`, in place of chat-next's bare cards.
 - Give `ClarifyCard` the controls' `send` so Ask again stops writing rows through the old `sendMessage`.
 - Tests: component tests for each card's answer path and the missed-approval case (`approval_not_pending` and friends).
 
-### 5. Model pill and header options (blocks retiring)
+### 6. Model pill and header options (blocks retiring)
 - Pass `model` to the composer as `CurrentChatPage` builds it, including in the plan-ready card.
 - Lift `actions` (rename, mute, resolve or reopen, discard, delete) and the context ring with its usage sheet out of `CurrentChatPage` into something both screens use.
 - Tests: component tests for the pick being pinned at first send (`pinModel`) and each action.
 
-### 6. Needed before default
+### 7. Needed before default
 In this order, one PR each unless two are trivially small:
 1. Model-change and compaction dividers (pass `compactions`; `ModelChange`, `Compacted`).
 2. Long chats: open on the newest `FIRST_ROWS` and draw the rest a beat later; replace the per-change `JSON.stringify` comparison in `shared` (`page.tsx`) with a cheap identity check. Escalates to an e2e flow (`bot-threads` holds the reader's place).
@@ -50,7 +68,7 @@ In this order, one PR each unless two are trivially small:
 9. Following the reader (`FollowOnSend`, `FollowAfterApproval`).
 10. Break reminders (`useBreakReminderEligibility`) and the dictation hint (title, project, repos).
 
-### 7. One decision, no code
+### 8. One decision, no code
 Record whether "a bot without the plugin's queue refuses a mid-reply message" stands. The plugin is mandatory, so it probably does; if so, mark the parity row as not a gap.
 
 ## Done when
