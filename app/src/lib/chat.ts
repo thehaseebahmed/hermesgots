@@ -12,7 +12,6 @@ import {
   type ClarifyRequest,
   type Conversation,
   type Message,
-  type MessageStats,
   type MessageStatus,
   type Profile,
   type ToolEvent,
@@ -45,6 +44,7 @@ import {
   type TurnUsage,
 } from "@/lib/hermes"
 import { attachmentsText, splitAttachments } from "@/lib/attachment-text"
+import { measureReply } from "@/lib/reply-stats"
 import { wireContent } from "@/lib/attachments"
 import { refreshContext } from "@/lib/context"
 import { refreshChatProviderUsage } from "@/lib/provider-usage"
@@ -118,10 +118,6 @@ const REATTACH_MS = [2_000, 5_000, 15_000, 30_000, 60_000]
 const controllers = new Map<string, AbortController>()
 /** In-flight reply drafts by message id, so approval answers land in the draft being flushed. */
 const activeDrafts = new Map<string, { draft: Message; touch: () => void }>()
-
-function estimateTokens(text: string) {
-  return Math.max(1, Math.round(text.length / 4))
-}
 
 async function syncTitle(conversationId: string, config: HermesConfig, sessionId: string) {
   if (await takeHostTitle(conversationId, config, sessionId)) return
@@ -803,24 +799,17 @@ async function finishTurn(turn: Turn, usage: TurnUsage | undefined, sendFailed =
   // Thinking left open when the turn ends is measured too: its span is the deltas this device saw.
   closeThinkingRun(turn)
   if (draft.content || usage) {
-    // Hermes's counts when it sent them; a stopped turn never gets them, so estimate.
-    const tokens = usage?.completionTokens || estimateTokens(draft.content)
-    const toolsUsed = draft.tools.length > 0
-    // Nothing streamed when the run's events never arrived and only its final output did.
-    const streamed = turn.firstTokenAt !== null
-    const writingMs = Math.max(1, endedAt - (turn.firstTokenAt ?? endedAt))
-    const stats: MessageStats = {
-      tokens,
-      estimated: !usage?.completionTokens,
-      tokensPerSecond:
-        toolsUsed || turn.resumed || !streamed
-          ? undefined
-          : Math.round(tokens / (writingMs / 1000)),
-      durationMs: endedAt - draft.createdAt,
-      promptTokens: usage?.promptTokens || undefined,
-      toolsUsed,
-    }
-    draft.stats = stats
+    // Hermes's counts when it sent them; a stopped turn never gets them, so they are estimated.
+    draft.stats = measureReply({
+      text: draft.content,
+      toolsUsed: draft.tools.length > 0,
+      counted: usage?.completionTokens,
+      promptTokens: usage?.promptTokens,
+      resumed: turn.resumed,
+      startedAt: draft.createdAt,
+      firstTokenAt: turn.firstTokenAt,
+      endedAt,
+    })
   }
   draft.runId = undefined
   draft.runSeq = undefined

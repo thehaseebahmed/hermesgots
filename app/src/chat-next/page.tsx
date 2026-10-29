@@ -631,7 +631,15 @@ export function ChatNextThread({
           const asking = Date.now() >= noAgentsUntil.current
           const askingQueue = Date.now() >= noQueueUntil.current
           const [rows, listed, queued] = await Promise.all([
-            readTranscript({ server, key }, session, alive.current.signal, false, store.get().rows),
+            // A turn's end reads the whole transcript: rows older than the ones that join what is held
+            // can only have changed then, and a read that joins is the cheap one in between.
+            readTranscript(
+              { server, key },
+              session,
+              alive.current.signal,
+              false,
+              final ? undefined : store.get().rows,
+            ),
             asking ? readAgents({ server, key }, session, alive.current.signal) : undefined,
             askingQueue ? readQueue({ server, key }, session, alive.current.signal) : undefined,
           ])

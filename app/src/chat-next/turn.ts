@@ -65,7 +65,6 @@ async function built(chatId: string, text: string, attachments: Attachment[]) {
     const sent = attachments.length
       ? await uploadAttachments(config, chat.hermesSessionId, attachments, Boolean(bot.apiKey))
       : attachments
-    await keepSent(chat.hermesSessionId, sent)
     const body = runRequest(config, {
       ...modelOf(pinned, bot),
       sessionId: chat.hermesSessionId,
@@ -78,6 +77,7 @@ async function built(chatId: string, text: string, attachments: Attachment[]) {
       key: randomId(),
       settled: (reached) => {
         if (!reached) return void release?.()
+        void keepSent(chat.hermesSessionId, sent)
         // The chat moved: its list row, the Code screen and sync go by this clock.
         void updateConversation(chatId, {
           updatedAt: Date.now(),

@@ -131,25 +131,18 @@ export function AppThreadView({
     () => ({ agents: agents.map(delegated), server: config, sessionId: session, onOpen: setShown }),
     [agents, config, session],
   )
-  // A bot's Main draws its threads as cards in its own flow, and the messages it sent off as markers.
-  const moves = useLiveQuery(
-    async () => (main ? (await db.conversations.get(chatId))?.moves : undefined),
-    [chatId, Boolean(main)],
-  )
-  // What the plugin recorded of the chat beside its transcript: where its model changed and where
-  // its context was compacted, which the dividers between the turns are drawn from.
-  const record = useLiveQuery(async () => {
-    const chat = await db.conversations.get(chatId)
-    return chat
-      ? {
-          changes: chat.modelChanges,
-          compactions: chat.compactions,
-          resolved: Boolean(chat.resolvedAt),
-          discarded: Boolean(chat.discardedAt),
-          blocked: Boolean(chat.blocked),
-        }
-      : undefined
-  }, [chatId])
+  // The chat's own record, read once: a bot's Main draws the messages it sent off as markers from
+  // it, and beside the transcript the plugin recorded where its model changed and where its context
+  // was compacted, which the dividers between the turns are drawn from.
+  const chat = useLiveQuery(() => db.conversations.get(chatId), [chatId])
+  const moves = main ? chat?.moves : undefined
+  const record = {
+    changes: chat?.modelChanges,
+    compactions: chat?.compactions,
+    resolved: Boolean(chat?.resolvedAt),
+    discarded: Boolean(chat?.discardedAt),
+    blocked: Boolean(chat?.blocked),
+  }
   // The break reminder counts only time the run carries on without the app: this screen follows
   // `/v1/runs` alone, so a streaming reply is one, until it waits on the user or its session closes.
   useBreakReminderEligibility(
@@ -158,24 +151,22 @@ export function AppThreadView({
       runId: "run",
       awaitingApproval: Boolean(waiting),
       awaitingClarify: false,
-      resolved: Boolean(record?.resolved),
-      discarded: Boolean(record?.discarded),
-      blocked: Boolean(record?.blocked),
+      resolved: Boolean(record.resolved),
+      discarded: Boolean(record.discarded),
+      blocked: Boolean(record.blocked),
     }),
   )
-  const profile = useLiveQuery(async () => {
-    const chat = await db.conversations.get(chatId)
-    return chat ? db.profiles.get(chat.profileId) : undefined
-  }, [chatId])
+  const profileId = chat?.profileId
+  const profile = useLiveQuery(
+    () => (profileId ? db.profiles.get(profileId) : undefined),
+    [profileId],
+  )
   // The interfaces a reply wrote draw as the app's own components, from what the thread holds.
   const draws = useDraws(messages, profile)
-  const changes = useMemo(
-    () => modelChanges(messages, record?.changes),
-    [messages, record?.changes],
-  )
+  const changes = useMemo(() => modelChanges(messages, record.changes), [messages, record.changes])
   const compacted = useMemo(
-    () => compactionMarks(messages, record?.compactions),
-    [messages, record?.compactions],
+    () => compactionMarks(messages, record.compactions),
+    [messages, record.compactions],
   )
   const { flow, moved, moveThatOpenedThread, undo, marker } = useMainFlow({
     chatId,
@@ -266,7 +257,7 @@ export function AppThreadView({
                             message={message}
                             // Only a row that draws a seam reads these: a new array on every
                             // conversation write would wake every row's memo.
-                            compactions={message.seams?.length ? record?.compactions : undefined}
+                            compactions={message.seams?.length ? record.compactions : undefined}
                             blocks={draws.get(message.id)}
                             showStats
                             busy={streaming}
@@ -355,7 +346,6 @@ export function AppThreadView({
   )
 }
 
-/** The thread as a chat opens it in the app: chat-next, drawn with the app's rows. */
 const APPROVAL_CHOICES: ApprovalChoice[] = ["once", "session", "always", "deny"]
 
 /**
@@ -428,6 +418,7 @@ export function AppPrompt({ waiting, answer, asker }: PromptProps) {
   )
 }
 
+/** The thread as a chat opens it in the app: chat-next, drawn with the app's rows. */
 export function AppChatNextThread({
   chatId,
   main,

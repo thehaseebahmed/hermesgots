@@ -22,11 +22,11 @@ export function messagesOf(
     // What a turn cost: as it was just measured, else as the device kept it with the row that opened it.
     const stats = turn.stats ?? (turn.row !== undefined ? options.stats?.[turn.row] : undefined)
     // The page hands back the very turn it drew where nothing in it moved, so its rows are too.
-    const key = `${chat}-${index}-${live}-${stats ? JSON.stringify(stats) : ""}`
+    const key = `${chat}-${index}-${live}`
     const held = drawn.get(turn)
-    if (held?.key === key) return held.rows
+    if (held?.key === key && held.stats === stats) return held.rows
     const rows = rowsOf(chat, `${chat}-${index}`, turn, live, stats)
-    drawn.set(turn, { key, rows })
+    drawn.set(turn, { key, stats, rows })
     return rows
   })
 }
@@ -39,20 +39,27 @@ export function messagesOf(
 export function withHeldFiles(messages: Message[], held: ReadonlyMap<string, Blob>): Message[] {
   if (!held.size) return messages
   return messages.map((message) => {
-    if (!message.attachments?.some((file) => file.path && !file.blob && held.has(file.path)))
-      return message
-    return {
+    const files = message.attachments
+    if (!files?.some((file) => file.path && !file.blob && held.has(file.path))) return message
+    // The same row with the same bytes is the same object, so a streamed word elsewhere in the
+    // thread never wakes the memo of a request that carries a photo.
+    const blobs = files.map((file) => (file.path ? held.get(file.path) : undefined))
+    const kept = overlaid.get(message)
+    if (kept && kept.blobs.every((blob, at) => blob === blobs[at])) return kept.row
+    const row = {
       ...message,
-      attachments: message.attachments.map((file) =>
-        file.path && !file.blob && held.has(file.path)
-          ? { ...file, blob: held.get(file.path) }
-          : file,
+      attachments: files.map((file, at) =>
+        !file.blob && blobs[at] ? { ...file, blob: blobs[at] } : file,
       ),
     }
+    overlaid.set(message, { blobs, row })
+    return row
   })
 }
 
-const drawn = new WeakMap<Turn, { key: string; rows: Message[] }>()
+const overlaid = new WeakMap<Message, { blobs: (Blob | undefined)[]; row: Message }>()
+
+const drawn = new WeakMap<Turn, { key: string; stats?: MessageStats; rows: Message[] }>()
 
 function rowsOf(
   chat: string,

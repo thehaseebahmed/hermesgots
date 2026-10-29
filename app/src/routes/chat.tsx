@@ -36,7 +36,7 @@ import { BotPicker } from "@/components/chat/bot-picker"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { ChatActions, LimitNotice, useChatUsage } from "@/components/chat/chat-actions"
 import { FollowAfterApproval, FollowOnSend } from "@/components/chat/follow"
-import { FIRST_ROWS, useFirstRows } from "@/components/chat/first-rows"
+import { useFirstRows } from "@/components/chat/first-rows"
 import { Composer } from "@/components/chat/composer"
 import { MessageItem } from "@/components/chat/message-item"
 import { Compacted, ModelChange } from "@/components/chat/model-change"
@@ -157,8 +157,6 @@ const NO_ROWS: Message[] = []
 const hasNoMessages = async (chat: Conversation) =>
   !(chat.updatedAt > chat.createdAt) &&
   (await db.messages.where("conversationId").equals(chat.id).count()) === 0
-export { FIRST_ROWS }
-
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
 function PendingChat() {

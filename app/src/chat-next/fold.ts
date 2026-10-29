@@ -2,7 +2,7 @@ import { splitAttachments } from "../lib/attachment-text.ts"
 import type { MessageStats } from "../lib/db.ts"
 import { steerText } from "../lib/steer.ts"
 
-import type { Timing } from "./stats.ts"
+import type { Timing } from "../lib/reply-stats.ts"
 
 /** A transcript row as `GET /api/sessions/{id}/messages` returns it; only what a turn is built from. */
 export interface Row {

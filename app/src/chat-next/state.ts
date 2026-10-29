@@ -1,8 +1,8 @@
 import type { LiveTurn, MessageStats } from "@/lib/db"
+import { measureReply } from "@/lib/reply-stats"
 
 import type { Agent } from "./agents"
 import type { Queued, RunEvent } from "./api"
-import { measureTurn } from "./stats"
 import { foldTurns, withArchive, type Part, type Row, type SentFile, type Turn } from "./fold"
 
 /**
@@ -152,11 +152,12 @@ function live(turn: Turn, event: RunEvent, now?: number): Turn {
     if (text || event.usage)
       return {
         ...turn,
-        stats: measureTurn({
+        stats: measureReply({
           text,
           toolsUsed: parts.some((part) => part.kind === "tools"),
-          usage: event.usage,
-          timing: turn.timing,
+          counted: event.usage?.output_tokens,
+          promptTokens: event.usage?.input_tokens,
+          ...turn.timing,
           endedAt: now,
         }),
       }
@@ -228,8 +229,13 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       // What the turn this device watched cost goes with the row that opened it, which the
       // transcript has now written.
       const measured = state.live?.turn.stats
+      // The turn is the one the transcript just gained: a repeated prompt read before the host has
+      // written the new request would otherwise take the previous turn's row.
       const stats =
-        measured && last?.row !== undefined && last.user === state.live?.turn.user
+        measured &&
+        last?.row !== undefined &&
+        last.user === state.live?.turn.user &&
+        last.row !== foldedOf(state.rows, state.archived).at(-1)?.row
           ? { ...state.stats, [last.row]: measured }
           : state.stats
       return {
