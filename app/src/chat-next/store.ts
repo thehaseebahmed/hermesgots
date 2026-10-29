@@ -51,6 +51,8 @@ const kept = (row: Row): Row => ({
   display_kind: row.display_kind,
   tool_calls: row.tool_calls,
   timestamp: row.timestamp,
+  reasoning: row.reasoning,
+  reasoning_content: row.reasoning_content,
 })
 
 const sameRow = (a: Row, b: Row) =>
@@ -60,6 +62,8 @@ const sameRow = (a: Row, b: Row) =>
   a.finish_reason === b.finish_reason &&
   a.display_kind === b.display_kind &&
   a.timestamp === b.timestamp &&
+  a.reasoning === b.reasoning &&
+  a.reasoning_content === b.reasoning_content &&
   JSON.stringify(a.tool_calls) === JSON.stringify(b.tool_calls)
 
 /**

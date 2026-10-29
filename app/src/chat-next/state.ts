@@ -82,20 +82,37 @@ function live(turn: Turn, event: RunEvent): Turn {
   const at = typeof event.timestamp === "number" ? event.timestamp * 1000 : undefined
   const last = parts.at(-1)
   const replaceLast = (part: Part): Turn => ({ ...turn, parts: [...parts.slice(0, -1), part] })
+  if (event.event === "reasoning.available" && event.text) {
+    const pendingThought = turn.pendingThought
+      ? `${turn.pendingThought}\n\n${event.text}`
+      : event.text
+    return { ...turn, pendingThought }
+  }
   if (event.event === "message.delta" && event.delta) {
-    if (last?.kind === "text") return replaceLast({ ...last, text: last.text + event.delta })
-    return { ...turn, parts: [...parts, { kind: "text", text: event.delta.trimStart() }] }
+    const { pendingThought: thought, ...rest } = turn
+    if (last?.kind === "text" && !thought)
+      return replaceLast({ ...last, text: last.text + event.delta })
+    return {
+      ...rest,
+      parts: [
+        ...parts,
+        { kind: "text", text: event.delta.trimStart(), ...(thought ? { thought } : {}) },
+      ],
+    }
   }
   if (event.event === "tool.started" && event.tool) {
     // The host names the call, and the transcript's row for it carries the same id.
+    const { pendingThought: thought, ...rest } = turn
     const call = {
       id: event.tool_call_id ?? `live-${parts.length}-${event.seq}`,
       name: event.tool,
       label: event.preview,
       ...(at !== undefined ? { startedAt: at } : {}),
+      ...(thought ? { thought } : {}),
     }
-    if (last?.kind === "tools") return replaceLast({ ...last, calls: [...last.calls, call] })
-    return { ...turn, parts: [...parts, { kind: "tools", calls: [call] }] }
+    if (last?.kind === "tools")
+      return { ...rest, parts: [...parts.slice(0, -1), { ...last, calls: [...last.calls, call] }] }
+    return { ...rest, parts: [...parts, { kind: "tools", calls: [call] }] }
   }
   if (event.event === "tool.completed" && event.tool_call_id) {
     const at = parts.findIndex(

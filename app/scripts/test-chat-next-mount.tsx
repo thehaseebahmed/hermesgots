@@ -434,3 +434,25 @@ test("a reply's MEDIA tag draws as the file it names, read through the chat's ow
     )
   })
 })
+
+test("a reply's thinking draws as the thought rows the app's thread draws everywhere", async () => {
+  const { host } = await onChatNext("c-think")
+  host.seed([
+    {
+      user: "Look around",
+      reply: "Found it.",
+      tools: 1,
+      thoughts: ["I should look first.", "Now say so."],
+    },
+  ])
+  await mount(chatScreen("c-think"), async () => {
+    await until(() => replies().length > 0, "the turn is drawn")
+    // Stretches only a tool call separates are one row, as everywhere else the app draws a reply.
+    const rows = findAll('[data-chat-next] [data-slot="thinking-line"]')
+    assert.equal(rows.length, 1)
+    await click(rows[0].querySelector("button"))
+    const body = find('[data-slot="thinking-body"]')?.textContent ?? ""
+    assert.match(body, /I should look first\./)
+    assert.match(body, /Now say so\./)
+  })
+})

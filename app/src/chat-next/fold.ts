@@ -12,6 +12,9 @@ export interface Row {
   tool_calls?: { id: string; function: { name: string; arguments: string } }[] | null
   /** When the host wrote the row, in Unix seconds. */
   timestamp?: number | null
+  /** The model's thinking before the row's words and calls; some providers name it `reasoning_content`. */
+  reasoning?: string | null
+  reasoning_content?: string | null
 }
 
 export interface ToolCall {
@@ -25,11 +28,13 @@ export interface ToolCall {
   /** When the call was made and when its result came back, in ms, where the host or the stream said. */
   startedAt?: number
   endedAt?: number
+  /** The thinking that came before this call, where it opens a stretch of its own. */
+  thought?: string
 }
 
 /** A reply in the order the host wrote it: its words, then the run of calls it made, then more words. */
 export type Part =
-  | { kind: "text"; text: string }
+  | { kind: "text"; text: string; thought?: string }
   | { kind: "tools"; calls: ToolCall[] }
   /** The host compacted the conversation here; the rows above are summarised in what follows. */
   | { kind: "compaction"; row?: number; at?: number }
@@ -54,6 +59,8 @@ export interface Turn {
   /** The host archived this turn's request when it compacted: what is left is the work, from the seam on. */
   carried?: boolean
   parts: Part[]
+  /** Thinking a live turn has heard that no word or call has followed yet. */
+  pendingThought?: string
   /** The host has written the reply's last row: an assistant row that makes no more calls and says why it stopped. */
   done: boolean
   /** A reply the host started when a subagent finished: it answers no message of the user's. */
@@ -238,14 +245,22 @@ export function foldTurns(rows: Row[]): Turn[] {
       continue
     }
     turn.done = !asked.length && Boolean(row.finish_reason)
-    if (row.content) turn.parts.push({ kind: "text", text: row.content })
+    // The row's thinking goes before whatever the row says or does first, so it follows the call
+    // before it and is read with the words or the call it led to.
+    let thought = row.reasoning ?? row.reasoning_content ?? undefined
+    if (row.content || (thought && !asked.length)) {
+      turn.parts.push({ kind: "text", text: row.content ?? "", ...(thought ? { thought } : {}) })
+      thought = undefined
+    }
     for (const one of asked) {
       const call: ToolCall = {
         id: one.id,
         name: one.function.name,
         arguments: one.function.arguments,
         ...(msOf(row) !== undefined ? { startedAt: msOf(row) } : {}),
+        ...(thought ? { thought } : {}),
       }
+      thought = undefined
       callOf.set(call.id, call)
       const last = turn.parts.at(-1)
       if (last?.kind === "tools") last.calls.push(call)

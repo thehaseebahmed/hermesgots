@@ -20,6 +20,8 @@ export interface RunEvent {
   run_id?: string
   seq?: number
   delta?: string
+  /** A whole block of thinking (`reasoning.available`), from providers that don't stream it. */
+  text?: string
   tool?: string
   preview?: string
   tool_call_id?: string

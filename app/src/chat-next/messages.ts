@@ -1,6 +1,7 @@
 import type { Attachment, Message, Seam, Steer, ToolEvent } from "../lib/db.ts"
 import { actionOf, spawnStamp } from "../lib/spawn.ts"
 import { clip, describeCall, parseArgs, patchStats, writeStats } from "../lib/tool-calls.ts"
+import { appendThinking, type ReasoningRun } from "../lib/thinking.ts"
 import { actionOfPreview, failureReason } from "../lib/tools.ts"
 
 import type { ToolCall, Turn } from "./fold.ts"
@@ -55,10 +56,20 @@ function rowsOf(chat: string, id: string, turn: Turn, live: boolean): Message[] 
   const tools: ToolEvent[] = []
   const steers: Steer[] = []
   const seams: Seam[] = []
+  let thinking: ReasoningRun[] | undefined
+  // Thinking continues the run the last call opened, as the transcript parse draws it.
+  const think = (text: string | undefined) => {
+    if (text) thinking = appendThinking(thinking, tools.at(-1)?.toolCallId, text, true)
+  }
   for (const part of turn.parts) {
-    if (part.kind === "text") content = content ? `${content}\n\n${part.text}` : part.text
-    else if (part.kind === "tools")
-      for (const call of part.calls) tools.push(toolOf(call, content.length, createdAt, live))
+    if (part.kind === "text") {
+      think(part.thought)
+      if (part.text) content = content ? `${content}\n\n${part.text}` : part.text
+    } else if (part.kind === "tools")
+      for (const call of part.calls) {
+        think(call.thought)
+        tools.push(toolOf(call, content.length, createdAt, live))
+      }
     else if (part.kind === "steer")
       steers.push({
         id: `${id}-s${steers.length}`,
@@ -75,13 +86,15 @@ function rowsOf(chat: string, id: string, turn: Turn, live: boolean): Message[] 
         at: part.at ?? createdAt,
       })
   }
-  if (live || content || tools.length || seams.length)
+  think(turn.pendingThought)
+  if (live || content || tools.length || seams.length || thinking)
     rows.push({
       id: `${id}-a`,
       conversationId: chat,
       role: "assistant",
       content,
       ...(tools.length ? { tools } : {}),
+      ...(thinking ? { reasoningRuns: thinking } : {}),
       ...(steers.length ? { steers } : {}),
       ...(seams.length ? { seams } : {}),
       status: live ? "streaming" : "done",

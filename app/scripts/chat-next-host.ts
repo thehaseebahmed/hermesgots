@@ -24,6 +24,7 @@ interface Row {
   session_id: string
   role: string
   content: string | null
+  reasoning?: string | null
   tool_call_id: string | null
   tool_calls: { id: string; type: string; function: { name: string; arguments: string } }[] | null
   tool_name: string | null
@@ -103,6 +104,8 @@ export interface Run {
    * once, and each child works on after this turn ends.
    */
   delegate(goals: string | string[]): Child[]
+  /** The model thinks: the next row the host writes carries it as `reasoning`, and the stream says so. */
+  think(text: string): void
   /** A call the agent makes: `tool.started`, its row, then `tool.completed` with its result. */
   tool(name: string, preview: string, result: string): void
   /** Streamed words, as the host sends them while the reply is being written. */
@@ -259,9 +262,17 @@ export function fakeHost(
     const turn = expected.at(-1)!
     let calls = 0
 
+    /** Thinking heard since the last row, which the next row the host writes carries. */
+    let thought: string | undefined
+    const reasoning = () => {
+      const held = thought
+      thought = undefined
+      return held ? { reasoning: held } : {}
+    }
     const callRow = (name: string, args = "{}") => {
       const call = `call_${id}_${++calls}`
       write("assistant", "", {
+        ...reasoning(),
         finish_reason: "tool_calls",
         tool_calls: [{ id: call, type: "function", function: { name, arguments: args } }],
       })
@@ -422,9 +433,13 @@ export function fakeHost(
         })
         turn.tools++
       },
+      think(text) {
+        thought = thought ? `${thought}\n\n${text}` : text
+        push("reasoning.available", { text })
+      },
       say: (delta) => push("message.delta", { delta }),
       finish(output) {
-        write("assistant", output, { finish_reason: "stop" })
+        write("assistant", output, { ...reasoning(), finish_reason: "stop" })
         turn.texts.push(output)
         push("run.completed", { output, usage: { input_tokens: 1, output_tokens: 1 } })
         state.done = true
@@ -742,10 +757,15 @@ export function fakeHost(
   }
 
   /** Turns already on the host before any device looks: finished, with their calls and reply. */
-  function seed(turns: { user: string; tools?: number; reply: string }[]) {
+  function seed(turns: { user: string; tools?: number; reply: string; thoughts?: string[] }[]) {
     for (const turn of turns) {
       const { run } = start(turn.user)
-      for (let at = 0; at < (turn.tools ?? 0); at++) run.tool("terminal", `step ${at}`, "{}")
+      const thoughts = [...(turn.thoughts ?? [])]
+      for (let at = 0; at < (turn.tools ?? 0); at++) {
+        if (thoughts.length > 1) run.think(thoughts.shift()!)
+        run.tool("terminal", `step ${at}`, "{}")
+      }
+      if (thoughts.length) run.think(thoughts[0])
       run.finish(turn.reply)
     }
   }

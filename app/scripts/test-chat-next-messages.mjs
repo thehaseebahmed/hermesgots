@@ -125,3 +125,33 @@ test("a compaction inside a reply is a seam naming the summary's row", () => {
     [[3, "Before.".length, 50_000]],
   )
 })
+
+test("a row's thinking leads the call or the words it came with, and follows the call before it", () => {
+  const rows = [
+    row(1, "user", "go"),
+    row(2, "assistant", "", {
+      reasoning: "Look first.",
+      tool_calls: [call("a", "terminal", { command: "ls" })],
+    }),
+    row(3, "tool", "files", { tool_call_id: "a" }),
+    row(4, "assistant", "All done.", { reasoning: "Now say so.", finish_reason: "stop" }),
+  ]
+  const [, reply] = messagesOf("chat", foldTurns(rows))
+  assert.deepEqual(reply.reasoningRuns, [
+    { text: "Look first." },
+    { text: "Now say so.", afterToolId: "a" },
+  ])
+  assert.equal(reply.content, "All done.")
+})
+
+test("thinking with no words or calls after it still draws as a reply", () => {
+  const rows = [row(1, "user", "go"), row(2, "assistant", "", { reasoning: "Hmm." })]
+  const [, reply] = messagesOf("chat", foldTurns(rows))
+  assert.deepEqual(reply.reasoningRuns, [{ text: "Hmm." }])
+})
+
+test("a live turn's unplaced thinking draws as the run still to come", () => {
+  const turn = { user: "go", parts: [], done: false, delivered: [], pendingThought: "Hmm." }
+  const [, reply] = messagesOf("chat", [turn], { streaming: true })
+  assert.deepEqual(reply.reasoningRuns, [{ text: "Hmm." }])
+})

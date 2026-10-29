@@ -188,6 +188,11 @@ const TurnView = memo(
           if (part.kind === "text")
             return (
               <div key={at} data-text>
+                {part.thought ? (
+                  <p data-thought className="text-sm text-muted-foreground italic">
+                    {part.thought}
+                  </p>
+                ) : null}
                 <Markdown>{part.text}</Markdown>
               </div>
             )
