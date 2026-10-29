@@ -24,10 +24,10 @@ from . import sessions
 
 logger = logging.getLogger(__name__)
 
-# The levels a bot may hold, and the tool calls each allows between reminders: Off asks never,
-# Normal is what every bot did before the level existed, Frequent asks twice as often.
-LEVELS = ("off", "normal", "frequent")
-AFTER: Dict[str, Optional[int]] = {"off": None, "normal": 20, "frequent": 10}
+# The tool calls each level allows between reminders: Off asks never, Normal is the count the
+# default reminder has always used, Frequent asks twice as often.
+CALLS_BETWEEN: Dict[str, Optional[int]] = {"off": None, "normal": 20, "frequent": 10}
+LEVELS = tuple(CALLS_BETWEEN)
 DEFAULT_LEVEL = "normal"
 LEVEL_KEY = "progress_reminders"
 OBJECT = "memento.progress_reminders"
@@ -75,7 +75,7 @@ def level(path: Path) -> str:
     from .store import get_setting
 
     value = get_setting(path, LEVEL_KEY)
-    return value if isinstance(value, str) and value in AFTER else DEFAULT_LEVEL
+    return value if isinstance(value, str) and value in CALLS_BETWEEN else DEFAULT_LEVEL
 
 
 def set_level(path: Path, value: Any) -> str:
@@ -84,7 +84,7 @@ def set_level(path: Path, value: Any) -> str:
     A value the host doesn't know is refused rather than written, so no row reads back as Normal
     while claiming to hold something else.
     """
-    if not isinstance(value, str) or value not in AFTER:
+    if not isinstance(value, str) or value not in CALLS_BETWEEN:
         raise ValueError(f"level must be one of {', '.join(LEVELS)}")
     from .store import put_setting
 
@@ -97,7 +97,7 @@ def record(value: str) -> Dict[str, Any]:
     return {"object": OBJECT, "level": value}
 
 
-def _room() -> None:
+def _drop_oldest_session() -> None:
     """Drops the oldest session, so the table stays as small as the sessions at work. Called with the
     lock held."""
     if len(_calls) > KEEP_SESSIONS:
@@ -141,7 +141,7 @@ def _threshold() -> Optional[int]:
     """
     path, _ = sessions._paths()
     try:
-        return AFTER[level(path)]
+        return CALLS_BETWEEN[level(path)]
     except Exception:
         logger.debug("memento: couldn't read the reminders level; asking nothing", exc_info=True)
         return None
@@ -163,7 +163,7 @@ def after_tool(**kwargs: Any) -> None:
         with _lock:
             turns = _calls.setdefault(session_id, {})
             turns[turn] = turns.get(turn, 0) + 1
-            _room()
+            _drop_oldest_session()
     except Exception:
         logger.debug("memento: progress reminder count failed", exc_info=True)
 

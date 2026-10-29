@@ -55,12 +55,12 @@ class ProgressTest(unittest.TestCase):
 
     def test_a_bot_that_chose_nothing_is_asked_at_normal(self) -> None:
         self.assertEqual(progress.level(self.store), progress.DEFAULT_LEVEL)
-        self.assertEqual(self.calls(progress.AFTER["normal"]), [None] * progress.AFTER["normal"])
+        self.assertEqual(self.calls(progress.CALLS_BETWEEN["normal"]), [None] * progress.CALLS_BETWEEN["normal"])
         self.assertIsNotNone(self.call())
 
     def test_a_frequent_bot_is_asked_sooner(self) -> None:
         self.at("frequent")
-        sooner = progress.AFTER["frequent"]
+        sooner = progress.CALLS_BETWEEN["frequent"]
         self.assertEqual(self.calls(sooner), [None] * sooner)
         self.assertIsNotNone(self.call())
 
@@ -68,9 +68,18 @@ class ProgressTest(unittest.TestCase):
         self.at("off")
         self.assertEqual(self.calls(100), [None] * 100)
 
+    def test_a_stretch_spent_while_off_is_answered_once_turned_on(self) -> None:
+        # The count runs whether or not anyone is asked, so a bot turned back on mid-run hears about
+        # the silence already spent rather than waiting out a fresh twenty.
+        self.at("off")
+        spent = progress.CALLS_BETWEEN["normal"] + 5
+        self.assertEqual(self.calls(spent), [None] * spent)
+        self.at("normal")
+        self.assertIsNotNone(self.call())
+
     def test_a_level_changed_mid_stretch_lands_on_the_next_call(self) -> None:
         # Frequent asks after fewer calls than the stretch has already run.
-        self.calls(progress.AFTER["frequent"])
+        self.calls(progress.CALLS_BETWEEN["frequent"])
         self.at("frequent")
         self.assertIsNotNone(self.call())
         self.at("off")
@@ -83,7 +92,7 @@ class ProgressTest(unittest.TestCase):
     def test_an_unreadable_store_asks_nothing(self) -> None:
         # The path a store is opened at, holding a directory: the read raises, and the route says so
         # while the hook asks nothing — a failed read must not cost a tool call.
-        self.calls(progress.AFTER["normal"])
+        self.calls(progress.CALLS_BETWEEN["normal"])
         broken = db_path(self.home)
         broken.parent.mkdir(parents=True, exist_ok=True)
         broken.mkdir()
@@ -111,60 +120,60 @@ class ProgressTest(unittest.TestCase):
     # The count ------------------------------------------------------------
 
     def test_the_reminder_asks_for_an_update_without_a_count(self) -> None:
-        self.calls(progress.AFTER["normal"])
+        self.calls(progress.CALLS_BETWEEN["normal"])
         blocked = self.call()
         self.assertEqual(blocked["action"], "block")
         self.assertIn("update", blocked["message"])
-        self.assertNotIn(str(progress.AFTER["normal"]), blocked["message"])
+        self.assertNotIn(str(progress.CALLS_BETWEEN["normal"]), blocked["message"])
 
     def test_a_model_ignoring_the_reminder_gets_its_tool_back(self) -> None:
-        self.calls(progress.AFTER["normal"])
+        self.calls(progress.CALLS_BETWEEN["normal"])
         self.assertIsNotNone(self.call())
         self.assertIsNone(self.call())
 
     def test_asking_again_takes_another_full_stretch(self) -> None:
-        stretch = progress.AFTER["normal"]
+        stretch = progress.CALLS_BETWEEN["normal"]
         self.calls(stretch + 1)
         self.assertEqual(self.calls(stretch), [None] * stretch)
         self.assertIsNotNone(self.call())
 
     def test_a_call_a_policy_blocked_is_not_counted(self) -> None:
-        spent = [self.call(status="blocked") for _ in range(progress.AFTER["normal"] + 5)]
+        spent = [self.call(status="blocked") for _ in range(progress.CALLS_BETWEEN["normal"] + 5)]
         self.assertEqual(spent, [None] * len(spent))
 
     def test_a_reply_with_text_starts_a_new_stretch(self) -> None:
-        stretch = progress.AFTER["normal"]
+        stretch = progress.CALLS_BETWEEN["normal"]
         self.calls(stretch)
         self.model_call(120)
         self.assertEqual(self.calls(stretch), [None] * stretch)
 
     def test_a_reply_of_tool_calls_alone_does_not(self) -> None:
-        self.calls(progress.AFTER["normal"])
+        self.calls(progress.CALLS_BETWEEN["normal"])
         self.model_call(0)
         self.assertIsNotNone(self.call())
 
     def test_a_new_turn_starts_at_zero(self) -> None:
-        self.calls(progress.AFTER["normal"])
+        self.calls(progress.CALLS_BETWEEN["normal"])
         progress.turn_started(session_id=SESSION, turn_id="turn-2")
         self.assertIsNone(self.call(turn="turn-2"))
 
     def test_a_repeat_turn_start_leaves_a_counted_turn_alone(self) -> None:
         # The reset does not depend on the turn hook firing exactly once: a repeat for a turn that
         # has already counted clears nothing, so the stretch survives it.
-        self.calls(progress.AFTER["normal"])
+        self.calls(progress.CALLS_BETWEEN["normal"])
         progress.turn_started(session_id=SESSION, turn_id=TURN)
         self.assertIsNotNone(self.call())
 
     def test_two_sessions_are_counted_apart(self) -> None:
-        self.calls(progress.AFTER["normal"])
+        self.calls(progress.CALLS_BETWEEN["normal"])
         self.assertIsNone(self.call(session="memento-other"))
 
     def test_an_afk_run_follows_the_same_level(self) -> None:
-        self.calls(progress.AFTER["normal"], session=AFK_SESSION)
+        self.calls(progress.CALLS_BETWEEN["normal"], session=AFK_SESSION)
         self.assertIsNotNone(self.call(session=AFK_SESSION))
 
     def test_a_session_that_is_not_gots_is_left_alone(self) -> None:
-        spent = progress.AFTER["normal"] + 1
+        spent = progress.CALLS_BETWEEN["normal"] + 1
         for session in ("20261029_101500_ab12cd", "sa-k3j9"):
             self.assertEqual(self.calls(spent, session=session), [None] * spent)
 
