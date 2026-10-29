@@ -19,14 +19,9 @@ import { stopSubagents } from "@/lib/agents"
 import { connectionKey } from "@/lib/connection"
 import { usePluginFeatureOn } from "@/lib/features"
 import { SAFETY_MS } from "@/lib/freshness"
+import { CATCHING_ACTIVITY } from "@/lib/format"
 import { onSessionMoved, useLive } from "@/lib/live"
-import {
-  knownLiveRun,
-  useLiveRun,
-  useLiveRunId,
-  useLiveSubagents,
-  useLiveWaking,
-} from "@/lib/waiting"
+import { knownLiveRun, useLiveRun, useLiveRunId, useHostBusy } from "@/lib/waiting"
 import { db, type Attachment, type MessageStats, type SessionDb } from "@/lib/db"
 
 import { equal } from "./equal"
@@ -416,7 +411,7 @@ function PlainView({
       {failure !== undefined ? <p role="alert">{failure}</p> : null}
       {catchingUp ? (
         <p data-catching-up role="status" className="text-sm text-muted-foreground">
-          Catching up…
+          {CATCHING_ACTIVITY}
         </p>
       ) : null}
       {older ? (
@@ -868,9 +863,7 @@ export function ChatNextThread({
     const timer = setTimeout(() => setHandedOff(false), HANDOFF_MS)
     return () => clearTimeout(timer)
   }, [handedOff])
-  const hostSubagents = useLiveSubagents()
-  const hostWaking = useLiveWaking()
-  const hostBusy = Boolean(session && (hostSubagents[session] || hostWaking[session]))
+  const hostBusy = useHostBusy(session ?? undefined)
   const busy = following || working || owed || starting || inQueue > 0 || handedOff || hostBusy
   const progress = useRef({ shape: "", at: 0 })
   const shape = tip + agents.map((agent) => `${agent.id}${agent.status}`).join()
@@ -887,6 +880,14 @@ export function ChatNextThread({
   // Held in a ref so the effects above `join` can ask for a join, and a new `join` never asks the
   // host again: opening the page is one read.
   const joining = useRef<(run: string) => Promise<void>>(undefined)
+  // Asks the host which run it has on the session and joins it: the plugin starts runs (a wake turn)
+  // that no catch-up of rows would ever name.
+  const joinLive = useCallback(async () => {
+    if (!server || !key || !session) return
+    const { signal } = alive.current
+    const run = await readLiveRun({ server, key }, session, signal).catch(() => undefined)
+    if (run && !signal.aborted) void joining.current?.(run)
+  }, [server, key, session])
   const follow = useCallback(
     async (run: string) => {
       if (!server || !key || !session) return
@@ -931,15 +932,11 @@ export function ChatNextThread({
     return onSessionMoved((heard, moved) => {
       if (heard !== mine || (moved && moved !== session) || streaming.current) return
       if (document.visibilityState !== "visible") return
-      // The catch-up only reads rows; a run the plugin started (a wake turn) is found by asking.
-      void catchUp().then(async () => {
-        if (!session || streaming.current) return
-        const { signal } = alive.current
-        const run = await readLiveRun({ server, key }, session, signal).catch(() => undefined)
-        if (run && !signal.aborted) void joining.current?.(run)
+      void catchUp().then(() => {
+        if (!streaming.current) void joinLive()
       })
     })
-  }, [ready, server, key, session, catchUp])
+  }, [ready, server, key, session, catchUp, joinLive])
 
   // An open chat is read now and then even when it looks finished, since another device may have
   // started a turn; a page nobody is looking at asks nothing. A turn still being written is joined
@@ -1047,11 +1044,8 @@ export function ChatNextThread({
   })
   useEffect(() => {
     if (!ready || !server || !key || !session) return
-    const { signal } = alive.current
-    void readLiveRun({ server, key }, session, signal).then((run) => {
-      if (run && !signal.aborted) void joining.current?.(run)
-    })
-  }, [ready, server, key, session])
+    void joinLive()
+  }, [ready, server, key, session, joinLive])
 
   // A card opened shows its child's own transcript, read again as the child's state moves.
   const [opened, setOpened] = useState<{ id: string; goal: string }>()

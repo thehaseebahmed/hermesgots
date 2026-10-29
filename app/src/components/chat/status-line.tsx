@@ -2,9 +2,17 @@ import type { ReactNode } from "react"
 
 import { Spinner } from "@/components/ui/spinner"
 import { CATCHING_ACTIVITY, THINKING_ACTIVITY, WRITING_ACTIVITY } from "@/lib/format"
+import type { BusyKind } from "@/lib/busy-words"
 import { REPLY_INSET } from "@/lib/layout"
 import { useBusyWord } from "@/lib/use-busy-word"
 import { cn } from "@/lib/utils"
+
+/** The activity lines that are dressed in a rotating word; any other line stands as written. */
+const KIND_OF: Record<string, BusyKind | undefined> = {
+  [THINKING_ACTIVITY]: "thinking",
+  [WRITING_ACTIVITY]: "writing",
+  [CATCHING_ACTIVITY]: "catching",
+}
 
 /**
  * What a reply is doing, in one line under it: the chat's own activity line, and the line a
@@ -25,15 +33,7 @@ export function StatusLine({
   children?: ReactNode
 }) {
   const working = Boolean(text) && !waiting
-  const kind = !working
-    ? undefined
-    : text === THINKING_ACTIVITY
-      ? "thinking"
-      : text === WRITING_ACTIVITY
-        ? "writing"
-        : text === CATCHING_ACTIVITY
-          ? "catching"
-          : undefined
+  const kind = working && text ? KIND_OF[text] : undefined
   const word = useBusyWord(kind, seed) ?? text
   return (
     <div

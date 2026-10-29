@@ -660,7 +660,7 @@ export const MessageItem = memo(function MessageItem({
   // data rather than a word: `0 && <line/>` is the numeral 0, which React would draw, so the line
   // is asked for by comparing the count.
   const subagentCount = subagents ?? 0
-  const shown = subagentCount > 0 && Boolean(subagentsInline) && Boolean(onShowSubagents)
+  const shown = subagentCount > 0 && Boolean(subagentsInline) && onShowSubagents !== undefined
   const activity = statusLine
     ? awaitingApproval
       ? "Waiting for your approval…"

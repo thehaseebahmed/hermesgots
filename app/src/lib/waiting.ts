@@ -208,6 +208,18 @@ export function useLiveRun(
 }
 
 /**
+ * Whether the host still has subagents at work for this session, or a wake turn it owes: a boolean
+ * read inside the snapshot, so a screen that only needs the fact re-renders when it flips and not
+ * on every poll of everyone's sessions.
+ */
+export function useHostBusy(sessionId: string | undefined): boolean {
+  useWaiting()
+  return useSyncExternalStore(subscribe, () =>
+    Boolean(sessionId && (subagents[sessionId] || waking[sessionId])),
+  )
+}
+
+/**
  * The id of the run the host has in flight for this session, from the same shared poll. Unlike its
  * status it changes when one run hands over to the next (a wake turn starting as the last one ends),
  * which is what a screen that follows runs has to notice.
