@@ -180,14 +180,10 @@ jobs:
             exit 1
           fi
           notes="$RUNNER_TEMP/release-notes.txt"
-          # App Distribution refuses notes past an undocumented length (a squash-merge message carrying
-          # a long PR body did), after the APK is already uploaded and the job has failed. The commit
-          # message is cut to a size well under it, on a character boundary, and says so.
-          message=$(git log -1 --format=%B "$GITHUB_SHA")
-          if [ "${#message}" -gt 1000 ]; then
-            message="$(printf '%s' "$message" | cut -c1-1000)…"
-          fi
-          { echo "$ANDROID_VERSION_NAME ($REF_NAME)"; echo; printf '%s\n' "$message"; } > "$notes"
+          # The notes name the change by its subject, which a squash merge sets to the PR's title. The
+          # body is every commit's message, and App Distribution refuses notes past an undocumented
+          # length after the APK is already uploaded, which failed the job once.
+          { echo "$ANDROID_VERSION_NAME ($REF_NAME)"; echo; git log -1 --format=%s "$GITHUB_SHA"; } > "$notes"
           apk=$(ls android/app/build/outputs/apk/debug/*.apk | head -n1)
           status=0
           npx --yes firebase-tools@15.31.0 appdistribution:distribute "$apk" \
