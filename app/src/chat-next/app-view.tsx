@@ -25,6 +25,7 @@ import { useFirstRows } from "@/components/chat/first-rows"
 import { Compacted, ModelChange } from "@/components/chat/model-change"
 import { QuestionCard } from "@/components/chat/question-card"
 import { AskAgainContext } from "@/components/chat/session-cards"
+import { StatusLine } from "@/components/chat/status-line"
 import { SubagentLine } from "@/components/chat/subagent-line"
 import { SubagentsSheet } from "@/components/chat/subagents"
 import { ThreadCard } from "@/components/chat/thread-card"
@@ -45,6 +46,7 @@ import { compactionMarks } from "@/lib/compactions"
 import { db, type ApprovalChoice, type Message } from "@/lib/db"
 import type { DelegatedAgent } from "@/lib/hermes"
 import { usePluginFeatureOn } from "@/lib/features"
+import { CATCHING_ACTIVITY } from "@/lib/format"
 import { COLUMN_BOX, REPLY_INSET } from "@/lib/layout"
 import { modelChanges } from "@/lib/model-changes"
 import { useDraws } from "@/lib/openui-draws"
@@ -96,6 +98,7 @@ export function AppThreadView({
   agents,
   away,
   failure,
+  catchingUp,
   older,
   origin,
   earlier,
@@ -225,7 +228,8 @@ export function AppThreadView({
     routeChat: main?.routeChat,
   })
   const { drawn, cut } = useFirstRows(chatId, flow, flow.length > 0)
-  const empty = Boolean(main) && !flow.length && !moved.trailing.length && !streaming
+  // A Main still being read is not an empty one: its greeting would say there is nothing here.
+  const empty = Boolean(main) && !flow.length && !moved.trailing.length && !streaming && !catchingUp
   const unstarted = Boolean(blank) && !messages.length && !streaming && !queue?.items.length
   const running = source.agents.filter((agent) => agent.status === "running").length
   const lastId = messages.at(-1)?.id
@@ -333,13 +337,16 @@ export function AppThreadView({
                     {compacted.trailing && <Compacted compaction={compacted.trailing} />}
                     {moved.trailing.map(marker)}
                     {running > 0 && !inline && (
-                      <SubagentLine
-                        count={running}
-                        onOpen={() => setSheet(true)}
-                        className="px-1"
-                      />
+                      <div className={cn(COLUMN_BOX, REPLY_INSET)}>
+                        <SubagentLine count={running} onOpen={() => setSheet(true)} />
+                      </div>
                     )}
                   </AgentsContext.Provider>
+                  {catchingUp && (
+                    <div className={COLUMN_BOX} data-catching-up>
+                      <StatusLine text={CATCHING_ACTIVITY} seed={chatId} />
+                    </div>
+                  )}
                   {queue?.items.map((item) => (
                     <div
                       key={item.id}

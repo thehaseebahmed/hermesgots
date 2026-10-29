@@ -49,7 +49,13 @@ test("a reply never told how many there are says nothing about them", async () =
 test("the dot parting the words from the count takes the count's blue", async () => {
   let dot: Element | null = null
   await mount(
-    <MessageItem message={reply} showStats onShowSubagents={() => {}} subagents={2} subagentsInline />,
+    <MessageItem
+      message={reply}
+      showStats
+      onShowSubagents={() => {}}
+      subagents={2}
+      subagentsInline
+    />,
     async () => {
       dot = document.querySelector('[data-slot="status-separator"]')
     },
@@ -60,4 +66,60 @@ test("the dot parting the words from the count takes the count's blue", async ()
     /(^|\s)text-info(\s|$)/,
     "and it belongs to the blue line, not to the accent words",
   )
+})
+
+test("with working words the count rides beside them and brings no loader of its own", async () => {
+  let loaders = 0
+  await mount(
+    <MessageItem
+      message={reply}
+      showStats
+      onShowSubagents={() => {}}
+      subagents={2}
+      subagentsInline
+    />,
+    async () => {
+      loaders = document.querySelectorAll('[data-slot="status-line"] [role="status"]').length
+    },
+  )
+  assert.equal(loaders, 1, "the status line's loader serves the count too")
+})
+
+test("with no working words the count is a row of its own, with a loader in its own blue", async () => {
+  const running: Message = {
+    ...reply,
+    tools: [
+      {
+        toolCallId: "t-1",
+        tool: "terminal",
+        label: "sleep",
+        status: "running",
+        startedAt: 2,
+        contentOffset: 14,
+      },
+    ],
+  }
+  let row: Element | null = null
+  let separator: Element | null = null
+  await mount(
+    <MessageItem
+      message={running}
+      showStats
+      onShowSubagents={() => {}}
+      subagents={2}
+      subagentsInline
+    />,
+    async () => {
+      row =
+        [...document.querySelectorAll("button")].find((one) =>
+          /2 subagents running/.test(one.textContent ?? ""),
+        ) ?? null
+      separator = document.querySelector('[data-slot="status-separator"]')
+    },
+  )
+  assert.ok(row, "the count is drawn")
+  assert.equal(separator, null, "with nothing to follow, there is no dot")
+  assert.ok(row!.querySelector('[role="status"]'), "and it has its own loader")
+  assert.match(row!.getAttribute("class") ?? "", /(^|\s)text-info(\s|$)/)
+  assert.match(row!.getAttribute("class") ?? "", /min-h-\[29px\]/, "in the work rows' shape")
 })

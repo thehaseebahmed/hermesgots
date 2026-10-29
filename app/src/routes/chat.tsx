@@ -22,7 +22,7 @@ import {
   SAFETY_MS,
   SEND_CAUGHT_UP_MS,
 } from "@/lib/freshness"
-import { COLUMN_BOX } from "@/lib/layout"
+import { COLUMN_BOX, REPLY_INSET } from "@/lib/layout"
 import type { ComposerControls } from "@/chat-next/page"
 import { opensOnChatNext } from "@/chat-next/route"
 import { prepareTurn, queueTurn, startTurn, steerTurn, triageTurn } from "@/chat-next/turn"
@@ -1386,11 +1386,9 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
                   {compacted.trailing && <Compacted compaction={compacted.trailing} />}
                   {moved.trailing.map(moveMarker)}
                   {subagentsRunning > 0 && !drawsInline && (
-                    <SubagentLine
-                      count={subagentsRunning}
-                      onOpen={showSubagents}
-                      className="px-1"
-                    />
+                    <div className={`${COLUMN_BOX} ${REPLY_INSET}`}>
+                      <SubagentLine count={subagentsRunning} onOpen={showSubagents} />
+                    </div>
                   )}
                 </AgentsContext.Provider>
               </MessageScrollerContent>

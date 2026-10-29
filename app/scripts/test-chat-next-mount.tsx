@@ -12,6 +12,8 @@ import { attachmentsText } from "@/lib/attachment-text"
 import { BreakReminderActivityContext } from "@/components/break-reminder-context"
 import { FIRST_ROWS } from "@/components/chat/first-rows"
 import { db, type Profile, type Settings } from "@/lib/db"
+import { BUSY_WORDS } from "@/lib/busy-words"
+
 import { fakeHost } from "./chat-next-host.ts"
 import { SALES, block, cardOf, codeOf, drawn, replyRow, warm } from "./openui-kit.tsx"
 import {
@@ -51,6 +53,8 @@ async function until(check: () => boolean, what: string) {
   }
   assert.ok(check(), what)
 }
+
+const writing = (words: string) => BUSY_WORDS.writing.some((word) => words.includes(`${word}…`))
 
 test("with the switch on, a plain chat opens on chat-next, read from its bot and its session", async () => {
   await seedChats([{ id: "c-next", title: "Sky colours", messages: ["held by the old screen"] }], {
@@ -631,9 +635,9 @@ test("the header's line stays put while a reply works; the thread says what it i
     await sendFromComposer("Look around")
     await until(() => host.asked.runs === 1, "the turn is running")
     host.latest.run!.say("Looking.")
-    await until(() => text().includes("Writing…"), "the thread says the reply is being written")
+    await until(() => writing(text()), "the thread says the reply is being written")
     await until(() => line().includes("repo"), "the header names the bot and its repos")
-    assert.ok(!line().includes("Writing…"), "and never what the reply is doing")
+    assert.ok(!writing(line()), "and never what the reply is doing")
     host.latest.run!.finish("Looking.")
   })
 })
@@ -643,7 +647,7 @@ test("a reply the host wrote with no finish reason is not drawn as still being w
   host.seed([{ user: "Look around", reply: "All done.", unmarked: true }])
   await mount(chatScreen("c-unmarked"), async () => {
     await until(() => replies().includes("All done."), "the turn is drawn")
-    await until(() => host.asked.runs === 0 && !text().includes("Writing…"), "and it is at rest")
+    await until(() => host.asked.runs === 0 && !writing(text()), "and it is at rest")
   })
 })
 
@@ -652,7 +656,7 @@ test("a turn the host gave up on is drawn as failed, in the host's words, and no
   host.seed([{ user: "Look around", reply: "", failed: "Your request was not processed." }])
   await mount(chatScreen("c-failed"), async () => {
     await until(() => text().includes("Your request was not processed."), "the host's words show")
-    assert.ok(!text().includes("Writing…"), "and the turn is at rest")
+    assert.ok(!writing(text()), "and the turn is at rest")
   })
 })
 

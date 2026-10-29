@@ -660,24 +660,24 @@ export const MessageItem = memo(function MessageItem({
   // data rather than a word: `0 && <line/>` is the numeral 0, which React would draw, so the line
   // is asked for by comparing the count.
   const subagentCount = subagents ?? 0
-  const shown = subagentCount > 0 && Boolean(subagentsInline) && Boolean(onShowSubagents)
+  const shown = subagentCount > 0 && Boolean(subagentsInline) && onShowSubagents !== undefined
   const activity = statusLine
     ? awaitingApproval
       ? "Waiting for your approval…"
       : describeActivity(message)
     : undefined
+  // The count rides on working words, whose loader serves it; beside a wait there is no loader.
+  const suffixed = shown && Boolean(activity) && !waiting
   // Empty, the row would still add two of the message's gaps around itself, so it is drawn only
   // once a line shows.
   const footerLines = [
-    (activity || shown) && (
-      <StatusLine key="status" text={activity} waiting={waiting}>
-        {shown && onShowSubagents && (
+    activity && (
+      <StatusLine key="status" text={activity} seed={message.id} waiting={waiting}>
+        {suffixed && onShowSubagents && (
           <>
-            {activity && (
-              <span aria-hidden data-slot="status-separator" className="text-info">
-                ·
-              </span>
-            )}
+            <span aria-hidden data-slot="status-separator" className="text-info">
+              ·
+            </span>
             <SubagentLine
               count={subagentCount}
               onOpen={onShowSubagents}
@@ -687,6 +687,10 @@ export const MessageItem = memo(function MessageItem({
           </>
         )}
       </StatusLine>
+    ),
+    // With no working words to ride on, the count is a row of its own, with its own loader.
+    shown && !suffixed && onShowSubagents && (
+      <SubagentLine key="subagents" count={subagentCount} onOpen={onShowSubagents} />
     ),
     // An error on a reply that streamed says so plainly: it isn't the bot's answer.
     failed && (

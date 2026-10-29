@@ -161,3 +161,27 @@ test("words written before and after a stream dies each appear once, with no cal
     await showsEverything(phone, host, "all of it once the run ends")
   })
 })
+
+test("a run that takes over as the last one ends is joined without leaving the chat", async () => {
+  const host = fakeHost("memento-reattach-handover", { plugin: true })
+  host.seed([{ user: "earlier", reply: "Earlier.", tools: 0 }])
+  await withDevice(openDevice(host), async (phone) => {
+    await showsEverything(phone, host, "the finished chat first")
+    const first = host.startElsewhere("the first turn")
+    first.say("\n\nFirst words.")
+    await eventually(
+      () => assert.deepEqual(lastTurn(phone)?.texts, ["First words."]),
+      "the first run is followed",
+    )
+    // The host's status reads running before and after: only the run's id tells them apart.
+    first.finish("First words.")
+    const second = host.startElsewhere("the wake turn")
+    second.say("\n\nWoken words.")
+    await eventually(
+      () => assert.deepEqual(lastTurn(phone)?.texts, ["Woken words."]),
+      "the run that took over is followed, with no remount",
+    )
+    second.finish("Woken words.")
+    await showsEverything(phone, host, "all of it once the second run ends")
+  })
+})
