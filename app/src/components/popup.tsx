@@ -245,6 +245,7 @@ export function PopupContent({
           >
             <Popover.Popup
               ref={popup}
+              data-popup-form={form}
               initialFocus={focus}
               className={cn(
                 "flex max-h-[min(36rem,var(--available-height))] max-w-(--available-width) origin-(--transform-origin) flex-col overflow-hidden rounded-2xl bg-popover pb-3 text-sm text-popover-foreground shadow-2xl ring-1 ring-foreground/5 transition-[opacity,scale] duration-150 outline-none data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0 motion-reduce:transition-none dark:ring-foreground/10",
@@ -277,6 +278,7 @@ export function PopupContent({
           <Drawer.Viewport className="fixed inset-0 z-50 flex justify-end">
             <Drawer.Popup
               ref={popup}
+              data-popup-form={form}
               initialFocus={focus}
               className={cn(
                 "relative flex h-full w-[clamp(calc(var(--spacing)*103),33.33vw,calc(var(--spacing)*103*4/3))] max-w-[calc(100vw-3.5rem)] flex-col overflow-hidden rounded-l-2xl bg-popover pb-6 text-sm text-popover-foreground shadow-lg outline-none",
@@ -313,6 +315,7 @@ export function PopupContent({
         <Drawer.Viewport className="fixed inset-0 z-50 flex items-end justify-center">
           <Drawer.Popup
             ref={popup}
+            data-popup-form={form}
             initialFocus={focus}
             className={cn(
               "group/popup relative flex max-h-[85dvh] w-full max-w-[640px] flex-col overflow-hidden rounded-t-[28px] bg-popover pb-[max(1.5rem,env(safe-area-inset-bottom))] text-sm text-popover-foreground shadow-lg outline-none",

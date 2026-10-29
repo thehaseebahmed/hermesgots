@@ -791,7 +791,7 @@ function LevelPick({
   onPick: (level: CleanupLevel) => void
 }) {
   return (
-    <div className="flex min-h-0 flex-col gap-1.5 overflow-y-auto" data-cleanup-levels>
+    <div className="flex min-h-0 flex-col gap-1.5 overflow-y-auto md:grid md:grid-cols-2 lg:flex lg:flex-col" data-cleanup-levels>
       {CLEANUP_LEVEL_ROWS.map((row) => {
         const chosen = row.level === level
         return (

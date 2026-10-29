@@ -26,9 +26,11 @@ import {
 import { Button } from "@/components/ui/button"
 import {
   absent,
+  atWidth,
   click,
   find,
   findAll,
+  laptop,
   mount,
   settle,
   text,
@@ -505,6 +507,37 @@ test("a pick offers no search over a list too short to need one", async () => {
     },
   )
 })
+
+const pickShape = () => find("[data-popup-form]")?.getAttribute("data-popup-form")
+
+const aPick = (
+  <PickSurface open onOpenChange={() => {}} title="Image">
+    <PickList
+      label="Image"
+      searchable={false}
+      options={[{ id: "gots", label: "Gots" }]}
+      onPick={() => {}}
+    />
+  </PickSurface>
+)
+
+test(
+  "a pick rises from the bottom as a sheet on a phone and a tablet",
+  atWidth(768, async () => {
+    await mount(aPick, async () => {
+      assert.equal(pickShape(), "sheet", "a tablet still takes the sheet the phone has")
+    })
+  }),
+)
+
+test(
+  "a pick is a drawer beside the screen from a laptop",
+  laptop(async () => {
+    await mount(aPick, async () => {
+      assert.equal(pickShape(), "drawer", "at a laptop's width the list arrives in its own column")
+    })
+  }),
+)
 
 test("a pick surface says what it is picking and holds the list", async () => {
   await mount(
