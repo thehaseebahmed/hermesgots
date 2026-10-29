@@ -36,6 +36,7 @@ import {
 import { COLUMN_BOX } from "@/lib/layout"
 import type { ComposerControls } from "@/chat-next/page"
 import { opensOnChatNext } from "@/chat-next/route"
+import { cn } from "@/lib/utils"
 import { prepareTurn, queueTurn, steerTurn } from "@/chat-next/turn"
 import { quietly } from "@/lib/report"
 import { threadCount, threadsLine } from "@/lib/bot-chrome"
@@ -449,7 +450,9 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
       data-slot="chat-pane"
       data-pane={slot}
       data-chat-next
-      className="relative flex min-h-0 flex-1 flex-col"
+      data-code-session={chat?.projectId ? "" : undefined}
+      // A code session reads in JetBrains Mono, a chat in the app's own face.
+      className={cn("relative flex min-h-0 flex-1 flex-col", chat?.projectId && "font-code")}
       inert={!ready}
     >
       {chat && bot && ready ? (

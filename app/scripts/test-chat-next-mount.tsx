@@ -311,3 +311,18 @@ test("a plan waiting is approved from its card: the mode moves and the plan's ru
     assert.match(input.at(-1)!.content, /plans\/hermes-x\.md/, "told to work through that plan")
   })
 })
+
+test("a code session reads in JetBrains Mono, and a chat keeps the app's face", async () => {
+  await sessionOnChatNext("c-mono")
+  await mount(chatScreen("c-mono"), async () => {
+    await until(
+      () => find("[data-chat-next]")?.classList.contains("font-code") ?? false,
+      "the session's pane reads in the code face",
+    )
+  })
+  await onChatNext("c-sans")
+  await mount(chatScreen("c-sans"), async () => {
+    await until(() => Boolean(composerField()), "the chat has loaded")
+    assert.equal(find("[data-chat-next]")!.classList.contains("font-code"), false, "a plain chat")
+  })
+})
