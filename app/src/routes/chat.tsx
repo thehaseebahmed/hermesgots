@@ -10,7 +10,7 @@ import {
   useState,
 } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { Link, matchPath, useLocation, useNavigate, useParams } from "react-router"
+import { matchPath, useLocation, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
 import {
   ArchiveXIcon,
@@ -49,7 +49,6 @@ import { Composer } from "@/components/chat/composer"
 import { MessageItem } from "@/components/chat/message-item"
 import { Compacted, ModelChange } from "@/components/chat/model-change"
 import { DayHeading } from "@/components/chat/day-heading"
-import { MovedMarker } from "@/components/chat/moved-marker"
 import { ThreadCard } from "@/components/chat/thread-card"
 import { prLabel } from "@/components/chat/pr-look"
 import { Cheatsheet } from "@/components/chat/cheatsheet"
@@ -74,8 +73,6 @@ import {
   UsageSheet,
   type ContextUsage,
 } from "@/components/chat/usage-sheet"
-import { Bot } from "@/components/bot"
-import { RepoChips } from "@/components/repos"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -136,13 +133,9 @@ import {
   updateConversation,
 } from "@/lib/db"
 import { compactionMarks } from "@/lib/compactions"
-import { dayOf } from "@/lib/days"
-import { moveMarks, openedThread } from "@/lib/move-marks"
-import { undoMove } from "@/lib/moves"
-import { drawnThreadIds, threadCards } from "@/lib/thread-cards"
 import { serverConfig } from "@/lib/connection"
 import { describeActivity } from "@/lib/format"
-import { supportsSteer, type DelegatedAgent, type HermesProject, type Move } from "@/lib/hermes"
+import { supportsSteer, type DelegatedAgent, type HermesProject } from "@/lib/hermes"
 import { readProjects, useProjects } from "@/lib/projects"
 import {
   caughtUpWithin,
@@ -187,11 +180,12 @@ import {
   type RepoRef,
 } from "@/lib/workspace"
 import { lastActivityAt } from "@/lib/session-work"
-import { useReadyLine } from "@/lib/greeting"
 import { hold, type HoldSlot } from "@/lib/chat-hold"
-import { SUGGESTIONS } from "@/lib/suggestions"
-import { DEFAULT_BOT_ID } from "@/components/bots"
-import { useBotThreads, useNow, useThreads, type Thread } from "@/lib/threads"
+import { useBotThreads } from "@/lib/threads"
+import { EmptyState, MainEmptyState } from "@/components/chat/empty-states"
+import { useMainFlow } from "@/components/chat/main-flow"
+
+export { SETUP_COPY } from "@/components/chat/empty-states"
 import { draftKey } from "@/lib/drafts"
 import { AgentsContext, runningAgents, stopSubagents, useSessionAgents } from "@/lib/agents"
 import { spawnInFlight } from "@/lib/spawn"
@@ -210,91 +204,7 @@ export const FIRST_ROWS = 8
 const LEAST_ROW = 44
 const REST_AFTER_MS = 250
 
-type FlowEntry =
-  | { kind: "heading"; day: string; at: number }
-  | { kind: "card"; thread: Thread }
-  | { kind: "message"; message: Message }
-
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
-
-/** What a chat or session not started yet says: the greeting, then one of the bot's lines. */
-function ReadyLine({ botId, id }: { botId?: string; id?: string }) {
-  const { greeting, line } = useReadyLine(botId ?? DEFAULT_BOT_ID, id)
-  return (
-    <div className="flex max-w-xs flex-col gap-0.5 text-lg font-medium tracking-tight">
-      {greeting && <p>{greeting}</p>}
-      <p>{line}</p>
-    </div>
-  )
-}
-
-export const SETUP_COPY = "Point Gots at your Hermes Agent API server to start chatting."
-
-function EmptyState({
-  botId,
-  configured,
-  session,
-  id,
-  line = true,
-}: {
-  botId?: string
-  configured: boolean
-  /** A project session not started yet: the repos it will work in. */
-  session?: { repos: RepoRef[] }
-  /** The chat or session on screen, none for a new chat. */
-  id?: string
-  line?: boolean
-}) {
-  return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-6 px-4 pt-24 pb-8 text-center">
-      <Bot id={botId} animate className="size-24" />
-      {configured ? (
-        <div className="flex max-w-md flex-col items-center gap-3">
-          {line && <ReadyLine botId={botId} id={id} />}
-          {session && <RepoChips repos={session.repos} />}
-        </div>
-      ) : (
-        <>
-          <p className="max-w-sm text-sm text-muted-foreground">{SETUP_COPY}</p>
-          <Button nativeButton={false} render={<Link to="/settings" replace />} size="lg">
-            <SettingsIcon data-icon="inline-start" />
-            Open settings
-          </Button>
-        </>
-      )}
-    </div>
-  )
-}
-
-function MainEmptyState({
-  botId,
-  id,
-  onSend,
-}: {
-  botId?: string
-  /** Main itself, so its line is the one it keeps. */
-  id?: string
-  onSend: (text: string) => Promise<void>
-}) {
-  return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-6 px-4 pt-24 pb-8 text-center">
-      <Bot id={botId} animate className="size-24" />
-      <ReadyLine botId={botId} id={id} />
-      <div className="flex max-w-md flex-wrap justify-center gap-2">
-        {SUGGESTIONS.map((text) => (
-          <Button
-            key={text}
-            variant="outline"
-            className="h-auto min-h-10 rounded-full whitespace-normal"
-            onClick={() => void onSend(text).catch(() => {})}
-          >
-            {text}
-          </Button>
-        ))}
-      </div>
-    </div>
-  )
-}
 
 function PendingChat() {
   return (
@@ -789,17 +699,24 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
       ],
     [messages],
   )
-  const threadList = useThreads(
-    botThreads && conversation?.main ? conversation.profileId : gone ? profile?.id : undefined,
-  )
-  const cards = useMemo(
-    () =>
-      botThreads && conversation?.main
-        ? threadList && threadCards(thread ?? NO_ROWS, threadList)
-        : undefined,
-    [botThreads, conversation?.main, thread, threadList],
-  )
-  const threadsDrawnAsCards = useMemo(() => drawnThreadIds(cards), [cards])
+  const {
+    threadList,
+    cards,
+    flow,
+    moved,
+    moveThatOpenedThread,
+    undo: undoMoveOutMain,
+    marker: moveMarker,
+  } = useMainFlow({
+    chatId: id,
+    profileId: conversation?.profileId ?? "",
+    thread,
+    moves: conversation?.moves,
+    on: Boolean(botThreads && conversation?.main),
+    listFor: gone ? profile?.id : undefined,
+    afterUndo: refreshQueue,
+    routeChat,
+  })
   const answered =
     settings !== undefined &&
     botThreads !== undefined &&
@@ -812,31 +729,6 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   useLayoutEffect(() => {
     if (answered) readyRef.current = { id }
   })
-  const now = useNow()
-  const flow = useMemo(() => {
-    const entries: FlowEntry[] = []
-    let day: string | undefined
-    const heading = (at: number) => {
-      if (!cards) return
-      const label = dayOf(at, now)
-      if (label === day) return
-      day = label
-      entries.push({ kind: "heading", day: label, at })
-    }
-    for (const message of thread ?? NO_ROWS) {
-      for (const card of cards?.before.get(message.id) ?? []) {
-        heading(card.chat.createdAt)
-        entries.push({ kind: "card", thread: card })
-      }
-      heading(message.createdAt)
-      entries.push({ kind: "message", message })
-    }
-    for (const card of cards?.trailing ?? []) {
-      heading(card.chat.createdAt)
-      entries.push({ kind: "card", thread: card })
-    }
-    return entries
-  }, [cards, thread, now])
   // The chat this pane has drawn whole. A long one opens on its last rows and draws the rest in a
   // transition; one short enough to be sure of not overflowing the window is cheap to draw at once,
   // so it is whole from its first frame, with no second commit to disturb its placing.
@@ -861,48 +753,6 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   const compacted = useMemo(
     () => compactionMarks(thread ?? [], conversation?.compactions),
     [thread, conversation?.compactions],
-  )
-  const moved = useMemo(
-    () => moveMarks(thread ?? [], conversation?.moves, threadsDrawnAsCards),
-    [thread, conversation?.moves, threadsDrawnAsCards],
-  )
-  const moveThatOpenedThread = useMemo(() => {
-    const found = new Map<string, Move>()
-    for (const move of conversation?.moves ?? []) {
-      const threadId = openedThread(move)
-      if (threadId) found.set(threadId, move)
-    }
-    return found
-  }, [conversation?.moves])
-  // One query for every moved-to thread's title, not one per marker: a write to any conversation
-  // re-runs a live query.
-  const movedIds = useMemo(
-    () => [...new Set(conversation?.moves?.map((m) => m.threadId))].sort(),
-    [conversation?.moves],
-  )
-  const movedTitles = useLiveQuery(
-    async () =>
-      new Map(
-        (await db.conversations.bulkGet(movedIds)).flatMap((c) => (c ? [[c.id, c.title]] : [])),
-      ),
-    [movedIds],
-  )
-  const undoMoveOutMain = (move: Move) =>
-    id &&
-    void undoMove(id, move.id)
-      .then(() => refreshQueue(id))
-      .catch((error) =>
-        toast.error(error instanceof Error ? error.message : "Couldn't undo the move"),
-      )
-  const moveMarker = (move: Move) => (
-    <MovedMarker
-      key={move.id}
-      move={move}
-      title={movedTitles?.get(move.threadId)}
-      profileId={conversation?.profileId ?? ""}
-      current={move.threadId === routeChat}
-      onUndo={undoMoveOutMain}
-    />
   )
   const draws = useDraws(thread ?? NO_ROWS, profile)
   // Only a run can be steered, and only on a Hermes that has the route.
