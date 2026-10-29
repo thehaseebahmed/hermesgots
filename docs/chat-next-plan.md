@@ -63,7 +63,7 @@ In this order, one PR each unless two are trivially small:
 2. Long chats: open on the newest `FIRST_ROWS` and draw the rest a beat later; replace the per-change `JSON.stringify` comparison in `shared` (`page.tsx`) with a cheap identity check. Escalates to an e2e flow (`bot-threads` holds the reader's place).
 3. Interfaces: `useDraws` gives each row its `blocks`.
 4. The limit banner above the composer.
-5. The header's line (`sessionSubtitle`, reply count beside Main, a session centred).
+5. The header's line: not ported. chat-next's header stays constant and what a reply is doing is drawn in the thread.
 6. Interim words (`message.interim`).
 7. This device's own photos drawn from held bytes (`useMediaSources`).
 8. Stats (`showStats`, tokens a second); needs something to measure them.

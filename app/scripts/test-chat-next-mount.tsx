@@ -624,21 +624,17 @@ test("an interface a reply wrote draws as the app's own card, not as its code", 
   })
 })
 
-test("a session's header line says what the reply is doing while it works", async () => {
+test("the header's line stays put while a reply works; the thread says what it is doing", async () => {
   const host = await sessionOnChatNext("c-activity")
   await mount(chatScreen("c-activity"), async () => {
+    const line = () => find('[data-slot="header-line"]')?.textContent ?? ""
     await sendFromComposer("Look around")
     await until(() => host.asked.runs === 1, "the turn is running")
     host.latest.run!.say("Looking.")
-    await until(
-      () => find('[data-slot="header-line"]')?.textContent?.includes("Writing…") ?? false,
-      "the header says the reply is being written",
-    )
+    await until(() => text().includes("Writing…"), "the thread says the reply is being written")
+    await until(() => line().includes("repo"), "the header names the bot and its repos")
+    assert.ok(!line().includes("Writing…"), "and never what the reply is doing")
     host.latest.run!.finish("Looking.")
-    await until(
-      () => !(find('[data-slot="header-line"]')?.textContent ?? "").includes("Writing…"),
-      "and stops saying so when the reply is done",
-    )
   })
 })
 

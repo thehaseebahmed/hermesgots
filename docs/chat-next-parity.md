@@ -18,7 +18,6 @@ What the current chat screen (`CurrentChatPage` in `app/src/routes/chat.tsx`, ov
 | Interfaces (OpenUI) | `useDraws` hands each row its `blocks` |
 | Stats | A turn this device watched from its start keeps its tokens, speed and time with the row that opened it (`stats.ts`); a turn followed from its middle has none |
 | The limit banner | `LimitNotice` above the composer, opening the usage sheet |
-| The header's line | What a session's reply is doing, and a thread's reply count beside Main |
 | Long chats | `useFirstRows` opens on the newest rows and draws the rest a beat later; turns are compared without building a string each (`equal.ts`) |
 | Following the reader | `FollowOnSend` and `FollowAfterApproval` |
 | Interim words | `message.interim` joins the reply where the deltas did not carry it |
@@ -37,6 +36,7 @@ What the current chat screen (`CurrentChatPage` in `app/src/routes/chat.tsx`, ov
 
 ## Not gaps
 
+- The header's activity line and the reply count beside Main. chat-next's header stays constant (Main's thread count, a session's bot and repos); what a reply is doing is drawn in the thread, so the thread has no status to push up to the header.
 - A project session's way back to Code (button and Android's back), its empty state with the repos it will work in, and a session left unsent deleted or kept as a draft.
 - A bot's Main: triage before every send, its thread cards, day headings and moved markers, its header, empty state and `/thread`, and a thread's way back to it.
 - The send path, the plugin queue, steering, a project session's workspace, the pills above the composer, the follow-up reads, the host's title, read marks and the code font match the current screen (ADR 0065, PR #669).

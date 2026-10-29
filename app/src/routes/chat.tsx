@@ -24,7 +24,6 @@ import {
 } from "@/lib/freshness"
 import { COLUMN_BOX } from "@/lib/layout"
 import type { ComposerControls } from "@/chat-next/page"
-import type { ThreadStatus } from "@/chat-next/app-view"
 import { opensOnChatNext } from "@/chat-next/route"
 import { prepareTurn, queueTurn, startTurn, steerTurn, triageTurn } from "@/chat-next/turn"
 import { quietly } from "@/lib/report"
@@ -394,9 +393,6 @@ function NextChat({
     chosenOf(chat?.modelChoice),
   )
   const [usageOpen, setUsageOpen] = useState(false)
-  // What the thread says it is doing, for the header's line.
-  const [status, setStatus] = useState<ThreadStatus>()
-  const here = status?.chatId === id ? status : undefined
   const limit = useMemo(
     () => ({ usage: { notice, provider, noticeDismissed }, onView: () => setUsageOpen(true) }),
     [notice, provider, noticeDismissed],
@@ -431,20 +427,17 @@ function NextChat({
               // Main is the bot's face, so its title is the bot's name, which Bot settings edits.
               // A session not started has no title yet, and its bot is the big one in the middle.
               title={unstarted ? "" : mainOn ? bot.name || chat.title : chat.title}
+              // The header never follows the reply: what the thread is doing is drawn in the thread.
               subtitle={
                 mainOn && threadList
                   ? threadsLine(threadCount(threadList))
                   : session && !unstarted
                     ? sessionSubtitle({
-                        activity: here?.activity,
                         botName: bot.name,
                         names: sessionRepos.map((repo) => repo.name),
                         cap: repoCap({ wide, xlarge: xl }),
                       })
-                    : here?.activity ||
-                      (mainPath && xl && here?.replies
-                        ? `${here.replies} ${here.replies === 1 ? "reply" : "replies"}`
-                        : undefined)
+                    : undefined
               }
               botId={bot.botId}
               muted={Boolean(chat.muted || bot.muted)}
@@ -466,7 +459,6 @@ function NextChat({
                 key={chat.hermesSessionId}
                 chatId={id}
                 code={Boolean(chat.projectId)}
-                onStatus={setStatus}
                 blank={unstarted ? { botId: bot.botId, repos: sessionRepos } : undefined}
                 main={
                   mainOn
@@ -514,12 +506,6 @@ function NextChat({
 }
 
 /**
- * The app's composer driving a chat-next thread. A message sent while a reply runs goes to the
- * plugin's queue, or steers the reply where the user asked to; one that can't go is said so and
- * handed back to the field. A project session's own cards take its place in the order the current
- * screen draws them: closed, blocked, then a plan waiting to be approved.
- */
-/**
  * What the pane knows of the account's limits and how to open the usage sheet, for the composer to
  * warn with: the composer is one component for the chat's life, so it reads this rather than being
  * handed it, and a change in the limits never remounts it.
@@ -529,6 +515,12 @@ const LimitContext = createContext<{
   onView: () => void
 } | null>(null)
 
+/**
+ * The app's composer driving a chat-next thread. A message sent while a reply runs goes to the
+ * plugin's queue, or steers the reply where the user asked to; one that can't go is said so and
+ * handed back to the field. A project session's own cards take its place in the order the current
+ * screen draws them: closed, blocked, then a plan waiting to be approved.
+ */
 function NextComposer(props: {
   controls: ComposerControls
   chatId: string

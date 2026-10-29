@@ -42,7 +42,6 @@ import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { compactionMarks } from "@/lib/compactions"
 import { db, type ApprovalChoice, type Message } from "@/lib/db"
 import type { DelegatedAgent } from "@/lib/hermes"
-import { describeActivity } from "@/lib/format"
 import { COLUMN_BOX } from "@/lib/layout"
 import { modelChanges } from "@/lib/model-changes"
 import { useDraws } from "@/lib/openui-draws"
@@ -70,19 +69,9 @@ const ChatOf = createContext<{
   chatId: string
   main?: MainView
   blank?: BlankView
-  onStatus?: (status: ThreadStatus) => void
 }>({
   chatId: "",
 })
-
-/** What the thread says of itself to the header above it: what the reply is doing, and its count. */
-export interface ThreadStatus {
-  chatId: string
-  /** What the streaming reply is doing, in words ("Running a command…"); none at rest. */
-  activity?: string
-  /** How many replies the thread holds. */
-  replies: number
-}
 
 /** A project session not started yet: its bot and the repos it will work in, said in its place. */
 export interface BlankView {
@@ -110,7 +99,7 @@ export function AppThreadView({
   stats,
   send,
 }: ThreadViewProps) {
-  const { chatId, main, blank, onStatus } = useContext(ChatOf)
+  const { chatId, main, blank } = useContext(ChatOf)
   // The files this device sent keep their bytes, so its own photos draw with the host away: only
   // the ones the thread's requests name are read.
   const sentPaths = useMemo(
@@ -146,10 +135,6 @@ export function AppThreadView({
     latestSend.current = send
   })
   const ask = useCallback((text: string) => latestSend.current(text, []), [])
-  const streamingReply = messages.findLast((message) => message.status === "streaming")
-  const activity = streamingReply && describeActivity(streamingReply)
-  const replies = messages.filter((message) => message.role === "assistant").length
-  useEffect(() => onStatus?.({ chatId, activity, replies }), [onStatus, chatId, activity, replies])
   const [shown, setShown] = useState<DelegatedAgent>()
   const [sheet, setSheet] = useState(false)
   const config = useMemo(
@@ -453,14 +438,11 @@ export function AppChatNextThread({
   main,
   blank,
   code,
-  onStatus,
   ...props
 }: ComponentProps<typeof ChatNextThread> & {
   chatId: string
   main?: MainView
   blank?: BlankView
-  /** Told what the thread is doing, for a header that says so. */
-  onStatus?: (status: ThreadStatus) => void
   /** A code session: the agent's own output reads in the code face. */
   code?: boolean
 }) {
@@ -472,9 +454,8 @@ export function AppChatNextThread({
       chatId,
       main: mainKey ? (JSON.parse(mainKey) as MainView) : undefined,
       blank: blankKey ? (JSON.parse(blankKey) as BlankView) : undefined,
-      onStatus,
     }),
-    [chatId, mainKey, blankKey, onStatus],
+    [chatId, mainKey, blankKey],
   )
   return (
     <CodeFaceProvider value={code ? "font-code" : undefined}>
