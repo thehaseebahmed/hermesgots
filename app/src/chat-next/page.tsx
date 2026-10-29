@@ -20,14 +20,13 @@ import { connectionKey } from "@/lib/connection"
 import { usePluginFeatureOn } from "@/lib/features"
 import { SAFETY_MS } from "@/lib/freshness"
 import { onSessionMoved, useLive } from "@/lib/live"
+import { knownLiveRun, useLiveRun } from "@/lib/waiting"
 import { db, type Attachment, type MessageStats, type SessionDb } from "@/lib/db"
 
 import { equal } from "./equal"
 import { cardsByPart, cardsOf, DELEGATE, delegated, type Agent, type Card } from "./agents"
 import {
-  atLeast,
   followRun,
-  MIN_HERMES,
   postRun,
   readQueue,
   actOnQueued,
@@ -36,10 +35,10 @@ import {
   readNewest,
   readPage,
   readTranscript,
-  readVersion,
   respond,
   startRun,
   stopRun,
+  HostAway,
   type Connection,
   type Queued,
 } from "./api"
@@ -554,8 +553,8 @@ export function ChatNextPage(options: ThreadOptions) {
 
 /**
  * A session read from the host and drawn. It works with the Hermes that shares a run's events
- * between every follower (`MIN_HERMES`), and says so on an older one rather than ask it for
- * anything. `server` is the bot's base URL, `/v1` or not.
+ * between every follower, which the plugin's manifest requires. `server` is the bot's base URL,
+ * `/v1` or not.
  */
 export function ChatNextThread({
   pollMs = POLL_MS,
@@ -606,10 +605,10 @@ export function ChatNextThread({
   const olderRun = useRef(0)
   const olderOn = useRef(false)
   const olderFailed = useRef(false)
-  const [host, setHost] = useState<"checking" | "ok" | "away" | { version?: string }>("checking")
-  // A host that cannot be reached is asked again, and meanwhile the chat is what the device holds.
-  const [asks, setAsks] = useState(0)
-  const ready = host === "ok"
+  // A host that cannot be reached is away, not failing: the chat is what the device holds, and the
+  // next read that gets an answer says it is back.
+  const [away, setAway] = useState(false)
+  const ready = Boolean(server && key && session)
   // A read begun before a send or a joined run is stale and does not land. Reads of the transcript
   // run one at a time, and a request that comes while one is out waits for it and is answered by
   // one more read after it, so a read that takes longer than the poll interval still lands.
@@ -621,30 +620,9 @@ export function ChatNextThread({
   // for a while.
   const noAgentsUntil = useRef(0)
   const noQueueUntil = useRef(0)
-
-  useEffect(() => {
-    if (!server || !key) return
-    const controller = new AbortController()
-    void readVersion({ server, key }, controller.signal).then((version) => {
-      if (controller.signal.aborted) return
-      if (version === "unreachable") setHost("away")
-      else setHost(version && atLeast(version) ? "ok" : { version })
-    })
-    return () => controller.abort()
-  }, [server, key, asks])
-
-  useEffect(() => {
-    if (host !== "away") return
-    const again = () => {
-      if (document.visibilityState === "visible") setAsks((n) => n + 1)
-    }
-    const timer = setInterval(again, idleMs)
-    document.addEventListener("visibilitychange", again)
-    return () => {
-      clearInterval(timer)
-      document.removeEventListener("visibilitychange", again)
-    }
-  }, [host, idleMs])
+  // Settles once the page's first read of the transcript has landed (or failed): a run joined before
+  // that would be replayed over a thread with no turn to put it in.
+  const firstRows = useRef<{ promise: Promise<void>; resolve: () => void }>(null)
 
   /** Drops the older read in flight, if any: what it lands would go above rows it was not read for. */
   const stopOlder = useCallback(() => {
@@ -712,22 +690,25 @@ export function ChatNextThread({
           await store.loaded().catch(() => undefined)
           const asking = Date.now() >= noAgentsUntil.current
           const askingQueue = Date.now() >= noQueueUntil.current
-          const [read, listed, queued] = await Promise.all([
-            // A turn's end reads the whole transcript: rows older than the ones that join what is held
-            // can only have changed then, and a read of the newest rows is the cheap one in between.
-            final
-              ? readTranscript({ server, key }, session, alive.current.signal).then((rows) => ({
-                  rows,
-                  more: false as boolean | undefined,
-                  joined: false,
-                }))
-              : readNewest({ server, key }, session, alive.current.signal, store.get().rows),
-            asking ? readAgents({ server, key }, session, alive.current.signal) : undefined,
-            askingQueue ? readQueue({ server, key }, session, alive.current.signal) : undefined,
-          ])
-          if (asking && !listed) noAgentsUntil.current = Date.now() + AGENTS_COOLDOWN_MS
-          if (askingQueue && !queued) noQueueUntil.current = Date.now() + AGENTS_COOLDOWN_MS
+          // The children and the queue are asked beside the transcript and land when they answer, so
+          // the thread is drawn as soon as its rows are, whichever read is the slowest.
+          const listing = asking
+            ? readAgents({ server, key }, session, alive.current.signal)
+            : undefined
+          const holding = askingQueue
+            ? readQueue({ server, key }, session, alive.current.signal)
+            : undefined
+          // A turn's end reads the whole transcript: rows older than the ones that join what is held
+          // can only have changed then, and a read of the newest rows is the cheap one in between.
+          const read = final
+            ? await readTranscript({ server, key }, session, alive.current.signal).then((rows) => ({
+                rows,
+                more: false as boolean | undefined,
+                joined: false,
+              }))
+            : await readNewest({ server, key }, session, alive.current.signal, store.get().rows)
           if (mine === reads.current) {
+            setAway(false)
             // Rows that replace the ones held make a page in flight for them stale.
             if (read.more !== undefined) stopOlder()
             // A write the device refuses leaves its copy behind, as it does for every event: the next
@@ -743,12 +724,22 @@ export function ChatNextThread({
               .catch(() => undefined)
             if (store.get().partial) void readOlder(read.more !== undefined)
             else setOlder("idle")
+          }
+          firstRows.current?.resolve()
+          const [listed, queued] = await Promise.all([listing, holding])
+          if (asking && !listed) noAgentsUntil.current = Date.now() + AGENTS_COOLDOWN_MS
+          if (askingQueue && !queued) noQueueUntil.current = Date.now() + AGENTS_COOLDOWN_MS
+          if (mine === reads.current) {
             if (listed) dispatch({ type: "agents", agents: listed })
             if (queued) dispatch({ type: "queue", ...queued })
           }
         } catch (error) {
-          if (!alive.current.signal.aborted && mine === reads.current) dispatch(failure(error))
+          if (alive.current.signal.aborted || mine !== reads.current) return
+          // A host that answered says what is wrong; one that did not is away.
+          if (error instanceof HostAway) setAway(true)
+          else dispatch(failure(error))
         } finally {
+          firstRows.current?.resolve()
           reading.current = null
         }
       })()
@@ -778,6 +769,8 @@ export function ChatNextThread({
   useEffect(() => {
     if (!ready) return
     alive.current = new AbortController()
+    let resolve = () => {}
+    firstRows.current = { promise: new Promise<void>((done) => (resolve = done)), resolve }
     void catchUp().then(() => settled.current?.("opened", asked()))
     // A device that was away missed what the others wrote; it asks again as it comes back.
     const back = () => {
@@ -867,11 +860,14 @@ export function ChatNextThread({
   // One run's events at a time, whoever started it, and which run that is, for Stop.
   const streaming = useRef(false)
   const followingRun = useRef<string>(undefined)
+  // The run last followed, so one the host still lists after its stream ended is not joined again.
+  const lastRun = useRef<string>(undefined)
   const follow = useCallback(
     async (run: string) => {
       if (!server || !key || !session) return
       streaming.current = true
       followingRun.current = run
+      lastRun.current = run
       try {
         await followRun(
           { server, key },
@@ -955,6 +951,44 @@ export function ChatNextThread({
     stallMs,
     streamOpen,
   ])
+
+  // A run the host says is working is joined at once, whatever the transcript's last turn looks like:
+  // the host writes a turn's rows only after its first tool round, so the transcript alone would
+  // leave the page unaware of it for that while. The shared poll the app's lists read says it for
+  // free, and one read beside the first catch-up covers a page with no bot of its own (the dev route).
+  const join = useCallback(
+    async (run: string) => {
+      const signal = alive.current.signal
+      if (streaming.current || lastRun.current === run) return
+      await firstRows.current?.promise
+      if (signal.aborted || streaming.current || lastRun.current === run) return
+      reads.current++
+      dispatch({ type: "attach" })
+      void follow(run)
+    },
+    [follow, dispatch],
+  )
+  const hostRun = useLiveRun(
+    server && key ? { baseUrl: server, apiKey: key } : undefined,
+    session ?? undefined,
+  )
+  useEffect(() => {
+    if (!ready || !hostRun || !server || !key || !session) return
+    const run = knownLiveRun({ baseUrl: server, apiKey: key }, session)?.runId
+    if (run) join(run)
+  }, [ready, hostRun, server, key, session, join])
+  // Held in a ref so a new `join` never asks the host again: this is one read per open.
+  const joining = useRef(join)
+  useEffect(() => {
+    joining.current = join
+  })
+  useEffect(() => {
+    if (!ready || !server || !key || !session) return
+    const { signal } = alive.current
+    void readLiveRun({ server, key }, session, signal).then((run) => {
+      if (run && !signal.aborted) void joining.current(run)
+    })
+  }, [ready, server, key, session])
 
   // A card opened shows its child's own transcript, read again as the child's state moves.
   const [opened, setOpened] = useState<{ id: string; goal: string }>()
@@ -1117,15 +1151,6 @@ export function ChatNextThread({
   if (!server || !key || !session)
     return <p className="p-4 text-sm">Open with ?server=&key=&session=</p>
 
-  if (typeof host === "object")
-    return (
-      <p data-unsupported role="alert" className="p-4 text-sm">
-        {host.version
-          ? `This host runs Hermes ${host.version}. This screen needs Hermes ${MIN_HERMES} or newer.`
-          : `Couldn't tell which Hermes this host runs. This screen needs Hermes ${MIN_HERMES} or newer.`}
-      </p>
-    )
-
   const asker = turns
     .at(-1)
     ?.parts.findLast((part) => part.kind === "tools")
@@ -1154,42 +1179,42 @@ export function ChatNextThread({
         onChoose={(choice) => void answer(doing.waiting as Waiting, choice)}
       />
     ) : null
-  const composer =
-    host === "away" ? null : Composer ? (
-      <Composer
-        controls={{
-          busy: doing.running,
-          send: sendTurn,
-          queue: queueMessage,
-          steer: steerMessage,
-          canSteer: doing.running && Boolean(steerTurn),
-          subagents,
-          stop,
-        }}
+  const composer = away ? null : Composer ? (
+    <Composer
+      controls={{
+        // A run the host works that this page has not joined yet is a turn running all the same.
+        busy: doing.running || Boolean(hostRun && !last?.done && !last?.failed),
+        send: sendTurn,
+        queue: queueMessage,
+        steer: steerMessage,
+        canSteer: doing.running && Boolean(steerTurn),
+        subagents,
+        stop,
+      }}
+    />
+  ) : (
+    <form
+      className="flex gap-2"
+      onSubmit={(event) => {
+        event.preventDefault()
+        void send()
+      }}
+    >
+      <textarea
+        data-composer
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        className="min-h-10 flex-1 rounded-md border bg-background px-3 py-2"
       />
-    ) : (
-      <form
-        className="flex gap-2"
-        onSubmit={(event) => {
-          event.preventDefault()
-          void send()
-        }}
+      <button
+        data-send
+        type="submit"
+        className="rounded-md bg-primary px-4 text-primary-foreground"
       >
-        <textarea
-          data-composer
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          className="min-h-10 flex-1 rounded-md border bg-background px-3 py-2"
-        />
-        <button
-          data-send
-          type="submit"
-          className="rounded-md bg-primary px-4 text-primary-foreground"
-        >
-          Send
-        </button>
-      </form>
-    )
+        Send
+      </button>
+    </form>
+  )
 
   return (
     <View
@@ -1200,7 +1225,7 @@ export function ChatNextThread({
       cards={cards}
       goals={goals}
       agents={agents}
-      away={host === "away"}
+      away={away}
       failure={doing.status === "failed" ? (doing.error ?? "") : undefined}
       older={older === "idle" ? undefined : { state: older, retry }}
       origin={origin}

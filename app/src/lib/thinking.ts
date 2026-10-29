@@ -216,6 +216,23 @@ export function thinkingRows(message: {
   return parts
 }
 
+/**
+ * Whether the row a quiet turn draws between calls is gone only because a call runs: the one case
+ * where `thinkingRows` answers nothing for a reply that would otherwise draw it. The thread keeps
+ * that row's place then, so it does not step by a row each time a call starts and ends.
+ */
+export function holdsPlace(message: Parameters<typeof thinkingRows>[0]): boolean {
+  const last = message.tools?.at(-1)
+  return (
+    message.status === "streaming" &&
+    !message.waiting &&
+    !message.statusText &&
+    last !== undefined &&
+    Boolean(message.tools?.some((tool) => tool.status === "running")) &&
+    (last.contentOffset ?? 0) >= message.content.length
+  )
+}
+
 /** A delta or a block of this run arrived: the span starts at the first one and ends at the last. */
 export function noteRunThinking(id: string, index: number, at = Date.now()) {
   let runs = watching.get(id)

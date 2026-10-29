@@ -12,7 +12,7 @@ export interface Connection {
   key: string
 }
 
-/** The oldest Hermes this screen works with: it shares a run's events between every follower. */
+/** The oldest Hermes this screen works with, which the plugin's manifest requires: it shares a run's events between every follower. */
 export const MIN_HERMES = "0.22.5"
 
 /** What a live run says as it goes; the fields are the ones Hermes v0.22.5 sends, and no more. */
@@ -49,47 +49,10 @@ const plugin = ({ server }: Connection) => pluginRoot(server)
 const headers = ({ key }: Connection) => ({ Authorization: `Bearer ${key}` })
 const within = (signal?: AbortSignal) =>
   AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(READ_TIMEOUT_MS)])
+/** A read that got no answer at all (no connection, or none in time): the host is away. */
+export class HostAway extends Error {}
 const ensure = (response: Response) => {
   if (!response.ok) throw new Error(`The host answered ${response.status}.`)
-}
-
-/** Whether `version` ("0.22.5", "0.23.0-rc1") is `min` or newer, comparing the numbers it opens with. */
-export function atLeast(version: string, min = MIN_HERMES): boolean {
-  const parts = (text: string) =>
-    (/^v?(\d+(?:\.\d+)*)/.exec(text.trim())?.[1] ?? "").split(".").map(Number)
-  const have = parts(version)
-  const need = parts(min)
-  if (Number.isNaN(have[0]) || (have.length === 1 && !/\d/.test(version))) return false
-  for (let at = 0; at < Math.max(have.length, need.length); at++) {
-    const a = have[at] ?? 0
-    const b = need[at] ?? 0
-    if (a !== b) return a > b
-  }
-  return true
-}
-
-/**
- * The Hermes version the host reports on `/health`, which asks for no key. A host that answers
- * without one has no version; one that cannot be reached at all is `"unreachable"`, which says
- * nothing about what it runs.
- */
-export async function readVersion(
-  connection: Connection,
-  signal?: AbortSignal,
-): Promise<string | "unreachable" | undefined> {
-  let response: Response
-  try {
-    response = await fetch(`${root(connection)}/health`, { signal: within(signal) })
-  } catch {
-    return "unreachable"
-  }
-  if (!response.ok) return undefined
-  try {
-    const { version } = (await response.json()) as { version?: string }
-    return typeof version === "string" ? version : undefined
-  } catch {
-    return undefined
-  }
 }
 
 /**
@@ -103,10 +66,15 @@ export async function readPage(
   signal?: AbortSignal,
   archived = false,
 ): Promise<Row[]> {
-  const response = await fetch(
-    `${root(connection)}/api/sessions/${encodeURIComponent(session)}/messages?order=latest&limit=${PAGE}&offset=${offset}${archived ? "&include_compacted=true" : ""}`,
-    { headers: headers(connection), signal: within(signal) },
-  )
+  let response: Response
+  try {
+    response = await fetch(
+      `${root(connection)}/api/sessions/${encodeURIComponent(session)}/messages?order=latest&limit=${PAGE}&offset=${offset}${archived ? "&include_compacted=true" : ""}`,
+      { headers: headers(connection), signal: within(signal) },
+    )
+  } catch {
+    throw new HostAway("Can't reach the host.")
+  }
   if (response.status === 404) {
     const code = (await response.json().catch(() => null))?.error?.code
     if (code === "session_not_found") return []
@@ -378,7 +346,8 @@ export async function followRun(
     headers: headers(connection),
     signal,
   })
-  if (!response.ok || !response.body) throw new Error(`The host answered ${response.status}.`)
+  ensure(response)
+  if (!response.body) throw new Error("The host sent no stream.")
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
   let pending = ""
   for (;;) {

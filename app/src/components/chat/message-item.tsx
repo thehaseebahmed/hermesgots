@@ -19,6 +19,7 @@ import { Compacted } from "@/components/chat/model-change"
 import { ClarifyCard, PlanApprovedCard } from "@/components/chat/session-cards"
 import { StatusLine } from "@/components/chat/status-line"
 import { ThinkingLine } from "@/components/chat/thinking-line"
+import { WORK_ROW_CLASS } from "@/components/chat/work-row"
 import { ToolGroup } from "@/components/chat/tool-group"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Button } from "@/components/ui/button"
@@ -38,7 +39,7 @@ import { attachmentSources, mediaRead, useMediaSources } from "@/lib/media-sourc
 import { mediaImages } from "@/lib/media-tags"
 import { openuiParts } from "@/lib/openui-block.ts"
 import type { InterfaceDraw, ThreadBlock } from "@/lib/openui-thread.ts"
-import { mergeThoughtRows, thinkingRows, type RunPart } from "@/lib/thinking"
+import { holdsPlace, mergeThoughtRows, thinkingRows, type RunPart } from "@/lib/thinking"
 import { cn } from "@/lib/utils"
 import { useReveal } from "@/lib/reveal"
 import { isPlanApproval } from "@/lib/workspace"
@@ -63,9 +64,13 @@ type Part =
   | { kind: "clarify"; tool: ToolEvent }
   | { kind: "agent"; tool: ToolEvent }
   | ({ kind: "thinking" } & RunPart)
+  /** The place of the row a quiet turn draws between calls, held while a call runs. */
+  | { kind: "reserve" }
 
 /** One stretch of a reply: the text between breaks, and the calls started inside it. */
 type Segment = { start: number; end: number; tools: ToolEvent[] }
+
+const RESERVE: Part = { kind: "reserve" }
 
 /** A segment with no run of its own, so a reply that never thought allocates nothing. */
 const NO_RUNS: RunPart[] = []
@@ -152,7 +157,8 @@ function placeThinking(parts: Part[], runs: RunPart[]): Part[] {
  * drops the space the reply puts under it — see `PARTS` for why that is enough.
  */
 function huggingWork(part: Part, next: Part | undefined) {
-  const work = (one: Part | undefined) => one?.kind === "thinking" || one?.kind === "tools"
+  const work = (one: Part | undefined) =>
+    one?.kind === "thinking" || one?.kind === "tools" || one?.kind === "reserve"
   return work(part) && work(next) ? "mb-0" : undefined
 }
 
@@ -643,6 +649,13 @@ export const MessageItem = memo(function MessageItem({
     !awaitingClarify &&
     drawn.some((parts) => parts.some((part) => part.kind === "thinking" && part.thinking))
   const statusLine = streaming && !runningTool && !rowSaysThinking
+  const reserve = holdsPlace({
+    status: message.status,
+    content: storedContent,
+    statusText: storedStatusText,
+    waiting,
+    tools: storedTools,
+  })
   // A subagent at work is the chat's news even while a tool card speaks for this reply. A count is
   // data rather than a word: `0 && <line/>` is the numeral 0, which React would draw, so the line
   // is asked for by comparing the count.
@@ -703,7 +716,11 @@ export const MessageItem = memo(function MessageItem({
           <Fragment key={breaks[i - 1]?.key ?? "start"}>
             {i > 0 && breaks[i - 1].node}
             {(parts.length > 0 || (last && footerShown)) && (
-              <AssistantRow conversationId={message.conversationId} busy={busy} parts={parts}>
+              <AssistantRow
+                conversationId={message.conversationId}
+                busy={busy}
+                parts={last && reserve ? [...parts, RESERVE] : parts}
+              >
                 {last && footer}
               </AssistantRow>
             )}
@@ -786,6 +803,10 @@ function AssistantRow({
                 spanMs={part.spanMs}
                 className={cn(REPLY_INSET, hug)}
               />
+            )
+          if (part.kind === "reserve")
+            return (
+              <div key="reserve" aria-hidden className={cn(REPLY_INSET, WORK_ROW_CLASS, hug)} />
             )
           if (part.kind === "media")
             return (

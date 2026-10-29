@@ -224,9 +224,8 @@ function LoadOlderWindow({
   return null
 }
 
-const ChatNextThread = lazy(() =>
-  import("@/chat-next/app-view").then((m) => ({ default: m.AppChatNextThread })),
-)
+const loadChatNext = () => import("@/chat-next/app-view")
+const ChatNextThread = lazy(() => loadChatNext().then((m) => ({ default: m.AppChatNextThread })))
 
 interface ChatPageProps {
   chatId?: string
@@ -248,7 +247,10 @@ export function ChatPage(props: ChatPageProps) {
     if (!on || !id) return `current\n${id}`
     const chat = await db.conversations.get(id)
     const bot = chat ? await db.profiles.get(chat.profileId) : undefined
-    return `${opensOnChatNext(on, chat, bot) ? "next" : "current"}\n${id}`
+    const next = opensOnChatNext(on, chat, bot)
+    // The chunk loads while the verdict settles, not after the screen is chosen.
+    if (next) void loadChatNext()
+    return `${next ? "next" : "current"}\n${id}`
   }, [id])
   // While the verdict for a chat just switched to is still out, the screen that drew the last one
   // keeps drawing: the current screen holds the chat it left until the new one is ready.

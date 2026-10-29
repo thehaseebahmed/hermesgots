@@ -76,8 +76,6 @@ export async function openDevice(
   const one = (selector: string) => container.querySelector(selector)
   return {
     database,
-    /** The notice an unsupported host is given in place of the chat. */
-    notice: () => one("[data-unsupported]")?.textContent ?? undefined,
     composer: () => Boolean(one("[data-composer]")),
     /** The line a host that can't be reached is given, over what the device holds. */
     away: () => Boolean(one("[data-away]")),
