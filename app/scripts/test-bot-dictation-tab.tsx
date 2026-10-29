@@ -466,6 +466,8 @@ test("the page offers four cleanup levels, Light in play until the bot picks ano
     },
   )
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    // The cards hang on the host's feature answer, so the page draws them a beat after the rows.
+    await until(async () => levelCards().length === 4, "the four cards")
     assert.deepEqual(
       levelCards().map((card) => card.getAttribute("data-cleanup-level")),
       ["none", "light", "medium", "high"],
@@ -505,6 +507,8 @@ test("a Developer's Hearing prompt switch is written to the host and read back",
   )
   await db.settings.update("settings", { developer: true })
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    // The switch waits on the device's own read of the Developer flag, so it lands after the rows.
+    await until(async () => Boolean(switchIn("hearing-prompt")), "the Hearing prompt switch")
     assert.ok(row("hearing-prompt"), "Developer on draws the row")
     assert.equal(
       switchIn("hearing-prompt")?.getAttribute("aria-checked"),
