@@ -14,7 +14,6 @@ import { matchPath, useLocation, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
 import {
   ArchiveXIcon,
-  ArrowLeftIcon,
   BellIcon,
   BellOffIcon,
   CheckIcon,
@@ -118,6 +117,7 @@ import { windowKey } from "@/lib/history-window"
 import {
   DEFAULT_SETTINGS,
   type Attachment,
+  type Conversation,
   type Message,
   type ModelChoice,
   createConversation,
@@ -182,12 +182,14 @@ import { lastActivityAt } from "@/lib/session-work"
 import { hold, type HoldSlot } from "@/lib/chat-hold"
 import { useBotThreads, useThreads } from "@/lib/threads"
 import { EmptyState, MainEmptyState } from "@/components/chat/empty-states"
-import { isUnsent, settleLeft } from "@/chat-next/unsent"
+import { isUnsent } from "@/chat-next/unsent"
+import { HeaderBack } from "@/components/chat/header-back"
+import { useSessionLeave } from "@/components/chat/session-leave"
 import { announceMove } from "@/lib/triage"
 import { useMainFlow } from "@/components/chat/main-flow"
 
 export { SETUP_COPY } from "@/components/chat/empty-states"
-import { draftKey, loadDraft } from "@/lib/drafts"
+import { draftKey } from "@/lib/drafts"
 import { AgentsContext, runningAgents, stopSubagents, useSessionAgents } from "@/lib/agents"
 import { spawnInFlight } from "@/lib/spawn"
 import { usePluginFeature, usePluginFeatureOn } from "@/lib/features"
@@ -196,6 +198,11 @@ import { SubagentLine } from "@/components/chat/subagent-line"
 import { SubagentsSheet } from "@/components/chat/subagents"
 
 const NO_ROWS: Message[] = []
+
+/** Nothing was sent in a chat of this screen's own store: no turn and no message in its row. */
+const hasNoMessages = async (chat: Conversation) =>
+  !(chat.updatedAt > chat.createdAt) &&
+  (await db.messages.where("conversationId").equals(chat.id).count()) === 0
 // The rows a chat draws in the commit it opens with: the end the reader lands on. Every row's
 // markdown is parsed as it mounts, so drawing a long transcript whole kept a switch blank for
 // hundreds of milliseconds on a phone; the rows above follow in a transition.
@@ -398,34 +405,16 @@ function NextChat({
   const session = chat?.projectId ? chat : undefined
   const beside = Boolean(useCodePane()) && Boolean(session)
   useRememberOpened("code", session?.id)
-  const [leavingWithDraft, setLeavingWithDraft] = useState(false)
-  const leave = async () => {
-    if (!session) return
-    if (!(await isUnsent(session))) return up("/code")
-    if ((await loadDraft(draftKey(session.id))).trim()) return setLeavingWithDraft(true)
-    void deleteConversation(session.id)
-    up("/code")
-  }
-  const leaveRef = useRef(leave)
-  useEffect(() => {
-    leaveRef.current = leave
+  const {
+    leave,
+    underCode,
+    dialog: leaveDialog,
+  } = useSessionLeave({
+    id,
+    session,
+    beside,
+    unsent: isUnsent,
   })
-  const underCode = Boolean(session) && !beside
-  useEffect(() => {
-    if (!underCode) return
-    return setBackGuard(() => {
-      void leaveRef.current()
-      return true
-    })
-  }, [underCode])
-  // Beside Code's list another session can be picked straight away, with no chance to ask, so a
-  // session left unsent goes, or is kept as a draft when something was typed.
-  const shown = useRef(id)
-  useEffect(() => {
-    const left = shown.current
-    shown.current = id
-    if (left && left !== id) void settleLeft(left)
-  }, [id])
   // The repos a session not started yet will work in; the project screen hands its project over.
   const handed = (useLocation().state as { project?: HermesProject } | null)?.project
   const projectId = session?.projectId
@@ -539,27 +528,9 @@ function NextChat({
               // Beside Main the bot is on screen with the thread; below `xl` the thread leads back.
               // A session leads back to Code, unless it is drawn beside Code's list.
               mainPath && !besideMain ? (
-                <Button
-                  variant="outline"
-                  size="icon-lg"
-                  className="size-11 rounded-full bg-background/80 backdrop-blur"
-                  onClick={() => up(mainPath)}
-                  aria-label={`Back to ${bot.name || "bot"}`}
-                >
-                  <ArrowLeftIcon />
-                </Button>
+                <HeaderBack label={`Back to ${bot.name || "bot"}`} onClick={() => up(mainPath)} />
               ) : (
-                underCode && (
-                  <Button
-                    variant="outline"
-                    size="icon-lg"
-                    className="size-11 rounded-full bg-background/80 backdrop-blur"
-                    onClick={() => void leave()}
-                    aria-label="Back to Code"
-                  >
-                    <ArrowLeftIcon />
-                  </Button>
-                )
+                underCode && <HeaderBack label="Back to Code" onClick={() => void leave()} />
               )
             }
           />
@@ -601,38 +572,7 @@ function NextChat({
               Composer={composer}
             />
           </Suspense>
-          <AlertDialog open={leavingWithDraft} onOpenChange={setLeavingWithDraft}>
-            <AlertDialogContent size="sm">
-              <AlertDialogHeader>
-                <AlertDialogTitle>Save your draft?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  This session hasn't started. Save the draft to pick it up later, or delete the
-                  session.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogAction
-                  variant="outline"
-                  onClick={async () => {
-                    if (!session) return
-                    await deleteConversation(session.id)
-                    up("/code")
-                  }}
-                >
-                  Delete
-                </AlertDialogAction>
-                <AlertDialogAction
-                  onClick={async () => {
-                    if (!session) return
-                    await updateConversation(session.id, { draftAt: Date.now() })
-                    up("/code")
-                  }}
-                >
-                  Save draft
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+          {leaveDialog}
         </>
       ) : (
         <PendingChat />
@@ -1284,49 +1224,6 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
       .then((owner) => (owner ? ensureMainThread(mainOwner) : root("/")))
   }, [id, conversation, root, botThreads, mainOwner])
 
-  // A session that was never sent anything isn't kept; typed text is the user's to keep or drop.
-  const draftRef = useRef("")
-  // Each chat's own, since the chat can change under the composer.
-  const drafts = useRef(new Map<string, string>())
-  const onDraft = useCallback(
-    (text: string) => {
-      draftRef.current = text
-      if (id) drafts.current.set(id, text)
-    },
-    [id],
-  )
-  const [leavingWithDraft, setLeavingWithDraft] = useState(false)
-  const unsent =
-    session !== undefined && messages?.length === 0 && !(session.updatedAt > session.createdAt)
-  const codePath = session && "/code"
-  const leave = () => {
-    if (!session || !codePath) return
-    if (!unsent) return up(codePath)
-    if (draftRef.current.trim()) return setLeavingWithDraft(true)
-    void deleteConversation(session.id)
-    up(codePath)
-  }
-  const leaveRef = useRef(leave)
-  useEffect(() => {
-    leaveRef.current = leave
-  })
-  // Beside Code's list another session can be picked straight away, with no chance to ask, so a
-  // session left unsent goes, or is kept as a draft when something was typed.
-  const shown = useRef(id)
-  useEffect(() => {
-    const left = shown.current
-    shown.current = id
-    if (!left || left === id) return
-    const text = drafts.current.get(left)?.trim()
-    drafts.current.delete(left)
-    void (async () => {
-      const row = await db.conversations.get(left)
-      if (!row?.projectId || row.draftAt || row.updatedAt > row.createdAt) return
-      if (await db.messages.where("conversationId").equals(left).count()) return
-      if (text) await updateConversation(left, { draftAt: Date.now() })
-      else await deleteConversation(left)
-    })()
-  }, [id])
   const isMain = Boolean(conversation?.main)
   // The thread the address itself names, when this instance is a bot's Main drawn beside it: a
   // Main id is never a thread, so a Main drawn beside another Main carries no item of its own.
@@ -1346,6 +1243,17 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   const besideMain = Boolean(mainPath) && xl
   const beside = Boolean(useCodePane()) && Boolean(session)
   useRememberOpened("code", session?.id)
+  const codePath = session && "/code"
+  const {
+    leave,
+    underCode,
+    dialog: leaveDialog,
+  } = useSessionLeave({
+    id,
+    session,
+    beside,
+    unsent: hasNoMessages,
+  })
   // This device has the session's thread on screen as of now — its read mark, written when the
   // thread renders and again while new activity lands in front of the reader, which is what clears
   // the row's unread dot (never synced: a mark is about where the reader was sitting).
@@ -1369,15 +1277,6 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
       return true
     })
   }, [mainPath, up])
-  // A session sits under Code, unless it's beside it; a plain chat is top-level, so back leaves the
-  // app.
-  useEffect(() => {
-    if (!codePath || beside) return
-    return setBackGuard(() => {
-      leaveRef.current()
-      return true
-    })
-  }, [codePath, beside])
 
   /** Before a session is deleted or discarded: its run, worktrees, pull requests and branches. */
   const closeSession = async () => {
@@ -1603,28 +1502,12 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
               // the pane keeps the thread wherever the address goes. Below `xl` it is a screen over
               // Main, and leads back to it.
               !besideMain && (
-                <Button
-                  variant="outline"
-                  size="icon-lg"
-                  className="size-11 rounded-full bg-background/80 backdrop-blur"
+                <HeaderBack
+                  label={`Back to ${profile?.name ?? "bot"}`}
                   onClick={() => up(mainPath)}
-                  aria-label={`Back to ${profile?.name ?? "bot"}`}
-                >
-                  <ArrowLeftIcon />
-                </Button>
+                />
               )
-            : session &&
-              !beside && (
-                <Button
-                  variant="outline"
-                  size="icon-lg"
-                  className="size-11 rounded-full bg-background/80 backdrop-blur"
-                  onClick={leave}
-                  aria-label="Back to Code"
-                >
-                  <ArrowLeftIcon />
-                </Button>
-              )
+            : underCode && <HeaderBack label="Back to Code" onClick={() => void leave()} />
         }
       />
 
@@ -1806,7 +1689,6 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
             busy={busy}
             disabled={!configured}
             draftKey={draftKey(id)}
-            onDraft={onDraft}
             onSend={send}
             onQueue={(text, attachments) => {
               if (!id) return send(text, attachments)
@@ -1948,38 +1830,7 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={leavingWithDraft} onOpenChange={setLeavingWithDraft}>
-        <AlertDialogContent size="sm">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Save your draft?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This session hasn't started. Save the draft to pick it up later, or delete the
-              session.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction
-              variant="outline"
-              onClick={async () => {
-                if (!session || !codePath) return
-                await deleteConversation(session.id)
-                up(codePath)
-              }}
-            >
-              Delete
-            </AlertDialogAction>
-            <AlertDialogAction
-              onClick={async () => {
-                if (!session || !codePath) return
-                await updateConversation(session.id, { draftAt: Date.now() })
-                up(codePath)
-              }}
-            >
-              Save draft
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {leaveDialog}
 
       <AlertDialog open={deleting} onOpenChange={setDeleting}>
         <AlertDialogContent size="sm">
