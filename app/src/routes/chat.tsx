@@ -115,6 +115,7 @@ import {
   sendMessage,
   steerText,
   stopMessage,
+  readAfterTurn,
 } from "@/lib/chat"
 import { windowKey } from "@/lib/history-window"
 import {
@@ -143,7 +144,12 @@ import { serverConfig } from "@/lib/connection"
 import { describeActivity } from "@/lib/format"
 import { supportsSteer, type DelegatedAgent, type HermesProject, type Move } from "@/lib/hermes"
 import { readProjects, useProjects } from "@/lib/projects"
-import { caughtUpWithin, loadEarlierHistory, reconcileHistory } from "@/lib/history"
+import {
+  caughtUpWithin,
+  loadEarlierHistory,
+  reconcileHistory,
+  refreshChatDetails,
+} from "@/lib/history"
 import { contextWindow } from "@/lib/context"
 import { useLive, watchChat } from "@/lib/live"
 import { useLiveRun, useLiveSubagents } from "@/lib/waiting"
@@ -471,8 +477,13 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
               prepareTurn={(text, attachments) => prepareTurn(id, text, attachments)}
               queueTurn={async (text, attachments) => void (await queueTurn(id, text, attachments))}
               steerTurn={(text, attachments) => steerTurn(id, text, attachments)}
-              // A project session's mode, its plan and whether it can still send are the plugin's.
-              onSettled={() => void refreshWorkspace(id)}
+              // What the plugin holds beside the transcript — the title, the context, the todos, a
+              // session's workspace, pull requests and library — read as every chat reads it.
+              onSettled={(reason, thread) =>
+                reason === "turn"
+                  ? void readAfterTurn(id, { turn: thread.turns })
+                  : refreshChatDetails(id)
+              }
               Composer={composer}
             />
           </Suspense>
@@ -490,7 +501,112 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
  * handed back to the field. A project session's own cards take its place in the order the current
  * screen draws them: closed, blocked, then a plan waiting to be approved.
  */
-function NextComposer({
+function NextComposer(props: { controls: ComposerControls; chatId: string; botId: string }) {
+  return (
+    <>
+      <NextPills chatId={props.chatId} botId={props.botId} busy={props.controls.busy} />
+      <NextComposerBody {...props} />
+    </>
+  )
+}
+
+/**
+ * What the plugin holds for a chat on chat-next, as the current screen shows it above the composer:
+ * a staged task's pipeline, the todo list, the session's pull requests and its filed outputs, each
+ * opening its sheet. The reads that fill them are the chat's follow-up reads (`onSettled`).
+ */
+function NextPills({ chatId, botId, busy }: { chatId: string; botId: string; busy: boolean }) {
+  const bot = useLiveQuery(() => db.profiles.get(botId), [botId])
+  const chat = useLiveQuery(() => db.conversations.get(chatId), [chatId])
+  const [todosOpen, setTodosOpen] = useState(false)
+  const [pipelineOpen, setPipelineOpen] = useState(false)
+  const [outputsOpen, setOutputsOpen] = useState(false)
+  const subagents = useLiveSubagents()
+  const tracked = Boolean(bot?.apiKey && !bot.disabled)
+  const session = chat?.projectId ? chat : undefined
+  const stagedPipeline = useStagedPipeline(bot, session?.pipeline)
+  if (!stagedPipeline && pipelineOpen) setPipelineOpen(false)
+  const checksRunning = prChecksPending(session?.prs)
+  useEffect(() => {
+    if (!checksRunning) return
+    const read = () => {
+      if (document.visibilityState === "visible") void refreshPrs(chatId, { force: true })
+    }
+    read()
+    const timer = window.setInterval(read, PR_PENDING_MS)
+    return () => window.clearInterval(timer)
+  }, [chatId, checksRunning])
+  // The session's read mark rides the activity it has seen, as on the current screen.
+  const threadId = session?.id
+  const activity = session ? lastActivityAt(session) : 0
+  useEffect(() => {
+    if (threadId) markRead(threadId, activity)
+  }, [threadId, activity])
+  if (!chat || !bot) return null
+  const todos = (tracked && chat.todos?.items) || []
+  const progress = tracked ? chat.todos?.progress : undefined
+  const outputs = session?.library?.count ?? 0
+  const prs = session?.prs ?? []
+  const firstPrLabel = prs.length ? prLabel(prs[0], prs) : undefined
+  const live = !runFinished({
+    live: undefined,
+    local: { streaming: busy },
+    subagents: subagents[chat.hermesSessionId],
+  })
+  return (
+    <>
+      {(stagedPipeline || todos.length > 0 || prs.length > 0 || outputs > 0) && (
+        <div className="-mx-3 flex [scrollbar-width:none] overflow-x-auto px-3 pb-2 sm:-mx-4 sm:px-4 [&::-webkit-scrollbar]:hidden">
+          <div className="mx-auto flex w-max max-w-none min-w-full shrink-0 justify-center gap-2">
+            {stagedPipeline && (
+              <PipelinePill pipeline={stagedPipeline} onClick={() => setPipelineOpen(true)} />
+            )}
+            {todos.length > 0 && (
+              <TodosPill
+                items={todos}
+                progress={progress}
+                live={live}
+                onClick={() => setTodosOpen(true)}
+              />
+            )}
+            {outputs === 0 && prs.length === 1 && firstPrLabel ? (
+              <PrPill pr={prs[0]} label={firstPrLabel} />
+            ) : (
+              (outputs > 0 || prs.length > 1) && (
+                <LibraryPill count={outputs + prs.length} onClick={() => setOutputsOpen(true)} />
+              )
+            )}
+          </div>
+        </div>
+      )}
+      {stagedPipeline && (
+        <PipelineSheet
+          open={pipelineOpen}
+          onOpenChange={setPipelineOpen}
+          pipeline={stagedPipeline}
+          prLabel={firstPrLabel}
+        />
+      )}
+      <TodosSheet
+        open={todosOpen}
+        onOpenChange={setTodosOpen}
+        items={todos}
+        progress={progress}
+        live={live}
+      />
+      {session && (
+        <OutputsDrawer
+          open={outputsOpen}
+          onOpenChange={setOutputsOpen}
+          session={session}
+          config={serverConfig(bot)}
+        />
+      )}
+    </>
+  )
+}
+
+function NextComposerBody({
   controls,
   chatId,
   botId,

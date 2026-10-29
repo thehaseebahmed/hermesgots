@@ -687,6 +687,15 @@ export const caughtUpWithin = (conversationId: string, ms: number) =>
  * session changed (a mode or a plan moves without a row), the first time, and otherwise every
  * `FOLLOW_UP_MS`, not on every catch-up of an idle chat. A turn that ended just now read them.
  */
+/**
+ * Reads what the plugin holds for a chat beside its transcript, as a catch-up does: at once where the
+ * transcript moved, at most every `FOLLOW_UP_MS` otherwise. chat-next asks it after each read it
+ * settles (ADR 0065).
+ */
+export function refreshChatDetails(conversationId: string, moved = true) {
+  followUps(conversationId, moved)
+}
+
 function followUps(conversationId: string, moved: boolean) {
   const since = Date.now() - (followedUp.get(conversationId) ?? -Infinity)
   if (since < JUST_FOLLOWED_UP_MS || (!moved && since < FOLLOW_UP_MS)) return

@@ -830,24 +830,37 @@ async function finishTurn(turn: Turn, usage: TurnUsage | undefined, sendFailed =
   // The turn's runs are final: nothing can add to them now, and anything that resumes later notes
   // its run afresh. Freeing the watcher here keeps a long session's entries to its live turns.
   forgetRuns(draft.id)
-  if (!sendFailed) {
-    noteFollowUps(conversationId)
-    void refreshContext(conversationId).catch(quietly("Reading a chat's context"))
-    void refreshChatProviderUsage(conversationId).catch(quietly("Reading provider limits"))
-    void refreshTodos(conversationId)
-  }
   await updateConversation(conversationId, { updatedAt: endedAt })
+  if (sendFailed) return
   const conversation = await db.conversations.get(conversationId)
-  if (conversation?.projectId && !sendFailed) {
-    if (draft.status === "done" && conversation.mode === "plan")
-      await db.conversations.update(conversationId, { planPending: true })
-    // A moment later: the plugin's own hook records the finished plan-mode turn.
-    setTimeout(() => {
-      void refreshWorkspace(conversationId)
-      void refreshPrs(conversationId, { force: true })
-      void refreshLibrary(conversationId)
-    }, PLUGIN_SETTLE_MS)
+  if (conversation?.projectId && draft.status === "done" && conversation.mode === "plan")
+    await db.conversations.update(conversationId, { planPending: true })
+  await readAfterTurn(conversationId)
+}
+
+/**
+ * What a finished turn reads again from the plugin, whichever screen streamed it: the context, the
+ * provider's limits and the todos at once, and a session's workspace, pull requests and library a
+ * moment later, once the plugin's own hooks have recorded the turn.
+ */
+export async function readAfterTurn(conversationId: string, { turn }: { turn?: number } = {}) {
+  noteFollowUps(conversationId)
+  void refreshContext(conversationId).catch(quietly("Reading a chat's context"))
+  void refreshChatProviderUsage(conversationId).catch(quietly("Reading provider limits"))
+  void refreshTodos(conversationId)
+  const conversation = await db.conversations.get(conversationId)
+  // Hermes titles a session over its first turns, so a screen that counts them reads it then too.
+  if (conversation && turn !== undefined && turn <= TITLED_TURNS) {
+    const profile = await db.profiles.get(conversation.profileId)
+    if (profile?.apiKey)
+      void syncTitle(conversationId, serverConfig(profile), conversation.hermesSessionId)
   }
+  if (!conversation?.projectId) return
+  setTimeout(() => {
+    void refreshWorkspace(conversationId)
+    void refreshPrs(conversationId, { force: true })
+    void refreshLibrary(conversationId)
+  }, PLUGIN_SETTLE_MS)
 }
 
 /**

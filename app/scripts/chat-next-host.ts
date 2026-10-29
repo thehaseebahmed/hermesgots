@@ -176,6 +176,13 @@ export function fakeHost(
     planFile: "plans/hermes-x.md",
     blocked: null as string | null,
   }
+  /** The title Hermes gave the session; none until it has one. */
+  const titled: { title: string | null } = { title: null }
+  /** The session's todo list as the plugin reads it from the transcript; none until it is set. */
+  const todos: { list: { id: string; content: string; status: string }[] | null; reads: number } = {
+    list: null,
+    reads: 0,
+  }
   /** What the plugin holds for the session, oldest first, as its queue route lists it. */
   const queue: {
     id: string
@@ -512,6 +519,8 @@ export function fakeHost(
       asked.health++
       return reply({ status: "ok", platform: "hermes-agent", version })
     }
+    if (path === `/api/sessions/${session}`)
+      return reply({ session: { id: session, title: titled.title } })
     if (path === `/api/sessions/${session}/messages`) {
       asked.transcript++
       if (latency) await new Promise((resolve) => setTimeout(resolve, latency))
@@ -644,6 +653,22 @@ export function fakeHost(
       })
     }
     // The plugin's list of the children a session delegated to.
+    if (plugin && path === `/api/plugins/memento/sessions/${session}/todos`) {
+      todos.reads++
+      const list = todos.list
+      return reply(
+        list
+          ? {
+              revision: 1,
+              todos: list,
+              progress: {
+                done: list.filter((one) => one.status === "completed").length,
+                total: list.filter((one) => one.status !== "cancelled").length,
+              },
+            }
+          : { revision: null, todos: null, progress: null },
+      )
+    }
     if (plugin && path === `/api/plugins/memento/sessions/${session}/agents`)
       return reply({ object: "memento.agents", session_id: session, agents })
     // A child is a session of its own, read like any other.
@@ -787,6 +812,8 @@ export function fakeHost(
     latest,
     queue,
     workspace,
+    todos,
+    titled,
     session,
     dropConnections,
     startElsewhere,

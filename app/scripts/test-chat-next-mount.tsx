@@ -154,7 +154,8 @@ test("a send the host refuses hands the words back and pins nothing", async () =
   await mount(chatScreen("c-refused"), async () => {
     await sendFromComposer("Will this go?")
     await until(() => composerField()?.value === "Will this go?", "the words are back in the field")
-    assert.deepEqual(requests(), [], "and nothing was drawn as sent")
+    // The thread drops the optimistic row through its store, a beat after the field has the words.
+    await until(() => requests().length === 0, "and nothing is left drawn as sent")
     assert.equal((await db.conversations.get("c-refused"))?.modelChoice, undefined)
   })
 })
@@ -346,6 +347,39 @@ test("a delegation draws as the app's agent card, which follows its child to don
       find('[data-chat-next] [data-slot="agent-card"]')?.textContent ?? "",
       /Lisbon|weather/i,
       "and the card still names what its child was asked",
+    )
+  })
+})
+
+test("a finished turn reads what the plugin holds beside it, and its todo list is the pill", async () => {
+  const { host } = await onChatNext("c-todos", {}, { plugin: true })
+  await mount(chatScreen("c-todos"), async () => {
+    const run = await midReply(host, "Plan it out")
+    host.todos.list = [
+      { id: "1", content: "Read the brief", status: "completed" },
+      { id: "2", content: "Write the plan", status: "in_progress" },
+    ]
+    run.finish("Planned.")
+    await until(() => host.todos.reads > 0, "the turn's end read the session's todos")
+    await until(
+      () =>
+        Boolean(find('[data-chat-next] [data-slot="composer-slot"]')?.textContent?.includes("1/2")),
+      "and the list is the pill above the composer",
+    )
+  })
+})
+
+test("a chat's first turn takes the title Hermes gave its session", async () => {
+  const { host } = await onChatNext("c-title")
+  // Seeded chats carry a title the user set, which the host's never replaces.
+  await db.conversations.update("c-title", { titleEdited: false })
+  await mount(chatScreen("c-title"), async () => {
+    const run = await midReply(host, "Why do leaves change colour?")
+    host.titled.title = "Autumn leaves"
+    run.finish("Chlorophyll breaks down.")
+    await until(
+      () => find('[data-slot="header-title"]')?.textContent?.trim() === "Autumn leaves",
+      "the header carries the host's title",
     )
   })
 })

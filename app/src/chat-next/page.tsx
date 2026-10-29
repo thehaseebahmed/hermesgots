@@ -36,7 +36,7 @@ import {
   type Queued,
 } from "./api"
 import { foldTurns, type Row, type ToolCall, type Turn } from "./fold"
-import { foldedOf, turnsOf, type ThreadEvent, type Waiting } from "./state"
+import { foldedOf, threadTurns, turnsOf, type ThreadEvent, type Waiting } from "./state"
 import { readRows, storeFor } from "./store"
 import type { PreparedTurn } from "./turn"
 
@@ -463,10 +463,10 @@ interface ThreadOptions {
   /** Steers the running reply through the plugin's queue; without it, nothing can be steered. */
   steerTurn?: (text: string, attachments: Attachment[]) => Promise<void>
   /**
-   * Called once the thread has read the host and after each run it followed has ended: where the
-   * app reads again what the plugin holds for the chat beside its transcript.
+   * Called once the thread has read the host (`opened`), and each time a turn has ended (`turn`):
+   * where the app reads again what the plugin holds for the chat beside its transcript.
    */
-  onSettled?: () => void
+  onSettled?: (reason: "opened" | "turn", thread: { turns: number }) => void
   /** The app's own composer; without it, a bare text box. */
   Composer?: ComponentType<{ controls: ComposerControls }>
   /** What draws the thread; without it, chat-next's own plain markup. */
@@ -612,6 +612,13 @@ export function ChatNextThread({
     [server, key, session, dispatch],
   )
 
+  /** How many of the thread's turns the user asked, as the app counts a chat's turns. */
+  const asked = useCallback(
+    () => ({
+      turns: threadTurns(store.get()).filter((turn) => !turn.wake && !turn.carried).length,
+    }),
+    [store],
+  )
   // Held in a ref, so a caller's new function each render never re-runs the reads that call it.
   const settled = useRef(onSettled)
   useEffect(() => {
@@ -620,7 +627,7 @@ export function ChatNextThread({
   useEffect(() => {
     if (!ready) return
     alive.current = new AbortController()
-    void catchUp().then(() => settled.current?.())
+    void catchUp().then(() => settled.current?.("opened", asked()))
     // A device that was away missed what the others wrote; it asks again as it comes back.
     const back = () => {
       if (document.visibilityState === "visible") void catchUp()
@@ -630,12 +637,23 @@ export function ChatNextThread({
       document.removeEventListener("visibilitychange", back)
       alive.current.abort()
     }
-  }, [catchUp, ready])
+  }, [catchUp, ready, asked])
 
   // A turn the host has not finished and this device is not streaming is followed, by its events
   // where the plugin names the run and by the transcript where it cannot.
   const last = turns.at(-1)
   const following = doing.status !== "loading" && !doing.running && last !== undefined && !last.done
+  // A turn that lands from the host — another device's, or a wake — settles the chat too.
+  // What was settled when the page opened is the open's to read, not a turn's.
+  const settledTurns = last?.done ? turns.length : 0
+  const seenSettled = useRef<number>(undefined)
+  useEffect(() => {
+    if (!ready || doing.status === "loading") return
+    const seen = seenSettled.current
+    seenSettled.current = settledTurns
+    if (seen !== undefined && settledTurns && settledTurns !== seen)
+      settled.current?.("turn", asked())
+  }, [ready, doing.status, settledTurns, asked])
   // A child at work, or one that finished whose result the transcript does not hold yet, keeps the
   // chat read at the fast pace too: the card is to follow it and the wake turn is on its way.
   const listed = held?.agents
@@ -705,9 +723,10 @@ export function ChatNextThread({
       }
       // Whatever the stream said, the host's transcript is what the turn was.
       await catchUp(true)
-      settled.current?.()
+      // A turn that finished settles the chat as it lands; one stopped or failed short never does.
+      if (!threadTurns(store.get()).at(-1)?.done) settled.current?.("turn", asked())
     },
-    [server, key, session, catchUp, dispatch],
+    [server, key, session, catchUp, dispatch, store, asked],
   )
 
   // An open chat is read now and then even when it looks finished, since another device may have
