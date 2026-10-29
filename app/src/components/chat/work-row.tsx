@@ -1,6 +1,7 @@
 import { forwardRef, type ComponentProps, type ReactNode } from "react"
 import { XIcon } from "lucide-react"
 
+import { useCodeFace } from "@/components/chat/code-face"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 
@@ -46,7 +47,10 @@ export const WorkLabel = forwardRef<HTMLSpanElement, ComponentProps<"span">>(fun
   { className, ...props },
   ref,
 ) {
-  return <span ref={ref} className={cn("min-w-0 truncate", className)} {...props} />
+  const code = useCodeFace()
+  return (
+    <span ref={ref} className={cn("min-w-0 truncate", code && "font-code", className)} {...props} />
+  )
 })
 
 /**
@@ -71,5 +75,11 @@ export const WorkRow = forwardRef<
  * explains — whether the row above it wears a spinner or a failure's mark (ADR 0064).
  */
 export function WorkNote({ className, ...props }: ComponentProps<"p">) {
-  return <p className={cn(WORK_LABEL_DENT, "truncate pb-1 text-sm", className)} {...props} />
+  const code = useCodeFace()
+  return (
+    <p
+      className={cn(WORK_LABEL_DENT, "truncate pb-1 text-sm", code && "font-code", className)}
+      {...props}
+    />
+  )
 }

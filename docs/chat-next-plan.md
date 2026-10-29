@@ -21,7 +21,7 @@ Run `pnpm e2e idle-requests` and `pnpm e2e stream-writes` with chat-next on, and
 - Subscribe to `lib/live.ts` (`onChanges` / `useLive`) so a chat catches up when the plugin's stream says the session moved and polls only at `SAFETY_MS` while a stream is open.
 - Tests: unit for the "what to read next" rule; component tests over a seeded device with the HTTP boundary faked, asserting a poll that finds nothing writes nothing and asks for one row; `idle-requests` back inside budget.
 
-### 3. The code face belongs to the agent's work only
+### 3. The code face belongs to the agent's work only (done, built first)
 Not a parity gap: a change to what chat-next already does. In a code session JetBrains Mono (`font-code`) should read only as the agent's own output, and nothing else in the UI.
 
 **Today.** `routes/chat.tsx:502` puts `font-code` on the whole chat pane when `chat.projectId` is set, so the header, composer, pills, approval and question cards, and every card in the thread are in it. Sheets and drawers are portaled out of the pane, so they inherit nothing: a tool call's input and output (drawn with `font-mono`, which is not JetBrains Mono, in `tool-card.tsx` and `markdown-renderer.tsx`) never get the code face.

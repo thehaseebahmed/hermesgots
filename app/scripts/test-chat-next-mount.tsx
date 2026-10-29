@@ -312,18 +312,53 @@ test("a plan waiting is approved from its card: the mode moves and the plan's ru
   })
 })
 
-test("a code session reads in JetBrains Mono, and a chat keeps the app's face", async () => {
-  await sessionOnChatNext("c-mono")
+/** Whether an element reads in the code face, from itself or any ancestor. */
+const inCodeFace = (element: Element | null, what: string) => {
+  assert.ok(element, `${what} is on screen`)
+  return Boolean(element.closest(".font-code"))
+}
+
+test("a code session reads the agent's output in JetBrains Mono, and nothing else", async () => {
+  const host = await sessionOnChatNext("c-mono")
+  host.seed([{ user: "Look around", reply: "Found it.", tools: 1 }])
   await mount(chatScreen("c-mono"), async () => {
-    await until(
-      () => find("[data-chat-next]")?.classList.contains("font-code") ?? false,
-      "the session's pane reads in the code face",
+    await until(() => replies().length > 0, "the turn is drawn")
+    const pane = find("[data-chat-next]")
+    assert.equal(pane?.classList.contains("font-code"), false, "the pane is not in the face")
+    assert.equal(inCodeFace(find('[data-slot="header-row"]'), "the header"), false, "the header")
+    assert.equal(inCodeFace(composerField(), "the composer"), false, "the composer")
+    assert.equal(
+      inCodeFace(find('[data-chat-next] [data-slot="bubble-content"]'), "the user's bubble"),
+      false,
+      "the user's bubble",
+    )
+    assert.ok(
+      inCodeFace(find('[data-chat-next] [data-slot="markdown"]'), "the reply"),
+      "the reply's words",
+    )
+    const row = find('[data-chat-next] [data-slot="tool-group"]')
+    assert.ok(row?.querySelector(".font-code"), "the tool call's row label")
+
+    await click(row)
+    assert.equal(
+      inCodeFace(find('[data-slot="sheet-title"]'), "the sheet's heading"),
+      false,
+      "the sheet's heading",
+    )
+    const call = findAll("ol button")[0] ?? null
+    assert.ok(inCodeFace(call, "the call"), "the call in the sheet's list")
+    await click(call)
+    assert.ok(inCodeFace(find("pre"), "the call's output"), "the call's input or output")
+    assert.equal(
+      inCodeFace(find('[data-slot="sheet-title"]'), "the sheet's heading"),
+      false,
+      "the detail's heading",
     )
   })
   await onChatNext("c-sans")
   await mount(chatScreen("c-sans"), async () => {
     await until(() => Boolean(composerField()), "the chat has loaded")
-    assert.equal(find("[data-chat-next]")!.classList.contains("font-code"), false, "a plain chat")
+    assert.equal(findAll(".font-code").length, 0, "a plain chat has the face nowhere")
   })
 })
 

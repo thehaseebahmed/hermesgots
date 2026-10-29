@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { WrapTextIcon } from "lucide-react"
 
+import { useMonoFace } from "@/components/chat/code-face"
 import { Button } from "@/components/ui/button"
 import { getSettings, saveSettings, type ToolEvent } from "@/lib/db"
 import { formatTool, splitHtml, type Block } from "@/lib/highlight"
@@ -38,6 +39,7 @@ function useFormatted(text: string, hint?: string, omit?: string) {
 /** Long lines wrap unless turned off; numbered rows keep their number beside each wrapped row. */
 function CodeBlock({ block, toggle }: { block: Block; toggle?: boolean }) {
   const wrap = useLiveQuery(async () => (await getSettings()).wrapToolOutput, []) ?? true
+  const mono = useMonoFace()
   const text = wrap ? "whitespace-pre-wrap [overflow-wrap:anywhere]" : "whitespace-pre"
   let body
   if (block.lines) {
@@ -74,7 +76,7 @@ function CodeBlock({ block, toggle }: { block: Block; toggle?: boolean }) {
   return (
     <div className="relative">
       <pre
-        className={`overflow-x-auto rounded-2xl bg-muted py-4 font-mono text-[13px] leading-relaxed ${block.lines ? "" : "pl-4"} ${toggle ? "pr-12" : "pr-4"}`}
+        className={`overflow-x-auto rounded-2xl bg-muted py-4 ${mono} text-[13px] leading-relaxed ${block.lines ? "" : "pl-4"} ${toggle ? "pr-12" : "pr-4"}`}
       >
         {body}
       </pre>

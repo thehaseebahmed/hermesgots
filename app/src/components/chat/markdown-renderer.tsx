@@ -1,13 +1,16 @@
-import { useState, type ComponentProps } from "react"
+import { useState, type ComponentProps, type ReactNode } from "react"
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { CheckIcon, CopyIcon } from "lucide-react"
 
+import { useMonoFace } from "@/components/chat/code-face"
 import { MediaImage } from "@/components/chat/media-image"
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 
 function CodeBlock({ language, code }: { language?: string; code: string }) {
   const [copied, setCopied] = useState(false)
+  const mono = useMonoFace()
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(code)
@@ -31,10 +34,24 @@ function CodeBlock({ language, code }: { language?: string; code: string }) {
           {copied ? <CheckIcon /> : <CopyIcon />}
         </Button>
       </div>
-      <pre className="px-4 pt-1 pb-4 font-mono text-[13px] leading-relaxed wrap-anywhere whitespace-pre-wrap">
+      <pre
+        className={cn(
+          mono,
+          "px-4 pt-1 pb-4 text-[13px] leading-relaxed wrap-anywhere whitespace-pre-wrap",
+        )}
+      >
         <code>{code}</code>
       </pre>
     </div>
+  )
+}
+
+function InlineCode({ children }: { children: ReactNode }) {
+  const mono = useMonoFace()
+  return (
+    <code data-md-code className={cn(mono, "rounded-md bg-muted px-1.5 py-0.5 text-[0.85em]")}>
+      {children}
+    </code>
   )
 }
 
@@ -47,11 +64,7 @@ const components: ComponentProps<typeof ReactMarkdown>["components"] = {
     if (match || text.includes("\n")) {
       return <CodeBlock language={match?.[1]} code={text.replace(/\n$/, "")} />
     }
-    return (
-      <code data-md-code className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[0.85em]">
-        {children}
-      </code>
-    )
+    return <InlineCode>{children}</InlineCode>
   },
   a: ({ children, href }) => (
     <a href={href} target="_blank" rel="noreferrer" className="underline underline-offset-4">
