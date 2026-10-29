@@ -738,6 +738,8 @@ export interface SessionState {
   agents?: Agent[]
   /** The reader asked for the rows a compaction archived, so later reads fold them in. */
   archived?: boolean
+  /** The live rows held are the newest ones: the older pages of the transcript are not all read. */
+  partial?: boolean
   /** The turn this device streamed, until the host's transcript replaces it. */
   live?: LiveTurn
   /** What the turns this device watched cost, by the id of the row that opened each. */

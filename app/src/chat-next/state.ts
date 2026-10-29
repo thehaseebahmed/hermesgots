@@ -3,6 +3,7 @@ import { measureReply } from "@/lib/reply-stats"
 
 import type { Agent } from "./agents"
 import type { Queued, RunEvent } from "./api"
+import { overlay, prepend } from "./pages.ts"
 import {
   foldTurns,
   withArchive,
@@ -24,6 +25,11 @@ export interface ThreadState {
   rows: Row[]
   /** The children the session delegated to, as the plugin last listed them; none before it has. */
   agents?: Agent[]
+  /**
+   * The rows above are the newest ones of a transcript whose older rows are not all read: the page
+   * reads them on, and a read that joins what is held leaves it as it was.
+   */
+  partial?: boolean
   /** The rows a compaction archived, once the reader has asked for them; kept across every read. */
   archived?: Row[]
   /** What the turns this device watched cost, by the id of the row that opened each. */
@@ -61,7 +67,13 @@ export type Waiting =
     }
 
 export type ThreadEvent =
-  | { type: "transcript"; rows: Row[]; final?: boolean }
+  /**
+   * `more` says older rows are left unread; where it is left out they are as they were. With `joined`
+   * the rows are only the newest ones, laid over the rows held from where they start.
+   */
+  | { type: "transcript"; rows: Row[]; final?: boolean; more?: boolean; joined?: boolean }
+  /** An older page of the transcript, to go above the rows held; `last` is the start of the chat. */
+  | { type: "older"; rows: Row[]; last: boolean }
   | { type: "earlier"; rows: Row[] }
   | { type: "sent"; user: string; files?: SentFile[]; at?: number }
   /** A send that never reached the host: the message goes back to the composer, not the thread. */
@@ -80,8 +92,8 @@ export type ThreadEvent =
 export const initial: ThreadState = { status: "loading", rows: [], running: false }
 
 /** The transcript's turns, the archive folded in where the reader has asked for it. */
-export const foldedOf = (rows: Row[], archived?: Row[]) =>
-  foldTurns(archived ? withArchive(rows, archived) : rows)
+export const foldedOf = (rows: Row[], archived?: Row[], partial?: boolean) =>
+  foldTurns(archived ? withArchive(rows, archived) : rows, Boolean(partial) && !archived)
 
 /** The turns the screen draws: the transcript's, with the streamed one laid over the last. */
 export function turnsOf(folded: Turn[], live?: LiveTurn): Turn[] {
@@ -234,7 +246,10 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
   switch (event.type) {
     case "transcript": {
       if (state.running && !event.final) return state
-      const last = foldedOf(event.rows, state.archived).at(-1)
+      const rows = event.joined ? overlay(state.rows, event.rows) : event.rows
+      if (!rows) return state
+      const partial = event.more ?? state.partial
+      const last = foldedOf(rows, state.archived, partial).at(-1)
       const done = last?.done
       // What the turn this device watched cost goes with the row that opened it, which the
       // transcript has now written.
@@ -245,12 +260,13 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         measured &&
         last?.row !== undefined &&
         last.user === state.live?.turn.user &&
-        last.row !== foldedOf(state.rows, state.archived).at(-1)?.row
+        last.row !== foldedOf(state.rows, state.archived, state.partial).at(-1)?.row
           ? { ...state.stats, [last.row]: measured }
           : state.stats
       return {
         status: "ready",
-        rows: event.rows,
+        rows,
+        ...(partial ? { partial } : {}),
         archived: state.archived,
         agents: state.agents,
         queue: state.queue,
@@ -260,6 +276,12 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         waiting: event.final || done ? undefined : state.waiting,
       }
     }
+    case "older": {
+      // Rows above the ones held change nothing of what the device is doing: no turn, run or wait.
+      const rows = prepend(state.rows, event.rows)
+      if (rows === state.rows && !event.last === Boolean(state.partial)) return state
+      return { ...state, rows, partial: event.last ? undefined : true }
+    }
     case "earlier":
       // Drawn by the next read of the transcript, which folds the archive in with the live rows.
       return { ...state, archived: event.rows }
@@ -267,6 +289,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       return {
         status: "ready",
         rows: state.rows,
+        partial: state.partial,
         running: true,
         archived: state.archived,
         agents: state.agents,
@@ -291,7 +314,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
     case "attach": {
       // The run's events are replayed from its start, so the turn, and what it waits on, are drawn
       // again from nothing.
-      const last = turnsOf(foldedOf(state.rows, state.archived), state.live).at(-1)
+      const last = turnsOf(foldedOf(state.rows, state.archived, state.partial), state.live).at(-1)
       return {
         ...state,
         running: true,
@@ -328,4 +351,4 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
 
 /** The turns a state draws. */
 export const threadTurns = (state: ThreadState) =>
-  turnsOf(foldedOf(state.rows, state.archived), state.live)
+  turnsOf(foldedOf(state.rows, state.archived, state.partial), state.live)

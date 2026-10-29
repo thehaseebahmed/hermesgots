@@ -180,6 +180,11 @@ export function fakeHost(
     failedClears: 0,
     info: 0,
   }
+  /** The offset of each transcript page asked for, in the order the asks came. */
+  const offsets: number[] = []
+  /** Pages the host holds back until released, and pages it fails with a 500, by offset. */
+  const gates = new Map<number, { wait: Promise<void>; release: () => void }>()
+  const failing = new Set<number>()
   const latest: { run?: Run; id?: string; body?: Record<string, unknown>; key?: string } = {}
   /** A project session's record on the plugin: its mode, a plan waiting, and why it can't send. */
   const workspace = {
@@ -560,7 +565,11 @@ export function fakeHost(
       return reply({ session: { id: session, title: titled.title } })
     if (path === `/api/sessions/${session}/messages`) {
       asked.transcript++
+      const at = Number(url.searchParams.get("offset"))
+      offsets.push(at)
       if (latency) await new Promise((resolve) => setTimeout(resolve, latency))
+      await gates.get(at)?.wait
+      if (failing.has(at)) return reply({ error: { message: "The host failed." } }, 500)
       if (!rows.length)
         return reply(
           { error: { message: `Session not found: ${session}`, code: "session_not_found" } },
@@ -908,12 +917,37 @@ export function fakeHost(
     return run
   }
 
+  /**
+   * Holds the transcript page at `offset` back: a read of it waits, as on a slow link, until `release`.
+   * The page is asked for (`offsets`) at once, so a test can tell it is in flight.
+   */
+  function hold(offset: number) {
+    let release = () => {}
+    const wait = new Promise<void>((resolve) => (release = resolve))
+    gates.set(offset, { wait, release })
+    return {
+      release: () => {
+        gates.delete(offset)
+        release()
+      },
+    }
+  }
+
+  /** The transcript page at `offset` answers 500 until `fix`. */
+  function fail(offset: number) {
+    failing.add(offset)
+    return { fix: () => failing.delete(offset) }
+  }
+
   // The host answers every request this process makes from the moment it exists.
   globalThis.fetch = handle as typeof fetch
 
   return {
     handle,
     seed,
+    offsets,
+    hold,
+    fail,
     expected,
     view,
     compact,

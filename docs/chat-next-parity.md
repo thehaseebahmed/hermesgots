@@ -6,7 +6,7 @@ What the current chat screen (`CurrentChatPage` in `app/src/routes/chat.tsx`, ov
 
 | Area | How chat-next does it now |
 | --- | --- |
-| Transcript reads | `readTranscript` stops at the first page that joins the rows the device holds, so a thread that has not moved costs one page; a compaction or an undo changes the newest rows, fails the join and reads on |
+| Transcript reads | A chat opens on its newest page (`readNewest`), which is drawn at once, and the older pages are read after it, one at a time, and put above it until one comes back short (`readOlder`, rules in `pages.ts`); the thread keeps the reader's place because every row keeps its id as turns are added above (`origin`), and the loader is over the pane, only while a page is being read. A reply whose request is in a page not read yet is drawn alone (`Turn.cut`) and is whole when the page lands. A page that fails leaves the thread as drawn and is read again from a button, never by itself; the rows held and whether the chat is whole (`SessionState.partial`) are kept on the device, so a chat left unfinished is picked up where it stopped. A device that holds the thread reads only the newest page when it has not moved: the read stops at the first page that joins the held rows (`newestRead`), and a compaction or an undo, which change the newest rows, fail the join and read on; a turn's end reads the whole transcript |
 | The change stream | `onSessionMoved` (`lib/live.ts`) catches the open thread up when the plugin says its session moved; the timer drops to `SAFETY_MS` while the stream is open |
 | Thinking | The fold keeps a row's `reasoning` with the word or call it led to, a live `reasoning.available` block waits on the turn until the next one takes it, and the message rows carry reasoning runs |
 | The model pill | The composer carries the chat's `ModelMenu`, and so does the plan-ready card |
@@ -31,7 +31,7 @@ What the current chat screen (`CurrentChatPage` in `app/src/routes/chat.tsx`, ov
 
 ## Still to check before the default changes
 
-- **No sweep flow drives chat-next.** `pnpm e2e idle-requests` and the others run the current screen, so the request budget of an idle chat-next thread is argued from `scripts/test-chat-next-reads.mjs` (one page for a thread that has not moved) and not measured in a browser. Following the reader and opening a long chat on its newest rows are geometry: their component tests assert that the scroller is told to move and that the first frame is short, and a browser run is what would show them landing.
+- **No sweep flow drives chat-next.** `pnpm e2e idle-requests` and the others run the current screen, so the request budget of an idle chat-next thread is argued from `scripts/test-chat-next-reads.mjs` (one page for a thread that has not moved) and not measured in a browser. Following the reader and opening a long chat on its newest rows are geometry: their component tests assert that the scroller is told to move and that the first frame is short, and a browser run is what would show them landing. The one flow that drives chat-next is `chat-next-older`, which measures the reader's place as older pages land above it; it does not count requests.
 - **Stats exist only for a turn this device streamed from its start**: the host's transcript carries no usage, so a turn followed from its middle or written on another device has none.
 
 ## Not gaps

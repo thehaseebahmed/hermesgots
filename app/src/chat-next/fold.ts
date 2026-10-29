@@ -63,6 +63,8 @@ export interface Turn {
   files?: SentFile[]
   /** The host archived this turn's request when it compacted: what is left is the work, from the seam on. */
   carried?: boolean
+  /** The request is in rows not read yet: the reply is drawn alone, and the turn is whole once they are. */
+  cut?: boolean
   parts: Part[]
   /** A turn this device sent and watches from its start, which is what its stats are measured by. */
   timing?: Timing
@@ -156,11 +158,13 @@ const CHILD = /^\[ASYNC DELEGATION COMPLETE — (\S+?)\]/
  * Cuts a transcript at each user row and folds the rows after it into that turn's ordered parts. A
  * delivery row is not the user's: it starts a wake turn, which the rows after it, up to the next
  * reply, belong to. The match is on the text, since Hermes marks the user's own first row with the
- * same `display_kind` it gives a notification.
+ * same `display_kind` it gives a notification. With `partial` the rows are the newest ones of a
+ * transcript whose older rows are not read yet, so a reply before the first request is a turn whose
+ * request is missing (`cut`) rather than a stray to drop.
  */
 const msOf = (row: Row) => (typeof row.timestamp === "number" ? row.timestamp * 1000 : undefined)
 
-export function foldTurns(rows: Row[]): Turn[] {
+export function foldTurns(rows: Row[], partial = false): Turn[] {
   const turns: Turn[] = []
   const callOf = new Map<string, ToolCall>()
   /** The rows just read are a compaction, or the carried copy of work already drawn: the next reply may be the copy of one too. */
@@ -230,7 +234,12 @@ export function foldTurns(rows: Row[]): Turn[] {
       })
       continue
     }
-    const turn = turns.at(-1)
+    // Rows read newest first can open on a reply whose request is older still: it is drawn alone.
+    const turn =
+      turns.at(-1) ??
+      (partial && row.role === "assistant"
+        ? turns[turns.push({ user: "", parts: [], done: false, cut: true, delivered: [] }) - 1]
+        : undefined)
     if (!turn) continue
     if (row.role === "tool") {
       const call = row.tool_call_id ? callOf.get(row.tool_call_id) : undefined

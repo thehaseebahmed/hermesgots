@@ -9,20 +9,23 @@ import type { ToolCall, Turn } from "./fold.ts"
 /**
  * A thread's turns as the rows the app's message components draw (ADR 0065): the user's request,
  * then the reply with its words, its calls where they were made, its steers and its compactions.
- * Nothing here is stored; the ids are the turn's place in the thread, so a row keeps its id from one
- * read to the next and the components' memos hold.
+ * Nothing here is stored; the ids are the turn's place in the thread, counted from `origin` (the
+ * place the first turn holds, which older turns read later put below zero), so a row keeps its id
+ * from one read to the next and the components' memos hold, and the scroller keeps the reader's
+ * place while turns are added above.
  */
 export function messagesOf(
   chat: string,
   turns: Turn[],
-  options: { streaming?: boolean; stats?: Record<string, MessageStats> } = {},
+  options: { streaming?: boolean; stats?: Record<string, MessageStats>; origin?: number } = {},
 ): Message[] {
-  return turns.flatMap((turn, index) => {
-    const live = Boolean(options.streaming) && index === turns.length - 1 && !turn.done
+  return turns.flatMap((turn, at) => {
+    const index = (options.origin ?? 0) + at
+    const live = Boolean(options.streaming) && at === turns.length - 1 && !turn.done
     // What a turn cost: as it was just measured, else as the device kept it with the row that opened it.
     const stats = turn.stats ?? (turn.row !== undefined ? options.stats?.[turn.row] : undefined)
     // The page hands back the very turn it drew where nothing in it moved, so its rows are too.
-    const key = `${chat}-${index}-${live}`
+    const key = `${turnId(chat, index)}-${live}`
     const held = drawn.get(turn)
     if (held?.key === key && held.stats === stats) return held.rows
     const rows = rowsOf(chat, turnId(chat, index), turn, live, stats)

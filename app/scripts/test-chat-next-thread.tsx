@@ -32,6 +32,8 @@ test("a session opened by address draws its request, its words and its calls fro
 
   const query = `server=${encodeURIComponent("http://hermes.test")}&key=secret&session=${SESSION}`
   await mount(screen(query), async () => {
+    // The read waits for what the device holds to be in memory, since that decides how much is read.
+    for (let tries = 0; !asked.length && tries < 20; tries++) await settle()
     assert.equal(asked.length, 1, "one read of the chat")
     assert.equal(asked[0].url.pathname, `/api/sessions/${SESSION}/messages`)
     assert.equal(asked[0].authorization, "Bearer secret")
