@@ -8,14 +8,13 @@ Fixed while auditing: chat-next's rows carried the Hermes session id as their `c
 
 | Area | Current screen | chat-next | Where to start |
 | --- | --- | --- | --- |
-| A bot's Main | Triaged before it sends, with its thread cards, moved markers and day headings in one flow, the bot's name and thread count in the header, and `/thread` | Not opened on chat-next (`route.ts`) | Task 11 |
 | Transcript reads | `history.ts` probes one row (`hermesTip`), reads only what's new, and grows the window backwards as the reader reaches the top (ADR 0058) | `readTranscript` reads the **whole** transcript, 50 rows a page, on every poll: 2 s while busy, 15 s idle. A 500-row chat costs 11 requests a read, about 44 in the `idle-requests` flow's 65 s, against its budget of 12 (_derived_) | Probe the tip; read only from the newest held row; page backwards on reach |
 | The change stream | `watchChat` and `useLive`: catches up when the plugin's stream says the session moved, polling only at `SAFETY_MS` while a stream is open | Ignores the stream, so it polls at its own pace whatever the stream says | `onChanges` / `useLive` from `lib/live.ts` |
 | Thinking | A reply's thinking as rows (`thinking.ts`, ADR 0054, 0064), from the transcript's `reasoning` and the run's `reasoning.available` | No thinking at all: the store's `kept()` drops a row's `reasoning`, the fold reads none, and `reasoning.available` is ignored | Carry `reasoning` through the fold; `appendThinking` into `reasoningRuns` |
 | The model pill | `ModelMenu` in the composer, and in the plan-ready card | `NextComposerBody` passes the composer no `model`, so a chat's model can't be changed | Pass `model` as `CurrentChatPage` builds it |
 | The header's options | Rename, mute, resolve or reopen, discard and delete; the context ring and its usage sheet | `ChatHeader` with no `actions` | Lift `actions` and its dialogs out of `CurrentChatPage` |
-| Back from a session or a thread | A back button to Code, or to Main; `setBackGuard`, so Android's back goes there too | No back button and no guard: Android's back leaves the app from a code session | Lift `leave`, the guard and `mainPath` |
-| A session not started | Not drawn as a thread: the greeting and the repos it will work in (`EmptyState`), and leaving deletes it or asks to keep its draft | Opens on chat-next as an empty thread — `route.ts` doesn't check the chat was started, though its comment and AGENTS.md say it does — and leaving keeps it | Either check `updatedAt > createdAt` in the rule or draw `EmptyState` and lift `leave` |
+| Back from a session or a thread | A back button to Code, or to Main; `setBackGuard`, so Android's back goes there too | A thread of Main leads back to it, guard included; a code session has no back button and no guard, so Android's back leaves the app from it | Lift `leave` and the session's guard |
+| A session not started | Not drawn as a thread: the greeting and the repos it will work in (`EmptyState`), and leaving deletes it or asks to keep its draft | Opens on chat-next as an empty thread, since `route.ts` asks only that the chat has a record — a session started from Code has one before anything is sent — and leaving keeps it | Either check `updatedAt > createdAt` in the rule or draw `EmptyState` and lift `leave` |
 | Stop | One press stops the turn and every subagent the session holds (`stopSubagents`, `subagents_stop_all`, ADR 0051); the composer offers Stop while a subagent works | Stops only the run it follows; the composer isn't told `subagentsRunning` | `stopSubagents` beside `stopRun`; pass `subagentsRunning` |
 | Approvals and questions | `ApprovalCard` (the asking tool, every choice, expired and missed) and `QuestionCard` (pages, Skip, Other) | chat-next's own bare cards in the composer's slot | Feed the app's cards from `Waiting`, answering through `respond` |
 | A missed question's Ask again | Sends through the chat's own send | `ClarifyCard` calls `chat.ts`'s `sendMessage`, the old engine, which writes rows chat-next never draws | Give the card the controls' `send` |
@@ -39,5 +38,6 @@ Fixed while auditing: chat-next's rows carried the Hermes session id as their `c
 
 ## Not gaps
 
+- A bot's Main: triage before every send, its thread cards, day headings and moved markers, its header, empty state and `/thread`, and a thread's way back to it.
 - The send path, the plugin queue, steering, a project session's workspace, the pills above the composer, the follow-up reads, the host's title, read marks and the code font match the current screen (ADR 0065, PR #669).
 - Keyless bots and Hermes older than 0.22.5 stay on the current screen by design (`route.ts`, `MIN_HERMES`).
