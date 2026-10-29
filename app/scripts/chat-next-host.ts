@@ -791,6 +791,8 @@ export function fakeHost(
       thoughts?: string[]
       /** The host wrote the reply with no finish reason, as it does for some finished turns. */
       unmarked?: boolean
+      /** The host gave up on the turn and wrote its own words for it, as a `failed_turn` row. */
+      failed?: string
     }[],
   ) {
     for (const turn of turns) {
@@ -803,6 +805,12 @@ export function fakeHost(
       if (thoughts.length) run.think(thoughts[0])
       run.finish(turn.reply)
       if (turn.unmarked) rows.at(-1)!.finish_reason = null
+      if (turn.failed !== undefined)
+        Object.assign(rows.at(-1)!, {
+          finish_reason: null,
+          display_kind: "failed_turn",
+          content: turn.failed,
+        })
     }
   }
 

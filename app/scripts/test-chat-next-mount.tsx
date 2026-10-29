@@ -647,6 +647,15 @@ test("a reply the host wrote with no finish reason is not drawn as still being w
   })
 })
 
+test("a turn the host gave up on is drawn as failed, in the host's words, and not as writing", async () => {
+  const { host } = await onChatNext("c-failed", {}, { plugin: true })
+  host.seed([{ user: "Look around", reply: "", failed: "Your request was not processed." }])
+  await mount(chatScreen("c-failed"), async () => {
+    await until(() => text().includes("Your request was not processed."), "the host's words show")
+    assert.ok(!text().includes("Writing…"), "and the turn is at rest")
+  })
+})
+
 test("a reply this device watched keeps what it cost, under the reply, once the transcript has it", async () => {
   const { host } = await onChatNext("c-stats")
   await mount(chatScreen("c-stats"), async () => {

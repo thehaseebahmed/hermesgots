@@ -162,3 +162,19 @@ test("a steer goes on the reply it steered, without the marker Hermes wraps it i
   )
   assert.equal(turns[0].parts[1].text, "Make it rhyme")
 })
+
+test("a failed turn's row ends the turn and keeps the host's words, not as a reply", () => {
+  const turns = foldTurns([
+    row(1, "user", "Connect my office"),
+    row(2, "assistant", "Your request was not processed.", { display_kind: "failed_turn" }),
+    row(3, "user", "Connect my office"),
+    row(4, "assistant", "Your request was not processed.", { display_kind: "failed_turn" }),
+  ])
+  assert.deepEqual(
+    turns.map((turn) => [turn.done, turn.failed, turn.parts.length]),
+    [
+      [true, "Your request was not processed.", 0],
+      [true, "Your request was not processed.", 0],
+    ],
+  )
+})

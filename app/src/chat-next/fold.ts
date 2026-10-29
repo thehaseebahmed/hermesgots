@@ -72,6 +72,8 @@ export interface Turn {
   pendingThought?: string
   /** The host has written the reply's last row: an assistant row that makes no more calls and says why it stopped. */
   done: boolean
+  /** The host gave up on the turn (`failed_turn`) and says so in its own words; it is over. */
+  failed?: string
   /** A reply the host started when a subagent finished: it answers no message of the user's. */
   wake?: boolean
   /** The children whose results this wake turn carries, as the host names them. */
@@ -241,6 +243,12 @@ export function foldTurns(rows: Row[]): Turn[] {
       continue
     }
     if (row.role !== "assistant") continue
+    // A failed turn ends in a row of its own, with no finish reason: it is over, not still writing.
+    if (row.display_kind === "failed_turn") {
+      turn.done = true
+      turn.failed = row.content || "Hermes couldn't finish this reply."
+      continue
+    }
     // After a compaction Hermes writes the work it carried forward again, under the ids it had: a
     // call already drawn is that call, and the first reply back is the one already given.
     const asked = row.tool_calls ?? []

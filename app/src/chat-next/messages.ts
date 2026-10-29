@@ -138,7 +138,7 @@ function rowsOf(
       })
   }
   think(turn.pendingThought)
-  if (live || content || tools.length || seams.length || thinking)
+  if (live || content || tools.length || seams.length || thinking || turn.failed)
     rows.push({
       id: `${id}-a`,
       conversationId: chat,
@@ -149,7 +149,8 @@ function rowsOf(
       ...(steers.length ? { steers } : {}),
       ...(seams.length ? { seams } : {}),
       ...(stats && !live ? { stats } : {}),
-      status: live ? "streaming" : "done",
+      status: live ? "streaming" : turn.failed ? "error" : "done",
+      ...(turn.failed && !live ? { statusText: turn.failed } : {}),
       createdAt,
     })
   return rows
