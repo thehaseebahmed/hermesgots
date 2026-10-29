@@ -146,12 +146,13 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
         </section>
       )}
 
-      {/* The cleanup's own card after the host's: the level a take is tidied at, then its model,
-          then — for a Developer — whether the decode is given a Hearing prompt (ADR 0066, 0067). */}
+      {/* The cleanup's own card after the host's: its model, and — where the plugin takes them — the
+          level a take is tidied at and, for a Developer, the Hearing prompt of its decode. */}
       {settings && (
         <CleanupSection
           settings={settings}
           saving={speech.saving}
+          levels={speech.levels}
           developer={Boolean(developer)}
           onLevel={(level) => (speech.saving ? undefined : void speech.chooseLevel(level))}
           onHearing={(sent) => (speech.saving ? undefined : void speech.setHearing(sent))}
@@ -710,6 +711,7 @@ function CleanupRow({
 function CleanupSection({
   settings,
   saving,
+  levels,
   developer,
   onLevel,
   onHearing,
@@ -717,6 +719,7 @@ function CleanupSection({
 }: {
   settings: SpeechSettings
   saving: boolean
+  levels: boolean
   developer: boolean
   onLevel: (level: CleanupLevel) => void
   onHearing: (sent: boolean) => void
@@ -725,10 +728,10 @@ function CleanupSection({
   return (
     <section className="flex flex-col gap-2" data-stt-group="cleanup">
       <Caption>Cleanup</Caption>
-      <CleanupLevels level={settings.cleanup.level} saving={saving} onPick={onLevel} />
+      {levels && <CleanupLevels level={settings.cleanup.level} saving={saving} onPick={onLevel} />}
       <Group>
         <CleanupRow tag="Gots" settings={settings} saving={saving} onClick={onPick} />
-        {developer && (
+        {levels && developer && (
           <SwitchRow
             id="stt-hearing-prompt"
             title="Hearing prompt"
@@ -755,7 +758,7 @@ function CleanupLevels({
   onPick: (level: CleanupLevel) => void
 }) {
   return (
-    <div className="grid gap-2 md:grid-cols-4" data-cleanup-levels>
+    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4" data-cleanup-levels>
       {CLEANUP_LEVEL_ROWS.map((row) => (
         <button
           key={row.level}

@@ -12,6 +12,17 @@ import { readStt, type SttSettings } from "./stt-settings.ts"
 /** The feature a host advertises when it has the host speech settings at all. */
 export const SPEECH_MODEL = "speech_model"
 
+/** The feature a host advertises when it takes a level and a Hearing prompt (ADR 0066, ADR 0067). */
+export const CLEANUP_LEVELS_FEATURE = "cleanup_level"
+
+/** The speech fields a page may write: each is the bot's, and none is the host's own config. */
+export type SpeechPatch = {
+  model?: string
+  cleanup_model?: SpeechPick | null
+  cleanup_level?: CleanupLevel
+  hearing_prompt?: boolean
+}
+
 export interface SpeechModel {
   name: string
   /** The download, in MB; null for a hand-written model the plugin's catalogue doesn't list. */

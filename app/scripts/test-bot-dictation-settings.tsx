@@ -25,7 +25,7 @@ import {
 test("the page draws every speech setting its host carries, in cards named for what they are", async () => {
   await seed(
     "stt-rows",
-    ["dictation", "speech_model", "stt_settings"],
+    ["dictation", "speech_model", "stt_settings", "cleanup_level"],
     {},
     { speech: speech({ stt: STT() }) },
   )

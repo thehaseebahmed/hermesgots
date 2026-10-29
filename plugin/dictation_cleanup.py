@@ -149,12 +149,18 @@ class CleanupPrompt:
         )
 
 
+def level_of(value: Any) -> str:
+    """A stored level as one of the four, defaulting where the host names none of them."""
+    name = str(value or "").strip().lower()
+    return name if name in LEVELS else DEFAULT_LEVEL
+
+
 class DictationCleanupPrompt:
     """The prompt a cleanup is asked with, one builder per level (ADR 0066).
 
-    ``DictationCleanupPrompt.WithLightCleanup().Build()`` is the whole of it; ``Of`` takes the level
-    a host stored and answers the default where it names none, so a host that has never picked cleans
-    at the level that keeps every word.
+    ``DictationCleanupPrompt.WithLightCleanup().Build()`` is the whole of it; ``ForLevel`` takes the
+    level a host stored and answers the default where it names none, so a host that has never picked
+    cleans at the level that keeps every word.
     """
 
     def __init__(self, level: str) -> None:
@@ -180,9 +186,9 @@ class DictationCleanupPrompt:
         return cls(HIGH)
 
     @classmethod
-    def Of(cls, level: Any) -> "DictationCleanupPrompt":
-        name = str(level or "").strip().lower()
-        return cls(name if name in LEVELS else DEFAULT_LEVEL)
+    def ForLevel(cls, level: Any) -> "DictationCleanupPrompt":
+        """The prompt for the level a host stored; anything else reads as the default."""
+        return cls(level_of(level))
 
     def Build(self) -> CleanupPrompt:
         return CleanupPrompt(
@@ -201,12 +207,6 @@ Ask = Callable[[CleanupPrompt, str, Optional[Dict[str, str]]], Optional[str]]
 def register(plugin_ctx: Any) -> None:
     global ctx
     ctx = plugin_ctx
-
-
-def level_of(value: Any) -> str:
-    """A stored level as one of the four, defaulting where the host names none of them."""
-    name = str(value or "").strip().lower()
-    return name if name in LEVELS else DEFAULT_LEVEL
 
 
 def _prompt(text: str, vocabulary: Sequence[str], hint: str = "") -> str:

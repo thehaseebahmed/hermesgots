@@ -1,5 +1,6 @@
 import { connectionKey } from "@/lib/connection"
 import { heardOf } from "@/lib/dictation-log"
+import type { SpeechPatch } from "@/lib/speech"
 import { pluginRoot, serverRoot } from "@/lib/host-url"
 import { READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
 import type {
@@ -1231,12 +1232,7 @@ export async function getSpeechSettings(config: HermesConfig, signal?: AbortSign
 /** Writes the speech fields that moved, and answers the host's whole record as it now stands. */
 export async function setSpeechSettings(
   config: HermesConfig,
-  patch: {
-    model?: string
-    cleanup_model?: { provider: string; model: string } | null
-    cleanup_level?: string
-    hearing_prompt?: boolean
-  },
+  patch: SpeechPatch,
   signal?: AbortSignal,
 ) {
   const response = await request(`${pluginRoot(config.baseUrl)}/speech`, {

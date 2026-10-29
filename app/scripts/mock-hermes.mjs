@@ -3825,6 +3825,7 @@ http
           "dictation",
           ...(DICTATIONS ? ["dictations"] : []),
           "speech_model",
+          "cleanup_level",
           "stt_settings",
           "afk",
           "afk_switch",

@@ -458,7 +458,7 @@ const pressed = (level: string) =>
 test("the page offers four cleanup levels, Light in play until the bot picks another", async () => {
   const calls = await seed(
     "cleanup-levels",
-    ["dictation", "speech_model"],
+    ["dictation", "speech_model", "cleanup_level"],
     {},
     {
       speech: speech(),
@@ -484,7 +484,12 @@ test("the page offers four cleanup levels, Light in play until the bot picks ano
 })
 
 test("the Hearing prompt row is not offered until Developer is on", async () => {
-  await seed("hearing-hidden", ["dictation", "speech_model"], {}, { speech: speech() })
+  await seed(
+    "hearing-hidden",
+    ["dictation", "speech_model", "cleanup_level"],
+    {},
+    { speech: speech() },
+  )
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
     assert.equal(row("hearing-prompt"), null, "no Developer switch, no experimental row")
     assert.ok(row("cleanup-model"), "while the cleanup's own row is still there")
@@ -494,7 +499,7 @@ test("the Hearing prompt row is not offered until Developer is on", async () => 
 test("a Developer's Hearing prompt switch is written to the host and read back", async () => {
   const calls = await seed(
     "hearing-shown",
-    ["dictation", "speech_model"],
+    ["dictation", "speech_model", "cleanup_level"],
     {},
     { speech: speech(), next: speech({ hearing: { sent: true } }) },
   )
@@ -512,5 +517,13 @@ test("a Developer's Hearing prompt switch is written to the host and read back",
       async () => switchIn("hearing-prompt")?.getAttribute("aria-checked") === "true",
       "the switch reading back on",
     )
+  })
+})
+
+test("a host too old to take a level offers the cleanup model alone", async () => {
+  await seed("levels-absent", ["dictation", "speech_model"], {}, { speech: speech() })
+  await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    assert.ok(row("cleanup-model"), "the model's row is still there")
+    assert.deepEqual(levelCards(), [], "and no level the host would refuse to store")
   })
 })

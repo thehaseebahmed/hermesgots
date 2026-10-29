@@ -152,7 +152,7 @@ def _model_prompt(system: str, instructions: str, example: str) -> str:
 
 def _level(level: str, note: str) -> tuple:
     """One cleanup level's call: its prompt as built, and the promise the level makes."""
-    asked = dictation_cleanup.DictationCleanupPrompt.Of(level).Build()
+    asked = dictation_cleanup.DictationCleanupPrompt.ForLevel(level).Build()
     return (f"Dictation cleanup: {level}", note, _model_prompt(asked.system, asked.instructions, WHOLE))
 
 

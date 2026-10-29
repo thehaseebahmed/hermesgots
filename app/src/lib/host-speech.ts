@@ -7,23 +7,17 @@ import { getSpeechSettings, setSpeechSettings, setSttSetting } from "@/lib/herme
 import { usePluginFeatureAnswers } from "@/lib/features"
 import { noteFailure } from "@/lib/report"
 import {
+  CLEANUP_LEVELS_FEATURE,
   readSpeech,
   SPEECH_MODEL,
   type CleanupLevel,
   type SpeechPick,
+  type SpeechPatch,
   type SpeechSettings,
 } from "@/lib/speech"
 import { STT_SETTINGS, type SttValue } from "@/lib/stt-settings"
 
 type Server = { baseUrl: string; apiKey: string }
-
-/** The speech fields a page may write: each is the bot's, and none is the host's own config. */
-export type SpeechPatch = {
-  model?: string
-  cleanup_model?: SpeechPick | null
-  cleanup_level?: CleanupLevel
-  hearing_prompt?: boolean
-}
 
 export async function getSpeech(config: Server, signal?: AbortSignal): Promise<SpeechSettings> {
   return readSpeech(await getSpeechSettings(config, signal))
@@ -68,10 +62,12 @@ export function useSpeech(profile?: (Server & { id?: string; speechModel?: strin
   // carries the rest of its speech settings, which a host too old for draws the model alone.
   const features = usePluginFeatureAnswers(
     { baseUrl, apiKey },
-    { speech: SPEECH_MODEL, stt: STT_SETTINGS },
+    { speech: SPEECH_MODEL, stt: STT_SETTINGS, levels: CLEANUP_LEVELS_FEATURE },
   )
   const supported = features.speech === "yes"
   const sttSupport = features.stt === "yes"
+  // A plugin older than the four levels refuses both writes, so the page doesn't offer them at all.
+  const levelsSupport = features.levels === "yes"
   const [saving, setSaving] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
 
@@ -148,6 +144,8 @@ export function useSpeech(profile?: (Server & { id?: string; speechModel?: strin
     supported,
     /** Whether the host carries the rest of its speech settings on this page (ADR 0063). */
     stt: supported && sttSupport,
+    /** Whether the host takes a cleanup level and a Hearing prompt (ADR 0066, ADR 0067). */
+    levels: supported && levelsSupport,
     saving,
     problem,
     choose: (model: string) => write({ model }),

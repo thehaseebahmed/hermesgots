@@ -44,9 +44,9 @@ class BuilderTest(unittest.TestCase):
         )
 
     def test_a_level_a_host_does_not_name_is_the_default_one(self) -> None:
-        self.assertEqual(dictation_cleanup.DictationCleanupPrompt.Of("HIGH").level, "high")
-        self.assertEqual(dictation_cleanup.DictationCleanupPrompt.Of("loud").level, "light")
-        self.assertEqual(dictation_cleanup.DictationCleanupPrompt.Of(None).level, "light")
+        self.assertEqual(dictation_cleanup.DictationCleanupPrompt.ForLevel("HIGH").level, "high")
+        self.assertEqual(dictation_cleanup.DictationCleanupPrompt.ForLevel("loud").level, "light")
+        self.assertEqual(dictation_cleanup.DictationCleanupPrompt.ForLevel(None).level, "light")
 
     def test_a_level_that_is_not_one_raises(self) -> None:
         with self.assertRaises(ValueError):

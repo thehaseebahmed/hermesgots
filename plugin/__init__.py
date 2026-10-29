@@ -473,6 +473,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # totals its Dictation screen counts (dictations.py, ADR 0060).
                     "dictations",
                     "speech_model",
+                    # The level a take is cleaned up at and the Hearing prompt its decode is given
+                    # (speech.py, ADR 0066, ADR 0067). Both are new fields an older plugin refuses,
+                    # so the page offers them only where this is advertised.
+                    "cleanup_level",
                     # The rest of the host's `stt` section, on the same page (speech.py, ADR 0063):
                     # advertised only where this host's Hermes declares those defaults, so a host
                     # that doesn't keeps the one speech row it already draws.
@@ -1911,7 +1915,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 body.get("text"),
                 vocabulary,
                 hint=hint,
-                prompt=dictation_cleanup.DictationCleanupPrompt.Of(level).Build(),
+                prompt=dictation_cleanup.DictationCleanupPrompt.ForLevel(level).Build(),
                 model=cleanup_model,
             )
         except dictation.DictationError as error:
