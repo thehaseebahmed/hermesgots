@@ -5,9 +5,10 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
+import { act } from "react"
 
 import { readAgents, readLiveRun } from "@/chat-next/api"
-import { db, type Profile } from "@/lib/db"
+import { db, type Profile, type Settings } from "@/lib/db"
 import { fakeHost } from "./chat-next-host.ts"
 import {
   botProfile,
@@ -17,6 +18,7 @@ import {
   find,
   findAll,
   mount,
+  pressEnter,
   seedChats,
   settle,
   type,
@@ -24,8 +26,13 @@ import {
 
 const bot = botProfile("hermes")
 
+/** Waits on the screen as a person would: the real screen polls at its real pace, so up to 6s. */
 async function until(check: () => boolean, what: string) {
-  for (let tries = 0; !check() && tries < 40; tries++) await settle()
+  const by = Date.now() + 6_000
+  while (!check() && Date.now() < by) {
+    await settle()
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 25)))
+  }
   assert.ok(check(), what)
 }
 
@@ -97,13 +104,18 @@ test("a bot served at /p/<profile> reaches its plugin inside the plugin's own pr
 })
 
 /** The chat seeded on chat-next, its host, and its bot's default pick: what the next sends run on. */
-async function onChatNext(id: string, patch: Partial<Profile> = {}) {
+async function onChatNext(
+  id: string,
+  patch: Partial<Profile> = {},
+  { plugin = false, settings = {} }: { plugin?: boolean; settings?: Partial<Settings> } = {},
+) {
   const defaultPick = { provider: "anthropic", model: "claude-sonnet-5-5" }
   await seedChats([{ id, title: "Sky colours" }], {
-    bots: [{ ...bot, modelChoice: defaultPick, ...patch }],
-    settings: { chatNext: true },
+    // An address of the chat's own: what a host's plugin offers is remembered per address.
+    bots: [{ ...bot, baseUrl: `http://${id}.test/v1`, modelChoice: defaultPick, ...patch }],
+    settings: { chatNext: true, ...settings },
   })
-  return { host: fakeHost(`memento-${id}`), defaultPick }
+  return { host: fakeHost(`memento-${id}`, { plugin }), defaultPick }
 }
 
 async function sendFromComposer(text: string) {
@@ -168,5 +180,97 @@ test("Stop stops the run the thread is following", async () => {
     await click(find('button[aria-label="Stop"]'))
     await until(() => host.asked.stops === 1, "the host was asked to stop it")
     await until(() => Boolean(find('button[aria-label="Send"]')), "and Send comes back")
+  })
+})
+
+/** Starts a turn and leaves it running, so the next message lands in the middle of it. */
+async function midReply(host: ReturnType<typeof fakeHost>, first: string) {
+  await sendFromComposer(first)
+  await until(() => host.asked.runs === 1, "the first turn is running")
+  await until(() => Boolean(find('button[aria-label="Stop"]')), "the composer knows it is")
+  return host.latest.run!
+}
+
+test("a message sent mid-reply goes to the plugin's queue and runs once the reply is over", async () => {
+  const { host } = await onChatNext("c-queue", {}, { plugin: true })
+  await mount(chatScreen("c-queue"), async () => {
+    const first = await midReply(host, "First question")
+    await type(composerField(), "And then this")
+    await pressEnter()
+    await until(() => host.queue.length === 1, "the plugin holds the message")
+    assert.equal(
+      host.queue[0].body.input instanceof Array,
+      true,
+      "with the whole run it will start",
+    )
+    assert.equal(host.asked.runs, 1, "and nothing was started beside the running reply")
+    await until(
+      () => find("[data-queued]")?.textContent?.includes("And then this") ?? false,
+      "the queued message waits at the end of the thread",
+    )
+    first.finish("First answer.")
+    // The plugin starts it once the reply is over; the thread follows the turn it opens.
+    await until(() => host.queue.length === 0 && host.latest.run !== first, "the plugin started it")
+    host.latest.run!.finish("Second answer.")
+    await until(
+      () =>
+        findAll("[data-chat-next] [data-user]")
+          .map((one) => one.textContent)
+          .join("|") === "First question|And then this",
+      "both turns are drawn, in order",
+    )
+    await until(() => find("[data-queued]") === null, "and nothing is left waiting")
+  })
+})
+
+test("Remove takes a queued message back off the plugin", async () => {
+  const { host } = await onChatNext("c-unqueue", {}, { plugin: true })
+  await mount(chatScreen("c-unqueue"), async () => {
+    await midReply(host, "Long job")
+    await type(composerField(), "Never mind")
+    await pressEnter()
+    await until(() => Boolean(find("[data-remove-queued]")), "the queued message offers Remove")
+    await click(find("[data-remove-queued]"))
+    await until(() => host.queue.length === 0, "the plugin no longer holds it")
+    await until(() => find("[data-queued]") === null, "and it is gone from the thread")
+  })
+})
+
+test("with Steer by default, a message sent mid-reply steers it and is drawn in the reply", async () => {
+  const { host } = await onChatNext(
+    "c-steer",
+    {},
+    { plugin: true, settings: { steerByDefault: true } },
+  )
+  await mount(chatScreen("c-steer"), async () => {
+    const run = await midReply(host, "Write a poem")
+    await type(composerField(), "Make it rhyme")
+    await pressEnter()
+    await until(
+      () => host.rows.some((row) => row.display_kind === "steer"),
+      "the plugin steered the running reply",
+    )
+    assert.equal(host.queue.length, 0, "and holds nothing back")
+    run.finish("Roses are red.")
+    await until(
+      () => find("[data-chat-next] [data-steer]")?.textContent?.includes("Make it rhyme") ?? false,
+      "the steer is drawn inside the reply it steered",
+    )
+    assert.deepEqual(
+      findAll("[data-chat-next] [data-user]").map((one) => one.textContent),
+      ["Write a poem"],
+      "and opens no turn of its own",
+    )
+  })
+})
+
+test("a bot whose plugin can't queue hands a mid-reply message back", async () => {
+  const { host } = await onChatNext("c-noqueue")
+  await mount(chatScreen("c-noqueue"), async () => {
+    await midReply(host, "Busy now")
+    await type(composerField(), "Hold this")
+    await pressEnter()
+    await until(() => composerField()?.value === "Hold this", "the words are back in the field")
+    assert.equal(host.asked.runs, 1, "and no second run was started")
   })
 })

@@ -203,6 +203,73 @@ export async function readAgents(
   }
 }
 
+/** A message the plugin holds for the session, to start once the run before it is over. */
+export interface Queued {
+  id: string
+  text: string
+  files: string[]
+  /** Why the plugin couldn't start it; it waits until it's sent again. */
+  error?: string
+}
+
+/**
+ * The session's queue on the Gots plugin: what waits, and whether a stopped or failed run has paused
+ * it. A host without the plugin, or one that cannot say, has no answer.
+ */
+export async function readQueue(
+  connection: Connection,
+  session: string,
+  signal?: AbortSignal,
+): Promise<{ items: Queued[]; paused: boolean } | undefined> {
+  try {
+    const response = await fetch(
+      `${plugin(connection)}/sessions/${encodeURIComponent(session)}/queue`,
+      {
+        headers: headers(connection),
+        signal: within(signal),
+      },
+    )
+    if (!response.ok) return undefined
+    const body = (await response.json()) as {
+      items?: {
+        id?: unknown
+        text?: unknown
+        attachments?: { name?: unknown }[]
+        error?: unknown
+      }[]
+      paused?: unknown
+    }
+    if (!Array.isArray(body.items)) return undefined
+    return {
+      paused: Boolean(body.paused),
+      items: body.items.map((item) => ({
+        id: String(item.id),
+        text: typeof item.text === "string" ? item.text : "",
+        files: (Array.isArray(item.attachments) ? item.attachments : []).map((file) =>
+          String(file?.name ?? "file"),
+        ),
+        ...(typeof item.error === "string" && item.error ? { error: item.error } : {}),
+      })),
+    }
+  } catch {
+    return undefined
+  }
+}
+
+/** Takes a queued message back, or sends it now while the queue is paused. */
+export async function actOnQueued(
+  connection: Connection,
+  session: string,
+  id: string,
+  action: "remove" | "send",
+) {
+  const response = await fetch(
+    `${plugin(connection)}/sessions/${encodeURIComponent(session)}/queue/${encodeURIComponent(id)}/${action}`,
+    { method: "POST", headers: headers(connection), signal: within() },
+  )
+  ensure(response)
+}
+
 /**
  * Answers the prompt a run is held up on through Hermes's own route. It takes exactly the prompt's
  * id, its generation and the one field for the kind: `choice` for an approval, `answer` for a

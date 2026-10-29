@@ -1,11 +1,12 @@
 import { wireContent } from "@/lib/attachments"
 import { serverConfig } from "@/lib/connection"
 import { db, type Attachment } from "@/lib/db"
-import { runRequest } from "@/lib/hermes"
+import { addToQueue, hasPluginFeature, queueAction, runRequest } from "@/lib/hermes"
 import { modelOf, wantsPin } from "@/lib/model-pick"
 import { quietly } from "@/lib/report"
 import { pinFromHost, pinModel, uploadAttachments } from "@/lib/send-turn"
 import { randomId } from "@/lib/utils"
+import { toast } from "sonner"
 
 /** A turn ready to post: its run's body and key, and what to do once the post is settled. */
 export interface PreparedTurn {
@@ -26,6 +27,10 @@ export async function prepareTurn(
   text: string,
   attachments: Attachment[],
 ): Promise<PreparedTurn> {
+  return (await built(chatId, text, attachments)).turn
+}
+
+async function built(chatId: string, text: string, attachments: Attachment[]) {
   const chat = await db.conversations.get(chatId)
   const bot = chat && (await db.profiles.get(chat.profileId))
   if (!chat || !bot) throw new Error("This chat is gone.")
@@ -41,7 +46,7 @@ export async function prepareTurn(
       messages: [{ role: "user", content: await wireContent(text.trim(), sent) }],
     })
     const ask = wantsPin(pinned)
-    return {
+    const turn: PreparedTurn = {
       body,
       key: randomId(),
       settled: (reached) => {
@@ -50,8 +55,47 @@ export async function prepareTurn(
         else if (ask) void pinFromHost(chatId, bot).catch(quietly("Pinning a chat's model"))
       },
     }
+    return { turn, config, session: chat.hermesSessionId, sent }
   } catch (error) {
     await release?.()
     throw error
+  }
+}
+
+/**
+ * Hands a message sent mid-reply to the plugin's queue, built as a send is, so it starts once the
+ * reply is over with the app closed too. Answers the item the plugin holds it as.
+ */
+export async function queueTurn(chatId: string, text: string, attachments: Attachment[]) {
+  // Asked before anything is pinned or uploaded, so a bot that can't queue spends nothing.
+  const chat = await db.conversations.get(chatId)
+  const bot = chat && (await db.profiles.get(chat.profileId))
+  if (!bot || !(await hasPluginFeature(serverConfig(bot), "queue")))
+    throw new Error("This bot's plugin can't hold a message until the reply is over.")
+  const { turn, config, session, sent } = await built(chatId, text, attachments)
+  try {
+    const item = await addToQueue(config, session, {
+      text: text.trim(),
+      attachments: sent.map(({ name, type, size, path }) => ({ name, type, size, path })),
+      run: turn.body,
+    })
+    turn.settled(true)
+    return { item, config, session }
+  } catch (error) {
+    turn.settled(false)
+    throw error
+  }
+}
+
+/**
+ * Steers the running reply the way the current screen does: queued first, then steered by the
+ * plugin, so a steer Hermes refuses or hands back unread stays queued rather than lost.
+ */
+export async function steerTurn(chatId: string, text: string, attachments: Attachment[]) {
+  const { item, config, session } = await queueTurn(chatId, text, attachments)
+  try {
+    await queueAction(config, session, item.id, "steer")
+  } catch {
+    toast.error("Couldn't steer this reply, so it's queued.")
   }
 }

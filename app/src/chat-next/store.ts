@@ -86,13 +86,15 @@ const recordOf = (session: string, state: ThreadState): SessionState => ({
   agents: state.agents,
   archived: state.archived ? true : undefined,
   live: state.live,
+  queue: state.queue,
 })
 
 const sameRecord = (a: SessionState | undefined, b: SessionState) =>
   a !== undefined &&
   a.agents === b.agents &&
   Boolean(a.archived) === Boolean(b.archived) &&
-  a.live === b.live
+  a.live === b.live &&
+  a.queue === b.queue
 
 function createStore(database: SessionDb, session: string, drop: () => void): ThreadStore {
   let state = initial
@@ -110,7 +112,14 @@ function createStore(database: SessionDb, session: string, drop: () => void): Th
     const record = await database.sessionStates.get(session)
     const rows = await readRows(database, session, "live")
     const archived = record?.archived ? await readRows(database, session, "archive") : undefined
-    state = { ...initial, rows, archived, agents: record?.agents, live: record?.live }
+    state = {
+      ...initial,
+      rows,
+      archived,
+      agents: record?.agents,
+      live: record?.live,
+      queue: record?.queue,
+    }
     written = { rows, archived, record }
   })()
 

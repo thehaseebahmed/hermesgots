@@ -168,6 +168,23 @@ export function fakeHost(
   const approvals: { run: string; choice: string }[] = []
   const asked = { transcript: 0, archive: 0, runs: 0, subscriptions: 0, health: 0, stops: 0 }
   const latest: { run?: Run; id?: string; body?: Record<string, unknown>; key?: string } = {}
+  /** What the plugin holds for the session, oldest first, as its queue route lists it. */
+  const queue: {
+    id: string
+    text: string
+    attachments: { name: string }[]
+    body: { input?: unknown }
+  }[] = []
+  let queued = 0
+  /** The plugin's dispatcher: the first waiting message starts once no run of the session is active. */
+  const dispatch = () => {
+    if (!queue.length || [...runs.values()].some((state) => !state.done)) return
+    const item = queue.shift()!
+    const { id, run } = start(durable(item.body.input))
+    latest.run = run
+    latest.id = id
+    latest.body = item.body as Record<string, unknown>
+  }
   const agents: AgentRecord[] = []
   const children = new Map<string, Row[]>()
   const compactions: { row: Row; turn: number; inside: boolean }[] = []
@@ -529,9 +546,57 @@ export function fakeHost(
       latest.key = new Headers(init.headers).get("idempotency-key") ?? undefined
       return reply({ run_id: id, status: "started", replayed: false }, 202)
     }
+    if (plugin && path === "/api/plugins/memento/info")
+      return reply({ object: "memento.info", version: "0.91.0", features: ["queue"] })
+    const queueRoute = `/api/plugins/memento/sessions/${session}/queue`
+    if (plugin && path === queueRoute && init?.method === "POST") {
+      const body = JSON.parse(String(init.body))
+      const item = {
+        id: `q${++queued}`,
+        text: body.text,
+        attachments: body.attachments,
+        body: body.body,
+      }
+      queue.push(item)
+      dispatch()
+      return reply({ item: { id: item.id, text: item.text, attachments: item.attachments } })
+    }
+    if (plugin && path === queueRoute) {
+      dispatch()
+      return reply({
+        items: queue.map(({ id, text, attachments }) => ({ id, text, attachments })),
+        sent: [],
+        paused: false,
+      })
+    }
+    const acting = new RegExp(`^${queueRoute}/([^/]+)/(remove|send|steer)$`).exec(path)
+    if (plugin && acting && init?.method === "POST") {
+      const at = queue.findIndex((item) => item.id === acting[1])
+      if (at < 0) return reply({ error: { code: "not_found" } }, 404)
+      const [item] = queue.splice(at, 1)
+      if (acting[2] === "send") queue.unshift(item)
+      if (acting[2] === "steer") {
+        const live = [...runs].find(([, state]) => !state.done)
+        if (!live) {
+          queue.splice(at, 0, item)
+          return reply({ error: { code: "run_not_running" } }, 409)
+        }
+        write(
+          "user",
+          `[OUT-OF-BAND USER MESSAGE — sent while you worked]\n${item.text}\n[/OUT-OF-BAND USER MESSAGE]`,
+          {
+            display_kind: "steer",
+          },
+        )
+        return reply({ run_id: live[0], status: "steered" })
+      }
+      dispatch()
+      return reply({ ok: true })
+    }
     // The Gots plugin's one read a device needs to find a run it did not start. Recorded against
     // 0.22.5, it calls a run held up on a prompt `running` and lists nothing under `waiting`.
     if (plugin && path === "/api/plugins/memento/runs/live") {
+      dispatch()
       const live = [...runs].filter(([, state]) => !state.done).at(-1)
       return reply({
         object: "memento.runs",
@@ -685,6 +750,7 @@ export function fakeHost(
     agents,
     rows,
     latest,
+    queue,
     session,
     dropConnections,
     startElsewhere,

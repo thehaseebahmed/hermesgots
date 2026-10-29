@@ -36,7 +36,7 @@ import {
 import { COLUMN_BOX } from "@/lib/layout"
 import type { ComposerControls } from "@/chat-next/page"
 import { opensOnChatNext } from "@/chat-next/route"
-import { prepareTurn } from "@/chat-next/turn"
+import { prepareTurn, queueTurn, steerTurn } from "@/chat-next/turn"
 import { quietly } from "@/lib/report"
 import { threadCount, threadsLine } from "@/lib/bot-chrome"
 import { repoCap, sessionSubtitle } from "@/lib/repo-line"
@@ -467,6 +467,10 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
                 apiKey={bot.apiKey}
                 session={chat.hermesSessionId}
                 prepareTurn={(text, attachments) => prepareTurn(id, text, attachments)}
+                queueTurn={async (text, attachments) =>
+                  void (await queueTurn(id, text, attachments))
+                }
+                steerTurn={(text, attachments) => steerTurn(id, text, attachments)}
                 Composer={composer}
               />
             </Suspense>
@@ -480,8 +484,9 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
 }
 
 /**
- * The app's composer driving a chat-next thread. A message sent while a reply runs waits for the
- * queue, which comes to chat-next next; until then the composer keeps it and says so.
+ * The app's composer driving a chat-next thread. A message sent while a reply runs goes to the
+ * plugin's queue, or steers the reply where the user asked to; one that can't go is said so and
+ * handed back to the field.
  */
 function NextComposer({
   controls,
@@ -497,7 +502,18 @@ function NextComposer({
   const filesFeature = usePluginFeature(bot, "attachments")
   const [cheatsheetOpen, setCheatsheetOpen] = useState(false)
   const [navShortcuts, setNavShortcuts] = useState(DEFAULT_SETTINGS.navShortcuts)
+  const steerByDefault = useLiveQuery(async () => (await getSettings()).steerByDefault, [])
   if (!bot) return null
+  const said =
+    (go: (text: string, attachments: Attachment[]) => Promise<void>) =>
+    async (text: string, attachments: Attachment[]) => {
+      try {
+        await go(text, attachments)
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : String(error))
+        throw error
+      }
+    }
   return (
     <>
       <Composer
@@ -509,10 +525,10 @@ function NextComposer({
         filesFeature={filesFeature}
         imagesAvailable={bot.imageInput !== false}
         onSend={controls.send}
-        onQueue={() => {
-          toast("Wait for the reply to finish before sending another message.")
-          throw new Error("queued")
-        }}
+        onQueue={said(controls.queue)}
+        onSteer={said(controls.steer)}
+        canSteer={controls.canSteer}
+        steerByDefault={Boolean(steerByDefault)}
         onStop={controls.stop}
         onCommand={async (command) => {
           if (command === "new") return root("/")

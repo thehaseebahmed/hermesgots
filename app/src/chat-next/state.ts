@@ -1,7 +1,7 @@
 import type { LiveTurn } from "@/lib/db"
 
 import type { Agent } from "./agents"
-import type { RunEvent } from "./api"
+import type { Queued, RunEvent } from "./api"
 import { foldTurns, withArchive, type Part, type Row, type SentFile, type Turn } from "./fold"
 
 /**
@@ -17,6 +17,8 @@ export interface ThreadState {
   agents?: Agent[]
   /** The rows a compaction archived, once the reader has asked for them; kept across every read. */
   archived?: Row[]
+  /** What the plugin holds for the session, drawn after the thread; none before it has said. */
+  queue?: { items: Queued[]; paused: boolean }
   /** The turn this device is streaming, drawn over the transcript's until the host's replaces it. */
   live?: LiveTurn
   /** This device has a turn running; while it does, what the host's transcript says waits. */
@@ -56,6 +58,7 @@ export type ThreadEvent =
   | { type: "answered" }
   | { type: "ended" }
   | { type: "agents"; agents: Agent[] }
+  | { type: "queue"; items: Queued[]; paused: boolean }
   | { type: "run"; event: RunEvent }
   | { type: "failed"; error: string }
 
@@ -152,6 +155,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         rows: event.rows,
         archived: state.archived,
         agents: state.agents,
+        queue: state.queue,
         running: false,
         // A finished turn waits on nothing, and the end of a followed run settles what it was on.
         waiting: event.final || done ? undefined : state.waiting,
@@ -167,6 +171,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         running: true,
         archived: state.archived,
         agents: state.agents,
+        queue: state.queue,
         live: {
           turn: {
             user: event.user,
@@ -190,6 +195,12 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         waiting: undefined,
         live: last ? { turn: { ...last, parts: [], done: false }, replaces: true } : undefined,
       }
+    }
+    case "queue": {
+      const next = { items: event.items, paused: event.paused }
+      return JSON.stringify(state.queue) === JSON.stringify(next)
+        ? state
+        : { ...state, queue: next }
     }
     case "agents":
       return sameAgents(state.agents, event.agents) ? state : { ...state, agents: event.agents }

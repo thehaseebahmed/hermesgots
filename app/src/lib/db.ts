@@ -1,6 +1,7 @@
 import Dexie, { type EntityTable, type Table, type Transaction } from "dexie"
 
 import type { Agent } from "@/chat-next/agents"
+import type { Queued } from "@/chat-next/api"
 import type { Row, Turn } from "@/chat-next/fold"
 import { BOTS, LEGACY_BOT_IDS } from "@/components/bots"
 import { connectionKey } from "@/lib/connection"
@@ -731,6 +732,8 @@ export interface SessionState {
   archived?: boolean
   /** The turn this device streamed, until the host's transcript replaces it. */
   live?: LiveTurn
+  /** What the plugin holds for the session, as it last listed it. */
+  queue?: { items: Queued[]; paused: boolean }
 }
 
 /** A streamed turn: a new one after the transcript's, or the transcript's last one drawn again. */

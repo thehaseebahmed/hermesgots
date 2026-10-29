@@ -20,6 +20,8 @@ import {
   followRun,
   MIN_HERMES,
   postRun,
+  readQueue,
+  actOnQueued,
   readAgents,
   readLiveRun,
   readTranscript,
@@ -175,6 +177,15 @@ const TurnView = memo(
                 <Markdown>{part.text}</Markdown>
               </div>
             )
+          if (part.kind === "steer")
+            return (
+              <div key={at} data-steer className="ml-auto w-fit max-w-[85%] space-y-1 text-right">
+                <p className="rounded-2xl bg-muted px-4 py-2 text-left whitespace-pre-wrap">
+                  {part.text}
+                </p>
+                <p className="text-xs text-muted-foreground">Steered</p>
+              </div>
+            )
           // A question the agent asked, and a subagent it set to work, are drawn as what they are.
           const plain = part.calls.filter(
             (call) => call.name !== "clarify" && call.name !== DELEGATE,
@@ -320,6 +331,8 @@ function ApprovalCard({
 const POLL_MS = 2_000
 const IDLE_MS = 15_000
 const AGENTS_COOLDOWN_MS = 60_000
+/** How long the chat keeps its fast pace after the plugin took a message off the queue. */
+const HANDOFF_MS = 10_000
 /** A turn that has written nothing for this long is not waited on any more. */
 const STALL_MS = 5 * 60_000
 
@@ -329,12 +342,22 @@ export interface ComposerControls {
   busy: boolean
   /** Rejects when nothing reached the host, so the composer can hand the message back. */
   send: (text: string, attachments: Attachment[]) => Promise<void>
+  /** Hands a message sent mid-reply to the plugin's queue, to start once the reply is over. */
+  queue: (text: string, attachments: Attachment[]) => Promise<void>
+  /** Gives the running reply a message it reads after its current calls. */
+  steer: (text: string, attachments: Attachment[]) => Promise<void>
+  /** Whether a run this thread follows can take a steer at all. */
+  canSteer: boolean
   stop: () => void
 }
 
 interface ThreadOptions {
   /** Builds a turn as the app sends one; without it, the message is posted as plain text. */
   prepareTurn?: (text: string, attachments: Attachment[]) => Promise<PreparedTurn>
+  /** Queues a message on the plugin, as the app builds one; without it, nothing can be queued. */
+  queueTurn?: (text: string, attachments: Attachment[]) => Promise<void>
+  /** Steers the running reply through the plugin's queue; without it, nothing can be steered. */
+  steerTurn?: (text: string, attachments: Attachment[]) => Promise<void>
   /** The app's own composer; without it, a bare text box. */
   Composer?: ComponentType<{ controls: ComposerControls }>
   pollMs?: number
@@ -371,6 +394,8 @@ export function ChatNextThread({
   apiKey: key,
   session,
   prepareTurn,
+  queueTurn,
+  steerTurn,
   Composer,
 }: ThreadOptions & { server: string | null; apiKey: string | null; session: string | null }) {
   // The thread is drawn from the device's copy; the store is the only thing that writes it, and
@@ -410,6 +435,7 @@ export function ChatNextThread({
   // A host without the plugin has no list of children; once it has said so it is not asked again
   // for a while.
   const noAgentsUntil = useRef(0)
+  const noQueueUntil = useRef(0)
 
   useEffect(() => {
     if (!server || !key) return
@@ -446,14 +472,18 @@ export function ChatNextThread({
       reading.current = (async () => {
         try {
           const asking = Date.now() >= noAgentsUntil.current
-          const [rows, listed] = await Promise.all([
+          const askingQueue = Date.now() >= noQueueUntil.current
+          const [rows, listed, queued] = await Promise.all([
             readTranscript({ server, key }, session, alive.current.signal),
             asking ? readAgents({ server, key }, session, alive.current.signal) : undefined,
+            askingQueue ? readQueue({ server, key }, session, alive.current.signal) : undefined,
           ])
           if (asking && !listed) noAgentsUntil.current = Date.now() + AGENTS_COOLDOWN_MS
+          if (askingQueue && !queued) noQueueUntil.current = Date.now() + AGENTS_COOLDOWN_MS
           if (mine === reads.current) {
             dispatch({ type: "transcript", rows, final })
             if (listed) dispatch({ type: "agents", agents: listed })
+            if (queued) dispatch({ type: "queue", ...queued })
           }
         } catch (error) {
           if (!alive.current.signal.aborted && mine === reads.current) dispatch(failure(error))
@@ -504,7 +534,24 @@ export function ChatNextThread({
   const cards = useMemo(() => cardsOf(turns, listed ?? []), [turns, listed])
   const starting =
     listed !== undefined && cards.some((list) => list.some((card) => card.status === "starting"))
-  const busy = following || working || owed || starting
+  // A message the plugin holds starts once the run before it ends, so the chat is read at the
+  // fast pace until it has: the turn it opens is the next one to follow. The read that finds the
+  // queue emptied can land before the transcript has that turn, so the pace holds until it does.
+  const inQueue = held?.queue?.items.length ?? 0
+  const [handedOff, setHandedOff] = useState(false)
+  const before = useRef({ inQueue, turns: turns.length })
+  useEffect(() => {
+    const was = before.current
+    before.current = { inQueue, turns: turns.length }
+    if (inQueue < was.inQueue) setHandedOff(true)
+    else if (turns.length > was.turns) setHandedOff(false)
+  }, [inQueue, turns.length])
+  useEffect(() => {
+    if (!handedOff) return
+    const timer = setTimeout(() => setHandedOff(false), HANDOFF_MS)
+    return () => clearTimeout(timer)
+  }, [handedOff])
+  const busy = following || working || owed || starting || inQueue > 0 || handedOff
   const progress = useRef({ shape: "", at: 0 })
   const shape =
     turns
@@ -656,6 +703,26 @@ export function ChatNextThread({
     await sendTurn(text).catch(() => setDraft((now) => now || text))
   }
 
+  async function queueMessage(text: string, attachments: Attachment[]) {
+    if (!queueTurn) throw new Error("This bot can't hold a message until the reply is over.")
+    await queueTurn(text, attachments)
+    void catchUp()
+  }
+
+  async function steerMessage(text: string, attachments: Attachment[]) {
+    if (!steerTurn) throw new Error("This reply can't be steered.")
+    await steerTurn(text, attachments)
+    void catchUp()
+  }
+
+  function onQueued(id: string, action: "remove" | "send") {
+    if (!server || !key || !session) return
+    actOnQueued({ server, key }, session, id, action).then(
+      () => void catchUp(),
+      (error) => dispatch(failure(error)),
+    )
+  }
+
   function stop() {
     const run = followingRun.current
     if (!run || !server || !key) return
@@ -723,6 +790,29 @@ export function ChatNextThread({
       {turns.map((turn, at) => (
         <TurnView key={at} turn={turn} cards={cards[at] ?? NO_CARDS} goals={goals} onOpen={open} />
       ))}
+      {held?.queue?.items.map((item) => (
+        <div key={item.id} data-queued className="ml-auto w-fit max-w-[85%] space-y-1 text-right">
+          {item.files.length ? (
+            <p className="text-xs text-muted-foreground">{item.files.join(", ")}</p>
+          ) : null}
+          {item.text ? (
+            <p className="rounded-2xl bg-muted px-4 py-2 text-left whitespace-pre-wrap opacity-60">
+              {item.text}
+            </p>
+          ) : null}
+          <div className="flex justify-end gap-3 text-xs text-muted-foreground">
+            <span data-queued-state>{item.error ?? "Queued"}</span>
+            {held.queue?.paused || item.error ? (
+              <button type="button" data-send-queued onClick={() => onQueued(item.id, "send")}>
+                Send now
+              </button>
+            ) : null}
+            <button type="button" data-remove-queued onClick={() => onQueued(item.id, "remove")}>
+              Remove
+            </button>
+          </div>
+        </div>
+      ))}
       {opened && openedRows?.id === opened.id ? (
         <ChildThread
           goal={opened.goal}
@@ -745,7 +835,16 @@ export function ChatNextThread({
         />
       ) : null}
       {host === "away" ? null : Composer ? (
-        <Composer controls={{ busy: doing.running, send: sendTurn, stop }} />
+        <Composer
+          controls={{
+            busy: doing.running,
+            send: sendTurn,
+            queue: queueMessage,
+            steer: steerMessage,
+            canSteer: doing.running && Boolean(steerTurn),
+            stop,
+          }}
+        />
       ) : (
         <form
           className="flex gap-2"

@@ -137,3 +137,28 @@ test("a request with no attachments carries no files", () => {
   const [turn] = foldTurns([row(1, "user", "Just words.")])
   assert.equal(turn.files, undefined)
 })
+
+test("a steer goes on the reply it steered, without the marker Hermes wraps it in", () => {
+  const turns = foldTurns([
+    row(1, "user", "Write a poem"),
+    row(2, "assistant", "", {
+      tool_calls: [{ id: "c1", function: { name: "terminal", arguments: "{}" } }],
+    }),
+    row(3, "tool", "{}", { tool_call_id: "c1" }),
+    row(
+      4,
+      "user",
+      "[OUT-OF-BAND USER MESSAGE — sent while you worked]\nMake it rhyme\n[/OUT-OF-BAND USER MESSAGE]",
+      {
+        display_kind: "steer",
+      },
+    ),
+    row(5, "assistant", "Roses are red.", { finish_reason: "stop" }),
+  ])
+  assert.equal(turns.length, 1, "a steer opens no turn")
+  assert.deepEqual(
+    turns[0].parts.map((part) => part.kind),
+    ["tools", "steer", "text"],
+  )
+  assert.equal(turns[0].parts[1].text, "Make it rhyme")
+})

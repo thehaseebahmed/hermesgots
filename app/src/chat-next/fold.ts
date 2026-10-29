@@ -27,6 +27,8 @@ export type Part =
   | { kind: "tools"; calls: ToolCall[] }
   /** The host compacted the conversation here; the rows above are summarised in what follows. */
   | { kind: "compaction" }
+  /** A message the user sent while the reply ran, which the agent read after its calls. */
+  | { kind: "steer"; text: string }
 
 /** A file a message carried, as its marker line names it: never its bytes. */
 export interface SentFile {
@@ -104,6 +106,7 @@ export function withArchive(live: Row[], archive: Row[]): Row[] {
 const isRequest = (row: Row) =>
   row.role === "user" &&
   row.display_kind !== "hidden" &&
+  row.display_kind !== "steer" &&
   row.display_kind !== "model_switch" &&
   !DELIVERY.test(row.content ?? "") &&
   !RESTATED.test(row.content ?? "")
@@ -139,6 +142,11 @@ export function foldTurns(rows: Row[]): Turn[] {
       // The host's own rows are the model's input, never the user's words. A compaction leaves one,
       // empty, where the summary went; a model switch is a note to the model.
       if (row.display_kind === "model_switch") continue
+      // A steer is the user's, but it goes on the reply it steered rather than opening a turn.
+      if (row.display_kind === "steer") {
+        turns.at(-1)?.parts.push({ kind: "steer", text: steerText(row.content ?? "") })
+        continue
+      }
       if (RESTATED.test(row.content ?? "")) continue
       if (row.display_kind === "hidden") {
         seamed = true
@@ -225,6 +233,15 @@ export function foldTurns(rows: Row[]): Turn[] {
   // reason its reply stopped, so an earlier turn is finished by what follows it.
   for (const turn of turns.slice(0, -1)) turn.done = true
   return turns
+}
+
+/** A steer's own words, without the marker Hermes wraps it in for the model. */
+function steerText(content: string) {
+  return content
+    .trim()
+    .replace(/^\[OUT-OF-BAND USER MESSAGE[^\n]*\]\n?/, "")
+    .replace(/\n?\[\/OUT-OF-BAND USER MESSAGE\]$/, "")
+    .trim()
 }
 
 /** Whether a reply already drawn ended on these very words. */
