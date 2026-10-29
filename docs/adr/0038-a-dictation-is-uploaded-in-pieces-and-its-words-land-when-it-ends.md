@@ -1,5 +1,13 @@
 # A dictation is uploaded in pieces and its words land when it ends
 
+**Superseded in its single cleanup rule and in its vocabulary-riding-the-decoder's-prompt clause by
+[ADR 0066](0066-a-cleanup-is-done-at-one-of-four-levels.md) and
+[ADR 0067](0067-the-decoder-may-be-spared-its-prompt-and-the-bot-decides.md):** a cleanup now runs at
+one of four levels a bot picks, so an answer that compresses the words is no longer discarded by
+being a rewrite; and the decode may be given no prompt at all, in which case the vocabulary reaches
+the cleanup alone. Everything else this ADR decided — pieces cut at pauses, no words on the bar, one
+text landed at the ending, the bounded waits — stands.
+
 A dictation shows no words while the user talks. The recording is cut into pieces at pauses, each
 piece is transcribed by the bot's host while the rest is still being spoken, and the whole text lands
 in the composer once, at the end — tidied by one cleanup pass over the finished text. The live path

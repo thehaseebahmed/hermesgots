@@ -161,15 +161,18 @@ export const chatScreen = (id: string) => (
   </MemoryRouter>
 )
 
-export const laptop = (body: () => Promise<void>) => async () => {
-  const width = window.innerWidth
-  window.innerWidth = 1440
+/** Runs `body` as a reader whose screen is `width` px across, then puts the width back. */
+export const atWidth = (width: number, body: () => Promise<void>) => async () => {
+  const before = window.innerWidth
+  window.innerWidth = width
   try {
     await body()
   } finally {
-    window.innerWidth = width
+    window.innerWidth = before
   }
 }
+
+export const laptop = (body: () => Promise<void>) => atWidth(1440, body)
 
 export function SwitchTo({
   to,

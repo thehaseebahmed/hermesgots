@@ -28,6 +28,7 @@ import {
   add,
   draft,
   seed,
+  switchIn,
 } from "./dictation-page-kit.tsx"
 import { click, find, findAll, mount, text, type, until } from "./component-kit.tsx"
 import { db } from "@/lib/db"
@@ -449,4 +450,107 @@ test("a host that withholds the model-override permission says so instead of off
   })
 })
 
-/** The switch a speech setting's row draws. */
+/** The four cards the level picker draws, and which of them the host says is in play. */
+const levelCards = () => findAll("[data-cleanup-level]")
+const pressed = (level: string) =>
+  findAll(`[data-cleanup-level="${level}"]`)[0]?.getAttribute("aria-pressed")
+
+test("Cleanup level is one row that names the level, and its sheet offers all four", async () => {
+  const calls = await seed(
+    "cleanup-levels",
+    ["dictation", "speech_model", "cleanup_level"],
+    {},
+    {
+      speech: speech(),
+      next: speech({ cleanup: { model: null, allowed: true, reason: null, level: "high" } }),
+    },
+  )
+  await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    await until(async () => Boolean(row("cleanup-level")), "the Cleanup level row")
+    assert.deepEqual(
+      lines(row("cleanup-level")),
+      ["Cleanup level", "Gots", "How much the tidying changes in a take", "Light"],
+      "a title, its mark, what it decides, and the level in play",
+    )
+    assert.deepEqual(levelCards(), [], "no cards on the page itself: they live in the sheet")
+    await click(row("cleanup-level"))
+    await until(async () => levelCards().length === 4, "the four levels")
+    assert.equal(
+      find('[data-slot="sheet-title"]')?.textContent,
+      "Cleanup level",
+      "the sheet is titled for the row it opened from",
+    )
+    assert.deepEqual(
+      levelCards().map((card) => card.getAttribute("data-cleanup-level")),
+      ["none", "light", "medium", "high"],
+      "every level, weakest first",
+    )
+    assert.equal(pressed("light"), "true", "the one in play is marked")
+    assert.equal(pressed("high"), "false", "and only one card is")
+    assert.ok(
+      levelCards().every((card) => (card.textContent ?? "").length > 40),
+      "each card says what it changes and shows the same sentence at its level",
+    )
+    await click(find('[data-cleanup-level="high"]'))
+    assert.deepEqual(calls[0]?.body, { cleanup_level: "high" }, "one level, written to the host")
+    await until(async () => lines(row("cleanup-level"))[3] === "High", "the row naming the level the host now runs")
+    assert.deepEqual(levelCards(), [], "and the sheet closed behind the pick")
+  })
+})
+
+test("the Hearing prompt row is not offered until Developer is on", async () => {
+  await seed(
+    "hearing-hidden",
+    ["dictation", "speech_model", "cleanup_level", "hearing_prompt"],
+    {},
+    { speech: speech() },
+  )
+  await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    assert.equal(row("hearing-prompt"), null, "no Developer switch, no experimental row")
+    assert.ok(row("cleanup-model"), "while the cleanup's own row is still there")
+  })
+})
+
+test("a host that takes a level but not a Hearing prompt draws the level alone", async () => {
+  await seed("hearing-absent", ["dictation", "speech_model", "cleanup_level"], {}, { speech: speech() })
+  await db.settings.update("settings", { developer: true })
+  await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    assert.ok(row("cleanup-level"), "the level the host does take is offered")
+    await until(async () => Boolean(row("cleanup-model")), "the cleanup's own rows")
+    assert.equal(row("hearing-prompt"), null, "and no switch for the prompt it never took")
+  })
+})
+
+test("a Developer's Hearing prompt switch is written to the host and read back", async () => {
+  const calls = await seed(
+    "hearing-shown",
+    ["dictation", "speech_model", "cleanup_level", "hearing_prompt"],
+    {},
+    { speech: speech(), next: speech({ hearing: { sent: true } }) },
+  )
+  await db.settings.update("settings", { developer: true })
+  await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    // The switch waits on the device's own read of the Developer flag, so it lands after the rows.
+    await until(async () => Boolean(switchIn("hearing-prompt")), "the Hearing prompt switch")
+    assert.ok(row("hearing-prompt"), "Developer on draws the row")
+    assert.equal(
+      switchIn("hearing-prompt")?.getAttribute("aria-checked"),
+      "false",
+      "a bot hears its takes unprompted until it says otherwise",
+    )
+    await click(switchIn("hearing-prompt"))
+    assert.deepEqual(calls[0]?.body, { hearing_prompt: true }, "one switch, written to the host")
+    await until(
+      async () => switchIn("hearing-prompt")?.getAttribute("aria-checked") === "true",
+      "the switch reading back on",
+    )
+  })
+})
+
+test("a host too old to take a level offers the cleanup model alone", async () => {
+  await seed("levels-absent", ["dictation", "speech_model"], {}, { speech: speech() })
+  await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    assert.ok(row("cleanup-model"), "the model's row is still there")
+    assert.equal(row("cleanup-level"), null, "and no level the host would refuse to store")
+  })
+})

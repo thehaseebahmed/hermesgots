@@ -43,7 +43,8 @@ late is worse than one that did not arrive.
   the vocabulary is worth a settings surface.
 - The bound is two seconds (`dictation_cleanup.DEADLINE_S`), kept by the host on a thread of its
   own, because the plugin's model access takes no timeout: the phrase is committed when the budget
-  is up whatever the model is still doing. The app's own wait on the answer that carries the phrase
+  is up whatever the model is still doing. (The constant has since grown, and a take is now tidied
+  once at its end rather than a phrase at a time: 8 s, or 12 s at High — ADR 0038, ADR 0066.) The app's own wait on the answer that carries the phrase
   is longer, so a cleanup is never what a slice times out on.
 - "Much longer or shorter" is measured in words: an answer that loses more than half the phrase or
   adds more than half again is discarded, with a word of slack each way so a short phrase whose

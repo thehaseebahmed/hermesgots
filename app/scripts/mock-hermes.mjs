@@ -3070,7 +3070,15 @@ const SPEECH_MODELS = [
 ]
 const SPEECH_DENIED =
   "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable memento`."
-const speech = { model: "small", cleanup: null, downloaded: new Set(["tiny", "base", "small"]) }
+const speech = {
+  model: "small",
+  cleanup: null,
+  // plugin/speech.py keeps the level a take is tidied at and whether its decode is prompted beside
+  // the cleanup model (ADR 0066, ADR 0067); a bot that never picked cleans at light, unprompted.
+  level: "light",
+  hearing: false,
+  downloaded: new Set(["tiny", "base", "small"]),
+}
 // plugin/speech.py's whole `stt` section (ADR 0063): Hermes's own defaults, one key at a time. The
 // values start empty, so the page draws every default as the host's own, and a write lands in the
 // file this stands in for.
@@ -3144,7 +3152,9 @@ function speechReading() {
       model: speech.cleanup,
       allowed: RESEARCH_WRITERS,
       reason: RESEARCH_WRITERS ? null : SPEECH_DENIED,
+      level: speech.level,
     },
+    hearing: { sent: speech.hearing },
     stt: sttReading(),
   }
 }
@@ -3815,6 +3825,8 @@ http
           "dictation",
           ...(DICTATIONS ? ["dictations"] : []),
           "speech_model",
+          "cleanup_level",
+          "hearing_prompt",
           "stt_settings",
           "afk",
           "afk_switch",
@@ -5262,8 +5274,15 @@ http
         return json(res, 200, { object: "memento.speech", speech: speechReading() })
       if (req.method === "POST") {
         const body = await readBody(req).catch(() => ({}))
-        if (!("model" in body) && !("cleanup_model" in body))
-          return json(res, 400, { error: { message: "Body needs a model or a cleanup_model." } })
+        if (
+          !("model" in body) &&
+          !("cleanup_model" in body) &&
+          !("cleanup_level" in body) &&
+          !("hearing_prompt" in body)
+        )
+          return json(res, 400, {
+            error: { message: "Body needs a model, a cleanup_model, a cleanup_level or a hearing_prompt." },
+          })
         if ("model" in body) {
           const name = typeof body.model === "string" ? body.model.trim().toLowerCase() : ""
           const entry = SPEECH_MODELS.find((one) => one.name === name)
@@ -5289,6 +5308,19 @@ http
           if (pick !== null && !RESEARCH_WRITERS)
             return json(res, 403, { error: { message: SPEECH_DENIED } })
           speech.cleanup = pick === null ? null : { provider: pick.provider, model: pick.model }
+        }
+        if ("cleanup_level" in body) {
+          const level = typeof body.cleanup_level === "string" ? body.cleanup_level.trim().toLowerCase() : ""
+          if (!["none", "light", "medium", "high"].includes(level))
+            return json(res, 400, {
+              error: { message: "cleanup_level must be one of none, light, medium, high" },
+            })
+          speech.level = level
+        }
+        if ("hearing_prompt" in body) {
+          if (typeof body.hearing_prompt !== "boolean")
+            return json(res, 400, { error: { message: "hearing_prompt must be true or false" } })
+          speech.hearing = body.hearing_prompt
         }
         return json(res, 200, { object: "memento.speech", speech: speechReading() })
       }

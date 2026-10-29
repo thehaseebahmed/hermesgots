@@ -1,8 +1,9 @@
 /**
- * A bot's two speech settings — the model its dictation is heard on, and the one a finished
- * dictation's cleanup runs on — are one record on the host, so one read and one write carry both:
- * `GET speech` and `POST speech` with only the fields that moved. `host-speech.ts` makes those
- * calls; this file is the shape and the words a row is read with, so the unit tier can pin them
+ * A bot's speech settings — the model its dictation is heard on, the model and level a finished
+ * dictation's cleanup runs at, and whether a take is heard with a Hearing prompt (ADR 0066,
+ * ADR 0067) — are one record on the host, so one read and one write carry them: `GET speech` and
+ * `POST speech` with only the fields that moved. `host-speech.ts` makes those calls; this file is
+ * the shape, the four levels' cards and the words a row is read with, so the unit tier can pin them
  * without a host.
  */
 
@@ -10,6 +11,20 @@ import { readStt, type SttSettings } from "./stt-settings.ts"
 
 /** The feature a host advertises when it has the host speech settings at all. */
 export const SPEECH_MODEL = "speech_model"
+
+/** The feature a host advertises when it takes a cleanup level (ADR 0066). */
+export const CLEANUP_LEVELS_FEATURE = "cleanup_level"
+
+/** The feature a host advertises when a take's decode may be given a Hearing prompt (ADR 0067). */
+export const HEARING_PROMPT_FEATURE = "hearing_prompt"
+
+/** The speech fields a page may write: each is the bot's, and none is the host's own config. */
+export type SpeechPatch = {
+  model?: string
+  cleanup_model?: SpeechPick | null
+  cleanup_level?: CleanupLevel
+  hearing_prompt?: boolean
+}
 
 export interface SpeechModel {
   name: string
@@ -34,6 +49,63 @@ export interface SpeechCleanup {
   allowed: boolean
   /** The host's own sentence for why it doesn't, shown in place of the field. */
   reason: string | null
+  /** How much a take's cleanup may change (ADR 0066). */
+  level: CleanupLevel
+}
+
+/** The four levels a bot's take is cleaned up at, weakest first (ADR 0066). */
+export const CLEANUP_LEVELS = ["none", "light", "medium", "high"] as const
+
+export type CleanupLevel = (typeof CLEANUP_LEVELS)[number]
+
+/** One level as the page's card draws it: its name, what it may change, and a sample. */
+export interface CleanupLevelRow {
+  level: CleanupLevel
+  name: string
+  purpose: string
+  sample: string
+}
+
+/** What each level's card says — keyed by level, so a card can never be missing its own name. */
+const CARD: Record<CleanupLevel, { name: string; purpose: string; sample: string }> = {
+  none: {
+    name: "None",
+    purpose: "Exactly what you said",
+    sample:
+      "hey joey, we still on for coffee or? i think we maybe should leave earlier to make it there in time there might um be traffic. What are you thinking?",
+  },
+  light: {
+    name: "Light",
+    purpose: "Cleans up filler words and grammar",
+    sample:
+      "Hey Joey, are we still on for coffee? I think we should leave earlier to make it there in time. There might be traffic. What are you thinking?",
+  },
+  medium: {
+    name: "Medium",
+    purpose: "Edits for clarity and conciseness",
+    sample:
+      "Hey Joey, are we still on for coffee? We should leave earlier; there might be traffic. What do you think?",
+  },
+  high: {
+    name: "High",
+    purpose: "Rewrites for brevity and polish",
+    sample:
+      "Hey Joey, are we still on for coffee? Let's leave early to beat traffic. What do you think?",
+  },
+}
+
+/**
+ * The four cards, weakest first, each with the same sentence at its own level — what a person is
+ * choosing between, rather than a promise about it (ADR 0066).
+ */
+export const CLEANUP_LEVEL_ROWS: CleanupLevelRow[] = CLEANUP_LEVELS.map((level) => ({
+  level,
+  ...CARD[level],
+}))
+
+/** A level's name as a page reads it: `Light`, not `light`. */
+export function levelName(level: CleanupLevel): string {
+  return CARD[level].name
 }
 
 export interface SpeechPick {
@@ -44,10 +116,17 @@ export interface SpeechPick {
 export interface SpeechSettings {
   model: string
   models: SpeechModel[]
-  /** The last pick that didn't load, with the host's reason, until a take on it succeeds. */
+  /** The cleanup's model and level, and whether the host lets Gots pick the model at all. */
   cleanup: SpeechCleanup
+  /** Whether a take is heard with a Hearing prompt (ADR 0067). */
+  hearing: { sent: boolean }
   /** Every other speech setting the host carries, where it advertises them (ADR 0063). */
   stt?: SttSettings
+}
+
+/** A host's level as one of the four, reading the default where it names none (ADR 0066). */
+export function cleanupLevel(raw: unknown): CleanupLevel {
+  return CLEANUP_LEVELS.includes(raw as CleanupLevel) ? (raw as CleanupLevel) : "light"
 }
 
 function choice(raw: unknown): SpeechPick | null {
@@ -75,6 +154,7 @@ function modelOf(raw: unknown): SpeechModel | null {
 export function readSpeech(raw: unknown): SpeechSettings {
   const speech = (raw ?? {}) as Record<string, unknown>
   const cleanup = (speech.cleanup ?? {}) as Record<string, unknown>
+  const hearing = (speech.hearing ?? {}) as Record<string, unknown>
   // The rest of the `stt` section only where the host sends it: a plugin without the feature
   // leaves the field out rather than promising settings it never described (ADR 0063).
   const stt = readStt(speech.stt)
@@ -87,7 +167,9 @@ export function readSpeech(raw: unknown): SpeechSettings {
       model: choice(cleanup.model),
       allowed: Boolean(cleanup.allowed),
       reason: typeof cleanup.reason === "string" ? cleanup.reason : null,
+      level: cleanupLevel(cleanup.level),
     },
+    hearing: { sent: hearing.sent === true },
     ...(stt ? { stt } : {}),
   }
 }

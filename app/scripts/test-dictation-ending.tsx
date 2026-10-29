@@ -119,8 +119,8 @@ test("a Stop lands the tidied take in one write, where the caret was", async () 
     assert.equal(hosted.cleanups().length, 1, "the host was asked to tidy the take once")
     assert.deepEqual(
       hosted.cleanups()[0].body,
-      { text: HEARD, vocabulary: VOCABULARY },
-      "the cleanup carries the words the host heard and the bot's vocabulary",
+      { text: HEARD, vocabulary: VOCABULARY, hint: "Hermes" },
+      "the cleanup carries the words the host heard, its vocabulary and the names it may mention",
     )
     assert.deepEqual(
       hosted.clips()[0].vocabulary,

@@ -45,7 +45,6 @@ import {
 } from "@/components/ui/input-group"
 import { Switch } from "@/components/ui/switch"
 import type { ModelChoice, Profile } from "@/lib/db"
-import { useLarge } from "@/lib/media"
 import { useModelInfo } from "@/lib/model-info"
 import { cn } from "@/lib/utils"
 
@@ -287,18 +286,6 @@ export function PickSurface({
   title: string
   children: ReactNode
 }) {
-  const large = useLarge()
-  if (large)
-    return (
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent size="default" className="grid-rows-[auto_minmax(0,1fr)]">
-          <DialogHeader>
-            <DialogTitle>{title}</DialogTitle>
-          </DialogHeader>
-          <div className="flex min-h-0 flex-col overflow-y-auto">{children}</div>
-        </DialogContent>
-      </Dialog>
-    )
   return (
     <Popup open={open} onOpenChange={onOpenChange}>
       <PopupContent initialFocus={false}>

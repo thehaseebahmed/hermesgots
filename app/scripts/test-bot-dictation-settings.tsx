@@ -25,20 +25,30 @@ import {
 test("the page draws every speech setting its host carries, in cards named for what they are", async () => {
   await seed(
     "stt-rows",
-    ["dictation", "speech_model", "stt_settings"],
+    ["dictation", "speech_model", "stt_settings", "cleanup_level"],
     {},
     { speech: speech({ stt: STT() }) },
   )
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
     assert.deepEqual(
       captions(),
-      ["General", "Local", "Cloud", "Providers"],
-      "four cards, by what their settings are about rather than who owns them",
+      ["General", "Local", "Cloud", "Providers", "Cleanup"],
+      "the host's four cards, then the cleanup's own below them",
     )
     assert.deepEqual(
       titlesIn("General"),
-      ["Enabled", "Provider", "Echo transcripts", "Cleanup model"],
-      "the master switch first, then who hears, then Gots's own cleanup model",
+      ["Enabled", "Provider", "Echo transcripts"],
+      "the master switch first, then who hears",
+    )
+    assert.deepEqual(
+      titlesIn("Cleanup"),
+      ["Cleanup level", "Cleanup model"],
+      "the level in play, then the model that does the tidying",
+    )
+    assert.deepEqual(
+      findAll("[data-cleanup-level]"),
+      [],
+      "the levels themselves are the level row's sheet, not this page",
     )
     assert.deepEqual(
       titlesIn("Local"),
@@ -271,7 +281,11 @@ test("a host without stt_settings draws the page it always had", async () => {
     { speech: speech({ stt: STT() }) },
   )
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
-    assert.deepEqual(captions(), [], "no captions over groups a host this old doesn't have")
+    assert.deepEqual(
+      captions(),
+      ["Cleanup"],
+      "one caption, over the cleanup's own card, and none over groups the host doesn't have",
+    )
     assert.deepEqual(
       [...(speechPage()?.querySelectorAll("[data-setting]") ?? [])].map(titleOf),
       ["Speech model", "Vocabulary", "Cleanup model"],

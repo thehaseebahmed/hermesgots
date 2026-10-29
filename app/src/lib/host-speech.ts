@@ -6,7 +6,16 @@ import { READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
 import { getSpeechSettings, setSpeechSettings, setSttSetting } from "@/lib/hermes"
 import { usePluginFeatureAnswers } from "@/lib/features"
 import { noteFailure } from "@/lib/report"
-import { readSpeech, SPEECH_MODEL, type SpeechPick, type SpeechSettings } from "@/lib/speech"
+import {
+  CLEANUP_LEVELS_FEATURE,
+  HEARING_PROMPT_FEATURE,
+  readSpeech,
+  SPEECH_MODEL,
+  type CleanupLevel,
+  type SpeechPick,
+  type SpeechPatch,
+  type SpeechSettings,
+} from "@/lib/speech"
 import { STT_SETTINGS, type SttValue } from "@/lib/stt-settings"
 
 type Server = { baseUrl: string; apiKey: string }
@@ -32,7 +41,7 @@ export type SpeechCheck = "checking" | "failed" | undefined
 
 export async function setSpeech(
   config: Server,
-  patch: { model?: string; cleanup_model?: SpeechPick | null },
+  patch: SpeechPatch,
   signal?: AbortSignal,
 ): Promise<SpeechSettings> {
   return readSpeech(await setSpeechSettings(config, patch, signal))
@@ -54,10 +63,18 @@ export function useSpeech(profile?: (Server & { id?: string; speechModel?: strin
   // carries the rest of its speech settings, which a host too old for draws the model alone.
   const features = usePluginFeatureAnswers(
     { baseUrl, apiKey },
-    { speech: SPEECH_MODEL, stt: STT_SETTINGS },
+    {
+      speech: SPEECH_MODEL,
+      stt: STT_SETTINGS,
+      levels: CLEANUP_LEVELS_FEATURE,
+      hearing: HEARING_PROMPT_FEATURE,
+    },
   )
   const supported = features.speech === "yes"
   const sttSupport = features.stt === "yes"
+  // A plugin older than the four levels refuses both writes, so the page doesn't offer them at all.
+  const levelsSupport = features.levels === "yes"
+  const hearingSupport = features.hearing === "yes"
   const [saving, setSaving] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
 
@@ -93,7 +110,7 @@ export function useSpeech(profile?: (Server & { id?: string; speechModel?: strin
   }, [])
 
   const write = useCallback(
-    async (patch: { model?: string; cleanup_model?: SpeechPick | null }) => {
+    async (patch: SpeechPatch) => {
       const settings = await save(() =>
         setSpeech({ baseUrl, apiKey }, patch, AbortSignal.timeout(WRITE_TIMEOUT_MS)),
       )
@@ -134,10 +151,16 @@ export function useSpeech(profile?: (Server & { id?: string; speechModel?: strin
     supported,
     /** Whether the host carries the rest of its speech settings on this page (ADR 0063). */
     stt: supported && sttSupport,
+    /** Whether the host takes a cleanup level (ADR 0066). */
+    levels: supported && levelsSupport,
+    /** Whether the host takes a Hearing prompt for a take's decode (ADR 0067). */
+    hearing: supported && hearingSupport,
     saving,
     problem,
     choose: (model: string) => write({ model }),
     chooseCleanup: (model: SpeechPick | null) => write({ cleanup_model: model }),
+    chooseLevel: (level: CleanupLevel) => write({ cleanup_level: level }),
+    setHearing: (sent: boolean) => write({ hearing_prompt: sent }),
     writeStt,
   }
 }

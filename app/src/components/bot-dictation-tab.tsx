@@ -1,5 +1,6 @@
-import { useState } from "react"
-import { PlusIcon, XIcon } from "lucide-react"
+import { useState, type ReactNode } from "react"
+import { useLiveQuery } from "dexie-react-hooks"
+import { CheckIcon, PlusIcon, XIcon } from "lucide-react"
 import { useNavigate } from "react-router"
 
 import { Banner } from "@/components/banner"
@@ -18,10 +19,19 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { botSubPath, type BotSub } from "@/lib/bot-subs"
 import { botTabPath } from "@/lib/bot-tabs"
-import { updateProfile, type Profile } from "@/lib/db"
+import { getSettings, updateProfile, type Profile } from "@/lib/db"
 import { useSpeech } from "@/lib/host-speech"
 import { botModel, fullModel, useModelInfo } from "@/lib/model-info"
-import { marked, modelSize, modelSpeed, type SpeechModel, type SpeechSettings } from "@/lib/speech"
+import {
+  CLEANUP_LEVEL_ROWS,
+  levelName,
+  marked,
+  modelSize,
+  modelSpeed,
+  type CleanupLevel,
+  type SpeechModel,
+  type SpeechSettings,
+} from "@/lib/speech"
 import {
   effective,
   explicitly,
@@ -40,7 +50,10 @@ import {
   type SttSettings,
   type SttValue,
 } from "@/lib/stt-settings"
+import { useWide } from "@/lib/media"
+import { usePopupForm } from "@/lib/popup-form"
 import { plural } from "@/lib/tools"
+import { cn } from "@/lib/utils"
 import { MAX_WORD, addWord, cleanWord, readVocabulary, removeWord } from "@/lib/vocabulary"
 
 /**
@@ -57,11 +70,13 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
   const words = readVocabulary(profile.vocabulary)
   const info = useModelInfo(profile)
   const own = botModel(profile, info)
-  const [pick, setPick] = useState<"speech" | "cleanup">()
+  const [pick, setPick] = useState<"speech" | "cleanup" | "level">()
   // The row whose form is open, wherever it sits on the page: one surface serves them all.
   const [open, setOpen] = useState<SttSetting>()
   const models = settings ? modelsFor(settings, block) : []
   const otherProviders = block ? providerRows(block) : []
+  // The Hearing prompt's value is the bot's, on the host, however many devices write it.
+  const developer = useLiveQuery(async () => Boolean((await getSettings()).developer), [])
 
   // A detail takes the page's place at either width: below 1024px the route pushed it, and from
   // 1024px it is the pane the page would have drawn in. A provider's page is asked for first, since
@@ -96,12 +111,6 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
             onClick={() => setPick("speech")}
           />
           <VocabularyRow profile={profile} words={words} />
-          <CleanupRow
-            tag="Gots"
-            settings={settings}
-            saving={speech.saving}
-            onClick={() => setPick("cleanup")}
-          />
         </Group>
       )}
 
@@ -121,8 +130,7 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
       )}
 
       {block && otherProviders.length > 0 && (
-        <section className="flex flex-col gap-2" data-stt-group="providers">
-          <Caption>Providers</Caption>
+        <Card id="providers" title="Providers">
           <Group>
             {otherProviders.map((row) => (
               <ValueRow
@@ -138,7 +146,22 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
               />
             ))}
           </Group>
-        </section>
+        </Card>
+      )}
+
+      {/* The cleanup's own card after the host's: its model, and — where the plugin takes them — the
+          level a take is tidied at and, for a Developer, the Hearing prompt of its decode. */}
+      {settings && (
+        <CleanupSection
+          settings={settings}
+          saving={speech.saving}
+          levels={speech.levels}
+          hearing={speech.hearing}
+          developer={Boolean(developer)}
+          onLevel={() => setPick("level")}
+          onHearing={(sent) => (speech.saving ? undefined : void speech.setHearing(sent))}
+          onPick={() => setPick("cleanup")}
+        />
       )}
 
       {block && (
@@ -175,6 +198,23 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
       )}
 
       {settings && (
+        <PickSurface
+          open={pick === "level"}
+          onOpenChange={(open) => !open && setPick(undefined)}
+          title="Cleanup level"
+        >
+          <LevelPick
+            level={settings.cleanup.level}
+            saving={speech.saving}
+            onPick={(level) => {
+              if (!speech.saving) void speech.chooseLevel(level)
+              setPick(undefined)
+            }}
+          />
+        </PickSurface>
+      )}
+
+      {settings && (
         <ModelPick
           open={pick === "cleanup"}
           title="Cleanup model"
@@ -189,7 +229,7 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
   )
 }
 
-/** What every card of the host's settings is drawn with: the page's one write, one surface, two picks. */
+/** What every card of the host's settings is drawn with: the page's one write, one surface, three picks. */
 type CardProps = {
   block: SttSettings
   settings: SpeechSettings
@@ -202,6 +242,16 @@ type CardProps = {
   words: string[]
 }
 
+/** One card of the page: the muted caption naming what it holds, over the rows it holds. */
+function Card({ id, title, children }: { id: string; title: string; children: ReactNode }) {
+  return (
+    <section className="flex flex-col gap-2" data-stt-group={id}>
+      <Caption>{title}</Caption>
+      {children}
+    </section>
+  )
+}
+
 /**
  * The host's settings as the page draws them: one card per group, captioned by what the settings
  * are about, with the two Gots rows in the card their kin live in and a tag saying whose they are.
@@ -211,21 +261,19 @@ function SpeechGroups(props: CardProps) {
   return (
     <>
       {sttGroups().map((group) => (
-        <section key={group.id} className="flex flex-col gap-2" data-stt-group={group.id}>
-          <Caption>{group.title}</Caption>
+        <Card key={group.id} id={group.id} title={group.title}>
           <Group>
             <GroupRows {...props} group={group.id} rows={group.rows} />
           </Group>
-        </section>
+        </Card>
       ))}
     </>
   )
 }
 
 /**
- * One card's rows, with the Gots ones in place: Vocabulary under the initial prompt it rides into
- * the decoder with, Cleanup model at the end of General, since a finished transcript is tidied on
- * the bot's own model rather than the host's speech one.
+ * One card's rows, with the Gots row in place: Vocabulary sits under the initial prompt it rides
+ * into the decoder with.
  */
 function GroupRows({
   group,
@@ -261,14 +309,6 @@ function GroupRows({
       {rows.slice(0, cut).map(draw)}
       {group === "local" && <VocabularyRow profile={profile} words={words} />}
       {rows.slice(cut).map(draw)}
-      {group === "general" && (
-        <CleanupRow
-          tag="Gots"
-          settings={settings}
-          saving={saving}
-          onClick={() => onPick("cleanup")}
-        />
-      )}
     </>
   )
 }
@@ -694,6 +734,109 @@ function CleanupRow({
       onClick={onClick}
       data-setting="cleanup-model"
     />
+  )
+}
+
+/** The cleanup's card: the level a take is tidied at, its model, and the decode's prompt. */
+function CleanupSection({
+  settings,
+  saving,
+  levels,
+  hearing,
+  developer,
+  onLevel,
+  onHearing,
+  onPick,
+}: {
+  settings: SpeechSettings
+  saving: boolean
+  levels: boolean
+  hearing: boolean
+  developer: boolean
+  onLevel: () => void
+  onHearing: (sent: boolean) => void
+  onPick: () => void
+}) {
+  return (
+    <Card id="cleanup" title="Cleanup">
+      <Group>
+        {levels && (
+          <ValueRow
+            title="Cleanup level"
+            tag="Gots"
+            purpose="How much the tidying changes in a take"
+            value={levelName(settings.cleanup.level)}
+            disabled={saving}
+            onClick={onLevel}
+            data-setting="cleanup-level"
+          />
+        )}
+        <CleanupRow tag="Gots" settings={settings} saving={saving} onClick={onPick} />
+        {hearing && developer && (
+          <SwitchRow
+            id="stt-hearing-prompt"
+            title="Hearing prompt"
+            subtitle="Whether the speech model is told this bot's names before it listens"
+            checked={settings.hearing.sent}
+            disabled={saving}
+            onCheckedChange={onHearing}
+            data-setting="hearing-prompt"
+          />
+        )}
+      </Group>
+    </Card>
+  )
+}
+
+/** The four levels as the sheet lists them: one setting card each, chosen one marked (ADR 0066). */
+function LevelPick({
+  level,
+  saving,
+  onPick,
+}: {
+  level: CleanupLevel
+  saving: boolean
+  onPick: (level: CleanupLevel) => void
+}) {
+  const form = usePopupForm()
+  const wide = useWide()
+  return (
+    <div
+      className={cn(
+        "flex min-h-0 flex-col gap-1.5 overflow-y-auto",
+        // Two across in the tablet's sheet, where there is the room to compare them; one column on a
+        // phone and in the desktop's drawer, which is a third of the screen wide.
+        form === "sheet" && wide && "grid auto-rows-fr grid-cols-2",
+      )}
+      data-cleanup-levels
+    >
+      {CLEANUP_LEVEL_ROWS.map((row) => {
+        const chosen = row.level === level
+        return (
+          <button
+            key={row.level}
+            type="button"
+            aria-pressed={chosen}
+            disabled={saving}
+            onClick={() => onPick(row.level)}
+            data-cleanup-level={row.level}
+            className={cn(
+              "flex h-full flex-col gap-1.5 rounded-xl border p-3 text-left transition-colors",
+              chosen ? "border-ring bg-card" : "border-border bg-card hover:bg-muted/40",
+            )}
+          >
+            <span className="flex items-center gap-2">
+              <span className="text-base">{row.name}</span>
+              {chosen && <CheckIcon className="size-4 shrink-0 text-primary" aria-hidden />}
+            </span>
+            <span className="text-sm text-muted-foreground">{row.purpose}</span>
+            <span className="flex-1 rounded-lg bg-muted px-3 py-2 text-xs leading-snug text-muted-foreground">
+              {row.sample}
+            </span>
+          </button>
+        )
+      })}
+    </div>
   )
 }
 

@@ -227,12 +227,31 @@ def _advertised(features: Tuple[Tuple[str, Callable[[], Optional[str]]], ...]) -
     return [name for (name, _), ok in zip(features, works) if ok] if works[0] else []
 
 
-def _cleanup_pick(path: Path) -> Optional[Dict[str, str]]:
+def _stored(read: Callable[[], Any], default: Any, what: str) -> Any:
+    """A setting the bot keeps, or ``default`` where it can't be read: a route never fails on it."""
     try:
-        return speech.applied_cleanup(path, research.llm_gate())
+        return read()
     except Exception:
-        logger.warning("memento: couldn't read the dictation cleanup model", exc_info=True)
-        return None
+        logger.warning(f"memento: couldn't read {what}", exc_info=True)
+        return default
+
+
+def _cleanup_pick(path: Path) -> Optional[Dict[str, str]]:
+    return _stored(
+        lambda: speech.applied_cleanup(path, research.llm_gate()), None, "the dictation cleanup model"
+    )
+
+
+def _cleanup_level(path: Path) -> str:
+    return _stored(
+        lambda: speech.read_level(path),
+        dictation_cleanup.DEFAULT_LEVEL,
+        "the dictation cleanup level",
+    )
+
+
+def _hearing_prompt(path: Path) -> bool:
+    return _stored(lambda: speech.read_hearing(path), False, "the hearing prompt setting")
 
 
 def mirror_for_profiles(app: Any, web: Any) -> None:
@@ -457,6 +476,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # totals its Dictation screen counts (dictations.py, ADR 0060).
                     "dictations",
                     "speech_model",
+                    # The level a take is cleaned up at (speech.py, ADR 0066) and whether its
+                    # decode is given a Hearing prompt (ADR 0067), each advertised on its own: the
+                    # level outlives the prompt, which is a comparison that may be taken back, and
+                    # a host that takes one needn't take the other.
+                    "cleanup_level",
+                    "hearing_prompt",
                     # The rest of the host's `stt` section, on the same page (speech.py, ADR 0063):
                     # advertised only where this host's Hermes declares those defaults, so a host
                     # that doesn't keeps the one speech row it already draws.
@@ -1843,6 +1868,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "The recording is empty.", 400)
         if len(data) > dictation.MAX_BYTES:
             return _error(web, "The recording is too long.", 413)
+        # A bot whose Hearing prompt is not sent decodes from the audio alone: `transcribe` composes
+        # no prompt on that flag, so what the query carries costs nothing (ADR 0067).
+        hearing = await asyncio.to_thread(_hearing_prompt, store_path())
         hint = dictation.clean_hint(request.query.get("hint"))
         context = dictation.clean_context(request.query.get("context"))
         vocabulary = dictation.clean_vocabulary(request.query.getall("vocabulary", []))
@@ -1855,6 +1883,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     hint,
                     context,
                     vocabulary,
+                    hearing=hearing,
                 )
             except dictation.DictationError as error:
                 return _error(web, str(error), error.status)
@@ -1871,7 +1900,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return web.json_response({"object": "memento.dictation_warm", **result})
 
     async def clean_dictation(request: "web.Request") -> "web.Response":
-        """A finished dictation's whole text tidied, on the bot's cleanup model (ADR 0038)."""
+        """A finished dictation tidied at the bot's cleanup level (ADR 0038, ADR 0066)."""
         denied = unauthorized(request)
         if denied is not None:
             return denied
@@ -1879,10 +1908,18 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if body is None:
             return _error(web, "Body must be a JSON object", 400)
         vocabulary = dictation.clean_vocabulary(body.get("vocabulary"))
-        cleanup_model = await asyncio.to_thread(_cleanup_pick, store_path())
+        hint = dictation.clean_hint(body.get("hint"))
+        path = store_path()
+        cleanup_model = await asyncio.to_thread(_cleanup_pick, path)
+        level = await asyncio.to_thread(_cleanup_level, path)
         try:
             result = await asyncio.to_thread(
-                dictation_cleanup.finish, body.get("text"), vocabulary, model=cleanup_model
+                dictation_cleanup.finish,
+                body.get("text"),
+                vocabulary,
+                hint=hint,
+                prompt=dictation_cleanup.DictationCleanupPrompt.ForLevel(level).Build(),
+                model=cleanup_model,
             )
         except dictation.DictationError as error:
             return _error(web, str(error), error.status)
@@ -1957,8 +1994,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if denied is not None:
             return denied
         body = await json_body(request)
-        if not body or "model" not in body and "cleanup_model" not in body:
-            return _error(web, "Body needs a model or a cleanup_model.", 400)
+        if not body or not any(
+            key in body for key in ("model", "cleanup_model", "cleanup_level", "hearing_prompt")
+        ):
+            return _error(
+                web, "Body needs a model, a cleanup_model, a cleanup_level or a hearing_prompt.", 400
+            )
         config_path = host_config_path()
         path = store_path()
         scope = profile_scope()
@@ -1970,6 +2011,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     speech.set_model(config_path, body.get("model"))
                 if "cleanup_model" in body:
                     speech.set_cleanup(path, body.get("cleanup_model"), gate, config_path)
+                if "cleanup_level" in body:
+                    speech.set_level(path, body.get("cleanup_level"))
+                if "hearing_prompt" in body:
+                    speech.set_hearing(path, body.get("hearing_prompt"))
                 return speech.read(config_path, path, gate)
 
         try:

@@ -124,15 +124,17 @@ AFK_VARIANTS = [
 # What dictation's calls are shown, and the words the bot spells its own way: the same three the
 # cleanup rules say to spell from the vocabulary, so a reader sees what the input really looks like.
 VOCABULARY = ("memento", "haseeb", "hermes-agent")
-PHRASE = "so i was thinking um we should move the retry logic into the plugin and then uh check the logs"
+HEARD = (
+    "so i was thinking um we should move the retry logic into the plugin and then uh check the logs"
+)
 WHOLE = (
-    PHRASE
+    HEARD
     + ". and then we could move them to the third of March and i will run it half past four tomorrow"
 )
 HINT = "Gots, memento, hermes-agent, spry-puffin"
 
 
-def _model_prompt(system: str, instructions: str, label: str, example: str) -> str:
+def _model_prompt(system: str, instructions: str, example: str) -> str:
     """One cleanup call as the model receives it: the system line, the rules, then the input.
 
     The input is built by the module's own ``_prompt``, so the doc shows the labels and the
@@ -142,51 +144,58 @@ def _model_prompt(system: str, instructions: str, label: str, example: str) -> s
         "System:\n"
         f"{system}\n\n"
         "Instructions:\n"
-        f"{instructions}\n\n"
+        f"{instructions.strip()}\n\n"
         "Input:\n"
-        f"{dictation_cleanup._prompt(example, VOCABULARY, label)}"
+        f"{dictation_cleanup._prompt(example, VOCABULARY, HINT)}"
     )
+
+
+def _level(level: str, note: str) -> tuple:
+    """One cleanup level's call: its prompt as built, and the promise the level makes."""
+    asked = dictation_cleanup.DictationCleanupPrompt.ForLevel(level).Build()
+    return (f"Dictation cleanup: {level}", note, _model_prompt(asked.system, asked.instructions, WHOLE))
 
 
 def _speech_prompt() -> str:
-    """What faster-whisper is given as its prompt, in the order `dictation.py` joins it.
+    """What faster-whisper is given as its prompt, in the order `dictation.py` builds it.
 
     It is not instructions: Whisper reads a prompt as what was just said, which is why the parts go
-    in this order and why the text before the clip comes last.
+    in this order and why the text before the clip comes last. A bot that withholds its Hearing
+    prompt sends the model none of it (ADR 0067).
     """
-    parts = (
-        "<the host's own initial_prompt, when it sets one>",
-        HINT[: dictation.MAX_HINT],
-        " ".join(VOCABULARY[: dictation.MAX_VOCABULARY]),
-        "<the end of what was said before this clip>",
+    return (
+        dictation.DictationHearingPrompt()
+        .WithInitialPrompt("<the host's own initial_prompt, when it sets one>")
+        .WithHint(HINT[: dictation.MAX_HINT])
+        .WithVocabulary(VOCABULARY[: dictation.MAX_VOCABULARY])
+        .WithContext("<the end of what was said before this clip>")
+        .Build()
     )
-    return " ".join(part for part in parts if part)
 
 
 # Dictation's own prompts, below the session's: they are calls on the bot's model rather than
 # instructions to a session, so they are told apart by their headings and their `System:` line.
 DICTATION_VARIANTS = [
-    (
-        "Dictation cleanup: one phrase",
-        "Every phrase a take is cut into at a pause is tidied by one call on the bot's own model "
-        "before its words land, so the text the user sees is what they said, written (ADR 0038). "
-        "The rules allow tidying and never rewording, and an answer much longer or shorter than "
-        "the phrase is thrown away.",
-        _model_prompt(
-            dictation_cleanup.SYSTEM, dictation_cleanup.INSTRUCTIONS, "Phrase", PHRASE
-        ),
+    _level(
+        "light",
+        "A take's whole text is tidied once when it ends, at the level its bot runs (ADR 0066). "
+        f"Light removes what was stumbled over — fillers, a false start, a slip — and repairs the "
+        f"grammar, punctuation, casing and numbers, keeping every other word. An answer outside "
+        f"{dictation_cleanup.SHORTER['light']}x–{dictation_cleanup.LONGER}x of the text is thrown "
+        f"away, and the words as heard land instead.",
     ),
-    (
-        "Dictation cleanup: a finished dictation",
-        "When a take ends its whole text is tidied once more, framed as the dictation it is: the "
-        "same rules, a longer deadline (`WHOLE_TEXT_DEADLINE_S`) and an answer budget sized from "
-        "its words, since a phrase's 400 tokens would truncate a long take's answer.",
-        _model_prompt(
-            dictation_cleanup.WHOLE_TEXT_SYSTEM,
-            dictation_cleanup.WHOLE_TEXT_INSTRUCTIONS,
-            "Dictation",
-            WHOLE,
-        ),
+    _level(
+        "medium",
+        "Medium does Light's work and tightens: wordiness, redundancy and run-ons go, without "
+        f"dropping information. Its answer may run to {dictation_cleanup.SHORTER['medium']}x of the "
+        "text before it is thrown away.",
+    ),
+    _level(
+        "high",
+        "High compresses: it may restructure a sentence and drop what a listener could not act on, "
+        f"keeping every fact, number, name and request. Its answer may run to "
+        f"{dictation_cleanup.SHORTER['high']}x of the text, and it is given "
+        f"{dictation_cleanup.HIGH_DEADLINE_S:.0f} s rather than {dictation_cleanup.DEADLINE_S:.0f} s.",
     ),
     (
         "Dictation: the speech model's prompt",
@@ -194,10 +203,12 @@ DICTATION_VARIANTS = [
         "parts are in one order and each is capped: the host's own `initial_prompt`, then the names "
         f"this clip may mention (up to {dictation.MAX_HINT} characters), then the bot's own "
         f"vocabulary (up to {dictation.MAX_VOCABULARY} words), then the text before this clip — the "
-        f"last {dictation.MAX_CONTEXT} characters — because its end matters most.",
+        f"last {dictation.MAX_CONTEXT} characters — because its end matters most. A bot whose "
+        "Hearing prompt is not sent gives the model none of it, and the cleanup carries the names.",
         _speech_prompt(),
     ),
 ]
+
 
 HEADER = """# Prompts
 
@@ -206,9 +217,9 @@ HEADER = """# Prompts
 > request when the doc moves).
 
 Two families of prompt live here. A session's is what an agent is injected with, and it is told in
-the same sections, in the same order. Dictation's are the calls the app's speech-to-text makes on a
-bot's own model — one to tidy each phrase as the user speaks, one to tidy a finished take, and the
-prompt the speech model itself is given — and they are the last three sections.
+the same sections, in the same order. Dictation's are the calls the app's speech-to-text makes: the
+one that tidies a finished take, at each of the three levels that call a model (ADR 0066), and the
+prompt the speech model itself is given (ADR 0067) — and they are the last four sections.
 
 Every prompt is told in the same parts, in the same order. `# You are Gots!` opens the base prompt
 with an overview of what the bot is, then `## Do` and `## Don't` — the guidelines it works by, a line

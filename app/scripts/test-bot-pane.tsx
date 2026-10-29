@@ -12,6 +12,7 @@ import {
   find,
   findAll,
   json,
+  laptop,
   mount,
   Path,
   path,
@@ -58,16 +59,6 @@ async function seed(threads: string[] = [], patch: { botThreads?: boolean } = {}
   globalThis.fetch = async () => json({})
 }
 
-/** A laptop's width: the bot's third pane is `xl`'s, so a test has to say the screen is one. */
-const laptop = (body: () => Promise<void>) => async () => {
-  const width = window.innerWidth
-  window.innerWidth = 1440
-  try {
-    await body()
-  } finally {
-    window.innerWidth = width
-  }
-}
 
 const screen = (entry: string) => (
   <MemoryRouter initialEntries={[entry]}>

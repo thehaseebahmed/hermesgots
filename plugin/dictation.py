@@ -15,6 +15,7 @@ import importlib.util
 import os
 import tempfile
 import time
+from dataclasses import dataclass, replace
 from typing import Any, Dict, List, Optional, Sequence
 
 # The API server refuses bodies over 10 MB (``MAX_REQUEST_BYTES``); Opus at 24 kbps is ~180 KB a minute.
@@ -184,30 +185,72 @@ def _hallucination(text: str) -> bool:
         return False
 
 
+@dataclass(frozen=True)
+class DictationHearingPrompt:
+    """What a host's speech model is given before it listens (ADR 0067).
+
+    Whisper reads a prompt as what was just said, so the parts go in one order and the text before
+    this clip comes last: ``DictationHearingPrompt().WithInitialPrompt(…).WithHint(…)
+    .WithVocabulary(…).WithContext(…).Build()`` answers the one string the decode is given. A bot's
+    Hearing prompt setting decides whether that string is sent at all.
+    """
+
+    initial_prompt: str = ""
+    hint: str = ""
+    vocabulary: Sequence[str] = ()
+    context: str = ""
+
+    def WithInitialPrompt(self, value: str) -> "DictationHearingPrompt":
+        return replace(self, initial_prompt=value or "")
+
+    def WithHint(self, value: str) -> "DictationHearingPrompt":
+        return replace(self, hint=value or "")
+
+    def WithVocabulary(self, value: Optional[Sequence[str]]) -> "DictationHearingPrompt":
+        return replace(self, vocabulary=tuple(word for word in value or () if word))
+
+    def WithContext(self, value: str) -> "DictationHearingPrompt":
+        return replace(self, context=value or "")
+
+    def Build(self) -> str:
+        words = " ".join(self.vocabulary)
+        parts = (self.initial_prompt, self.hint, words, self.context)
+        return " ".join(part for part in parts if part).strip()
+
+
 def transcribe(
     data: bytes,
     content_type: Optional[str],
     hint: str = "",
     context: str = "",
     vocabulary: Optional[Sequence[str]] = None,
+    *,
+    hearing: bool,
 ) -> Dict[str, Any]:
     """The clip's text, ``""`` when nobody spoke. DictationError when the host can't.
 
     ``vocabulary`` is the bot's own words, so a decoder that only half-heard one spells it the way
-    the bot does; it rides after the hint and before ``context``, which must stay last.
+    the bot does; it rides after the hint and before ``context``, which must stay last. ``hearing``
+    is the bot's Hearing prompt setting, and it is the one place the rule lives: false composes no
+    prompt at all, so the model hears the audio alone and the cleanup carries the names instead
+    (ADR 0067). It has no default, since a caller that forgets it would prompt a bot that withheld.
     """
     state = info()
     if not state.get("ready"):
         raise DictationError(state.get("reason") or "Dictation is off on the host.", 409)
     tt = _tools()
     cfg = _local_config(tt)
-    # Our hint goes after the host's own prompt, which a `pre_transcription` plugin may also fill,
-    # then the bot's words, and the text before this clip goes last: Whisper reads a prompt as what
-    # was just said.
-    configured = (cfg.get("local") or {}).get("initial_prompt")
-    words = " ".join(vocabulary or ())
-    parts = (configured if isinstance(configured, str) else "", hint, words, context)
-    prompt = " ".join(p for p in parts if p).strip()
+    prompt = ""
+    if hearing:
+        configured = (cfg.get("local") or {}).get("initial_prompt")
+        prompt = (
+            DictationHearingPrompt()
+            .WithInitialPrompt(configured if isinstance(configured, str) else "")
+            .WithHint(hint)
+            .WithVocabulary(vocabulary)
+            .WithContext(context)
+            .Build()
+        )
     started = time.monotonic()
     fd, path = tempfile.mkstemp(prefix="memento-dictation-", suffix=suffix_for(content_type))
     try:

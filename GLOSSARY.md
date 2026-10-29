@@ -464,12 +464,20 @@ The unit a take uploads: one stretch of its recording, cut at a pause or at its 
 _Avoid_: chunk, slice, segment, part
 
 **Cleanup**:
-The pass that tidies a take's finished words — fillers, punctuation, casing, numbers, a spoken list as a list — without rewording them. It runs once over the whole text when the take ends, on the bot's own model, bounded; one that misses its budget, fails or comes back much longer or shorter than the text leaves the words as the host heard them.
+The pass that tidies a take's finished words, once over the whole text when the take ends, on the bot's cleanup model, at the bot's **Cleanup level**. What it may change is its level's; what no level may change is what the take says. It is bounded, and one that misses its budget, fails or answers something no level would produce leaves the words as the host heard them.
 _Avoid_: polish, post-processing, formatting, correction
 
+**Cleanup level**:
+How much Cleanup may change in one bot's takes: **None**, **Light**, **Medium** or **High**. **None** makes no call at all — the heard words are what lands. **Light** takes out fillers, false starts and slips, and repairs grammar, punctuation, casing and numbers. **Medium** does Light's work and tightens: wordiness, redundancy and run-ons, without dropping information. **High** does Medium's work and compresses — it may restructure a sentence, drop hedges and low-value words, and reorder within it. No level adds content, answers a question the take asked, or changes a name, a number or what the person asked for. The level is the bot's, kept on its host and read for every take, and a bot that has never picked runs **Light**.
+_Avoid_: cleanup tier, style, strength, aggressiveness, mode, preset
+
 **Vocabulary**:
-The words a bot's speech-to-text leans towards: names, product words, jargon. A short list, the bot's own, edited in its Speech-to-text settings; it biases what the host hears and how the finished text is cleaned up.
+The words a bot's speech-to-text leans towards: names, product words, jargon. A short list, the bot's own, edited in its Speech-to-text settings; it is spelled as listed in the cleanup of every take, and it also biases what the host hears wherever the bot's **Hearing prompt** is sent.
 _Avoid_: dictionary, custom words, hint, keyterms
+
+**Hearing prompt**:
+What a take's host speech model is given before it listens: the host's own initial prompt, a hint naming the bot, the chat and its repos, the bot's **Vocabulary**, and the text of the take so far. Sent, it steers spelling and carries a sentence across the pauses a take is cut at; not sent, the model hears the audio alone and the cleanup repairs the names instead. The bot's, kept on its host and read for every piece, and offered on its Speech-to-text page only while Developer is on.
+_Avoid_: whisper prompt, initial prompt, decoder prompt, context, hint
 
 **Host speech model**:
 The model on a bot's host that hears its speech-to-text. Its size is the trade between waiting and being right.

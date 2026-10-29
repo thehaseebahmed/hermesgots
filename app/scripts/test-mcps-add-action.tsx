@@ -24,6 +24,7 @@ import {
   find,
   findAll,
   json,
+  laptop,
   mediaHost,
   mount,
   path,
@@ -277,11 +278,10 @@ test("an address naming a server the Host no longer lists says so, and nothing m
   })
 })
 
-test("on a wide screen the + is the page's own, never the list's", async () => {
+test(
+  "on a wide screen the + is the page's own, never the list's",
   // The width is set before the screen is rendered, since the pane it draws is chosen then.
-  const width = window.innerWidth
-  window.innerWidth = 1440
-  try {
+  laptop(async () => {
     await seed("mcp-add-wide", ["mcps", "mcps_add", "mcps_catalogue"])
     await mount(settings(), async () => {
       await settle()
@@ -300,7 +300,5 @@ test("on a wide screen the + is the page's own, never the list's", async () => {
       )
       assert.ok(find("[data-bot-settings-list]"), "the list is on screen beside the page")
     })
-  } finally {
-    window.innerWidth = width
-  }
-})
+  }),
+)
