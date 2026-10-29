@@ -468,9 +468,7 @@ def set_level(path: Path, value: Any) -> str:
     Read per request like the cleanup model, so a change lands on the next take and every device on
     the bot agrees (ADR 0066).
     """
-    if not isinstance(value, str) or value.strip().lower() not in dictation_cleanup.LEVELS:
-        raise ValueError(f"cleanup_level must be one of {', '.join(dictation_cleanup.LEVELS)}")
-    name = value.strip().lower()
+    name = dictation_cleanup.require_level(value)
     put_setting(path, LEVEL_KEY, name)
     return name
 

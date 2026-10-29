@@ -8,13 +8,11 @@ ready, what reaches faster-whisper, and how its answers come back.
 from __future__ import annotations
 
 import os
-import time
 import types
 import unittest
 from unittest import mock
 
-from plugin import dictation, dictation_cleanup
-from plugin.tests._helpers import with_model
+from plugin import dictation
 
 
 def hermes(**overrides):
@@ -89,7 +87,9 @@ class TranscribeTest(unittest.TestCase):
     def test_sends_the_clip_to_the_local_model_and_deletes_it(self) -> None:
         tt, patch = hermes()
         with patch:
-            result = dictation.transcribe(b"opus", "audio/webm;codecs=opus", "Gots Hermes")
+            result = dictation.transcribe(
+                b"opus", "audio/webm;codecs=opus", "Gots Hermes", hearing=True
+            )
         self.assertEqual(result["text"], "Hello there.")
         call = tt.calls[0]
         self.assertEqual((call["model"], call["prompt"], call["data"]), ("small", "Gots Hermes", b"opus"))
@@ -100,7 +100,7 @@ class TranscribeTest(unittest.TestCase):
         cfg = {"local": {"model": "base", "initial_prompt": "Haseeb"}}
         tt, patch = hermes(_load_stt_config=lambda: cfg)
         with patch:
-            dictation.transcribe(b"x", "audio/mp4", "Gots")
+            dictation.transcribe(b"x", "audio/mp4", "Gots", hearing=True)
         self.assertEqual(tt.calls[0]["prompt"], "Haseeb Gots")
         self.assertTrue(tt.calls[0]["path"].endswith(".mp4"))
 
@@ -117,7 +117,7 @@ class TranscribeTest(unittest.TestCase):
         cfg = {"local": {"model": "base", "initial_prompt": "Haseeb"}}
         tt, patch = hermes(_load_stt_config=lambda: cfg)
         with patch:
-            dictation.transcribe(b"x", "audio/webm", "Gots", "We should ship it")
+            dictation.transcribe(b"x", "audio/webm", "Gots", "We should ship it", hearing=True)
         self.assertEqual(tt.calls[0]["prompt"], "Haseeb Gots We should ship it")
 
     def test_the_bot_s_words_ride_between_the_hint_and_the_text_before(self) -> None:
@@ -130,6 +130,7 @@ class TranscribeTest(unittest.TestCase):
                 "Gots",
                 "We should ship it",
                 vocabulary=["DeepSeek", "Hermes"],
+                hearing=True,
             )
         self.assertEqual(
             tt.calls[0]["prompt"], "Haseeb Gots DeepSeek Hermes We should ship it"
@@ -138,26 +139,26 @@ class TranscribeTest(unittest.TestCase):
     def test_a_clip_with_no_words_asks_with_only_its_hint(self) -> None:
         tt, patch = hermes()
         with patch:
-            dictation.transcribe(b"x", "audio/webm", "Gots", vocabulary=None)
+            dictation.transcribe(b"x", "audio/webm", "Gots", vocabulary=None, hearing=True)
         self.assertEqual(tt.calls[0]["prompt"], "Gots")
 
     def test_no_speech_is_empty_text(self) -> None:
         empty = lambda path, model, prompt=None: {"success": False, "error": "Empty transcript"}
         _, patch = hermes(_transcribe_local=empty)
         with patch:
-            self.assertEqual(dictation.transcribe(b"x", "audio/webm")["text"], "")
+            self.assertEqual(dictation.transcribe(b"x", "audio/webm", hearing=True)["text"], "")
 
     def test_a_failure_is_an_error_with_hermes_reason(self) -> None:
         broken = lambda path, model, prompt=None: {"success": False, "error": "CUDA out of memory"}
         _, patch = hermes(_transcribe_local=broken)
         with patch, self.assertRaises(dictation.DictationError) as caught:
-            dictation.transcribe(b"x", "audio/webm")
+            dictation.transcribe(b"x", "audio/webm", hearing=True)
         self.assertEqual((str(caught.exception), caught.exception.status), ("CUDA out of memory", 502))
 
     def test_refuses_when_not_ready(self) -> None:
         _, patch = hermes(_load_stt_config=lambda: {"enabled": False})
         with patch, self.assertRaises(dictation.DictationError) as caught:
-            dictation.transcribe(b"x", "audio/webm")
+            dictation.transcribe(b"x", "audio/webm", hearing=True)
         self.assertEqual(caught.exception.status, 409)
 
 

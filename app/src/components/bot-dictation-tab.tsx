@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { CheckIcon, PlusIcon, XIcon } from "lucide-react"
 import { useNavigate } from "react-router"
@@ -50,6 +50,8 @@ import {
   type SttSettings,
   type SttValue,
 } from "@/lib/stt-settings"
+import { useWide } from "@/lib/media"
+import { usePopupForm } from "@/lib/popup-form"
 import { plural } from "@/lib/tools"
 import { cn } from "@/lib/utils"
 import { MAX_WORD, addWord, cleanWord, readVocabulary, removeWord } from "@/lib/vocabulary"
@@ -73,7 +75,7 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
   const [open, setOpen] = useState<SttSetting>()
   const models = settings ? modelsFor(settings, block) : []
   const otherProviders = block ? providerRows(block) : []
-  // The Hearing prompt row is offered only while Developer is on; the value it writes is the host's.
+  // The Hearing prompt's value is the bot's, on the host, however many devices write it.
   const developer = useLiveQuery(async () => Boolean((await getSettings()).developer), [])
 
   // A detail takes the page's place at either width: below 1024px the route pushed it, and from
@@ -128,8 +130,7 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
       )}
 
       {block && otherProviders.length > 0 && (
-        <section className="flex flex-col gap-2" data-stt-group="providers">
-          <Caption>Providers</Caption>
+        <Card id="providers" title="Providers">
           <Group>
             {otherProviders.map((row) => (
               <ValueRow
@@ -145,7 +146,7 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
               />
             ))}
           </Group>
-        </section>
+        </Card>
       )}
 
       {/* The cleanup's own card after the host's: its model, and — where the plugin takes them — the
@@ -155,6 +156,7 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
           settings={settings}
           saving={speech.saving}
           levels={speech.levels}
+          hearing={speech.hearing}
           developer={Boolean(developer)}
           onLevel={() => setPick("level")}
           onHearing={(sent) => (speech.saving ? undefined : void speech.setHearing(sent))}
@@ -227,7 +229,7 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
   )
 }
 
-/** What every card of the host's settings is drawn with: the page's one write, one surface, two picks. */
+/** What every card of the host's settings is drawn with: the page's one write, one surface, three picks. */
 type CardProps = {
   block: SttSettings
   settings: SpeechSettings
@@ -240,6 +242,16 @@ type CardProps = {
   words: string[]
 }
 
+/** One card of the page: the muted caption naming what it holds, over the rows it holds. */
+function Card({ id, title, children }: { id: string; title: string; children: ReactNode }) {
+  return (
+    <section className="flex flex-col gap-2" data-stt-group={id}>
+      <Caption>{title}</Caption>
+      {children}
+    </section>
+  )
+}
+
 /**
  * The host's settings as the page draws them: one card per group, captioned by what the settings
  * are about, with the two Gots rows in the card their kin live in and a tag saying whose they are.
@@ -249,12 +261,11 @@ function SpeechGroups(props: CardProps) {
   return (
     <>
       {sttGroups().map((group) => (
-        <section key={group.id} className="flex flex-col gap-2" data-stt-group={group.id}>
-          <Caption>{group.title}</Caption>
+        <Card key={group.id} id={group.id} title={group.title}>
           <Group>
             <GroupRows {...props} group={group.id} rows={group.rows} />
           </Group>
-        </section>
+        </Card>
       ))}
     </>
   )
@@ -262,7 +273,7 @@ function SpeechGroups(props: CardProps) {
 
 /**
  * One card's rows, with the Gots row in place: Vocabulary sits under the initial prompt it rides
- * into the decoder with, and the cleanup's own rows live in the card below the host's.
+ * into the decoder with.
  */
 function GroupRows({
   group,
@@ -731,6 +742,7 @@ function CleanupSection({
   settings,
   saving,
   levels,
+  hearing,
   developer,
   onLevel,
   onHearing,
@@ -739,14 +751,14 @@ function CleanupSection({
   settings: SpeechSettings
   saving: boolean
   levels: boolean
+  hearing: boolean
   developer: boolean
   onLevel: () => void
   onHearing: (sent: boolean) => void
   onPick: () => void
 }) {
   return (
-    <section className="flex flex-col gap-2" data-stt-group="cleanup">
-      <Caption>Cleanup</Caption>
+    <Card id="cleanup" title="Cleanup">
       <Group>
         {levels && (
           <ValueRow
@@ -760,7 +772,7 @@ function CleanupSection({
           />
         )}
         <CleanupRow tag="Gots" settings={settings} saving={saving} onClick={onPick} />
-        {levels && developer && (
+        {hearing && developer && (
           <SwitchRow
             id="stt-hearing-prompt"
             title="Hearing prompt"
@@ -772,7 +784,7 @@ function CleanupSection({
           />
         )}
       </Group>
-    </section>
+    </Card>
   )
 }
 
@@ -786,9 +798,16 @@ function LevelPick({
   saving: boolean
   onPick: (level: CleanupLevel) => void
 }) {
+  const form = usePopupForm()
+  const wide = useWide()
   return (
     <div
-      className="flex min-h-0 flex-col gap-1.5 overflow-y-auto md:grid md:auto-rows-fr md:grid-cols-2 lg:flex lg:flex-col"
+      className={cn(
+        "flex min-h-0 flex-col gap-1.5 overflow-y-auto",
+        // Two across in the tablet's sheet, where there is the room to compare them; one column on a
+        // phone and in the desktop's drawer, which is a third of the screen wide.
+        form === "sheet" && wide && "grid auto-rows-fr grid-cols-2",
+      )}
       data-cleanup-levels
     >
       {CLEANUP_LEVEL_ROWS.map((row) => {

@@ -502,7 +502,7 @@ test("Cleanup level is one row that names the level, and its sheet offers all fo
 test("the Hearing prompt row is not offered until Developer is on", async () => {
   await seed(
     "hearing-hidden",
-    ["dictation", "speech_model", "cleanup_level"],
+    ["dictation", "speech_model", "cleanup_level", "hearing_prompt"],
     {},
     { speech: speech() },
   )
@@ -512,10 +512,20 @@ test("the Hearing prompt row is not offered until Developer is on", async () => 
   })
 })
 
+test("a host that takes a level but not a Hearing prompt draws the level alone", async () => {
+  await seed("hearing-absent", ["dictation", "speech_model", "cleanup_level"], {}, { speech: speech() })
+  await db.settings.update("settings", { developer: true })
+  await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    assert.ok(row("cleanup-level"), "the level the host does take is offered")
+    await until(async () => Boolean(row("cleanup-model")), "the cleanup's own rows")
+    assert.equal(row("hearing-prompt"), null, "and no switch for the prompt it never took")
+  })
+})
+
 test("a Developer's Hearing prompt switch is written to the host and read back", async () => {
   const calls = await seed(
     "hearing-shown",
-    ["dictation", "speech_model", "cleanup_level"],
+    ["dictation", "speech_model", "cleanup_level", "hearing_prompt"],
     {},
     { speech: speech(), next: speech({ hearing: { sent: true } }) },
   )

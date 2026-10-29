@@ -8,6 +8,7 @@ import { usePluginFeatureAnswers } from "@/lib/features"
 import { noteFailure } from "@/lib/report"
 import {
   CLEANUP_LEVELS_FEATURE,
+  HEARING_PROMPT_FEATURE,
   readSpeech,
   SPEECH_MODEL,
   type CleanupLevel,
@@ -62,12 +63,18 @@ export function useSpeech(profile?: (Server & { id?: string; speechModel?: strin
   // carries the rest of its speech settings, which a host too old for draws the model alone.
   const features = usePluginFeatureAnswers(
     { baseUrl, apiKey },
-    { speech: SPEECH_MODEL, stt: STT_SETTINGS, levels: CLEANUP_LEVELS_FEATURE },
+    {
+      speech: SPEECH_MODEL,
+      stt: STT_SETTINGS,
+      levels: CLEANUP_LEVELS_FEATURE,
+      hearing: HEARING_PROMPT_FEATURE,
+    },
   )
   const supported = features.speech === "yes"
   const sttSupport = features.stt === "yes"
   // A plugin older than the four levels refuses both writes, so the page doesn't offer them at all.
   const levelsSupport = features.levels === "yes"
+  const hearingSupport = features.hearing === "yes"
   const [saving, setSaving] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
 
@@ -144,8 +151,10 @@ export function useSpeech(profile?: (Server & { id?: string; speechModel?: strin
     supported,
     /** Whether the host carries the rest of its speech settings on this page (ADR 0063). */
     stt: supported && sttSupport,
-    /** Whether the host takes a cleanup level and a Hearing prompt (ADR 0066, ADR 0067). */
+    /** Whether the host takes a cleanup level (ADR 0066). */
     levels: supported && levelsSupport,
+    /** Whether the host takes a Hearing prompt for a take's decode (ADR 0067). */
+    hearing: supported && hearingSupport,
     saving,
     problem,
     choose: (model: string) => write({ model }),

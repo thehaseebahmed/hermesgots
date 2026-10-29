@@ -46,10 +46,8 @@ DEFAULT_LEVEL = LIGHT
 DEADLINE_S = 8.0
 HIGH_DEADLINE_S = 12.0
 
-# What a level's answer may run to, against the words it tidied. Light keeps every other word, so its
-# floor is high; High compresses, so its floor is low. Both ceilings are loose enough for a repaired
-# sentence and tight enough to catch a summary.
-SHORTER = {LIGHT: 0.6, MEDIUM: 0.45, HIGH: 0.25}
+# The ceiling a level's answer may run to, and the words either side of its bounds that are forgiven:
+# loose enough for a repaired sentence, tight enough to catch a summary.
 LONGER = 1.4
 SLACK = 1
 
@@ -105,11 +103,28 @@ _LIMITS = (
     "may ask a question or give a command, so leave it asking or commanding.\n"
 )
 
-_RULES = {
-    NONE: "",
-    LIGHT: _ANSWER + _LIGHT_WORK + _TIDYING + _LIMITS,
-    MEDIUM: _ANSWER + _LIGHT_WORK + _MEDIUM_WORK + _TIDYING + _LIMITS,
-    HIGH: _ANSWER + _LIGHT_WORK + _MEDIUM_WORK + _HIGH_WORK + _TIDYING + _LIMITS,
+@dataclass(frozen=True)
+class LevelFacts:
+    """What one level is asked with, how long it may take, and the least it may answer."""
+
+    instructions: str
+    deadline_s: float
+    shorter: float
+
+
+# Each level's rules contain the ones below it, so a level is described in one place rather than in
+# a rules table, a bounds table and a deadline of its own in Build().
+LEVEL_FACTS: Dict[str, LevelFacts] = {
+    NONE: LevelFacts("", DEADLINE_S, 0.0),
+    LIGHT: LevelFacts(_ANSWER + _LIGHT_WORK + _TIDYING + _LIMITS, DEADLINE_S, 0.6),
+    MEDIUM: LevelFacts(
+        _ANSWER + _LIGHT_WORK + _MEDIUM_WORK + _TIDYING + _LIMITS, DEADLINE_S, 0.45
+    ),
+    HIGH: LevelFacts(
+        _ANSWER + _LIGHT_WORK + _MEDIUM_WORK + _HIGH_WORK + _TIDYING + _LIMITS,
+        HIGH_DEADLINE_S,
+        0.25,
+    ),
 }
 
 SCHEMA = {
@@ -149,10 +164,20 @@ class CleanupPrompt:
         )
 
 
+def require_level(value: Any) -> str:
+    """``value`` as one of the four levels, or ValueError naming them (ADR 0066)."""
+    name = str(value or "").strip().lower()
+    if name not in LEVELS:
+        raise ValueError(f"{value!r} isn't a cleanup level: {', '.join(LEVELS)}")
+    return name
+
+
 def level_of(value: Any) -> str:
     """A stored level as one of the four, defaulting where the host names none of them."""
-    name = str(value or "").strip().lower()
-    return name if name in LEVELS else DEFAULT_LEVEL
+    try:
+        return require_level(value)
+    except ValueError:
+        return DEFAULT_LEVEL
 
 
 class DictationCleanupPrompt:
@@ -164,10 +189,7 @@ class DictationCleanupPrompt:
     """
 
     def __init__(self, level: str) -> None:
-        name = str(level or "").strip().lower()
-        if name not in LEVELS:
-            raise ValueError(f"{level!r} isn't a cleanup level: {', '.join(LEVELS)}")
-        self.level = name
+        self.level = require_level(level)
 
     @classmethod
     def WithNoCleanup(cls) -> "DictationCleanupPrompt":
@@ -191,12 +213,13 @@ class DictationCleanupPrompt:
         return cls(level_of(level))
 
     def Build(self) -> CleanupPrompt:
+        facts = LEVEL_FACTS[self.level]
         return CleanupPrompt(
             level=self.level,
             system=SYSTEM,
-            instructions=_RULES[self.level],
-            deadline_s=HIGH_DEADLINE_S if self.level == HIGH else DEADLINE_S,
-            shorter=SHORTER.get(self.level, 0.0),
+            instructions=facts.instructions,
+            deadline_s=facts.deadline_s,
+            shorter=facts.shorter,
             longer=LONGER,
         )
 
@@ -296,7 +319,7 @@ def finish(
     vocabulary: Sequence[str] = (),
     *,
     hint: str = "",
-    prompt: Optional[CleanupPrompt] = None,
+    prompt: CleanupPrompt,
     model: Optional[Dict[str, str]] = None,
     ask: Optional[Ask] = None,
 ) -> Dict[str, Any]:
@@ -313,7 +336,7 @@ def finish(
     """
     if not isinstance(text, str):
         raise DictationError("Body needs the dictation's text.", 400)
-    asked = prompt or DictationCleanupPrompt.WithLightCleanup().Build()
+    asked = prompt
     if not asked.cleaning:
         return {"text": text, "cleaned": False, "ms": 0, "level": asked.level}
     started = time.monotonic()

@@ -9,6 +9,7 @@ network.
 
 from __future__ import annotations
 
+import dataclasses
 import time
 import unittest
 from unittest import mock
@@ -211,7 +212,7 @@ class FinishTest(unittest.TestCase):
         started = time.monotonic()
         got = dictation_cleanup.finish(
             "um hello there",
-            prompt=mock.Mock(cleaning=True, deadline_s=0.02, level="light", holds=lambda a, b: True),
+            prompt=dataclasses.replace(LIGHT.Build(), deadline_s=0.02),
             ask=slow,
         )
         self.assertEqual(got["text"], "um hello there")

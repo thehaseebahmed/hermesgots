@@ -121,10 +121,11 @@ export const DICTATION = "dictation"
 export const SEND_WAIT_MS = 4000
 /**
  * How long a Stop waits for the same ending. Longer than a Send because a Stop is the user asking
- * for the whole take, and the pieces still being heard, the cleanup that tidies them and the
- * answer all have to fit; it covers the widest budget a host holds for a cleanup — the 12 s High
- * gets (ADR 0066) — and past it the take goes with what it has, so a wedged host can't hold the
- * composer's place for ever.
+ * for the whole take. It is one clock for both halves: the pieces still being heard come first and
+ * the cleanup spends whatever is left of it, which is what the host's own 12 s at High is measured
+ * against (ADR 0066) — a take whose last piece was still in flight can therefore land its heard
+ * words instead of a tidied answer, which is the trade this wait makes. Past it the take goes with
+ * what it has, so a wedged host can't hold the composer's place for ever.
  */
 export const STOP_WAIT_MS = 12_000
 /** A live track whose recorder has sent nothing by now is a dead one: silence still encodes. */

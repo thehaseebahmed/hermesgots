@@ -12,8 +12,11 @@ import { readStt, type SttSettings } from "./stt-settings.ts"
 /** The feature a host advertises when it has the host speech settings at all. */
 export const SPEECH_MODEL = "speech_model"
 
-/** The feature a host advertises when it takes a level and a Hearing prompt (ADR 0066, ADR 0067). */
+/** The feature a host advertises when it takes a cleanup level (ADR 0066). */
 export const CLEANUP_LEVELS_FEATURE = "cleanup_level"
+
+/** The feature a host advertises when a take's decode may be given a Hearing prompt (ADR 0067). */
+export const HEARING_PROMPT_FEATURE = "hearing_prompt"
 
 /** The speech fields a page may write: each is the bot's, and none is the host's own config. */
 export type SpeechPatch = {

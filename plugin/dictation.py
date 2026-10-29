@@ -225,14 +225,15 @@ def transcribe(
     context: str = "",
     vocabulary: Optional[Sequence[str]] = None,
     *,
-    hearing: bool = True,
+    hearing: bool,
 ) -> Dict[str, Any]:
     """The clip's text, ``""`` when nobody spoke. DictationError when the host can't.
 
     ``vocabulary`` is the bot's own words, so a decoder that only half-heard one spells it the way
     the bot does; it rides after the hint and before ``context``, which must stay last. ``hearing``
-    is the bot's Hearing prompt setting: false sends the model no prompt at all, and the cleanup then
-    carries the names it would have been given.
+    is the bot's Hearing prompt setting, and it is the one place the rule lives: false composes no
+    prompt at all, so the model hears the audio alone and the cleanup carries the names instead
+    (ADR 0067). It has no default, since a caller that forgets it would prompt a bot that withheld.
     """
     state = info()
     if not state.get("ready"):

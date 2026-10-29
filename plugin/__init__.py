@@ -476,10 +476,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # totals its Dictation screen counts (dictations.py, ADR 0060).
                     "dictations",
                     "speech_model",
-                    # The level a take is cleaned up at and the Hearing prompt its decode is given
-                    # (speech.py, ADR 0066, ADR 0067). Both are new fields an older plugin refuses,
-                    # so the page offers them only where this is advertised.
+                    # The level a take is cleaned up at (speech.py, ADR 0066) and whether its
+                    # decode is given a Hearing prompt (ADR 0067), each advertised on its own: the
+                    # level outlives the prompt, which is a comparison that may be taken back, and
+                    # a host that takes one needn't take the other.
                     "cleanup_level",
+                    "hearing_prompt",
                     # The rest of the host's `stt` section, on the same page (speech.py, ADR 0063):
                     # advertised only where this host's Hermes declares those defaults, so a host
                     # that doesn't keeps the one speech row it already draws.
@@ -1866,14 +1868,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "The recording is empty.", 400)
         if len(data) > dictation.MAX_BYTES:
             return _error(web, "The recording is too long.", 413)
+        # A bot whose Hearing prompt is not sent decodes from the audio alone: `transcribe` composes
+        # no prompt on that flag, so what the query carries costs nothing (ADR 0067).
         hearing = await asyncio.to_thread(_hearing_prompt, store_path())
-        # A bot whose Hearing prompt is not sent decodes from the audio alone: nothing is composed
-        # and nothing is read off the query, so a hint an old client still sends costs nothing.
-        hint = dictation.clean_hint(request.query.get("hint")) if hearing else ""
-        context = dictation.clean_context(request.query.get("context")) if hearing else ""
-        vocabulary = (
-            dictation.clean_vocabulary(request.query.getall("vocabulary", [])) if hearing else []
-        )
+        hint = dictation.clean_hint(request.query.get("hint"))
+        context = dictation.clean_context(request.query.get("context"))
+        vocabulary = dictation.clean_vocabulary(request.query.getall("vocabulary", []))
         async with dictating:
             try:
                 result = await asyncio.to_thread(

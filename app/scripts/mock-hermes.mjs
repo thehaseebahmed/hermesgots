@@ -3826,6 +3826,7 @@ http
           ...(DICTATIONS ? ["dictations"] : []),
           "speech_model",
           "cleanup_level",
+          "hearing_prompt",
           "stt_settings",
           "afk",
           "afk_switch",
