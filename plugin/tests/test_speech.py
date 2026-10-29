@@ -19,6 +19,7 @@ from pathlib import Path
 from unittest import mock
 
 from plugin import speech
+from plugin.store import put_setting
 
 # Hermes's own ``DEFAULT_CONFIG["stt"]``, as the read is answered from: every key the page draws.
 DEFAULTS = {
@@ -283,6 +284,54 @@ class CleanupTest(TempStore):
                 self.path, {"provider": "acme", "model": "fast"}, self.allowed, self.config
             )
         self.assertEqual(same, {"provider": "acme", "model": "fast"})
+
+
+class LevelTest(TempStore):
+    allowed = {"model": True, "provider": True}
+
+    def test_a_bot_that_has_never_picked_cleans_at_light(self) -> None:
+        self.assertEqual(speech.read_level(self.path), "light")
+        self.assertEqual(speech.cleanup_state(self.path, self.allowed)["level"], "light")
+
+    def test_a_level_is_stored_with_the_bot_and_read_back(self) -> None:
+        self.assertEqual(speech.set_level(self.path, "High"), "high")
+        self.assertEqual(speech.read_level(self.path), "high")
+        self.assertEqual(speech.set_level(self.path, " none "), "none")
+        self.assertEqual(speech.read_level(self.path), "none")
+
+    def test_a_level_that_is_not_one_is_refused_and_stores_nothing(self) -> None:
+        for value in ("loud", "", 7, None):
+            with self.assertRaises(ValueError):
+                speech.set_level(self.path, value)
+        self.assertEqual(speech.read_level(self.path), "light")
+
+    def test_a_level_stored_as_something_else_reads_as_the_default(self) -> None:
+        put_setting(self.path, speech.LEVEL_KEY, "Loud")
+        self.assertEqual(speech.read_level(self.path), "light")
+
+    def test_the_read_carries_the_level_beside_the_model(self) -> None:
+        with Host(stt("base")):
+            payload = speech.read(self.config, self.path, self.allowed)
+        self.assertEqual(payload["cleanup"]["level"], "light")
+        self.assertEqual(payload["hearing"], {"sent": False})
+
+
+class HearingTest(TempStore):
+
+    def test_a_take_is_heard_without_a_hearing_prompt_until_the_bot_says_so(self) -> None:
+        self.assertFalse(speech.read_hearing(self.path))
+
+    def test_the_setting_is_stored_with_the_bot_and_read_back(self) -> None:
+        self.assertTrue(speech.set_hearing(self.path, True))
+        self.assertTrue(speech.read_hearing(self.path))
+        self.assertFalse(speech.set_hearing(self.path, False))
+        self.assertFalse(speech.read_hearing(self.path))
+
+    def test_anything_but_a_boolean_is_refused_and_stores_nothing(self) -> None:
+        for value in (1, "true", None):
+            with self.assertRaises(ValueError):
+                speech.set_hearing(self.path, value)
+        self.assertFalse(speech.read_hearing(self.path))
 
 
 class SttHost:

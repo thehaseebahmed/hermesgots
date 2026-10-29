@@ -13,12 +13,16 @@ and the model catalogues — and ``set_stt_value`` writes one dotted path, or cl
 host's default with ``None``. No value of a key is ever read: a provider is reported as having one
 or not.
 
-Two things are kept beside it in the host's settings store, per bot:
+Four things are kept beside it in the host's settings store, per bot:
 
 - the model a finished dictation's cleanup runs on, where the host grants the plugin its
   model-override permission (``llm.model_override`` and ``llm.provider_override``; ADR 0036). It is
   read per request, so it survives a plugin restart, and it is dropped where the permission is not
   granted: cleanup then runs on the bot's own model.
+- the level a finished dictation is cleaned up at — none, light, medium or high (ADR 0066) — read
+  per request, defaulting to light where the bot has never picked one.
+- whether a take is heard with a Hearing prompt (ADR 0067): read per piece, and not sent until the
+  bot says so.
 - the last model that actually loaded. A pick Hermes can't load — a download that failed, a file
   the host can't read — falls back to that model rather than costing the user their dictation, and
   the failure is kept, once, for the app to show. A model that failed is never remembered as the one
@@ -36,6 +40,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
+from . import dictation_cleanup
 from .store import get_setting, put_setting
 
 logger = logging.getLogger(__name__)
@@ -43,6 +48,8 @@ logger = logging.getLogger(__name__)
 # Hermes's own default when ``stt.local.model`` is unset.
 DEFAULT_MODEL = "base"
 CLEANUP_KEY = "speech_cleanup_model"
+LEVEL_KEY = "speech_cleanup_level"
+HEARING_KEY = "speech_hearing_prompt"
 STT_KEY = "stt"
 
 # What a pick is weighed on. ``speed`` is roughly how many seconds of speech the model hears in a
@@ -205,6 +212,7 @@ def read(
         "model": model,
         "models": rows,
         "cleanup": cleanup_state(path, gate),
+        "hearing": {"sent": read_hearing(path)},
     }
     if with_stt:
         try:
@@ -439,9 +447,48 @@ def read_cleanup(path: Path) -> Optional[Dict[str, str]]:
 
 
 def cleanup_state(path: Path, gate: Dict[str, bool]) -> Dict[str, Any]:
-    """The cleanup model as the tab draws it: the pick, whether the host allows one, and why not."""
+    """The cleanup as the tab draws it: the model, whether the host allows one, and the level."""
     allowed = bool(gate.get("model") and gate.get("provider"))
-    return {"model": read_cleanup(path), "allowed": allowed, "reason": None if allowed else DENIED}
+    return {
+        "model": read_cleanup(path),
+        "allowed": allowed,
+        "reason": None if allowed else DENIED,
+        "level": read_level(path),
+    }
+
+
+def read_level(path: Path) -> str:
+    """The level a take is tidied at, defaulting where the bot has never picked one."""
+    return dictation_cleanup.level_of(get_setting(path, LEVEL_KEY))
+
+
+def set_level(path: Path, value: Any) -> str:
+    """Keeps ``value`` as the level a take is tidied at; ValueError names one it can't be.
+
+    Read per request like the cleanup model, so a change lands on the next take and every device on
+    the bot agrees (ADR 0066).
+    """
+    if not isinstance(value, str) or value.strip().lower() not in dictation_cleanup.LEVELS:
+        raise ValueError(f"cleanup_level must be one of {', '.join(dictation_cleanup.LEVELS)}")
+    name = value.strip().lower()
+    put_setting(path, LEVEL_KEY, name)
+    return name
+
+
+def read_hearing(path: Path) -> bool:
+    """Whether a take is heard with a Hearing prompt: not until the bot says so (ADR 0067)."""
+    return get_setting(path, HEARING_KEY) is True
+
+
+def set_hearing(path: Path, value: Any) -> bool:
+    """Keeps ``value`` as whether a take's decode is prompted; ValueError on anything but a boolean.
+
+    Read per piece, so the next piece is heard the new way without a restart.
+    """
+    if not isinstance(value, bool):
+        raise ValueError("hearing_prompt must be true or false")
+    put_setting(path, HEARING_KEY, value)
+    return value
 
 
 def set_cleanup(

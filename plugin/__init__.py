@@ -235,6 +235,22 @@ def _cleanup_pick(path: Path) -> Optional[Dict[str, str]]:
         return None
 
 
+def _cleanup_level(path: Path) -> str:
+    try:
+        return speech.read_level(path)
+    except Exception:
+        logger.warning("memento: couldn't read the dictation cleanup level", exc_info=True)
+        return dictation_cleanup.DEFAULT_LEVEL
+
+
+def _hearing_prompt(path: Path) -> bool:
+    try:
+        return speech.read_hearing(path)
+    except Exception:
+        logger.warning("memento: couldn't read the hearing prompt setting", exc_info=True)
+        return False
+
+
 def mirror_for_profiles(app: Any, web: Any) -> None:
     """Serve every route again at ``PREFIX/p/{profile}/...`` for bots at ``/p/<profile>``.
 
@@ -1846,6 +1862,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         hint = dictation.clean_hint(request.query.get("hint"))
         context = dictation.clean_context(request.query.get("context"))
         vocabulary = dictation.clean_vocabulary(request.query.getall("vocabulary", []))
+        hearing = await asyncio.to_thread(_hearing_prompt, store_path())
         async with dictating:
             try:
                 result = await asyncio.to_thread(
@@ -1855,6 +1872,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     hint,
                     context,
                     vocabulary,
+                    hearing=hearing,
                 )
             except dictation.DictationError as error:
                 return _error(web, str(error), error.status)
@@ -1871,7 +1889,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return web.json_response({"object": "memento.dictation_warm", **result})
 
     async def clean_dictation(request: "web.Request") -> "web.Response":
-        """A finished dictation's whole text tidied, on the bot's cleanup model (ADR 0038)."""
+        """A finished dictation tidied at the bot's cleanup level (ADR 0038, ADR 0066)."""
         denied = unauthorized(request)
         if denied is not None:
             return denied
@@ -1879,10 +1897,16 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if body is None:
             return _error(web, "Body must be a JSON object", 400)
         vocabulary = dictation.clean_vocabulary(body.get("vocabulary"))
-        cleanup_model = await asyncio.to_thread(_cleanup_pick, store_path())
+        path = store_path()
+        cleanup_model = await asyncio.to_thread(_cleanup_pick, path)
+        level = await asyncio.to_thread(_cleanup_level, path)
         try:
             result = await asyncio.to_thread(
-                dictation_cleanup.finish, body.get("text"), vocabulary, model=cleanup_model
+                dictation_cleanup.finish,
+                body.get("text"),
+                vocabulary,
+                prompt=dictation_cleanup.DictationCleanupPrompt.Of(level).Build(),
+                model=cleanup_model,
             )
         except dictation.DictationError as error:
             return _error(web, str(error), error.status)
@@ -1957,8 +1981,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if denied is not None:
             return denied
         body = await json_body(request)
-        if not body or "model" not in body and "cleanup_model" not in body:
-            return _error(web, "Body needs a model or a cleanup_model.", 400)
+        if not body or not any(
+            key in body for key in ("model", "cleanup_model", "cleanup_level", "hearing_prompt")
+        ):
+            return _error(
+                web, "Body needs a model, a cleanup_model, a cleanup_level or a hearing_prompt.", 400
+            )
         config_path = host_config_path()
         path = store_path()
         scope = profile_scope()
@@ -1970,6 +1998,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     speech.set_model(config_path, body.get("model"))
                 if "cleanup_model" in body:
                     speech.set_cleanup(path, body.get("cleanup_model"), gate, config_path)
+                if "cleanup_level" in body:
+                    speech.set_level(path, body.get("cleanup_level"))
+                if "hearing_prompt" in body:
+                    speech.set_hearing(path, body.get("hearing_prompt"))
                 return speech.read(config_path, path, gate)
 
         try:
