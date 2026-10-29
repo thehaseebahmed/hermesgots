@@ -791,7 +791,10 @@ function LevelPick({
   onPick: (level: CleanupLevel) => void
 }) {
   return (
-    <div className="flex min-h-0 flex-col gap-1.5 overflow-y-auto md:grid md:grid-cols-2 lg:flex lg:flex-col" data-cleanup-levels>
+    <div
+      className="flex min-h-0 flex-col gap-1.5 overflow-y-auto md:grid md:auto-rows-fr md:grid-cols-2 lg:flex lg:flex-col"
+      data-cleanup-levels
+    >
       {CLEANUP_LEVEL_ROWS.map((row) => {
         const chosen = row.level === level
         return (
@@ -803,7 +806,7 @@ function LevelPick({
             onClick={() => onPick(row.level)}
             data-cleanup-level={row.level}
             className={cn(
-              "flex flex-col gap-1.5 rounded-xl border p-3 text-left transition-colors",
+              "flex h-full flex-col gap-1.5 rounded-xl border p-3 text-left transition-colors",
               chosen ? "border-ring bg-card" : "border-border bg-card hover:bg-muted/40",
             )}
           >
@@ -812,7 +815,7 @@ function LevelPick({
               {chosen && <CheckIcon className="size-4 shrink-0 text-primary" aria-hidden />}
             </span>
             <span className="text-sm text-muted-foreground">{row.purpose}</span>
-            <span className="rounded-lg bg-muted px-3 py-2 text-xs leading-snug text-muted-foreground">
+            <span className="flex-1 rounded-lg bg-muted px-3 py-2 text-xs leading-snug text-muted-foreground">
               {row.sample}
             </span>
           </button>

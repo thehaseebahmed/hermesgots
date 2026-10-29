@@ -71,7 +71,7 @@ export const CLEANUP_LEVEL_ROWS: CleanupLevelRow[] = [
   {
     level: "none",
     name: "None",
-    purpose: "Transcribes exactly what you said, mistakes and all",
+    purpose: "Exactly what you said",
     sample:
       "hey joey, we still on for coffee or? i think we maybe should leave earlier to make it there in time there might um be traffic. What are you thinking?",
   },
