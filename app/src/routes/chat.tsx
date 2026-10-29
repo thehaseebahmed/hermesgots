@@ -35,6 +35,7 @@ import { ApprovalCard } from "@/components/chat/approval-card"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { ChatActions, LimitNotice, useChatUsage } from "@/components/chat/chat-actions"
+import { FollowAfterApproval, FollowOnSend } from "@/components/chat/follow"
 import { FIRST_ROWS, useFirstRows } from "@/components/chat/first-rows"
 import { Composer } from "@/components/chat/composer"
 import { MessageItem } from "@/components/chat/message-item"
@@ -63,7 +64,6 @@ import {
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
-  useMessageScroller,
   useMessageScrollerScrollable,
 } from "@/components/ui/message-scroller"
 import { Spinner } from "@/components/ui/spinner"
@@ -142,6 +142,7 @@ import { announceMove } from "@/lib/triage"
 import { useMainFlow } from "@/components/chat/main-flow"
 
 export { SETUP_COPY } from "@/components/chat/empty-states"
+import { dictationHint } from "@/lib/dictation-hint"
 import { draftKey } from "@/lib/drafts"
 import { AgentsContext, runningAgents, stopSubagents, useSessionAgents } from "@/lib/agents"
 import { spawnInFlight } from "@/lib/spawn"
@@ -167,28 +168,6 @@ function PendingChat() {
       <div className="flex-1" />
     </>
   )
-}
-
-/** An approval or question card temporarily replaces the composer; once answered, follow the reply again. */
-function FollowAfterApproval({ pending }: { pending: boolean }) {
-  const { scrollToEnd } = useMessageScroller()
-  const wasPending = useRef(pending)
-  useEffect(() => {
-    if (wasPending.current && !pending) scrollToEnd({ behavior: "smooth" })
-    wasPending.current = pending
-  }, [pending, scrollToEnd])
-  return null
-}
-
-/** Sending jumps back to the end, even if you'd scrolled up to read. */
-function FollowOnSend({ lastUserId }: { lastUserId?: string }) {
-  const { scrollToEnd } = useMessageScroller()
-  const previous = useRef(lastUserId)
-  useEffect(() => {
-    if (lastUserId !== previous.current) scrollToEnd({ behavior: "smooth" })
-    previous.current = lastUserId
-  }, [lastUserId, scrollToEnd])
-  return null
 }
 
 /** Steps one edge gets before the reader has to leave the top and come back. */
@@ -683,11 +662,19 @@ function NextComposerBody({
   const { root } = useNav()
   const navigate = useNavigate()
   const bot = useLiveQuery(() => db.profiles.get(botId), [botId])
-  const session = useLiveQuery(async () => {
-    const chat = await db.conversations.get(chatId)
-    return chat?.projectId ? chat : null
-  }, [chatId])
-  const kept = useLiveQuery(async () => (await db.conversations.get(chatId))?.modelChoice, [chatId])
+  const chat = useLiveQuery(() => db.conversations.get(chatId), [chatId])
+  const session = chat?.projectId ? chat : null
+  const kept = chat?.modelChoice
+  // What the dictation hears best with: the chat's title, its project and the repos it works in.
+  const projects = useProjects(
+    session && bot ? { baseUrl: bot.baseUrl, apiKey: bot.apiKey } : undefined,
+  )
+  const project = projects?.find((one) => one.id === session?.projectId)
+  const repos = session?.worktree?.repos.length
+    ? session.worktree.repos
+    : project
+      ? projectRepos(project)
+      : []
   // `/thread` from Main: a thread of its own, with Main's pick and the message as its first turn.
   const startThread = async (text: string, attachments: Attachment[]) => {
     try {
@@ -704,7 +691,7 @@ function NextComposerBody({
   const [cheatsheetOpen, setCheatsheetOpen] = useState(false)
   const [navShortcuts, setNavShortcuts] = useState(DEFAULT_SETTINGS.navShortcuts)
   const steerByDefault = useLiveQuery(async () => (await getSettings()).steerByDefault, [])
-  if (!bot || session === undefined) return null
+  if (!bot || !chat) return null
   // Without a key nothing on the host answers for Auto, so the session runs as Accept edits.
   const tracked = Boolean(bot.apiKey && !bot.disabled)
   // The chat's model pill: the composer's, and the plan-ready card's while a plan waits on it.
@@ -750,6 +737,7 @@ function NextComposerBody({
         connection={serverConfig(bot)}
         botName={bot.name}
         dictationWords={bot.vocabulary}
+        dictationHint={dictationHint({ title: chat.title, project: project?.name, repos })}
         draftKey={draftKey(chatId)}
         filesFeature={filesFeature}
         imagesAvailable={bot.imageInput !== false}
@@ -1552,13 +1540,11 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
             connection={serverConfig(profile)}
             botName={profile?.name}
             dictationWords={profile?.vocabulary}
-            dictationHint={[
-              conversation?.title,
-              project?.name,
-              ...sessionRepos.map((repo) => repo.name.split("/").pop()),
-            ]
-              .filter(Boolean)
-              .join(", ")}
+            dictationHint={dictationHint({
+              title: conversation?.title,
+              project: project?.name,
+              repos: sessionRepos,
+            })}
             session={
               session && {
                 // Without the plugin nothing answers for Auto, so the session runs as Accept edits.

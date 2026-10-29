@@ -2,6 +2,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { type ComponentProps, createContext, useContext, useEffect, useMemo, useState } from "react"
 
 import { Banner } from "@/components/banner"
+import { useBreakReminderEligibility } from "@/components/break-reminder-context"
 import { AgentPopup } from "@/components/chat/agent-card"
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { CodeFaceProvider } from "@/components/chat/code-face"
@@ -9,6 +10,7 @@ import { DayHeading } from "@/components/chat/day-heading"
 import { EmptyState, MainEmptyState } from "@/components/chat/empty-states"
 import { useMainFlow } from "@/components/chat/main-flow"
 import { MessageItem } from "@/components/chat/message-item"
+import { FollowAfterApproval, FollowOnSend } from "@/components/chat/follow"
 import { useFirstRows } from "@/components/chat/first-rows"
 import { Compacted, ModelChange } from "@/components/chat/model-change"
 import { QuestionCard } from "@/components/chat/question-card"
@@ -27,6 +29,7 @@ import {
 } from "@/components/ui/message-scroller"
 import { Spinner } from "@/components/ui/spinner"
 import { AgentsContext, type AgentsSource } from "@/lib/agents"
+import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { compactionMarks } from "@/lib/compactions"
 import { db, type ApprovalChoice, type Message } from "@/lib/db"
 import type { DelegatedAgent } from "@/lib/hermes"
@@ -137,8 +140,29 @@ export function AppThreadView({
   // its context was compacted, which the dividers between the turns are drawn from.
   const record = useLiveQuery(async () => {
     const chat = await db.conversations.get(chatId)
-    return chat ? { changes: chat.modelChanges, compactions: chat.compactions } : undefined
+    return chat
+      ? {
+          changes: chat.modelChanges,
+          compactions: chat.compactions,
+          resolved: Boolean(chat.resolvedAt),
+          discarded: Boolean(chat.discardedAt),
+          blocked: Boolean(chat.blocked),
+        }
+      : undefined
   }, [chatId])
+  // The break reminder counts only time the run carries on without the app: this screen follows
+  // `/v1/runs` alone, so a streaming reply is one, until it waits on the user or its session closes.
+  useBreakReminderEligibility(
+    isBackgroundSafeRunActive({
+      busy: streaming,
+      runId: "run",
+      awaitingApproval: Boolean(waiting),
+      awaitingClarify: false,
+      resolved: Boolean(record?.resolved),
+      discarded: Boolean(record?.discarded),
+      blocked: Boolean(record?.blocked),
+    }),
+  )
   const profile = useLiveQuery(async () => {
     const chat = await db.conversations.get(chatId)
     return chat ? db.profiles.get(chat.profileId) : undefined
@@ -305,6 +329,10 @@ export function AppThreadView({
                 </MessageScrollerContent>
               </MessageScrollerViewport>
               <MessageScrollerButton />
+              <FollowAfterApproval pending={Boolean(waiting)} />
+              <FollowOnSend
+                lastUserId={messages.findLast((message) => message.role === "user")?.id}
+              />
             </MessageScroller>
           </MessageScrollerProvider>
         )}

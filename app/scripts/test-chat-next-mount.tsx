@@ -8,6 +8,7 @@ import test from "node:test"
 import { act } from "react"
 
 import { readAgents, readLiveRun } from "@/chat-next/api"
+import { BreakReminderActivityContext } from "@/components/break-reminder-context"
 import { FIRST_ROWS } from "@/components/chat/first-rows"
 import { db, type Profile, type Settings } from "@/lib/db"
 import { fakeHost } from "./chat-next-host.ts"
@@ -654,4 +655,20 @@ test("a reply this device watched keeps what it cost, under the reply, once the 
     const kept = (await db.sessionStates.get("memento-c-stats"))?.stats
     assert.equal(Object.keys(kept ?? {}).length, 1, "and the device keeps them across a reload")
   })
+})
+
+test("a reply the run carries on without the app counts toward the break reminder, until it waits", async () => {
+  const { host } = await onChatNext("c-break")
+  const states: boolean[] = []
+  await mount(
+    <BreakReminderActivityContext.Provider value={(active) => states.push(active)}>
+      {chatScreen("c-break")}
+    </BreakReminderActivityContext.Provider>,
+    async () => {
+      const run = await midReply(host, "Clean up")
+      await until(() => states.at(-1) === true, "a running reply is background-safe work")
+      run.requestApproval("rm -rf /tmp/x", "delete")
+      await until(() => states.at(-1) === false, "a reply waiting on the user is not")
+    },
+  )
 })

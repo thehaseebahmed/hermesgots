@@ -1,5 +1,7 @@
 # chat-next implementation plan
 
+**Status:** steps 2 to 8 are built on `ccr-eb6ef31a-3paja1` (step 1 was replaced by unit tests of the read, see `docs/chat-next-parity.md`, which lists what is closed and what is still to check).
+
 How the gaps in `docs/chat-next-parity.md` get closed, in the order they are built. The decision behind chat-next is `docs/adr/0065-chat-next-comes-into-the-app-behind-a-developer-switch.md`.
 
 **Out of scope:** retiring the old screen (making `Settings.chatNext` the default and deleting `lib/chat.ts` / `lib/history.ts`). ADR 0065 makes that a later decision, taken when nothing the old screen does is missing. This plan only gets chat-next to that point.

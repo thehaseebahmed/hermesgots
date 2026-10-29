@@ -1,38 +1,39 @@
 # chat-next parity
 
-What the current chat screen (`CurrentChatPage` in `app/src/routes/chat.tsx`, over `lib/chat.ts` and `lib/history.ts`) does that a chat drawn by chat-next (`NextChat`, `src/chat-next/`) does not yet. The current screen is retired (task 8) only once every row marked **Blocks retiring** is done. Audited 2026-10-29 against `ccr-b0990318-q2tg06`, by reading both screens. A finding marked _derived_ is worked out from the code rather than measured.
+What the current chat screen (`CurrentChatPage` in `app/src/routes/chat.tsx`, over `lib/chat.ts` and `lib/history.ts`) does that a chat drawn by chat-next (`NextChat`, `src/chat-next/`) does not. Audited 2026-10-29 against `ccr-b0990318-q2tg06` by reading both screens, and closed by the work in `docs/chat-next-plan.md` on `ccr-eb6ef31a-3paja1`. Retiring the current screen stays a separate decision (ADR 0065): it is made when nothing the old screen does is missing, and what is left to check before it is below.
 
-Fixed while auditing: chat-next's rows carried the Hermes session id as their `conversationId`, so a reply's `MEDIA:` tags never drew, a file's row couldn't download, and a missed question's Ask again found no chat (`30dd959`).
+## Closed
 
-## Blocks retiring
+| Area | How chat-next does it now |
+| --- | --- |
+| Transcript reads | `readTranscript` stops at the first page that joins the rows the device holds, so a thread that has not moved costs one page; a compaction or an undo changes the newest rows, fails the join and reads on |
+| The change stream | `onSessionMoved` (`lib/live.ts`) catches the open thread up when the plugin says its session moved; the timer drops to `SAFETY_MS` while the stream is open |
+| Thinking | The fold keeps a row's `reasoning` with the word or call it led to, a live `reasoning.available` block waits on the turn until the next one takes it, and the message rows carry reasoning runs |
+| The model pill | The composer carries the chat's `ModelMenu`, and so does the plan-ready card |
+| The header's options | `ChatActions` and `useChatUsage` (`components/chat/chat-actions.tsx`): the context ring and usage sheet, rename, mute, resolve or reopen, discard and delete, drawn by both screens |
+| Stop | One press ends the run and every subagent the session holds, and the composer stays on Stop while one works |
+| Approvals and questions | `AppPrompt` draws the app's `ApprovalCard` and `QuestionCard`, answered where chat-next answers |
+| A missed question's Ask again | `AskAgainContext` hands the card the thread's own send |
+| Model and compaction dividers | Drawn from the chat record the plugin fills (`modelChanges`, `compactions`) |
+| Interfaces (OpenUI) | `useDraws` hands each row its `blocks` |
+| Stats | A turn this device watched from its start keeps its tokens, speed and time with the row that opened it (`stats.ts`); a turn followed from its middle has none |
+| The limit banner | `LimitNotice` above the composer, opening the usage sheet |
+| The header's line | What a session's reply is doing, and a thread's reply count beside Main |
+| Long chats | `useFirstRows` opens on the newest rows and draws the rest a beat later; turns are compared without building a string each (`equal.ts`) |
+| Following the reader | `FollowOnSend` and `FollowAfterApproval` |
+| Interim words | `message.interim` joins the reply where the deltas did not carry it |
+| Break reminders | A streaming reply counts as background-safe work until it waits on the user or its session closes |
+| Dictation's hint | `dictationHint` (title, project, repos) |
+| This device's own photos | `sentFiles` (Dexie 29) keeps the bytes of what was sent by the path the host saved it at, so they draw with the host away |
 
-| Area | Current screen | chat-next | Where to start |
-| --- | --- | --- | --- |
-| Transcript reads | `history.ts` probes one row (`hermesTip`), reads only what's new, and grows the window backwards as the reader reaches the top (ADR 0058) | `readTranscript` reads the **whole** transcript, 50 rows a page, on every poll: 2 s while busy, 15 s idle. A 500-row chat costs 11 requests a read, about 44 in the `idle-requests` flow's 65 s, against its budget of 12 (_derived_) | Probe the tip; read only from the newest held row; page backwards on reach |
-| The change stream | `watchChat` and `useLive`: catches up when the plugin's stream says the session moved, polling only at `SAFETY_MS` while a stream is open | Ignores the stream, so it polls at its own pace whatever the stream says | `onChanges` / `useLive` from `lib/live.ts` |
-| Thinking | A reply's thinking as rows (`thinking.ts`, ADR 0054, 0064), from the transcript's `reasoning` and the run's `reasoning.available` | No thinking at all: the store's `kept()` drops a row's `reasoning`, the fold reads none, and `reasoning.available` is ignored | Carry `reasoning` through the fold; `appendThinking` into `reasoningRuns` |
-| The model pill | `ModelMenu` in the composer, and in the plan-ready card | `NextComposerBody` passes the composer no `model`, so a chat's model can't be changed | Pass `model` as `CurrentChatPage` builds it |
-| The header's options | Rename, mute, resolve or reopen, discard and delete; the context ring and its usage sheet | `ChatHeader` with no `actions` | Lift `actions` and its dialogs out of `CurrentChatPage` |
-| Stop | One press stops the turn and every subagent the session holds (`stopSubagents`, `subagents_stop_all`, ADR 0051); the composer offers Stop while a subagent works | Stops only the run it follows; the composer isn't told `subagentsRunning` | `stopSubagents` beside `stopRun`; pass `subagentsRunning` |
-| Approvals and questions | `ApprovalCard` (the asking tool, every choice, expired and missed) and `QuestionCard` (pages, Skip, Other) | chat-next's own bare cards in the composer's slot | Feed the app's cards from `Waiting`, answering through `respond` |
-| A missed question's Ask again | Sends through the chat's own send | `ClarifyCard` calls `chat.ts`'s `sendMessage`, the old engine, which writes rows chat-next never draws | Give the card the controls' `send` |
+## Decided
 
-## Needed before chat-next is the default
+- A bot without the plugin's queue refuses a message sent mid-reply with a toast. The plugin is mandatory, so this stands.
 
-| Area | Current screen | chat-next |
-| --- | --- | --- |
-| Model and compaction dividers | `ModelChange` where the model changed; `Compacted` with how full the context was | Neither: a seam draws inside its reply with no size, since the view passes no `compactions` |
-| Interfaces (OpenUI) | `useDraws` hands each row its `blocks` | No `blocks`, so an interface draws as its code fence |
-| Stats | Tokens a second and the turn's figures (`showStats`) | `showStats={false}`, and nothing measures them |
-| The limit banner | `LimitBanner` above the composer | None |
-| The header's line | What the session is doing, its bot and repos (`sessionSubtitle`), or the reply count beside Main | Title and picture only; a session is not centred |
-| Long chats | Opens on its newest `FIRST_ROWS` and draws the rest a beat later | Draws every turn at once, and compares every turn by `JSON.stringify` on each change (`shared` in `page.tsx`) |
-| Following the reader | `FollowOnSend` and `FollowAfterApproval` | The scroller's own `autoScroll` only |
-| Interim words | `message.interim` adds the reply's interim text where it wasn't already streamed (`hermes.ts`) | Not read, so those words appear only once the transcript has them |
-| Break reminders | `useBreakReminderEligibility` while a run works safely in the background | Not called |
-| Dictation's hint | The chat's title, project and repos | Not passed |
-| This device's own photos | Drawn from the bytes this device holds, so they show with the host away | Drawn from the host's path only |
-| A bot without the plugin's queue | A message sent mid-reply waits on the device | Refused with a toast; the plugin is mandatory, so this may stand |
+## Still to check before the default changes
+
+- **No sweep flow drives chat-next.** `pnpm e2e idle-requests` and the others run the current screen, so the request budget of an idle chat-next thread is argued from `scripts/test-chat-next-reads.mjs` (one page for a thread that has not moved) and not measured in a browser. Following the reader and opening a long chat on its newest rows are geometry: their component tests assert that the scroller is told to move and that the first frame is short, and a browser run is what would show them landing.
+- **Stats exist only for a turn this device streamed from its start**: the host's transcript carries no usage, so a turn followed from its middle or written on another device has none.
 
 ## Not gaps
 
