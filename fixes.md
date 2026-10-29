@@ -2314,3 +2314,35 @@ without it; splitting further would trade one long function for four that each t
 ---
 
 Found by the review pass on the archive drain (ADR 0058). None of it blocks the pull request.
+
+## A Stop's one clock, and the waits that mirror the host
+
+Found by the review pass on the cleanup levels (ADR 0066). None of it blocks the pull request.
+
+### 1. A Stop spends one clock on the pieces and the cleanup
+
+`settle()` (`src/lib/dictation.ts`) takes one deadline: the pieces still being heard drain against
+it, and `tidy()` is then given `deadline - Date.now()`, the remainder. `STOP_WAIT_MS` is 12 s and
+the host's High cleanup is bounded at 12 s of its own, so a take whose last piece was still in
+flight at Stop cannot fit the cleanup in — the client stops waiting and lands the heard words,
+while the host's `_within` worker runs the model call to its own deadline and throws the answer
+away.
+
+- Cost: at High, the level that costs the most tokens is the one a Stop most often loses, and every
+  lost one is a full model call paid for and discarded. The coupling predates the levels (it was 8 s
+  against 8 s), so this pass corrected the comment that claimed 12 s "covers the widest budget a
+  host holds for a cleanup" rather than the clock.
+- Suggested fix: give the cleanup its own window — start its budget when the drain finishes and cap
+  it at the level's deadline — or raise `STOP_WAIT_MS` to the drain allowance plus the widest
+  deadline. Both are product-visible waits, so they want the user's call rather than a cleanup pass.
+
+### 2. The client copies the host's per-level deadline
+
+`SEND_WAIT_MS` and `STOP_WAIT_MS` are the client's statements of a budget that lives on the host
+(`dictation_cleanup.LEVEL_FACTS[level].deadline_s`, per level). The client is handed `config`, not
+the speech settings, so it cannot read the level it is racing against.
+
+- Cost: a fifth level or a changed High deadline is a two-repo edit with nothing to fail when one
+  side is missed.
+- Suggested fix: let the host state its own bound — a `cleanup.deadline_ms` on the speech record, or
+  on the cleanup's answer — and derive both waits from it.
