@@ -8,11 +8,11 @@ import { useBusyWord } from "@/lib/use-busy-word"
 import { cn } from "@/lib/utils"
 
 /** The activity lines that are dressed in a rotating word; any other line stands as written. */
-const KIND_OF: Record<string, BusyKind | undefined> = {
-  [THINKING_ACTIVITY]: "thinking",
-  [WRITING_ACTIVITY]: "writing",
-  [CATCHING_ACTIVITY]: "catching",
-}
+const KIND_OF = new Map<string, BusyKind>([
+  [THINKING_ACTIVITY, "thinking"],
+  [WRITING_ACTIVITY, "writing"],
+  [CATCHING_ACTIVITY, "catching"],
+])
 
 /**
  * What a reply is doing, in one line under it: the chat's own activity line, and the line a
@@ -33,7 +33,7 @@ export function StatusLine({
   children?: ReactNode
 }) {
   const working = Boolean(text) && !waiting
-  const kind = working && text ? KIND_OF[text] : undefined
+  const kind = working && text ? KIND_OF.get(text) : undefined
   const word = useBusyWord(kind, seed) ?? text
   return (
     <div
