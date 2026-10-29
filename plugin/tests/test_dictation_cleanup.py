@@ -204,7 +204,7 @@ class FinishTest(unittest.TestCase):
         self.assertEqual(call["max_tokens"], HIGH.Build().tokens("um hello there"))
 
     def test_a_call_that_misses_its_budget_lands_the_words_as_heard(self) -> None:
-        def slow(prompt, text, vocabulary, model):
+        def slow(prompt, input_text, model):
             time.sleep(0.2)
             return "Tidied."
 
@@ -252,16 +252,45 @@ class FinishTest(unittest.TestCase):
         with self.assertRaises(dictation_cleanup.DictationError):
             dictation_cleanup.finish(None, prompt=LIGHT.Build())
 
-    def test_the_scripted_ask_is_handed_the_level_s_prompt(self) -> None:
+    def test_the_scripted_ask_is_handed_the_level_s_prompt_and_its_input(self) -> None:
         asked = []
 
-        def script(prompt, text, vocabulary, model):
-            asked.append((prompt.level, text, list(vocabulary), model))
+        def script(prompt, input_text, model):
+            asked.append((prompt.level, input_text, model))
             return "Hello there."
 
-        got = dictation_cleanup.finish("um hello there", ["Gots"], prompt=MEDIUM.Build(), ask=script)
+        got = dictation_cleanup.finish(
+            "um hello there", ["Gots"], hint="Gots, ship it", prompt=MEDIUM.Build(), ask=script
+        )
         self.assertEqual(got["text"], "Hello there.")
-        self.assertEqual(asked, [("medium", "um hello there", ["Gots"], None)])
+        self.assertEqual(
+            asked,
+            [
+                (
+                    "medium",
+                    "Names: Gots, ship it\nVocabulary: Gots\nDictation: um hello there",
+                    None,
+                )
+            ],
+        )
+
+    def test_the_names_a_take_may_mention_ride_in_front_of_its_words(self) -> None:
+        _, llm = cleaned(
+            LIGHT,
+            {"text": "Gots ships it."},
+            text="gots ships it",
+            vocabulary=["Gots"],
+            hint="Gots, memento",
+        )
+        self.assertEqual(
+            llm.calls[0]["input"],
+            [
+                {
+                    "type": "text",
+                    "text": "Names: Gots, memento\nVocabulary: Gots\nDictation: gots ships it",
+                }
+            ],
+        )
 
     def test_a_picked_model_answers_and_its_failure_falls_back_to_the_bot_s_own(self) -> None:
         # The seam the Speech-to-text page's pick fits into: the pick is asked first, and a host

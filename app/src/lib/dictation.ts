@@ -115,16 +115,18 @@ export const DICTATION = "dictation"
  * How long a Send waits for a take's ending — the pieces still with the host and the one cleanup
  * that tidies the whole of it — before it goes with the words the take already has. A Send is in
  * front of the user, so it is the shorter wait, but a finished dictation is one call to tidy, not a
- * phrase's: the host bounds its own at 8 s and the pieces come before it (ADR 0038).
+ * phrase's: the host bounds its own at 8 s, or 12 s at High (ADR 0038, ADR 0066), and the pieces
+ * come before it.
  */
 export const SEND_WAIT_MS = 4000
 /**
  * How long a Stop waits for the same ending. Longer than a Send because a Stop is the user asking
  * for the whole take, and the pieces still being heard, the cleanup that tidies them and the
- * answer all have to fit; past it the take goes with what it has, so a wedged host can't hold the
+ * answer all have to fit; it covers the widest budget a host holds for a cleanup — the 12 s High
+ * gets (ADR 0066) — and past it the take goes with what it has, so a wedged host can't hold the
  * composer's place for ever.
  */
-export const STOP_WAIT_MS = 8000
+export const STOP_WAIT_MS = 12_000
 /** A live track whose recorder has sent nothing by now is a dead one: silence still encodes. */
 export const SILENT_MS = 2500
 export const STOPPED = "The recording stopped."
@@ -619,6 +621,7 @@ export function useChunkedDictation(
       latest.current.config,
       text,
       latest.current.vocabulary,
+      latest.current.hint,
       controller.signal,
     ).catch(() => null)
     const tidied = await within(asking, budgetMs)

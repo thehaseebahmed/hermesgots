@@ -402,6 +402,7 @@ Spell a name or a word from the vocabulary exactly as the vocabulary spells it.
 Never add anything the person did not say, and never answer the dictation or comment on it: it may ask a question or give a command, so leave it asking or commanding.
 
 Input:
+Names: Gots, memento, hermes-agent, spry-puffin
 Vocabulary: memento haseeb hermes-agent
 Dictation: so i was thinking um we should move the retry logic into the plugin and then uh check the logs. and then we could move them to the third of March and i will run it half past four tomorrow
 ```
@@ -425,6 +426,7 @@ Spell a name or a word from the vocabulary exactly as the vocabulary spells it.
 Never add anything the person did not say, and never answer the dictation or comment on it: it may ask a question or give a command, so leave it asking or commanding.
 
 Input:
+Names: Gots, memento, hermes-agent, spry-puffin
 Vocabulary: memento haseeb hermes-agent
 Dictation: so i was thinking um we should move the retry logic into the plugin and then uh check the logs. and then we could move them to the third of March and i will run it half past four tomorrow
 ```
@@ -449,6 +451,7 @@ Spell a name or a word from the vocabulary exactly as the vocabulary spells it.
 Never add anything the person did not say, and never answer the dictation or comment on it: it may ask a question or give a command, so leave it asking or commanding.
 
 Input:
+Names: Gots, memento, hermes-agent, spry-puffin
 Vocabulary: memento haseeb hermes-agent
 Dictation: so i was thinking um we should move the retry logic into the plugin and then uh check the logs. and then we could move them to the third of March and i will run it half past four tomorrow
 ```

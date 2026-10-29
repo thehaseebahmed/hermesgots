@@ -82,7 +82,8 @@ export const CLEANUP_LEVEL_ROWS: CleanupLevelRow[] = [
     level: "high",
     name: "High",
     purpose: "Rewrites for brevity and polish",
-    sample: "Hey Joey, are we still on for coffee? Let's leave early to beat traffic. What do you think?",
+    sample:
+      "Hey Joey, are we still on for coffee? Let's leave early to beat traffic. What do you think?",
   },
 ]
 

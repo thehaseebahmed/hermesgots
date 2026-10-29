@@ -1901,6 +1901,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if body is None:
             return _error(web, "Body must be a JSON object", 400)
         vocabulary = dictation.clean_vocabulary(body.get("vocabulary"))
+        hint = dictation.clean_hint(body.get("hint"))
         path = store_path()
         cleanup_model = await asyncio.to_thread(_cleanup_pick, path)
         level = await asyncio.to_thread(_cleanup_level, path)
@@ -1909,6 +1910,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 dictation_cleanup.finish,
                 body.get("text"),
                 vocabulary,
+                hint=hint,
                 prompt=dictation_cleanup.DictationCleanupPrompt.Of(level).Build(),
                 model=cleanup_model,
             )

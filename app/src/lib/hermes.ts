@@ -2648,8 +2648,8 @@ export async function transcribeClip(
 }
 
 /**
- * A finished dictation tidied whole (`POST dictation/cleanup`, ADR 0038): the words the host heard
- * and the bot's vocabulary in, the tidied text out.
+ * A finished dictation tidied whole (`POST dictation/cleanup`, ADR 0038): the words the host heard,
+ * the bot's vocabulary and the names the take may mention in, the tidied text out (ADR 0066).
  *
  * The answer is null when the host didn't answer with text at all — a shape the route never sends,
  * and the take lands the words as it heard them. A refusal, a timeout or a host without the route
@@ -2659,12 +2659,13 @@ export async function tidyDictation(
   config: HermesConfig,
   text: string,
   vocabulary: string[] = [],
+  hint = "",
   signal?: AbortSignal,
 ): Promise<string | null> {
   const response = await request(`${pluginRoot(config.baseUrl)}/dictation/cleanup`, {
     method: "POST",
     headers: headers(config),
-    body: JSON.stringify({ text, vocabulary }),
+    body: JSON.stringify({ text, vocabulary, ...(hint ? { hint } : {}) }),
     signal,
   })
   const tidied = (await response.json())?.text

@@ -195,7 +195,7 @@ class DictationCleanupPrompt:
         )
 
 
-Ask = Callable[[CleanupPrompt, str, Sequence[str], Optional[Dict[str, str]]], Optional[str]]
+Ask = Callable[[CleanupPrompt, str, Optional[Dict[str, str]]], Optional[str]]
 
 
 def register(plugin_ctx: Any) -> None:
@@ -209,12 +209,20 @@ def level_of(value: Any) -> str:
     return name if name in LEVELS else DEFAULT_LEVEL
 
 
-def _prompt(text: str, vocabulary: Sequence[str]) -> str:
-    """The input a cleanup is given: the bot's words, then the dictation they must be spelled in."""
+def _prompt(text: str, vocabulary: Sequence[str], hint: str = "") -> str:
+    """The input a cleanup is given: the names a take may mention, the bot's words, then the words.
+
+    The hint is the same one the decode is offered (the bot's name, the chat's title, its repos), so
+    a take heard without a Hearing prompt has the names to repair in the one pass that tidies it.
+    """
+    lines = []
+    if hint:
+        lines.append(f"Names: {hint}")
     words = " ".join(str(word) for word in vocabulary or () if word)
-    if not words:
-        return f"Dictation: {text}"
-    return f"Vocabulary: {words}\nDictation: {text}"
+    if words:
+        lines.append(f"Vocabulary: {words}")
+    lines.append(f"Dictation: {text}")
+    return "\n".join(lines)
 
 
 def _within(deadline_s: float, call: Callable[[], Optional[str]]) -> Optional[str]:
@@ -240,8 +248,7 @@ def _within(deadline_s: float, call: Callable[[], Optional[str]]) -> Optional[st
 
 def _ask_model(
     prompt: CleanupPrompt,
-    text: str,
-    vocabulary: Sequence[str],
+    input_text: str,
     model: Optional[Dict[str, str]] = None,
 ) -> Optional[str]:
     """One call on the bot's model, or the picked one, answering the text; None when there is none.
@@ -258,10 +265,10 @@ def _ask_model(
     }
     call = dict(
         instructions=prompt.instructions,
-        input=[{"type": "text", "text": _prompt(text, vocabulary)}],
+        input=[{"type": "text", "text": input_text}],
         json_schema=SCHEMA,
         system_prompt=prompt.system,
-        max_tokens=prompt.tokens(text),
+        max_tokens=prompt.tokens(input_text),
         temperature=0,
         purpose="memento.dictation.cleanup",
     )
@@ -288,6 +295,7 @@ def finish(
     text: Any,
     vocabulary: Sequence[str] = (),
     *,
+    hint: str = "",
     prompt: Optional[CleanupPrompt] = None,
     model: Optional[Dict[str, str]] = None,
     ask: Optional[Ask] = None,
@@ -295,7 +303,8 @@ def finish(
     """A finished dictation tidied at its bot's level: the answer ``POST dictation/cleanup`` gives.
 
     The level's own rules are asked in one call over the whole text, framed as the finished dictation
-    it is, with the answer budget sized from its words and bounded by the level's deadline. Nothing
+    it is, with the names the take may mention and the bot's vocabulary in front of it and the answer
+    budget sized from its words, bounded by the level's deadline. Nothing
     here raises on the model's account: an answer that fails, misses its budget or falls outside the
     level's bounds lands the words as the host heard them, so ``text`` is always usable. ``None``
     makes no call at all.
@@ -311,9 +320,10 @@ def finish(
     said = " ".join(text.split())
     tidied = None
     if said:
+        input_text = _prompt(said, vocabulary, hint)
         tidied = _within(
             asked.deadline_s,
-            lambda: (ask or _ask_model)(asked, said, vocabulary, model),
+            lambda: (ask or _ask_model)(asked, input_text, model),
         )
         if tidied is not None:
             answer = tidied.strip()

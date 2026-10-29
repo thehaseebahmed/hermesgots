@@ -146,7 +146,7 @@ def _model_prompt(system: str, instructions: str, example: str) -> str:
         "Instructions:\n"
         f"{instructions.strip()}\n\n"
         "Input:\n"
-        f"{dictation_cleanup._prompt(example, VOCABULARY)}"
+        f"{dictation_cleanup._prompt(example, VOCABULARY, HINT)}"
     )
 
 
