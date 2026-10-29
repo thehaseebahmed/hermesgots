@@ -33,6 +33,8 @@ import {
   actOnQueued,
   readAgents,
   readLiveRun,
+  readNewest,
+  readPage,
   readTranscript,
   readVersion,
   respond,
@@ -42,6 +44,7 @@ import {
   type Queued,
 } from "./api"
 import { foldTurns, type Row, type ToolCall, type Turn } from "./fold"
+import { isLast, nextOffset, originOf, shift } from "./pages"
 import { foldedOf, threadTurns, turnsOf, type ThreadEvent, type Waiting } from "./state"
 import { readRows, storeFor } from "./store"
 import type { PreparedTurn } from "./turn"
@@ -80,9 +83,12 @@ const NO_ROWS: Row[] = []
  * being written rather than the whole transcript.
  */
 function shared(held: Turn[], read: Turn[]): Turn[] {
-  return read.map((turn, at) =>
-    held[at] === turn || (held[at] && equal(held[at], turn)) ? held[at] : turn,
-  )
+  // Turns added above the held ones (an older page) move every held turn down.
+  const moved = shift(held, read) ?? 0
+  return read.map((turn, at) => {
+    const was = held[at - moved]
+    return was === turn || (was && equal(was, turn)) ? was : turn
+  })
 }
 
 const sameCards = (a: Card[], b: Card[]) =>
@@ -151,7 +157,7 @@ const TurnView = memo(
               : "a subagent"}
             {turn.done ? " finished" : " just finished"}
           </p>
-        ) : turn.carried ? null : (
+        ) : turn.carried || turn.cut ? null : (
           <div className="ml-auto w-fit max-w-[85%] space-y-1">
             {turn.files?.length ? (
               <ul
@@ -362,6 +368,13 @@ export interface ThreadViewProps {
   /** The host can't be reached: what is drawn is what the device holds. */
   away: boolean
   failure?: string
+  /**
+   * Older pages of the transcript are being read (`reading`) or the last read failed (`failed`, and
+   * `retry` reads on from there); absent once the chat is whole, so nothing is drawn for it then.
+   */
+  older?: { state: "reading" | "failed"; retry: () => void }
+  /** The place the first turn holds in the thread, which older turns read later put below zero. */
+  origin: number
   /** Offered where a compaction archived rows the reader hasn't asked for. */
   earlier?: { state: "idle" | "reading" | "failed"; load: () => void }
   queue?: { items: Queued[]; paused: boolean; act: (id: string, action: "remove" | "send") => void }
@@ -384,6 +397,8 @@ function PlainView({
   goals,
   away,
   failure,
+  older,
+  origin,
   earlier,
   queue,
   child,
@@ -399,6 +414,21 @@ function PlainView({
         </p>
       ) : null}
       {failure !== undefined ? <p role="alert">{failure}</p> : null}
+      {older ? (
+        <p
+          data-older={older.state}
+          role="status"
+          className="text-center text-sm text-muted-foreground"
+        >
+          {older.state === "reading" ? (
+            "Loading earlier messages…"
+          ) : (
+            <button data-older-retry type="button" className="underline" onClick={older.retry}>
+              Couldn't load earlier messages. Try again
+            </button>
+          )}
+        </p>
+      ) : null}
       {earlier ? (
         <button
           data-earlier
@@ -414,7 +444,7 @@ function PlainView({
       ) : null}
       {turns.map((turn, at) => (
         <TurnView
-          key={at}
+          key={origin + at}
           turn={turn}
           cards={cards[at] ?? NO_CARDS}
           goals={goals}
@@ -570,14 +600,23 @@ export function ChatNextThread({
     () => (held?.archived ? readRows(database, session ?? "", "archive") : undefined),
     [database, session, held?.archived],
   )
-  const folded = useMemo(() => foldedOf(rows, archived), [rows, archived])
-  const drawn = useRef<Turn[]>([])
-  const turns = useMemo(
-    () => (drawn.current = shared(drawn.current, turnsOf(folded, held?.live))),
-    [folded, held?.live],
+  const folded = useMemo(
+    () => foldedOf(rows, archived, held?.partial),
+    [rows, archived, held?.partial],
   )
+  const drawn = useRef<{ turns: Turn[]; origin: number }>({ turns: [], origin: 0 })
+  const { turns, origin } = useMemo(() => {
+    const next = shared(drawn.current.turns, turnsOf(folded, held?.live))
+    return (drawn.current = { turns: next, origin: originOf(drawn.current, next) })
+  }, [folded, held?.live])
   const [draft, setDraft] = useState("")
   const [earlier, setEarlier] = useState<"idle" | "reading" | "failed">("idle")
+  // The older pages of the transcript, read one after another once the newest is drawn. A token is
+  // handed to each run, and a run whose token is no longer the latest is stale and lands nothing.
+  const [older, setOlder] = useState<"idle" | "reading" | "failed">("idle")
+  const olderRun = useRef(0)
+  const olderOn = useRef(false)
+  const olderFailed = useRef(false)
   const [host, setHost] = useState<"checking" | "ok" | "away" | { version?: string }>("checking")
   // A host that cannot be reached is asked again, and meanwhile the chat is what the device holds.
   const [asks, setAsks] = useState(0)
@@ -618,6 +657,58 @@ export function ChatNextThread({
     }
   }, [host, idleMs])
 
+  /** Drops the older read in flight, if any: what it lands would go above rows it was not read for. */
+  const stopOlder = useCallback(() => {
+    olderRun.current++
+    olderOn.current = false
+    olderFailed.current = false
+  }, [])
+
+  /**
+   * Reads the pages above the rows held, one at a time, until one comes back short: each lands above
+   * what is drawn without moving it. A page that fails leaves the thread as it is and `retry` reads on
+   * from there; nothing is retried by itself, so a host that cannot answer is not asked again at every
+   * poll. `fresh` begins again after the rows held were replaced.
+   */
+  const readOlder = useCallback(
+    async (fresh = false) => {
+      if (!server || !key || !session || olderOn.current) return
+      if (!fresh && olderFailed.current) return
+      const mine = ++olderRun.current
+      olderOn.current = true
+      const signal = alive.current.signal
+      setOlder("reading")
+      try {
+        while (mine === olderRun.current && store.get().partial) {
+          const page = await readPage(
+            { server, key },
+            session,
+            nextOffset(store.get().rows),
+            signal,
+          )
+          if (mine !== olderRun.current) return
+          const held = store.get().rows.length
+          await store
+            .apply({ type: "older", rows: page, last: isLast(page) })
+            .catch(() => undefined)
+          // Rows written meanwhile can leave a page of rows already held: the offset is stale, and
+          // asking again at once would ask for the same page, so it waits for the reader's retry.
+          if (store.get().rows.length === held && store.get().partial)
+            throw new Error("The older page held nothing new.")
+        }
+        if (mine === olderRun.current) setOlder("idle")
+      } catch {
+        if (mine === olderRun.current && !signal.aborted) {
+          olderFailed.current = true
+          setOlder("failed")
+        }
+      } finally {
+        if (mine === olderRun.current) olderOn.current = false
+      }
+    },
+    [server, key, session, store],
+  )
+
   const catchUp = useCallback(
     async function read(final = false): Promise<void> {
       if (!server || !key || !session) return
@@ -628,25 +719,41 @@ export function ChatNextThread({
       const mine = reads.current
       reading.current = (async () => {
         try {
+          // What the device holds decides how much is read, so it is in memory before a read begins.
+          await store.loaded().catch(() => undefined)
           const asking = Date.now() >= noAgentsUntil.current
           const askingQueue = Date.now() >= noQueueUntil.current
-          const [rows, listed, queued] = await Promise.all([
+          const [read, listed, queued] = await Promise.all([
             // A turn's end reads the whole transcript: rows older than the ones that join what is held
-            // can only have changed then, and a read that joins is the cheap one in between.
-            readTranscript(
-              { server, key },
-              session,
-              alive.current.signal,
-              false,
-              final ? undefined : store.get().rows,
-            ),
+            // can only have changed then, and a read of the newest rows is the cheap one in between.
+            final
+              ? readTranscript({ server, key }, session, alive.current.signal).then((rows) => ({
+                  rows,
+                  more: false as boolean | undefined,
+                  joined: false,
+                }))
+              : readNewest({ server, key }, session, alive.current.signal, store.get().rows),
             asking ? readAgents({ server, key }, session, alive.current.signal) : undefined,
             askingQueue ? readQueue({ server, key }, session, alive.current.signal) : undefined,
           ])
           if (asking && !listed) noAgentsUntil.current = Date.now() + AGENTS_COOLDOWN_MS
           if (askingQueue && !queued) noQueueUntil.current = Date.now() + AGENTS_COOLDOWN_MS
           if (mine === reads.current) {
-            dispatch({ type: "transcript", rows, final })
+            // Rows that replace the ones held make a page in flight for them stale.
+            if (read.more !== undefined) stopOlder()
+            // A write the device refuses leaves its copy behind, as it does for every event: the next
+            // read writes it again.
+            await store
+              .apply({
+                type: "transcript",
+                rows: read.rows,
+                final,
+                more: read.more,
+                joined: read.joined,
+              })
+              .catch(() => undefined)
+            if (store.get().partial) void readOlder(read.more !== undefined)
+            else setOlder("idle")
             if (listed) dispatch({ type: "agents", agents: listed })
             if (queued) dispatch({ type: "queue", ...queued })
           }
@@ -661,13 +768,16 @@ export function ChatNextThread({
       queued.current = null
       if (next) await read(next.final)
     },
-    [server, key, session, dispatch, store],
+    [server, key, session, dispatch, store, stopOlder, readOlder],
   )
 
   /** How many of the thread's turns the user asked, as the app counts a chat's turns. */
   const asked = useCallback(
     () => ({
-      turns: threadTurns(store.get()).filter((turn) => !turn.wake && !turn.carried).length,
+      // While older pages are unread the turns drawn are only the newest: "at least this many".
+      turns: store.get().partial
+        ? Infinity
+        : threadTurns(store.get()).filter((turn) => !turn.wake && !turn.carried).length,
     }),
     [store],
   )
@@ -688,8 +798,10 @@ export function ChatNextThread({
     return () => {
       document.removeEventListener("visibilitychange", back)
       alive.current.abort()
+      stopOlder()
+      setOlder("idle")
     }
-  }, [catchUp, ready, asked])
+  }, [catchUp, ready, asked, stopOlder])
 
   // A turn the host has not finished and this device is not streaming is followed, by its events
   // where the plugin names the run and by the transcript where it cannot.
@@ -697,11 +809,11 @@ export function ChatNextThread({
   // Where the thread's work has got to, by the calls each turn holds. A turn Hermes never marked
   // finished (a reply it wrote with no reason, one stopped or failed short) is followed only until
   // the host says no run is working it; the thread then draws it at rest until it moves on.
-  const tip = turns
-    .map((turn) =>
-      turn.parts.map((part) => (part.kind === "tools" ? part.calls.length : "t")).join(),
-    )
-    .join("|")
+  // Counted from the thread's end and read off its last turn, so turns an older page adds above
+  // leave it as it was.
+  const tip = `${origin + turns.length}:${(last?.parts ?? [])
+    .map((part) => (part.kind === "tools" ? part.calls.length : "t"))
+    .join()}`
   const tipNow = useRef(tip)
   useEffect(() => {
     tipNow.current = tip
@@ -715,7 +827,7 @@ export function ChatNextThread({
     hostIdleAt !== tip
   // A turn that lands from the host — another device's, or a wake — settles the chat too.
   // What was settled when the page opened is the open's to read, not a turn's.
-  const settledTurns = last?.done ? turns.length : 0
+  const settledTurns = last?.done ? origin + turns.length : 0
   const seenSettled = useRef<number>(undefined)
   useEffect(() => {
     if (!ready || doing.status === "loading") return
@@ -981,6 +1093,11 @@ export function ChatNextThread({
     }
   }
 
+  function retry() {
+    olderFailed.current = false
+    void readOlder()
+  }
+
   /** Asks for the rows a compaction took out of the transcript; the next read folds them in. */
   async function loadEarlier() {
     if (!server || !key || !session) return
@@ -1085,6 +1202,8 @@ export function ChatNextThread({
       agents={agents}
       away={host === "away"}
       failure={doing.status === "failed" ? (doing.error ?? "") : undefined}
+      older={older === "idle" ? undefined : { state: older, retry }}
+      origin={origin}
       earlier={
         !held?.archived &&
         turns.some((turn) => turn.parts.some((part) => part.kind === "compaction"))

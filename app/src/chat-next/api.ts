@@ -3,6 +3,7 @@ import { READ_TIMEOUT_MS } from "../lib/freshness.ts"
 
 import type { Agent } from "./agents"
 import type { Row } from "./fold"
+import { isLast, newestRead, PAGE, uniq } from "./pages.ts"
 import type { Waiting } from "./state"
 
 /** A bot's server, as its base URL (`/v1` or not, `/p/<profile>` or not) and key. */
@@ -41,8 +42,6 @@ export interface RunEvent {
   /** When the host wrote the event, in Unix seconds. */
   timestamp?: number
 }
-
-const PAGE = 50
 
 const root = ({ server }: Connection) => serverRoot(server)
 // A bot served at `/p/<profile>` reaches its plugin inside the plugin's own prefix.
@@ -94,55 +93,73 @@ export async function readVersion(
 }
 
 /**
+ * One page of a session's transcript: the `PAGE` rows that end `offset` rows before the newest,
+ * oldest first. A session the host has not heard of yet is an empty chat, not a failure.
+ */
+export async function readPage(
+  connection: Connection,
+  session: string,
+  offset: number,
+  signal?: AbortSignal,
+  archived = false,
+): Promise<Row[]> {
+  const response = await fetch(
+    `${root(connection)}/api/sessions/${encodeURIComponent(session)}/messages?order=latest&limit=${PAGE}&offset=${offset}${archived ? "&include_compacted=true" : ""}`,
+    { headers: headers(connection), signal: within(signal) },
+  )
+  if (response.status === 404) {
+    const code = (await response.json().catch(() => null))?.error?.code
+    if (code === "session_not_found") return []
+  }
+  ensure(response)
+  const { data } = (await response.json()) as { data: Row[] }
+  return data
+}
+
+/**
  * A session's whole transcript, oldest row first. With `archived` it holds the rows a compaction took
  * out of it too, in the conversation's order rather than the ids'. The host pages newest-first by offset, so older
- * pages are read until one comes back short. A session the host has not heard of yet is an empty
- * chat, not a failure.
- *
- * With `held` (the live rows the device has) the read stops at the first page that joins them: its
- * rows are the ones held from some row on, in the same order, so what is older is what the device
- * already has. A thread that has not moved costs the one page it is asked for, and a compaction or
- * an undo, which change the newest rows, fail that join and read on.
- * What is older than the join is trusted as held: a row edited in place without a new id is seen at the
- * next read of the whole transcript, which the end of a turn asks for.
+ * pages are read until one comes back short.
  */
 export async function readTranscript(
   connection: Connection,
   session: string,
   signal?: AbortSignal,
   archived = false,
-  held?: Row[],
 ): Promise<Row[]> {
   const pages: Row[][] = []
-  const joins = (page: Row[]) => {
-    const at = held?.findIndex((row) => row.id === page[0]?.id) ?? -1
-    return at < 0 || !held ? -1 : page.every((row, i) => held[at + i]?.id === row.id) ? at : -1
-  }
   for (let offset = 0; ; offset += PAGE) {
-    const response = await fetch(
-      `${root(connection)}/api/sessions/${encodeURIComponent(session)}/messages?order=latest&limit=${PAGE}&offset=${offset}${archived ? "&include_compacted=true" : ""}`,
-      { headers: headers(connection), signal: within(signal) },
-    )
-    if (response.status === 404) {
-      const code = (await response.json().catch(() => null))?.error?.code
-      if (code === "session_not_found") return []
-    }
-    ensure(response)
-    const { data } = (await response.json()) as { data: Row[] }
-    // Rows written while the pages were read slide into the next offset, so a page that joins the
-    // held rows only counts when it also reaches back to the held row it starts at.
-    const at = data.length === PAGE ? joins(data) : -1
-    if (at >= 0 && held) {
-      pages.unshift(data)
-      pages.unshift(held.slice(0, at))
-      break
-    }
-    pages.unshift(data)
-    if (data.length < PAGE) break
+    const page = await readPage(connection, session, offset, signal, archived)
+    pages.unshift(page)
+    if (isLast(page)) break
   }
-  // Rows written while the pages were read slide into the next offset, so a row can come twice.
-  const seen = new Set<number>()
-  return pages.flat().filter((row) => !seen.has(row.id) && seen.add(row.id))
+  return uniq(pages.flat())
+}
+
+/**
+ * The newest rows of a session's transcript, for a read that draws what it has as soon as it can
+ * (`newestRead`): `more` says older rows are left unread, and is undefined where the rows join the
+ * ones held (`joined`, and the rows are then only those read) and the device already knows whether
+ * older ones are.
+ *
+ * With nothing held it is the one newest page, drawn at once. With `held` (the live rows the device
+ * has) it stops at the first page that joins them, so a thread that has not moved costs the one page
+ * it is asked for, and a compaction or an undo, which change the newest rows, fail that join and read
+ * on. What is older than the join is trusted as held: a row edited in place without a new id is seen
+ * at the next read of the whole transcript, which the end of a turn asks for.
+ */
+export async function readNewest(
+  connection: Connection,
+  session: string,
+  signal?: AbortSignal,
+  held?: Row[],
+): Promise<{ rows: Row[]; more: boolean | undefined; joined: boolean }> {
+  const pages: Row[][] = []
+  for (let offset = 0; ; offset += PAGE) {
+    pages.unshift(await readPage(connection, session, offset, signal))
+    const read = newestRead(pages, held)
+    if (read) return read
+  }
 }
 
 /** Starts a turn on the host; it carries on without us, so the run's id is all there is to keep. */

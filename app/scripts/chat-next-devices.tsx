@@ -112,6 +112,14 @@ export async function openDevice(
           }))
         : undefined
     },
+    /** The turns' own elements, which stay the same ones while the turns around them change. */
+    sections: () => [...container.querySelectorAll("main > section")],
+    /** What the screen says of the older pages: being read, or failed; nothing where it says nothing. */
+    older: () => one("[data-older]")?.getAttribute("data-older") ?? undefined,
+    async retryOlder() {
+      await click(one("[data-older-retry]"))
+      await settle()
+    },
     /** Whether the screen offers the messages a compaction took out of the transcript. */
     offersEarlier: () => Boolean(one("[data-earlier]")),
     async loadEarlier() {

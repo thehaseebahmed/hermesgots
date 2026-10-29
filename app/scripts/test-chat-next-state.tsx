@@ -7,6 +7,7 @@ import test from "node:test"
 
 import type { RunEvent } from "@/chat-next/api"
 import { initial, reduce, threadTurns, type ThreadState } from "@/chat-next/state"
+import type { Row } from "@/chat-next/fold"
 import { events as recordedEvents, fixture as recorded } from "./chat-next-fixtures.ts"
 
 /** Plays events into a thread that has just sent a turn. */
@@ -157,4 +158,64 @@ test("an interim line the deltas did not carry is words of the reply, and one th
     .at(-1)!
     .parts.flatMap((part) => (part.kind === "text" ? [part.text] : []))
   assert.deepEqual(texts, ["Looking into it.\n\nDone."])
+})
+
+const row = (id: number): Row => ({
+  id,
+  role: id % 2 ? "user" : "assistant",
+  content: `row ${id}`,
+  finish_reason: id % 2 ? null : "stop",
+})
+const range = (from: number, to: number) =>
+  Array.from({ length: to - from + 1 }, (_, at) => row(from + at))
+const ids = (rows: Row[]) => rows.map((one) => one.id)
+
+test("the reducer puts an older page above the rows and says whether the chat is whole", () => {
+  let state = reduce(initial, { type: "transcript", rows: range(71, 120), more: true })
+  assert.equal(state.partial, true)
+  state = reduce(state, { type: "older", rows: range(21, 70), last: false })
+  assert.deepEqual(ids(state.rows), ids(range(21, 120)))
+  assert.equal(state.partial, true)
+  state = reduce(state, { type: "older", rows: range(1, 20), last: true })
+  assert.deepEqual(ids(state.rows), ids(range(1, 120)))
+  assert.equal(state.partial, undefined, "a short page leaves nothing unread")
+  assert.equal(state.status, "ready")
+})
+
+test("a read that joins the rows held leaves unread what was unread; one that does not decides it", () => {
+  let state = reduce(initial, { type: "transcript", rows: range(71, 120), more: true })
+  state = reduce(state, { type: "transcript", rows: range(71, 130) })
+  assert.equal(state.partial, true)
+  state = reduce(state, { type: "transcript", rows: range(1, 130), more: false })
+  assert.equal(state.partial, undefined)
+})
+
+test("an older page does not disturb a turn this device is running", () => {
+  let state = reduce(initial, { type: "transcript", rows: range(71, 120), more: true })
+  state = reduce(state, { type: "sent", user: "and now?" })
+  const live = state.live
+  state = reduce(state, { type: "older", rows: range(21, 70), last: false })
+  assert.equal(state.running, true)
+  assert.equal(state.live, live)
+})
+
+test("the thread's turns come from the reducer's partial flag", () => {
+  const state = reduce(initial, {
+    type: "transcript",
+    rows: [{ id: 70, role: "assistant", content: "tail", finish_reason: "stop" }, row(71)],
+    more: true,
+  })
+  assert.deepEqual(
+    threadTurns(state).map((turn) => turn.cut ?? false),
+    [true, false],
+  )
+  const whole = reduce(state, { type: "older", rows: [row(69)], last: true })
+  assert.deepEqual(
+    threadTurns(whole).map((turn) => [turn.user, turn.cut ?? false]),
+    [
+      ["row 69", false],
+      ["row 71", false],
+    ],
+    "the older page is the cut turn's request",
+  )
 })

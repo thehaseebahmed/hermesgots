@@ -14,6 +14,8 @@ import { initial, reduce, type ThreadEvent, type ThreadState } from "./state"
  */
 export interface ThreadStore {
   get: () => ThreadState
+  /** Settles once the device's copy of the thread is in memory: what `get` says before is nothing held. */
+  loaded: () => Promise<void>
   /** What the page is doing, as an object that changes only when one of its fields does. */
   doing: () => Doing
   subscribe: (listener: () => void) => () => void
@@ -31,6 +33,15 @@ const doingOf = ({ status, running, waiting, error }: ThreadState): Doing => ({
   waiting,
   error,
 })
+
+/** The position the first of a session's rows is held at; older rows added above count down from it. */
+async function firstPos(database: SessionDb, session: string, set: SessionRow["set"]) {
+  const first = await database.sessionRows
+    .where("[session+set+pos]")
+    .between([session, set, Dexie.minKey], [session, set, Dexie.maxKey])
+    .first()
+  return first?.pos ?? 0
+}
 
 /** A session's rows as one read gave them, in that read's order. */
 export async function readRows(database: SessionDb, session: string, set: SessionRow["set"]) {
@@ -70,6 +81,10 @@ const sameRow = (a: Row, b: Row) =>
  * Writes what a read changed since the rows last written (`was`): the rows that are new, moved or
  * changed, and drops the ones gone. The diff is against what this store wrote or loaded, so a flush
  * costs no read of the session, and a read that says nothing new touches the device not at all.
+ *
+ * A row's position is its place counted from `base`, the position of the first row written. Rows read
+ * above the ones written (an older page) are given the positions before it, so the rows below keep
+ * theirs and a page costs the device its own rows only. Returns the base the rows are now held from.
  */
 async function saveRows(
   database: SessionDb,
@@ -77,26 +92,31 @@ async function saveRows(
   set: SessionRow["set"],
   rows: Row[],
   was: Row[] = [],
-) {
-  const before = new Map(was.map((row, pos) => [row.id, { row, pos }]))
-  const changed = rows.flatMap((row, pos): SessionRow[] => {
+  wasBase = 0,
+): Promise<number> {
+  const above = was.length ? rows.findIndex((row) => row.id === was[0].id) : -1
+  const base = above > 0 ? wasBase - above : wasBase
+  const before = new Map(was.map((row, at) => [row.id, { row, pos: wasBase + at }]))
+  const changed = rows.flatMap((row, at): SessionRow[] => {
     const held = before.get(row.id)
-    return held && held.pos === pos && sameRow(held.row, row)
+    return held && held.pos === base + at && sameRow(held.row, row)
       ? []
-      : [{ session, set, id: row.id, pos, row: kept(row) }]
+      : [{ session, set, id: row.id, pos: base + at, row: kept(row) }]
   })
   const ids = new Set(rows.map((row) => row.id))
   const gone = was.filter((row) => !ids.has(row.id)).map((row) => [session, set, row.id])
-  if (!changed.length && !gone.length) return
+  if (!changed.length && !gone.length) return base
   await database.transaction("rw", database.sessionRows, async () => {
     if (gone.length) await database.sessionRows.bulkDelete(gone as [string, string, number][])
     if (changed.length) await database.sessionRows.bulkPut(changed)
   })
+  return base
 }
 
 const recordOf = (session: string, state: ThreadState): SessionState => ({
   session,
   agents: state.agents,
+  partial: state.partial ? true : undefined,
   archived: state.archived ? true : undefined,
   live: state.live,
   queue: state.queue,
@@ -106,6 +126,7 @@ const recordOf = (session: string, state: ThreadState): SessionState => ({
 const sameRecord = (a: SessionState | undefined, b: SessionState) =>
   a !== undefined &&
   a.agents === b.agents &&
+  Boolean(a.partial) === Boolean(b.partial) &&
   Boolean(a.archived) === Boolean(b.archived) &&
   a.live === b.live &&
   a.queue === b.queue &&
@@ -119,11 +140,16 @@ function createStore(database: SessionDb, session: string, drop: () => void): Th
     rows: initial.rows,
     archived: initial.archived,
     record: undefined as SessionState | undefined,
+    bases: { live: 0, archive: 0 },
   }
   const listeners = new Set<() => void>()
   let timer: ReturnType<typeof setTimeout> | undefined
 
   const loaded = (async () => {
+    const positions = Promise.all([
+      firstPos(database, session, "live"),
+      firstPos(database, session, "archive"),
+    ])
     const record = await database.sessionStates.get(session)
     const rows = await readRows(database, session, "live")
     const archived = record?.archived ? await readRows(database, session, "archive") : undefined
@@ -131,12 +157,21 @@ function createStore(database: SessionDb, session: string, drop: () => void): Th
       ...initial,
       rows,
       archived,
+      partial: record?.partial,
       agents: record?.agents,
       live: record?.live,
       queue: record?.queue,
       stats: record?.stats,
     }
-    written = { rows, archived, record }
+    written = {
+      rows,
+      archived,
+      record,
+      bases: {
+        live: (await positions)[0],
+        archive: (await positions)[1],
+      },
+    }
   })()
 
   let queue: Promise<void> = loaded.catch(() => undefined)
@@ -159,17 +194,27 @@ function createStore(database: SessionDb, session: string, drop: () => void): Th
     )
       return
     // One transaction, so a turn's end never shows its rows beside the streamed copy they replace.
+    const bases = { ...written.bases }
     await database.transaction("rw", database.sessionRows, database.sessionStates, async () => {
-      if (rows !== written.rows) await saveRows(database, session, "live", rows, written.rows)
+      if (rows !== written.rows)
+        bases.live = await saveRows(database, session, "live", rows, written.rows, bases.live)
       if (archived && archived !== written.archived)
-        await saveRows(database, session, "archive", archived, written.archived)
+        bases.archive = await saveRows(
+          database,
+          session,
+          "archive",
+          archived,
+          written.archived,
+          bases.archive,
+        )
       if (!sameRecord(written.record, record)) await database.sessionStates.put(record)
     })
-    written = { rows, archived, record }
+    written = { rows, archived, record, bases }
   }
 
   return {
     get: () => state,
+    loaded: () => loaded,
     doing: () => doing,
     subscribe(listener) {
       listeners.add(listener)

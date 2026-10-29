@@ -10,7 +10,7 @@ const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8")
 const audit = read("../../docs/e2e-flow-audit.md")
 
 const VERDICTS = ["stay", "component", "plugin", "delete"]
-const STAYS = 19
+const STAYS = 20
 
 const registry = () => Object.keys(FLOWS)
 

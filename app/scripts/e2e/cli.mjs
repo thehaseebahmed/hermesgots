@@ -124,6 +124,11 @@ export const FLOWS = {
     about:
       "A session opened mid-turn from another device loads whole turns, grows its window back twice and keeps one reply",
   },
+  "chat-next-older": {
+    script: "e2e/chat-next-older.mjs",
+    about:
+      "A long chat on chat-next draws its newest page at once and reads the older pages after it, the loader over the pane while they are read: a reader at the end keeps the newest reply on the same line, a reader up in the thread keeps the line they are reading, and the loader is gone with the chat whole",
+  },
   "chat-archive": {
     script: "e2e/chat-archive.mjs",
     about:

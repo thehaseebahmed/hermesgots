@@ -96,6 +96,8 @@ export function AppThreadView({
   agents,
   away,
   failure,
+  older,
+  origin,
   earlier,
   queue,
   waiting,
@@ -126,11 +128,11 @@ export function AppThreadView({
   const messages = useMemo(
     () =>
       withHeldFiles(
-        messagesOf(chatId, turns, { streaming, stats }),
+        messagesOf(chatId, turns, { streaming, stats, origin }),
         sentFiles &&
           new Map(sentFiles.flatMap((file) => (file ? [[file.path, file.blob] as const] : []))),
       ),
-    [chatId, turns, streaming, stats, sentFiles],
+    [chatId, turns, streaming, stats, origin, sentFiles],
   )
   // The send a card asks for is the latest one, behind an identity that never changes, so a streamed
   // flush never wakes the cards that hold it.
@@ -146,8 +148,10 @@ export function AppThreadView({
     "failed_turn_clear",
   )
   const [retrying, setRetrying] = useState(false)
-  const failedTurn = turns.at(-1)?.failed && !streaming && !waiting ? turns.at(-1) : undefined
-  const retryId = failedTurn && replyId(chatId, turns.length - 1)
+  // A turn whose request is in a page not read yet has nothing to send again.
+  const failedTurn =
+    turns.at(-1)?.failed && !turns.at(-1)?.cut && !streaming && !waiting ? turns.at(-1) : undefined
+  const retryId = failedTurn && replyId(chatId, origin + turns.length - 1)
   async function retry() {
     if (!failedTurn?.failed || retrying) return
     setRetrying(true)
@@ -377,6 +381,32 @@ export function AppThreadView({
                   ))}
                 </MessageScrollerContent>
               </MessageScrollerViewport>
+              {/* Over the scroller rather than in its flow: a row added or taken away at the top of the
+                  content would move the thread, and this one is there only while pages are read. */}
+              {older && (
+                <div
+                  data-older={older.state}
+                  role="status"
+                  className="pointer-events-none absolute inset-x-0 top-2 z-10 flex justify-center"
+                >
+                  {older.state === "reading" ? (
+                    <span className="rounded-full bg-background/90 p-2 shadow-sm">
+                      <Spinner className="size-4" />
+                      <span className="sr-only">Loading earlier messages</span>
+                    </span>
+                  ) : (
+                    <Button
+                      data-older-retry
+                      variant="secondary"
+                      size="sm"
+                      className="pointer-events-auto"
+                      onClick={older.retry}
+                    >
+                      Couldn't load earlier messages. Try again
+                    </Button>
+                  )}
+                </div>
+              )}
               <MessageScrollerButton />
               <FollowAfterApproval pending={Boolean(waiting)} />
               <FollowOnSend
