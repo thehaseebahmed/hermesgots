@@ -2,7 +2,7 @@ import { getReminderLevel, setReminderLevel, type ReminderLevel } from "@/lib/he
 import { useHostRecord, type HostRoute } from "@/lib/host-record"
 
 /**
- * A bot's progress updates, held on its host (`progress.py`, ADR 0066): the level it answers, and
+ * A bot's progress updates, held on its host (`progress.py`, ADR 0068): the level it answers, and
  * the one a pick writes. The feature is the host's own, so an older plugin offers no row at all.
  */
 const REMINDERS: HostRoute<ReminderLevel> = {

@@ -3,7 +3,7 @@ short update, at the rate its own level sets.
 
 A run that reads, greps, patches and tests for minutes shows the user tool cards and no words, and
 nothing in its prompt asks it to narrate — telling it so every turn would cost every bot tokens and
-could not change mid-run. So the ask comes from the hooks instead (ADR 0066). ``post_tool_call``
+could not change mid-run. So the ask comes from the hooks instead (ADR 0068). ``post_tool_call``
 counts each tool call that ran, ``post_api_request`` restarts the count on any reply that carried
 text, and a turn's own start restarts it too.
 
@@ -37,7 +37,7 @@ OBJECT = "memento.progress_reminders"
 KEEP_SESSIONS = 512
 
 # Kept free of the count: a number here is one the model may hand the user, and the counts are the
-# loop's business, never theirs (ADR 0066).
+# loop's business, never theirs (ADR 0068).
 REMINDER = (
     "Progress reminder: a long run of tool calls with nothing said to the user. Reply with a short"
     " update now — what has landed and what is next, a sentence or two, not a replay of the calls —"

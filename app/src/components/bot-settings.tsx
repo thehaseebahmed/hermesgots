@@ -177,7 +177,7 @@ const REMINDER_LABELS: Record<ReminderLevel, string> = {
 }
 
 /**
- * How often Gots asks this bot to say what it is doing (`progress.py`, ADR 0066): a value held per
+ * How often Gots asks this bot to say what it is doing (`progress.py`, ADR 0068): a value held per
  * bot on its host, set where the switches beside it are set, since a control that acts where it
  * sits is what the row is (ADR 0055).
  *
