@@ -13,6 +13,7 @@ import {
 } from "lucide-react"
 
 import {
+  LimitBanner,
   ContextIcon,
   ContextPercent,
   ContextRing,
@@ -38,6 +39,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
+import { COLUMN_BOX } from "@/lib/layout"
 import { stopMessage } from "@/lib/chat"
 import { contextWindow } from "@/lib/context"
 import {
@@ -110,6 +112,38 @@ export function useChatUsage(
   }, [profileId, baseUrl, apiKey, provider])
 
   return { usage, provider, providerUsage, notice, noticeDismissed }
+}
+
+/**
+ * The warning above the composer when the provider's account is out or nearly (ADR 0007): a claim
+ * about the account, which a dismiss silences until it becomes a different claim. Nothing when
+ * there is none or it was dismissed.
+ */
+export function LimitNotice({
+  usage,
+  profileId,
+  onView,
+}: {
+  usage: Pick<ReturnType<typeof useChatUsage>, "notice" | "provider" | "noticeDismissed">
+  profileId?: string
+  onView: () => void
+}) {
+  const { notice, provider, noticeDismissed } = usage
+  if (!notice || !provider || noticeDismissed) return null
+  return (
+    <div className={`${COLUMN_BOX} pb-2`} data-toast-above>
+      <LimitBanner
+        notice={notice}
+        onDismiss={() =>
+          profileId &&
+          void db.profiles
+            .update(profileId, { limitDismissed: limitNoticeKey(provider, notice) })
+            .catch(() => undefined)
+        }
+        onView={onView}
+      />
+    </div>
+  )
 }
 
 /**

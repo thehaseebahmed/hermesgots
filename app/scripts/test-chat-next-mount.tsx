@@ -8,8 +8,10 @@ import test from "node:test"
 import { act } from "react"
 
 import { readAgents, readLiveRun } from "@/chat-next/api"
+import { FIRST_ROWS } from "@/components/chat/first-rows"
 import { db, type Profile, type Settings } from "@/lib/db"
 import { fakeHost } from "./chat-next-host.ts"
+import { SALES, block, cardOf, codeOf, drawn, replyRow, warm } from "./openui-kit.tsx"
 import {
   botProfile,
   chatScreen,
@@ -555,5 +557,83 @@ test("the header's options rename a chat and delete it, as the current screen's 
     await click(button("Delete"))
     await settle()
     assert.equal(await db.conversations.get("c-options"), undefined, "the chat is deleted")
+  })
+})
+
+test("the dividers the plugin's record places are drawn between the turns", async () => {
+  const { host } = await onChatNext("c-dividers")
+  host.seed([
+    { user: "First", reply: "One." },
+    { user: "Second", reply: "Two." },
+  ])
+  await db.conversations.update("c-dividers", {
+    compactions: [{ at: 0, tokens: 168_000, window: 200_000 }],
+  })
+  await mount(chatScreen("c-dividers"), async () => {
+    await until(() => replies().length === 2, "both turns are drawn")
+    await until(
+      () => Boolean(find('[role="separator"][aria-label="Compaction · 168k of 200k (84%)"]')),
+      "the compaction's divider, with how full the context was",
+    )
+  })
+})
+
+test("a long chat opens on its last rows and draws the rest a beat later", async () => {
+  const { host } = await onChatNext("c-long")
+  host.seed(Array.from({ length: 40 }, (_, at) => ({ user: `Ask ${at}`, reply: `Answer ${at}` })))
+  await mount(chatScreen("c-long"), async () => {
+    const rows = () => findAll('[data-chat-next] [data-slot="message"]').length
+    for (let tries = 0; !rows() && tries < 400; tries++)
+      await act(async () => new Promise((resolve) => setTimeout(resolve, 5)))
+    const first = rows()
+    assert.ok(first > 0 && first <= FIRST_ROWS, `the first frame drew ${first} rows`)
+    await until(() => rows() === 80, "the rest of the chat follows")
+  })
+})
+
+test("an account near its limit warns above the composer, and View usage opens the sheet", async () => {
+  await onChatNext("c-limit", {
+    providerUsage: {
+      provider: "anthropic",
+      at: Date.now(),
+      windows: [{ label: "Session", usedPercent: 94, resetsAt: Date.now() + 3 * 3_600_000 }],
+    },
+  })
+  await mount(chatScreen("c-limit"), async () => {
+    await until(() => Boolean(button("View usage")), "the limit banner, with a way to the usage")
+    await click(button("View usage"))
+    await until(() => /Context/.test(text()), "the usage sheet")
+  })
+})
+
+test("an interface a reply wrote draws as the app's own card, not as its code", async () => {
+  const { host } = await onChatNext("c-interface")
+  host.seed([{ user: "Show sales", reply: block(SALES) }])
+  await warm()
+  await mount(chatScreen("c-interface"), async () => {
+    await until(() => findAll("[data-slot=message]").length === 2, "the turn is drawn")
+    await drawn(
+      () => Boolean(cardOf(replyRow("Quarterly sales"))),
+      "the interface draws as the library's card",
+    )
+    assert.equal(codeOf(replyRow("Quarterly sales")), null, "and not as the code it came as")
+  })
+})
+
+test("a session's header line says what the reply is doing while it works", async () => {
+  const host = await sessionOnChatNext("c-activity")
+  await mount(chatScreen("c-activity"), async () => {
+    await sendFromComposer("Look around")
+    await until(() => host.asked.runs === 1, "the turn is running")
+    host.latest.run!.say("Looking.")
+    await until(
+      () => find('[data-slot="header-line"]')?.textContent?.includes("Writing…") ?? false,
+      "the header says the reply is being written",
+    )
+    host.latest.run!.finish("Looking.")
+    await until(
+      () => !(find('[data-slot="header-line"]')?.textContent ?? "").includes("Writing…"),
+      "and stops saying so when the reply is done",
+    )
   })
 })

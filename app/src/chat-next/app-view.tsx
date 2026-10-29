@@ -1,5 +1,5 @@
 import { useLiveQuery } from "dexie-react-hooks"
-import { type ComponentProps, createContext, useContext, useMemo, useState } from "react"
+import { type ComponentProps, createContext, useContext, useEffect, useMemo, useState } from "react"
 
 import { Banner } from "@/components/banner"
 import { AgentPopup } from "@/components/chat/agent-card"
@@ -9,6 +9,8 @@ import { DayHeading } from "@/components/chat/day-heading"
 import { EmptyState, MainEmptyState } from "@/components/chat/empty-states"
 import { useMainFlow } from "@/components/chat/main-flow"
 import { MessageItem } from "@/components/chat/message-item"
+import { useFirstRows } from "@/components/chat/first-rows"
+import { Compacted, ModelChange } from "@/components/chat/model-change"
 import { QuestionCard } from "@/components/chat/question-card"
 import { AskAgainContext } from "@/components/chat/session-cards"
 import { SubagentLine } from "@/components/chat/subagent-line"
@@ -25,9 +27,13 @@ import {
 } from "@/components/ui/message-scroller"
 import { Spinner } from "@/components/ui/spinner"
 import { AgentsContext, type AgentsSource } from "@/lib/agents"
+import { compactionMarks } from "@/lib/compactions"
 import { db, type ApprovalChoice, type Message } from "@/lib/db"
 import type { DelegatedAgent } from "@/lib/hermes"
+import { describeActivity } from "@/lib/format"
 import { COLUMN_BOX } from "@/lib/layout"
+import { modelChanges } from "@/lib/model-changes"
+import { useDraws } from "@/lib/openui-draws"
 import type { RepoRef } from "@/lib/workspace"
 import { cn } from "@/lib/utils"
 
@@ -48,9 +54,23 @@ export interface MainView {
 }
 
 /** The chat a view draws, and its Main where it is one: a context, so the view is one component. */
-const ChatOf = createContext<{ chatId: string; main?: MainView; blank?: BlankView }>({
+const ChatOf = createContext<{
+  chatId: string
+  main?: MainView
+  blank?: BlankView
+  onStatus?: (status: ThreadStatus) => void
+}>({
   chatId: "",
 })
+
+/** What the thread says of itself to the header above it: what the reply is doing, and its count. */
+export interface ThreadStatus {
+  chatId: string
+  /** What the streaming reply is doing, in words ("Running a command…"); none at rest. */
+  activity?: string
+  /** How many replies the thread holds. */
+  replies: number
+}
 
 /** A project session not started yet: its bot and the repos it will work in, said in its place. */
 export interface BlankView {
@@ -77,13 +97,17 @@ export function AppThreadView({
   composer,
   send,
 }: ThreadViewProps) {
-  const { chatId, main, blank } = useContext(ChatOf)
+  const { chatId, main, blank, onStatus } = useContext(ChatOf)
   // The rows are the chat's: what a row reads through its chat — its media, its files, a question
   // asked again — finds the chat by this id, never by the session's.
   const messages = useMemo(
     () => messagesOf(chatId, turns, { streaming }),
     [chatId, turns, streaming],
   )
+  const streamingReply = messages.findLast((message) => message.status === "streaming")
+  const activity = streamingReply && describeActivity(streamingReply)
+  const replies = messages.filter((message) => message.role === "assistant").length
+  useEffect(() => onStatus?.({ chatId, activity, replies }), [onStatus, chatId, activity, replies])
   const [shown, setShown] = useState<DelegatedAgent>()
   const [sheet, setSheet] = useState(false)
   const config = useMemo(
@@ -99,6 +123,26 @@ export function AppThreadView({
     async () => (main ? (await db.conversations.get(chatId))?.moves : undefined),
     [chatId, Boolean(main)],
   )
+  // What the plugin recorded of the chat beside its transcript: where its model changed and where
+  // its context was compacted, which the dividers between the turns are drawn from.
+  const record = useLiveQuery(async () => {
+    const chat = await db.conversations.get(chatId)
+    return chat ? { changes: chat.modelChanges, compactions: chat.compactions } : undefined
+  }, [chatId])
+  const profile = useLiveQuery(async () => {
+    const chat = await db.conversations.get(chatId)
+    return chat ? db.profiles.get(chat.profileId) : undefined
+  }, [chatId])
+  // The interfaces a reply wrote draw as the app's own components, from what the thread holds.
+  const draws = useDraws(messages, profile)
+  const changes = useMemo(
+    () => modelChanges(messages, record?.changes),
+    [messages, record?.changes],
+  )
+  const compacted = useMemo(
+    () => compactionMarks(messages, record?.compactions),
+    [messages, record?.compactions],
+  )
   const { flow, moved, moveThatOpenedThread, undo, marker } = useMainFlow({
     chatId,
     profileId: main?.profileId ?? "",
@@ -107,6 +151,7 @@ export function AppThreadView({
     on: Boolean(main),
     routeChat: main?.routeChat,
   })
+  const { drawn, cut } = useFirstRows(chatId, flow, messages.length > 0 || Boolean(main))
   const empty = Boolean(main) && !flow.length && !moved.trailing.length && !streaming
   const unstarted = Boolean(blank) && !messages.length && !streaming && !queue?.items.length
   const running = source.agents.filter((agent) => agent.status === "running").length
@@ -124,7 +169,9 @@ export function AppThreadView({
           <MessageScrollerProvider autoScroll defaultScrollPosition="end">
             <MessageScroller className="flex-1">
               <MessageScrollerViewport aria-label="Messages">
-                <MessageScrollerContent className="w-full gap-6 px-4 pt-32 pb-6">
+                <MessageScrollerContent
+                  className={cn("w-full gap-6 px-4 pt-32 pb-6", cut && "justify-end")}
+                >
                   {away && (
                     <div className={COLUMN_BOX} data-away role="status">
                       <Banner tone="info">Can't reach this host right now.</Banner>
@@ -155,7 +202,7 @@ export function AppThreadView({
                     </div>
                   )}
                   <AgentsContext.Provider value={source}>
-                    {flow.map((entry) => {
+                    {drawn.map((entry) => {
                       if (entry.kind === "heading")
                         return <DayHeading key={`day-${entry.at}`} day={entry.day} />
                       if (entry.kind === "card")
@@ -173,11 +220,20 @@ export function AppThreadView({
                           />
                         )
                       const message = entry.message
+                      const change = changes.get(message.id)
                       return (
                         <MessageScrollerItem key={message.id} messageId={message.id}>
                           {moved.before.get(message.id)?.map(marker)}
+                          {compacted.before.has(message.id) && (
+                            <Compacted compaction={compacted.before.get(message.id)!} />
+                          )}
+                          {change && <ModelChange model={change} />}
                           <MessageItem
                             message={message}
+                            // Only a row that draws a seam reads these: a new array on every
+                            // conversation write would wake every row's memo.
+                            compactions={message.seams?.length ? record?.compactions : undefined}
+                            blocks={draws.get(message.id)}
                             showStats={false}
                             busy={streaming}
                             subagents={message.id === lastId ? running : undefined}
@@ -187,6 +243,7 @@ export function AppThreadView({
                         </MessageScrollerItem>
                       )
                     })}
+                    {compacted.trailing && <Compacted compaction={compacted.trailing} />}
                     {moved.trailing.map(marker)}
                     {running > 0 && !inline && (
                       <SubagentLine
@@ -338,11 +395,14 @@ export function AppChatNextThread({
   main,
   blank,
   code,
+  onStatus,
   ...props
 }: ComponentProps<typeof ChatNextThread> & {
   chatId: string
   main?: MainView
   blank?: BlankView
+  /** Told what the thread is doing, for a header that says so. */
+  onStatus?: (status: ThreadStatus) => void
   /** A code session: the agent's own output reads in the code face. */
   code?: boolean
 }) {
@@ -354,8 +414,9 @@ export function AppChatNextThread({
       chatId,
       main: mainKey ? (JSON.parse(mainKey) as MainView) : undefined,
       blank: blankKey ? (JSON.parse(blankKey) as BlankView) : undefined,
+      onStatus,
     }),
-    [chatId, mainKey, blankKey],
+    [chatId, mainKey, blankKey, onStatus],
   )
   return (
     <CodeFaceProvider value={code ? "font-code" : undefined}>

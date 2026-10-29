@@ -1,8 +1,9 @@
 import {
+  createContext,
   lazy,
-  startTransition,
   Suspense,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -23,6 +24,7 @@ import {
 } from "@/lib/freshness"
 import { COLUMN_BOX } from "@/lib/layout"
 import type { ComposerControls } from "@/chat-next/page"
+import type { ThreadStatus } from "@/chat-next/app-view"
 import { opensOnChatNext } from "@/chat-next/route"
 import { prepareTurn, queueTurn, startTurn, steerTurn, triageTurn } from "@/chat-next/turn"
 import { quietly } from "@/lib/report"
@@ -32,7 +34,8 @@ import { useBreakReminderEligibility } from "@/components/break-reminder-context
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { ChatHeader } from "@/components/chat/chat-header"
-import { ChatActions, useChatUsage } from "@/components/chat/chat-actions"
+import { ChatActions, LimitNotice, useChatUsage } from "@/components/chat/chat-actions"
+import { FIRST_ROWS, useFirstRows } from "@/components/chat/first-rows"
 import { Composer } from "@/components/chat/composer"
 import { MessageItem } from "@/components/chat/message-item"
 import { Compacted, ModelChange } from "@/components/chat/model-change"
@@ -53,7 +56,6 @@ import {
 } from "@/components/chat/session-cards"
 import { TodosPill, TodosSheet } from "@/components/chat/todos"
 import { ModelMenu } from "@/components/chat/model-picker"
-import { LimitBanner } from "@/components/chat/usage-sheet"
 import {
   MessageScroller,
   MessageScrollerButton,
@@ -119,7 +121,6 @@ import { useStagedPipeline } from "@/lib/afk-workflows"
 import { modelChanges } from "@/lib/model-changes"
 import { chosenOf, samePick, storedPick } from "@/lib/model-pick"
 import { useDraws } from "@/lib/openui-draws"
-import { limitNoticeKey } from "@/lib/provider-usage"
 import {
   planApprovalMessage,
   projectRepos,
@@ -155,14 +156,7 @@ const NO_ROWS: Message[] = []
 const hasNoMessages = async (chat: Conversation) =>
   !(chat.updatedAt > chat.createdAt) &&
   (await db.messages.where("conversationId").equals(chat.id).count()) === 0
-// The rows a chat draws in the commit it opens with: the end the reader lands on. Every row's
-// markdown is parsed as it mounts, so drawing a long transcript whole kept a switch blank for
-// hundreds of milliseconds on a phone; the rows above follow in a transition.
-export const FIRST_ROWS = 8
-// The least height a row and its gap take: a chat with more rows than fit the window this way
-// overflows it once drawn whole, so its last row ends where the opening frame put it.
-const LEAST_ROW = 44
-const REST_AFTER_MS = 250
+export { FIRST_ROWS }
 
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
@@ -417,8 +411,19 @@ function NextChat({
   useLayoutEffect(() => {
     if (ready) hold(slot, id)
   })
-  const { usage, providerUsage } = useChatUsage(chat, bot, chosenOf(chat?.modelChoice))
+  const { usage, providerUsage, notice, provider, noticeDismissed } = useChatUsage(
+    chat,
+    bot,
+    chosenOf(chat?.modelChoice),
+  )
   const [usageOpen, setUsageOpen] = useState(false)
+  // What the thread says it is doing, for the header's line.
+  const [status, setStatus] = useState<ThreadStatus>()
+  const here = status?.chatId === id ? status : undefined
+  const limit = useMemo(
+    () => ({ usage: { notice, provider, noticeDismissed }, onView: () => setUsageOpen(true) }),
+    [notice, provider, noticeDismissed],
+  )
   const actions = chat && bot && (
     <ChatActions
       chat={chat}
@@ -434,91 +439,100 @@ function NextChat({
     />
   )
   return (
-    <div
-      data-slot="chat-pane"
-      data-pane={slot}
-      data-chat-next
-      data-code-session={chat?.projectId ? "" : undefined}
-      className="relative flex min-h-0 flex-1 flex-col"
-      inert={!ready}
-    >
-      {chat && bot && ready ? (
-        <>
-          <ChatHeader
-            // Main is the bot's face, so its title is the bot's name, which Bot settings edits.
-            // A session not started has no title yet, and its bot is the big one in the middle.
-            title={unstarted ? "" : mainOn ? bot.name || chat.title : chat.title}
-            subtitle={
-              mainOn && threadList
-                ? threadsLine(threadCount(threadList))
-                : session && !unstarted
-                  ? sessionSubtitle({
-                      botName: bot.name,
-                      names: sessionRepos.map((repo) => repo.name),
-                      cap: repoCap({ wide, xlarge: xl }),
-                    })
-                  : undefined
-            }
-            botId={bot.botId}
-            muted={Boolean(chat.muted || bot.muted)}
-            centered={Boolean(session) || besideMain}
-            showBot={!session && !besideMain}
-            actions={actions}
-            leading={
-              // Beside Main the bot is on screen with the thread; below `xl` the thread leads back.
-              // A session leads back to Code, unless it is drawn beside Code's list.
-              mainPath && !besideMain ? (
-                <HeaderBack label={`Back to ${bot.name || "bot"}`} onClick={() => up(mainPath)} />
-              ) : (
-                underCode && <HeaderBack label="Back to Code" onClick={() => void leave()} />
-              )
-            }
-          />
-          <Suspense fallback={null}>
-            <ChatNextThread
-              key={chat.hermesSessionId}
-              chatId={id}
-              code={Boolean(chat.projectId)}
-              blank={unstarted ? { botId: bot.botId, repos: sessionRepos } : undefined}
-              main={
-                mainOn
-                  ? {
-                      profileId: chat.profileId,
-                      botId: bot.botId,
-                      openThread: routeThread ?? paneThread,
-                      beside: Boolean(routeThread),
-                      routeChat,
-                    }
-                  : undefined
+    <LimitContext.Provider value={limit}>
+      <div
+        data-slot="chat-pane"
+        data-pane={slot}
+        data-chat-next
+        data-code-session={chat?.projectId ? "" : undefined}
+        className="relative flex min-h-0 flex-1 flex-col"
+        inert={!ready}
+      >
+        {chat && bot && ready ? (
+          <>
+            <ChatHeader
+              // Main is the bot's face, so its title is the bot's name, which Bot settings edits.
+              // A session not started has no title yet, and its bot is the big one in the middle.
+              title={unstarted ? "" : mainOn ? bot.name || chat.title : chat.title}
+              subtitle={
+                mainOn && threadList
+                  ? threadsLine(threadCount(threadList))
+                  : session && !unstarted
+                    ? sessionSubtitle({
+                        activity: here?.activity,
+                        botName: bot.name,
+                        names: sessionRepos.map((repo) => repo.name),
+                        cap: repoCap({ wide, xlarge: xl }),
+                      })
+                    : here?.activity ||
+                      (mainPath && xl && here?.replies
+                        ? `${here.replies} ${here.replies === 1 ? "reply" : "replies"}`
+                        : undefined)
               }
-              server={bot.baseUrl}
-              apiKey={bot.apiKey}
-              session={chat.hermesSessionId}
-              prepareTurn={(text, attachments) => prepareTurn(id, text, attachments)}
-              queueTurn={async (text, attachments) => void (await queueTurn(id, text, attachments))}
-              steerTurn={(text, attachments) => steerTurn(id, text, attachments)}
-              // Only Main's messages are triaged; a thread and a project session never are.
-              triageTurn={
-                mainOn
-                  ? (text, attachments, options) => triageTurn(id, text, attachments, options)
-                  : undefined
+              botId={bot.botId}
+              muted={Boolean(chat.muted || bot.muted)}
+              centered={Boolean(session) || besideMain}
+              showBot={!session && !besideMain}
+              actions={actions}
+              leading={
+                // Beside Main the bot is on screen with the thread; below `xl` the thread leads back.
+                // A session leads back to Code, unless it is drawn beside Code's list.
+                mainPath && !besideMain ? (
+                  <HeaderBack label={`Back to ${bot.name || "bot"}`} onClick={() => up(mainPath)} />
+                ) : (
+                  underCode && <HeaderBack label="Back to Code" onClick={() => void leave()} />
+                )
               }
-              // What the plugin holds beside the transcript — the title, the context, the todos, a
-              // session's workspace, pull requests and library — read as every chat reads it.
-              onSettled={(reason, thread) =>
-                reason === "turn"
-                  ? void readAfterTurn(id, { turn: thread.turns })
-                  : refreshChatDetails(id)
-              }
-              Composer={composer}
             />
-          </Suspense>
-          {leaveDialog}
-        </>
-      ) : (
-        <PendingChat />
-      )}
-    </div>
+            <Suspense fallback={null}>
+              <ChatNextThread
+                key={chat.hermesSessionId}
+                chatId={id}
+                code={Boolean(chat.projectId)}
+                onStatus={setStatus}
+                blank={unstarted ? { botId: bot.botId, repos: sessionRepos } : undefined}
+                main={
+                  mainOn
+                    ? {
+                        profileId: chat.profileId,
+                        botId: bot.botId,
+                        openThread: routeThread ?? paneThread,
+                        beside: Boolean(routeThread),
+                        routeChat,
+                      }
+                    : undefined
+                }
+                server={bot.baseUrl}
+                apiKey={bot.apiKey}
+                session={chat.hermesSessionId}
+                prepareTurn={(text, attachments) => prepareTurn(id, text, attachments)}
+                queueTurn={async (text, attachments) =>
+                  void (await queueTurn(id, text, attachments))
+                }
+                steerTurn={(text, attachments) => steerTurn(id, text, attachments)}
+                // Only Main's messages are triaged; a thread and a project session never are.
+                triageTurn={
+                  mainOn
+                    ? (text, attachments, options) => triageTurn(id, text, attachments, options)
+                    : undefined
+                }
+                // What the plugin holds beside the transcript — the title, the context, the todos, a
+                // session's workspace, pull requests and library — read as every chat reads it.
+                onSettled={(reason, thread) =>
+                  reason === "turn"
+                    ? void readAfterTurn(id, { turn: thread.turns })
+                    : refreshChatDetails(id)
+                }
+                Composer={composer}
+              />
+            </Suspense>
+            {leaveDialog}
+          </>
+        ) : (
+          <PendingChat />
+        )}
+      </div>
+    </LimitContext.Provider>
   )
 }
 
@@ -528,6 +542,16 @@ function NextChat({
  * handed back to the field. A project session's own cards take its place in the order the current
  * screen draws them: closed, blocked, then a plan waiting to be approved.
  */
+/**
+ * What the pane knows of the account's limits and how to open the usage sheet, for the composer to
+ * warn with: the composer is one component for the chat's life, so it reads this rather than being
+ * handed it, and a change in the limits never remounts it.
+ */
+const LimitContext = createContext<{
+  usage: Pick<ReturnType<typeof useChatUsage>, "notice" | "provider" | "noticeDismissed">
+  onView: () => void
+} | null>(null)
+
 function NextComposer(props: {
   controls: ComposerControls
   chatId: string
@@ -535,8 +559,10 @@ function NextComposer(props: {
   main: boolean
   home?: string
 }) {
+  const limit = useContext(LimitContext)
   return (
     <>
+      {limit && <LimitNotice usage={limit.usage} profileId={props.botId} onView={limit.onView} />}
       <NextPills chatId={props.chatId} botId={props.botId} busy={props.controls.busy} />
       <NextComposerBody {...props} />
     </>
@@ -881,20 +907,7 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   useLayoutEffect(() => {
     if (answered) readyRef.current = { id }
   })
-  // The chat this pane has drawn whole. A long one opens on its last rows and draws the rest in a
-  // transition; one short enough to be sure of not overflowing the window is cheap to draw at once,
-  // so it is whole from its first frame, with no second commit to disturb its placing.
-  const [whole, setWhole] = useState<string>()
-  const long = flow.length > Math.max(FIRST_ROWS, window.innerHeight / LEAST_ROW)
-  if (answered && whole !== (id ?? "") && !long) setWhole(id ?? "")
-  const cut = answered && whole !== (id ?? "") && long
-  useEffect(() => {
-    if (!cut) return
-    // A beat later, so a reader moving straight on to another chat never waits behind these rows.
-    const timer = window.setTimeout(() => startTransition(() => setWhole(id ?? "")), REST_AFTER_MS)
-    return () => window.clearTimeout(timer)
-  }, [cut, id])
-  const drawn = cut ? flow.slice(-FIRST_ROWS) : flow
+  const { drawn, cut } = useFirstRows(id ?? "", flow, answered)
   // Where this chat's model changed, as the host recorded it: the divider each turn below carries.
   const changes = useMemo(
     () => modelChanges(thread ?? [], conversation?.modelChanges),
@@ -1466,20 +1479,11 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
             <BotPicker profile={profile} />
           </div>
         )}
-        {notice && provider && !noticeDismissed && (
-          <div className={`${COLUMN_BOX} pb-2`} data-toast-above>
-            <LimitBanner
-              notice={notice}
-              onDismiss={() =>
-                profileId &&
-                void db.profiles
-                  .update(profileId, { limitDismissed: limitNoticeKey(provider, notice) })
-                  .catch(() => undefined)
-              }
-              onView={() => setUsageOpen(true)}
-            />
-          </div>
-        )}
+        <LimitNotice
+          usage={{ notice, provider, noticeDismissed }}
+          profileId={profileId}
+          onView={() => setUsageOpen(true)}
+        />
         {session?.discardedAt ? (
           <DiscardedCard />
         ) : session?.resolvedAt ? (

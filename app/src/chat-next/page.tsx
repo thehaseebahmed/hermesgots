@@ -22,6 +22,7 @@ import { SAFETY_MS } from "@/lib/freshness"
 import { onSessionMoved, useLive } from "@/lib/live"
 import { db, type Attachment, type SessionDb } from "@/lib/db"
 
+import { equal } from "./equal"
 import { cardsByPart, cardsOf, DELEGATE, delegated, type Agent, type Card } from "./agents"
 import {
   atLeast,
@@ -80,9 +81,7 @@ const NO_ROWS: Row[] = []
  */
 function shared(held: Turn[], read: Turn[]): Turn[] {
   return read.map((turn, at) =>
-    held[at] === turn || (held[at] && JSON.stringify(held[at]) === JSON.stringify(turn))
-      ? held[at]
-      : turn,
+    held[at] === turn || (held[at] && equal(held[at], turn)) ? held[at] : turn,
   )
 }
 
