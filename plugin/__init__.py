@@ -1859,10 +1859,14 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "The recording is empty.", 400)
         if len(data) > dictation.MAX_BYTES:
             return _error(web, "The recording is too long.", 413)
-        hint = dictation.clean_hint(request.query.get("hint"))
-        context = dictation.clean_context(request.query.get("context"))
-        vocabulary = dictation.clean_vocabulary(request.query.getall("vocabulary", []))
         hearing = await asyncio.to_thread(_hearing_prompt, store_path())
+        # A bot whose Hearing prompt is not sent decodes from the audio alone: nothing is composed
+        # and nothing is read off the query, so a hint an old client still sends costs nothing.
+        hint = dictation.clean_hint(request.query.get("hint")) if hearing else ""
+        context = dictation.clean_context(request.query.get("context")) if hearing else ""
+        vocabulary = (
+            dictation.clean_vocabulary(request.query.getall("vocabulary", [])) if hearing else []
+        )
         async with dictating:
             try:
                 result = await asyncio.to_thread(
