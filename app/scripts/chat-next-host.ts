@@ -525,6 +525,8 @@ export function fakeHost(
   async function handle(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     const url = new URL(String(input))
     const path = decodeURIComponent(url.pathname)
+    if (path === "/v1/capabilities")
+      return reply({ features: { run_submission: true, run_events_sse: true, run_steer: true } })
     if (path === "/health") {
       asked.health++
       return reply({ status: "ok", platform: "hermes-agent", version })

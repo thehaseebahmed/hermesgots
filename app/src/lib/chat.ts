@@ -1,7 +1,7 @@
 import { toast } from "sonner"
 
 import { serverConfig } from "@/lib/connection"
-import { FLUSH_INTERVAL_MS, READ_TIMEOUT_MS, TRIAGE_MS } from "@/lib/freshness"
+import { FLUSH_INTERVAL_MS, READ_TIMEOUT_MS } from "@/lib/freshness"
 import {
   db,
   getActiveProfile,
@@ -25,7 +25,6 @@ import {
   getRun,
   getQueue,
   hasPluginFeature,
-  triageMessage,
   HermesError,
   labelSession,
   queueAction,
@@ -59,9 +58,8 @@ import {
   reconcileHistory,
 } from "@/lib/history"
 import { unknownLastTurn } from "@/lib/model-changes"
-import { botModel } from "@/lib/model-info"
-import { chosenOf, modelOf, pickFields, pickOf, wantsPin } from "@/lib/model-pick"
-import { refreshMoves } from "@/lib/moves"
+import { modelOf, pickOf, wantsPin } from "@/lib/model-pick"
+import { askTriage, canTriage, triaging } from "@/lib/triage"
 import { takeHostTitle } from "@/lib/title"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { appendThinking, closeRun, forgetRuns, noteRunThinking } from "@/lib/thinking"
@@ -1415,8 +1413,7 @@ export async function sendFromMain(
     host?.conversation.main &&
     content &&
     !triaging.has(conversationId) &&
-    (await hostQueue(host.config)) &&
-    (await hasPluginFeature(host.config, "triage"))
+    (await canTriage(host.config))
   if (!host || !triaged) {
     if (triaging.has(conversationId) && content)
       await queueMessage(conversationId, text, attachments)
@@ -1444,35 +1441,12 @@ export async function sendFromMain(
     }
     heldId = held.id
     await db.messages.add(held)
-    let moved: { threadId: string; created: boolean } | undefined
-    try {
-      const run = runRequest(host.config, {
-        // The ask names the model Main runs on, as this device can resolve it — Main's own pick,
-        // else the bot's default, else the host's remembered model — so a thread triage opens or
-        // fills adopts it instead of following the default for ever. Nothing is named when nothing
-        // can be, and nothing is read from the host here: the send path carries no model read.
-        ...pickFields(chosenOf(host.conversation.modelChoice) ?? botModel(host.profile)),
-        sessionId: host.conversation.hermesSessionId,
-        messages: [{ role: "user", content: await wireContent(content, sent) }],
-      })
-      const files = sent.map(({ name, type, size, path }) => ({ name, type, size, path }))
-      const ask = (ms: number) =>
-        triageMessage(
-          host.config,
-          host.conversation.hermesSessionId,
-          { id: held.id, text: content, run, attachments: files, steer: options.steer },
-          AbortSignal.timeout(ms),
-        )
-      // A dropped answer is asked for again under the same id: the host answers it as it did
-      // before, so a message it already queued on a thread isn't also sent to Main.
-      const answer = await ask(TRIAGE_MS * 0.7).catch(() => ask(TRIAGE_MS * 0.3))
-      if (answer.decision !== "main") {
-        moved = { threadId: answer.threadId, created: answer.decision === "new" }
-        void refreshMoves(conversationId).catch(quietly("Reading a chat's moves"))
-      }
-    } catch {
-      // Main it is.
-    }
+    const moved = await askTriage(host, {
+      content,
+      sent,
+      steer: options.steer,
+      id: held.id,
+    })
     if (moved) return moved
     triaging.delete(conversationId)
     if (controllers.has(conversationId)) {
@@ -1506,9 +1480,6 @@ function steerOrQueue(
     ? steerText(conversationId, content, attachments)
     : queueMessage(conversationId, content, attachments)
 }
-
-/** Chats whose Main message is being triaged on this page. */
-const triaging = new Set<string>()
 
 /**
  * A triaging message that nothing here is deciding on (the page reloaded or closed mid-triage) was

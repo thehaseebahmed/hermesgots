@@ -154,7 +154,6 @@ import { markRead } from "@/lib/read-marks"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
-import { syncNow } from "@/lib/sync"
 import { setBotMuted, setThreadMuted } from "@/lib/push"
 import { useStagedPipeline } from "@/lib/afk-workflows"
 import { modelChanges } from "@/lib/model-changes"
@@ -184,6 +183,7 @@ import { hold, type HoldSlot } from "@/lib/chat-hold"
 import { useBotThreads, useThreads } from "@/lib/threads"
 import { EmptyState, MainEmptyState } from "@/components/chat/empty-states"
 import { isUnsent, settleLeft } from "@/chat-next/unsent"
+import { announceMove } from "@/lib/triage"
 import { useMainFlow } from "@/components/chat/main-flow"
 
 export { SETUP_COPY } from "@/components/chat/empty-states"
@@ -1389,22 +1389,6 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
         `Kept ${tree.name}: it has ${tree.reason === "dirty" ? "uncommitted" : "unpushed"} changes.`,
       )
     for (const error of errors) toast.error(error)
-  }
-
-  // Said after the message went, so a failure to say so is not a failure to send.
-  const announceMove = async (moved: { threadId: string; created: boolean } | undefined) => {
-    try {
-      if (moved?.created) {
-        // The host made the thread, so this device learns of it with the chat list.
-        void syncNow()
-        toast.success("Started a new thread")
-      } else if (moved) {
-        const thread = await db.conversations.get(moved.threadId)
-        toast.success(`Sent to ${thread?.title ?? "a thread"}`)
-      }
-    } catch {
-      // The message is where it belongs either way.
-    }
   }
 
   // Main's messages are triaged even while its reply runs, so one for another thread goes there at
