@@ -26,9 +26,7 @@ import { db, type Attachment, type MessageStats, type SessionDb } from "@/lib/db
 import { equal } from "./equal"
 import { cardsByPart, cardsOf, DELEGATE, delegated, type Agent, type Card } from "./agents"
 import {
-  atLeast,
   followRun,
-  MIN_HERMES,
   postRun,
   readQueue,
   actOnQueued,
@@ -37,10 +35,10 @@ import {
   readNewest,
   readPage,
   readTranscript,
-  readVersion,
   respond,
   startRun,
   stopRun,
+  HostAnswered,
   type Connection,
   type Queued,
 } from "./api"
@@ -471,8 +469,6 @@ function PlainView({
   )
 }
 
-/** Hosts that answered as new enough, for the page's life: the next chat on one reads at once. */
-const supported = new Set<string>()
 const POLL_MS = 2_000
 const IDLE_MS = 15_000
 const AGENTS_COOLDOWN_MS = 60_000
@@ -557,8 +553,7 @@ export function ChatNextPage(options: ThreadOptions) {
 
 /**
  * A session read from the host and drawn. It works with the Hermes that shares a run's events
- * between every follower (`MIN_HERMES`), and says so on an older one rather than ask it for
- * anything. `server` is the bot's base URL, `/v1` or not.
+ * between every follower (`MIN_HERMES`), which the plugin's own manifest holds it to. `server` is the bot's base URL, `/v1` or not.
  */
 export function ChatNextThread({
   pollMs = POLL_MS,
@@ -609,15 +604,10 @@ export function ChatNextThread({
   const olderRun = useRef(0)
   const olderOn = useRef(false)
   const olderFailed = useRef(false)
-  const [host, setHost] = useState<"checking" | "ok" | "away" | { version?: string }>("checking")
-  // A host that cannot be reached is asked again, and meanwhile the chat is what the device holds.
-  const [asks, setAsks] = useState(0)
-  // A host that already answered as new enough is not asked again before its transcript is read;
-  // it is still asked behind the read, and a changed answer replaces the verdict.
-  const known = Boolean(
-    server && key && supported.has(connectionKey({ baseUrl: server, apiKey: key })),
-  )
-  const ready = host === "ok" || (host === "checking" && known)
+  // A host that cannot be reached is away, not failing: the chat is what the device holds, and the
+  // next read that gets an answer says it is back.
+  const [away, setAway] = useState(false)
+  const ready = Boolean(server && key && session)
   // A read begun before a send or a joined run is stale and does not land. Reads of the transcript
   // run one at a time, and a request that comes while one is out waits for it and is answered by
   // one more read after it, so a read that takes longer than the poll interval still lands.
@@ -632,37 +622,6 @@ export function ChatNextThread({
   // Settles once the page's first read of the transcript has landed (or failed): a run joined before
   // that would be replayed over a thread with no turn to put it in.
   const firstRows = useRef<{ promise: Promise<void>; resolve: () => void }>(null)
-
-  useEffect(() => {
-    if (!server || !key) return
-    const controller = new AbortController()
-    void readVersion({ server, key }, controller.signal).then((version) => {
-      if (controller.signal.aborted) return
-      const mine = connectionKey({ baseUrl: server, apiKey: key })
-      if (version === "unreachable") setHost("away")
-      else if (version && atLeast(version)) {
-        supported.add(mine)
-        setHost("ok")
-      } else {
-        supported.delete(mine)
-        setHost({ version })
-      }
-    })
-    return () => controller.abort()
-  }, [server, key, asks])
-
-  useEffect(() => {
-    if (host !== "away") return
-    const again = () => {
-      if (document.visibilityState === "visible") setAsks((n) => n + 1)
-    }
-    const timer = setInterval(again, idleMs)
-    document.addEventListener("visibilitychange", again)
-    return () => {
-      clearInterval(timer)
-      document.removeEventListener("visibilitychange", again)
-    }
-  }, [host, idleMs])
 
   /** Drops the older read in flight, if any: what it lands would go above rows it was not read for. */
   const stopOlder = useCallback(() => {
@@ -748,6 +707,7 @@ export function ChatNextThread({
               }))
             : await readNewest({ server, key }, session, alive.current.signal, store.get().rows)
           if (mine === reads.current) {
+            setAway(false)
             // Rows that replace the ones held make a page in flight for them stale.
             if (read.more !== undefined) stopOlder()
             // A write the device refuses leaves its copy behind, as it does for every event: the next
@@ -773,7 +733,10 @@ export function ChatNextThread({
             if (queued) dispatch({ type: "queue", ...queued })
           }
         } catch (error) {
-          if (!alive.current.signal.aborted && mine === reads.current) dispatch(failure(error))
+          if (alive.current.signal.aborted || mine !== reads.current) return
+          // A host that answered says what is wrong; one that did not is away.
+          if (error instanceof HostAnswered) dispatch(failure(error))
+          else setAway(true)
         } finally {
           firstRows.current?.resolve()
           reading.current = null
@@ -1181,15 +1144,6 @@ export function ChatNextThread({
   if (!server || !key || !session)
     return <p className="p-4 text-sm">Open with ?server=&key=&session=</p>
 
-  if (typeof host === "object")
-    return (
-      <p data-unsupported role="alert" className="p-4 text-sm">
-        {host.version
-          ? `This host runs Hermes ${host.version}. This screen needs Hermes ${MIN_HERMES} or newer.`
-          : `Couldn't tell which Hermes this host runs. This screen needs Hermes ${MIN_HERMES} or newer.`}
-      </p>
-    )
-
   const asker = turns
     .at(-1)
     ?.parts.findLast((part) => part.kind === "tools")
@@ -1218,43 +1172,42 @@ export function ChatNextThread({
         onChoose={(choice) => void answer(doing.waiting as Waiting, choice)}
       />
     ) : null
-  const composer =
-    host === "away" ? null : Composer ? (
-      <Composer
-        controls={{
-          // A run the host works that this page has not joined yet is a turn running all the same.
-          busy: doing.running || Boolean(hostRun && !last?.done),
-          send: sendTurn,
-          queue: queueMessage,
-          steer: steerMessage,
-          canSteer: doing.running && Boolean(steerTurn),
-          subagents,
-          stop,
-        }}
+  const composer = away ? null : Composer ? (
+    <Composer
+      controls={{
+        // A run the host works that this page has not joined yet is a turn running all the same.
+        busy: doing.running || Boolean(hostRun && !last?.done),
+        send: sendTurn,
+        queue: queueMessage,
+        steer: steerMessage,
+        canSteer: doing.running && Boolean(steerTurn),
+        subagents,
+        stop,
+      }}
+    />
+  ) : (
+    <form
+      className="flex gap-2"
+      onSubmit={(event) => {
+        event.preventDefault()
+        void send()
+      }}
+    >
+      <textarea
+        data-composer
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        className="min-h-10 flex-1 rounded-md border bg-background px-3 py-2"
       />
-    ) : (
-      <form
-        className="flex gap-2"
-        onSubmit={(event) => {
-          event.preventDefault()
-          void send()
-        }}
+      <button
+        data-send
+        type="submit"
+        className="rounded-md bg-primary px-4 text-primary-foreground"
       >
-        <textarea
-          data-composer
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          className="min-h-10 flex-1 rounded-md border bg-background px-3 py-2"
-        />
-        <button
-          data-send
-          type="submit"
-          className="rounded-md bg-primary px-4 text-primary-foreground"
-        >
-          Send
-        </button>
-      </form>
-    )
+        Send
+      </button>
+    </form>
+  )
 
   return (
     <View
@@ -1265,7 +1218,7 @@ export function ChatNextThread({
       cards={cards}
       goals={goals}
       agents={agents}
-      away={host === "away"}
+      away={away}
       failure={doing.status === "failed" ? (doing.error ?? "") : undefined}
       older={older === "idle" ? undefined : { state: older, retry }}
       origin={origin}

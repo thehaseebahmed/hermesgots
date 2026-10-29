@@ -18,6 +18,7 @@ import {
   settle,
   shutSheet,
   spyScrollIntoView,
+  findAll,
   thinkingLines,
   withReducedMotion,
 } from "./component-kit.tsx"
@@ -231,6 +232,44 @@ test("behind a finished call, the model's quiet draws a row after it until words
       })
       await settle()
       assert.equal(thinkingLines().length, 0, "the answer moving again takes the row with it")
+    },
+  )
+})
+
+test("while a call runs, the row the quiet drew keeps its place, so the thread does not step", async () => {
+  host()
+  const id = "reserved-while-running"
+  const TEXT = "I read the parser first."
+  await screen(
+    undefined,
+    turn({
+      id,
+      content: TEXT,
+      tools: [{ ...call("call-1"), contentOffset: TEXT.length }],
+    }),
+    async () => {
+      await stream(id)
+      assert.equal(thinkingLines().length, 1, "the model is quiet behind a finished call")
+      assert.equal(
+        findAll('[aria-hidden="true"].min-h-\\[29px\\]').length,
+        0,
+        "and nothing is held",
+      )
+
+      await db.messages.put({
+        ...(await db.messages.get(id))!,
+        tools: [
+          { ...call("call-1"), contentOffset: TEXT.length },
+          { ...call("call-2"), status: "running", contentOffset: TEXT.length },
+        ],
+      })
+      await settle()
+      assert.equal(thinkingLines().length, 0, "the call that runs speaks for the turn")
+      assert.equal(
+        findAll('[aria-hidden="true"].min-h-\\[29px\\]').length,
+        1,
+        "and one hidden row holds the place the thinking row had",
+      )
     },
   )
 })
