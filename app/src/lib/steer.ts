@@ -41,3 +41,12 @@ export function steerAsked(
 ) {
   return chosen ? chosen === "steer" : byDefault && steerable
 }
+
+/** A steer's own text, without the marker Hermes wraps it in for the model. */
+export function steerText(content: string) {
+  return content
+    .trim()
+    .replace(/^\[OUT-OF-BAND USER MESSAGE[^\n]*\]\n?/, "")
+    .replace(/\n?\[\/OUT-OF-BAND USER MESSAGE\]$/, "")
+    .trim()
+}

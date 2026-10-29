@@ -12,6 +12,7 @@ import { refreshLibrary, refreshPrs, refreshWorkspace } from "@/lib/workspace"
 import { listSessionMessages, type HermesConfig, type SessionMessage } from "@/lib/hermes"
 import { takeHostTitle } from "@/lib/title"
 import { splitAttachments } from "@/lib/attachment-text"
+import { steerText } from "@/lib/steer"
 import { appendThinking, carrySpans } from "@/lib/thinking"
 import { readLiveRuns } from "@/lib/waiting"
 import { failureReason } from "@/lib/tools"
@@ -71,15 +72,6 @@ function toolCalls(row: SessionMessage) {
 
 /** A user message Hermes handed the agent mid-turn (a steer); it belongs to the reply. */
 const isSteer = (row: SessionMessage) => row.role === "user" && row.display_kind === "steer"
-
-/** A steer's own text, without the marker Hermes wraps it in for the model. */
-function steerText(content: string) {
-  return content
-    .trim()
-    .replace(/^\[OUT-OF-BAND USER MESSAGE[^\n]*\]\n?/, "")
-    .replace(/\n?\[\/OUT-OF-BAND USER MESSAGE\]$/, "")
-    .trim()
-}
 
 /**
  * A note Hermes writes as a user row to keep a turn going: after a reply was cut off by the network

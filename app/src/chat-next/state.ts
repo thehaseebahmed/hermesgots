@@ -128,6 +128,17 @@ const sameAgents = (a: Agent[] | undefined, b: Agent[]) =>
       one.tool_calls === b[at].tool_calls,
   )
 
+const sameQueue = (a: ThreadState["queue"], b: NonNullable<ThreadState["queue"]>) =>
+  a?.paused === b.paused &&
+  a.items.length === b.items.length &&
+  a.items.every(
+    (one, at) =>
+      one.id === b.items[at].id &&
+      one.text === b.items[at].text &&
+      one.error === b.items[at].error &&
+      one.files.join() === b.items[at].files.join(),
+  )
+
 const SETTLED = ["approval.settled", "clarify.settled"]
 const ENDINGS = ["run.completed", "run.failed", "run.cancelled", "run.interrupted"]
 
@@ -211,9 +222,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
     }
     case "queue": {
       const next = { items: event.items, paused: event.paused }
-      return JSON.stringify(state.queue) === JSON.stringify(next)
-        ? state
-        : { ...state, queue: next }
+      return sameQueue(state.queue, next) ? state : { ...state, queue: next }
     }
     case "agents":
       return sameAgents(state.agents, event.agents) ? state : { ...state, agents: event.agents }

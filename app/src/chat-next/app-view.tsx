@@ -54,11 +54,6 @@ export interface MainView {
   routeChat?: string
 }
 
-/**
- * A chat-next thread drawn with the app's own rows (ADR 0065): each turn's request and reply through
- * `MessageItem`, its calls in the reply's tool groups and its delegations as the app's agent cards,
- * in the app's scroller, with the composer — or the prompt the run is held up on — pinned under it.
- */
 /** The chat a view draws, and its Main where it is one: a context, so the view is one component. */
 const ChatOf = createContext<{ chatId: string; main?: MainView; blank?: BlankView }>({
   chatId: "",
@@ -70,6 +65,11 @@ export interface BlankView {
   repos: RepoRef[]
 }
 
+/**
+ * A chat-next thread drawn with the app's own rows (ADR 0065): each turn's request and reply through
+ * `MessageItem`, its calls in the reply's tool groups and its delegations as the app's agent cards,
+ * in the app's scroller, with the composer — or the prompt the run is held up on — pinned under it.
+ */
 export function AppThreadView({
   server,
   session,

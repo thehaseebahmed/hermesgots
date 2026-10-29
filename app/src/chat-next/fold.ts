@@ -1,4 +1,5 @@
 import { splitAttachments } from "../lib/attachment-text.ts"
+import { steerText } from "../lib/steer.ts"
 
 /** A transcript row as `GET /api/sessions/{id}/messages` returns it; only what a turn is built from. */
 export interface Row {
@@ -161,7 +162,11 @@ export function foldTurns(rows: Row[]): Turn[] {
         seamed = true
         const last = turns.at(-1)
         const at = msOf(row)
-        const seam = { kind: "compaction" as const, row: row.id, ...(at !== undefined ? { at } : {}) }
+        const seam = {
+          kind: "compaction" as const,
+          row: row.id,
+          ...(at !== undefined ? { at } : {}),
+        }
         if (!last)
           turns.push({
             user: "",
@@ -251,15 +256,6 @@ export function foldTurns(rows: Row[]): Turn[] {
   // reason its reply stopped, so an earlier turn is finished by what follows it.
   for (const turn of turns.slice(0, -1)) turn.done = true
   return turns
-}
-
-/** A steer's own words, without the marker Hermes wraps it in for the model. */
-function steerText(content: string) {
-  return content
-    .trim()
-    .replace(/^\[OUT-OF-BAND USER MESSAGE[^\n]*\]\n?/, "")
-    .replace(/\n?\[\/OUT-OF-BAND USER MESSAGE\]$/, "")
-    .trim()
 }
 
 /** Whether a reply already drawn ended on these very words. */

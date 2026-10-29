@@ -1,4 +1,5 @@
 import { pluginRoot, serverRoot } from "../lib/host-url.ts"
+import { READ_TIMEOUT_MS } from "../lib/freshness.ts"
 
 import type { Agent } from "./agents"
 import type { Row } from "./fold"
@@ -35,7 +36,6 @@ export interface RunEvent {
   timestamp?: number
 }
 
-const READ_TIMEOUT_MS = 15_000
 const PAGE = 50
 
 const root = ({ server }: Connection) => serverRoot(server)
