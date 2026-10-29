@@ -2762,14 +2762,17 @@ def register(ctx) -> None:
         register_hook("post_api_request", context.record)
         register_hook("post_api_request", model_changes.record)
         register_hook("post_api_request", community.record)
+        # A long silent tool loop is asked to check in with the user; see progress.py. Registered
+        # before the policy hooks below because the first block wins, and a check-in swallowed by
+        # plan mode's own block would never reach the model.
+        register_hook("pre_tool_call", progress.before_tool)
+        register_hook("post_tool_call", progress.after_tool)
+        register_hook("post_api_request", progress.after_model_call)
+        register_hook("pre_llm_call", progress.turn_started)
         register_hook("pre_tool_call", sessions.before_tool)
         # What each run executed, kept on its stage for the details sheet; see commands.py.
         register_hook("pre_tool_call", commands.before_tool)
         register_hook("pre_tool_call", research.before_tool)
-        # A long silent tool loop is asked to check in with the user; see progress.py.
-        register_hook("pre_tool_call", progress.before_tool)
-        register_hook("post_api_request", progress.after_model_call)
-        register_hook("pre_llm_call", progress.turn_started)
         register_hook("pre_llm_call", sessions.before_llm)
         register_hook("on_session_start", sessions.started)
         register_hook("post_llm_call", sessions.after_llm)

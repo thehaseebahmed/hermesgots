@@ -3,17 +3,18 @@ update the user before it goes on.
 
 A run that reads, greps, patches and tests for minutes shows the user tool cards and no words, and
 the prompt's own "post a short update between checkpoints" is the only thing asking for them — a
-model deep in a loop skips it. Hermes hands the plugin two hooks that make the count honest:
-``pre_tool_call`` before every tool call, and ``post_api_request`` after every model call, carrying
-``assistant_content_chars``. So the count of *continuous* calls is the number since the model last
-said something: a model call that produced text resets it, one that produced only tool calls does
-not. The turn's own start resets it too, so a new turn never inherits yesterday's count.
+model deep in a loop skips it. Hermes hands the plugin the hooks that make the count honest:
+``post_tool_call`` after every tool, carrying its status, and ``post_api_request`` after every model
+call, carrying ``assistant_content_chars``. So the count is of calls that ran — a call plan mode or
+a guardrail blocked never became work the user waited on and is not counted — and a model call that
+produced text restarts it, since that text is words the user reads. A turn's own start restarts it
+too, so a new turn never inherits yesterday's count.
 
-When the count passes :data:`CHECK_IN_AFTER`, the next call is blocked with a message telling the
+When the count reaches :data:`CHECK_IN_AFTER`, the next call is blocked with a message telling the
 agent to post a short update and then make the call again — the same directive plan mode uses, so
-the tool result carries the ask and the loop goes on. The count resets on the block itself: a model
-that ignores the ask gets its tool back and is asked again after another :data:`CHECK_IN_AFTER`
-calls, never stuck at a wall.
+the tool result carries the ask and the loop goes on. The count restarts at the ask: a model that
+ignores it gets its tool back and is asked again after another :data:`CHECK_IN_AFTER` calls, never
+stuck at a wall.
 """
 
 from __future__ import annotations
@@ -26,13 +27,16 @@ from . import sessions
 
 logger = logging.getLogger(__name__)
 
-# Calls between check-ins, counted since the agent last wrote something the user sees.
+# Tool calls allowed between check-ins, counted from the agent's last update or the last ask.
 CHECK_IN_AFTER = 20
 # Counts kept at once: the sessions at work in one process. A stale one is only a number, so the
 # oldest is dropped rather than the table growing for as long as the gateway runs.
 KEEP_SESSIONS = 512
+# An AFK run works a task with nobody watching: its own prompt already asks for a checkpoint update
+# between stages, and a blocked call there buys the user nothing. See afk.new_session_id.
+AFK_PREFIX = f"{sessions.MEMENTO_ID_PREFIX}afk-"
 
-CHECK_IN = (
+CHECK_IN_BLOCK = (
     "Progress check-in: {count} tool calls in this turn with nothing said to the user. Reply with a"
     " short update now — what has landed and what is next, a sentence or two, not a replay of the"
     " calls — then make this tool call again."
@@ -43,15 +47,18 @@ _calls: Dict[Tuple[str, str], int] = {}
 
 
 def _session(kwargs: Dict[str, Any]) -> Optional[str]:
-    """The session this hook call belongs to, or None for one that isn't Gots's.
+    """The session this hook call belongs to, or None for one with no user to update.
 
-    Gots mints its chats' ids (``createConversation`` in the app), and a delegated child is a fresh
-    session of its own — its reply reaches its parent, not the user — so the prefix gates both.
+    Gots mints its chats' ids (``createConversation`` in the app). A delegated child is a fresh
+    session of its own, whose reply reaches its parent rather than the user, and an AFK run works
+    unattended — neither has a reader waiting on this turn.
     """
     session_id = kwargs.get("session_id") or ""
-    if isinstance(session_id, str) and session_id.startswith(sessions.MEMENTO_ID_PREFIX):
-        return session_id
-    return None
+    if not isinstance(session_id, str) or not session_id.startswith(sessions.MEMENTO_ID_PREFIX):
+        return None
+    if session_id.startswith(AFK_PREFIX):
+        return None
+    return session_id
 
 
 def _key(kwargs: Dict[str, Any]) -> Optional[Tuple[str, str]]:
@@ -63,7 +70,7 @@ def _key(kwargs: Dict[str, Any]) -> Optional[Tuple[str, str]]:
 
 
 def _forget(session_id: str) -> None:
-    """Drops every turn of one session: its turn is over, or its agent has just spoken."""
+    """Drops a session's counts: a new turn starts its own stretch."""
     with _lock:
         for key in list(_calls):
             if key[0] == session_id:
@@ -78,9 +85,10 @@ def _room() -> None:
 
 
 def before_tool(**kwargs: Any) -> Optional[Dict[str, str]]:
-    """The ``pre_tool_call`` hook: counts the call, and after :data:`CHECK_IN_AFTER` of them with no
-    update in between, blocks it with the ask.
+    """The ``pre_tool_call`` hook: after :data:`CHECK_IN_AFTER` calls with no update in between,
+    blocks this one with the ask.
 
+    The counting is ``after_tool``'s, so a call another hook blocked before it ran is never counted.
     Never raises: it runs inside Hermes's tool loop, and a policy hook that raises blocks the call.
     """
     try:
@@ -95,14 +103,32 @@ def _before_tool(kwargs: Dict[str, Any]) -> Optional[Dict[str, str]]:
     if key is None:
         return None
     with _lock:
-        count = _calls.get(key, 0) + 1
-        if count <= CHECK_IN_AFTER:
-            _calls[key] = count
-            _room()
+        count = _calls.get(key, 0)
+        if count < CHECK_IN_AFTER:
             return None
         # The ask is what starts a new stretch: the model that ignores it still gets its tool back.
         del _calls[key]
-    return {"action": "block", "message": CHECK_IN.format(count=CHECK_IN_AFTER)}
+    return {"action": "block", "message": CHECK_IN_BLOCK.format(count=count)}
+
+
+def after_tool(**kwargs: Any) -> None:
+    """The ``post_tool_call`` hook: a tool call ran, so the silent stretch is one longer. A call that
+    was blocked — by this hook or any other policy — never became work the user waited on, so it is
+    not one of them.
+
+    Never raises: it runs after every tool call.
+    """
+    try:
+        if kwargs.get("status") == "blocked":
+            return
+        key = _key(kwargs)
+        if key is None:
+            return
+        with _lock:
+            _calls[key] = _calls.get(key, 0) + 1
+            _room()
+    except Exception:
+        logger.debug("memento: progress check-in count failed", exc_info=True)
 
 
 def after_model_call(**kwargs: Any) -> None:
@@ -121,8 +147,9 @@ def after_model_call(**kwargs: Any) -> None:
 
 
 def _spoke(kwargs: Dict[str, Any]) -> bool:
-    """Whether the model's reply carried text the app draws. Reasoning is not text the user reads,
-    and a host that doesn't count the characters is read from the message it sent instead."""
+    """Whether the model's reply carried any text: a reply of tool calls alone did not, and any
+    reasoning a provider leaves inline counts, the same way the host counts it. A host that sends no
+    count is read from the message it sent instead."""
     chars = kwargs.get("assistant_content_chars")
     if isinstance(chars, (int, float)):
         return chars > 0
