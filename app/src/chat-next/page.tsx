@@ -68,10 +68,16 @@ const failure = (error: unknown): ThreadEvent => ({
 const NO_CARDS: Card[] = []
 const NO_ROWS: Row[] = []
 
-/** The turns just drawn, each the very object already held where it says the same. */
+/**
+ * The turns just drawn, each the very object already held where it says the same. A turn the fold
+ * handed back unchanged is the held one by reference, so a streamed word compares only the turn
+ * being written rather than the whole transcript.
+ */
 function shared(held: Turn[], read: Turn[]): Turn[] {
   return read.map((turn, at) =>
-    held[at] && JSON.stringify(held[at]) === JSON.stringify(turn) ? held[at] : turn,
+    held[at] === turn || (held[at] && JSON.stringify(held[at]) === JSON.stringify(turn))
+      ? held[at]
+      : turn,
   )
 }
 

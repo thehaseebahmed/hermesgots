@@ -62,22 +62,29 @@ const sameRow = (a: Row, b: Row) =>
   a.timestamp === b.timestamp &&
   JSON.stringify(a.tool_calls) === JSON.stringify(b.tool_calls)
 
-/** Writes a read's rows: only the ones that are new, moved or changed, and drops the ones gone. */
-async function saveRows(database: SessionDb, session: string, set: SessionRow["set"], rows: Row[]) {
+/**
+ * Writes what a read changed since the rows last written (`was`): the rows that are new, moved or
+ * changed, and drops the ones gone. The diff is against what this store wrote or loaded, so a flush
+ * costs no read of the session, and a read that says nothing new touches the device not at all.
+ */
+async function saveRows(
+  database: SessionDb,
+  session: string,
+  set: SessionRow["set"],
+  rows: Row[],
+  was: Row[] = [],
+) {
+  const before = new Map(was.map((row, pos) => [row.id, { row, pos }]))
+  const changed = rows.flatMap((row, pos): SessionRow[] => {
+    const held = before.get(row.id)
+    return held && held.pos === pos && sameRow(held.row, row)
+      ? []
+      : [{ session, set, id: row.id, pos, row: kept(row) }]
+  })
+  const ids = new Set(rows.map((row) => row.id))
+  const gone = was.filter((row) => !ids.has(row.id)).map((row) => [session, set, row.id])
+  if (!changed.length && !gone.length) return
   await database.transaction("rw", database.sessionRows, async () => {
-    const held = await database.sessionRows
-      .where("[session+set+id]")
-      .between([session, set, Dexie.minKey], [session, set, Dexie.maxKey])
-      .toArray()
-    const byId = new Map(held.map((one) => [one.id, one]))
-    const changed = rows.flatMap((row, pos): SessionRow[] => {
-      const was = byId.get(row.id)
-      return was && was.pos === pos && sameRow(was.row, row)
-        ? []
-        : [{ session, set, id: row.id, pos, row: kept(row) }]
-    })
-    const ids = new Set(rows.map((row) => row.id))
-    const gone = held.filter((one) => !ids.has(one.id)).map((one) => [session, set, one.id])
     if (gone.length) await database.sessionRows.bulkDelete(gone as [string, string, number][])
     if (changed.length) await database.sessionRows.bulkPut(changed)
   })
@@ -146,9 +153,9 @@ function createStore(database: SessionDb, session: string, drop: () => void): Th
       return
     // One transaction, so a turn's end never shows its rows beside the streamed copy they replace.
     await database.transaction("rw", database.sessionRows, database.sessionStates, async () => {
-      if (rows !== written.rows) await saveRows(database, session, "live", rows)
+      if (rows !== written.rows) await saveRows(database, session, "live", rows, written.rows)
       if (archived && archived !== written.archived)
-        await saveRows(database, session, "archive", archived)
+        await saveRows(database, session, "archive", archived, written.archived)
       if (!sameRecord(written.record, record)) await database.sessionStates.put(record)
     })
     written = { rows, archived, record }

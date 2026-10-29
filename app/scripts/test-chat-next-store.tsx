@@ -165,3 +165,26 @@ test("deleting a chat deletes what chat-next kept of its session", async () => {
   )
   assert.equal(await db.sessionStates.get(session), undefined, "and its state")
 })
+
+test("a flush costs the device no read of the session, however long the thread", async () => {
+  const database = deviceDatabase()
+  const { store, leave } = opened(database, "s-reads")
+  const rows = Array.from({ length: 200 }, (_, at) => user(at + 1, `message ${at}`))
+  await store.apply({ type: "transcript", rows })
+  // Watched from here on: the diff is against what the store wrote, so nothing is read back.
+  let reads = 0
+  const where = database.sessionRows.where.bind(database.sessionRows)
+  database.sessionRows.where = ((...args: Parameters<typeof where>) => {
+    reads++
+    return where(...args)
+  }) as typeof where
+  await store.apply({ type: "transcript", rows: [...rows, reply(201, "One more.")] })
+  await store.apply({ type: "transcript", rows: [...rows, reply(201, "One more, changed.")] })
+  assert.equal(reads, 0)
+  assert.equal(
+    (await readRows(database, "s-reads", "live")).at(-1)?.content,
+    "One more, changed.",
+    "and the device still holds the newest",
+  )
+  leave()
+})
