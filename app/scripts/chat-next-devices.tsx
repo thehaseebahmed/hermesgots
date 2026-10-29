@@ -77,6 +77,8 @@ export async function openDevice(
   return {
     database,
     composer: () => Boolean(one("[data-composer]")),
+    /** Whether the thread says it is catching up, as the first read of it is still out. */
+    catching: () => Boolean(one("[data-catching-up]")),
     /** The line a host that can't be reached is given, over what the device holds. */
     away: () => Boolean(one("[data-away]")),
     turns: (): ExpectedTurn[] =>

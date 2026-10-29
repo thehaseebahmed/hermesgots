@@ -1,7 +1,9 @@
 import type { ReactNode } from "react"
 
 import { Spinner } from "@/components/ui/spinner"
+import { CATCHING_ACTIVITY, THINKING_ACTIVITY, WRITING_ACTIVITY } from "@/lib/format"
 import { REPLY_INSET } from "@/lib/layout"
+import { useBusyWord } from "@/lib/use-busy-word"
 import { cn } from "@/lib/utils"
 
 /**
@@ -11,15 +13,28 @@ import { cn } from "@/lib/utils"
  */
 export function StatusLine({
   text,
+  seed = "",
   waiting,
   children,
 }: {
   text?: string
+  /** What the rotating word is drawn from, so a reply keeps its own while it streams. */
+  seed?: string
   /** The turn wants the reader, not the host: its words stand and no loader turns beside them. */
   waiting?: boolean
   children?: ReactNode
 }) {
   const working = Boolean(text) && !waiting
+  const kind = !working
+    ? undefined
+    : text === THINKING_ACTIVITY
+      ? "thinking"
+      : text === WRITING_ACTIVITY
+        ? "writing"
+        : text === CATCHING_ACTIVITY
+          ? "catching"
+          : undefined
+  const word = useBusyWord(kind, seed) ?? text
   return (
     <div
       className={cn(
@@ -31,9 +46,9 @@ export function StatusLine({
       data-slot="status-line"
     >
       {working && <Spinner aria-hidden />}
-      {text && (
+      {word && (
         <span className="min-w-0 truncate" data-slot="status-words">
-          {text}
+          {word}
         </span>
       )}
       {children}

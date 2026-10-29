@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { db, type Message, type Settings, type ToolEvent } from "@/lib/db"
+import { BUSY_WORDS } from "@/lib/busy-words"
 import type { ReasoningRun } from "@/lib/thinking"
 import {
   absent,
@@ -164,6 +165,9 @@ function sized(element: Element, size: { client: number; scroll: number }) {
   Object.defineProperty(element, "scrollHeight", { value: size.scroll, configurable: true })
 }
 
+const WRITING = new RegExp(`(${BUSY_WORDS.writing.join("|")})…`)
+const WRITING_WHOLE = new RegExp(`^(${BUSY_WORDS.writing.join("|")})…$`)
+
 test("a working row spins beside its words, and the footer never says it too", async () => {
   host()
   const id = "streaming"
@@ -203,7 +207,7 @@ test("a reply that never thinks wears the row while it works, and loses it at th
     await db.messages.put({ ...(await db.messages.get(id))!, content: ANSWER })
     await settle()
     assert.equal(thinkingLines().length, 0, "the model never thought, so the row goes with that")
-    assert.match(screenText(), /Writing…/, "and the footer says what the reply is doing instead")
+    assert.match(screenText(), WRITING, "and the footer says what the reply is doing instead")
   })
 })
 
@@ -525,7 +529,7 @@ test("the footer names what the turn is doing beside a loader, and a thought row
     await stream(id)
     const line = workingLine()
     assert.ok(line, "the footer says what the turn is doing")
-    assert.equal(statusWords(), "Writing…", "the words stand whole, untyped")
+    assert.match(statusWords(), WRITING_WHOLE, "the words stand whole, untyped")
     assert.ok(statusLoader(), "and a loader turns beside them")
     assert.match(
       line!.className,

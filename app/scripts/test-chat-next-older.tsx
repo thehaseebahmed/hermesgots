@@ -244,3 +244,19 @@ test("the app's rows keep their ids while older turns are added above, which is 
     )
   })
 })
+
+test("a thread whose first read is still out says it is catching up, and stops when rows land", async () => {
+  const host = fakeHost("memento-catching")
+  host.seed(LONG)
+  const first = host.hold(0)
+  await withDevice(openDevice(host), async (device) => {
+    await eventually(
+      () => assert.ok(host.offsets.includes(0), "the newest page is asked for"),
+      "the first page is in flight",
+    )
+    assert.equal(device.catching(), true, "nothing is drawn yet, and it says why")
+    first.release()
+    await showsEverything(device, host, "the whole chat")
+    assert.equal(device.catching(), false, "it stops once the rows are in")
+  })
+})

@@ -1,4 +1,4 @@
-import { Spinner } from "@/components/ui/spinner"
+import { WorkLabel, WorkRow, WorkSign } from "@/components/chat/work-row"
 import { subagentsLine } from "@/lib/agents"
 import { cn } from "@/lib/utils"
 
@@ -20,6 +20,18 @@ export function SubagentLine({
   className?: string
 }) {
   if (count <= 0) return null
+  // Alone it is a work row like the Thinking and Running rows around it; beside a status line's
+  // words (`spinner` false) it is their suffix and the line's own loader serves both.
+  if (spinner)
+    return (
+      <WorkRow
+        before={<WorkSign />}
+        onClick={onOpen}
+        className={cn("w-auto max-w-full self-start text-info hover:underline", className)}
+      >
+        <WorkLabel>{subagentsLine(count)}</WorkLabel>
+      </WorkRow>
+    )
   return (
     <button
       type="button"
@@ -29,7 +41,6 @@ export function SubagentLine({
         className,
       )}
     >
-      {spinner && <Spinner aria-hidden />}
       <span className="truncate">{subagentsLine(count)}</span>
     </button>
   )

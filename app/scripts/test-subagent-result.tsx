@@ -4,6 +4,7 @@
  * sub-thread its card opens. The chat reads the transcript, so a synced or reloaded one draws the
  * same thread.
  */
+import { BUSY_WORDS } from "@/lib/busy-words"
 import assert from "node:assert/strict"
 import test from "node:test"
 import { MemoryRouter, Route, Routes } from "react-router"
@@ -204,7 +205,8 @@ const bubble = (row: Element) => row.querySelector("[data-slot=bubble]")
 const resultRow = () => rows().find((row) => row.textContent?.includes("The fixture is in place"))
 const agentCard = () => document.querySelector("[data-slot=agent-card]")
 
-const drawn = () => rows().map((row) => `${row.getAttribute("data-align")}:${row.textContent ?? ""}`)
+const drawn = () =>
+  rows().map((row) => `${row.getAttribute("data-align")}:${row.textContent ?? ""}`)
 
 /** The thread as it lands: the catch-up reads Hermes, then the turn's rows draw. */
 async function landed() {
@@ -440,7 +442,7 @@ test("nothing pins under a reply that is still streaming, and nothing goes", asy
         assert.equal(before.length, 2, "the user's message, and the reply still streaming")
         assert.match(
           rows().at(-1)?.textContent ?? "",
-          /Sent it off.*Writing/,
+          new RegExp(`Sent it off.*(${BUSY_WORDS.writing.join("|")})…`),
           "the reply is the thread's last row, and says it is still writing",
         )
         // A catch-up lands while that reply streams: Hermes has news of a finished subagent.

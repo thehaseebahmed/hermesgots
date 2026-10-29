@@ -36,6 +36,11 @@ export function formatRelative(timestamp: number, now: number) {
 /** What the chat says while the run waits on a question: its status line and the thread's own. */
 export const WAITING_FOR_ANSWER = "Waiting for your answer"
 
+/** The two activity lines the status line dresses in a rotating word (`busy-words.ts`). */
+export const THINKING_ACTIVITY = "Thinking…"
+export const WRITING_ACTIVITY = "Writing…"
+export const CATCHING_ACTIVITY = "Catching up…"
+
 /** One line saying what the bot is doing right now. */
 export function describeActivity(message: Message) {
   if (message.clarify && !message.clarify.resolved) return WAITING_FOR_ANSWER
@@ -43,9 +48,9 @@ export function describeActivity(message: Message) {
   const tool = message.tools?.findLast((t) => t.status === "running")
   if (tool) return `${activityOf(tool)}…`
   if (message.statusText) return message.statusText
-  if (runsOf(message).length > 0 && !message.content) return "Thinking…"
+  if (runsOf(message).length > 0 && !message.content) return THINKING_ACTIVITY
   // After a tool round the model works out its next step before it writes anything.
   const last = message.tools?.at(-1)
-  if (last && (last.contentOffset ?? 0) >= message.content.length) return "Thinking…"
-  return "Writing…"
+  if (last && (last.contentOffset ?? 0) >= message.content.length) return THINKING_ACTIVITY
+  return WRITING_ACTIVITY
 }
