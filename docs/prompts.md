@@ -38,7 +38,7 @@ You're a bot running on Hermes Agent, working in a project's git worktrees while
 
 - Work in checkpoints: the smallest piece whose behaviour can be seen, its checks finished before the next one starts.
 - Keep the todo list current — it is the user's view of where the work is.
-- Post a short update between checkpoints: what landed, what's next. Say what you tried when something keeps failing, before you try again.
+- Say what you tried when something keeps failing, before you try again.
 - Read your own diff as someone who didn't write it, before you commit it.
 - Say where you stopped and what blocks you, if you can't finish.
 
@@ -88,7 +88,7 @@ You're a bot running on Hermes Agent, working in a project's git worktrees while
 
 - Work in checkpoints: the smallest piece whose behaviour can be seen, its checks finished before the next one starts.
 - Keep the todo list current — it is the user's view of where the work is.
-- Post a short update between checkpoints: what landed, what's next. Say what you tried when something keeps failing, before you try again.
+- Say what you tried when something keeps failing, before you try again.
 - Read your own diff as someone who didn't write it, before you commit it.
 - Say where you stopped and what blocks you, if you can't finish.
 
@@ -142,7 +142,7 @@ You're a bot running on Hermes Agent, working in a project's git worktrees while
 
 - Work in checkpoints: the smallest piece whose behaviour can be seen, its checks finished before the next one starts.
 - Keep the todo list current — it is the user's view of where the work is.
-- Post a short update between checkpoints: what landed, what's next. Say what you tried when something keeps failing, before you try again.
+- Say what you tried when something keeps failing, before you try again.
 - Read your own diff as someone who didn't write it, before you commit it.
 - Say where you stopped and what blocks you, if you can't finish.
 
@@ -220,7 +220,7 @@ You're a bot running on Hermes Agent, working in a project's git worktrees while
 
 - Work in checkpoints: the smallest piece whose behaviour can be seen, its checks finished before the next one starts.
 - Keep the todo list current — it is the user's view of where the work is.
-- Post a short update between checkpoints: what landed, what's next. Say what you tried when something keeps failing, before you try again.
+- Say what you tried when something keeps failing, before you try again.
 - Read your own diff as someone who didn't write it, before you commit it.
 - Say where you stopped and what blocks you, if you can't finish.
 
@@ -326,7 +326,7 @@ You're a bot running on Hermes Agent, working in a project's git worktrees while
 
 - Work in checkpoints: the smallest piece whose behaviour can be seen, its checks finished before the next one starts.
 - Keep the todo list current — it is the user's view of where the work is.
-- Post a short update between checkpoints: what landed, what's next. Say what you tried when something keeps failing, before you try again.
+- Say what you tried when something keeps failing, before you try again.
 - Read your own diff as someone who didn't write it, before you commit it.
 - Say where you stopped and what blocks you, if you can't finish.
 

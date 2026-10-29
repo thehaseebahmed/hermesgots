@@ -59,8 +59,8 @@ import { DICTATION } from "@/lib/dictation"
 import { MAX_FALLBACKS } from "@/lib/fallback-list"
 import { useFallbackModels } from "@/lib/fallbacks"
 import { usePluginFeatureAnswers } from "@/lib/features"
-import { formatRelative } from "@/lib/format"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
+import { formatRelative } from "@/lib/format"
 import {
   checkHealth,
   getPluginVersion,
