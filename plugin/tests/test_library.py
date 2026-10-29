@@ -364,10 +364,13 @@ class InstructionsTest(unittest.TestCase):
 
     def test_the_block_names_the_rhythm_rules(self) -> None:
         text = prompt_builder.session_prompt(self.record)
-        self.assertIn("short update between checkpoints", text)
         self.assertIn("Keep the todo list current", text)
         self.assertIn("before you commit it", text, "the diff is read before it goes in")
         self.assertIn("Don't narrate each edit", text)
+        # How often the bot says what it is doing is not the prompt's to ask for: the reminder is
+        # the only thing that asks, at the bot's own level (ADR 0066).
+        self.assertNotIn("short update between checkpoints", text)
+        self.assertIn("Say what you tried when something keeps failing", text)
 
     def test_the_media_block_says_how_a_file_is_named_and_where_it_may_come_from(self) -> None:
         # The tag is a message's own convention, so it is told beside the tools rather than in one of

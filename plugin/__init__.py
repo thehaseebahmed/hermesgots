@@ -56,6 +56,7 @@ from . import (
     outbox,
     pipeline,
     projects,
+    progress,
     prompt_builder,
     repos,
     research,
@@ -427,6 +428,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "prs",
                     "plans",
                     "library",
+                    # How often a bot is asked to say what it is doing: a row on its General page
+                    # (progress.py). An app that predates the row draws nothing for it.
+                    "progress_reminders",
                     # A project's ready tasks, read from its repositories' GitHub issues; see tasks.py.
                     "afk",
                     # Whether that project is left to work them: AFK's switch, the project's own
@@ -805,6 +809,30 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return denied
         on = await asyncio.to_thread(openui.enabled, store_path())
         return web.json_response(openui.record(on))
+
+    async def get_reminders(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            held = await asyncio.to_thread(progress.level, store_path())
+        except Exception:
+            # A store that can't be read is said, not guessed at: the app's row reads the failure.
+            return _error(web, "Couldn't read this bot's reminders setting.", 503)
+        return web.json_response(progress.record(held))
+
+    async def set_reminders(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request) or {}
+        try:
+            held = await asyncio.to_thread(progress.set_level, store_path(), body.get("level"))
+        except ValueError as error:
+            return _error(web, str(error), 400)
+        except Exception:
+            return _error(web, "Couldn't save this bot's reminders setting.", 503)
+        return web.json_response(progress.record(held))
 
     async def set_openui(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1769,6 +1797,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/delegation", get_delegation)
     app.router.add_get(f"{PREFIX}/triage-model", get_triage_model)
     app.router.add_get(f"{PREFIX}/openui", get_openui)
+    app.router.add_get(f"{PREFIX}/reminders", get_reminders)
     app.router.add_get(f"{PREFIX}/skills", list_skills)
     # The list's writes and one skill's read, in the `skills/{name}` space the list answers for. The
     # word `skills` itself is a static segment above, so it is registered first; no static sibling
@@ -1796,6 +1825,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/delegation", set_delegation)
     app.router.add_post(f"{PREFIX}/triage-model", set_triage_model)
     app.router.add_post(f"{PREFIX}/openui", set_openui)
+    app.router.add_post(f"{PREFIX}/reminders", set_reminders)
     app.router.add_get(f"{PREFIX}/github", github_status)
     app.router.add_get(f"{PREFIX}/github/repos", github_repos)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/label", label_session)
@@ -2761,6 +2791,13 @@ def register(ctx) -> None:
         register_hook("post_api_request", context.record)
         register_hook("post_api_request", model_changes.record)
         register_hook("post_api_request", community.record)
+        # A long silent tool loop is asked for an update; see progress.py. Registered before the
+        # policy hooks below because the first block wins, and a reminder swallowed by plan mode's
+        # own block would never reach the model.
+        register_hook("pre_tool_call", progress.before_tool)
+        register_hook("post_tool_call", progress.after_tool)
+        register_hook("post_api_request", progress.after_model_call)
+        register_hook("pre_llm_call", progress.turn_started)
         register_hook("pre_tool_call", sessions.before_tool)
         # What each run executed, kept on its stage for the details sheet; see commands.py.
         register_hook("pre_tool_call", commands.before_tool)

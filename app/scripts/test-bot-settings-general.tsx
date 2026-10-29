@@ -102,6 +102,8 @@ function host({
         ],
       })
     if (url.pathname.endsWith("/models")) return json({ data: models.map((id) => ({ id })) })
+    if (url.pathname.endsWith("/plugins/memento/reminders"))
+      return json({ object: "memento.progress_reminders", level: body?.level ?? "normal", levels: ["off", "normal", "frequent"] })
     if (url.pathname.endsWith("/health"))
       return health ? json({ error: { message: health } }, 500) : json({ ok: true })
     return json({})
@@ -544,5 +546,57 @@ test("an address into a page this bot doesn't have draws no edit of it, and writ
       [],
       "and nothing was sent anywhere",
     )
+  })
+})
+
+test("the reminders row is chosen where it sits, and shows no count", async () => {
+  const calls = await seed("general-reminders", { hostId: "host-1" }, [
+    ...FEATURES,
+    "progress_reminders",
+  ])
+  await mount(general(), async () => {
+    await until(() => Boolean(row("reminders")), "the reminders row")
+    assert.match(rowText("reminders"), /Progress updates/, "the row names what the setting is for")
+    assert.match(
+      rowText("reminders"),
+      /How much it says is still the bot's call/,
+      "and says what the levels do not promise",
+    )
+    const pills = findAll('[data-setting="reminders"] [role="radio"]')
+    assert.deepEqual(
+      pills.map((one) => words(one)),
+      ["Off", "Normal", "Frequent"],
+      "three words, and no numbers",
+    )
+    assert.doesNotMatch(rowText("reminders"), /\d/, "the counts behind them stay on the host")
+
+    const chosen = () =>
+      findAll('[data-setting="reminders"] [aria-checked="true"]').map((one) => words(one))
+    assert.deepEqual(chosen(), ["Normal"], "the level the host answered is the one that reads on")
+
+    const frequent = pills.find((one) => words(one) === "Frequent")
+    assert.ok(frequent, "Frequent is a pill the row draws")
+    await click(frequent)
+    await until(
+      () => calls.some((one) => one.method === "POST" && one.path.endsWith("/reminders")),
+      "the level's write",
+    )
+    assert.deepEqual(
+      calls.find((one) => one.method === "POST" && one.path.endsWith("/reminders"))?.body,
+      { level: "frequent" },
+      "choosing a pill writes that level, and the counts stay the host's",
+    )
+    await until(
+      () => chosen()[0] === "Frequent",
+      "the level the host answered back",
+    )
+  })
+})
+
+test("a plugin that doesn't advertise reminders draws no row", async () => {
+  await seed("general-no-reminders", { hostId: "host-1" })
+  await mount(general(), async () => {
+    assert.equal(row("reminders"), null, "no row to set a setting this host doesn't have")
+    assert.doesNotMatch(words(page()), /Progress updates/)
   })
 })

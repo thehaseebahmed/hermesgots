@@ -19,6 +19,7 @@ import { Banner } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { BOTS } from "@/components/bots"
 import { CodingTab } from "@/components/bot-coding-tab"
+import { Segmented } from "@/components/segmented"
 import { DictationTab } from "@/components/bot-dictation-tab"
 import { McpsTab } from "@/components/mcps-tab"
 import { SkillsTab } from "@/components/skills-tab"
@@ -35,6 +36,7 @@ import {
   SwitchRow,
   ValueRow,
   linkRowClass,
+  rowClass,
   useHeaderAction,
 } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
@@ -59,12 +61,19 @@ import { useFallbackModels } from "@/lib/fallbacks"
 import { usePluginFeatureAnswers } from "@/lib/features"
 import { READ_TIMEOUT_MS } from "@/lib/freshness"
 import { formatRelative } from "@/lib/format"
-import { checkHealth, getPluginVersion, listModels } from "@/lib/hermes"
+import {
+  checkHealth,
+  getPluginVersion,
+  listModels,
+  REMINDER_LEVELS,
+  type ReminderLevel,
+} from "@/lib/hermes"
 import { useLarge } from "@/lib/media"
 import { MCP_FEATURES } from "@/lib/mcps"
 import { botModel, fullModel, setDefaultModel, useModelInfo } from "@/lib/model-info"
 import { syncContextWindow } from "@/lib/models"
 import { setBotMuted } from "@/lib/push"
+import { useReminders } from "@/lib/reminders"
 import { isOnline, removeHost, setBotEnabled } from "@/lib/registry"
 import { SKILL_FEATURES } from "@/lib/skills"
 import { useNow } from "@/lib/threads"
@@ -157,6 +166,56 @@ function MutedSetting({ profile }: { profile: Profile }) {
       checked={Boolean(profile.muted)}
       onCheckedChange={(checked) => void setBotMuted(profile.id, checked)}
     />
+  )
+}
+
+/** What each level is called on the row. The levels themselves are the host's vocabulary. */
+const REMINDER_LABELS: Record<ReminderLevel, string> = {
+  off: "Off",
+  normal: "Normal",
+  frequent: "Frequent",
+}
+
+/**
+ * How often Gots asks this bot to say what it is doing (`progress.py`, ADR 0068): a value held per
+ * bot on its host, set where the switches beside it are set, since a control that acts where it
+ * sits is what the row is (ADR 0055).
+ *
+ * The words name what Gots does, not what the bot will do: however often it is asked, how much it
+ * says is the model's own choice, and the line under the row tells the reader so. Nothing here
+ * shows a count — twenty calls and ten are the loop's business, not the reader's.
+ */
+function RemindersSetting({ profile }: { profile: Profile }) {
+  const { value, supported, settled, saving, save } = useReminders(profile)
+  if (!supported) return null
+
+  return (
+    <div
+      className={cn(rowClass, "flex-col items-stretch gap-3")}
+      aria-busy={saving || undefined}
+      data-setting="reminders"
+    >
+      <span className="flex min-w-0 flex-col gap-1">
+        <span className="text-base">Progress updates</span>
+        <span className="text-sm text-muted-foreground">
+          How often Gots asks the bot to say what it&apos;s doing. How much it says is still the
+          bot&apos;s call.
+        </span>
+      </span>
+      <Segmented
+        label="Progress updates"
+        options={REMINDER_LEVELS.map((id) => ({ id, label: REMINDER_LABELS[id] }))}
+        value={value}
+        onChange={(next) => {
+          void save(next).catch((error: unknown) =>
+            toast.error(
+              error instanceof Error ? error.message : "Couldn't save that reminder level.",
+            ),
+          )
+        }}
+        disabled={!settled || saving}
+      />
+    </div>
   )
 }
 
@@ -501,6 +560,7 @@ function GeneralPage({
       <Group>
         {linked && <EnabledSetting profile={profile} />}
         <MutedSetting profile={profile} />
+        <RemindersSetting profile={profile} />
       </Group>
 
       <Caption>Bot Profile</Caption>
