@@ -17,9 +17,8 @@ for (const [width, dark] of [
     async ({ page, seed, send, shot }) => {
       // The new screen is a Developer switch: a chat of its own opens on it with both on.
       await page.evaluate(async () => {
-        const { db } = await import("/src/lib/db.ts")
-        const settings = await db.settings.get("settings")
-        await db.settings.put({ ...settings, developer: true, chatNext: true })
+        const { saveSettings } = await import("/src/lib/db.ts")
+        await saveSettings({ developer: true, chatNext: true })
       })
       const chat = `e2e-question-card-${runId()}`
       await seed([{ id: chat, title: "Question card" }])
@@ -42,7 +41,7 @@ for (const [width, dark] of [
         "the question is the composer's, not the thread's",
       )
       assert.equal(
-        await thread.locator("[data-slot=card]").count(),
+        await thread.locator("[data-slot=card]").filter({ hasText: QUESTION }).count(),
         0,
         "no card of the question's own in the thread",
       )

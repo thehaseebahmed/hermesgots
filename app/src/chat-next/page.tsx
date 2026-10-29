@@ -43,6 +43,7 @@ import {
   type Connection,
   type Queued,
 } from "./api"
+import { clarifyRead } from "@/lib/clarify"
 import { foldTurns, type Row, type ToolCall, type Turn } from "./fold"
 import { isLast, nextOffset, originOf, shift } from "./pages"
 import { foldedOf, threadTurns, turnsOf, type ThreadEvent, type Waiting } from "./state"
@@ -51,40 +52,10 @@ import type { PreparedTurn } from "./turn"
 
 /** The questions a finished `clarify` call got answered, each as "<question> → <answer>". */
 function answered(call: ToolCall): string[] {
-  if (call.name !== "clarify" || !call.result) return []
-  try {
-    const { responses } = JSON.parse(call.result) as {
-      responses?: { question: string; user_response: string | string[] | null }[]
-    }
-    return (responses ?? [])
-      .filter((one) => one.user_response !== null && one.user_response !== undefined)
-      .map((one) => {
-        const given = Array.isArray(one.user_response)
-          ? one.user_response.join(", ")
-          : one.user_response
-        return `${one.question} → ${given}`
-      })
-  } catch {
-    return []
-  }
-}
-
-/**
- * What Hermes's `clarify` tool returns for the one answer given, so the thread's card reads the
- * same live as it will from the transcript: `{ responses, outcome }`, one response.
- */
-function clarifyResult(waiting: Extract<Waiting, { kind: "question" }>, answer: string) {
-  return JSON.stringify({
-    responses: [
-      {
-        question: waiting.question,
-        choices_offered: waiting.choices.length ? waiting.choices : null,
-        status: answer ? "answered" : "skipped",
-        user_response: answer || null,
-      },
-    ],
-    outcome: "submitted",
-  })
+  if (call.name !== "clarify") return []
+  return clarifyRead(call.result).asked.flatMap((question) =>
+    question.answers.length ? [`${question.question} → ${question.answers.join(", ")}`] : [],
+  )
 }
 
 const failure = (error: unknown): ThreadEvent => ({
@@ -1109,7 +1080,15 @@ export function ChatNextThread({
       await respond({ server, key }, waiting, value)
       dispatch({
         type: "answered",
-        ...(waiting.kind === "question" ? { result: clarifyResult(waiting, value) } : {}),
+        ...(waiting.kind === "question"
+          ? {
+              answer: {
+                question: waiting.question,
+                choicesOffered: waiting.choices.length ? waiting.choices : null,
+                value,
+              },
+            }
+          : {}),
       })
     } catch (error) {
       dispatch(failure(error))

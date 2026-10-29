@@ -3530,41 +3530,31 @@ function startRun(req, body, options = {}) {
       const answers = {}
       let outcome = "submitted"
       const whole = new Promise((resolve) => pendingClarifies.set(id, { clarify_id, resolve }))
-      let wholeAnswer
-      void whole.then((reply) => {
-        wholeAnswer = reply
-      })
+      // One deadline for the whole call, as the plugin's own wait has: a question set answered
+      // slowly must not leave a timer behind per question.
+      const deadline = sleep(120_000).then(() => ({ timeout: true }))
       for (const [at, question] of questions.entries()) {
-        if (wholeAnswer) break
-        const prompt_id = `${clarify_id}-${at}`
+        // One object for both readers: the run's status and the stream say the same thing, as an
+        // approval's do.
         run.clarify = {
           event: "clarify.request",
           run_id: id,
           timestamp: Date.now() / 1000,
           clarify_id,
           questions,
-          prompt_id,
+          prompt_id: `${clarify_id}-${at}`,
           execution_generation: 0,
           question: question.question,
           choices: question.choices ?? [],
           multi_select: Boolean(question.multi_select),
         }
-        push("clarify.request", {
-          run_id: id,
-          clarify_id,
-          questions,
-          prompt_id,
-          execution_generation: 0,
-          question: question.question,
-          ...(question.choices?.length ? { choices: question.choices } : {}),
-          ...(question.multi_select ? { multi_select: true } : {}),
-        })
+        push("clarify.request", run.clarify)
         const settled = await Promise.race([
-          new Promise((resolve) => pendingPrompts.set(prompt_id, resolve)),
+          new Promise((resolve) => pendingPrompts.set(run.clarify.prompt_id, resolve)),
           whole,
-          sleep(120_000).then(() => ({ timeout: true })),
+          deadline,
         ])
-        pendingPrompts.delete(prompt_id)
+        pendingPrompts.delete(run.clarify.prompt_id)
         if (!settled || settled.timeout) {
           outcome = "timed_out"
           break
@@ -3576,7 +3566,7 @@ function startRun(req, body, options = {}) {
           break
         }
         answers[question.id] = settled.answer || null
-        push("clarify.settled", { prompt_id, execution_generation: 0 })
+        push("clarify.settled", { prompt_id: run.clarify.prompt_id, execution_generation: 0 })
       }
       pendingClarifies.delete(id)
       run.status = "running"

@@ -159,15 +159,50 @@ test("the answer the app gave is the call's result, since the served turn's comp
     ],
     outcome: "submitted",
   })
-  const after = reduce(state, { type: "answered", result })
+  const after = reduce(state, {
+    type: "answered",
+    answer: { question: "Tea?", choicesOffered: ["yes", "no"], value: "yes" },
+  })
   assert.equal(after.waiting, undefined, "the card goes")
   assert.deepEqual(
     calls(after).map((call) => call.result),
     [result],
     "the answer is what the thread's card reads",
   )
-  // The transcript's own row is what the next read takes, so nothing here outlives the turn.
-  assert.equal(state.live?.turn.parts.length, after.live?.turn.parts.length)
+  // The transcript's own row is what the next read takes, so the answer touches nothing else: the
+  // rows and what the turn cost are the very objects they were.
+  assert.equal(after.rows, state.rows)
+  assert.equal(after.stats, state.stats)
+
+  // The host's completion lands after the answer, carrying no result of its own: the answer stays.
+  const completed = reduce(after, {
+    type: "run",
+    event: {
+      event: "tool.completed",
+      tool: "clarify",
+      tool_call_id: "c1",
+      preview: "",
+    } as RunEvent,
+  })
+  assert.deepEqual(
+    calls(completed).map((call) => call.result),
+    [result],
+    "an empty completion never empties an answered call",
+  )
+
+  // A call that asked a second question is answered once per prompt: both answers stay, in order.
+  const sugar = reduce(
+    { ...completed, waiting: { ...state.waiting!, promptId: "p2", question: "Sugar?" } },
+    { type: "answered", answer: { question: "Sugar?", choicesOffered: ["yes", "no"], value: "no" } },
+  )
+  assert.deepEqual(
+    JSON.parse(calls(sugar)[0].result ?? "{}").responses,
+    [
+      { question: "Tea?", choices_offered: ["yes", "no"], status: "answered", user_response: "yes" },
+      { question: "Sugar?", choices_offered: ["yes", "no"], status: "answered", user_response: "no" },
+    ],
+    "one call's answers are all of them",
+  )
 })
 
 test("a block of thinking waits for the word or call it led to, and leads it", () => {

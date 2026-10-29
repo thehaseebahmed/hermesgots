@@ -9,7 +9,6 @@ import {
   type ApprovalChoice,
   type Attachment,
   type ClarifyAnswers,
-  type ClarifyRequest,
   type Conversation,
   type Message,
   type MessageStatus,
@@ -63,6 +62,7 @@ import { askTriage, canTriage, triaging } from "@/lib/triage"
 import { takeHostTitle } from "@/lib/title"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { appendThinking, closeRun, forgetRuns, noteRunThinking } from "@/lib/thinking"
+import { clarifyResult } from "@/lib/clarify"
 import { quietly } from "@/lib/report"
 import { canSteer, midReply } from "@/lib/steer"
 import { actionOfPreview } from "@/lib/tools"
@@ -259,22 +259,6 @@ function closeThinkingRun(turn: Turn) {
   turn.draft.reasoningRuns = next
 }
 
-/** What Hermes's clarify tool returns for the answers given, so a question reads the same live and from the transcript. */
-function clarifyResult(clarify: ClarifyRequest, answers: ClarifyAnswers, outcome: string) {
-  return JSON.stringify({
-    responses: clarify.questions.map((q) => {
-      const answer = answers[q.id] ?? null
-      return {
-        question: q.question,
-        choices_offered: q.choices ?? null,
-        status: answer ? "answered" : outcome === "submitted" ? "skipped" : "unanswered",
-        user_response: answer,
-      }
-    }),
-    outcome,
-  })
-}
-
 /**
  * Marks the reply's question answered and gives its `clarify` call the full result: the run
  * stream's own preview of it is cut at 500 characters, and the thread's card reads the call.
@@ -287,7 +271,14 @@ function settledClarify(
   const clarify = { ...message.clarify!, resolved: { answers, outcome } }
   const tools = [...(message.tools ?? [])]
   const at = tools.findLastIndex((t) => t.tool === "clarify")
-  if (at >= 0) tools[at] = { ...tools[at], result: clarifyResult(clarify, answers, outcome) }
+  if (at >= 0) {
+    const responses = clarify.questions.map((question) => ({
+      question: question.question,
+      choicesOffered: question.choices ?? null,
+      answer: answers[question.id] ?? null,
+    }))
+    tools[at] = { ...tools[at], result: clarifyResult(responses, outcome) }
+  }
   return { clarify, tools }
 }
 
