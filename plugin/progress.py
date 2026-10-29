@@ -22,16 +22,15 @@ import logging
 import threading
 from typing import Any, Dict, Optional, Tuple
 
+from . import sessions
+
 logger = logging.getLogger(__name__)
 
 # Calls between check-ins, counted since the agent last wrote something the user sees.
 CHECK_IN_AFTER = 20
-# Sessions at work at once in one process; a stale entry is only a count, so it is dropped, not kept.
+# Counts kept at once: the sessions at work in one process. A stale one is only a number, so the
+# oldest is dropped rather than the table growing for as long as the gateway runs.
 KEEP_SESSIONS = 512
-
-# Gots's own chats mint this prefix (``createConversation`` in the app); a delegated child is a
-# fresh session of its own, whose "reply" no user is reading, so the count is Gots's alone.
-SESSION_PREFIX = "memento-"
 
 CHECK_IN = (
     "Progress check-in: {count} tool calls in this turn with nothing said to the user. Reply with a"
@@ -43,27 +42,38 @@ _lock = threading.Lock()
 _calls: Dict[Tuple[str, str], int] = {}
 
 
-def _key(kwargs: Dict[str, Any]) -> Optional[Tuple[str, str]]:
-    """What one continuous stretch of tool calls is counted under, or None for a session that isn't
-    Gots's."""
+def _session(kwargs: Dict[str, Any]) -> Optional[str]:
+    """The session this hook call belongs to, or None for one that isn't Gots's.
+
+    Gots mints its chats' ids (``createConversation`` in the app), and a delegated child is a fresh
+    session of its own — its reply reaches its parent, not the user — so the prefix gates both.
+    """
     session_id = kwargs.get("session_id") or ""
-    if not isinstance(session_id, str) or not session_id.startswith(SESSION_PREFIX):
+    if isinstance(session_id, str) and session_id.startswith(sessions.MEMENTO_ID_PREFIX):
+        return session_id
+    return None
+
+
+def _key(kwargs: Dict[str, Any]) -> Optional[Tuple[str, str]]:
+    """What one continuous stretch of tool calls is counted under: a turn of a Gots session."""
+    session_id = _session(kwargs)
+    if session_id is None:
         return None
-    turn_id = kwargs.get("turn_id") or ""
-    return session_id, turn_id if isinstance(turn_id, str) else ""
+    return session_id, str(kwargs.get("turn_id") or "")
 
 
 def _forget(session_id: str) -> None:
     """Drops every turn of one session: its turn is over, or its agent has just spoken."""
     with _lock:
-        for key in [key for key in _calls if key[0] == session_id]:
-            del _calls[key]
+        for key in list(_calls):
+            if key[0] == session_id:
+                del _calls[key]
 
 
 def _room() -> None:
-    """Keeps the table small: the oldest count is the one least likely to be needed. Called with the
+    """Drops the oldest count, so the table stays as small as the sessions at work. Called with the
     lock held."""
-    while len(_calls) > KEEP_SESSIONS:
+    if len(_calls) > KEEP_SESSIONS:
         del _calls[next(iter(_calls))]
 
 
@@ -91,7 +101,7 @@ def _before_tool(kwargs: Dict[str, Any]) -> Optional[Dict[str, str]]:
             _room()
             return None
         # The ask is what starts a new stretch: the model that ignores it still gets its tool back.
-        _calls[key] = 0
+        del _calls[key]
     return {"action": "block", "message": CHECK_IN.format(count=CHECK_IN_AFTER)}
 
 
@@ -103,22 +113,19 @@ def after_model_call(**kwargs: Any) -> None:
     """
     try:
         key = _key(kwargs)
-        if key is None or not _spoke(kwargs):
-            return
-        with _lock:
-            _calls.pop(key, None)
+        if key is not None and _spoke(kwargs):
+            with _lock:
+                _calls.pop(key, None)
     except Exception:
         logger.debug("memento: progress check-in reset failed", exc_info=True)
 
 
 def _spoke(kwargs: Dict[str, Any]) -> bool:
-    """Whether the model's reply carried text the app draws — reasoning and tool calls alone are not
-    words the user reads."""
+    """Whether the model's reply carried text the app draws. Reasoning is not text the user reads,
+    and a host that doesn't count the characters is read from the message it sent instead."""
     chars = kwargs.get("assistant_content_chars")
-    if isinstance(chars, bool) or not isinstance(chars, (int, float)):
-        return False
-    if chars > 0:
-        return True
+    if isinstance(chars, (int, float)):
+        return chars > 0
     message = kwargs.get("assistant_message")
     content = message.get("content") if isinstance(message, dict) else None
     return isinstance(content, str) and bool(content.strip())
@@ -128,8 +135,8 @@ def turn_started(**kwargs: Any) -> None:
     """The ``pre_llm_call`` hook: a new turn starts its stretch of calls at zero, whatever the turn
     before it ended on."""
     try:
-        session_id = kwargs.get("session_id") or ""
-        if isinstance(session_id, str) and session_id.startswith(SESSION_PREFIX):
+        session_id = _session(kwargs)
+        if session_id is not None:
             _forget(session_id)
     except Exception:
         logger.debug("memento: progress check-in turn reset failed", exc_info=True)
