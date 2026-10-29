@@ -1216,8 +1216,10 @@ export async function setTriageModel(
   return pickOf((await response.json())?.triage_model)
 }
 
-/** The words a bot's reminders level is chosen from, `off` asking never. */
-export type ReminderLevel = "off" | "normal" | "frequent"
+/** The levels a bot's reminders may be set to, `off` asking never. The counts behind each are the
+ * host's, so a level it learns before this list does reads as Normal here. */
+export const REMINDER_LEVELS = ["off", "normal", "frequent"] as const
+export type ReminderLevel = (typeof REMINDER_LEVELS)[number]
 
 /**
  * How often Gots asks this bot to say what it is doing (`progress.py`, ADR 0066): `off`, `normal`
@@ -1230,7 +1232,7 @@ export async function getReminderLevel(config: HermesConfig, signal?: AbortSigna
     signal,
   })
   const level = (await response.json())?.level
-  return (level === "off" || level === "frequent" ? level : "normal") as ReminderLevel
+  return REMINDER_LEVELS.includes(level) ? (level as ReminderLevel) : "normal"
 }
 
 /** Writes the bot's level, and answers the host's record as it now stands. */

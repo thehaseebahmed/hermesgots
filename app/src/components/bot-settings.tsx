@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   AudioLinesIcon,
@@ -58,15 +58,14 @@ import { useDelegationModel } from "@/lib/delegation"
 import { DICTATION } from "@/lib/dictation"
 import { MAX_FALLBACKS } from "@/lib/fallback-list"
 import { useFallbackModels } from "@/lib/fallbacks"
-import { usePluginFeatureAnswers, usePluginFeatureOn } from "@/lib/features"
-import { READ_TIMEOUT_MS } from "@/lib/freshness"
+import { usePluginFeatureAnswers } from "@/lib/features"
 import { formatRelative } from "@/lib/format"
+import { READ_TIMEOUT_MS } from "@/lib/freshness"
 import {
   checkHealth,
   getPluginVersion,
-  getReminderLevel,
   listModels,
-  setReminderLevel,
+  REMINDER_LEVELS,
   type ReminderLevel,
 } from "@/lib/hermes"
 import { useLarge } from "@/lib/media"
@@ -74,6 +73,7 @@ import { MCP_FEATURES } from "@/lib/mcps"
 import { botModel, fullModel, setDefaultModel, useModelInfo } from "@/lib/model-info"
 import { syncContextWindow } from "@/lib/models"
 import { setBotMuted } from "@/lib/push"
+import { useReminders } from "@/lib/reminders"
 import { isOnline, removeHost, setBotEnabled } from "@/lib/registry"
 import { SKILL_FEATURES } from "@/lib/skills"
 import { useNow } from "@/lib/threads"
@@ -169,12 +169,12 @@ function MutedSetting({ profile }: { profile: Profile }) {
   )
 }
 
-/** The three words the progress updates row offers; the counts behind them are the host's (ADR 0066). */
-const REMINDER_LEVELS: { id: ReminderLevel; label: string }[] = [
-  { id: "off", label: "Off" },
-  { id: "normal", label: "Normal" },
-  { id: "frequent", label: "Frequent" },
-]
+/** What each level is called on the row. The levels themselves are the host's vocabulary. */
+const REMINDER_LABELS: Record<ReminderLevel, string> = {
+  off: "Off",
+  normal: "Normal",
+  frequent: "Frequent",
+}
 
 /**
  * How often Gots asks this bot to say what it is doing (`progress.py`, ADR 0066): a value held per
@@ -186,53 +186,8 @@ const REMINDER_LEVELS: { id: ReminderLevel; label: string }[] = [
  * shows a count — twenty calls and ten are the loop's business, not the reader's.
  */
 function RemindersSetting({ profile }: { profile: Profile }) {
-  const supported = usePluginFeatureOn(profile, "progress_reminders")
-  // The profile is the host the level lives on, so its own connection says which host answered:
-  // held still on those two parts, since a profiles write makes a new object for the same host.
-  const config = useMemo(
-    () => ({ baseUrl: profile.baseUrl, apiKey: profile.apiKey }),
-    [profile.baseUrl, profile.apiKey],
-  )
-  const [level, setLevel] = useState<ReminderLevel | null>(null)
-  const [failed, setFailed] = useState(false)
-  // The level a write is carrying until its answer lands: a refused one drops it, so nothing reads
-  // as saved that the host never kept.
-  const [draft, setDraft] = useState<ReminderLevel | null>(null)
-  const [saving, setSaving] = useState(false)
-
-  useEffect(() => {
-    if (!supported) return
-    let cancelled = false
-    setFailed(false)
-    void getReminderLevel(config, AbortSignal.timeout(READ_TIMEOUT_MS))
-      .then((answer) => {
-        if (!cancelled) setLevel(answer)
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [config, supported])
-
+  const { value, supported, settled, saving, save } = useReminders(profile)
   if (!supported) return null
-
-  const shown = draft ?? level ?? "normal"
-
-  const choose = async (next: ReminderLevel) => {
-    if (saving || failed || next === shown) return
-    setDraft(next)
-    setSaving(true)
-    try {
-      setLevel(await setReminderLevel(config, next))
-    } catch (failure) {
-      toast.error(failure instanceof Error ? failure.message : "Couldn't save that reminder level.")
-    } finally {
-      setDraft(null)
-      setSaving(false)
-    }
-  }
 
   return (
     <div
@@ -246,18 +201,19 @@ function RemindersSetting({ profile }: { profile: Profile }) {
           How often Gots asks the bot to say what it&apos;s doing. How much it says is still the
           bot&apos;s call.
         </span>
-        {failed && (
-          <span className="text-sm text-destructive">
-            Couldn&apos;t read this bot&apos;s setting.
-          </span>
-        )}
       </span>
       <Segmented
         label="Progress updates"
-        options={REMINDER_LEVELS}
-        value={shown}
-        onChange={(next) => void choose(next)}
-        disabled={saving || failed || level === null}
+        options={REMINDER_LEVELS.map((id) => ({ id, label: REMINDER_LABELS[id] }))}
+        value={value}
+        onChange={(next) => {
+          void save(next).catch((error: unknown) =>
+            toast.error(
+              error instanceof Error ? error.message : "Couldn't save that reminder level.",
+            ),
+          )
+        }}
+        disabled={!settled || saving}
       />
     </div>
   )

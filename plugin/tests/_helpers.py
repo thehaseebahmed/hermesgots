@@ -84,9 +84,12 @@ class Context:
 
     def __init__(self) -> None:
         self.platforms: Dict[str, Any] = {}
+        # name -> the callbacks in the order the plugin registered them, since that order is what
+        # Hermes resolves a pre-tool block by (the first block wins).
+        self.hooks: Dict[str, list] = {}
 
     def register_hook(self, name: str, callback: Any) -> None:
-        pass
+        self.hooks.setdefault(name, []).append(callback)
 
     def register_tool(self, **kwargs: Any) -> None:
         pass

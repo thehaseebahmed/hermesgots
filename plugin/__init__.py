@@ -814,20 +814,24 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         denied = unauthorized(request)
         if denied is not None:
             return denied
-        held = await asyncio.to_thread(progress.level, store_path())
+        try:
+            held = await asyncio.to_thread(progress.level, store_path())
+        except Exception:
+            # A store that can't be read is said, not guessed at: the app's row reads the failure.
+            return _error(web, "Couldn't read this bot's reminders setting.", 503)
         return web.json_response(progress.record(held))
 
     async def set_reminders(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
             return denied
-        body = await json_body(request)
-        if body is None:
-            return _error(web, 'Body must be {"level": "off"} or {"level": "normal"} or {"level": "frequent"}', 400)
+        body = await json_body(request) or {}
         try:
             held = await asyncio.to_thread(progress.set_level, store_path(), body.get("level"))
         except ValueError as error:
             return _error(web, str(error), 400)
+        except Exception:
+            return _error(web, "Couldn't save this bot's reminders setting.", 503)
         return web.json_response(progress.record(held))
 
     async def set_openui(request: "web.Request") -> "web.Response":
@@ -2787,9 +2791,9 @@ def register(ctx) -> None:
         register_hook("post_api_request", context.record)
         register_hook("post_api_request", model_changes.record)
         register_hook("post_api_request", community.record)
-        # A long silent tool loop is asked to check in with the user; see progress.py. Registered
-        # before the policy hooks below because the first block wins, and a check-in swallowed by
-        # plan mode's own block would never reach the model.
+        # A long silent tool loop is asked for an update; see progress.py. Registered before the
+        # policy hooks below because the first block wins, and a reminder swallowed by plan mode's
+        # own block would never reach the model.
         register_hook("pre_tool_call", progress.before_tool)
         register_hook("post_tool_call", progress.after_tool)
         register_hook("post_api_request", progress.after_model_call)
