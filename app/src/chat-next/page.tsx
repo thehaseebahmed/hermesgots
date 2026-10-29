@@ -43,6 +43,7 @@ import {
   type Connection,
   type Queued,
 } from "./api"
+import { clarifyRead } from "@/lib/clarify"
 import { foldTurns, type Row, type ToolCall, type Turn } from "./fold"
 import { isLast, nextOffset, originOf, shift } from "./pages"
 import { foldedOf, threadTurns, turnsOf, type ThreadEvent, type Waiting } from "./state"
@@ -51,22 +52,10 @@ import type { PreparedTurn } from "./turn"
 
 /** The questions a finished `clarify` call got answered, each as "<question> → <answer>". */
 function answered(call: ToolCall): string[] {
-  if (call.name !== "clarify" || !call.result) return []
-  try {
-    const { responses } = JSON.parse(call.result) as {
-      responses?: { question: string; user_response: string | string[] | null }[]
-    }
-    return (responses ?? [])
-      .filter((one) => one.user_response !== null && one.user_response !== undefined)
-      .map((one) => {
-        const given = Array.isArray(one.user_response)
-          ? one.user_response.join(", ")
-          : one.user_response
-        return `${one.question} → ${given}`
-      })
-  } catch {
-    return []
-  }
+  if (call.name !== "clarify") return []
+  return clarifyRead(call.result).asked.flatMap((question) =>
+    question.answers.length ? [`${question.question} → ${question.answers.join(", ")}`] : [],
+  )
 }
 
 const failure = (error: unknown): ThreadEvent => ({
@@ -1082,12 +1071,25 @@ export function ChatNextThread({
   }
 
   // An answer that fails is said so; one that lands takes the card away at once, and the host's
-  // `*.settled` event follows.
+  // `*.settled` event follows. A question's answer is written onto its call here, since the
+  // served turn's `tool.completed` carries no result: the thread reads the answer straight away
+  // rather than "No answer" until the transcript's row lands.
   async function answer(waiting: Waiting, value: string) {
     if (!server || !key) return
     try {
       await respond({ server, key }, waiting, value)
-      dispatch({ type: "answered" })
+      dispatch({
+        type: "answered",
+        ...(waiting.kind === "question"
+          ? {
+              answer: {
+                question: waiting.question,
+                choicesOffered: waiting.choices.length ? waiting.choices : null,
+                value,
+              },
+            }
+          : {}),
+      })
     } catch (error) {
       dispatch(failure(error))
     }
@@ -1136,9 +1138,7 @@ export function ChatNextThread({
         asker={asker}
         answer={async (value) => {
           const asked = doing.waiting as Waiting
-          if (!server || !key) return
-          await respond({ server, key }, asked, value)
-          dispatch({ type: "answered" })
+          await answer(asked, value)
         }}
       />
     ) : doing.waiting?.kind === "question" ? (

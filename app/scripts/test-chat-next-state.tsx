@@ -129,6 +129,82 @@ test("a question is a wait until the host says it is settled", () => {
   assert.equal(after.waiting, undefined)
 })
 
+test("the answer the app gave is the call's result, since the served turn's completion carries none", () => {
+  const state = play([
+    { event: "tool.started", tool: "clarify", tool_call_id: "c1" } as RunEvent,
+    {
+      event: "clarify.request",
+      run_id: "r",
+      prompt_id: "p1",
+      execution_generation: 1,
+      question: "Tea?",
+      choices: ["yes", "no"],
+    } as RunEvent,
+    // Hermes's served turn says only that the call ended: its event carries no result.
+    { event: "tool.completed", tool: "clarify", tool_call_id: "c1", preview: "" } as RunEvent,
+  ])
+  assert.deepEqual(
+    calls(state).map((call) => call.result),
+    [""],
+    "nothing but the stream's own (empty) preview so far",
+  )
+  const result = JSON.stringify({
+    responses: [
+      {
+        question: "Tea?",
+        choices_offered: ["yes", "no"],
+        status: "answered",
+        user_response: "yes",
+      },
+    ],
+    outcome: "submitted",
+  })
+  const after = reduce(state, {
+    type: "answered",
+    answer: { question: "Tea?", choicesOffered: ["yes", "no"], value: "yes" },
+  })
+  assert.equal(after.waiting, undefined, "the card goes")
+  assert.deepEqual(
+    calls(after).map((call) => call.result),
+    [result],
+    "the answer is what the thread's card reads",
+  )
+  // The transcript's own row is what the next read takes, so the answer touches nothing else: the
+  // rows and what the turn cost are the very objects they were.
+  assert.equal(after.rows, state.rows)
+  assert.equal(after.stats, state.stats)
+
+  // The host's completion lands after the answer, carrying no result of its own: the answer stays.
+  const completed = reduce(after, {
+    type: "run",
+    event: {
+      event: "tool.completed",
+      tool: "clarify",
+      tool_call_id: "c1",
+      preview: "",
+    } as RunEvent,
+  })
+  assert.deepEqual(
+    calls(completed).map((call) => call.result),
+    [result],
+    "an empty completion never empties an answered call",
+  )
+
+  // A call that asked a second question is answered once per prompt: both answers stay, in order.
+  const sugar = reduce(
+    { ...completed, waiting: { ...state.waiting!, promptId: "p2", question: "Sugar?" } },
+    { type: "answered", answer: { question: "Sugar?", choicesOffered: ["yes", "no"], value: "no" } },
+  )
+  assert.deepEqual(
+    JSON.parse(calls(sugar)[0].result ?? "{}").responses,
+    [
+      { question: "Tea?", choices_offered: ["yes", "no"], status: "answered", user_response: "yes" },
+      { question: "Sugar?", choices_offered: ["yes", "no"], status: "answered", user_response: "no" },
+    ],
+    "one call's answers are all of them",
+  )
+})
+
 test("a block of thinking waits for the word or call it led to, and leads it", () => {
   const state = play([
     { event: "reasoning.available", text: "I should look first." },

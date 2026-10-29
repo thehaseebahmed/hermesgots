@@ -81,6 +81,11 @@ export const FLOWS = {
     about:
       "A question the host timed out stays in the thread, and asking again has the agent ask afresh",
   },
+  "question-card": {
+    script: "e2e/question-card.mjs",
+    about:
+      'On the new chat screen a question is the composer\'s alone — one waiting line in the thread, no card of it there — and reads answered once given, never "No answer"',
+  },
   "failed-send": {
     script: "e2e/failed-send.mjs",
     about:

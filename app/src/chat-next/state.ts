@@ -1,3 +1,4 @@
+import { clarifyAnswered, type ClarifyResponse } from "@/lib/clarify"
 import type { LiveTurn, MessageStats } from "@/lib/db"
 import { measureReply } from "@/lib/reply-stats"
 
@@ -11,6 +12,7 @@ import {
   type Part,
   type Row,
   type SentFile,
+  type ToolCall,
   type Turn,
 } from "./fold"
 
@@ -81,7 +83,11 @@ export type ThreadEvent =
   /** A message the host sent somewhere else (triage, ADR 0029): it leaves this thread, unfailed. */
   | { type: "moved" }
   | { type: "attach" }
-  | { type: "answered" }
+  /** The card goes; `answer` is what the question got, where the user gave one. */
+  | {
+      type: "answered"
+      answer?: { question: string; choicesOffered: string[] | null; value: string }
+    }
   | { type: "ended" }
   | { type: "agents"; agents: Agent[] }
   | { type: "queue"; items: Queued[]; paused: boolean }
@@ -90,6 +96,62 @@ export type ThreadEvent =
   | { type: "failed"; error: string }
 
 export const initial: ThreadState = { status: "loading", rows: [], running: false }
+
+/**
+ * The turn with one call replaced — the first, or the last, the predicate picks — and the part it
+ * sits in replaced with it. Nothing is mutated, and a turn holding no such call is the turn itself.
+ */
+function patchCall(
+  turn: Turn,
+  pick: (call: ToolCall) => boolean,
+  patch: (call: ToolCall) => Partial<ToolCall>,
+  which: "first" | "last" = "first",
+): Turn {
+  const seen: { part: number; call: number }[] = []
+  turn.parts.forEach((part, at) => {
+    if (part.kind !== "tools") return
+    part.calls.forEach((call, callAt) => pick(call) && seen.push({ part: at, call: callAt }))
+  })
+  const at = seen.at(which === "last" ? -1 : 0)
+  if (!at) return turn
+  const part = turn.parts[at.part]
+  if (part.kind !== "tools") return turn
+  const calls = part.calls.with(at.call, { ...part.calls[at.call], ...patch(part.calls[at.call]) })
+  return { ...turn, parts: turn.parts.with(at.part, { ...part, calls }) }
+}
+
+/**
+ * The answer the app just gave, written onto the call the question was asked by. Hermes's served
+ * turn sends `tool.completed` with no result, so nothing else fills it in: without this the
+ * thread's card would read "No answer", with Ask again, until the transcript's own row for the
+ * call lands at the end of the turn.
+ *
+ * One call may ask several questions, which Hermes puts one prompt at a time: each answer is
+ * merged into the responses the call already holds, so the card lists them all rather than the
+ * last one written over the others.
+ */
+function withClarifyAnswer(
+  turn: Turn,
+  answer: { question: string; choicesOffered: string[] | null; value: string },
+): Turn {
+  // The served turn's completion sets an empty preview rather than leaving it out, so a call that
+  // carries nothing is one still waiting for its answer; a call past its first question carries
+  // the answers given so far and is read for the rest.
+  const unanswered = (call: ToolCall) => call.name === "clarify" && !call.result
+  const clarify = (call: ToolCall) => call.name === "clarify"
+  const open = turn.parts.some((part) => part.kind === "tools" && part.calls.some(unanswered))
+  const written: ClarifyResponse = {
+    question: answer.question,
+    choicesOffered: answer.choicesOffered,
+    answer: answer.value || null,
+  }
+  return patchCall(
+    turn,
+    open ? unanswered : clarify,
+    (call) => ({ result: clarifyAnswered(call.result, written, "submitted") }),
+    "last",
+  )
+}
 
 /** The transcript's turns, the archive folded in where the reader has asked for it. */
 export const foldedOf = (rows: Row[], archived?: Row[], partial?: boolean) =>
@@ -152,21 +214,17 @@ function live(turn: Turn, event: RunEvent, now?: number): Turn {
     return { ...rest, parts: [...parts, { kind: "tools", calls: [call] }] }
   }
   if (event.event === "tool.completed" && event.tool_call_id) {
-    const at = parts.findIndex(
-      (part) => part.kind === "tools" && part.calls.some((one) => one.id === event.tool_call_id),
+    // A completion says only that the call ended: its preview is empty on the served turn, so the
+    // result an answer already wrote is kept rather than emptied — what `chat.ts`'s `onTool` guards
+    // too. A preview that says something is the host's own result and wins.
+    return patchCall(
+      turn,
+      (one) => one.id === event.tool_call_id,
+      (one) => ({
+        result: event.preview || one.result || "",
+        ...(at !== undefined ? { endedAt: at } : {}),
+      }),
     )
-    const part = parts[at]
-    if (part?.kind !== "tools") return turn
-    const calls = part.calls.map((one) =>
-      one.id === event.tool_call_id
-        ? {
-            ...one,
-            result: event.preview ?? "",
-            ...(at !== undefined ? { endedAt: at } : {}),
-          }
-        : one,
-    )
-    return { ...turn, parts: parts.with(at, { ...part, calls }) }
   }
   // The end of a run this device watched from its start says what the reply cost.
   if (event.event === "run.completed" && turn.timing && now !== undefined) {
@@ -336,9 +394,16 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       // was comes from the transcript, which a later read may supply if the one for this end was
       // superseded.
       return { ...state, running: false }
-    case "answered":
-      // The card goes at once; the host's `*.settled` event confirms it.
-      return { ...state, waiting: undefined }
+    case "answered": {
+      // The card goes at once; the host's `*.settled` event confirms it. A question's call reads
+      // the answer from here until the transcript's own result reaches it.
+      const held = state.live
+      const answered = held && event.answer ? withClarifyAnswer(held.turn, event.answer) : undefined
+      const live = held && answered && answered !== held.turn ? { ...held, turn: answered } : held
+      // An answer that changed nothing on screen is no state at all, as every arm above says.
+      if (state.waiting === undefined && live === held) return state
+      return { ...state, waiting: undefined, ...(live ? { live } : {}) }
+    }
     case "run": {
       const waiting = waitingAfter(state.waiting, event.event)
       const held = state.live

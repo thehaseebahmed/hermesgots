@@ -101,7 +101,10 @@
 // the app queued and starts it when the session's run ends, like plugin/outbox.py. The agent asks the user questions
 // with Hermes's clarify tool, which the plugin serves on runs: say "ask" for one, or "ask five" for
 // five (plan mode asks before planning), the run carries
-// `clarify.request` and waits, and POST /api/plugins/memento/runs/{id}/clarify answers it. POST
+// `clarify.request` and waits, and POST /api/plugins/memento/runs/{id}/clarify answers it. The same
+// event carries the prompt Hermes 0.22.5's own route answers, one question at a time (a `prompt_id`,
+// with POST /v1/runs/{id}/clarify taking `{request_id, execution_generation, answer}`), so the new
+// chat screen's question card can be driven here too. POST
 // /__mock/clarify ends every pending question with no answer, like a window that closed on the user.
 // POST /v1/runs/{id}/steer hands a running turn more from the user: like Hermes, it lands as a
 // `display_kind: "steer"` user row after the next tool result, and one still unread when the turn
@@ -178,6 +181,8 @@ const TOOL_PLACEMENT = JSON.parse(
 const PORT = Number(process.env.PORT ?? 8642)
 const pendingApprovals = new Map()
 const pendingClarifies = new Map()
+/** Questions Hermes's own route is asked one at a time, by `prompt_id` (0.22.5 and newer). */
+const pendingPrompts = new Map()
 const chatTitles = new Map()
 /** How long after a chat's opener Hermes's background title lands (POST /__mock/title-delay). */
 const TITLE_DELAY_MS = 2000
@@ -2022,7 +2027,11 @@ async function playTurn(req, body, last, out) {
         ? { notice: "This client can't show questions on this turn; ask in your reply instead." }
         : {}),
     })
-    out.tool({ tool: "clarify", toolCallId: id, status: "completed", result })
+    // The served turn ends a call with `tool.completed` carrying no result: its preview is empty and
+    // the transcript's own row is where a result is read from. The thread's card reads the answer
+    // the app writes when the user gives it, and the mock leaves this empty so a client that only
+    // reads the stream is not quietly helped.
+    out.tool({ tool: "clarify", toolCallId: id, status: "completed", result: "" })
     record(req, { role: "tool", tool_call_id: id, tool_name: "clarify", content: result })
     return { answers, outcome }
   }
@@ -3033,6 +3042,10 @@ const runs = new Map()
 const wakePending = new Map()
 let wakeDelayMs = Number(process.env.MOCK_WAKE_DELAY_MS ?? 0)
 const PLUGIN_VERSION = process.env.MOCK_PLUGIN_VERSION || "0.29.1"
+// The Hermes version the host reports on /health, which is how a screen knows the host is new
+// enough for it (the new chat screen needs 0.22.5). A host older than that answers with its own;
+// the mock models one host and says so.
+const HERMES_VERSION = "0.25.0"
 const DICTATION = process.env.MOCK_DICTATION ?? "on"
 let DICTATION_TIDY = process.env.MOCK_DICTATION_TIDY ?? "ok"
 const TIDY_MS = 400
@@ -3515,19 +3528,51 @@ function startRun(req, body, options = {}) {
     async ask(questions) {
       const clarify_id = randomUUID().replace(/-/g, "").slice(0, 12)
       run.status = "waiting_for_approval"
-      run.clarify = {
-        event: "clarify.request",
-        run_id: id,
-        timestamp: Date.now() / 1000,
-        clarify_id,
-        questions,
+      // Hermes 0.22.5 asks one prompt per question on its own route (`POST /v1/runs/{id}/clarify`
+      // with `{ request_id, execution_generation, answer }`); the plugin's older flow asks the call
+      // as a whole (`POST /api/plugins/memento/runs/{id}/clarify` with `{ clarify_id, answers }`).
+      // The event carries both shapes, so a client on either route can answer it.
+      const answers = {}
+      let outcome = "submitted"
+      const whole = new Promise((resolve) => pendingClarifies.set(id, { clarify_id, resolve }))
+      // One deadline for the whole call, as the plugin's own wait has: a question set answered
+      // slowly must not leave a timer behind per question.
+      const deadline = sleep(120_000).then(() => ({ timeout: true }))
+      for (const [at, question] of questions.entries()) {
+        // One object for both readers: the run's status and the stream say the same thing, as an
+        // approval's do.
+        run.clarify = {
+          event: "clarify.request",
+          run_id: id,
+          timestamp: Date.now() / 1000,
+          clarify_id,
+          questions,
+          prompt_id: `${clarify_id}-${at}`,
+          execution_generation: 0,
+          question: question.question,
+          choices: question.choices ?? [],
+          multi_select: Boolean(question.multi_select),
+        }
+        push("clarify.request", run.clarify)
+        const settled = await Promise.race([
+          new Promise((resolve) => pendingPrompts.set(run.clarify.prompt_id, resolve)),
+          whole,
+          deadline,
+        ])
+        pendingPrompts.delete(run.clarify.prompt_id)
+        if (!settled || settled.timeout) {
+          outcome = "timed_out"
+          break
+        }
+        // The older route answers every question at once, in the app's own shape.
+        if (settled.answers) {
+          Object.assign(answers, settled.answers)
+          outcome = settled.outcome
+          break
+        }
+        answers[question.id] = settled.answer || null
+        push("clarify.settled", { prompt_id: run.clarify.prompt_id, execution_generation: 0 })
       }
-      push("clarify.request", { clarify_id, questions })
-      const reply = new Promise((resolve) => pendingClarifies.set(id, { clarify_id, resolve }))
-      const { answers, outcome } = await Promise.race([
-        reply,
-        sleep(120_000).then(() => ({ answers: {}, outcome: "timed_out" })),
-      ])
       pendingClarifies.delete(id)
       run.status = "running"
       run.clarify = undefined
@@ -3649,7 +3694,8 @@ http
     const pluginProfile = /^\/api\/plugins\/memento\/p\/([^/]+)(?=\/)/.exec(url.pathname)?.[1]
     if (pluginProfile)
       url.pathname = `/api/plugins/memento${url.pathname.slice(pluginProfile.length + 23)}`
-    if (url.pathname === "/health") return json(res, 200, { status: "ok", platform: "mock-hermes" })
+    if (url.pathname === "/health")
+      return json(res, 200, { status: "ok", platform: "mock-hermes", version: HERMES_VERSION })
     if (url.pathname === "/v1/models") {
       // Named profiles advertise their name as the model id.
       const id = profile ?? "hermes-agent"
@@ -4984,6 +5030,25 @@ http
         stopped: true,
       })
     }
+    // Hermes's own route for a question (0.22.5 and newer): one prompt at a time, answered with
+    // exactly `{ request_id, execution_generation, answer }`. The plugin's route below is the
+    // older call-as-a-whole one; both settle the same wait.
+    const runClarifyRoute = /^\/v1\/runs\/([^/]+)\/clarify$/.exec(url.pathname)
+    if (!profile && req.method === "POST" && runClarifyRoute) {
+      const { request_id, answer } = await readBody(req)
+      const pending = pendingPrompts.get(request_id)
+      if (!pending)
+        return json(res, 404, {
+          error: { message: `Run has no pending question: ${request_id ?? ""}` },
+        })
+      pending({ answer: typeof answer === "string" ? answer : String(answer ?? "") })
+      return json(res, 200, {
+        object: "hermes.clarify_response",
+        run_id: runClarifyRoute[1],
+        request_id,
+        resolved: true,
+      })
+    }
     const clarifyRoute = /^\/api\/plugins\/memento\/runs\/([^/]+)\/clarify$/.exec(url.pathname)
     if (PLUGIN && !profile && req.method === "POST" && clarifyRoute) {
       const pending = pendingClarifies.get(clarifyRoute[1])
@@ -5636,6 +5701,8 @@ http
     if (url.pathname === "/__mock/clarify" && req.method === "POST") {
       const { outcome = "timed_out" } = await readBody(req)
       for (const { resolve } of [...pendingClarifies.values()]) resolve({ answers: {}, outcome })
+      // A client on Hermes's own route waits on one prompt, which this ends the same way.
+      for (const resolve of [...pendingPrompts.values()]) resolve({ timeout: true })
       return json(res, 200, { ok: true })
     }
     // Dev only: POST { fail } makes the plugin's read of a session's pull requests fail, like a

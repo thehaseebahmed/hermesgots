@@ -11,11 +11,13 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
+import { StatusLine } from "@/components/chat/status-line"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { Spinner } from "@/components/ui/spinner"
 import { sendMessage } from "@/lib/chat"
+import { clarifyRead } from "@/lib/clarify"
 import type { ToolEvent } from "@/lib/db"
+import { WAITING_FOR_ANSWER } from "@/lib/format"
 import { COLUMN_BOX } from "@/lib/layout"
 
 /**
@@ -180,49 +182,9 @@ function ExchangeCard({
   )
 }
 
-interface Asked {
-  question?: string
-  answers: string[]
-}
-
-const listOf = (value: unknown) =>
-  (Array.isArray(value) ? value : [value])
-    .filter((item) => typeof item === "string" && item.trim())
-    .map((item) => String(item).trim())
-
-/**
- * What a clarify call asked and was answered: Hermes's `{ responses, outcome }`, or the one answer
- * older shapes and plain text carry. The call's label is its first question.
- */
-function readClarify(tool: ToolEvent): { asked: Asked[]; outcome?: string } {
-  const first = tool.label && tool.label !== tool.tool ? tool.label : undefined
-  const raw = tool.result
-  if (!raw) return { asked: first ? [{ question: first, answers: [] }] : [] }
-  try {
-    const parsed = JSON.parse(raw)
-    const outcome =
-      typeof parsed?.outcome === "string"
-        ? parsed.outcome
-        : parsed?.timed_out === true
-          ? "timed_out"
-          : undefined
-    if (Array.isArray(parsed?.responses)) {
-      return {
-        outcome,
-        asked: parsed.responses.map((r: Record<string, unknown>) => ({
-          question: typeof r?.question === "string" ? r.question : undefined,
-          answers: listOf(r?.user_response),
-        })),
-      }
-    }
-    const direct = typeof parsed === "string" ? [parsed] : []
-    const keyed = ["user_response", "response", "answer", "choice"].flatMap((key) =>
-      listOf(parsed?.[key]),
-    )
-    return { outcome, asked: [{ question: first, answers: [...direct, ...keyed] }] }
-  } catch {
-    return { asked: [{ question: first, answers: [raw] }] }
-  }
+/** What a clarify call asked and was answered; the call's label is its first question. */
+function readClarify(tool: ToolEvent) {
+  return clarifyRead(tool.result, tool.label && tool.label !== tool.tool ? tool.label : undefined)
 }
 
 /** What the user says to have the agent ask a question it never got an answer for again. */
@@ -247,7 +209,11 @@ const CLARIFY_ENDED: Record<string, { title: string; owed: boolean }> = {
   timed_out: { title: "No answer", owed: true },
 }
 
-/** A clarify call in the thread: its questions and the answers, or that it's waiting for them. */
+/**
+ * A clarify call in the thread: its questions and the answers they got. While the run waits it draws
+ * no card at all — the form is in the composer slot, so the thread says that in one line and leaves
+ * the question to the form.
+ */
 export function ClarifyCard({
   tool,
   conversationId,
@@ -267,7 +233,7 @@ export function ClarifyCard({
   // The window closed on this question: it was neither answered nor skipped, so it can be asked
   // again. Nothing resumes the expired call — the agent asks afresh, in a new turn.
   const missed = !running && !answered && ended.owed
-  const title = running ? "Question" : answered ? "Answered" : ended.title
+  const title = answered ? "Answered" : ended.title
   const askAgain = async () => {
     setAsking(true)
     try {
@@ -278,17 +244,12 @@ export function ClarifyCard({
       setAsking(false)
     }
   }
+  // While the run waits the form itself is in the composer slot, so the thread says only that it
+  // waits: a card there would repeat the question beside the one being answered.
+  if (running) return <StatusLine text={WAITING_FOR_ANSWER} waiting />
   return (
     <ExchangeCard icon={<MessageCircleQuestionIcon className="size-4" />} title={title}>
-      {running ? (
-        <>
-          {asked[0]?.question && <p>{asked[0].question}</p>}
-          <p className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Spinner className="size-3.5" />
-            Waiting for an answer…
-          </p>
-        </>
-      ) : missed ? (
+      {missed ? (
         <>
           {asked[0]?.question && <p>{asked[0].question}</p>}
           <Button
