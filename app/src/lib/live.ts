@@ -134,6 +134,19 @@ export function onChanges(kind: Kind, listener: (key: string) => void) {
   }
 }
 
+const sessionListeners = new Set<(key: string, session?: string) => void>()
+
+/**
+ * Hears that a session moved on a server, or (no session) that this device missed some of what a
+ * server said and every session on it may have: the listener decides whether it is the one on show.
+ */
+export function onSessionMoved(listener: (key: string, session?: string) => void) {
+  sessionListeners.add(listener)
+  return () => {
+    sessionListeners.delete(listener)
+  }
+}
+
 /** Marks a chat as on screen until the returned function is called. */
 export function watchChat(conversationId: string) {
   openChats.add(conversationId)
@@ -183,6 +196,7 @@ function catchUpAll(key: string) {
       if (chat && botsOf(key).some((bot) => bot.id === chat.profileId)) catchUpChat(id)
     })
   }
+  sessionListeners.forEach((listener) => listener(key))
   for (const kind of ["cron", "runs", "projects", "research", "meetings"] as const) bump(key, kind)
 }
 
@@ -221,6 +235,8 @@ function onEvent(key: string, event: string, data: Record<string, unknown>) {
       catchUpAll(key)
       break
     case "session":
+      if (typeof data.session_id === "string")
+        sessionListeners.forEach((listener) => listener(key, data.session_id as string))
       void chatsFor(key, data.session_id).then((chats) =>
         chats.filter((c) => openChats.has(c.id)).forEach((c) => catchUpChat(c.id)),
       )

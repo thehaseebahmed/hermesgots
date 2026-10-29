@@ -92,14 +92,24 @@ export async function readVersion(
  * out of it too, in the conversation's order rather than the ids'. The host pages newest-first by offset, so older
  * pages are read until one comes back short. A session the host has not heard of yet is an empty
  * chat, not a failure.
+ *
+ * With `held` (the live rows the device has) the read stops at the first page that joins them: its
+ * rows are the ones held from some row on, in the same order, so what is older is what the device
+ * already has. A thread that has not moved costs the one page it is asked for, and a compaction or
+ * an undo, which change the newest rows, fail that join and read on.
  */
 export async function readTranscript(
   connection: Connection,
   session: string,
   signal?: AbortSignal,
   archived = false,
+  held?: Row[],
 ): Promise<Row[]> {
   const pages: Row[][] = []
+  const joins = (page: Row[]) => {
+    const at = held?.findIndex((row) => row.id === page[0]?.id) ?? -1
+    return at < 0 || !held ? -1 : page.every((row, i) => held[at + i]?.id === row.id) ? at : -1
+  }
   for (let offset = 0; ; offset += PAGE) {
     const response = await fetch(
       `${root(connection)}/api/sessions/${encodeURIComponent(session)}/messages?order=latest&limit=${PAGE}&offset=${offset}${archived ? "&include_compacted=true" : ""}`,
@@ -111,6 +121,14 @@ export async function readTranscript(
     }
     ensure(response)
     const { data } = (await response.json()) as { data: Row[] }
+    // Rows written while the pages were read slide into the next offset, so a page that joins the
+    // held rows only counts when it also reaches back to the held row it starts at.
+    const at = data.length === PAGE ? joins(data) : -1
+    if (at >= 0 && held) {
+      pages.unshift(data)
+      pages.unshift(held.slice(0, at))
+      break
+    }
     pages.unshift(data)
     if (data.length < PAGE) break
   }

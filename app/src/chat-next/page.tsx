@@ -15,6 +15,9 @@ import {
 import { useSearchParams } from "react-router"
 
 import { Markdown } from "@/components/chat/markdown"
+import { connectionKey } from "@/lib/connection"
+import { SAFETY_MS } from "@/lib/freshness"
+import { onSessionMoved, useLive } from "@/lib/live"
 import { db, type Attachment, type SessionDb } from "@/lib/db"
 
 import { cardsByPart, cardsOf, DELEGATE, type Agent, type Card } from "./agents"
@@ -605,7 +608,7 @@ export function ChatNextThread({
           const asking = Date.now() >= noAgentsUntil.current
           const askingQueue = Date.now() >= noQueueUntil.current
           const [rows, listed, queued] = await Promise.all([
-            readTranscript({ server, key }, session, alive.current.signal),
+            readTranscript({ server, key }, session, alive.current.signal, false, store.get().rows),
             asking ? readAgents({ server, key }, session, alive.current.signal) : undefined,
             askingQueue ? readQueue({ server, key }, session, alive.current.signal) : undefined,
           ])
@@ -627,7 +630,7 @@ export function ChatNextThread({
       queued.current = null
       if (next) await read(next.final)
     },
-    [server, key, session, dispatch],
+    [server, key, session, dispatch, store],
   )
 
   /** How many of the thread's turns the user asked, as the app counts a chat's turns. */
@@ -747,6 +750,18 @@ export function ChatNextThread({
     [server, key, session, catchUp, dispatch, store, asked],
   )
 
+  // A server that streams its changes says when this session moved, so the timer below only has to
+  // be a safety net while the stream is open.
+  const streamOpen = useLive(server && key ? { baseUrl: server, apiKey: key } : undefined)
+  useEffect(() => {
+    if (!ready || !server || !key) return
+    const mine = connectionKey({ baseUrl: server, apiKey: key })
+    return onSessionMoved((heard, moved) => {
+      if (heard !== mine || (moved && moved !== session) || streaming.current) return
+      if (document.visibilityState === "visible") void catchUp()
+    })
+  }, [ready, server, key, session, catchUp])
+
   // An open chat is read now and then even when it looks finished, since another device may have
   // started a turn; a page nobody is looking at asks nothing. A turn still being written is joined
   // where the host can say which run it is, so its words are drawn as they come.
@@ -775,7 +790,7 @@ export function ChatNextThread({
         }
         void catchUp()
       },
-      busy ? pollMs : idleMs,
+      busy ? pollMs : streamOpen ? Math.max(idleMs, SAFETY_MS) : idleMs,
     )
     return () => clearInterval(timer)
   }, [
@@ -792,6 +807,7 @@ export function ChatNextThread({
     pollMs,
     idleMs,
     stallMs,
+    streamOpen,
   ])
 
   // A card opened shows its child's own transcript, read again as the child's state moves.
