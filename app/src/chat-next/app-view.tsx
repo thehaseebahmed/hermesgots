@@ -1,5 +1,14 @@
 import { useLiveQuery } from "dexie-react-hooks"
-import { type ComponentProps, createContext, useContext, useEffect, useMemo, useState } from "react"
+import {
+  type ComponentProps,
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 
 import { Banner } from "@/components/banner"
 import { useBreakReminderEligibility } from "@/components/break-reminder-context"
@@ -102,21 +111,41 @@ export function AppThreadView({
   send,
 }: ThreadViewProps) {
   const { chatId, main, blank, onStatus } = useContext(ChatOf)
+  // The files this device sent keep their bytes, so its own photos draw with the host away: only
+  // the ones the thread's requests name are read.
+  const sentPaths = useMemo(
+    () => turns.flatMap((turn) => turn.files?.flatMap((file) => file.path ?? []) ?? []).join("\n"),
+    [turns],
+  )
+  const sent = useLiveQuery(
+    async () => ({
+      // What the answer is for: a query goes on answering with its last result while the next runs.
+      paths: sentPaths,
+      files: await db.sentFiles.bulkGet(
+        sentPaths ? sentPaths.split("\n").map((path): [string, string] => [session, path]) : [],
+      ),
+    }),
+    [session, sentPaths],
+  )
+  const sentFiles = sent?.paths === sentPaths ? sent.files : undefined
   // The rows are the chat's: what a row reads through its chat — its media, its files, a question
   // asked again — finds the chat by this id, never by the session's.
-  // The files this device sent keep their bytes, so its own photos draw with the host away.
-  const sentFiles = useLiveQuery(
-    () => db.sentFiles.where("[session+path]").between([session], [session, []]).toArray(),
-    [session],
-  )
   const messages = useMemo(
     () =>
       withHeldFiles(
         messagesOf(chatId, turns, { streaming, stats }),
-        new Map(sentFiles?.map((file) => [file.path, file.blob])),
+        sentFiles &&
+          new Map(sentFiles.flatMap((file) => (file ? [[file.path, file.blob] as const] : []))),
       ),
     [chatId, turns, streaming, stats, sentFiles],
   )
+  // The send a card asks for is the latest one, behind an identity that never changes, so a streamed
+  // flush never wakes the cards that hold it.
+  const latestSend = useRef(send)
+  useEffect(() => {
+    latestSend.current = send
+  })
+  const ask = useCallback((text: string) => latestSend.current(text, []), [])
   const streamingReply = messages.findLast((message) => message.status === "streaming")
   const activity = streamingReply && describeActivity(streamingReply)
   const replies = messages.filter((message) => message.role === "assistant").length
@@ -176,7 +205,7 @@ export function AppThreadView({
     on: Boolean(main),
     routeChat: main?.routeChat,
   })
-  const { drawn, cut } = useFirstRows(chatId, flow, messages.length > 0 || Boolean(main))
+  const { drawn, cut } = useFirstRows(chatId, flow, flow.length > 0)
   const empty = Boolean(main) && !flow.length && !moved.trailing.length && !streaming
   const unstarted = Boolean(blank) && !messages.length && !streaming && !queue?.items.length
   const running = source.agents.filter((agent) => agent.status === "running").length
@@ -184,7 +213,7 @@ export function AppThreadView({
   const inline = running > 0 && messages.at(-1)?.status === "streaming"
 
   return (
-    <AskAgainContext.Provider value={(text) => send(text, [])}>
+    <AskAgainContext.Provider value={ask}>
       <div className="flex min-h-0 flex-1 flex-col">
         {unstarted && blank ? (
           <EmptyState botId={blank.botId} configured session={{ repos: blank.repos }} id={chatId} />

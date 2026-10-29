@@ -103,6 +103,8 @@ export async function readVersion(
  * rows are the ones held from some row on, in the same order, so what is older is what the device
  * already has. A thread that has not moved costs the one page it is asked for, and a compaction or
  * an undo, which change the newest rows, fail that join and read on.
+ * What is older than the join is trusted as held: a row edited in place without a new id is seen at the
+ * next read of the whole transcript, which the end of a turn asks for.
  */
 export async function readTranscript(
   connection: Connection,

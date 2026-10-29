@@ -194,7 +194,7 @@ const TurnView = memo(
                     {part.thought}
                   </p>
                 ) : null}
-                <Markdown>{part.text}</Markdown>
+                {part.text ? <Markdown>{part.text}</Markdown> : null}
               </div>
             )
           if (part.kind === "steer")

@@ -34,9 +34,24 @@ export function messagesOf(
 /**
  * The rows with the bytes this device holds for the files they carry, found by the path the host
  * saved each at: the transcript holds a marker and no bytes, and the device's own photos draw from
- * these while the host is away. A row that carries nothing held is the very row given.
+ * these while the host is away. `held` is undefined while the device is still reading what it
+ * holds. A row that carries nothing held is the very row given.
  */
-export function withHeldFiles(messages: Message[], held: ReadonlyMap<string, Blob>): Message[] {
+export function withHeldFiles(
+  messages: Message[],
+  held: ReadonlyMap<string, Blob> | undefined,
+): Message[] {
+  // Until the device has said what it holds, a file has no path to read from: asking the host for
+  // bytes the device turns out to have would be a read for nothing.
+  if (!held)
+    return messages.map((message) =>
+      message.attachments?.some((file) => file.path)
+        ? {
+            ...message,
+            attachments: message.attachments.map(({ path: _path, ...file }) => file),
+          }
+        : message,
+    )
   if (!held.size) return messages
   return messages.map((message) => {
     const files = message.attachments

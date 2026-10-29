@@ -191,3 +191,22 @@ test("a file this device holds draws from its bytes, found by the path the host 
   assert.equal(drawn[1], rows[1], "and a row that carries nothing held is the very row given")
   assert.equal(withHeldFiles(rows, new Map()), rows)
 })
+
+test("until the device has said what it holds, a file has no path to read from the host by", () => {
+  const rows = [
+    {
+      id: "a-u",
+      conversationId: "c",
+      role: "user",
+      content: "look",
+      status: "done",
+      createdAt: 1,
+      attachments: [
+        { id: "f0", name: "a.png", type: "image/png", size: 1, image: true, path: "/h/a.png" },
+      ],
+    },
+  ]
+  const drawn = withHeldFiles(rows, undefined)
+  assert.equal(drawn[0].attachments[0].path, undefined)
+  assert.equal(drawn[0].attachments[0].name, "a.png")
+})
