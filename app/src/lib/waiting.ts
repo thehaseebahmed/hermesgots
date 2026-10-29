@@ -207,6 +207,23 @@ export function useLiveRun(
   )
 }
 
+/**
+ * The id of the run the host has in flight for this session, from the same shared poll. Unlike its
+ * status it changes when one run hands over to the next (a wake turn starting as the last one ends),
+ * which is what a screen that follows runs has to notice.
+ */
+export function useLiveRunId(
+  profile: Server | undefined,
+  sessionId: string | undefined,
+): string | undefined {
+  useWaiting()
+  const key = profile?.baseUrl && profile.apiKey ? connectionKey(profile as Server) : undefined
+  return useSyncExternalStore(
+    subscribe,
+    () => (key && sessionId && answers.get(key)?.runIds[sessionId]) || undefined,
+  )
+}
+
 /** Project sessions, across every bot, waiting on the user, newest first. Needs the plugin. */
 export function useWaitingSessions(): WaitingSession[] {
   const waiting = useWaiting()
