@@ -328,9 +328,40 @@ test("a run joined from its start never draws the reply smaller than the transcr
     type: "run",
     event: { event: "tool.started", tool: "terminal", tool_call_id: "B" },
   })
+  assert.equal(callsOf(state).length, 2, "caught up, the live turn is the one drawn")
   state = reduce(state, {
     type: "run",
     event: { event: "tool.started", tool: "terminal", tool_call_id: "C" },
   })
-  assert.equal(callsOf(state).length, 3, "once the replay has caught up, the live turn is drawn")
+  assert.equal(callsOf(state).length, 3, "and it goes on past the transcript's copy")
+})
+
+test("a replay that never reaches the transcript's copy is let go when the run ends", () => {
+  const row = (id: number, rest: Partial<Row>): Row => ({ id, timestamp: id, ...rest }) as Row
+  const held = reduce(initial, {
+    type: "transcript",
+    rows: [
+      row(1, { role: "user", content: "go" }),
+      row(2, {
+        role: "assistant",
+        content: "A long answer the host wrote.",
+        finish_reason: "stop",
+      }),
+    ],
+  })
+  let state = reduce(held, { type: "attach" })
+  const textOf = (one: ThreadState) =>
+    threadTurns(one)
+      .at(-1)!
+      .parts.flatMap((part) => (part.kind === "text" ? [part.text] : []))
+      .join("")
+  assert.equal(textOf(state), "A long answer the host wrote.", "the transcript's copy stands first")
+  state = reduce(state, { type: "run", event: { event: "message.delta", delta: "Short." } })
+  assert.equal(
+    textOf(state),
+    "A long answer the host wrote.",
+    "a shorter replay does not replace it",
+  )
+  state = reduce(state, { type: "run", event: { event: "run.completed" } })
+  assert.equal(textOf(state), "Short.", "the run's end is the live turn's to say")
 })

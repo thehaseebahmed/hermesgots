@@ -49,10 +49,10 @@ const plugin = ({ server }: Connection) => pluginRoot(server)
 const headers = ({ key }: Connection) => ({ Authorization: `Bearer ${key}` })
 const within = (signal?: AbortSignal) =>
   AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(READ_TIMEOUT_MS)])
-/** The host answered, and said no: unlike a read that never got an answer, which says it is away. */
-export class HostAnswered extends Error {}
+/** A read that got no answer at all (no connection, or none in time): the host is away. */
+export class HostAway extends Error {}
 const ensure = (response: Response) => {
-  if (!response.ok) throw new HostAnswered(`The host answered ${response.status}.`)
+  if (!response.ok) throw new Error(`The host answered ${response.status}.`)
 }
 
 /**
@@ -66,10 +66,15 @@ export async function readPage(
   signal?: AbortSignal,
   archived = false,
 ): Promise<Row[]> {
-  const response = await fetch(
-    `${root(connection)}/api/sessions/${encodeURIComponent(session)}/messages?order=latest&limit=${PAGE}&offset=${offset}${archived ? "&include_compacted=true" : ""}`,
-    { headers: headers(connection), signal: within(signal) },
-  )
+  let response: Response
+  try {
+    response = await fetch(
+      `${root(connection)}/api/sessions/${encodeURIComponent(session)}/messages?order=latest&limit=${PAGE}&offset=${offset}${archived ? "&include_compacted=true" : ""}`,
+      { headers: headers(connection), signal: within(signal) },
+    )
+  } catch {
+    throw new HostAway("Can't reach the host.")
+  }
   if (response.status === 404) {
     const code = (await response.json().catch(() => null))?.error?.code
     if (code === "session_not_found") return []

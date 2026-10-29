@@ -752,6 +752,11 @@ export interface SessionState {
 export interface LiveTurn {
   turn: Turn
   replaces: boolean
+  /**
+   * A run joined from its start replays its events from nothing: until the replay holds as many calls
+   * and as many words as the transcript's copy of the turn did when it joined, that copy stays drawn.
+   */
+  replay?: { calls: number; chars: number }
 }
 
 /** chat-next's tables, so a test can give each device a database of its own (ADR 0065). */

@@ -38,7 +38,7 @@ import {
   respond,
   startRun,
   stopRun,
-  HostAnswered,
+  HostAway,
   type Connection,
   type Queued,
 } from "./api"
@@ -736,8 +736,8 @@ export function ChatNextThread({
         } catch (error) {
           if (alive.current.signal.aborted || mine !== reads.current) return
           // A host that answered says what is wrong; one that did not is away.
-          if (error instanceof HostAnswered) dispatch(failure(error))
-          else setAway(true)
+          if (error instanceof HostAway) setAway(true)
+          else dispatch(failure(error))
         } finally {
           firstRows.current?.resolve()
           reading.current = null
@@ -984,8 +984,9 @@ export function ChatNextThread({
   })
   useEffect(() => {
     if (!ready || !server || !key || !session) return
-    void readLiveRun({ server, key }, session, alive.current.signal).then((run) => {
-      if (run && !alive.current.signal.aborted) void joining.current(run)
+    const { signal } = alive.current
+    void readLiveRun({ server, key }, session, signal).then((run) => {
+      if (run && !signal.aborted) void joining.current(run)
     })
   }, [ready, server, key, session])
 
@@ -1182,7 +1183,7 @@ export function ChatNextThread({
     <Composer
       controls={{
         // A run the host works that this page has not joined yet is a turn running all the same.
-        busy: doing.running || Boolean(hostRun && !last?.done),
+        busy: doing.running || Boolean(hostRun && !last?.done && !last?.failed),
         send: sendTurn,
         queue: queueMessage,
         steer: steerMessage,

@@ -157,24 +157,24 @@ function withClarifyAnswer(
 export const foldedOf = (rows: Row[], archived?: Row[], partial?: boolean) =>
   foldTurns(archived ? withArchive(rows, archived) : rows, Boolean(partial) && !archived)
 
-/** How much of a reply a turn holds: its calls and the words it wrote. */
-const sizeOf = (turn: Turn) =>
-  turn.parts.reduce(
-    (sum, part) =>
-      sum +
-      (part.kind === "tools" ? part.calls.length : part.kind === "text" ? part.text.length : 0),
-    0,
-  )
+/** How much of a reply a turn holds: its calls, and the characters of the words it wrote. */
+function reach(turn: Turn) {
+  let calls = 0
+  let chars = 0
+  for (const part of turn.parts) {
+    if (part.kind === "tools") calls += part.calls.length
+    else if (part.kind === "text") chars += part.text.length
+  }
+  return { calls, chars }
+}
 
 /**
  * The turns the screen draws: the transcript's, with the streamed one laid over the last. A run
- * joined from its start replays its events from nothing, so until it holds as much as the
- * transcript's copy of that turn the transcript's is drawn, and the reply never shrinks as it joins.
+ * joined from its start is replaying, so the transcript's copy of the turn stays drawn until the
+ * replay has caught up with it (`LiveTurn.replay`), and the reply never shrinks as it joins.
  */
 export function turnsOf(folded: Turn[], live?: LiveTurn): Turn[] {
-  if (!live) return folded
-  const tail = folded.at(-1)
-  if (live.replaces && tail && sizeOf(live.turn) < sizeOf(tail)) return folded
+  if (!live || live.replay) return folded
   return withoutRepeatedFailures(
     live.replaces ? [...folded.slice(0, -1), live.turn] : [...folded, live.turn],
   )
@@ -395,7 +395,9 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         ...state,
         running: true,
         waiting: undefined,
-        live: last ? { turn: { ...last, parts: [], done: false }, replaces: true } : undefined,
+        live: last
+          ? { turn: { ...last, parts: [], done: false }, replaces: true, replay: reach(last) }
+          : undefined,
       }
     }
     case "queue": {
@@ -423,7 +425,16 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       const waiting = waitingAfter(state.waiting, event.event)
       const held = state.live
       const turn = held && live(held.turn, event.event, event.at)
-      const moved = held && turn && turn !== held.turn ? { ...held, turn } : held
+      let moved = held && turn && turn !== held.turn ? { ...held, turn } : held
+      // The replay is over once it holds what the transcript's copy did, or the run has ended.
+      if (moved?.replay) {
+        const { calls, chars } = reach(moved.turn)
+        if (
+          ENDINGS.includes(event.event.event) ||
+          (calls >= moved.replay.calls && chars >= moved.replay.chars)
+        )
+          moved = { ...moved, replay: undefined }
+      }
       if (waiting === state.waiting && moved === held) return state
       return { ...state, waiting, live: moved }
     }
