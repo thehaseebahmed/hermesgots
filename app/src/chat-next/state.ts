@@ -157,9 +157,24 @@ function withClarifyAnswer(
 export const foldedOf = (rows: Row[], archived?: Row[], partial?: boolean) =>
   foldTurns(archived ? withArchive(rows, archived) : rows, Boolean(partial) && !archived)
 
-/** The turns the screen draws: the transcript's, with the streamed one laid over the last. */
+/** How much of a reply a turn holds: its calls and the words it wrote. */
+const sizeOf = (turn: Turn) =>
+  turn.parts.reduce(
+    (sum, part) =>
+      sum +
+      (part.kind === "tools" ? part.calls.length : part.kind === "text" ? part.text.length : 0),
+    0,
+  )
+
+/**
+ * The turns the screen draws: the transcript's, with the streamed one laid over the last. A run
+ * joined from its start replays its events from nothing, so until it holds as much as the
+ * transcript's copy of that turn the transcript's is drawn, and the reply never shrinks as it joins.
+ */
 export function turnsOf(folded: Turn[], live?: LiveTurn): Turn[] {
   if (!live) return folded
+  const tail = folded.at(-1)
+  if (live.replaces && tail && sizeOf(live.turn) < sizeOf(tail)) return folded
   return withoutRepeatedFailures(
     live.replaces ? [...folded.slice(0, -1), live.turn] : [...folded, live.turn],
   )

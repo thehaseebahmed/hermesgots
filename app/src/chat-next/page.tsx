@@ -20,6 +20,7 @@ import { connectionKey } from "@/lib/connection"
 import { usePluginFeatureOn } from "@/lib/features"
 import { SAFETY_MS } from "@/lib/freshness"
 import { onSessionMoved, useLive } from "@/lib/live"
+import { knownLiveRun, useLiveRun } from "@/lib/waiting"
 import { db, type Attachment, type MessageStats, type SessionDb } from "@/lib/db"
 
 import { equal } from "./equal"
@@ -470,6 +471,8 @@ function PlainView({
   )
 }
 
+/** Hosts that answered as new enough, for the page's life: the next chat on one reads at once. */
+const supported = new Set<string>()
 const POLL_MS = 2_000
 const IDLE_MS = 15_000
 const AGENTS_COOLDOWN_MS = 60_000
@@ -609,7 +612,12 @@ export function ChatNextThread({
   const [host, setHost] = useState<"checking" | "ok" | "away" | { version?: string }>("checking")
   // A host that cannot be reached is asked again, and meanwhile the chat is what the device holds.
   const [asks, setAsks] = useState(0)
-  const ready = host === "ok"
+  // A host that already answered as new enough is not asked again before its transcript is read;
+  // it is still asked behind the read, and a changed answer replaces the verdict.
+  const known = Boolean(
+    server && key && supported.has(connectionKey({ baseUrl: server, apiKey: key })),
+  )
+  const ready = host === "ok" || (host === "checking" && known)
   // A read begun before a send or a joined run is stale and does not land. Reads of the transcript
   // run one at a time, and a request that comes while one is out waits for it and is answered by
   // one more read after it, so a read that takes longer than the poll interval still lands.
@@ -621,14 +629,24 @@ export function ChatNextThread({
   // for a while.
   const noAgentsUntil = useRef(0)
   const noQueueUntil = useRef(0)
+  // Settles once the page's first read of the transcript has landed (or failed): a run joined before
+  // that would be replayed over a thread with no turn to put it in.
+  const firstRows = useRef<{ promise: Promise<void>; resolve: () => void }>(null)
 
   useEffect(() => {
     if (!server || !key) return
     const controller = new AbortController()
     void readVersion({ server, key }, controller.signal).then((version) => {
       if (controller.signal.aborted) return
+      const mine = connectionKey({ baseUrl: server, apiKey: key })
       if (version === "unreachable") setHost("away")
-      else setHost(version && atLeast(version) ? "ok" : { version })
+      else if (version && atLeast(version)) {
+        supported.add(mine)
+        setHost("ok")
+      } else {
+        supported.delete(mine)
+        setHost({ version })
+      }
     })
     return () => controller.abort()
   }, [server, key, asks])
@@ -712,21 +730,23 @@ export function ChatNextThread({
           await store.loaded().catch(() => undefined)
           const asking = Date.now() >= noAgentsUntil.current
           const askingQueue = Date.now() >= noQueueUntil.current
-          const [read, listed, queued] = await Promise.all([
-            // A turn's end reads the whole transcript: rows older than the ones that join what is held
-            // can only have changed then, and a read of the newest rows is the cheap one in between.
-            final
-              ? readTranscript({ server, key }, session, alive.current.signal).then((rows) => ({
-                  rows,
-                  more: false as boolean | undefined,
-                  joined: false,
-                }))
-              : readNewest({ server, key }, session, alive.current.signal, store.get().rows),
-            asking ? readAgents({ server, key }, session, alive.current.signal) : undefined,
-            askingQueue ? readQueue({ server, key }, session, alive.current.signal) : undefined,
-          ])
-          if (asking && !listed) noAgentsUntil.current = Date.now() + AGENTS_COOLDOWN_MS
-          if (askingQueue && !queued) noQueueUntil.current = Date.now() + AGENTS_COOLDOWN_MS
+          // The children and the queue are asked beside the transcript and land when they answer, so
+          // the thread is drawn as soon as its rows are, whichever read is the slowest.
+          const listing = asking
+            ? readAgents({ server, key }, session, alive.current.signal)
+            : undefined
+          const holding = askingQueue
+            ? readQueue({ server, key }, session, alive.current.signal)
+            : undefined
+          // A turn's end reads the whole transcript: rows older than the ones that join what is held
+          // can only have changed then, and a read of the newest rows is the cheap one in between.
+          const read = final
+            ? await readTranscript({ server, key }, session, alive.current.signal).then((rows) => ({
+                rows,
+                more: false as boolean | undefined,
+                joined: false,
+              }))
+            : await readNewest({ server, key }, session, alive.current.signal, store.get().rows)
           if (mine === reads.current) {
             // Rows that replace the ones held make a page in flight for them stale.
             if (read.more !== undefined) stopOlder()
@@ -743,12 +763,19 @@ export function ChatNextThread({
               .catch(() => undefined)
             if (store.get().partial) void readOlder(read.more !== undefined)
             else setOlder("idle")
+          }
+          firstRows.current?.resolve()
+          const [listed, queued] = await Promise.all([listing, holding])
+          if (asking && !listed) noAgentsUntil.current = Date.now() + AGENTS_COOLDOWN_MS
+          if (askingQueue && !queued) noQueueUntil.current = Date.now() + AGENTS_COOLDOWN_MS
+          if (mine === reads.current) {
             if (listed) dispatch({ type: "agents", agents: listed })
             if (queued) dispatch({ type: "queue", ...queued })
           }
         } catch (error) {
           if (!alive.current.signal.aborted && mine === reads.current) dispatch(failure(error))
         } finally {
+          firstRows.current?.resolve()
           reading.current = null
         }
       })()
@@ -778,6 +805,8 @@ export function ChatNextThread({
   useEffect(() => {
     if (!ready) return
     alive.current = new AbortController()
+    let resolve = () => {}
+    firstRows.current = { promise: new Promise<void>((done) => (resolve = done)), resolve }
     void catchUp().then(() => settled.current?.("opened", asked()))
     // A device that was away missed what the others wrote; it asks again as it comes back.
     const back = () => {
@@ -867,11 +896,14 @@ export function ChatNextThread({
   // One run's events at a time, whoever started it, and which run that is, for Stop.
   const streaming = useRef(false)
   const followingRun = useRef<string>(undefined)
+  // The run last followed, so one the host still lists after its stream ended is not joined again.
+  const lastRun = useRef<string>(undefined)
   const follow = useCallback(
     async (run: string) => {
       if (!server || !key || !session) return
       streaming.current = true
       followingRun.current = run
+      lastRun.current = run
       try {
         await followRun(
           { server, key },
@@ -955,6 +987,38 @@ export function ChatNextThread({
     stallMs,
     streamOpen,
   ])
+
+  // A run the host says is working is joined at once, whatever the transcript's last turn looks like:
+  // the host writes a turn's rows only after its first tool round, so the transcript alone would
+  // leave the page unaware of it for that while. The shared poll the app's lists read says it for
+  // free, and one read beside the first catch-up covers a page with no bot of its own (the dev route).
+  const join = useCallback(
+    async (run: string) => {
+      const signal = alive.current.signal
+      if (streaming.current || lastRun.current === run) return
+      await firstRows.current?.promise
+      if (signal.aborted || streaming.current || lastRun.current === run) return
+      reads.current++
+      dispatch({ type: "attach" })
+      void follow(run)
+    },
+    [follow, dispatch],
+  )
+  const hostRun = useLiveRun(
+    server && key ? { baseUrl: server, apiKey: key } : undefined,
+    session ?? undefined,
+  )
+  useEffect(() => {
+    if (!ready || !hostRun || !server || !key || !session) return
+    const run = knownLiveRun({ baseUrl: server, apiKey: key }, session)?.runId
+    if (run) join(run)
+  }, [ready, hostRun, server, key, session, join])
+  useEffect(() => {
+    if (!ready || !server || !key || !session) return
+    void readLiveRun({ server, key }, session, alive.current.signal).then((run) => {
+      if (run && !alive.current.signal.aborted) join(run)
+    })
+  }, [ready, server, key, session, join])
 
   // A card opened shows its child's own transcript, read again as the child's state moves.
   const [opened, setOpened] = useState<{ id: string; goal: string }>()
@@ -1158,7 +1222,8 @@ export function ChatNextThread({
     host === "away" ? null : Composer ? (
       <Composer
         controls={{
-          busy: doing.running,
+          // A run the host works that this page has not joined yet is a turn running all the same.
+          busy: doing.running || Boolean(hostRun && !last?.done),
           send: sendTurn,
           queue: queueMessage,
           steer: steerMessage,
