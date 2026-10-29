@@ -63,40 +63,47 @@ export interface CleanupLevelRow {
   sample: string
 }
 
-/**
- * The four cards, in order, each with the same sentence at its own level — what a person is choosing
- * between, rather than a promise about it (ADR 0066).
- */
-export const CLEANUP_LEVEL_ROWS: CleanupLevelRow[] = [
-  {
-    level: "none",
+/** What each level's card says — keyed by level, so a card can never be missing its own name. */
+const CARD: Record<CleanupLevel, { name: string; purpose: string; sample: string }> = {
+  none: {
     name: "None",
     purpose: "Exactly what you said",
     sample:
       "hey joey, we still on for coffee or? i think we maybe should leave earlier to make it there in time there might um be traffic. What are you thinking?",
   },
-  {
-    level: "light",
+  light: {
     name: "Light",
     purpose: "Cleans up filler words and grammar",
     sample:
       "Hey Joey, are we still on for coffee? I think we should leave earlier to make it there in time. There might be traffic. What are you thinking?",
   },
-  {
-    level: "medium",
+  medium: {
     name: "Medium",
     purpose: "Edits for clarity and conciseness",
     sample:
       "Hey Joey, are we still on for coffee? We should leave earlier; there might be traffic. What do you think?",
   },
-  {
-    level: "high",
+  high: {
     name: "High",
     purpose: "Rewrites for brevity and polish",
     sample:
       "Hey Joey, are we still on for coffee? Let's leave early to beat traffic. What do you think?",
   },
-]
+}
+
+/**
+ * The four cards, weakest first, each with the same sentence at its own level — what a person is
+ * choosing between, rather than a promise about it (ADR 0066).
+ */
+export const CLEANUP_LEVEL_ROWS: CleanupLevelRow[] = CLEANUP_LEVELS.map((level) => ({
+  level,
+  ...CARD[level],
+}))
+
+/** A level's name as a page reads it: `Light`, not `light`. */
+export function levelName(level: CleanupLevel): string {
+  return CARD[level].name
+}
 
 export interface SpeechPick {
   provider: string

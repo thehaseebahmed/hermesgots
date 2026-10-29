@@ -24,6 +24,7 @@ import { useSpeech } from "@/lib/host-speech"
 import { botModel, fullModel, useModelInfo } from "@/lib/model-info"
 import {
   CLEANUP_LEVEL_ROWS,
+  levelName,
   marked,
   modelSize,
   modelSpeed,
@@ -723,11 +724,6 @@ function CleanupRow({
       data-setting="cleanup-model"
     />
   )
-}
-
-/** A level's name as the row reads it: `Light`, not `light`. */
-function levelName(level: CleanupLevel): string {
-  return CLEANUP_LEVEL_ROWS.find((row) => row.level === level)?.name ?? "Light"
 }
 
 /** The cleanup's card: the level a take is tidied at, its model, and the decode's prompt. */

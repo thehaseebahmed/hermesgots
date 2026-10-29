@@ -227,28 +227,31 @@ def _advertised(features: Tuple[Tuple[str, Callable[[], Optional[str]]], ...]) -
     return [name for (name, _), ok in zip(features, works) if ok] if works[0] else []
 
 
-def _cleanup_pick(path: Path) -> Optional[Dict[str, str]]:
+def _stored(read: Callable[[], Any], default: Any, what: str) -> Any:
+    """A setting the bot keeps, or ``default`` where it can't be read: a route never fails on it."""
     try:
-        return speech.applied_cleanup(path, research.llm_gate())
+        return read()
     except Exception:
-        logger.warning("memento: couldn't read the dictation cleanup model", exc_info=True)
-        return None
+        logger.warning(f"memento: couldn't read {what}", exc_info=True)
+        return default
+
+
+def _cleanup_pick(path: Path) -> Optional[Dict[str, str]]:
+    return _stored(
+        lambda: speech.applied_cleanup(path, research.llm_gate()), None, "the dictation cleanup model"
+    )
 
 
 def _cleanup_level(path: Path) -> str:
-    try:
-        return speech.read_level(path)
-    except Exception:
-        logger.warning("memento: couldn't read the dictation cleanup level", exc_info=True)
-        return dictation_cleanup.DEFAULT_LEVEL
+    return _stored(
+        lambda: speech.read_level(path),
+        dictation_cleanup.DEFAULT_LEVEL,
+        "the dictation cleanup level",
+    )
 
 
 def _hearing_prompt(path: Path) -> bool:
-    try:
-        return speech.read_hearing(path)
-    except Exception:
-        logger.warning("memento: couldn't read the hearing prompt setting", exc_info=True)
-        return False
+    return _stored(lambda: speech.read_hearing(path), False, "the hearing prompt setting")
 
 
 def mirror_for_profiles(app: Any, web: Any) -> None:
