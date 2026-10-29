@@ -3,6 +3,7 @@ import { type ComponentProps, createContext, useContext, useMemo, useState } fro
 
 import { Banner } from "@/components/banner"
 import { AgentPopup } from "@/components/chat/agent-card"
+import { CodeFaceProvider } from "@/components/chat/code-face"
 import { DayHeading } from "@/components/chat/day-heading"
 import { EmptyState, MainEmptyState } from "@/components/chat/empty-states"
 import { useMainFlow } from "@/components/chat/main-flow"
@@ -266,11 +267,14 @@ export function AppChatNextThread({
   chatId,
   main,
   blank,
+  code,
   ...props
 }: ComponentProps<typeof ChatNextThread> & {
   chatId: string
   main?: MainView
   blank?: BlankView
+  /** A code session: the agent's own output reads in the code face. */
+  code?: boolean
 }) {
   // Held by its fields, so a parent's render that changes nothing about Main draws nothing again.
   const mainKey = main ? JSON.stringify(main) : ""
@@ -284,8 +288,10 @@ export function AppChatNextThread({
     [chatId, mainKey, blankKey],
   )
   return (
-    <ChatOf.Provider value={chat}>
-      <ChatNextThread {...props} View={AppThreadView} />
-    </ChatOf.Provider>
+    <CodeFaceProvider value={code ? "font-code" : undefined}>
+      <ChatOf.Provider value={chat}>
+        <ChatNextThread {...props} View={AppThreadView} />
+      </ChatOf.Provider>
+    </CodeFaceProvider>
   )
 }

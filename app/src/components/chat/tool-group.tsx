@@ -225,8 +225,8 @@ function ToolList({
   tip: string
   onSelect: (index: number) => void
 }) {
-  const code = useCodeFace()
-  const mono = useMonoFace()
+  const face = useCodeFace()
+  const mono = face ?? "font-mono"
   return (
     <>
       <PopupHeader className="pb-2">
@@ -246,7 +246,7 @@ function ToolList({
                 type="button"
                 className={cn(
                   "flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-lg text-left text-[15px] outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
-                  code && "font-code",
+                  face,
                 )}
                 onClick={() => onSelect(index)}
               >

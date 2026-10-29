@@ -43,7 +43,6 @@ import { useBreakReminderEligibility } from "@/components/break-reminder-context
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { ChatHeader } from "@/components/chat/chat-header"
-import { CodeFaceProvider } from "@/components/chat/code-face"
 import { Composer } from "@/components/chat/composer"
 import { MessageItem } from "@/components/chat/message-item"
 import { Compacted, ModelChange } from "@/components/chat/model-change"
@@ -493,96 +492,91 @@ function NextChat({
     </DropdownMenu>
   )
   return (
-    // A code session reads the agent's own output in JetBrains Mono (`useCodeFace`); the pane's
-    // chrome stays in the app's face.
-    <CodeFaceProvider value={Boolean(chat?.projectId)}>
-      <div
-        data-slot="chat-pane"
-        data-pane={slot}
-        data-chat-next
-        data-code-session={chat?.projectId ? "" : undefined}
-        className="relative flex min-h-0 flex-1 flex-col"
-        inert={!ready}
-      >
-        {chat && bot && ready ? (
-          <>
-            <ChatHeader
-              // Main is the bot's face, so its title is the bot's name, which Bot settings edits.
-              // A session not started has no title yet, and its bot is the big one in the middle.
-              title={unstarted ? "" : mainOn ? bot.name || chat.title : chat.title}
-              subtitle={
-                mainOn && threadList
-                  ? threadsLine(threadCount(threadList))
-                  : session && !unstarted
-                    ? sessionSubtitle({
-                        botName: bot.name,
-                        names: sessionRepos.map((repo) => repo.name),
-                        cap: repoCap({ wide, xlarge: xl }),
-                      })
-                    : undefined
+    <div
+      data-slot="chat-pane"
+      data-pane={slot}
+      data-chat-next
+      data-code-session={chat?.projectId ? "" : undefined}
+      className="relative flex min-h-0 flex-1 flex-col"
+      inert={!ready}
+    >
+      {chat && bot && ready ? (
+        <>
+          <ChatHeader
+            // Main is the bot's face, so its title is the bot's name, which Bot settings edits.
+            // A session not started has no title yet, and its bot is the big one in the middle.
+            title={unstarted ? "" : mainOn ? bot.name || chat.title : chat.title}
+            subtitle={
+              mainOn && threadList
+                ? threadsLine(threadCount(threadList))
+                : session && !unstarted
+                  ? sessionSubtitle({
+                      botName: bot.name,
+                      names: sessionRepos.map((repo) => repo.name),
+                      cap: repoCap({ wide, xlarge: xl }),
+                    })
+                  : undefined
+            }
+            botId={bot.botId}
+            muted={Boolean(chat.muted || bot.muted)}
+            centered={Boolean(session) || besideMain}
+            showBot={!session && !besideMain}
+            actions={actions}
+            leading={
+              // Beside Main the bot is on screen with the thread; below `xl` the thread leads back.
+              // A session leads back to Code, unless it is drawn beside Code's list.
+              mainPath && !besideMain ? (
+                <HeaderBack label={`Back to ${bot.name || "bot"}`} onClick={() => up(mainPath)} />
+              ) : (
+                underCode && <HeaderBack label="Back to Code" onClick={() => void leave()} />
+              )
+            }
+          />
+          <Suspense fallback={null}>
+            <ChatNextThread
+              key={chat.hermesSessionId}
+              chatId={id}
+              code={Boolean(chat.projectId)}
+              blank={unstarted ? { botId: bot.botId, repos: sessionRepos } : undefined}
+              main={
+                mainOn
+                  ? {
+                      profileId: chat.profileId,
+                      botId: bot.botId,
+                      openThread: routeThread ?? paneThread,
+                      beside: Boolean(routeThread),
+                      routeChat,
+                    }
+                  : undefined
               }
-              botId={bot.botId}
-              muted={Boolean(chat.muted || bot.muted)}
-              centered={Boolean(session) || besideMain}
-              showBot={!session && !besideMain}
-              actions={actions}
-              leading={
-                // Beside Main the bot is on screen with the thread; below `xl` the thread leads back.
-                // A session leads back to Code, unless it is drawn beside Code's list.
-                mainPath && !besideMain ? (
-                  <HeaderBack label={`Back to ${bot.name || "bot"}`} onClick={() => up(mainPath)} />
-                ) : (
-                  underCode && <HeaderBack label="Back to Code" onClick={() => void leave()} />
-                )
+              server={bot.baseUrl}
+              apiKey={bot.apiKey}
+              session={chat.hermesSessionId}
+              prepareTurn={(text, attachments) => prepareTurn(id, text, attachments)}
+              queueTurn={async (text, attachments) => void (await queueTurn(id, text, attachments))}
+              steerTurn={(text, attachments) => steerTurn(id, text, attachments)}
+              // Only Main's messages are triaged; a thread and a project session never are.
+              triageTurn={
+                mainOn
+                  ? (text, attachments, options) => triageTurn(id, text, attachments, options)
+                  : undefined
               }
+              // What the plugin holds beside the transcript — the title, the context, the todos, a
+              // session's workspace, pull requests and library — read as every chat reads it.
+              onSettled={(reason, thread) =>
+                reason === "turn"
+                  ? void readAfterTurn(id, { turn: thread.turns })
+                  : refreshChatDetails(id)
+              }
+              Composer={composer}
             />
-            <Suspense fallback={null}>
-              <ChatNextThread
-                key={chat.hermesSessionId}
-                chatId={id}
-                blank={unstarted ? { botId: bot.botId, repos: sessionRepos } : undefined}
-                main={
-                  mainOn
-                    ? {
-                        profileId: chat.profileId,
-                        botId: bot.botId,
-                        openThread: routeThread ?? paneThread,
-                        beside: Boolean(routeThread),
-                        routeChat,
-                      }
-                    : undefined
-                }
-                server={bot.baseUrl}
-                apiKey={bot.apiKey}
-                session={chat.hermesSessionId}
-                prepareTurn={(text, attachments) => prepareTurn(id, text, attachments)}
-                queueTurn={async (text, attachments) =>
-                  void (await queueTurn(id, text, attachments))
-                }
-                steerTurn={(text, attachments) => steerTurn(id, text, attachments)}
-                // Only Main's messages are triaged; a thread and a project session never are.
-                triageTurn={
-                  mainOn
-                    ? (text, attachments, options) => triageTurn(id, text, attachments, options)
-                    : undefined
-                }
-                // What the plugin holds beside the transcript — the title, the context, the todos, a
-                // session's workspace, pull requests and library — read as every chat reads it.
-                onSettled={(reason, thread) =>
-                  reason === "turn"
-                    ? void readAfterTurn(id, { turn: thread.turns })
-                    : refreshChatDetails(id)
-                }
-                Composer={composer}
-              />
-            </Suspense>
-            {leaveDialog}
-          </>
-        ) : (
-          <PendingChat />
-        )}
-      </div>
-    </CodeFaceProvider>
+          </Suspense>
+          {leaveDialog}
+        </>
+      ) : (
+        <PendingChat />
+      )}
+    </div>
   )
 }
 
