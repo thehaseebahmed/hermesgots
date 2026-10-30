@@ -834,7 +834,7 @@ test("a reply the run carries on without the app counts toward the break reminde
   )
 })
 
-test("a file this device sent downloads from the bytes it holds, with no read of the host", async () => {
+test("a file this device sent opens a tab at the URL the host signs for it", async () => {
   const { host } = await onChatNext("c-held", {}, { plugin: true })
   const file = {
     id: "f0",
@@ -845,21 +845,12 @@ test("a file this device sent downloads from the bytes it holds, with no read of
     path: "/host/files/field notes.txt",
   }
   host.seed([{ user: attachmentsText("Read this", [file]), reply: "Read." }])
-  await db.sentFiles.put({ session: "memento-c-held", path: file.path, blob: new Blob(["notes"]) })
-  const saved: string[] = []
-  const reads: string[] = []
-  const anchor = window.HTMLAnchorElement.prototype
-  const real = { create: URL.createObjectURL, revoke: URL.revokeObjectURL, click: anchor.click }
-  const fetched = globalThis.fetch
-  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-    if (String(input).includes("/media")) reads.push(String(input))
-    return fetched(input, init)
-  }) as typeof fetch
-  URL.createObjectURL = () => "blob:held"
-  URL.revokeObjectURL = () => {}
-  anchor.click = function (this: HTMLAnchorElement) {
-    saved.push(this.download)
-  }
+  const opened: string[] = []
+  const real = { open: window.open }
+  window.open = ((url: string | URL) => {
+    opened.push(String(url))
+    return null
+  }) as typeof window.open
   try {
     await mount(chatScreen("c-held"), async () => {
       const row = () =>
@@ -867,18 +858,11 @@ test("a file this device sent downloads from the bytes it holds, with no read of
           (one) => one.getAttribute("aria-label") === `Download ${file.name}`,
         ) ?? null
       await until(() => row() !== null, "the file's row")
-      // The row is there a moment before the device has read what it holds.
-      for (let tries = 0; !saved.length && tries < 40; tries++) {
-        await click(row())
-        await settle()
-      }
-      assert.deepEqual(saved, [file.name], "the download, under the file's own name")
-      assert.deepEqual(reads, [], "the bytes were the device's own, so the host was not asked")
+      await click(row())
+      await until(async () => opened.length > 0, "the tab")
+      assert.match(opened[0], /\/media\?path=.*token=/, "at the URL the host signed for the file")
     })
   } finally {
-    globalThis.fetch = fetched
-    URL.createObjectURL = real.create
-    URL.revokeObjectURL = real.revoke
-    anchor.click = real.click
+    window.open = real.open
   }
 })

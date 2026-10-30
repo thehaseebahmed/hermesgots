@@ -1,8 +1,10 @@
 /**
  * What a message's media draws as, over a seeded device database with the HTTP boundary faked: one
- * Gallery for the photos and clips, a recording in a row of its own, a file as a row that downloads
- * — and the bytes from this device's own copy where it has one, else from the host's media route
- * behind the bot's key. Nothing is played in the thread: a tap hands the media to the platform.
+ * Gallery for the photos and clips, a recording in a row of its own, a file as a row the platform
+ * takes — every one of them from the URL the host signed, never from bytes fetched into the app.
+ * A photo or a clip keeps its cell whatever its read is doing: a skeleton while its URL is out, and
+ * the same cell with a retry after a read that failed. A row that downloads is for a file kind and
+ * never the fallback for a picture. Nothing is played in the thread: a tap opens the Previewer.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -13,13 +15,11 @@ import {
   botProfile,
   chatScreen,
   click,
-  find,
   findAll,
   mediaHost,
   mediaReads,
   mount,
   seedChat,
-  text,
   until,
 } from "./component-kit.tsx"
 
@@ -53,16 +53,6 @@ const voice: Attachment = {
   path: `${HOST}/voice.mp3`,
 }
 
-const diagram: Attachment = {
-  id: "diagram",
-  name: "diagram.svg",
-  type: "image/svg+xml",
-  size: 640,
-  // SVG travels to the model as a file marker, and still draws as the image it is.
-  image: false,
-  path: `${HOST}/diagram.svg`,
-}
-
 const notes: Attachment = {
   id: "notes",
   name: "notes.pdf",
@@ -82,7 +72,7 @@ const message = (attachments: Attachment[]): Message => ({
   attachments,
 })
 
-const gallery = () => find('[role="group"][aria-label="Gallery"]')
+const gallery = () => findAll('[role="group"][aria-label="Gallery"]')[0] ?? null
 const cell = (name: string) =>
   findAll("button").find((button) => button.getAttribute("aria-label") === `Open ${name}`) ?? null
 const row = (name: string) =>
@@ -91,123 +81,102 @@ const download = (name: string) =>
   findAll("button").find((button) => button.getAttribute("aria-label") === `Download ${name}`) ??
   null
 
-const ready = (button: Element | null) => Boolean(button) && !button!.hasAttribute("disabled")
+/** Whether the cell or row a file draws in has answered: its place is kept, busy until it has. */
+const filled = (button: Element | null) => Boolean(button) && !button!.hasAttribute("aria-busy")
 
-/** jsdom has no object URLs, so the browser's own handle on a blob is stood in for. */
-function stubUrls() {
-  const real = { create: URL.createObjectURL, revoke: URL.revokeObjectURL }
-  let made = 0
-  URL.createObjectURL = (blob: Blob | MediaSource) =>
-    `blob:${(blob as Blob).type || "bytes"}-${++made}`
-  URL.revokeObjectURL = () => {}
-  return () => {
-    URL.createObjectURL = real.create
-    URL.revokeObjectURL = real.revoke
-  }
-}
-
-test("a message's photo and clip draw in one Gallery, its recording in a row of its own", async () => {
+test("a message's photo and clip draw in one Gallery, its recording in a row, its note as a file", async () => {
   const profile = botProfile("media-gallery")
   await seedChat({
     id: "c1",
     profile,
-    messages: [message([photo, clip, diagram, voice, notes])],
+    messages: [message([photo, clip, voice, notes])],
   })
-  // The host can't serve the photo: this device's own copy is what draws it.
-  const asked = mediaHost({ fail: ["cat.png"] })
-  const restore = stubUrls()
-  const opened: string[] = []
-  const realOpen = window.open
-  window.open = ((url: string | URL) => {
-    opened.push(String(url))
-    return null
-  }) as typeof window.open
-  try {
-    await mount(chatScreen("c1"), async () => {
-      await until(async () => gallery() !== null, "the Gallery")
-      await until(async () => ready(cell("clip.mp4")), "the clip's cell")
-
-      const cells = gallery()!
-      assert.ok(cells.contains(cell("cat.png")), "the photo keeps its place in the Gallery")
-      assert.ok(cells.contains(cell("clip.mp4")), "and the clip sits beside it")
-      assert.ok(cells.contains(cell("diagram.svg")), "an SVG draws as the image it is")
-      assert.equal(
-        cells.contains(row("voice.mp3")),
-        false,
-        "a recording is not a picture, so it isn't in the Gallery",
-      )
-      assert.ok(ready(row("voice.mp3")), "the recording has a row of its own")
-      assert.match(text(), /voice\.mp3/, "the row names it")
-      assert.equal(cell("notes.pdf"), null, "a PDF is not media")
-      assert.ok(ready(download("notes.pdf")), "a file still draws as a row that downloads it")
-
-      assert.equal(document.querySelector("video"), null, "nothing is played in the thread")
-      assert.equal(document.querySelector("audio"), null)
-
-      const picture = cell("cat.png")!.querySelector("img")
-      assert.ok(picture, "the photo is drawn")
-      assert.match(picture!.getAttribute("src") ?? "", /^blob:/, "from this device's own copy")
-      assert.deepEqual(
-        mediaReads(asked).filter((path) => path.endsWith("cat.png")),
-        [],
-        "a photo this device holds is never asked of a host that can't serve it",
-      )
-      assert.deepEqual(
-        mediaReads(asked).map((path) => path.replace(`${HOST}/`, "")).sort(),
-        ["clip.mp4", "diagram.svg", "voice.mp3"],
-        "what this device doesn't hold comes from the media route",
-      )
-
-      await click(cell("clip.mp4"))
-      await click(row("voice.mp3"))
-      assert.deepEqual(opened.length, 2, "each tap opens the platform's own player")
-      for (const url of opened) assert.match(url, /^blob:/)
-    })
-  } finally {
-    window.open = realOpen
-    restore()
-  }
-})
-
-test("a message restored on another device draws its media from the host", async () => {
-  const profile = botProfile("media-restored")
-  // What a restored message keeps: the name, the type, the size and where the host has it.
-  const restored: Attachment[] = [{ ...photo, blob: undefined }, clip, voice]
-  await seedChat({ id: "c1", profile, messages: [message(restored)] })
   const asked = mediaHost()
-  const restore = stubUrls()
-  try {
-    await mount(chatScreen("c1"), async () => {
-      await until(async () => ready(cell("cat.png")), "the photo's cell")
-      assert.ok(ready(cell("clip.mp4")), "the clip's cell")
-      assert.ok(ready(row("voice.mp3")), "the recording's row")
-      assert.deepEqual(
-        mediaReads(asked).map((path) => path.replace(`${HOST}/`, "")).sort(),
-        ["cat.png", "clip.mp4", "voice.mp3"],
-        "every one of them read from the host, which is where the bytes are",
-      )
-      assert.match(
-        cell("cat.png")!.querySelector("img")?.getAttribute("src") ?? "",
-        /^blob:/,
-        "and drawn from what the host answered",
-      )
-    })
-  } finally {
-    restore()
-  }
+  await mount(chatScreen("c1"), async () => {
+    await until(async () => filled(cell("clip.mp4")), "the clip's cell")
+    await until(async () => filled(row("voice.mp3")), "the recording's row")
+    await until(async () => filled(download("notes.pdf")), "the file's row")
+
+    const cells = gallery()!
+    assert.ok(cells.contains(cell("cat.png")), "the photo keeps its place in the Gallery")
+    assert.ok(cells.contains(cell("clip.mp4")), "and the clip sits beside it")
+    assert.equal(cells.contains(row("voice.mp3")), false, "a recording is not a picture")
+    assert.equal(cell("notes.pdf"), null, "a PDF is not media")
+    assert.equal(
+      findAll('[role="group"][aria-label="Gallery"]').length,
+      1,
+      "two cells are one Gallery",
+    )
+
+    // Every file is drawn from the URL the host signed for it, and nothing is played here.
+    assert.match(
+      cell("cat.png")!.querySelector("img")?.getAttribute("src") ?? "",
+      /\/media\?path=[^&]*cat\.png&token=/,
+      "the photo draws from its signed URL",
+    )
+    assert.equal(document.querySelector("video"), null, "nothing is played in the thread")
+    assert.equal(document.querySelector("audio"), null)
+    assert.deepEqual(
+      mediaReads(asked).map((path) => path.replace(`${HOST}/`, "")).sort(),
+      ["cat.png", "clip.mp4", "notes.pdf", "voice.mp3"],
+      "every file the message carries, asked for once",
+    )
+
+    // A tap on a cell opens the app's own Previewer: the clip plays there, paused.
+    await click(cell("clip.mp4"))
+    await until(async () => document.querySelector("video") !== null, "the clip's player")
+    const player = document.querySelector("video")!
+    assert.match(player.getAttribute("src") ?? "", /clip\.mp4/, "on the URL it was drawn from")
+    assert.equal(player.hasAttribute("autoplay"), false, "paused until it is pressed")
+    await click(findAll("button").find((one) => one.getAttribute("aria-label") === "Close"))
+
+    // And the recording opens the same Previewer, on a player of its own.
+    await click(row("voice.mp3"))
+    await until(async () => document.querySelector("audio") !== null, "the recording's player")
+    assert.match(
+      document.querySelector("audio")!.getAttribute("src") ?? "",
+      /voice\.mp3/,
+      "from its own URL",
+    )
+  })
 })
 
-test("media whose bytes can't be read falls back to the row that downloads it", async () => {
+test("a photo whose URL never answers keeps its cell, never a download row", async () => {
   const profile = botProfile("media-missing")
-  await seedChat({ id: "c1", profile, messages: [message([clip])] })
-  mediaHost({ fail: ["clip.mp4"] })
-  const restore = stubUrls()
-  try {
-    await mount(chatScreen("c1"), async () => {
-      await until(async () => download("clip.mp4") !== null, "the download row")
-      assert.equal(cell("clip.mp4"), null, "a cell it can't fill is not promised")
-    })
-  } finally {
-    restore()
-  }
+  await seedChat({ id: "c1", profile, messages: [message([photo])] })
+  // A host that can't be asked: nothing settles this file, and the cell says so.
+  mediaHost({ fail: ["cat.png"], failure: 503 })
+  await mount(chatScreen("c1"), async () => {
+    await until(async () => cell("cat.png") !== null, "the photo's cell")
+    assert.equal(download("cat.png"), null, "a picture is never handed over as a file to save")
+    assert.equal(gallery()?.contains(cell("cat.png")), true, "its place is kept in the Gallery")
+  })
+})
+
+test("a photo whose read failed offers a retry that asks again and draws", async () => {
+  const profile = botProfile("media-retry-cell")
+  await seedChat({ id: "c1", profile, messages: [message([photo])] })
+  mediaHost({ fail: ["cat.png"], failure: 503 })
+  const asked = mediaHost({ fail: ["cat.png"], failure: 503 })
+  await mount(chatScreen("c1"), async () => {
+    await until(async () => !filled(cell("cat.png")), "the cell that couldn't read")
+    assert.equal(download("cat.png"), null, "still not a file to save")
+    // The host comes back: the retry in the Previewer asks it again, and the picture draws.
+    mediaHost({ asked })
+    await click(cell("cat.png"))
+    await until(
+      async () => findAll("button").some((one) => one.textContent === "Try again"),
+      "the retry",
+    )
+    await click(findAll("button").find((one) => one.textContent === "Try again")!)
+    await until(
+      async () => document.querySelector('img[alt="cat.png"]') !== null,
+      "the photo drawn from the host's answer",
+    )
+    assert.deepEqual(
+      mediaReads(asked).filter((path) => path.endsWith("cat.png")).length,
+      2,
+      "the retry asked the host a second time",
+    )
+  })
 })

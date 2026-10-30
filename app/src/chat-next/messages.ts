@@ -77,49 +77,6 @@ export function heldMessage(chat: string, row: Unsent): Message {
   }
 }
 
-/**
- * The rows with the bytes this device holds for the files they carry, found by the path the host
- * saved each at: the transcript holds a marker and no bytes, and the device's own photos draw from
- * these while the host is away. `held` is undefined while the device is still reading what it
- * holds. A row that carries nothing held is the very row given.
- */
-export function withHeldFiles(
-  messages: Message[],
-  held: ReadonlyMap<string, Blob> | undefined,
-): Message[] {
-  // Until the device has said what it holds, a file has no path to read from: asking the host for
-  // bytes the device turns out to have would be a read for nothing.
-  if (!held)
-    return messages.map((message) =>
-      message.attachments?.some((file) => file.path)
-        ? {
-            ...message,
-            attachments: message.attachments.map(({ path: _path, ...file }) => file),
-          }
-        : message,
-    )
-  if (!held.size) return messages
-  return messages.map((message) => {
-    const files = message.attachments
-    if (!files?.some((file) => file.path && !file.blob && held.has(file.path))) return message
-    // The same row with the same bytes is the same object, so a streamed word elsewhere in the
-    // thread never wakes the memo of a request that carries a photo.
-    const blobs = files.map((file) => (file.path ? held.get(file.path) : undefined))
-    const kept = overlaid.get(message)
-    if (kept && kept.blobs.every((blob, at) => blob === blobs[at])) return kept.row
-    const row = {
-      ...message,
-      attachments: files.map((file, at) =>
-        !file.blob && blobs[at] ? { ...file, blob: blobs[at] } : file,
-      ),
-    }
-    overlaid.set(message, { blobs, row })
-    return row
-  })
-}
-
-const overlaid = new WeakMap<Message, { blobs: (Blob | undefined)[]; row: Message }>()
-
 const drawn = new WeakMap<Turn, { key: string; stats?: MessageStats; rows: Message[] }>()
 
 function rowsOf(

@@ -646,7 +646,15 @@ export function fakeHost(
       return reply({
         object: "memento.info",
         version: "0.91.0",
-        features: ["queue", "media", "triage", "moves", "subagents_stop_all", "failed_turn_clear"],
+        features: [
+          "queue",
+          "media",
+          "media_url",
+          "triage",
+          "moves",
+          "subagents_stop_all",
+          "failed_turn_clear",
+        ],
       })
     }
     if (plugin && path === `/api/plugins/memento/sessions/${session}/triage`) {
@@ -658,7 +666,19 @@ export function fakeHost(
     }
     if (plugin && path === `/api/plugins/memento/sessions/${session}/moves`)
       return reply({ moves: triage.moves })
-    // The plugin's media route, serving any path as the image or file its suffix names.
+    // The plugin's media route: a URL minted for one path, which the route serves as the image or
+    // file its suffix names.
+    if (plugin && path === "/api/plugins/memento/media/url") {
+      const file = String(JSON.parse(String(init?.body ?? "{}")).path ?? "")
+      const type = file.endsWith(".png") ? "image/png" : "application/octet-stream"
+      return reply({
+        object: "memento.media_url",
+        path: file,
+        url: `${url.origin}${path.replace(/\/url$/, "")}?path=${encodeURIComponent(file)}&token=mock-token`,
+        type,
+        size: 5,
+      })
+    }
     if (plugin && path === "/api/plugins/memento/media") {
       const file = url.searchParams.get("path") ?? ""
       const type = file.endsWith(".png") ? "image/png" : "application/octet-stream"

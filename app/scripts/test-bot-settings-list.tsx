@@ -188,7 +188,7 @@ test("an out-of-date plugin's banner leads the list, in the words the design set
     const list = find("[data-bot-settings-list]")
     assert.equal(
       list?.firstElementChild?.textContent,
-      "This bot's plugin is out of date! Update it to 0.80.0 or newer.",
+      "This bot's plugin is out of date! Update it to 0.95.0 or newer.",
       "the banner is the first thing on the list",
     )
     assert.equal(rows().length, 6, "and every row follows it")
@@ -196,7 +196,7 @@ test("an out-of-date plugin's banner leads the list, in the words the design set
 })
 
 test("a plugin that isn't out of date has no banner over the list", async () => {
-  await seed("banner-current", ALL, { pluginVersion: "0.81.0" })
+  await seed("banner-current", ALL, { pluginVersion: "0.95.0" })
   await mount(settings("/settings/bots/bot-1"), async () => {
     assert.doesNotMatch(text(), /out of date/, "nothing says the plugin is old")
     assert.equal(rows().length, 6, "and the list is all there is")

@@ -1,19 +1,23 @@
-import { useEffect, useState } from "react"
-import { PlayIcon } from "lucide-react"
+import { useEffect, useId, useRef, useState } from "react"
+import { PlayIcon, RotateCwIcon } from "lucide-react"
 
 import { FileRow, MediaName } from "@/components/chat/attachments"
+import { usePreviewer } from "@/components/chat/previewer"
 import { Skeleton } from "@/components/ui/skeleton"
 import { boundedStore } from "@/lib/bounded-cache"
+import { previewItem } from "@/lib/media-items"
 import type { MediaCell, MediaKind } from "@/lib/media-kind"
 import { useImageReady } from "@/lib/image"
-import { openMediaViewer } from "@/lib/native"
 import { cn } from "@/lib/utils"
 
 // Every cell in the Gallery takes this box — a photo, and a clip's first frame — so nothing moves
 // as media arrives. A reply's single image has always taken it, and still does.
 const CELL = "h-24 w-full rounded-xl border md:h-32 xl:h-40"
 
-/** One piece of media a thread draws: what it is, where it draws, and its bytes where they are in. */
+/** How far a file's bytes are in: still asked for, drawn, or the read failed and can be asked again. */
+export type MediaItemState = "reading" | "ready" | "failed"
+
+/** One piece of media a thread draws: what it is, where it draws, and where it is read from. */
 export interface MediaItem {
   /** Stable where the item came from: an attachment's id, or the index a tag was written at. */
   key: string
@@ -25,8 +29,9 @@ export interface MediaItem {
   type: string
   /** Its size, where the message kept one. */
   size?: number
-  /** What to draw or play, once the bytes are in. */
+  /** The URL the host signed for it, once its answer is in. */
   src?: string
+  state: MediaItemState
 }
 
 /** How long the browser gets to give up a clip's first frame before its cell settles for less. */
@@ -39,6 +44,21 @@ const FRAME_LIMIT = 64
 type Frame = { frame: string } | { frame: null }
 
 const frames = boundedStore<Frame>({ limit: FRAME_LIMIT })
+
+/**
+ * Waits for the clip to give up a frame of its own: a recorded clip reports no size until one is
+ * decoded, and a frame callback is the one thing that says it has been.
+ */
+const nextFrame = (video: HTMLVideoElement) =>
+  new Promise<void>((resolve) => {
+    const done = () => {
+      window.clearTimeout(timer)
+      resolve()
+    }
+    const timer = window.setTimeout(done, FRAME_TIMEOUT_MS)
+    video.addEventListener("resize", done, { once: true })
+    if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(done)
+  })
 
 /**
  * A clip's first frame, read once a page: an element that is never put on the page seeks a moment in
@@ -54,6 +74,9 @@ async function firstFrame(src: string, type: string): Promise<string | null> {
     video.muted = true
     video.playsInline = true
     video.preload = "auto"
+    // The clip comes from the bot's host, not this page's origin: without CORS the frame it paints
+    // is a tainted canvas, and a tainted canvas can't be read back into the cell.
+    video.crossOrigin = "anonymous"
     video.src = src
     const settle = (event: string) =>
       new Promise<void>((resolve, reject) => {
@@ -79,6 +102,9 @@ async function firstFrame(src: string, type: string): Promise<string | null> {
         video.currentTime = 0.1
         await settle("seeked")
       }
+      // A clip the page recorded names its own size a moment after its first frame, so the canvas
+      // waits for a frame rather than drawing an empty one.
+      if (!video.videoWidth) await nextFrame(video)
       const canvas = document.createElement("canvas")
       canvas.width = video.videoWidth
       canvas.height = video.videoHeight
@@ -121,12 +147,6 @@ function useFirstFrame(src: string | undefined, type: string) {
   return { frame, settled }
 }
 
-function open(item: MediaItem) {
-  // A markdown image has no name of its own, and the platform's viewer names the file it is handed
-  // itself when there is none.
-  if (item.src) void openMediaViewer(item.src, { type: item.type, name: item.name || undefined })
-}
-
 /** A photo in its cell, holding the box with a skeleton until its bytes are drawn. */
 function Picture({ src, alt }: { src?: string; alt: string }) {
   const { ready, onLoad, onError } = useImageReady(src ?? "")
@@ -149,20 +169,27 @@ function Picture({ src, alt }: { src?: string; alt: string }) {
   )
 }
 
-/** One cell: a photo, or the first frame of a clip with the mark that it is one. */
-export function Cell({ item }: { item: MediaItem }) {
+/**
+ * One cell: a photo, or the first frame of a clip with the mark that it is one. Its place is kept
+ * whatever its bytes are doing — a skeleton while its URL is out, a plain face with a retry when the
+ * read failed — and a tap opens the app's Previewer, never leaves for another app.
+ */
+export function Cell({ item, onOpen }: { item: MediaItem; onOpen?: () => void }) {
   const clip = item.kind === "video"
   const { frame, settled } = useFirstFrame(clip ? item.src : undefined, item.type ?? "")
   return (
     <button
       type="button"
-      onClick={() => open(item)}
-      disabled={!item.src}
+      onClick={onOpen}
       aria-label={`Open ${item.name}`}
-      aria-busy={!item.src || undefined}
+      aria-busy={item.state !== "ready" || undefined}
       className={cn(CELL, "relative block cursor-pointer overflow-hidden bg-muted/40")}
     >
-      {clip ? (
+      {item.state === "failed" ? (
+        <span className="absolute inset-0 flex items-center justify-center">
+          <RotateCwIcon className="size-6 text-muted-foreground" />
+        </span>
+      ) : clip ? (
         <>
           {frame ? (
             <img
@@ -191,10 +218,13 @@ export function Cell({ item }: { item: MediaItem }) {
 function MediaGallery({
   items,
   align = "start",
+  onOpen,
 }: {
   items: MediaItem[]
   /** Which edge the cells hug: a reply's start, a message the user sent the end, beside its bubble. */
   align?: "start" | "end"
+  /** Opens the Previewer on one of them. */
+  onOpen: (item: MediaItem) => void
 }) {
   if (!items.length) return null
   const columns = items.length >= 5 ? 3 : 2
@@ -212,7 +242,7 @@ function MediaGallery({
     >
       {items.map((item) => (
         <div key={item.key} className={width}>
-          <Cell item={item} />
+          <Cell item={item} onOpen={() => onOpen(item)} />
         </div>
       ))}
     </div>
@@ -220,47 +250,84 @@ function MediaGallery({
 }
 
 /**
- * A recording in the thread: a row of its own, never a cell in the Gallery, and a tap hands it to
- * the platform's player.
+ * A recording in the thread: a row of its own, never a cell in the Gallery, and a tap opens the
+ * Previewer on it, where it plays.
  */
-function AudioRow({ item }: { item: MediaItem }) {
+function AudioRow({ item, onOpen }: { item: MediaItem; onOpen: () => void }) {
   return (
     <button
       type="button"
-      onClick={() => open(item)}
-      disabled={!item.src}
+      onClick={onOpen}
       aria-label={`Play ${item.name}`}
-      aria-busy={!item.src || undefined}
+      aria-busy={item.state !== "ready" || undefined}
       className="flex w-full max-w-[min(100%,42rem)] items-center gap-3 rounded-xl border bg-muted/40 px-3 py-2.5 text-left text-sm"
     >
       <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-foreground text-background">
-        <PlayIcon className="size-4" />
+        {item.state === "failed" ? (
+          <RotateCwIcon className="size-4" />
+        ) : (
+          <PlayIcon className="size-4" />
+        )}
       </span>
       <MediaName name={item.name} size={item.size} />
     </button>
   )
 }
 
-/** A thread's media drawn in one place, wherever it came from: a cell, a recording's row, or a file's. */
+/**
+ * A thread's media drawn in one place, wherever it came from: a cell, a recording's row, or a file's.
+ * The cells and rows a tap opens the Previewer on are one list, in the order they are drawn here, so
+ * stepping inside the Previewer follows the message.
+ */
 export function MediaItems({
   items,
   align = "start",
   onDownload,
+  onRetry,
 }: {
   items: MediaItem[]
   /** Which edge the cells and rows hug, as the Gallery takes it. */
   align?: "start" | "end"
-  /** Saves a file's row under its own name. */
+  /** Hands a file that a tap can't show to the platform, which shows or saves it. */
   onDownload: (item: MediaItem) => void
+  /** Asks a file whose read failed again. */
+  onRetry?: (item: MediaItem) => void
 }) {
+  const { open: preview, update } = usePreviewer()
+  const owner = useId()
   const cells = items.filter((item) => item.cell === "gallery")
   const recordings = items.filter((item) => item.cell === "audio")
   const files = items.filter((item) => item.cell === "file")
+  const playable = [...cells, ...recordings]
+  // What the Previewer draws changes as each URL comes in, so the list it was opened on is kept
+  // current rather than frozen at the tap: the signature says when something in it moved.
+  const signature = playable.map((one) => `${one.key}\u0000${one.state}\u0000${one.src}`).join("\n")
+  const live = useRef(playable)
+  useEffect(() => {
+    live.current = playable
+  })
+  useEffect(() => {
+    update(owner, live.current.map((one) => previewItem(one)))
+  }, [owner, signature, update])
+  const open = (item: MediaItem) =>
+    preview(
+      {
+        items: playable.map((one) => previewItem(one)),
+        index: playable.indexOf(item),
+        onRetry:
+          onRetry &&
+          ((shown) => {
+            const found = items.find((one) => one.key === shown.key)
+            if (found) onRetry(found)
+          }),
+      },
+      owner,
+    )
   return (
     <>
-      <MediaGallery items={cells} align={align} />
+      <MediaGallery items={cells} align={align} onOpen={open} />
       {recordings.map((item) => (
-        <AudioRow key={item.key} item={item} />
+        <AudioRow key={item.key} item={item} onOpen={() => open(item)} />
       ))}
       {files.length > 0 && (
         <div

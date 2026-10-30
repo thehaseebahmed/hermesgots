@@ -56,7 +56,7 @@ import { cn } from "@/lib/utils"
 
 import { delegated } from "./agents"
 import { clearFailedTurn } from "./api"
-import { messagesOf, heldMessage, replyId, withHeldFiles } from "./messages"
+import { messagesOf, heldMessage, replyId } from "./messages"
 import { ChatNextThread, type PromptProps, type ThreadViewProps } from "./page"
 
 /** A bot's Main as chat-next draws it: whose threads are its cards, and which one is open. */
@@ -111,33 +111,9 @@ export function AppThreadView({
   send,
 }: ThreadViewProps) {
   const { chatId, main, blank } = useContext(ChatOf)
-  // The files this device sent keep their bytes, so its own photos draw with the host away: only
-  // the ones the thread's requests name are read.
-  const sentPaths = useMemo(
-    () => turns.flatMap((turn) => turn.files?.flatMap((file) => file.path ?? []) ?? []).join("\n"),
-    [turns],
-  )
-  const sent = useLiveQuery(
-    async () => ({
-      // What the answer is for: a query goes on answering with its last result while the next runs.
-      paths: sentPaths,
-      files: await db.sentFiles.bulkGet(
-        sentPaths ? sentPaths.split("\n").map((path): [string, string] => [session, path]) : [],
-      ),
-    }),
-    [session, sentPaths],
-  )
-  const sentFiles = sent?.paths === sentPaths ? sent.files : undefined
-  // The rows are the chat's: what a row reads through its chat — its media, its files, a question
-  // asked again — finds the chat by this id, never by the session's.
   const messages = useMemo(
-    () =>
-      withHeldFiles(
-        messagesOf(chatId, turns, { streaming, inFlight, stats, origin }),
-        sentFiles &&
-          new Map(sentFiles.flatMap((file) => (file ? [[file.path, file.blob] as const] : []))),
-      ),
-    [chatId, turns, streaming, inFlight, stats, origin, sentFiles],
+    () => messagesOf(chatId, turns, { streaming, inFlight, stats, origin }),
+    [chatId, turns, streaming, inFlight, stats, origin],
   )
   const held = useMemo(
     () => (unsent?.items ?? []).map((row) => heldMessage(chatId, row)),

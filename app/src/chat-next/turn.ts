@@ -12,15 +12,7 @@ import { ensureSessionWorkspace } from "@/lib/workspace"
 import { randomId } from "@/lib/utils"
 import { toast } from "sonner"
 
-/** Keeps the bytes of the files a turn sends, by the path the host saved each at. */
-async function keepSent(session: string, sent: Attachment[]) {
-  const files = sent.flatMap((file) =>
-    file.path && file.blob ? [{ session, path: file.path, blob: file.blob }] : [],
-  )
-  if (files.length) await db.sentFiles.bulkPut(files).catch(quietly("Keeping a file that was sent"))
-}
-
-/** A turn ready to post: its run's body, the files it carries, and what to do once the post is settled. */
+/** A turn ready to post: its run's body and key, and what to do once the post is settled. */
 export interface PreparedTurn {
   body: Record<string, unknown>
   /** The files as the host saved them, each with its path, or as they came where none was saved. */
@@ -78,7 +70,6 @@ async function built(chatId: string, text: string, attachments: Attachment[]) {
       sent,
       settled: (reached) => {
         if (!reached) return void release?.()
-        void keepSent(chat.hermesSessionId, sent)
         // The chat moved: its list row, the Code screen and sync go by this clock.
         void updateConversation(chatId, {
           updatedAt: Date.now(),

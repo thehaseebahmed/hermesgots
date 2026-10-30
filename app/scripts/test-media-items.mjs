@@ -9,7 +9,10 @@ import test from "node:test"
 import { mediaItems } from "../src/lib/media-items.ts"
 
 const tag = (name) => ({ key: `0:${name}`, path: `/tmp/${name}`, name })
-const ready = (type, size = 12) => ({ status: "ready", read: { url: `blob:${type}`, type, size } })
+const ready = (type, size = 12) => ({
+  status: "ready",
+  read: { url: `https://host/media?path=${type}`, type, size },
+})
 
 test("a tag draws as what the host said its file is", () => {
   const tags = [tag("photo.png"), tag("clip.mp4"), tag("voice.mp3"), tag("notes.pdf")]
@@ -30,7 +33,7 @@ test("a tag draws as what the host said its file is", () => {
     ],
     "in the order the tags were written",
   )
-  assert.equal(items[0].src, "blob:image/png")
+  assert.equal(items[0].src, "https://host/media?path=image/png", "the URL the host signed")
   assert.equal(items[0].size, 12)
   assert.equal(items[0].type, "image/png")
   assert.deepEqual(unread, [])
@@ -47,7 +50,7 @@ test("a tag still being read holds the place its extension says", () => {
 test("a tag the host had nothing for is drawn as its own text, after the rest", () => {
   const tags = [tag("gone.pdf"), tag("photo.png")]
   const sources = new Map([
-    [tags[0].key, { status: "empty" }],
+    [tags[0].key, { status: "gone" }],
     [tags[1].key, ready("image/png")],
   ])
   const { items, unread } = mediaItems(tags, sources)

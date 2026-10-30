@@ -27,8 +27,7 @@ import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Button } from "@/components/ui/button"
 import { Message as MessageRow, MessageContent } from "@/components/ui/message"
 import { spawnedAgent } from "@/lib/spawn"
-import { attachmentUrl } from "@/lib/attachment-url"
-import { downloadAttachment } from "@/lib/attachments"
+import { openAttachment } from "@/lib/attachments"
 import { steerWords } from "@/lib/attachment-text"
 import { removeQueued, sendQueued } from "@/lib/chat"
 import type { Attachment, Message, ProgressReminder, ToolEvent } from "@/lib/db"
@@ -38,8 +37,9 @@ import { describeActivity, formatDuration, WAITING_FOR_APPROVAL } from "@/lib/fo
 import { NOT_SENT } from "@/lib/words"
 import { COLUMN, REPLY_INSET } from "@/lib/layout"
 import { mediaCell, mediaKind, type MediaCell } from "@/lib/media-kind"
+import { mediaImages } from "@/lib/media-parts"
 import { attachmentSources, mediaRead, useMediaSources } from "@/lib/media-source"
-import { mediaImages } from "@/lib/media-tags"
+import { mediaStage } from "@/lib/media-stage"
 import { openuiParts } from "@/lib/openui-block.ts"
 import type { InterfaceDraw, ThreadBlock } from "@/lib/openui-thread.ts"
 import {
@@ -263,8 +263,10 @@ function Stats({ message }: { message: Message }) {
 }
 
 /**
- * A sent message's media: this device's own copy where it has one, the host's otherwise, and a file
- * whose bytes can't be read anywhere as a row that saves it.
+ * A sent message's media: every file the message carries, drawn from the URL the host signs for it.
+ * A photo, a clip or a recording always keeps its cell — a skeleton until its URL is in, a plain
+ * face with a retry after a read that failed — and only a file the Previewer can't show is a row.
+ * A kind the host has no copy of is drawn as nothing at all.
  */
 function SentAttachments({
   conversationId,
@@ -275,16 +277,8 @@ function SentAttachments({
   attachments: Attachment[]
   dim: boolean
 }) {
-  const media = attachments.filter(
-    (attachment) => mediaCell(attachment.type, attachment.name) !== "file",
-  )
-  const sources = useMediaSources(conversationId, attachmentSources(media, attachmentUrl))
-  const state = (attachment: Attachment) => sources.get(attachment.id)
-  const files = [
-    ...attachments.filter((attachment) => mediaCell(attachment.type, attachment.name) === "file"),
-    ...media.filter((attachment) => state(attachment)?.status === "empty"),
-  ]
-  const drawn = media.filter((attachment) => state(attachment)?.status !== "empty")
+  const { states, retry } = useMediaSources(conversationId, attachmentSources(attachments))
+  const state = (attachment: Attachment) => states.get(attachment.id)
   const item = (attachment: Attachment, cell: MediaCell): MediaItem => ({
     key: attachment.id,
     kind: mediaKind(attachment.type, attachment.name),
@@ -293,22 +287,26 @@ function SentAttachments({
     type: attachment.type,
     size: attachment.size,
     src: mediaRead(state(attachment))?.url,
+    state: mediaStage(state(attachment)),
   })
+  const drawn = attachments.filter(
+    (attachment) =>
+      mediaCell(attachment.type, attachment.name) === "file" ||
+      state(attachment)?.status !== "gone",
+  )
   const download = (one: MediaItem) => {
     const attachment = attachments.find((it) => it.id === one.key)
-    if (attachment) void downloadAttachment(conversationId, attachment)
+    if (attachment) void openAttachment(conversationId, { ...attachment, src: one.src })
   }
   return (
     <div className={cn("flex w-full max-w-full flex-col items-end gap-2", dim && "opacity-60")}>
       <MediaItems
-        items={[
-          ...drawn.map((attachment) =>
-            item(attachment, mediaCell(attachment.type, attachment.name)),
-          ),
-          ...files.map((attachment) => item(attachment, "file")),
-        ]}
+        items={drawn.map((attachment) =>
+          item(attachment, mediaCell(attachment.type, attachment.name)),
+        )}
         align="end"
         onDownload={download}
+        onRetry={(one) => retry(one.key)}
       />
     </div>
   )

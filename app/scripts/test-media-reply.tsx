@@ -1,9 +1,10 @@
 /**
- * One thread, both halves of the media contract: what the user sent draws from this device and the
- * host, and a reply's `MEDIA:<path>` tags draw through the very same cells — a clip joins the
- * Gallery, a recording takes a row of its own, and any other file a row that downloads — from one
- * seeded device database with the HTTP boundary faked. Tags sent together are one Gallery, a tag
- * inside a fenced block stays text, and a tag the host can't answer falls back to its own text.
+ * One thread, both halves of the media contract: what the user sent and a reply's `MEDIA:<path>`
+ * tags draw through the very same cells — a clip joins the Gallery, a recording takes a row of its
+ * own, and any other file a row the platform takes — every one of them from the URL the host signed
+ * for it, over one seeded device database with the HTTP boundary faked. Tags sent together are one
+ * Gallery, a tag inside a fenced block stays text, and a tag the host can't answer keeps its cell
+ * with a retry. A tap on a cell or a row opens the app's Previewer; a file's row opens a new tab.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -12,7 +13,6 @@ import { act } from "react"
 import { db, type Attachment, type Message } from "@/lib/db"
 
 import {
-  askedFor,
   botProfile,
   chatScreen,
   click,
@@ -102,36 +102,20 @@ const row = (name: string) =>
 const download = (name: string) =>
   findAll("button").find((button) => button.getAttribute("aria-label") === `Download ${name}`) ??
   null
+/** Whether the cell or row a file draws in is in: its place is kept, busy until its URL answers. */
+const filled = (name: string) => (cell(name) ?? row(name))?.hasAttribute("aria-busy") === false
 
-const ready = (button: Element | null) => Boolean(button) && !button!.hasAttribute("disabled")
-
-/** jsdom has no object URLs, and a download is the browser's own effect: both stand in. */
+/** jsdom has no tabs of its own, so a tab opening stands in for the browser's effect. */
 function stubBrowser() {
-  const real = {
-    create: URL.createObjectURL,
-    revoke: URL.revokeObjectURL,
-    click: window.HTMLAnchorElement.prototype.click,
-    open: window.open,
-  }
-  let made = 0
-  const saved: string[] = []
+  const real = { open: window.open }
   const opened: string[] = []
-  URL.createObjectURL = (blob: Blob | MediaSource) => `blob:${(blob as Blob).type}-${++made}`
-  URL.revokeObjectURL = () => {}
-  window.HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
-    saved.push(this.download)
-  }
   window.open = ((url: string | URL) => {
     opened.push(String(url))
     return null
   }) as typeof window.open
   return {
-    saved,
     opened,
     restore: () => {
-      URL.createObjectURL = real.create
-      URL.revokeObjectURL = real.revoke
-      window.HTMLAnchorElement.prototype.click = real.click
       window.open = real.open
     },
   }
@@ -140,18 +124,18 @@ function stubBrowser() {
 test("a thread's sent media and a reply's tags draw through the same cells", async () => {
   const profile = botProfile("media-reply")
   await seedChat({ id: "c1", profile, messages: thread() })
-  // The photo this device holds draws from its own copy; every other file comes from the route.
+  // Every file is read from a URL the host signs; one it has no copy of is the text it came from.
   const asked = mediaHost({ fail: ["missing.png"] })
   const browser = stubBrowser()
   try {
     await mount(chatScreen("c1"), async () => {
-      await until(async () => ready(cell("render.mp4")), "the reply's clip")
+      await until(async () => filled("render.mp4"), "the reply's clip")
       await until(async () => download("notes.pdf") !== null, "the sent file's row")
 
       // What the user sent, unchanged: the photo in the Gallery, the recording in its row, the file.
-      assert.ok(ready(cell("cat.png")), "the sent photo keeps its cell")
-      assert.ok(ready(row("voice.mp3")), "the sent recording keeps its row")
-      assert.ok(ready(download("notes.pdf")), "the sent document keeps its download row")
+      assert.ok(cell("cat.png"), "the sent photo keeps its cell")
+      assert.ok(row("voice.mp3"), "the sent recording keeps its row")
+      assert.ok(download("notes.pdf"), "the sent document keeps its download row")
 
       // The reply's tags draw as the same three kinds of cell, in one thread with the sent media.
       const drawn = galleries()
@@ -167,16 +151,16 @@ test("a thread's sent media and a reply's tags draw through the same cells", asy
         false,
         "a recording is never a Gallery cell",
       )
-      assert.ok(ready(row("take.mp3")), "it takes a row of its own")
-      assert.ok(ready(download("report.pdf")), "and the document a row that downloads it")
+      assert.ok(row("take.mp3"), "it takes a row of its own")
+      assert.ok(download("report.pdf"), "and the document a row the platform takes")
 
-      // A tag is drawn, not left as the path it came from — but the one that can't be read is.
+      // A tag is drawn, not left as the path it came from — but the one the host has no file for is.
       assert.equal(text().includes(`${LIBRARY}/render.mp4`), false, "a drawn tag isn't text")
       assert.equal(text().includes(`${LIBRARY}/take.mp3`), false, "a drawn recording isn't text")
       assert.match(
         text(),
         new RegExp(`MEDIA:${LIBRARY}/missing.png`),
-        "a tag whose file can't be fetched falls back to its text",
+        "a tag whose file the host has no copy of falls back to its text",
       )
       assert.match(
         text(),
@@ -185,37 +169,73 @@ test("a thread's sent media and a reply's tags draw through the same cells", asy
       )
       assert.equal(cell("example.png"), null, "a fenced example draws no cell")
 
-      // One read per file, however many times the thread is drawn — and the sent photo this device
-      // already holds is never asked of the host.
+      // One URL per file, however many times the thread is drawn — the sent photo included, since
+      // the thread reads every file from the host.
       assert.deepEqual(
         mediaReads(asked).map((path) => path.split("/").pop()).sort(),
-        ["chart.png", "missing.png", "render.mp4", "report.pdf", "take.mp3", "voice.mp3"],
-        "each file the thread needed, read once",
+        [
+          "cat.png",
+          "chart.png",
+          "missing.png",
+          "notes.pdf",
+          "render.mp4",
+          "report.pdf",
+          "take.mp3",
+          "voice.mp3",
+        ],
+        "each file the thread needed, asked for once",
       )
-      assert.equal(mediaReads(asked).length, 6, "no file read twice")
-      assert.equal(
+      assert.ok(
         mediaReads(asked).includes(`${SENT}/cat.png`),
-        false,
-        "the sent photo draws from this device",
+        "a sent photo is read from the host's URL too",
       )
 
-      // A tap hands the media to the platform, and a download saves under the file's own name.
+      // Nothing is played in the thread: a tap opens the app's own Previewer instead.
+      assert.equal(document.querySelector("video"), null, "no clip is played in the thread")
+      assert.equal(document.querySelector("audio"), null)
       await click(cell("render.mp4"))
+      await until(async () => document.querySelector("video") !== null, "the clip's player")
+      const player = document.querySelector("video")!
+      assert.equal(player.getAttribute("src")?.includes("render.mp4"), true, "from its own URL")
+      assert.equal(player.hasAttribute("autoplay"), false, "paused until it is pressed")
+      assert.equal(browser.opened.length, 0, "and nothing left the app")
+      // Stepping stays in the app and follows the media drawn beside it, named as it goes.
+      await click(findAll("button").find((one) => one.getAttribute("aria-label") === "Previous"))
+      await until(
+        async () =>
+          !document.querySelector("video") &&
+          document.querySelector('img[alt="chart.png"]') !== null,
+        "the image beside it",
+      )
+      assert.match(
+        document.querySelector('[role="dialog"]')?.textContent ?? "",
+        /chart\.png/,
+        "and the one on screen is named",
+      )
+      assert.equal(browser.opened.length, 0, "stepping never leaves the app")
+      await click(findAll("button").find((one) => one.getAttribute("aria-label") === "Close"))
+
+      // A recording's row opens the same Previewer, on a player of its own.
       await click(row("take.mp3"))
-      assert.equal(browser.opened.length, 2, "both taps opened the platform's own player")
-      for (const url of browser.opened) assert.match(url, /^blob:/)
+      await until(async () => document.querySelector("audio") !== null, "the recording's player")
+      assert.equal(document.querySelector("video"), null, "the clip is not on screen")
+      assert.equal(browser.opened.length, 0, "and nothing left the app for it")
+      await click(findAll("button").find((one) => one.getAttribute("aria-label") === "Close"))
+
+      // A file's row hands the file to the platform: a new tab at the URL the host signed.
       await click(download("report.pdf"))
-      await until(async () => browser.saved.length > 0, "the download")
-      assert.deepEqual(browser.saved, ["report.pdf"], "saved under the name the tag named")
+      await until(async () => browser.opened.length > 0, "the new tab")
+      assert.equal(browser.opened.length, 1, "one tab for one tap")
+      assert.match(browser.opened[0], /\/media\?path=[^&]*report\.pdf&token=/, "at the signed URL")
     })
   } finally {
     browser.restore()
   }
 })
 
-test("a tag the host couldn't serve is asked again when the reply carries more", async () => {
-  // A host that was out isn't a route that has no such file: the tag is left as text rather than
-  // settled, and the next read of the reply's media asks for it again.
+test("a tag the host couldn't serve keeps its cell, and is asked again when the reply carries more", async () => {
+  // A host that was out isn't a route that has no such file: the cell keeps its place with a retry
+  // rather than turning the file into text, and the next read of the reply's media asks again.
   const profile = botProfile("media-retry")
   await seedChat({
     id: "c1",
@@ -233,11 +253,11 @@ test("a tag the host couldn't serve is asked again when the reply carries more",
   })
   // The host is out for the first read, then answers: a 503 said nothing about the file.
   const asked = mediaHost({ fail: ["chart.png"], failure: 503 })
-  const browser = stubBrowser()
   try {
     await mount(chatScreen("c1"), async () => {
-      await until(async () => text().includes(`MEDIA:${LIBRARY}/chart.png`), "the tag kept as text")
-      assert.equal(cell("chart.png"), null, "a host that couldn't answer draws nothing")
+      await until(async () => cell("chart.png") !== null, "the cell it keeps")
+      assert.equal(text().includes(`MEDIA:${LIBRARY}/chart.png`), false, "the tag is not left as text")
+      assert.equal(download("chart.png"), null, "and the file is never a download row")
       mediaHost({ asked })
       // The reply carries on and names another file, so its tags are read again.
       await act(async () => {
@@ -245,39 +265,13 @@ test("a tag the host couldn't serve is asked again when the reply carries more",
           content: `Made this: MEDIA: ${LIBRARY}/chart.png MEDIA: ${LIBRARY}/second.png`,
         })
       })
-      await until(async () => ready(cell("chart.png")), "the tag drawn once the host answers")
-      assert.equal(
-        text().includes(`MEDIA:${LIBRARY}/chart.png`),
-        false,
-        "and the tag is no longer left as text",
+      await until(
+        async () => (cell("chart.png")?.querySelector("img")?.getAttribute("src") ?? "").length > 0,
+        "the cell drawn once the host answers",
       )
-      assert.ok(ready(cell("second.png")), "the file it named next draws too")
+      assert.ok(cell("second.png"), "the file it named next draws too")
     })
   } finally {
-    browser.restore()
+    // Nothing here opens a tab.
   }
-})
-
-test("a reply's tag on a plugin without the media route stays its own text", async () => {
-  const profile = botProfile("media-reply-old")
-  await seedChat({
-    id: "c1",
-    profile,
-    messages: [
-      {
-        id: "m1",
-        conversationId: "c1",
-        role: "assistant",
-        content: `Made this: MEDIA: ${LIBRARY}/render.mp4`,
-        status: "done",
-        createdAt: 1,
-      },
-    ],
-  })
-  const asked = mediaHost({ features: ["attachments"] })
-  await mount(chatScreen("c1"), async () => {
-    await until(async () => text().includes(`${LIBRARY}/render.mp4`), "the tag's text")
-    assert.equal(cell("render.mp4"), null, "a plugin from before the route draws no cell")
-    assert.equal(askedFor(asked, "/plugins/memento/media"), 0, "and its media route is never asked")
-  })
 })

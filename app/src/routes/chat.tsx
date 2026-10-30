@@ -43,6 +43,7 @@ import { Composer } from "@/components/chat/composer"
 import { MessageItem } from "@/components/chat/message-item"
 import { Compacted, ModelChange } from "@/components/chat/model-change"
 import { DayHeading } from "@/components/chat/day-heading"
+import { PreviewerProvider } from "@/components/chat/previewer"
 import { ThreadCard } from "@/components/chat/thread-card"
 import { prLabel } from "@/components/chat/pr-look"
 import { Cheatsheet } from "@/components/chat/cheatsheet"
@@ -262,14 +263,21 @@ export function ChatPage(props: ChatPageProps) {
   const kind = verdict?.split("\n")[0]
   if (kind === "next" && verdict === `next\n${id}` && id)
     return (
-      <NextChat
-        id={id}
-        slot={props.slot}
-        pinned={Boolean(props.chatId)}
-        paneThread={props.paneThread}
-      />
+      <PreviewerProvider>
+        <NextChat
+          id={id}
+          slot={props.slot}
+          pinned={Boolean(props.chatId)}
+          paneThread={props.paneThread}
+        />
+      </PreviewerProvider>
     )
-  if (kind === "current") return <CurrentChatPage {...props} />
+  if (kind === "current")
+    return (
+      <PreviewerProvider>
+        <CurrentChatPage {...props} />
+      </PreviewerProvider>
+    )
   return (
     <div
       data-slot="chat-pane"

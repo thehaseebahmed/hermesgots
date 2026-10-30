@@ -2,10 +2,10 @@
 export const APP_VERSION = __APP_VERSION__
 
 /** The oldest Gots plugin this app works with. Raise it when the app starts relying on a route,
- * field or behaviour that only a newer plugin has. 0.80.0 is the first whose media route serves any
- * file a message carries (`plugin/media.py`), so a picked file's row can be drawn or downloaded
- * wherever Files is offered: before it, the route answered 415 for anything that isn't an image. */
-export const MIN_PLUGIN_VERSION = "0.80.0"
+ * field or behaviour that only a newer plugin has. 0.95.0 is the first whose media route signs a URL
+ * (`POST …/media/url`, `plugin/media.py`) and accepts that signature in place of the key: the thread
+ * draws every file an `<img>` or a `<video>` can from it, and there is no second way to read bytes. */
+export const MIN_PLUGIN_VERSION = "0.95.0"
 
 function parts(version: string) {
   const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(version.trim())
