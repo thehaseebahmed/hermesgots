@@ -387,6 +387,11 @@ export interface Attachment {
   size: number
   /** Goes to the model inline as well. */
   image: boolean
+  /**
+   * A photo the host's row named and this thread draws: not a file the user attached, so it never
+   * rides back out as a marker.
+   */
+  host?: true
   /** The file the user chose (or the scaled copy that stands in for it), on this device only: the
    * host's transcript doesn't keep it. */
   blob?: Blob

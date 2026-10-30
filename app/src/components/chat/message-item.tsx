@@ -28,7 +28,7 @@ import { Message as MessageRow, MessageContent } from "@/components/ui/message"
 import { spawnedAgent } from "@/lib/spawn"
 import { attachmentUrl } from "@/lib/attachment-url"
 import { downloadAttachment } from "@/lib/attachments"
-import { splitAttachments } from "@/lib/attachment-text"
+import { steerWords } from "@/lib/attachment-text"
 import { removeQueued, sendQueued } from "@/lib/chat"
 import type { Attachment, Message, ToolEvent } from "@/lib/db"
 import { compactionOf } from "@/lib/compactions"
@@ -316,7 +316,7 @@ function SentAttachments({
 /** Something the user steered the reply with, where it reached the agent. */
 function SteerBubble({ text }: { text: string }) {
   const face = useCodeFace()
-  const said = splitAttachments(text).text
+  const said = steerWords(text)
   return (
     <MessageRow align="end" className={COLUMN}>
       <MessageContent className="items-end gap-1">

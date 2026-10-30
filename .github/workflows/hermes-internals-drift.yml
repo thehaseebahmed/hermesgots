@@ -13,6 +13,7 @@ on:
       - "plugin/outbox.py"
       - "plugin/store.py"
       - "app/src/lib/compaction-seam.ts"
+      - "app/src/lib/attachment-text.ts"
       - ".github/scripts/check-hermes-internals.py"
       - ".github/workflows/hermes-internals-drift.yml"
   push:
@@ -23,6 +24,7 @@ on:
       - "plugin/outbox.py"
       - "plugin/store.py"
       - "app/src/lib/compaction-seam.ts"
+      - "app/src/lib/attachment-text.ts"
       - ".github/scripts/check-hermes-internals.py"
       - ".github/workflows/hermes-internals-drift.yml"
   # Weekly, so a Hermes change shows up while no pull request is open.

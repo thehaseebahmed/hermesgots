@@ -1570,10 +1570,13 @@ async function syncQueue(conversationId: string) {
     }
     for (const item of items) {
       const mine = byId.get(item.id)
-      const files = mine?.attachments ?? attachmentsOf(item)
-      const carried = files?.length
-        ? { text: item.text, attachments: files }
-        : splitAttachments(item.text)
+      // The host's stored text may carry the marker lines the send wrote, which are never the
+      // message's words — a row in the thread draws the same way whether it is queued or sent.
+      const folded = splitAttachments(item.text)
+      // This device's copy first, then what the host answered for, then what the text's own markers
+      // name.
+      const own = mine?.attachments?.length ? mine.attachments : attachmentsOf(item)
+      const carried = { text: folded.text, attachments: own?.length ? own : folded.attachments }
       const next: Message = {
         id: item.id,
         conversationId,

@@ -2,10 +2,15 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { foldTurns } from "../src/chat-next/fold.ts"
-import { attachmentsText } from "../src/lib/attachment-text.ts"
+import { attachmentsText, marker } from "../src/lib/attachment-text.ts"
+import { durableUserRow } from "./host-row.mjs"
 import { recorded } from "./chat-next-fixtures.ts"
 
 const fixture = recorded("sky-blue.transcript.json")
+
+// A real 1x1 PNG, so the fake host commits bytes the way the host's own sniffing accepts them.
+const PNG =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGBgAAAABQABpfZFQAAAAABJRU5ErkJggg=="
 
 const row = (id, role, content, extra = {}) => ({ id, role, content, ...extra })
 
@@ -133,6 +138,33 @@ test("a request's attachment markers are its files, not its words", () => {
   ])
 })
 
+test("a request the host committed a photo for folds the same as it was sent", () => {
+  const photo = { id: "a", name: "sky.jpg", type: "image/jpeg", size: 2048, image: true, path: "/h/sky.jpg" }
+  const content = durableUserRow([
+    { type: "text", text: "What's in these?" },
+    { type: "text", text: marker(photo) },
+    { type: "image_url", image_url: { url: PNG } },
+  ])
+  assert.match(content, /^What's in these\?\n\n\[Image attached at: /, "the hint lands with the words")
+  const [turn] = foldTurns([
+    row(1, "user", content),
+    row(2, "assistant", "A sky.", { finish_reason: "stop" }),
+  ])
+  assert.equal(turn.user, "What's in these?")
+  assert.deepEqual(turn.files, [
+    { name: "sky.jpg", type: "image/jpeg", size: 2048, image: true, path: "/h/sky.jpg" },
+  ])
+})
+
+test("a photo the host's row named folds with the flag that keeps it off the wire", () => {
+  const content = ["look", "", "[Image attached at: /c/native-inputs/abc/api_abc.jpg]", "[screenshot]"].join(
+    "\n",
+  )
+  const [turn] = foldTurns([row(1, "user", content), row(2, "assistant", "A sky.", { finish_reason: "stop" })])
+  assert.equal(turn.user, "look")
+  assert.equal(turn.files[0].host, true, "the retry path can still tell it was never the user's file")
+})
+
 test("a request with no attachments carries no files", () => {
   const [turn] = foldTurns([row(1, "user", "Just words.")])
   assert.equal(turn.files, undefined)
@@ -161,6 +193,17 @@ test("a steer goes on the reply it steered, without the marker Hermes wraps it i
     ["tools", "steer", "text"],
   )
   assert.equal(turns[0].parts[1].text, "Make it rhyme")
+})
+
+test("a steer's file is not its words", () => {
+  const file = { id: "f", name: "notes.md", type: "text/markdown", size: 40, image: false, path: "/h/notes.md" }
+  const turns = foldTurns([
+    row(1, "user", "Write a poem"),
+    row(2, "assistant", "Here it comes.", { finish_reason: "stop" }),
+    row(3, "user", attachmentsText("Make it rhyme", [file]), { display_kind: "steer" }),
+  ])
+  const steered = turns[0].parts.find((part) => part.kind === "steer")
+  assert.equal(steered.text, "Make it rhyme")
 })
 
 test("a failed turn's row ends the turn and keeps the host's words, not as a reply", () => {

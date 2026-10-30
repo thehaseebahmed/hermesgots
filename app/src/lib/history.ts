@@ -11,8 +11,7 @@ import { refreshTodos } from "@/lib/todos"
 import { refreshLibrary, refreshPrs, refreshWorkspace } from "@/lib/workspace"
 import { listSessionMessages, type HermesConfig, type SessionMessage } from "@/lib/hermes"
 import { takeHostTitle } from "@/lib/title"
-import { splitAttachments } from "@/lib/attachment-text"
-import { steerText } from "@/lib/steer"
+import { splitAttachments, steerWords } from "@/lib/attachment-text"
 import { appendThinking, carrySpans } from "@/lib/thinking"
 import { readLiveRuns } from "@/lib/waiting"
 import { failureReason } from "@/lib/tools"
@@ -320,7 +319,7 @@ function foldRows(
         ...(reply.steers ?? []),
         {
           id,
-          text: splitAttachments(steerText(row.content ?? "")).text,
+          text: steerWords(row.content ?? ""),
           contentOffset: reply.content.length,
           at: createdAt,
         },
