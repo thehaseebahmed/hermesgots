@@ -6,6 +6,7 @@ import {
   db,
   getActiveProfile,
   getMessages,
+  getSettings,
   type ApprovalChoice,
   type Attachment,
   type ClarifyAnswers,
@@ -43,7 +44,7 @@ import {
   type TurnUsage,
 } from "@/lib/hermes"
 import { attachmentsText, splitAttachments } from "@/lib/attachment-text"
-import { isProgressReminder } from "@/lib/progress-reminder"
+import { progressReminderNote, progressRemindersShown } from "@/lib/progress-reminder"
 import { measureReply } from "@/lib/reply-stats"
 import { wireContent } from "@/lib/attachments"
 import { refreshContext } from "@/lib/context"
@@ -153,6 +154,8 @@ export interface Turn {
   source?: Promise<TurnSource | undefined>
   /** The transcript read out now, and whether a caller asked for another pass while it was. */
   read?: { pending?: Promise<Message | undefined>; again?: boolean }
+  /** Whether this turn draws reminders, read once. */
+  reminders?: Promise<boolean>
 }
 
 const turns = new Map<string, Turn>()
@@ -174,6 +177,7 @@ function shape(draft: Draft) {
     // A run starting is structural — the row it belongs to is drawn at once — but its text is not.
     runs?.length,
     runs?.at(-1)?.afterToolId,
+    draft.reminders?.length,
   ].join("|")
 }
 
@@ -302,6 +306,18 @@ function raiseApproval(turn: Turn, event: ApprovalRequestEvent) {
   touch()
 }
 
+/**
+ * Whether this turn's refusals draw their notes as rows, read the first time the turn needs to know
+ * and kept for its length: the fold's own answer, never one pushed in when the stream started. A read
+ * that fails is today's thread, not a failed reply.
+ */
+function showsReminders(turn: Turn) {
+  turn.reminders ??= getSettings()
+    .then(progressRemindersShown)
+    .catch(() => false)
+  return turn.reminders
+}
+
 export function streamHandlers(turn: Turn): StreamHandlers {
   const { draft, touch } = turn
   const watchedHere = !turn.resumed
@@ -347,14 +363,26 @@ export function streamHandlers(turn: Turn): StreamHandlers {
         : draft.tools.find((t) => t.status === "running" && t.tool === event.tool)
       // A run's `tool.completed` carries no call id (`hermes.ts`), so the refusal is matched the way
       // every completion is: by id, else the oldest running call of its tool.
-      if (event.status !== "running" && isProgressReminder(event.result)) {
-        if (!existing) return
-        const at = draft.tools.indexOf(existing)
-        const previous = draft.tools[at - 1]?.toolCallId
-        draft.tools = draft.tools.filter((t) => t !== existing)
-        // The thinking that follows belongs to the call before this one, as the settled fold places it.
-        if (anchor === existing.toolCallId) anchor = previous
-        touch()
+      const note = event.status !== "running" ? progressReminderNote(event.result) : undefined
+      if (note !== undefined) {
+        const at = existing ? draft.tools.indexOf(existing) : draft.tools.length
+        const previous = existing && at > 0 ? draft.tools[at - 1]?.toolCallId : undefined
+        const reminder = {
+          note,
+          contentOffset: existing?.contentOffset ?? draft.content.length,
+          toolsBefore: at,
+        }
+        if (existing) {
+          draft.tools = draft.tools.filter((t) => t !== existing)
+          // The thinking that follows belongs to the call before this one, as the settled fold places it.
+          if (anchor === existing.toolCallId) anchor = previous
+          touch()
+        }
+        void showsReminders(turn).then((shown) => {
+          if (!shown) return
+          draft.reminders = [...(draft.reminders ?? []), reminder]
+          touch()
+        })
         return
       }
       if (existing) {
@@ -522,6 +550,8 @@ function transcriptOf(turn: Turn, signal: AbortSignal) {
   }
   read.pending = (async () => {
     let reply: Message | undefined
+    // Started beside the transcript's own read, not ahead of it.
+    const showReminders = showsReminders(turn)
     do {
       read.again = false
       const source = await turnSource(turn)
@@ -532,6 +562,7 @@ function transcriptOf(turn: Turn, signal: AbortSignal) {
         source.since,
         signal,
         summaryRowsOf(source.conversation.compactions),
+        await showReminders,
       )
     } while (read.again)
     return reply
@@ -598,6 +629,8 @@ async function transcriptReader(turn: Turn) {
     forgetRuns(draft.id)
     if (reply.content) draft.content = reply.content
     if (reply.seams?.length) draft.seams = reply.seams
+    // A reminder's whole note comes from the transcript: the stream's preview is cut short.
+    if (reply.reminders?.length) draft.reminders = reply.reminders
     touch()
   }
 }
@@ -971,11 +1004,20 @@ function anchorOffsets(draft: Draft, next: string) {
     draft.approval = { ...draft.approval, contentOffset: anchor(draft.approval.contentOffset) }
   if (draft.steers)
     draft.steers = draft.steers.map((s) => ({ ...s, contentOffset: anchor(s.contentOffset) }))
+  if (draft.reminders)
+    draft.reminders = draft.reminders.map((one) => ({
+      ...one,
+      contentOffset: anchor(one.contentOffset),
+    }))
 }
 
 /** Where the text streamed since the last tool call starts; the run's final answer replaces it. */
 function finalTextStart(draft: Draft) {
-  return Math.max(0, ...draft.tools.map((t) => t.contentOffset ?? 0))
+  return Math.max(
+    0,
+    ...draft.tools.map((t) => t.contentOffset ?? 0),
+    ...(draft.reminders ?? []).map((one) => one.contentOffset),
+  )
 }
 
 /**

@@ -1,7 +1,7 @@
 import { splitAttachments, steerWords } from "../lib/attachment-text.ts"
 import { isSeamScaffolding, seamDrawnContent } from "../lib/compaction-seam.ts"
 import type { MessageStats } from "../lib/db.ts"
-import { refusedCallIds } from "../lib/progress-reminder.ts"
+import { progressReminderNotes } from "../lib/progress-reminder.ts"
 
 import type { Timing } from "../lib/reply-stats.ts"
 
@@ -44,6 +44,11 @@ export type Part =
   | { kind: "compaction"; row?: number; at?: number }
   /** A message the user sent while the reply ran, which the agent read after its calls. */
   | { kind: "steer"; text: string }
+  /**
+   * A progress reminder's note, drawn only behind *Show progress reminders*: the call it refused never
+   * ran, so it stands as a row of its own rather than in the group beside it (ADR 0068).
+   */
+  | { kind: "reminder"; note: string }
 
 /** A file a message carried, as its marker line names it: never its bytes. */
 export interface SentFile {
@@ -168,10 +173,12 @@ const CHILD = /^\[ASYNC DELEGATION COMPLETE — (\S+?)\]/
  */
 const msOf = (row: Row) => (typeof row.timestamp === "number" ? row.timestamp * 1000 : undefined)
 
-export function foldTurns(rows: Row[], partial = false): Turn[] {
+export function foldTurns(rows: Row[], partial = false, showReminders = false): Turn[] {
   const turns: Turn[] = []
   const callOf = new Map<string, ToolCall>()
-  const refused = refusedCallIds(rows)
+  const refusals = progressReminderNotes(rows)
+  // The refused calls already accounted for: a carried copy of a row must not draw its reminder twice.
+  const noted = new Set<string>()
   /** The rows just read are a compaction, or the carried copy of work already drawn: the next reply may be the copy of one too. */
   let seamed = false
   for (const row of rows) {
@@ -270,10 +277,10 @@ export function foldTurns(rows: Row[], partial = false): Turn[] {
     // After a compaction Hermes writes the work it carried forward again, under the ids it had: a
     // call already drawn is that call, and the first reply back is the one already given.
     const asked = row.tool_calls ?? []
-    const drawn = asked.filter((one) => !refused.has(one.id))
+    const drawn = asked.filter((one) => !refusals.has(one.id))
     const first = seamed
     seamed = false
-    if (asked.length && asked.every((one) => callOf.has(one.id))) {
+    if (asked.length && asked.every((one) => callOf.has(one.id) || noted.has(one.id))) {
       seamed = true
       continue
     }
@@ -289,7 +296,15 @@ export function foldTurns(rows: Row[], partial = false): Turn[] {
       turn.parts.push({ kind: "text", text: row.content ?? "", ...(thought ? { thought } : {}) })
       thought = undefined
     }
-    for (const one of drawn) {
+    for (const one of asked) {
+      const note = refusals.get(one.id)
+      if (note !== undefined) {
+        if (showReminders) {
+          noted.add(one.id)
+          turn.parts.push({ kind: "reminder", note })
+        }
+        continue
+      }
       const call: ToolCall = {
         id: one.id,
         name: one.function.name,

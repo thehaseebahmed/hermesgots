@@ -1,4 +1,12 @@
-import type { Attachment, Message, MessageStats, Seam, Steer, ToolEvent } from "../lib/db.ts"
+import type {
+  Attachment,
+  Message,
+  MessageStats,
+  ProgressReminder,
+  Seam,
+  Steer,
+  ToolEvent,
+} from "../lib/db.ts"
 import { actionOf, spawnStamp } from "../lib/spawn.ts"
 import { clip, describeCall, parseArgs, patchStats, writeStats } from "../lib/tool-calls.ts"
 import { appendThinking, type ReasoningRun } from "../lib/thinking.ts"
@@ -124,6 +132,7 @@ function rowsOf(
   const tools: ToolEvent[] = []
   const steers: Steer[] = []
   const seams: Seam[] = []
+  const reminders: ProgressReminder[] = []
   let thinking: ReasoningRun[] | undefined
   // Thinking continues the run the last call opened, as the transcript parse draws it.
   const think = (text: string | undefined) => {
@@ -145,6 +154,8 @@ function rowsOf(
         contentOffset: content.length,
         at: createdAt,
       })
+    else if (part.kind === "reminder")
+      reminders.push({ note: part.note, contentOffset: content.length, toolsBefore: tools.length })
     else
       seams.push({
         id: `${id}-c${seams.length}`,
@@ -155,13 +166,22 @@ function rowsOf(
       })
   }
   think(turn.pendingThought)
-  if (live || content || tools.length || seams.length || thinking || turn.failed)
+  if (
+    live ||
+    content ||
+    tools.length ||
+    seams.length ||
+    reminders.length ||
+    thinking ||
+    turn.failed
+  )
     rows.push({
       id: `${id}-a`,
       conversationId: chat,
       role: "assistant",
       content,
       ...(tools.length ? { tools } : {}),
+      ...(reminders.length ? { reminders } : {}),
       ...(thinking ? { reasoningRuns: thinking } : {}),
       ...(steers.length ? { steers } : {}),
       ...(seams.length ? { seams } : {}),

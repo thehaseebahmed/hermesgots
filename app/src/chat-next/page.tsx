@@ -13,6 +13,7 @@ import {
 import { useSearchParams } from "react-router"
 
 import { Markdown } from "@/components/chat/markdown"
+import { ReminderRow } from "@/components/chat/reminder-row"
 import { stopSubagents } from "@/lib/agents"
 import { connectionKey } from "@/lib/connection"
 import { usePluginFeatureOn } from "@/lib/features"
@@ -20,9 +21,10 @@ import { SAFETY_MS } from "@/lib/freshness"
 import { CATCHING_ACTIVITY } from "@/lib/format"
 import { onSessionMoved, useLive } from "@/lib/live"
 import { knownLiveRun, useLiveRunId, useHostBusy } from "@/lib/waiting"
-import { db, type Attachment, type MessageStats, type SessionDb } from "@/lib/db"
+import { db, getSettings, type Attachment, type MessageStats, type SessionDb } from "@/lib/db"
 
-import { equal } from "./equal"
+import { equal } from "@/lib/equal"
+import { progressRemindersShown } from "@/lib/progress-reminder"
 import { cardsByPart, cardsOf, DELEGATE, delegated, type Agent, type Card } from "./agents"
 import {
   followRun,
@@ -203,6 +205,7 @@ const TurnView = memo(
                 <p className="text-xs text-muted-foreground">Steered</p>
               </div>
             )
+          if (part.kind === "reminder") return <ReminderRow key={at} reminder={part} />
           // A question the agent asked, and a subagent it set to work, are drawn as what they are.
           const plain = part.calls.filter(
             (call) => call.name !== "clarify" && call.name !== DELEGATE,
@@ -609,9 +612,22 @@ export function ChatNextThread({
     () => (held?.archived ? readRows(database, session ?? "", "archive") : undefined),
     [database, session, held?.archived],
   )
+  const [showReminders, setShowReminders] = useState(false)
+  useEffect(() => {
+    let here = true
+    void getSettings().then((settings) => {
+      if (!here) return
+      const on = progressRemindersShown(settings)
+      setShowReminders(on)
+      void store.apply({ type: "reminders", on })
+    })
+    return () => {
+      here = false
+    }
+  }, [store])
   const folded = useMemo(
-    () => foldedOf(rows, archived, held?.partial),
-    [rows, archived, held?.partial],
+    () => foldedOf(rows, archived, held?.partial, showReminders),
+    [rows, archived, held?.partial, showReminders],
   )
   const drawn = useRef<{ turns: Turn[]; origin: number }>({ turns: [], origin: 0 })
   const { turns, origin } = useMemo(() => {

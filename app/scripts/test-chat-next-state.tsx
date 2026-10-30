@@ -9,7 +9,7 @@ import type { RunEvent } from "@/chat-next/api"
 import { initial, reduce, threadTurns, type ThreadState, type Waiting } from "@/chat-next/state"
 import type { Row } from "@/chat-next/fold"
 import { events as recordedEvents, fixture as recorded } from "./chat-next-fixtures.ts"
-import { stored } from "./progress-reminder-fixture.ts"
+import { NOTE, stored } from "./progress-reminder-fixture.ts"
 
 /** Plays events into a thread that has just sent a turn. */
 function play(events: RunEvent[]): ThreadState {
@@ -57,6 +57,72 @@ const RAISED: ThreadState = reduce(
   reduce(initial, { type: "attach", run: "r" }),
   { type: "waiting", waiting: PROMPT },
 )
+
+/** A thread that sent a turn with *Show progress reminders* read as `on`, then played `events`. */
+const playWith = (on: boolean, events: RunEvent[]) => {
+  const sent = reduce(initial, { type: "sent", user: "go" })
+  return events.reduce<ThreadState>(
+    (state, event) => reduce(state, { type: "run", event }),
+    reduce(sent, { type: "reminders", on }),
+  )
+}
+
+const parts = (state: ThreadState) => threadTurns(state).at(-1)!.parts
+
+test("with the switch on, a refusal becomes a row of its own where the call was", () => {
+  const state = playWith(true, [
+    { event: "tool.started", tool: "read_file", tool_call_id: "A" },
+    { event: "tool.started", tool: "read_file", tool_call_id: "B" },
+    { event: "tool.completed", tool: "read_file", tool_call_id: "A", preview: stored(NOTE) },
+  ])
+  const kinds = parts(state).map((part) => part.kind)
+  assert.deepEqual(kinds, ["reminder", "tools"], "the note stands where A was, B after it")
+  const reminder = parts(state).find((part) => part.kind === "reminder")
+  assert.equal(
+    reminder?.kind === "reminder" ? reminder.note : undefined,
+    NOTE,
+    "the note the host wrote, unmodified",
+  )
+  assert.deepEqual(
+    calls(state).map((call) => call.id),
+    ["B"],
+    "the group beside it counts only the call that ran",
+  )
+})
+
+test("with the switch off, the refusal is dropped exactly as before", () => {
+  const state = playWith(false, [
+    { event: "tool.started", tool: "read_file", tool_call_id: "A" },
+    { event: "tool.started", tool: "read_file", tool_call_id: "B" },
+    { event: "tool.completed", tool: "read_file", tool_call_id: "A", preview: stored(NOTE) },
+  ])
+  assert.equal(
+    parts(state).some((part) => part.kind === "reminder"),
+    false,
+    "no row is drawn",
+  )
+  assert.deepEqual(
+    calls(state).map((call) => call.id),
+    ["B"],
+  )
+})
+
+test("a refusal with no running call still lands, at the reply's end", () => {
+  const state = playWith(true, [
+    { event: "tool.started", tool: "read_file", tool_call_id: "A" },
+    { event: "tool.completed", tool: "read_file", tool_call_id: "ghost", preview: stored(NOTE) },
+  ])
+  assert.deepEqual(
+    parts(state).map((part) => part.kind),
+    ["tools", "reminder"],
+    "nothing matched, so the note follows what was drawn",
+  )
+  assert.deepEqual(
+    calls(state).map((call) => call.id),
+    ["A"],
+    "the call it was about is untouched",
+  )
+})
 
 test("a call's result lands on the call it names, whichever order the calls complete in", () => {
   const state = play([

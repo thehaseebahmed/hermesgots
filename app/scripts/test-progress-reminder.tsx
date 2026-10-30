@@ -4,7 +4,7 @@ import test from "node:test"
 import { streamHandlers, type Turn } from "@/lib/chat"
 import type { Message } from "@/lib/db"
 import { toMessages } from "@/lib/history"
-import { connection } from "./component-kit.tsx"
+import { connection, seedSettings, settle } from "./component-kit.tsx"
 import { NOTE, stored } from "./progress-reminder-fixture.ts"
 
 const UPDATE = "Halfway: the parser reads end to end, and the tests come next."
@@ -80,6 +80,31 @@ test("a run's completion drops the refused card though it names no call", () => 
   assert.equal(turn.draft.tools?.length, 1, "the call is drawn while it runs")
   onTool({ tool: "read_file", status: "failed", result: stored(NOTE) })
   assert.deepEqual(turn.draft.tools, [], "and leaves no card behind")
+})
+
+test("with the switch on, the live stream turns the refusal into a row of its own", async () => {
+  await seedSettings({ developer: true, showProgressReminders: true })
+  const turn = liveTurn()
+  const onTool = streamHandlers(turn).onTool!
+  onTool({ tool: "read_file", status: "running", toolCallId: "run:1" })
+  onTool({ tool: "read_file", status: "failed", result: stored(NOTE) })
+  await settle()
+  assert.deepEqual(turn.draft.tools, [], "the refused call's card is gone")
+  assert.equal(turn.draft.reminders?.length, 1, "and its note stands in its place")
+  assert.equal(turn.draft.reminders?.[0]?.note, NOTE, "exactly as the host wrote it")
+  assert.equal(turn.draft.reminders?.[0]?.contentOffset, 0, "where in the reply it happened")
+  assert.equal(turn.draft.reminders?.[0]?.toolsBefore, 0, "outside the run beside it")
+})
+
+test("with the switch off, the live stream drops it exactly as today", async () => {
+  await seedSettings({ developer: true })
+  const turn = liveTurn()
+  const onTool = streamHandlers(turn).onTool!
+  onTool({ tool: "read_file", status: "running", toolCallId: "run:1" })
+  onTool({ tool: "read_file", status: "failed", result: stored(NOTE) })
+  await settle()
+  assert.deepEqual(turn.draft.tools, [], "the card is gone")
+  assert.equal(turn.draft.reminders, undefined, "and nothing new is drawn")
 })
 
 test("a normal completion still lands on the card it started", () => {

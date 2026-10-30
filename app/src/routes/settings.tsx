@@ -603,6 +603,15 @@ export function DeveloperSettings() {
           onCheckedChange={(checked) => saveSettings({ botThreads: checked })}
         />
         <SwitchRow
+          id="show-progress-reminders"
+          icon={MessageSquareTextIcon}
+          title="Show progress reminders"
+          experimental
+          subtitle="Each reminder a thread hides, as a row of its own"
+          checked={Boolean(settings?.showProgressReminders)}
+          onCheckedChange={(checked) => saveSettings({ showProgressReminders: checked })}
+        />
+        <SwitchRow
           id="chat-next"
           icon={MessageSquareDashedIcon}
           title="New chat screen"

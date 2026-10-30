@@ -1,5 +1,12 @@
 import { serverConfig } from "@/lib/connection"
-import { db, getMessages, type Conversation, type Message, type ToolEvent } from "@/lib/db"
+import {
+  db,
+  getMessages,
+  getSettings,
+  type Conversation,
+  type Message,
+  type ToolEvent,
+} from "@/lib/db"
 import { CLOCK_SLACK_MS, refreshQueue } from "@/lib/chat"
 import { FOLLOW_UP_MS, JUST_FOLLOWED_UP_MS, READ_TIMEOUT_MS } from "@/lib/freshness"
 import { quietly } from "@/lib/report"
@@ -18,7 +25,8 @@ import { failureReason } from "@/lib/tools"
 import { actionOf, spawnStamp } from "@/lib/spawn"
 import { labelComparable } from "@/lib/tool-preview"
 import { clip, describeCall, parseArgs, patchStats, writeStats } from "@/lib/tool-calls"
-import { refusedCallIds } from "@/lib/progress-reminder"
+import { progressReminderNotes, progressRemindersShown } from "@/lib/progress-reminder"
+import { equal } from "@/lib/equal"
 
 export { MAX_TEXT_CHARS, patchStats } from "@/lib/tool-calls"
 import { isSubagentResult } from "@/lib/subagent-results.ts"
@@ -249,7 +257,7 @@ export function toMessages(
   conversationId: string,
   sessionId: string,
   rows: SessionMessage[],
-  options: { live?: boolean; summaries?: SummaryRows } = {},
+  options: { live?: boolean; summaries?: SummaryRows; reminders?: boolean } = {},
 ) {
   return turnsFromRows(rows, options.summaries).flatMap((turn) =>
     foldRows(conversationId, sessionId, turn.rows, options),
@@ -261,11 +269,11 @@ function foldRows(
   conversationId: string,
   sessionId: string,
   rows: SessionMessage[],
-  options: { live?: boolean; summaries?: SummaryRows },
+  options: { live?: boolean; summaries?: SummaryRows; reminders?: boolean },
 ) {
   const { summaries } = options
   const messages: Message[] = []
-  const refused = refusedCallIds(rows)
+  const refusals = progressReminderNotes(rows)
   let reply: Message | undefined
   // Where the reply's text since its last tool call starts, and the notice that text was cut by.
   let segment = 0
@@ -395,7 +403,18 @@ function foldRows(
     const calls = toolCalls(row)
     if (row.content || calls.length) notice = undefined
     for (const call of calls) {
-      if (refused.has(call.id)) continue
+      if (refusals.has(call.id)) {
+        if (options.reminders)
+          reply.reminders = [
+            ...(reply.reminders ?? []),
+            {
+              note: refusals.get(call.id)!,
+              contentOffset: reply.content.length,
+              toolsBefore: reply.tools?.length ?? 0,
+            },
+          ]
+        continue
+      }
       const event: ToolEvent = {
         toolCallId: call.id,
         tool: call.name,
@@ -422,6 +441,7 @@ function foldRows(
       m.role === "user" ||
       m.content ||
       m.tools?.length ||
+      m.reminders?.length ||
       m.status === "error" ||
       m.reasoningRuns?.length,
   )
@@ -563,6 +583,12 @@ function mergeSeams(local: Message, reply: Message | undefined) {
   return found.map((seam) => seam.id).join() === held ? undefined : found
 }
 
+/** The fold's reminder rows, their absence included: a reply nothing re-folds still reads today. */
+function withReminders(local: Message, reply: Message | undefined): Partial<Message> | undefined {
+  const next = reply?.reminders?.length ? reply.reminders : undefined
+  return equal(local.reminders, next) ? undefined : { reminders: next }
+}
+
 /**
  * The transcript's tool details folded into the reply this device already drew, for a turn it kept:
  * what the stream recorded stays, and its calls gain what only the transcript carries.
@@ -574,8 +600,9 @@ function withReplyDetails(local: Message, reply: Message | undefined) {
       ? foldTranscriptDetails(local.tools, reply.tools)
       : undefined
   const seams = mergeSeams(local, reply)
-  if (!tools && !seams) return
-  return { ...local, ...(tools ? { tools } : {}), ...(seams ? { seams } : {}) }
+  const reminders = withReminders(local, reply)
+  if (!tools && !seams && !reminders) return
+  return { ...local, ...(tools ? { tools } : {}), ...(seams ? { seams } : {}), ...reminders }
 }
 
 /**
@@ -590,6 +617,7 @@ export async function liveTurn(
   since: number,
   signal?: AbortSignal,
   summaries?: SummaryRows,
+  showReminders = false,
 ) {
   const from = since - RUN_START_SLACK_S
   const rows = new Map<number, SessionMessage>()
@@ -632,7 +660,7 @@ export async function liveTurn(
       !turn && last && last.summaryAt >= 0 ? last.rows.slice(last.summaryAt + 1) : undefined
     const run = found ?? (resumed && runsOf(resumed).at(-1))
     if (run)
-      return foldRows("", sessionId, run, { live: true, summaries }).find(
+      return foldRows("", sessionId, run, { live: true, summaries, reminders: showReminders }).find(
         (m) => m.role === "assistant",
       )
     if (batch.length < PAGE) return undefined
@@ -797,11 +825,16 @@ function turnsOf(
   rows: SessionMessage[],
   liveTail = false,
   summaries?: SummaryRows,
+  showReminders = false,
 ) {
   const groups = turnsFromRows(rows, summaries).flatMap((turn) => turn.runs)
   return groups.map((group, i) => {
     const live = liveTail && i === groups.length - 1
-    const messages = foldRows(conversationId, sessionId, group, { live, summaries })
+    const messages = foldRows(conversationId, sessionId, group, {
+      live,
+      summaries,
+      reminders: showReminders,
+    })
     const user = messages.find((m) => m.role === "user")
     const reply = messages.find((m) => m.role === "assistant")
     // A catch-up keeps one reply per turn. The turn a wake run opened has no user message at all, and
@@ -815,6 +848,15 @@ function turnsOf(
       rows: new Set(group.map((row) => row.id)),
     }
   })
+}
+
+function firstRowOf(messages: Message[], sessionId: string) {
+  for (const message of messages) {
+    const row =
+      message.role === "user" ? rowIdOf(message, sessionId) : replyRowOf(message, sessionId)
+    if (row !== undefined) return row
+  }
+  return undefined
 }
 
 /** The transcript row a reply loaded from Hermes is named after. */
@@ -888,16 +930,20 @@ async function reconcile(conversationId: string) {
   if (isStreaming(local)) return null
   const sessionId = conversation.hermesSessionId
   await scrubSeamBubbles(local, sessionId)
+  const showReminders = progressRemindersShown(await getSettings())
+  // Folded under the other answer: this open folds the window again, as far as `fetchTail` reads.
+  const refold = Boolean(conversation.remindersFolded) !== showReminders
   const tip = local.length ? conversation.hermesTip : undefined
-  if (tip !== undefined) {
+  if (tip !== undefined && !refold) {
     const [newest] = await listSessionMessages(config, sessionId, { limit: 1, offset: 0 })
     if (!newest || newest.id === tip) return 0
   }
   const summaries = summaryRowsOf(conversation.compactions)
-  const { rows, full } = await fetchTail(config, sessionId, tip, summaries)
+  const from = refold ? firstRowOf(local, sessionId) : tip
+  const { rows, full } = await fetchTail(config, sessionId, from, summaries)
   if (!rows.length) return 0
   const live = awaitingResults(rows) && (await runningOnHost(config, sessionId))
-  const turns = turnsOf(conversationId, sessionId, rows, live, summaries)
+  const turns = turnsOf(conversationId, sessionId, rows, live, summaries, showReminders)
   return await db.transaction("rw", db.messages, db.conversations, async () => {
     const current = await getMessages(conversationId)
     if (isStreaming(current)) return null
@@ -959,7 +1005,10 @@ async function reconcile(conversationId: string) {
           // it saw, and the reply this device holds for it is named after the first row it wrote.
           const local = byId.get(reply.id)
           const createdAt = local?.createdAt ?? Math.max(reply.createdAt, floor)
-          writes.push({ ...reply, createdAt, ...mergedRuns(reply, local) })
+          const next = { ...reply, createdAt, ...mergedRuns(reply, local) }
+          // A refold mostly says what the reply already says: a write per unchanged reply would wake
+          // every observer of the chat for nothing.
+          if (!local || !equal(local, next)) writes.push(next)
           floor = createdAt + 1
         }
         // A device that drew the seam row before the fold read it keeps that text: the row folds to
@@ -998,6 +1047,7 @@ async function reconcile(conversationId: string) {
             ...mergedRuns(reply, local),
             steers: local.steers ?? reply.steers,
             ...(seams ? { seams } : {}),
+            ...withReminders(restored, reply),
           })
         } else if (local?.role === "assistant") {
           const merged = withReplyDetails(local, reply)
@@ -1042,6 +1092,7 @@ async function reconcile(conversationId: string) {
     await db.messages.bulkPut(writes)
     await db.conversations.update(conversationId, {
       hermesTip: rows[rows.length - 1].id,
+      ...(refold ? { remindersFolded: showReminders } : {}),
       // Where the window's edge is, so a reader who reaches the top can walk the rows above it. A
       // window that begins at the live transcript's first row is the chat's own edge only if
       // nothing was archived above it, and only the host says whether anything was: the reach asks
@@ -1128,6 +1179,7 @@ async function loadEarlier(conversationId: string) {
    *  start. The rows are at the newest end, so the read starts there and pages back until the next
    *  turn's start is in. */
   const summaries = summaryRowsOf(compactions)
+  const showReminders = progressRemindersShown(await getSettings())
   async function turnFrom(cut: number) {
     const rows = new Map<number, SessionMessage>()
     for (let page = 0; page <= MAX_SKIPS; page++) {
@@ -1183,7 +1235,10 @@ async function loadEarlier(conversationId: string) {
     // host whose clock ran ahead of this device's would have newer ones still.
     const older = pages.flat()
     const rows = mend ? [...older, ...rest] : older
-    const messages = toMessages(conversationId, sessionId, rows, { summaries })
+    const messages = toMessages(conversationId, sessionId, rows, {
+      summaries,
+      reminders: showReminders,
+    })
     const ceiling = mend ? mend.ceiling : windowFirst?.createdAt
     const next = nextWindow(cursor, { oldest: older[0]?.id, end, offset }, archive)
     await db.transaction("rw", db.messages, db.conversations, async () => {

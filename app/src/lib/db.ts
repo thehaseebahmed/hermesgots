@@ -45,6 +45,11 @@ export interface Settings {
   chatNext?: boolean
   /** Meetings: add a recording or transcript and read the host's notes. Developer, local. */
   meetings?: boolean
+  /**
+   * Draws each progress reminder a thread would drop as a row of its own, opening the note the host
+   * wrote (`progress-reminder.ts`, ADR 0068). Developer, local, off by default.
+   */
+  showProgressReminders?: boolean
   /** AFK's workflow library: a project's Workflow row, its library and its editor. Developer, local. */
   afkWorkflows?: boolean
   /** How the bot-threads sidebar orders the bots; unset is `recent`. Local. */
@@ -178,6 +183,13 @@ export interface Conversation {
   moves?: Move[]
   /** Newest Hermes transcript row this device has caught up to. Local only; never synced. */
   hermesTip?: number
+  /**
+   * Whether the replies this device folded were folded with *Show progress reminders* on. A display
+   * choice of this device, so it is local and never synced; a chat whose value differs from the
+   * setting is folded again on its next open, as far as the catch-up's page bound reaches, which is
+   * how the switch reaches a thread already kept (`history.ts`, ADR 0068).
+   */
+  remindersFolded?: boolean
   /**
    * The agent's own todo list (its `todo_list` tool), the progress the plugin worked out with it, and
    * when this device last set it. Local only; every device reads it from the Gots plugin.
@@ -431,6 +443,20 @@ export interface Seam {
 /** `queued` is a user message waiting for the current reply to finish. */
 export type MessageStatus = "triaging" | "queued" | "streaming" | "done" | "error" | "stopped"
 
+/**
+ * A progress reminder a thread keeps behind *Show progress reminders* (`progress-reminder.ts`,
+ * ADR 0068): the note the host wrote, in the place among the reply's parts the refused call held.
+ * It is not a tool call — never in the group, never counted — so it is a row of its own.
+ */
+export interface ProgressReminder {
+  /** The note exactly as the host wrote it, its pinned opening first. */
+  note: string
+  /** Length of the reply text when the refused call was made, so it renders where it happened. */
+  contentOffset: number
+  /** Calls drawn before it, which is what keeps it ahead of or behind a call of the same row. */
+  toolsBefore: number
+}
+
 export interface Message {
   id: string
   conversationId: string
@@ -449,6 +475,11 @@ export interface Message {
    */
   reasoningRuns?: ReasoningRun[]
   tools?: ToolEvent[]
+  /**
+   * Progress reminders folded in behind *Show progress reminders*, at the places their refused calls
+   * held. Kept apart from `tools` so the group beside them counts only calls that ran (ADR 0068).
+   */
+  reminders?: ProgressReminder[]
   approval?: ApprovalRequest
   clarify?: ClarifyRequest
   /** A reply's steers, in order. */

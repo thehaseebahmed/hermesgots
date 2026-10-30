@@ -1,6 +1,6 @@
 import { clarifyAnswered, type ClarifyResponse } from "@/lib/clarify"
 import type { LiveTurn, MessageStats } from "@/lib/db"
-import { isProgressReminder } from "@/lib/progress-reminder"
+import { progressReminderNote } from "@/lib/progress-reminder"
 import { measureReply } from "@/lib/reply-stats"
 import { promptFrom, type RunPrompt } from "@/lib/run-prompt"
 
@@ -44,6 +44,12 @@ export interface ThreadState {
   live?: LiveTurn
   /** This device has a turn running; while it does, what the host's transcript says waits. */
   running: boolean
+  /**
+   * Draws each progress reminder a reply would drop as a row of its own (ADR 0068). This page's own
+   * display choice, read once when it opens: the transcript and the live run are both folded where
+   * they are drawn, so it never touches what the host holds.
+   */
+  showReminders: boolean
   /** The run this page joined, whose status its wait is read from; none before it has joined one. */
   run?: string
   /** What the run is held up on, until the user's answer or someone else's takes it away. */
@@ -105,18 +111,33 @@ export type ThreadEvent =
   | { type: "gone"; run: string }
   | { type: "agents"; agents: Agent[] }
   | { type: "queue"; items: Queued[]; paused: boolean }
+  /** The page read this device's *Show progress reminders*: what a reply's refusals draw from now. */
+  | { type: "reminders"; on: boolean }
   /** `at` is this device's clock as the event arrived, which a turn it sent is timed by. */
   | { type: "run"; event: RunEvent; at?: number }
   | { type: "failed"; error: string }
 
-export const initial: ThreadState = { status: "loading", rows: [], running: false }
+export const initial: ThreadState = {
+  status: "loading",
+  rows: [],
+  running: false,
+  showReminders: false,
+}
 
-/** A call the thread should not hold any more: a run of calls that empties goes with it. */
-function dropCall(turn: Turn, pick: (call: ToolCall) => boolean): Turn {
-  let changed = false
+/**
+ * The turn with the last matching call of the first run holding one taken out, `replacement` standing
+ * where it was: a run the call split is two runs again, so each group counts only what ran.
+ */
+function spliceCall(
+  turn: Turn,
+  pick: (call: ToolCall) => boolean,
+  replacement: (call: ToolCall) => Part[],
+  missing: Part[] = [],
+): Turn {
   const parts: Part[] = []
+  let found = false
   for (const part of turn.parts) {
-    if (part.kind !== "tools") {
+    if (found || part.kind !== "tools") {
       parts.push(part)
       continue
     }
@@ -125,11 +146,23 @@ function dropCall(turn: Turn, pick: (call: ToolCall) => boolean): Turn {
       parts.push(part)
       continue
     }
-    changed = true
-    const calls = part.calls.filter((_, index) => index !== at)
-    if (calls.length) parts.push({ ...part, calls })
+    found = true
+    const before = part.calls.slice(0, at)
+    const after = part.calls.slice(at + 1)
+    if (before.length) parts.push({ ...part, calls: before })
+    parts.push(...replacement(part.calls[at]))
+    if (after.length) parts.push({ kind: "tools", calls: after })
   }
-  return changed ? { ...turn, parts } : turn
+  if (found) return { ...turn, parts }
+  return missing.length ? { ...turn, parts: [...parts, ...missing] } : turn
+}
+
+/** A call the thread should not hold any more: a run of calls that empties goes with it. */
+const dropCall = (turn: Turn, pick: (call: ToolCall) => boolean) => spliceCall(turn, pick, () => [])
+
+const remindInstead = (turn: Turn, pick: (call: ToolCall) => boolean, note: string) => {
+  const reminder: Part = { kind: "reminder", note }
+  return spliceCall(turn, pick, () => [reminder], [reminder])
 }
 
 /**
@@ -189,8 +222,12 @@ function withClarifyAnswer(
 }
 
 /** The transcript's turns, the archive folded in where the reader has asked for it. */
-export const foldedOf = (rows: Row[], archived?: Row[], partial?: boolean) =>
-  foldTurns(archived ? withArchive(rows, archived) : rows, Boolean(partial) && !archived)
+export const foldedOf = (rows: Row[], archived?: Row[], partial?: boolean, showReminders = false) =>
+  foldTurns(
+    archived ? withArchive(rows, archived) : rows,
+    Boolean(partial) && !archived,
+    showReminders,
+  )
 
 /** How much of a reply a turn holds: its calls, and the characters of the words it wrote. */
 function reach(turn: Turn) {
@@ -231,7 +268,7 @@ export function turnsOf(folded: Turn[], live?: LiveTurn, waiting?: Waiting): Tur
 }
 
 /** One live event's change to the turn it belongs to; only the part it touches is a new object. */
-function live(turn: Turn, event: RunEvent, now?: number): Turn {
+function live(turn: Turn, event: RunEvent, now?: number, showReminders = false): Turn {
   const { parts } = turn
   const at = typeof event.timestamp === "number" ? event.timestamp * 1000 : undefined
   const last = parts.at(-1)
@@ -281,11 +318,13 @@ function live(turn: Turn, event: RunEvent, now?: number): Turn {
   if (event.event === "tool.completed" && (event.tool_call_id || event.tool)) {
     // A call the progress reminder refused never ran: the note its result carries is the host
     // talking to the model, so the card goes rather than spending the run showing machinery
-    // (`progress-reminder.ts`, ADR 0068). Matched by id, else the newest call of that tool.
-    if (isProgressReminder(event.preview))
-      return dropCall(turn, (one) =>
-        event.tool_call_id ? one.id === event.tool_call_id : one.name === event.tool,
-      )
+    // (`progress-reminder.ts`, ADR 0068). Matched by id, else the newest call of that tool. Behind
+    // the developer switch the note comes back as a row of its own, where the call was.
+    const note = progressReminderNote(event.preview)
+    const pick = (one: ToolCall) =>
+      event.tool_call_id ? one.id === event.tool_call_id : one.name === event.tool
+    if (note !== undefined)
+      return showReminders ? remindInstead(turn, pick, note) : dropCall(turn, pick)
     if (!event.tool_call_id) return turn
     // A completion says only that the call ended: its preview is empty on the served turn, so the
     // result an answer already wrote is kept rather than emptied — what `chat.ts`'s `onTool` guards
@@ -391,7 +430,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       const rows = event.joined ? overlay(state.rows, event.rows) : event.rows
       if (!rows) return state
       const partial = event.more ?? state.partial
-      const last = foldedOf(rows, state.archived, partial).at(-1)
+      const last = foldedOf(rows, state.archived, partial, state.showReminders).at(-1)
       const done = last?.done
       // What the turn this device watched cost goes with the row that opened it, which the
       // transcript has now written.
@@ -402,7 +441,8 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         measured &&
         last?.row !== undefined &&
         last.user === state.live?.turn.user &&
-        last.row !== foldedOf(state.rows, state.archived, state.partial).at(-1)?.row
+        last.row !==
+          foldedOf(state.rows, state.archived, state.partial, state.showReminders).at(-1)?.row
           ? { ...state.stats, [last.row]: measured }
           : state.stats
       return {
@@ -462,7 +502,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       // again from nothing — but the wait this page read off the run's own status is the run's, and
       // a join of the same run keeps it.
       const last = turnsOf(
-        foldedOf(state.rows, state.archived, state.partial),
+        foldedOf(state.rows, state.archived, state.partial, state.showReminders),
         state.live,
         state.waiting,
       ).at(-1)
@@ -477,6 +517,8 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
           : undefined,
       }
     }
+    case "reminders":
+      return event.on === state.showReminders ? state : { ...state, showReminders: event.on }
     case "queue": {
       const next = { items: event.items, paused: event.paused }
       return sameQueue(state.queue, next) ? state : { ...state, queue: next }
@@ -525,7 +567,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
             }
           : state.settled
       const held = state.live
-      const turn = held && live(held.turn, event.event, event.at)
+      const turn = held && live(held.turn, event.event, event.at, state.showReminders)
       let moved = held && turn && turn !== held.turn ? { ...held, turn } : held
       // The replay is over once it holds what the transcript's copy did, or the run has ended.
       if (moved?.replay) {
@@ -553,4 +595,8 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
 
 /** The turns a state draws. */
 export const threadTurns = (state: ThreadState) =>
-  turnsOf(foldedOf(state.rows, state.archived, state.partial), state.live, state.waiting)
+  turnsOf(
+    foldedOf(state.rows, state.archived, state.partial, state.showReminders),
+    state.live,
+    state.waiting,
+  )
