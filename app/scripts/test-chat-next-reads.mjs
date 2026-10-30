@@ -78,15 +78,13 @@ test("a run's status is where a wait a late subscriber never heard is read", asy
   const recordedStatus = recorded("approval-v22.status.json")
   statusHost(recordedStatus)
   assert.deepEqual(await readRun(connection, recordedStatus.run_id), {
-    waiting: {
-      kind: "approval",
-      run: recordedStatus.run_id,
-      promptId: "78e6b47b81d74c508050f6ae435e9d2b",
-      generation: 1,
-      command: "rm -rf /tmp/gots-approval-fixture-does-not-exist",
-      description: "delete in root path",
-      choices: ["once", "deny", "session", "always"],
-    },
+    kind: "approval",
+    run: recordedStatus.run_id,
+    promptId: "78e6b47b81d74c508050f6ae435e9d2b",
+    generation: 1,
+    command: "rm -rf /tmp/gots-approval-fixture-does-not-exist",
+    description: "delete in root path",
+    choices: ["once", "deny", "session", "always"],
   })
 
   // A host that names the question on the status itself, as the newer one does.
@@ -105,20 +103,61 @@ test("a run's status is where a wait a late subscriber never heard is read", asy
     },
   })
   assert.deepEqual(await readRun(connection, "run_q"), {
-    waiting: {
-      kind: "question",
-      run: "run_q",
-      promptId: "cl1-0",
-      generation: 2,
-      question: "Which logs should I count as old?",
-      choices: ["Older than 90 days"],
-      multiSelect: false,
-    },
+    kind: "question",
+    run: "run_q",
+    promptId: "cl1-0",
+    generation: 2,
+    question: "Which logs should I count as old?",
+    choices: ["Older than 90 days"],
+    multiSelect: false,
   })
 
   // A run that waits on nothing is no wait, and a host that cannot answer is no answer.
   statusHost({ object: "hermes.run", run_id: "run_go", status: "running", pending_controls: [] })
-  assert.deepEqual(await readRun(connection, "run_go"), { waiting: undefined })
+  assert.equal(await readRun(connection, "run_go"), undefined)
   globalThis.fetch = async () => new Response("{}", { status: 503 })
   assert.equal(await readRun(connection, "run_go"), undefined)
+})
+
+test("what the status holds now wins, and a control this build cannot answer is no prompt", async () => {
+  statusHost({
+    run_id: "run_both",
+    status: "waiting_for_approval",
+    clarify: { prompt_id: "stale", execution_generation: 1, question: "Old?" },
+    pending_controls: [
+      { kind: "approval", prompt_id: "live", execution_generation: 2, command: "rm -rf /tmp/x" },
+    ],
+  })
+  const prompt = await readRun(connection, "run_both")
+  assert.equal(prompt.kind, "approval")
+  assert.equal(prompt.promptId, "live")
+
+  // A question written as Hermes's own list of them asks its first, and takes its choices.
+  statusHost({
+    run_id: "run_list",
+    clarify: {
+      prompt_id: "p1",
+      execution_generation: 1,
+      questions: [{ question: "Which file?", choices: ["a.ts", "b.ts"], multi_select: true }],
+    },
+  })
+  assert.deepEqual(await readRun(connection, "run_list"), {
+    kind: "question",
+    run: "run_list",
+    promptId: "p1",
+    generation: 1,
+    question: "Which file?",
+    choices: ["a.ts", "b.ts"],
+    multiSelect: true,
+  })
+
+  statusHost({ run_id: "run_x", pending_controls: [{ kind: "plan", prompt_id: "p2" }] })
+  assert.equal(await readRun(connection, "run_x"), undefined)
+  statusHost({ run_id: "run_x", status: "completed", clarify: { prompt_id: "p3" } })
+  assert.equal(await readRun(connection, "run_x"), undefined)
+  statusHost({
+    run_id: "run_x",
+    clarify: { clarify_id: "cl1", questions: [{ question: "Which?" }] },
+  })
+  assert.equal(await readRun(connection, "run_x"), undefined)
 })

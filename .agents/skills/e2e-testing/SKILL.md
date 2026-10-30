@@ -50,7 +50,7 @@ The CLI reuses any server that is already up, so after `pnpm e2e up` each run st
 | 18647 | Mock `triage-thread`: `MOCK_TRIAGE=thread`, so triage sends into the newest plain thread |
 | 18648 | Mock `withheld`: `MOCK_WITHHOLD_PROMPT=1`, a host that never re-sends a prompt's request to a subscriber that arrives after it |
 
-A `--jobs N` sweep runs N lanes at once: lane n takes the mock ports 18642 + 4n (its own mock
+A `--jobs N` sweep runs N lanes at once: lane n takes its own mock ports, starting at 18642 + 8n (its own mock
 state) and every lane drives the one app on 15173. `pnpm e2e down` stops every lane's servers.
 
 The CLI looks for Playwright in `app/node_modules`, then globally (`npm root -g`). If it's

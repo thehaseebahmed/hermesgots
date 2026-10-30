@@ -14,6 +14,11 @@ export const SAFETY_MS = 5 * 60_000
 export const FLUSH_INTERVAL_MS = 150
 /** A read that hasn't answered by now is treated as lost, since a dead connection can hang. */
 export const READ_TIMEOUT_MS = 15_000
+/**
+ * How long a run's status read that got no answer waits before it is asked again: it is the only way
+ * to a prompt a host never re-sends, so one lost to a dead connection is worth another try.
+ */
+export const PROMPT_RETRY_MS = 600
 /** A write the host hasn't answered by now is given up on as well: a screen waiting on it (the bot
  * editor's fallback rows grey out with a save) has to come back, answer or not. */
 export const WRITE_TIMEOUT_MS = 15_000

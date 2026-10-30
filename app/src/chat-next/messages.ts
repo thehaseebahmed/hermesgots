@@ -19,7 +19,7 @@ export function messagesOf(
   turns: Turn[],
   options: {
     streaming?: boolean
-    /** A run the host has on this session: its last turn's calls without a result are still running. */
+    /** That turn is the host's still, or its run holds a prompt: a call with no result is running. */
     inFlight?: boolean
     stats?: Record<string, MessageStats>
     origin?: number
@@ -27,17 +27,16 @@ export function messagesOf(
 ): Message[] {
   return turns.flatMap((turn, at) => {
     const index = (options.origin ?? 0) + at
-    const live = Boolean(options.streaming) && at === turns.length - 1 && !turn.done
-    // A turn the host still works, on a page that is not streaming it: a call it has not answered
-    // yet is running, not one that ended without a result.
-    const running = live || (Boolean(options.inFlight) && at === turns.length - 1 && !turn.done)
+    const tail = at === turns.length - 1 && !turn.done
+    const live = Boolean(options.streaming) && tail
+    const running = tail && Boolean(options.streaming || options.inFlight)
     // What a turn cost: as it was just measured, else as the device kept it with the row that opened it.
     const stats = turn.stats ?? (turn.row !== undefined ? options.stats?.[turn.row] : undefined)
     // The page hands back the very turn it drew where nothing in it moved, so its rows are too.
     const key = `${turnId(chat, index)}-${live}-${running}`
     const held = drawn.get(turn)
     if (held?.key === key && held.stats === stats) return held.rows
-    const rows = rowsOf(chat, turnId(chat, index), turn, live, running, stats)
+    const rows = rowsOf(chat, turnId(chat, index), turn, { live, running }, stats)
     drawn.set(turn, { key, stats, rows })
     return rows
   })
@@ -98,9 +97,7 @@ function rowsOf(
   chat: string,
   id: string,
   turn: Turn,
-  live: boolean,
-  /** A call in the turn that has no result yet is still running, by the run or by this stream. */
-  running: boolean,
+  { live, running }: { live: boolean; running: boolean },
   stats?: MessageStats,
 ): Message[] {
   const createdAt = turn.at ?? 0

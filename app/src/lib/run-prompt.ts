@@ -35,39 +35,62 @@ const held = (raw: unknown): Record<string, unknown> | undefined =>
 const strings = (raw: unknown): string[] =>
   Array.isArray(raw) ? raw.filter((one): one is string => typeof one === "string") : []
 
-/**
- * The prompt a run's status carries, as the host wrote it; nothing while the run waits on none. A
- * status that lists `pending_controls` holds at most one, so the newest is the one.
- */
-export function promptEntry(status: unknown): Record<string, unknown> | undefined {
+/** The execution the prompt belongs to, which an answer names so a settled one cannot be re-raised. */
+const generationOf = (entry: Record<string, unknown>) =>
+  typeof entry.execution_generation === "number" ? entry.execution_generation : 0
+
+const ENDED = ["completed", "cancelled", "failed", "interrupted"]
+
+/** The prompts a status carries, newest first: `pending_controls` where it lists any, else its own. */
+function promptEntries(status: unknown): Record<string, unknown>[] {
   const body = held(status)
-  if (!body) return undefined
+  if (!body || (typeof body.status === "string" && ENDED.includes(body.status))) return []
   const listed = Array.isArray(body.pending_controls) ? body.pending_controls : []
-  return held(body.clarify) ?? held(body.approval) ?? held(listed.at(-1))
+  const pending = listed.flatMap((one): Record<string, unknown>[] => {
+    const entry = held(one)
+    return entry ? [entry] : []
+  })
+  if (pending.length) return pending.reverse()
+  return [held(body.clarify), held(body.approval)].flatMap((one) => (one ? [one] : []))
 }
 
-/** Which prompt an entry is: the host says so (`kind`), or the field only one of them carries does. */
-export function promptKindOf(entry: Record<string, unknown>): "question" | "approval" {
-  if (entry.kind === "approval") return "approval"
-  if (entry.kind === "clarify") return "question"
-  return "command" in entry ? "approval" : "question"
+/** A control this build does not know is no prompt at all, not a question by default. */
+export function promptKindOf(entry: Record<string, unknown>): "question" | "approval" | undefined {
+  if (entry.kind === "approval" || entry.event === "approval.request") return "approval"
+  if (entry.kind === "clarify" || entry.event === "clarify.request") return "question"
+  if ("command" in entry) return "approval"
+  if ("question" in entry || "questions" in entry) return "question"
+  return undefined
 }
 
-/** The prompt a run's status carries, as the screen waits on it. */
-export function promptOf(status: unknown, runId: string): RunPrompt | undefined {
-  const entry = promptEntry(status)
-  if (!entry) return undefined
-  // A prompt is answered by its id and the generation it was asked in, so one without both is not a
-  // prompt a client can answer.
-  if (typeof entry.prompt_id !== "string" || !entry.prompt_id) return undefined
+/** The newest prompt of one kind the status carries, as the host wrote it. */
+export function promptEntry(
+  status: unknown,
+  kind: "question" | "approval",
+): Record<string, unknown> | undefined {
+  return promptEntries(status).find((entry) => promptKindOf(entry) === kind)
+}
+
+/** The question an entry asks: its own, or the first of Hermes's list of them, which carries its own. */
+function askedOf(entry: Record<string, unknown>): Record<string, unknown> {
+  const listed = Array.isArray(entry.questions) ? entry.questions : []
+  return held(listed[0]) ?? entry
+}
+
+/** One prompt from a status entry or the event with the same fields; nothing where no route answers it. */
+export function promptFrom(raw: unknown, runId: string): RunPrompt | undefined {
+  const entry = held(raw)
+  if (!entry || typeof entry.prompt_id !== "string" || !entry.prompt_id) return undefined
+  const kind = promptKindOf(entry)
+  if (!kind) return undefined
   const base = {
     run: typeof entry.run_id === "string" && entry.run_id ? entry.run_id : runId,
     promptId: entry.prompt_id,
-    generation: typeof entry.execution_generation === "number" ? entry.execution_generation : 0,
+    generation: generationOf(entry),
   }
-  if (promptKindOf(entry) === "approval")
+  if (kind === "approval")
     return {
-      kind: "approval",
+      kind,
       ...base,
       command: typeof entry.command === "string" ? entry.command : "",
       ...(typeof entry.description === "string" && entry.description
@@ -75,11 +98,20 @@ export function promptOf(status: unknown, runId: string): RunPrompt | undefined 
         : {}),
       choices: strings(entry.choices),
     }
+  const asked = askedOf(entry)
   return {
-    kind: "question",
+    kind,
     ...base,
-    question: typeof entry.question === "string" ? entry.question : "",
-    choices: strings(entry.choices),
-    multiSelect: Boolean(entry.multi_select),
+    question: typeof asked.question === "string" ? asked.question : "",
+    choices: strings(asked.choices),
+    multiSelect: Boolean(asked.multi_select),
   }
+}
+
+export function promptOf(status: unknown, runId: string): RunPrompt | undefined {
+  for (const entry of promptEntries(status)) {
+    const prompt = promptFrom(entry, runId)
+    if (prompt) return prompt
+  }
+  return undefined
 }

@@ -12,10 +12,11 @@ import { laneOf, MAX_LANES } from "./lanes.mjs"
 const here = dirname(fileURLToPath(import.meta.url))
 const appDir = resolve(here, "../..")
 // Running the CLI is for the command line only: `test-e2e-registry.mjs` imports `FLOWS` as data.
-const invokedDirectly = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href
+const invokedDirectly =
+  Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href
 
 // Mocks by what they leave out; each runs on its own port so flows can mix them. A parallel lane
-// takes its own set (E2E_MOCK_BASE + its four), so lanes never share mock state.
+// takes a set of its own, one port per mock below, so lanes never share mock state.
 const MOCK_BASE = Number(process.env.E2E_MOCK_BASE ?? 18642)
 const MOCKS = {
   live: { port: MOCK_BASE, env: {} },
@@ -26,6 +27,8 @@ const MOCKS = {
   "triage-thread": { port: MOCK_BASE + 5, env: { MOCK_TRIAGE: "thread" } },
   withheld: { port: MOCK_BASE + 6, env: { MOCK_WITHHOLD_PROMPT: "1" } },
 }
+// How many ports a lane's mocks take, and so how far apart two lanes' sets start.
+const LANE_PORTS = Object.keys(MOCKS).length
 // The app is shared: lanes drive it in separate browsers and one Vite serves them all.
 const APP_PORT = Number(process.env.E2E_APP_PORT ?? 15173)
 
@@ -91,7 +94,7 @@ export const FLOWS = {
     script: "e2e/question-reload.mjs",
     mock: "withheld",
     about:
-      'A chat whose run already waits on a question opens with the question\'s form, read off the run\'s own status on a host that never re-sends the request: never a "No answer" card while it waits, and the answer reading back once given',
+      "A chat whose run already waits on a question opens with the question's form, read off the run's own status on a host that never re-sends the request: never a \"No answer\" card while it waits, and the answer reading back once given",
   },
   "failed-send": {
     script: "e2e/failed-send.mjs",
@@ -462,7 +465,7 @@ Options:
   --dark               shot: dark mode
   --out <file>         shot: the file to write (default: <shots>/shot-<path>-<width>.png)
   --jobs <n>           Run the flows in <n> parallel lanes (2-${MAX_LANES}); each lane takes its own
-                       mock ports (base + 4 per lane) and they share the app
+                       mock ports (one set per lane) and they share the app
   --keep               Leave the servers running afterwards (the next run reuses them)`
 
 const args = process.argv.slice(2)
@@ -532,7 +535,15 @@ const serveApp = () =>
   appUrl ??
   // Bound to 127.0.0.1 so the URL every probe and flow uses reaches it whatever `localhost` means
   // here (the e2e-testing skill's gotcha).
-  serve("app", APP_PORT, "pnpm", ["exec", "vite", "--port", `${APP_PORT}`, "--strictPort", "--host", "127.0.0.1"])
+  serve("app", APP_PORT, "pnpm", [
+    "exec",
+    "vite",
+    "--port",
+    `${APP_PORT}`,
+    "--strictPort",
+    "--host",
+    "127.0.0.1",
+  ])
 const serveMock = (name) =>
   serve(`mock-${name}`, MOCKS[name].port, "node", ["scripts/mock-hermes.mjs"], MOCKS[name].env)
 function stopStarted() {
@@ -547,8 +558,11 @@ function stopStarted() {
 }
 function stopAll() {
   // Every lane's mock ports too: `down` also stops a sweep this CLI ran in parallel (lane n takes
-  // MOCK_BASE + 4n, up to MAX_LANES lanes).
-  const ports = [APP_PORT, ...Array.from({ length: 4 * MAX_LANES }, (_, index) => MOCK_BASE + index)]
+  // MOCK_BASE + LANE_PORTS·n, up to MAX_LANES lanes).
+  const ports = [
+    APP_PORT,
+    ...Array.from({ length: LANE_PORTS * MAX_LANES }, (_, index) => MOCK_BASE + index),
+  ]
   spawnSync("fuser", ["-k", ...ports.map((port) => `${port}/tcp`)], { stdio: "ignore" })
 }
 
@@ -675,7 +689,7 @@ function laneRun(lane, lanes, argv) {
         ...process.env,
         E2E_LANE: String(lane),
         E2E_LANES: String(lanes),
-        E2E_MOCK_BASE: String(MOCK_BASE + lane * 4),
+        E2E_MOCK_BASE: String(MOCK_BASE + lane * LANE_PORTS),
       },
       stdio: ["ignore", "pipe", "pipe"],
     })
@@ -760,7 +774,9 @@ if (invokedDirectly) {
           const name =
             Object.keys(FLOWS).find((key) => label === key) ??
             Object.keys(FLOWS).find((key) => label.startsWith(`${key} (`))
-          const mock = name ? (/\((\S+) mock\)/.exec(label)?.[1] ?? FLOWS[name].mock ?? "live") : null
+          const mock = name
+            ? (/\((\S+) mock\)/.exec(label)?.[1] ?? FLOWS[name].mock ?? "live")
+            : null
           console.log(`\n== serial re-run of ${label}`)
           if (name && (await runFlow(name, mock)) === null) {
             console.log(`passed serially, a lane flake: ${label}`)

@@ -605,15 +605,16 @@ export function fakeHost(
       return reply({ run_id: stopping[1], status: "stopping" })
     }
     if (path === "/v1/runs" && init?.method === "POST") {
+      const body = JSON.parse(String(init.body))
       // Hermes takes no second turn on a session whose run is held on the user: it answers 409, which
-      // is what a send made while the run waits meets.
-      if ([...runs.values()].some((state) => !state.done && state.waiting))
+      // is what a send made while that run waits meets.
+      const target = typeof body.session_id === "string" ? body.session_id : session
+      if (target === session && [...runs.values()].some((state) => !state.done && state.waiting))
         return reply(
           { error: { message: "Run is waiting on the user", code: "run_waiting_for_user" } },
           409,
         )
       asked.runs++
-      const body = JSON.parse(String(init.body))
       const { id, run } = start(durable(body.input))
       latest.run = run
       latest.id = id

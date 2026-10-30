@@ -215,6 +215,32 @@ test.describe("a run already waiting when the chat opens", () => {
   })
 })
 
+test("a refusal that is not a waiting bot keeps the host's own words", async () => {
+  const host = setUp("q-blocked")
+  await withDevice(openDevice(host, { pollMs: 5_000, idleMs: 5_000 }), async (phone) => {
+    const answer = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
+      new URL(String(input)).pathname === "/v1/runs" && init?.method === "POST"
+        ? new Response(
+            JSON.stringify({
+              error: { message: "This workspace is blocked.", code: "workspace_blocked" },
+            }),
+            { status: 409 },
+          )
+        : answer(input, init)) as typeof fetch
+    try {
+      await phone.send("never mind")
+      await eventually(
+        () => assert.equal(phone.alert(), "This workspace is blocked."),
+        "the host's reason is what the screen says",
+        200,
+      )
+    } finally {
+      globalThis.fetch = answer
+    }
+  })
+})
+
 test.describe("a command that needs approval", () => {
   const COMMAND = "rm -rf /tmp/gots-approval-fixture-does-not-exist"
   const asked = { command: COMMAND, choices: ["once", "deny", "session", "always"] }

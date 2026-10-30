@@ -261,7 +261,10 @@ export async function addBot(page, { name, messages, hour = 3_600_000 }) {
 }
 
 /** The signed-in account the wizard flows start from, and the one `flow`'s `account` seeds. */
-export const accountUser = { id: "11111111-2222-4333-8444-555555555555", email: "tester@example.com" }
+export const accountUser = {
+  id: "11111111-2222-4333-8444-555555555555",
+  email: "tester@example.com",
+}
 
 /**
  * Signs a browser context in to Identity and stubs the site's functions an account reads: the sync
@@ -395,7 +398,9 @@ function helpers(page) {
             const { sendMessage } = await import("/src/lib/chat.ts")
             const canvas = Object.assign(document.createElement("canvas"), { width: 8, height: 8 })
             const blob = await new Promise((done) => canvas.toBlob(done, "image/png"))
-            const photo = await prepareAttachment(new File([blob], "photo.png", { type: "image/png" }))
+            const photo = await prepareAttachment(
+              new File([blob], "photo.png", { type: "image/png" }),
+            )
             void sendMessage(id, text, { attachments: [photo] })
           },
           [chatId, text],
@@ -538,6 +543,35 @@ function helpers(page) {
     stopSkeletons() {
       return page.evaluate(() => window.__skeletonObserver?.disconnect())
     },
+    /**
+     * Records whether the page ever shows `text`, from its next navigation on: it watches each change
+     * rather than polling, so a line that lives for a single frame is still seen. `sawText()` reads
+     * it and `stopText()` ends the watching. The thread is scanned where there is one, since that is
+     * where a message's own words are drawn.
+     */
+    async watchText(watched) {
+      await page.addInitScript((text) => {
+        window.__sawText = false
+        const scan = () => {
+          if (window.__sawText) return
+          const scope = document.querySelector("[aria-label=Messages]") ?? document.body
+          if (scope?.textContent?.includes(text)) window.__sawText = true
+        }
+        scan()
+        window.__textObserver = new MutationObserver(scan)
+        window.__textObserver.observe(document, {
+          subtree: true,
+          childList: true,
+          characterData: true,
+        })
+      }, watched)
+    },
+    sawText() {
+      return page.evaluate(() => Boolean(window.__sawText))
+    },
+    stopText() {
+      return page.evaluate(() => window.__textObserver?.disconnect())
+    },
   }
 }
 
@@ -614,7 +648,11 @@ export async function seedVault(page, userId = accountUser.id) {
   await page.evaluate(async (id) => {
     const vault = await import("/src/lib/vault.ts")
     const { db } = await import("/src/lib/db.ts")
-    await db.vault.put({ id: "key", userId: id, key: await vault.lockDown(await vault.generateDataKey()) })
+    await db.vault.put({
+      id: "key",
+      userId: id,
+      key: await vault.lockDown(await vault.generateDataKey()),
+    })
   }, userId)
 }
 

@@ -416,7 +416,7 @@ test("a status read raises the wait a late subscriber never heard, and never one
     choices: ["yes", "no"],
     multiSelect: false,
   }
-  const attached = reduce(initial, { type: "attach" })
+  const attached = reduce(initial, { type: "attach", run: "r" })
   const raised = reduce(attached, { type: "waiting", waiting: asked })
   assert.deepEqual(raised.waiting, asked, "the prompt the status carries is drawn")
   // A join of the run the wait was read for keeps it — the read may land before the join does — and
