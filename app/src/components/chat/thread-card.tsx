@@ -9,6 +9,7 @@ import {
 } from "lucide-react"
 
 import { Bot } from "@/components/bot"
+import { useCodeFace } from "@/components/chat/code-face"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Spinner } from "@/components/ui/spinner"
 import type { Move } from "@/lib/hermes"
@@ -45,11 +46,14 @@ export function ThreadCard({
   move?: Move
   onUndo?: (move: Move) => void
 }) {
+  const face = useCodeFace()
   const label = thread.reason ? reasonText(thread.reason) : undefined
   return (
     <div data-slot="thread-card" className={cn("flex flex-col items-start gap-1.5", COLUMN)}>
       <Bubble variant="default" align="end" className="max-w-[85%] self-end">
-        <BubbleContent className="line-clamp-4 px-4 py-2.5 text-[15px] whitespace-pre-wrap">
+        <BubbleContent
+          className={cn("line-clamp-4 px-4 py-2.5 text-[15px] whitespace-pre-wrap", face)}
+        >
           {move?.text ?? thread.opener ?? thread.chat.title}
         </BubbleContent>
       </Bubble>

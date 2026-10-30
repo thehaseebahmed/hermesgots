@@ -327,7 +327,7 @@ const inCodeFace = (element: Element | null, what: string) => {
   return Boolean(element.closest(".font-code"))
 }
 
-test("a code session reads the agent's output in JetBrains Mono, and nothing else", async () => {
+test("a code session reads what is said in it in JetBrains Mono, and none of the chrome", async () => {
   const host = await sessionOnChatNext("c-mono")
   host.seed([{ user: "Look around", reply: "Found it.", tools: 1 }])
   await mount(chatScreen("c-mono"), async () => {
@@ -335,10 +335,9 @@ test("a code session reads the agent's output in JetBrains Mono, and nothing els
     const pane = find("[data-chat-next]")
     assert.equal(pane?.classList.contains("font-code"), false, "the pane is not in the face")
     assert.equal(inCodeFace(find('[data-slot="header-row"]'), "the header"), false, "the header")
-    assert.equal(inCodeFace(composerField(), "the composer"), false, "the composer")
-    assert.equal(
+    assert.ok(inCodeFace(composerField(), "the composer"), "the composer's text")
+    assert.ok(
       inCodeFace(find('[data-chat-next] [data-slot="bubble-content"]'), "the user's bubble"),
-      false,
       "the user's bubble",
     )
     assert.ok(
@@ -364,10 +363,62 @@ test("a code session reads the agent's output in JetBrains Mono, and nothing els
       "the detail's heading",
     )
   })
-  await onChatNext("c-sans")
+})
+
+test("a chat with a bot keeps the app's face, except a tool call's input and output", async () => {
+  const { host } = await onChatNext("c-sans")
+  host.seed([{ user: "Look around", reply: "Found it.", tools: 1 }])
   await mount(chatScreen("c-sans"), async () => {
-    await until(() => Boolean(composerField()), "the chat has loaded")
-    assert.equal(findAll(".font-code").length, 0, "a plain chat has the face nowhere")
+    await until(() => replies().length > 0, "the turn is drawn")
+    assert.equal(inCodeFace(composerField(), "the composer"), false, "the composer")
+    assert.equal(
+      inCodeFace(find('[data-chat-next] [data-slot="bubble-content"]'), "the user's bubble"),
+      false,
+      "the user's bubble",
+    )
+    assert.equal(
+      inCodeFace(find('[data-chat-next] [data-slot="markdown"]'), "the reply"),
+      false,
+      "the reply's words",
+    )
+    const row = find('[data-chat-next] [data-slot="tool-group"]')
+    assert.equal(row?.querySelector(".font-code") ?? null, null, "the tool call's row label")
+    await click(row)
+    await click(findAll("ol button")[0] ?? null)
+    assert.ok(inCodeFace(find("pre"), "the call's output"), "the call's input or output")
+  })
+})
+
+test("a chat this device holds nothing of loads under one loader mid-screen, not words", async () => {
+  const { host } = await onChatNext("c-fresh")
+  host.seed([{ user: "Look around", reply: "Found it.", tools: 0 }])
+  const first = host.hold(0)
+  await mount(chatScreen("c-fresh"), async () => {
+    await until(() => Boolean(find("[data-loading-fresh]")), "the first read has the one loader")
+    assert.equal(find("[data-catching-up]"), null, "and no words say it is catching up")
+    first.release()
+    await until(() => replies().length > 0, "the chat arrives")
+    assert.equal(find("[data-loading-fresh]"), null, "the loader goes with the rows")
+  })
+})
+
+test("a chat this device already holds is caught up in the status line's words, with no loader", async () => {
+  const { host } = await onChatNext("c-held")
+  host.seed([{ user: "Look around", reply: "Found it.", tools: 0 }])
+  await mount(chatScreen("c-held"), async () => {
+    await until(() => replies().length > 0, "the chat is held")
+  })
+  const second = host.hold(0)
+  await mount(chatScreen("c-held"), async () => {
+    await until(() => Boolean(find("[data-catching-up]")), "the held thread says it is catching up")
+    const words = find("[data-catching-up] [data-slot=status-words]")?.textContent ?? ""
+    assert.ok(
+      BUSY_WORDS.catching.some((word) => words === `${word}…`),
+      `in one of the catching words, not a fixed phrase: ${words}`,
+    )
+    assert.equal(find("[data-loading-fresh]"), null, "and no loader mid-screen")
+    assert.ok(replies().length > 0, "over the rows it already holds")
+    second.release()
   })
 })
 

@@ -32,6 +32,30 @@ test("the rows the host wrote for the host's own sake are never a message of the
   assert.equal(turns[1].user, "User message 1.")
 })
 
+test("the task snapshot and the pruned-skills notice Hermes writes at the seam are never drawn as the user's", () => {
+  const snapshot = [
+    "[Your active task list was preserved across context compression]",
+    "- [>] 4. Checkpoint 3: app (in_progress)",
+    "- [ ] 6. Full suite (pending)",
+    "",
+    "[Skills pruned during compression — reload before acting on these tasks]",
+    "The task list above crossed the compression boundary verbatim, but the skill instructions that governed it were pruned.",
+  ].join("\n")
+  const turns = foldTurns([
+    row(1, "user", "one"),
+    row(2, "assistant", "first", { finish_reason: "stop" }),
+    row(3, "user", snapshot),
+    row(4, "assistant", "second", { finish_reason: "stop" }),
+    row(5, "user", `two\n\n${snapshot.split("\n\n")[0]}`),
+    row(6, "assistant", "third", { finish_reason: "stop" }),
+  ])
+  assert.deepEqual(
+    turns.map((turn) => turn.user),
+    ["one", "two"],
+  )
+  assert.equal(turns[0].parts.length, 2, "the reply after the notice stays on the turn it continues")
+})
+
 test("a compaction between two replies stands between them", () => {
   const turns = foldTurns([
     row(1, "user", "one"),

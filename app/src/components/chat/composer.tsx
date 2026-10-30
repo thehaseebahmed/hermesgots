@@ -14,6 +14,7 @@ import { ArrowUpIcon, MicIcon, SquareIcon } from "lucide-react"
 import { toast } from "sonner"
 
 import { AttachMenu } from "@/components/chat/attach-menu"
+import { useCodeFace } from "@/components/chat/code-face"
 import { AttachmentTile, AttachmentViewer } from "@/components/chat/attachments"
 import type { ModeSettings } from "@/components/chat/mode-menu"
 import { SlashMenu } from "@/components/chat/slash-menu"
@@ -184,6 +185,7 @@ export function Composer({
   // Where a pick wants the caret, placed once the new text is in the field.
   const caretWanted = useRef<number | null>(null)
   const textarea = useRef<HTMLTextAreaElement>(null)
+  const face = useCodeFace()
   // When the last Escape that had nothing else to close was pressed, for the double that clears.
   const lastEscape = useRef<number | null>(null)
   const listId = useId()
@@ -634,7 +636,7 @@ export function Composer({
           }
           disabled={disabled}
           rows={1}
-          className="max-h-48 min-h-12 px-5 pt-4 pb-2 text-base md:text-[15px]"
+          className={cn("max-h-48 min-h-12 px-5 pt-4 pb-2 text-base md:text-[15px]", face)}
           aria-label="Message"
         />
         <InputGroupAddon

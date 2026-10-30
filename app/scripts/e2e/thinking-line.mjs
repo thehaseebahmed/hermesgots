@@ -9,12 +9,17 @@
 import { assert, app, flow, pass, settled } from "./lib.mjs"
 // What a row reads is the app's own rule, imported rather than restated: a second copy of the label
 // format here could drift from the one the thread draws and still pass.
+import { BUSY_WORDS } from "../../src/lib/busy-words.ts"
 import { thinkingLabel } from "../../src/lib/thinking.ts"
 
 /** The reply's own item on the page: its rows, its calls and the sheet are all drawn inside it. */
 const ITEM = "[data-slot=message-scroller-item]"
 const WORKING = "[data-slot=status-line]"
-const THINKING = /^(Thinking…|Thought it through|Thought for \d+[sm])/
+const SAYING = BUSY_WORDS.thinking.map((word) => `${word}…`)
+/** A row still thinking says one of the status line's thinking words, never a fixed phrase. */
+const saysThinking = (label) => SAYING.includes(label ?? "")
+const saysWriting = (words) => BUSY_WORDS.writing.some((word) => words === `${word}…`)
+const THINKING = new RegExp(`^(${SAYING.join("|")}|Thought it through|Thought for \\d+[sm])`)
 const SPAN = /^Thought for \d+s$/
 const ROW = "[data-slot=thinking-line]"
 const SHEET = "[data-slot=thinking-sheet]"
@@ -69,7 +74,10 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
         const edge = (node) => {
           if (!node) return null
           const rect = node.getBoundingClientRect()
-          return { ...box(node), left: Math.round(rect.left + parseFloat(getComputedStyle(node).paddingLeft)) }
+          return {
+            ...box(node),
+            left: Math.round(rect.left + parseFloat(getComputedStyle(node).paddingLeft)),
+          }
         }
         const parts = (slot) => [...(own?.querySelectorAll(`[data-slot=${slot}]`) ?? [])]
         return {
@@ -122,7 +130,11 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
           cap: document.querySelectorAll("[data-slot=thinking-cap]").length,
           fade: document.querySelectorAll("[data-slot=thinking-fade]").length,
           frame: box(view),
-          scroll: view && { top: view.scrollTop, height: view.clientHeight, total: view.scrollHeight },
+          scroll: view && {
+            top: view.scrollTop,
+            height: view.clientHeight,
+            total: view.scrollHeight,
+          },
           screen: { width: window.innerWidth, height: window.innerHeight },
         }
       },
@@ -139,7 +151,11 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     assert.equal(drawn.length, 1, `${where}, the reply drew one row of thinking`)
     assert.equal(drawn[0].height, ROW_HEIGHT, `${where}, the row stands ${ROW_HEIGHT}px tall`)
     for (const group of groups)
-      assert.equal(group.height, ROW_HEIGHT, `${where}, a tool group stands ${ROW_HEIGHT}px tall too`)
+      assert.equal(
+        group.height,
+        ROW_HEIGHT,
+        `${where}, a tool group stands ${ROW_HEIGHT}px tall too`,
+      )
     assert.ok(text.length > 0, `${where}, the reply answers after the work it did`)
     const edges = [...drawn, ...groups, ...text].map((one) => one.left)
     assert.equal(
@@ -210,15 +226,11 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
    * last words, and that empty floor is not more of the run to read.
    */
   const foot = (state) =>
-    state.sheet
-      ? Math.max(0, state.sheet.box.bottom - state.sheet.frame.bottom)
-      : Infinity
+    state.sheet ? Math.max(0, state.sheet.box.bottom - state.sheet.frame.bottom) : Infinity
 
   /** Whether the body has outgrown the share of the screen the old cap held it to. */
   const tall = (state) =>
-    Boolean(
-      state.sheet && state.sheet.drawn.height > state.screen.height * FORMER_CAP_SHARE,
-    )
+    Boolean(state.sheet && state.sheet.drawn.height > state.screen.height * FORMER_CAP_SHARE)
 
   /**
    * The sheet holds the whole run: past the old cap's share of the screen, and drawn in full — the
@@ -255,7 +267,8 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   const shut = async () => {
     await page.keyboard.press("Escape")
     await until(
-      async () => ((await page.evaluate((sel) => !document.querySelector(sel), BODY)) ? true : null),
+      async () =>
+        (await page.evaluate((sel) => !document.querySelector(sel), BODY)) ? true : null,
       5_000,
       "the sheet to close",
     )
@@ -280,7 +293,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   const before = await until(
     async () => {
       const state = await threadState()
-      return state.rows.length === 1 && state.rows[0].label === "Thinking…" ? state : null
+      return state.rows.length === 1 && saysThinking(state.rows[0].label) ? state : null
     },
     10_000,
     "the row carrying the turn before any thinking lands",
@@ -294,7 +307,10 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   )
   assert.equal(before.sheet, null, "and no sheet drawn for a row holding no words")
   const says = await page.evaluate((sel) => document.querySelector(sel)?.textContent ?? "", WORKING)
-  assert.ok(!/Writing…|Thinking…/.test(says), "the footer says nothing while the row says it")
+  assert.ok(
+    !/Writing…/.test(says) && !saysThinking(says),
+    "the footer says nothing while the row says it",
+  )
   await shot("working")
   pass("the row spins from the turn's first working moment, the footer silent")
 
@@ -312,7 +328,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   const streaming = await until(
     async () => {
       const state = await threadState()
-      return state.rows.length === 1 && state.rows[0].label === "Thinking…" ? state : null
+      return state.rows.length === 1 && saysThinking(state.rows[0].label) ? state : null
     },
     5_000,
     "the thinking to reach the row",
@@ -345,15 +361,16 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     async () => {
       const reply = await lastReply(chatId)
       if (reply?.status !== "streaming" || reply.runs.length !== 2 || reply.content) return null
-      return reply.runs[1].text.includes(MEASURED) && reply.runs[0].spanMs !== null ? threadState() : null
+      return reply.runs[1].text.includes(MEASURED) && reply.runs[0].spanMs !== null
+        ? threadState()
+        : null
     },
     30_000,
     "the first call to land with the thinking after it streaming",
   )
   assert.equal(latched.rows.length, 1, "the call adds no row: the stretch after it joins the one")
-  assert.equal(
-    latched.rows[0].label,
-    "Thinking…",
+  assert.ok(
+    saysThinking(latched.rows[0].label),
     "the row reads the turn's thinking while the stretch after the call arrives",
   )
   assert.equal(latched.rows[0].spins, true, "its spinner turning while that stretch streams")
@@ -364,7 +381,9 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   )
   await inThread(MEASURED, "after the first call")
   await shot("latched")
-  pass("the call draws no second row: the row above it keeps spinning while the next stretch streams")
+  pass(
+    "the call draws no second row: the row above it keeps spinning while the next stretch streams",
+  )
 
   // A second call, straight after the first with nothing said between them: the two draw as ONE tool
   // group, and every stretch of the turn's thinking sits above it as one row holding all their
@@ -393,9 +412,8 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     `and the group says how many calls it holds ("${merged.group}")`,
   )
   assert.equal(merged.rows.length, 1, "every stretch of the turn draws as one row")
-  assert.equal(
-    merged.rows[0].label,
-    "Thinking…",
+  assert.ok(
+    saysThinking(merged.rows[0].label),
     "which says it is thinking while its newest stretch streams",
   )
   assert.deepEqual(
@@ -424,7 +442,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
       const reply = await lastReply(chatId)
       if (!reply || reply.content || !reply.runs.at(-1)?.text.includes(LAST)) return null
       const state = await threadState()
-      return state.rows.length === 1 && state.rows[0].label === "Thinking…" ? state : null
+      return state.rows.length === 1 && saysThinking(state.rows[0].label) ? state : null
     },
     20_000,
     "the turn's last thinking piece to land with the row still thinking",
@@ -503,7 +521,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   const writing = await until(
     async () => {
       const state = await lineState()
-      return state?.words === "Writing…" ? state : null
+      return saysWriting(state?.words) ? state : null
     },
     15_000,
     "the footer's line to say the turn is writing",
@@ -513,9 +531,9 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   assert.equal(writing.wordsColour, accent, "the words' own text takes it too, not just the row")
   await page.waitForTimeout(STEADY_MS)
   const steady = await lineState()
-  assert.equal(steady?.words, "Writing…", "the words stand whole: nothing types itself in")
+  assert.ok(saysWriting(steady?.words), "the words stand whole: nothing types itself in")
   assert.equal(steady?.colour, writing.colour, "and the line holds the colour it works in")
-  pass(`the footer names "Writing…" beside a loader, in ${writing.colour}`)
+  pass(`the footer says "${writing.words}" beside a loader, in ${writing.colour}`)
 
   await until(
     async () => ((await lastReply(chatId))?.status === "done" ? true : null),
@@ -593,7 +611,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   const opening = await until(
     async () => {
       const state = await threadState()
-      return state.rows.length === 1 && state.rows[0].label === "Thinking…" ? state : null
+      return state.rows.length === 1 && saysThinking(state.rows[0].label) ? state : null
     },
     10_000,
     "the long run's row",

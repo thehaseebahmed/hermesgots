@@ -1,6 +1,7 @@
 import { Link } from "react-router"
 import { MessagesSquareIcon, Undo2Icon } from "lucide-react"
 
+import { useCodeFace } from "@/components/chat/code-face"
 import { COLUMN } from "@/lib/layout"
 import { stayHere } from "@/lib/nav"
 import { cn } from "@/lib/utils"
@@ -26,10 +27,11 @@ export function MovedMarker({
   current?: boolean
   onUndo?: (move: Move) => void
 }) {
+  const face = useCodeFace()
   return (
     <div className={cn("flex flex-col gap-1", COLUMN)}>
       <Bubble variant="default" align="end" className="self-end">
-        <BubbleContent className="px-4 py-2.5 text-[15px] whitespace-pre-wrap">
+        <BubbleContent className={cn("px-4 py-2.5 text-[15px] whitespace-pre-wrap", face)}>
           {move.text}
         </BubbleContent>
       </Bubble>
