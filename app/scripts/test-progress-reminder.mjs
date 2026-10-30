@@ -6,7 +6,7 @@ import { foldTurns } from "../src/chat-next/fold.ts"
 import {
   isProgressReminder,
   PROGRESS_REMINDER_HEADER,
-  refusedCallIds,
+  progressReminderNotes,
 } from "../src/lib/progress-reminder.ts"
 import { NOTE, stored } from "./progress-reminder-fixture.ts"
 
@@ -41,7 +41,7 @@ test("the app matches the opening the plugin actually writes", () => {
 })
 
 test("the note reads through the envelope Hermes stores, whole or cut", () => {
-  assert.equal(isProgressReminder(stored(NOTE)), true, "the row's `{\"error\": …}`")
+  assert.equal(isProgressReminder(stored(NOTE)), true, 'the row\'s `{"error": …}`')
   assert.equal(
     isProgressReminder(`  ${stored(NOTE)}\n`),
     true,
@@ -63,8 +63,48 @@ test("nothing else reads as one", () => {
 })
 
 test("the refused call's id is the one its result answers", () => {
-  assert.deepEqual([...refusedCallIds(interrupted())], ["call-1"])
-  assert.deepEqual([...refusedCallIds(interrupted(stored("Blocked: no")))], [])
+  assert.deepEqual([...progressReminderNotes(interrupted()).keys()], ["call-1"])
+  assert.deepEqual([...progressReminderNotes(interrupted(stored("Blocked: no"))).keys()], [])
+})
+
+test("the refused call's note is the note its result carries, whole", () => {
+  assert.equal(progressReminderNotes(interrupted()).get("call-1"), NOTE)
+})
+
+test("behind the switch the fold draws the note where the call was, outside the run", () => {
+  const [turn] = foldTurns(interrupted(), false, true)
+  assert.deepEqual(
+    turn.parts.map((part) => part.kind),
+    ["reminder", "text", "tools"],
+    "the refusal, then the update it asked for, then the call that ran",
+  )
+  const reminder = turn.parts.find((part) => part.kind === "reminder")
+  assert.equal(reminder.note, NOTE, "the note exactly as the host wrote it")
+  assert.match(reminder.note, /^Progress reminder:/, "its pinned opening first")
+  const calls = turn.parts.flatMap((part) => (part.kind === "tools" ? part.calls : []))
+  assert.deepEqual(
+    calls.map((call) => call.id),
+    ["call-2"],
+    "the group counts only the call that ran",
+  )
+})
+
+test("with the switch off the fold is exactly today's: no row, the same group", () => {
+  const [turn] = foldTurns(interrupted())
+  assert.deepEqual(
+    turn.parts.map((part) => part.kind),
+    ["text", "tools"],
+    "nothing new is drawn",
+  )
+  assert.equal(
+    turn.parts.some((part) => part.kind === "reminder"),
+    false,
+    "no reminder row",
+  )
+  assert.deepEqual(
+    turn.parts.flatMap((part) => (part.kind === "tools" ? part.calls : [])).map((call) => call.id),
+    ["call-2"],
+  )
 })
 
 test("the fold draws the call that ran, not the one the reminder refused", () => {

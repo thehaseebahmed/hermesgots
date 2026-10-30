@@ -21,6 +21,8 @@ import { ClarifyCard, PlanApprovedCard } from "@/components/chat/session-cards"
 import { StatusLine } from "@/components/chat/status-line"
 import { ThinkingLine } from "@/components/chat/thinking-line"
 import { ToolGroup } from "@/components/chat/tool-group"
+import { ReminderRow } from "@/components/chat/reminder-row"
+import { useRemindersShown } from "@/components/chat/use-reminders-shown"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Button } from "@/components/ui/button"
 import { Message as MessageRow, MessageContent } from "@/components/ui/message"
@@ -29,7 +31,7 @@ import { attachmentUrl } from "@/lib/attachment-url"
 import { downloadAttachment } from "@/lib/attachments"
 import { steerWords } from "@/lib/attachment-text"
 import { removeQueued, sendQueued } from "@/lib/chat"
-import type { Attachment, Message, ToolEvent } from "@/lib/db"
+import type { Attachment, Message, ProgressReminder, ToolEvent } from "@/lib/db"
 import { compactionOf } from "@/lib/compactions"
 import type { Compaction } from "@/lib/hermes"
 import { describeActivity, formatDuration, WAITING_FOR_APPROVAL } from "@/lib/format"
@@ -67,6 +69,8 @@ type Part =
   | { kind: "media"; at: number; paths: string[] }
   | { kind: "openui"; at: number; block: RowBlock }
   | { kind: "tools"; tools: ToolEvent[] }
+  /** A reminder's note, drawn as a row of its own: never part of the group beside it (ADR 0068). */
+  | { kind: "reminder"; reminder: ProgressReminder }
   | { kind: "clarify"; tool: ToolEvent }
   | { kind: "agent"; tool: ToolEvent }
   | ({ kind: "thinking" } & RunPart)
@@ -128,7 +132,8 @@ function withThinking(parts: Part[], runs: RunPart[]): Part[] {
  * drops the space the reply puts under it — see `PARTS` for why that is enough.
  */
 function huggingWork(part: Part, next: Part | undefined) {
-  const work = (one: Part | undefined) => one?.kind === "thinking" || one?.kind === "tools"
+  const work = (one: Part | undefined) =>
+    one?.kind === "thinking" || one?.kind === "tools" || one?.kind === "reminder"
   return work(part) && work(next) ? "mb-0" : undefined
 }
 
@@ -172,6 +177,8 @@ function toParts(
   start: number,
   spans: RowBlock[],
   runs: RunPart[],
+  reminders: ProgressReminder[],
+  callsBefore: number,
 ): Part[] {
   const end = start + content.length
   const parts: Part[] = []
@@ -197,13 +204,38 @@ function toParts(
     if (to > from) emit(from, to)
     cursor = to
   }
-  const sorted = [...tools].sort(
-    (a, b) => (a.contentOffset ?? 0) - (b.contentOffset ?? 0) || a.startedAt - b.startedAt,
+  // Calls and reminders in the order they happened. `order` is the number of calls drawn before the
+  // item; a reminder at the same number as a call stands before it, which is where the refused call
+  // was. A reminder never joins a run of calls, so the group beside it counts only what ran.
+  type Placed =
+    | { at: number; order: number; kind: "tool"; tool: ToolEvent }
+    | { at: number; order: number; kind: "reminder"; reminder: ProgressReminder }
+  const placed: Placed[] = [
+    ...tools.map((tool, index): Placed => ({
+      at: tool.contentOffset ?? 0,
+      order: callsBefore + index,
+      kind: "tool",
+      tool,
+    })),
+    ...reminders.map((reminder): Placed => ({
+      at: reminder.contentOffset,
+      order: reminder.toolsBefore,
+      kind: "reminder",
+      reminder,
+    })),
+  ].sort(
+    (a, b) =>
+      a.at - b.at || a.order - b.order || (a.kind === b.kind ? 0 : a.kind === "reminder" ? -1 : 1),
   )
-  for (const tool of sorted) {
-    let at = tool.contentOffset ?? cursor
+  for (const entry of placed) {
+    let at = entry.kind === "tool" ? (entry.tool.contentOffset ?? cursor) : entry.at
     for (const span of spans) if (at >= span.at && at < span.end) at = Math.min(span.end, end)
     if (at > cursor) pushText(at)
+    if (entry.kind === "reminder") {
+      parts.push({ kind: "reminder", reminder: entry.reminder })
+      continue
+    }
+    const { tool } = entry
     const last = parts.at(-1)
     if (tool.tool === "clarify") parts.push({ kind: "clarify", tool })
     // A card is drawn only where the call set a subagent to work; a control call is a tool row like
@@ -423,6 +455,7 @@ export const MessageItem = memo(function MessageItem({
   compactions,
 }: MessageItemProps) {
   const face = useCodeFace()
+  const remindersShown = useRemindersShown(Boolean(message.reminders?.length))
   // Replies type out a word at a time, however Hermes delivers them.
   const content = useReveal(message.role === "assistant" ? message.content : "")
   const spans = useMemo(
@@ -604,15 +637,28 @@ export const MessageItem = memo(function MessageItem({
   }
   // Each segment's parts as it draws them, before anything is rendered: a merged row is one row
   // with one key, and a row holds its own state rather than the thread's.
-  const drawn = segments.map((segment, i) =>
-    toParts(
+  // Each segment draws the reminders filed under its stretch of the reply; one past the revealed
+  // text waits at the end, as the words still being typed do.
+  const storedReminders = remindersShown ? message.reminders : undefined
+  let callsBefore = 0
+  const drawn = segments.map((segment, i) => {
+    const lastSegment = i === segments.length - 1
+    const reminders = (storedReminders ?? []).filter((reminder) => {
+      const at = reminder.contentOffset
+      return (at >= segment.start && at < segment.end) || (lastSegment && at >= segment.end)
+    })
+    const parts = toParts(
       content.slice(segment.start, segment.end),
       segment.tools,
       segment.start,
       spans,
       thinkingBySegment.get(i) ?? NO_RUNS,
-    ),
-  )
+      reminders,
+      callsBefore,
+    )
+    callsBefore += segment.tools.length
+    return parts
+  })
   // A reply's stats come only once it is done and fully revealed, so they never count up.
   const statsShown = showStats && !streaming && !revealing && Boolean(message.stats)
   // The three rows a working reply ends on stand thought, tools, status, in one order that the
@@ -764,6 +810,14 @@ function AssistantRow({
               <div key={part.tools[0].toolCallId} className={cn(edge, hug)}>
                 <div className="w-full max-w-xl">
                   <ToolGroup tools={part.tools} />
+                </div>
+              </div>
+            )
+          if (part.kind === "reminder")
+            return (
+              <div key={`reminder-${index}`} className={cn(edge, hug)}>
+                <div className="w-full max-w-xl">
+                  <ReminderRow reminder={part.reminder} />
                 </div>
               </div>
             )

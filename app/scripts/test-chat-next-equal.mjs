@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { equal } from "../src/chat-next/equal.ts"
+import { equal } from "../src/lib/equal.ts"
 
 test("values that say the same are equal, whatever order their keys came in", () => {
   assert.ok(equal({ a: 1, b: [1, { c: "x" }] }, { b: [1, { c: "x" }], a: 1 }))
