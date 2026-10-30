@@ -14,13 +14,12 @@ import { MediaItems, type MediaItem } from "@/components/chat/media-gallery"
 import { useCodeFace } from "@/components/chat/code-face"
 import { Markdown } from "@/components/chat/markdown"
 import { AgentCards } from "@/components/chat/agent-card"
-import { SubagentLine } from "@/components/chat/subagent-line"
+import { SubagentCount } from "@/components/chat/subagent-count"
 import { MediaTag } from "@/components/chat/media-image"
 import { Compacted } from "@/components/chat/model-change"
 import { ClarifyCard, PlanApprovedCard } from "@/components/chat/session-cards"
 import { StatusLine } from "@/components/chat/status-line"
 import { ThinkingLine } from "@/components/chat/thinking-line"
-import { WORK_ROW_CLASS } from "@/components/chat/work-row"
 import { ToolGroup } from "@/components/chat/tool-group"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Button } from "@/components/ui/button"
@@ -33,14 +32,20 @@ import { removeQueued, sendQueued } from "@/lib/chat"
 import type { Attachment, Message, ToolEvent } from "@/lib/db"
 import { compactionOf } from "@/lib/compactions"
 import type { Compaction } from "@/lib/hermes"
-import { describeActivity, formatDuration } from "@/lib/format"
+import { describeActivity, formatDuration, WAITING_FOR_APPROVAL } from "@/lib/format"
 import { COLUMN, REPLY_INSET } from "@/lib/layout"
 import { mediaCell, mediaKind, type MediaCell } from "@/lib/media-kind"
 import { attachmentSources, mediaRead, useMediaSources } from "@/lib/media-source"
 import { mediaImages } from "@/lib/media-tags"
 import { openuiParts } from "@/lib/openui-block.ts"
 import type { InterfaceDraw, ThreadBlock } from "@/lib/openui-thread.ts"
-import { holdsPlace, mergeThoughtRows, thinkingRows, type RunPart } from "@/lib/thinking"
+import {
+  mergeThoughtRows,
+  placeThinking,
+  statusLineOf,
+  thinkingRows,
+  type RunPart,
+} from "@/lib/thinking"
 import { cn } from "@/lib/utils"
 import { useReveal } from "@/lib/reveal"
 import { isPlanApproval } from "@/lib/workspace"
@@ -65,13 +70,9 @@ type Part =
   | { kind: "clarify"; tool: ToolEvent }
   | { kind: "agent"; tool: ToolEvent }
   | ({ kind: "thinking" } & RunPart)
-  /** The place of the row a quiet turn draws between calls, held while a call runs. */
-  | { kind: "reserve" }
 
 /** One stretch of a reply: the text between breaks, and the calls started inside it. */
 type Segment = { start: number; end: number; tools: ToolEvent[] }
-
-const RESERVE: Part = { kind: "reserve" }
 
 /** A segment with no run of its own, so a reply that never thought allocates nothing. */
 const NO_RUNS: RunPart[] = []
@@ -115,42 +116,11 @@ function segmentOf(part: RunPart, segments: Segment[], tools: ToolEvent[]) {
 }
 
 /**
- * Puts a segment's runs where they belong within it: a run with no anchor opens the segment, and an
- * anchored stretch draws ABOVE the part that holds its call — above the whole group when
- * consecutive calls merged into one — so a tool row never lands between two thought rows and the row
- * still working is the last one the reply draws. Two stretches after the same part arrive in order,
- * so each is spliced where the part stands by then and the later never stacks above the earlier. The
- * turn's pending row is the exception: it is the working status at the thread's end and stays behind
- * its last call, as does a stretch that follows a clarify or an agent card, neither of which is a
- * tool row. A run whose call this segment doesn't draw follows the last call it does draw, and sits
- * at the segment's top when it draws none.
+ * A segment's parts with its runs placed among them: the `Part` constructor for the one placing
+ * rule, which is `placeThinking`'s in `thinking.ts` and stays there so both screens share it.
  */
-function placeThinking(parts: Part[], runs: RunPart[]): Part[] {
-  const row = (run: RunPart): Part => ({ kind: "thinking", ...run })
-  const leading = runs.filter((run) => !run.afterToolId)
-  const placed: Part[] = [...leading.map(row), ...parts]
-  const lastCall = placed.findLastIndex(
-    (part) => part.kind === "tools" || part.kind === "clarify" || part.kind === "agent",
-  )
-  const top = leading.length - 1
-  const inserted = new Map<number, number>()
-  for (const run of runs) {
-    const id = run.afterToolId
-    if (!id) continue
-    const found = placed.findIndex(
-      (one) =>
-        (one.kind === "tools" && one.tools.some((tool) => tool.toolCallId === id)) ||
-        ((one.kind === "clarify" || one.kind === "agent") && one.tool.toolCallId === id),
-    )
-    const at = found >= 0 ? found : lastCall >= 0 ? lastCall : top
-    const count = inserted.get(at) ?? 0
-    // The stretch of a real call goes above its tool row; the pending row and a card's own stretch
-    // stay behind their part, where the reader's eye already is.
-    const above = found >= 0 && placed[at].kind === "tools" && !run.pending
-    placed.splice(above ? at + count : at + 1 + count, 0, row(run))
-    inserted.set(at, count + 1)
-  }
-  return placed
+function withThinking(parts: Part[], runs: RunPart[]): Part[] {
+  return placeThinking(parts, runs, (run) => ({ kind: "thinking", ...run }))
 }
 
 /**
@@ -158,8 +128,7 @@ function placeThinking(parts: Part[], runs: RunPart[]): Part[] {
  * drops the space the reply puts under it — see `PARTS` for why that is enough.
  */
 function huggingWork(part: Part, next: Part | undefined) {
-  const work = (one: Part | undefined) =>
-    one?.kind === "thinking" || one?.kind === "tools" || one?.kind === "reserve"
+  const work = (one: Part | undefined) => one?.kind === "thinking" || one?.kind === "tools"
   return work(part) && work(next) ? "mb-0" : undefined
 }
 
@@ -244,7 +213,7 @@ function toParts(
     else parts.push({ kind: "tools", tools: [tool] })
   }
   if (cursor < end) pushText(end)
-  return mergeThinking(placeThinking(parts, runs))
+  return mergeThinking(withThinking(parts, runs))
 }
 
 function Stats({ message }: { message: Message }) {
@@ -256,7 +225,6 @@ function Stats({ message }: { message: Message }) {
       {stats.tokens} tokens
       {stats.tokensPerSecond !== undefined && ` · ${stats.tokensPerSecond} tok/s`} ·{" "}
       {formatDuration(stats.durationMs)}
-      {message.status === "stopped" && " · stopped"}
     </div>
   )
 }
@@ -647,55 +615,56 @@ export const MessageItem = memo(function MessageItem({
   )
   // A reply's stats come only once it is done and fully revealed, so they never count up.
   const statsShown = showStats && !streaming && !revealing && Boolean(message.stats)
-  // The footer says what the turn is doing — waiting on the reader, running a call, writing — but
-  // never while a row says the turn is thinking: the row owns that, so two places never say it.
-  const rowSaysThinking =
-    !awaitingApproval &&
-    !awaitingClarify &&
-    drawn.some((parts) => parts.some((part) => part.kind === "thinking" && part.thinking))
-  const statusLine = streaming && !runningTool && !rowSaysThinking
-  const reserve = holdsPlace({
-    status: message.status,
-    content: storedContent,
-    statusText: storedStatusText,
-    waiting,
-    tools: storedTools,
-  })
+  // The three rows a working reply ends on stand thought, tools, status, in one order that the
+  // placing above and this footer below hold between them (ADR 0070). A thought row of this reply
+  // that says it is thinking owns that word, so the line stays out of it.
+  const rowSaysThinking = drawn.some((parts) =>
+    parts.some((part) => part.kind === "thinking" && part.thinking),
+  )
   // A subagent at work is the chat's news even while a tool card speaks for this reply. A count is
-  // data rather than a word: `0 && <line/>` is the numeral 0, which React would draw, so the line
-  // is asked for by comparing the count.
+  // data rather than a word: `0 && <line/>` is the numeral 0, which React would draw, so the count
+  // is drawn only where it is above zero.
   const subagentCount = subagents ?? 0
   const shown = subagentCount > 0 && Boolean(subagentsInline) && Boolean(onShowSubagents)
-  const activity = statusLine
-    ? awaitingApproval
-      ? "Waiting for your approval…"
-      : describeActivity(message)
-    : undefined
-  // The count rides on working words, whose loader serves it; beside a wait there is no loader.
-  const suffixed = shown && Boolean(activity) && !waiting
+  // What the line says, and whether it stands at all, is the one rule's to decide; what the turn is
+  // doing is only the rule's to read while the turn still works.
+  const foot = statusLineOf({
+    status: message.status,
+    waiting,
+    runningCall: runningTool,
+    thinks: rowSaysThinking,
+    activity:
+      message.status === "streaming"
+        ? awaitingApproval
+          ? WAITING_FOR_APPROVAL
+          : describeActivity(message)
+        : undefined,
+    count: subagentCount,
+    countShown: shown,
+  })
+  const suffixed = foot?.count === "suffix"
+  const place = suffixed ? "suffix" : foot?.countLoader ? "alone-loading" : "alone"
   // Empty, the row would still add two of the message's gaps around itself, so it is drawn only
-  // once a line shows.
+  // once the line shows.
   const footerLines = [
-    activity && (
-      <StatusLine key="status" text={activity} seed={message.id} waiting={waiting}>
-        {suffixed && onShowSubagents && (
+    foot && (
+      <StatusLine key="status" text={foot.text} seed={message.id}>
+        {foot.count !== "none" && onShowSubagents && (
           <>
-            <span aria-hidden data-slot="status-separator" className="text-info">
-              ·
-            </span>
-            <SubagentLine
+            {suffixed && (
+              <span aria-hidden data-slot="status-separator" className="text-info">
+                ·
+              </span>
+            )}
+            <SubagentCount
               count={subagentCount}
               onOpen={onShowSubagents}
-              spinner={false}
-              className="-my-2.5"
+              place={place}
+              className={suffixed ? "-my-2.5" : undefined}
             />
           </>
         )}
       </StatusLine>
-    ),
-    // With no working words to ride on, the count is a row of its own, with its own loader.
-    shown && !suffixed && onShowSubagents && (
-      <SubagentLine key="subagents" count={subagentCount} onOpen={onShowSubagents} />
     ),
     // An error on a reply that streamed says so plainly: it isn't the bot's answer.
     failed && (
@@ -706,7 +675,7 @@ export const MessageItem = memo(function MessageItem({
         {error}
       </div>
     ),
-    message.status === "stopped" && !message.content && (
+    message.status === "stopped" && (
       <div key="stopped" className={cn(REPLY_INSET, "text-xs text-muted-foreground")}>
         Stopped
       </div>
@@ -725,12 +694,7 @@ export const MessageItem = memo(function MessageItem({
           <Fragment key={breaks[i - 1]?.key ?? "start"}>
             {i > 0 && breaks[i - 1].node}
             {(parts.length > 0 || (last && footerShown)) && (
-              <AssistantRow
-                conversationId={message.conversationId}
-                seed={message.id}
-                busy={busy}
-                parts={last && reserve ? [...parts, RESERVE] : parts}
-              >
+              <AssistantRow conversationId={message.conversationId} busy={busy} parts={parts}>
                 {last && footer}
               </AssistantRow>
             )}
@@ -767,14 +731,11 @@ const PARTS = "gap-0 space-y-3"
 
 function AssistantRow({
   conversationId,
-  seed,
   busy,
   parts,
   children,
 }: {
   conversationId: string
-  /** The reply's id: what its rotating word is drawn from, in the thinking row as in the status line. */
-  seed: string
   /** A reply is streaming in this chat, so a card that sends (a missed question) waits. */
   busy?: boolean
   parts: Part[]
@@ -811,16 +772,10 @@ function AssistantRow({
               <ThinkingLine
                 key={part.key}
                 reasoning={part.text}
-                seed={seed}
                 thinking={part.thinking}
-                pending={part.pending}
                 spanMs={part.spanMs}
                 className={cn(REPLY_INSET, hug)}
               />
-            )
-          if (part.kind === "reserve")
-            return (
-              <div key="reserve" aria-hidden className={cn(REPLY_INSET, WORK_ROW_CLASS, hug)} />
             )
           if (part.kind === "media")
             return (

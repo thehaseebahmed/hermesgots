@@ -1,7 +1,7 @@
 import type { ReactNode } from "react"
 
 import { useCodeFace } from "@/components/chat/code-face"
-import { WORK_ROW_CLASS, WORKING_ROW_CLASS, WorkSign } from "@/components/chat/work-row"
+import { WORK_ROW_CLASS, WorkSign } from "@/components/chat/work-row"
 import { CATCHING_ACTIVITY, THINKING_ACTIVITY, WRITING_ACTIVITY } from "@/lib/format"
 import type { BusyKind } from "@/lib/busy-words"
 import { REPLY_INSET } from "@/lib/layout"
@@ -17,39 +17,32 @@ const KIND_OF = new Map<string, BusyKind>([
 
 /**
  * What a reply is doing, in one line under it: the chat's own activity line, and the line a
- * question the agent asked waits on while this screen holds its form in the composer slot. A turn
- * that wants the reader, not the host, says so without a loader: nothing is working.
+ * question the agent asked waits on while this screen holds its form in the composer slot. It turns
+ * one loader whenever it has words to say, the wait words taking the busy words' place and keeping
+ * it, since a waiting turn is still a live line; only its words rotate, so a rotating word means
+ * "this is the live line" and nothing else. What it says, and whether it stands at all, is
+ * `statusLineOf`'s to decide.
  */
 export function StatusLine({
   text,
   seed = "",
-  waiting,
   children,
 }: {
   text?: string
   /** What the rotating word is drawn from, so a reply keeps its own while it streams. */
   seed?: string
-  /** The turn wants the reader, not the host: its words stand and no loader turns beside them. */
-  waiting?: boolean
   children?: ReactNode
 }) {
-  const working = Boolean(text) && !waiting
-  const kind = working && text ? KIND_OF.get(text) : undefined
+  const kind = text ? KIND_OF.get(text) : undefined
   const word = useBusyWord(kind, seed) ?? text
   const face = useCodeFace()
   return (
     <div
-      className={cn(
-        REPLY_INSET,
-        WORK_ROW_CLASS,
-        "w-auto",
-        face,
-        working ? WORKING_ROW_CLASS : "text-muted-foreground",
-      )}
+      className={cn(REPLY_INSET, WORK_ROW_CLASS, "w-auto", face)}
       aria-live="polite"
       data-slot="status-line"
     >
-      {working && <WorkSign />}
+      {word && <WorkSign />}
       {word && (
         <span className="min-w-0 truncate" data-slot="status-words">
           {word}

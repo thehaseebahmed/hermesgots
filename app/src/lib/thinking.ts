@@ -1,11 +1,13 @@
 /**
  * A reply's thinking, kept in runs: one per contiguous stretch of thinking between tool calls, each
  * anchored to the call that broke it, and drawn as the rows it touches: `thinkingRows` is the one
- * rule for the rows a reply draws — its runs marked where the turn still thinks, and the row for
- * the stretch still to come — and `mergeThoughtRows` is the one rule for when two of them are one.
+ * rule for the rows a reply draws — its runs marked where the turn still thinks — and
+ * `mergeThoughtRows` is the one rule for when two of them are one. `placeThinking` is the one rule
+ * for where those rows stand among a reply's parts, and `statusLineOf` the one rule for the line the
+ * live cluster ends on: the thought row, the tool group's row, then the status line (ADR 0070).
  * The rules here are pure and reach nothing, so `scripts/test-thinking.mjs` drives them without a
  * screen; the ingest that fills them in is `chat.ts`, and the thread that draws them is
- * `message-item.tsx`. See ADR 0038 and ADR 0049.
+ * `message-item.tsx`. See ADR 0038, ADR 0049 and ADR 0070.
  */
 
 /** One stretch of a reply's thinking, and the tool call it followed. */
@@ -148,31 +150,27 @@ export function runsOf(message: {
 
 /**
  * One row as the thread draws it: its words, the key it keeps across redraws, and the truth its
- * label reads from. `pending` is the stretch still to come — the turn works but its model has said
- * nothing yet, so the row wears the spinner over no words at all, and is not a run: `runsOf` would
- * drop it, which is why it never travels through a store.
+ * label reads from. A row is always a run: nothing empty is ever a run (`runsOf` drops it), so a
+ * turn whose model has said nothing draws no row at all — the status line says the turn is working
+ * until a word of thinking arrives (ADR 0070).
  */
 export type RunPart = {
   key: string
   text: string
   /** How long this device watched the stretch think, where it watched all of it. */
   spanMs?: number
-  /** The row says the turn is thinking right now, so it spins and reads "Thinking…". */
+  /** The row says the turn is thinking right now, so it turns a loader beside its word. */
   thinking: boolean
   /** The call this stretch follows; absent on the run at the top of a reply, and on a merged row. */
   afterToolId?: string
-  /** The turn's own stretch has not arrived: a status row with no words to open yet. */
-  pending?: boolean
 }
 
 /**
  * The rows a reply's thinking is drawn as, from the runs it already has: the last run still
- * thinking while the reply works, the run after the model's last call marked where that call left
- * the model quiet, and — while the reply streams with nothing of its own, or resting behind its
- * last call — a pending row for the stretch still to come, so the turn's spinner is on screen from
- * its first working moment and the footer never has to say "Thinking…" itself. The pending row
- * waits while the turn waits on the reader (an approval or a question) or while the host speaks its
- * own status, because those are the footer's line to say, not the row's.
+ * thinking while the reply works, and the run after the model's last call marked where that call
+ * left the model quiet. A turn with no word of thinking yet draws no row — not even an empty one
+ * behind its last call — so the status line says that first moment, and no row of the cluster ever
+ * stands below the tool row it is about (ADR 0070).
  */
 export function thinkingRows(message: {
   reasoningRuns?: ReasoningRun[]
@@ -201,36 +199,133 @@ export function thinkingRows(message: {
   if (message.status !== "streaming" || running || !quiet || message.waiting || message.statusText)
     return parts
   const live = parts.at(-1)
-  if (last && live?.afterToolId === last.toolCallId && live.spanMs === undefined) {
+  if (last && live?.afterToolId === last.toolCallId && live.spanMs === undefined)
     live.thinking = true
-    return parts
-  }
-  if (last || !live)
-    parts.push({
-      key: `run-${parts.length}`,
-      text: "",
-      thinking: true,
-      pending: true,
-      ...(last ? { afterToolId: last.toolCallId } : {}),
-    })
   return parts
 }
 
 /**
- * Whether the row a quiet turn draws between calls is gone only because a call runs: the one case
- * where `thinkingRows` answers nothing for a reply that would otherwise draw it. The thread keeps
- * that row's place then, so it does not step by a row each time a call starts and ends.
+ * A reply's parts as far as the placing rule reads them: a thought row and the two rows that break
+ * it — a call's row, which groups the calls it draws, and a card's row, which draws the one call it
+ * followed. Anything else drawn at a place (text, media, an interface block) breaks a run of rows
+ * by being neither of them.
  */
-export function holdsPlace(message: Parameters<typeof thinkingRows>[0]): boolean {
-  const last = message.tools?.at(-1)
-  return (
-    message.status === "streaming" &&
-    !message.waiting &&
-    !message.statusText &&
-    last !== undefined &&
-    Boolean(message.tools?.some((tool) => tool.status === "running")) &&
-    (last.contentOffset ?? 0) >= message.content.length
-  )
+export type PlacingPart = {
+  kind: string
+  /** A call's row: the calls it groups. */
+  tools?: readonly { toolCallId: string }[]
+  /** A card's row: the one call it draws. */
+  tool?: { toolCallId: string }
+}
+
+/**
+ * The word a thinking row says while its words still arrive — the row's own, never one of the status
+ * line's rotating ones (ADR 0070). The one home for it, so the row, the tests and the browser flow
+ * that read it cannot drift apart.
+ */
+export const THINKING_WORD = "thinking"
+
+/**
+ * Where a reply's thinking rows stand among its parts — the one placing rule, asked by the thread
+ * that draws a reply and by the tests that pin the order, so no screen can place them differently
+ * (ADR 0070). A run's row goes above the tool row whose call it led into, so the working-out reads
+ * over the work it led into; a run at the top of a reply stands above everything; a run whose call
+ * this reply doesn't draw follows the last call it does draw, and sits at the top when it draws
+ * none. Two stretches after the same part arrive in order, so each is spliced where the part stands
+ * by then and the later never stacks above the earlier. A stretch that follows a clarify or an
+ * agent card stays behind that card, neither of which is a tool row.
+ */
+export function placeThinking<P extends PlacingPart>(
+  parts: P[],
+  runs: readonly RunPart[],
+  row: (run: RunPart) => P,
+): P[] {
+  // Most replies never thought: nothing to place, and nothing to build.
+  if (!runs.length) return parts
+  const leading = runs.filter((run) => !run.afterToolId)
+  const placed: P[] = [...leading.map(row), ...parts]
+  const holdsCall = (part: P) =>
+    part.kind === "tools" || part.kind === "clarify" || part.kind === "agent"
+  const lastCall = placed.findLastIndex(holdsCall)
+  const top = leading.length - 1
+  const inserted = new Map<number, number>()
+  for (const run of runs) {
+    const id = run.afterToolId
+    if (!id) continue
+    const found = placed.findIndex(
+      (one) =>
+        (one.kind === "tools" && Boolean(one.tools?.some((tool) => tool.toolCallId === id))) ||
+        ((one.kind === "clarify" || one.kind === "agent") && one.tool?.toolCallId === id),
+    )
+    const at = found >= 0 ? found : lastCall >= 0 ? lastCall : top
+    const count = inserted.get(at) ?? 0
+    // The stretch of a real call goes above its tool row; a card's own stretch stays behind the
+    // card, where the reader's eye already is.
+    const above = found >= 0 && placed[at].kind === "tools"
+    placed.splice(above ? at + count : at + 1 + count, 0, row(run))
+    inserted.set(at, count + 1)
+  }
+  return placed
+}
+
+/**
+ * Whether a reply draws a status line at all. A reply whose error is shown, or that the host
+ * stopped, draws none — its error or "Stopped" stands where the line would — so the count of
+ * subagents at work goes to the thread's foot instead of a line that is not there.
+ */
+export const drawsFootLine = (status?: string) => status !== "error" && status !== "stopped"
+
+/** Whether a message is the reply that draws the count on its own line, and not the thread's foot. */
+export const carriesCount = (message: { role?: string; status?: string }) =>
+  message.role === "assistant" && drawsFootLine(message.status)
+
+/** Where the count of subagents at work sits, once it is the status line's own (ADR 0070). */
+export type FootCount = "suffix" | "alone" | "none"
+
+/** The status line a reply's live cluster ends on: its words and where the count rides them. */
+export type FootLine = {
+  /** The line's words before the count; absent when it says nothing but the count. */
+  text?: string
+  /** The count at work: riding the words, alone on the line, or not drawn at all. */
+  count: FootCount
+  /** Whether the count turns its own loader, in the info blue, because it alone keeps the line live. */
+  countLoader: boolean
+}
+
+/**
+ * The status line a reply draws, or none at all — the one rule for what the foot of a reply says
+ * (ADR 0070). It says nothing while a thought row above says the turn is thinking, and nothing
+ * while a call runs save the count of subagents at work; the wait words take the busy words' place
+ * and keep the line live. A reply that failed or was stopped draws no line. The count is the line's
+ * own: a suffix on its words while the turn works or waits, and its only words once the turn is
+ * done and its subagents still run — turning its loader in the blue only then, when it alone is
+ * what the line is for.
+ */
+export function statusLineOf(input: {
+  status?: string
+  /** An approval or a question waits on the reader: the line says what the reader must do. */
+  waiting?: boolean
+  /** A call of this reply runs, and its own row says so. */
+  runningCall?: boolean
+  /** A thought row above already says the turn is thinking. */
+  thinks?: boolean
+  /** What the turn is doing, as the app words it, while it is still working. */
+  activity?: string
+  /** How many subagents are at work, where this reply draws them at all. */
+  count?: number
+  /** Whether this reply draws the count, rather than leaving it to the thread's foot. */
+  countShown?: boolean
+}): FootLine | undefined {
+  // A broken or stopped reply wears its error or "Stopped" where the line would stand.
+  if (!drawsFootLine(input.status)) return undefined
+  const working = input.status === "streaming"
+  const words =
+    working && (input.waiting || !(input.runningCall || input.thinks)) ? input.activity : undefined
+  const shown = Boolean(input.countShown) && (input.count ?? 0) > 0
+  const count: FootCount = !shown ? "none" : words ? "suffix" : "alone"
+  if (!words && count === "none") return undefined
+  // The line's loader turns for its words; the count's turns only when the count is all it says.
+  return { ...(words ? { text: words } : {}), count, countLoader: count === "alone" && !working }
 }
 
 /** A delta or a block of this run arrived: the span starts at the first one and ends at the last. */

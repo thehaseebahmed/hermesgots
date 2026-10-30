@@ -168,17 +168,37 @@ function sized(element: Element, size: { client: number; scroll: number }) {
 
 const WRITING = new RegExp(`(${BUSY_WORDS.writing.join("|")})…`)
 const WRITING_WHOLE = new RegExp(`^(${BUSY_WORDS.writing.join("|")})…$`)
+/** The rotating words the line wears, as against the row's own literal one. */
+const ROTATING_THINKING = new RegExp(`(${BUSY_WORDS.thinking.join("|")})…`)
+const ROTATING_WHOLE = new RegExp(`^(${BUSY_WORDS.thinking.join("|")})…$`)
 
-test("a working row spins beside its words, and the footer never says it too", async () => {
+test("a working row says its own word beside a loader, muted, and the footer never says it too", async () => {
   host()
   const id = "streaming"
   await screen(undefined, turn({ id, reasoningRuns: [run(REASONING)] }), async () => {
     await stream(id)
     const line = onlyThinkingLine()
-    assert.ok(saysThinking(lineLabel(line)), "still thinking, so no duration yet")
-    assert.ok(spins(line), "with a spinner ahead of its label: the row is at work")
-    assert.ok(line.classList.contains("text-primary"), "in the status line's own working colour")
-    assert.ok(!line.classList.contains("text-muted-foreground"), "never the muted one")
+    assert.equal(
+      lineLabel(line),
+      "thinking",
+      "the row owns its word: the literal one, not the pool's",
+    )
+    assert.ok(spins(line), "with a loader ahead of it: the row is at work")
+    assert.match(
+      line.className,
+      /(^|\s)text-muted-foreground(\s|$)/,
+      "in the row's own muted colour",
+    )
+    assert.doesNotMatch(
+      line.className,
+      /(^|\s)text-primary(\s|$)/,
+      "never the accent, which is kept for what a press does",
+    )
+    assert.doesNotMatch(
+      line.querySelector("[data-slot=spinner]")?.getAttribute("class") ?? "",
+      /text-(primary|info)/,
+      "and the loader wears the row's colour with it, no colour of its own",
+    )
     assert.equal(line.getAttribute("aria-label"), "Thinking…", "named plainly for assistive tech")
     assert.equal(
       line.querySelector("[data-slot=spinner]")?.getAttribute("aria-hidden"),
@@ -195,30 +215,36 @@ test("a working row spins beside its words, and the footer never says it too", a
   })
 })
 
-test("a reply that never thinks wears the row while it works, and loses it at the answer", async () => {
+test("a reply that never thinks draws no row, and the line says it is thinking instead", async () => {
   host()
   const id = "no-reasoning"
   await screen(undefined, turn({ id }), async () => {
     await stream(id)
-    const line = onlyThinkingLine()
-    assert.ok(saysThinking(lineLabel(line)), "the row is on screen from the first working moment")
-    assert.ok(spins(line), "spinning, before a word of thinking arrives")
-    assert.equal(expanded(line), null, "the row offers no tap: its stretch has not arrived")
-    await click(line)
-    assert.equal(sheet(), null, "and nothing opens until there are words to open")
-    assert.equal(workingLine(), null, "and the footer leaves the saying to it")
+    assert.equal(thinkingLines().length, 0, "no word of thinking has arrived, so no row is drawn")
+    const line = workingLine()
+    assert.ok(line, "and the footer's line says the turn is working from its first moment")
+    assert.match(
+      statusWords(),
+      ROTATING_WHOLE,
+      "in the thinking word the line wears until a thought row arrives, standing whole",
+    )
+    assert.ok(statusLoader(), "beside a loader")
+    assert.match(
+      line!.className,
+      /(^|\s)text-muted-foreground(\s|$)/,
+      "and the pair read muted, never in the accent",
+    )
 
     await db.messages.put({ ...(await db.messages.get(id))!, content: ANSWER })
     await settle()
-    assert.equal(thinkingLines().length, 0, "the model never thought, so the row goes with that")
-    assert.match(screenText(), WRITING, "and the footer says what the reply is doing instead")
+    assert.equal(thinkingLines().length, 0, "the model never thought, so no row appears")
+    assert.match(screenText(), WRITING, "and the line goes on saying what the reply is doing")
     const footer = document.querySelector('[data-slot="status-line"]')
-    assert.ok(footer?.classList.contains("text-primary"), "in the colour the thinking row wore")
-    assert.ok(footer?.classList.contains("min-h-[29px]"), "and on the row's own height")
+    assert.ok(footer?.classList.contains("min-h-[29px]"), "on the work rows' own height")
   })
 })
 
-test("behind a finished call, the model's quiet draws a row after it until words land", async () => {
+test("behind a finished call, a reply that never thought draws no row either", async () => {
   host()
   const id = "quiet-after-call"
   const TEXT = "I read the parser first."
@@ -231,25 +257,31 @@ test("behind a finished call, the model's quiet draws a row after it until words
     }),
     async () => {
       await stream(id)
-      const line = onlyThinkingLine()
-      assert.ok(saysThinking(lineLabel(line)), "the model is quiet behind its last call")
-      assert.ok(spins(line), "so the row spins where the footer's line used to be")
-      const box = item(line)
-      assert.ok(follows(toolRow(box), line), "drawn after the call the quiet follows")
+      assert.equal(
+        thinkingLines().length,
+        0,
+        "the model is quiet behind its last call, and no empty row stands below it",
+      )
+      assert.match(
+        statusWords(),
+        ROTATING_THINKING,
+        "the line wears its rotating thinking word, so the turn never goes unsaid",
+      )
+      assert.ok(statusLoader(), "beside the line's own loader")
 
       await db.messages.put({
         ...(await db.messages.get(id))!,
         content: `${TEXT} Then its blocks.`,
       })
       await settle()
-      assert.equal(thinkingLines().length, 0, "the answer moving again takes the row with it")
+      assert.equal(thinkingLines().length, 0, "the answer moving on draws no row")
     },
   )
 })
 
-test("while a call runs, the row the quiet drew keeps its place, so the thread does not step", async () => {
+test("while a call runs, nothing empty stands in the thinking row's place", async () => {
   host()
-  const id = "reserved-while-running"
+  const id = "no-reserve"
   const TEXT = "I read the parser first."
   await screen(
     undefined,
@@ -260,12 +292,7 @@ test("while a call runs, the row the quiet drew keeps its place, so the thread d
     }),
     async () => {
       await stream(id)
-      assert.equal(thinkingLines().length, 1, "the model is quiet behind a finished call")
-      assert.equal(
-        findAll('[aria-hidden="true"].min-h-\\[29px\\]').length,
-        0,
-        "and nothing is held",
-      )
+      assert.equal(thinkingLines().length, 0, "a reply that never thought draws no row at all")
 
       await db.messages.put({
         ...(await db.messages.get(id))!,
@@ -278,8 +305,8 @@ test("while a call runs, the row the quiet drew keeps its place, so the thread d
       assert.equal(thinkingLines().length, 0, "the call that runs speaks for the turn")
       assert.equal(
         findAll('[aria-hidden="true"].min-h-\\[29px\\]').length,
-        1,
-        "and one hidden row holds the place the thinking row had",
+        0,
+        "and no hidden row holds a place for a row that is never drawn",
       )
     },
   )
@@ -540,8 +567,8 @@ test("the footer names what the turn is doing beside a loader, and a thought row
     assert.ok(statusLoader(), "and a loader turns beside them")
     assert.match(
       line!.className,
-      /(^|\s)text-primary(\s|$)/,
-      "the loader and the words it sits by take the accent colour",
+      /(^|\s)text-muted-foreground(\s|$)/,
+      "the loader and the words it sits by take the row's muted colour",
     )
 
     // A call lands and the model goes quiet behind it: the row above is the one place that names
@@ -703,7 +730,7 @@ test("a merged row adds up the spans it holds, and claims none where a stretch w
   })
 })
 
-test("a merged row whose last stretch still streams reads Thinking… and spins", async () => {
+test("a merged row whose last stretch still streams says thinking and turns its loader", async () => {
   host()
   const id = "merged-streaming"
   const messages = turn({
@@ -802,11 +829,11 @@ test("while the turn waits on the user, the working line says so beside the spin
       "Waiting for your approval…",
       "a line waiting on the reader says its words whole",
     )
-    assert.ok(!statusLoader(), "and no loader turns, because nothing is running")
+    assert.ok(statusLoader(), "and its loader keeps turning, because the line is still live")
     assert.match(
       workingLine()!.className,
       /(^|\s)text-muted-foreground(\s|$)/,
-      "the waiting line stands muted rather than in the accent colour",
+      "the waiting line stands muted, like every state of the line",
     )
   })
 })

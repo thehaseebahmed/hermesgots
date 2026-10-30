@@ -1,8 +1,8 @@
 /**
- * The subagent line and its sheet: how many subagents a session has at work in words, the composer
- * keeping Stop while they run and giving Send back when the box has something in it, and the sheet
- * that lists every subagent of the session — the ones at work first, each stoppable where it stands,
- * then the ones that finished.
+ * The subagent sheet and the composer beside it: the composer keeping Stop while subagents run and
+ * giving Send back when the box has something in it, and the sheet that lists every subagent of the
+ * session — the ones at work first, each stoppable where it stands, then the ones that finished. The
+ * count that opens it is `test-subagent-count.tsx`'s (ADR 0070).
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -11,7 +11,6 @@ import { createRoot } from "react-dom/client"
 
 import { AgentsContext, type AgentsSource } from "@/lib/agents"
 import { Composer } from "@/components/chat/composer"
-import { SubagentLine } from "@/components/chat/subagent-line"
 import { SubagentsSheet } from "@/components/chat/subagents"
 import type { DelegatedAgent, HermesConfig } from "@/lib/hermes"
 
@@ -64,66 +63,18 @@ function host() {
       return json({ name: "memento", features: ["agents", "subagent_stop", "subagents_stop_all"] })
     if (url.pathname.endsWith("/stop") && method === "POST") {
       const id = url.pathname.split("/").at(-2) ?? ""
-      return json({ object: "memento.agent_stop", session_id: SESSION, agent_id: id, stopped: true })
+      return json({
+        object: "memento.agent_stop",
+        session_id: SESSION,
+        agent_id: id,
+        stopped: true,
+      })
     }
     if (url.pathname.endsWith("/messages")) return json({ data: [] })
     return json({ error: "not found" }, 404)
   }) as typeof fetch
   return calls
 }
-
-test("the line counts what runs, and nothing when nothing does", async () => {
-  const one = await mount(<SubagentLine count={1} onOpen={() => {}} />)
-  try {
-    assert.equal(text(), "1 subagent running")
-  } finally {
-    await one.close()
-  }
-  const two = await mount(<SubagentLine count={2} onOpen={() => {}} />)
-  try {
-    assert.equal(text(), "2 subagents running")
-  } finally {
-    await two.close()
-  }
-  const none = await mount(<SubagentLine count={0} onOpen={() => {}} />)
-  try {
-    assert.equal(text(), "", "nothing runs, so there is nothing to say")
-  } finally {
-    await none.close()
-  }
-})
-
-test("the line is blue wherever it lands, and its loader rides inside that colour", async () => {
-  const line = await mount(<SubagentLine count={2} onOpen={() => {}} />)
-  try {
-    const button = findAll("button")[0]
-    assert.match(
-      button.className,
-      /(^|\s)text-info(\s|$)/,
-      "delegated work reads in the blue, not the reply's grey",
-    )
-    const loader = button.querySelector('[data-slot="spinner"]')
-    assert.ok(loader, "with its loader beside it")
-    assert.doesNotMatch(
-      loader?.getAttribute("class") ?? "",
-      /text-(primary|muted-foreground|foreground)/,
-      "and no colour of its own to override the line's",
-    )
-  } finally {
-    await line.close()
-  }
-})
-
-test("pressing the line opens the sheet", async () => {
-  let opened = 0
-  const line = await mount(<SubagentLine count={2} onOpen={() => opened++} />)
-  try {
-    await click(findAll("button")[0])
-    assert.equal(opened, 1)
-  } finally {
-    await line.close()
-  }
-})
 
 test("the composer keeps Stop while subagents run, and gives Send back when there is text", async () => {
   host()
@@ -183,8 +134,8 @@ test("the sheet lists the running subagents first, newest first, then the finish
       document.querySelector('[data-group="running"]')?.textContent?.includes("Running for"),
       "a running card says how long it has been working",
     )
-    const stops = findAll("button").filter(
-      (one) => one.getAttribute("aria-label")?.startsWith("Stop "),
+    const stops = findAll("button").filter((one) =>
+      one.getAttribute("aria-label")?.startsWith("Stop "),
     )
     assert.equal(stops.length, 2, "only the running cards offer Stop")
   } finally {
@@ -198,15 +149,24 @@ test("a card stopped in the sheet stops on the host and reads it at once", async
   const source: AgentsSource = { agents, server, sessionId: SESSION }
   const sheet = await mount(<SubagentsSheet open onOpenChange={() => {}} source={source} />)
   try {
-    const stop = findAll("button").find((one) => one.getAttribute("aria-label")?.startsWith("Stop "))
+    const stop = findAll("button").find((one) =>
+      one.getAttribute("aria-label")?.startsWith("Stop "),
+    )
     assert.ok(stop)
     await click(stop!)
     const posted = calls.filter((call) => call.path.endsWith("/stop"))
     assert.equal(posted.length, 1)
-    assert.equal(posted[0].path, `/api/plugins/memento/sessions/${SESSION}/agents/child-session/stop`)
+    assert.equal(
+      posted[0].path,
+      `/api/plugins/memento/sessions/${SESSION}/agents/child-session/stop`,
+    )
     assert.match(text(), /Stopped after/, "the card reads the host's answer where it stands")
     await sheet.rerender(
-      <SubagentsSheet open onOpenChange={() => {}} source={{ agents: [agent("child-session", "stopped", 300)], server, sessionId: SESSION }} />,
+      <SubagentsSheet
+        open
+        onOpenChange={() => {}}
+        source={{ agents: [agent("child-session", "stopped", 300)], server, sessionId: SESSION }}
+      />,
     )
     const groups = findAll("[data-group]")
     assert.deepEqual(
@@ -224,7 +184,11 @@ test("a card in the sheet opens its sub-thread above the sheet", async () => {
   const agents = [agent("child-session", "running", 300)]
   const sheet = await mount(
     <AgentsContext.Provider value={{ agents, server, sessionId: SESSION }}>
-      <SubagentsSheet open onOpenChange={() => {}} source={{ agents, server, sessionId: SESSION }} />
+      <SubagentsSheet
+        open
+        onOpenChange={() => {}}
+        source={{ agents, server, sessionId: SESSION }}
+      />
     </AgentsContext.Provider>,
   )
   try {
@@ -238,9 +202,7 @@ test("a card in the sheet opens its sub-thread above the sheet", async () => {
     )
     assert.ok(meta, "and its header says how long it worked")
     assert.match(meta.textContent ?? "", /· model/, "naming the model the card leaves out")
-    const model = [...meta.querySelectorAll("span")].find(
-      (span) => span.textContent === " · model",
-    )
+    const model = [...meta.querySelectorAll("span")].find((span) => span.textContent === " · model")
     assert.doesNotMatch(model!.className, /hidden/, "at every width, not only a tablet's")
   } finally {
     await sheet.close()
