@@ -4,9 +4,10 @@ Status: grilled 2026-10-30, every decision settled and recorded in
 [ADR 0070](adr/0070-the-status-line-is-muted-and-the-count-is-the-only-blue.md), which amends ADR 0066
 and ADR 0069, with the glossary's *Live cluster* entry written alongside and *Thinking*, *Work row*
 and *Status line* amended and *Subagent line* renamed *Subagent count*. Published as #694 with tickets
-#695 to #698; the build order at the end is the tickets' shape when implementation starts. The spec
-carries `ready-for-agent` and the tickets stay bare, so the agent claims the spec and works the graph
-in order.
+#695 to #698; the build order at the end is the tickets' shape when implementation starts. #694 is
+blocked by the gate issue (#700) that the docs pull request carrying this file (#699) closes — work
+starts on that merge. The spec carries `ready-for-agent` and the tickets stay bare, so the agent claims
+the spec and works the graph in order.
 
 ## Problem Statement
 
