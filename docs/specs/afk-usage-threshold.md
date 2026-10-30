@@ -5,8 +5,9 @@ Status: grilled 2026-10-30, every decision settled and recorded in
 because its argument still holds and only its facts moved: the control's home, the flag that advertises
 it, and the scope a window carries. The glossary's *Usage threshold* entry is rewritten alongside.
 Published as #716 with tickets #717 to #719; the build order at the end is the tickets' shape when
-implementation starts. The spec carries `ready-for-agent` and the tickets stay bare, so the agent claims
-the spec and works the graph in order.
+implementation starts. #716 is blocked by the gate issue (#721) that this file's pull request (#720)
+closes — work starts on that merge. The spec carries `ready-for-agent` and the tickets stay bare, so the
+agent claims the spec and works the graph in order.
 
 ## Problem Statement
 
