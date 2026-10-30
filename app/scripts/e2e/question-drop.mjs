@@ -32,9 +32,7 @@ const body =
       timeout: 20_000,
     })
 
-    // Held across several streams, each cut by the host a second and a half in. A blink is what this
-    // watches for, so the page counts the frames: an observer sees every one, a poll sees whichever it
-    // lands on.
+    // Held across several streams, each cut by the host a second and a half in.
     await watchQuestion(page)
     await page.waitForTimeout(HELD_MS)
     const lost = await page.evaluate(() => window.__questionLost())

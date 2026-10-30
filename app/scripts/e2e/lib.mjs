@@ -261,8 +261,8 @@ export async function addBot(page, { name, messages, hour = 3_600_000 }) {
 }
 
 /**
- * Opens a chat of its own on the new chat screen (chat-next), which two Developer switches turn on,
- * and answers its id. The chat is seeded titled, drawn, and ready for a send.
+ * A chat of its own on the new chat screen (chat-next), which two Developer switches turn on: seeded,
+ * drawn, and ready for a send.
  */
 export async function openChatNext({ page, seed }, { id, title }) {
   await page.evaluate(async () => {
@@ -273,13 +273,9 @@ export async function openChatNext({ page, seed }, { id, title }) {
   await seed([{ id: chat, title }])
   await page.goto(`${app}/c/${chat}`)
   await page.locator("[data-chat-next]").first().waitFor({ timeout: 20_000 })
-  return chat
 }
 
-/**
- * Answers the question the host asked with `choice`, then waits for the thread's card to read it —
- * never "No answer". The thread is returned for whatever else the flow asserts there.
- */
+/** Answers the question the host asked with `choice`, and waits for the thread's card to read it. */
 export async function answerQuestion(page, choice) {
   const thread = page.locator("[aria-label=Messages]")
   await page.getByRole("button", { name: new RegExp(choice) }).first().click()
@@ -287,7 +283,6 @@ export async function answerQuestion(page, choice) {
   await thread.getByText("Answered", { exact: true }).waitFor({ timeout: 30_000 })
   await thread.getByText(choice, { exact: true }).waitFor({ timeout: 30_000 })
   assert.equal(await thread.getByText("No answer", { exact: true }).count(), 0, "not a miss")
-  return thread
 }
 
 /**

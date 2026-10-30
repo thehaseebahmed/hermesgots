@@ -204,20 +204,26 @@ function reach(turn: Turn) {
 }
 
 /**
+ * Whether the transcript's copy is the one to draw: a join's rebuilt turn stands in for the
+ * transcript's own turn, and drawing it while it holds fewer calls than that copy takes the
+ * question's call off the screen.
+ */
+const copyHoldsTheWait = (copy: Turn | undefined, live: LiveTurn) =>
+  live.replaces && copy !== undefined && reach(copy).calls >= reach(live.turn).calls
+
+/**
  * The turns the screen draws: the transcript's, with the streamed one laid over the last. A run
  * joined from its start is replaying, so the transcript's copy of the turn stays drawn until the
  * replay has caught up with it (`LiveTurn.replay`), and the reply never shrinks as it joins.
  */
-export function turnsOf(folded: Turn[], live?: LiveTurn, waiting?: boolean): Turn[] {
+export function turnsOf(folded: Turn[], live?: LiveTurn, waiting?: Waiting): Turn[] {
   if (!live || live.replay) return folded
   // A run held on a prompt writes nothing more, so the turn it holds is drawn from the transcript —
-  // the copy that carries the call the question was asked by. A join rebuilds that same turn from
-  // the stream (`replaces`), and a host sends a prompt's request only to the subscribers it had at
-  // the time, so the rebuilt copy can hold less than the transcript's: the thread would lose the one
-  // line it draws while the run waits, for as long as the replay takes to catch up. A rebuilt copy
-  // holding more than the transcript does is the newer one, and is drawn.
+  // the copy that carries the call the question was asked by. A host sends a prompt's request only
+  // to the subscribers it had at the time, so a join's rebuilt copy can hold less than that one, and
+  // the thread would lose the one line it draws while the run waits.
   const copy = folded.at(-1)
-  if (waiting && live.replaces && copy && reach(copy).calls >= reach(live.turn).calls) return folded
+  if (waiting && copyHoldsTheWait(copy, live)) return folded
   return withoutRepeatedFailures(
     live.replaces ? [...folded.slice(0, -1), live.turn] : [...folded, live.turn],
   )
@@ -454,7 +460,11 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       // The run's events are replayed from its start, so the turn, and what it waits on, are drawn
       // again from nothing — but the wait this page read off the run's own status is the run's, and
       // a join of the same run keeps it.
-      const last = turnsOf(foldedOf(state.rows, state.archived, state.partial), state.live).at(-1)
+      const last = turnsOf(
+        foldedOf(state.rows, state.archived, state.partial),
+        state.live,
+        state.waiting,
+      ).at(-1)
       const waiting = state.waiting?.run === event.run ? state.waiting : undefined
       return {
         ...state,
@@ -483,9 +493,8 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       // superseded.
       return { ...state, running: false }
     case "gone":
-      // Nothing this page could read said the prompt settled; the host's own list of runs does. Only
-      // the run this page was following can have settled that way — a wait raised since belongs to
-      // another run, and a `gone` still in flight from an earlier look is not about it.
+      // Only the run this page was following can have settled that way: a wait raised since belongs
+      // to another run, and a `gone` still in flight from an earlier look is not about it.
       if (state.waiting === undefined || state.waiting.run !== event.run) return state
       return { ...state, waiting: undefined, settled: settledWith(state) }
     case "answered": {
@@ -531,9 +540,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       return { ...state, waiting, settled, live: moved }
     }
     case "failed":
-      // What this page could not read is not what the host settled. A prompt the run still holds stays
-      // on screen — the stream that carried it can die while the run waits — and the turn's own end,
-      // the next settle event or an answer given here is what takes it away.
+      // What this page could not read is not what the host settled.
       return {
         ...state,
         status: "failed",
@@ -545,8 +552,4 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
 
 /** The turns a state draws. */
 export const threadTurns = (state: ThreadState) =>
-  turnsOf(
-    foldedOf(state.rows, state.archived, state.partial),
-    state.live,
-    state.waiting !== undefined,
-  )
+  turnsOf(foldedOf(state.rows, state.archived, state.partial), state.live, state.waiting)

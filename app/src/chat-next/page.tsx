@@ -614,11 +614,10 @@ export function ChatNextThread({
     [rows, archived, held?.partial],
   )
   const drawn = useRef<{ turns: Turn[]; origin: number }>({ turns: [], origin: 0 })
-  const waitOn = doing.waiting !== undefined
   const { turns, origin } = useMemo(() => {
-    const next = shared(drawn.current.turns, turnsOf(folded, held?.live, waitOn))
+    const next = shared(drawn.current.turns, turnsOf(folded, held?.live, doing.waiting))
     return (drawn.current = { turns: next, origin: originOf(drawn.current, next) })
-  }, [folded, held?.live, waitOn])
+  }, [folded, held?.live, doing.waiting])
   const [draft, setDraft] = useState("")
   const [earlier, setEarlier] = useState<"idle" | "reading" | "failed">("idle")
   // The older pages of the transcript, read one after another once the newest is drawn. A token is
@@ -1003,7 +1002,8 @@ export function ChatNextThread({
         // Subagents the host still runs, wake turns it owes, and a run held on the user's answer are
         // not a stall however quiet the thread is: the next turn, or the read that ends the wait, is
         // still owed one.
-        if (busy && !hostBusy && !waitOn && Date.now() - progress.current.at > stallMs) return
+        if (busy && !hostBusy && !doing.waiting && Date.now() - progress.current.at > stallMs)
+          return
         const known =
           server && key && session
             ? knownLiveRun({ baseUrl: server, apiKey: key }, session)
@@ -1020,9 +1020,6 @@ export function ChatNextThread({
           }
           streaming.current = false
           if (run === null) {
-            // The host lists no run on this session — and it would list one that still held a prompt —
-            // so the prompt this page draws has settled without it. That is the only way to learn it
-            // with the run's own stream gone, and without it a dead form would keep the composer away.
             dispatch({ type: "gone", run: lastRun.current ?? "" })
             setHostIdleAt(tipNow.current)
           }
@@ -1037,7 +1034,7 @@ export function ChatNextThread({
     following,
     busy,
     starting,
-    waitOn,
+    doing.waiting,
     catchUp,
     follow,
     dispatch,

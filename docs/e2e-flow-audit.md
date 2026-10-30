@@ -141,8 +141,8 @@ the rebuilt copy without the call the question was asked by, so the thread would
 line away at each rejoin — `turnsOf` draws the transcript's copy while a wait is on, which is the
 copy carrying that call, and `test-chat-next-state.tsx` holds the rule. What none of them draws is
 the app's own composer and thread (`AppChatNextThread`), nor the wall clock of a rejoin, which is
-what the flow watches for twenty seconds of drops. So the registry holds 82 + 1 = **83** keys, the component
-verdicts unchanged at **55**, and the stays are 23 + 1: **24**.
+what the flow watches for twenty seconds of drops. So the registry holds 82 + 1 = **83** keys, the
+component verdicts unchanged at **55**, and the stays are 23 + 1: **24**.
 
 `app/scripts/test-e2e-registry.mjs`, a unit test, holds the registry and this page to each other:
 a key with no row here, a row with no key, a verdict outside the four, a count in the table above

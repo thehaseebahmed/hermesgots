@@ -548,8 +548,6 @@ export function fakeHost(
           if (sent.seq > after && !(withhold && PROMPT_EVENTS.has(sent.event)))
             controller.enqueue(encoder.encode(frame(sent)))
         if (state.done) return controller.close()
-        // One stream, one entry: closing or breaking it takes its listener and its break with it, so
-        // neither helper walks handles of streams that are gone.
         listener = (sent) => {
           if (sent) return controller.enqueue(encoder.encode(frame(sent as { seq: number })))
           state.listeners.delete(listener)
@@ -939,7 +937,6 @@ export function fakeHost(
         breakIt()
         broke++
       }
-    // A break that broke nothing is a test that never opened a stream: say so rather than passing.
     if (!broke) throw new Error("No open stream to break.")
   }
 

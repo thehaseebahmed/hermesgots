@@ -25,7 +25,7 @@ const calls = (state: ThreadState) =>
     .parts.flatMap((part) => (part.kind === "tools" ? part.calls : []))
 
 /** The question a run waits on, as the run's status and its `clarify.request` both carry it. */
-const ASKED: Waiting = {
+const PROMPT: Waiting = {
   kind: "question",
   run: "r",
   promptId: "p1",
@@ -35,8 +35,7 @@ const ASKED: Waiting = {
   multiSelect: false,
 }
 
-/** The transcript of the turn that asked it: the request, then the assistant row holding the call. */
-const ASKING: Row[] = [
+const PROMPT_ROWS: Row[] = [
   { id: 1, role: "user", content: "go" },
   {
     id: 2,
@@ -56,7 +55,7 @@ const FINISHED: Row[] = [
 /** A page that has joined run `r` and read its question off the run's own status. */
 const RAISED: ThreadState = reduce(
   reduce(initial, { type: "attach", run: "r" }),
-  { type: "waiting", waiting: ASKED },
+  { type: "waiting", waiting: PROMPT },
 )
 
 test("a call's result lands on the call it names, whichever order the calls complete in", () => {
@@ -443,13 +442,13 @@ test("a status read raises the wait a late subscriber never heard, and never one
   // A host sends a prompt's request only to the subscribers it has at the time, so a page that joins
   // a run already waiting reads the wait off the run's own status instead.
   const attached = reduce(initial, { type: "attach", run: "r" })
-  const raised = reduce(attached, { type: "waiting", waiting: ASKED })
-  assert.deepEqual(raised.waiting, ASKED, "the prompt the status carries is drawn")
+  const raised = reduce(attached, { type: "waiting", waiting: PROMPT })
+  assert.deepEqual(raised.waiting, PROMPT, "the prompt the status carries is drawn")
   // A join of the run the wait was read for keeps it — the read may land before the join does — and
   // another run's wait is not carried over.
   assert.deepEqual(
     reduce(raised, { type: "attach", run: "r" }).waiting,
-    ASKED,
+    PROMPT,
     "the run's own wait survives its join",
   )
   assert.equal(
@@ -457,7 +456,7 @@ test("a status read raises the wait a late subscriber never heard, and never one
     undefined,
     "a wait of another run goes",
   )
-  assert.equal(reduce(raised, { type: "waiting", waiting: { ...ASKED } }), raised, "once only")
+  assert.equal(reduce(raised, { type: "waiting", waiting: { ...PROMPT } }), raised, "once only")
 
   // A prompt that settles while the read is out is not raised again, whichever end settled it.
   const settled = reduce(raised, {
@@ -466,7 +465,7 @@ test("a status read raises the wait a late subscriber never heard, and never one
   })
   assert.equal(settled.waiting, undefined, "the card goes")
   assert.equal(
-    reduce(settled, { type: "waiting", waiting: { ...ASKED } }).waiting,
+    reduce(settled, { type: "waiting", waiting: { ...PROMPT } }).waiting,
     undefined,
     "the read still carrying it lands nothing",
   )
@@ -475,7 +474,7 @@ test("a status read raises the wait a late subscriber never heard, and never one
     answer: { question: "Tea?", choicesOffered: ["yes", "no"], value: "yes" },
   })
   assert.equal(
-    reduce(answered, { type: "waiting", waiting: { ...ASKED } }).waiting,
+    reduce(answered, { type: "waiting", waiting: { ...PROMPT } }).waiting,
     undefined,
     "the answer this screen gave is not undone by it",
   )
@@ -487,26 +486,25 @@ test("a wait outlives a read that could not see the run end, and goes when the t
   // failed says anything about the prompt. Only the turn's own end (a final row, or a failed turn,
   // which `fold` finishes too), an answer given here, or the host's `*.settled` event takes it away.
   const raised = RAISED
-  const whole = reduce(raised, { type: "transcript", rows: ASKING, final: true })
-  assert.deepEqual(whole.waiting, ASKED, "a whole read of an unfinished turn keeps the question")
+  const whole = reduce(raised, { type: "transcript", rows: PROMPT_ROWS, final: true })
+  assert.deepEqual(whole.waiting, PROMPT, "a whole read of an unfinished turn keeps the question")
   assert.equal(whole.running, false, "the read still takes the page out of its follow")
   assert.equal(
     reduce(raised, { type: "failed", error: "Can't reach the host." }).waiting,
-    ASKED,
+    PROMPT,
     "a read that failed settles nothing",
   )
   assert.deepEqual(
     reduce(
       reduce(raised, { type: "failed", error: "Can't reach the host." }),
-      { type: "waiting", waiting: { ...ASKED } },
+      { type: "waiting", waiting: { ...PROMPT } },
     ).waiting,
-    ASKED,
+    PROMPT,
     "and the next read that finds it is not turned away as already settled",
   )
-  // The turn's own end: the reply's row stops the turn, and the wait goes with it.
   const ended = reduce(raised, {
     type: "transcript",
-    rows: [...ASKING, { id: 3, role: "assistant", content: "Tea it is.", finish_reason: "stop" }],
+    rows: [...PROMPT_ROWS, { id: 3, role: "assistant", content: "Tea it is.", finish_reason: "stop" }],
     final: true,
   })
   assert.equal(ended.waiting, undefined, "a finished turn waits on nothing")
@@ -521,23 +519,21 @@ test("the host naming no run ends a wait the page never saw settle", () => {
   assert.equal(reduce(attached, { type: "gone", run: "r" }), attached, "nothing waited, so nothing changed")
   assert.equal(
     reduce(raised, { type: "gone", run: "another" }).waiting,
-    ASKED,
+    PROMPT,
     "a run that is not the one being waited on settles nothing",
   )
   const gone = reduce(raised, { type: "gone", run: "r" })
   assert.equal(gone.waiting, undefined, "the form goes with the run the host no longer lists")
   assert.equal(
-    reduce(gone, { type: "waiting", waiting: { ...ASKED } }).waiting,
+    reduce(gone, { type: "waiting", waiting: { ...PROMPT } }).waiting,
     undefined,
     "and a status read still carrying the prompt does not put it back",
   )
 })
 
 test("a run held on a prompt draws the transcript's copy, which carries the question's call", () => {
-  // A join rebuilds the turn from the stream, and a host sends a prompt's request only to the
-  // subscribers it had at the time: the rebuilt copy can hold no question at all, and the thread
-  // would lose the one line it draws while the run waits. Nothing streams then, so the transcript's
-  // copy is what it draws — and the streamed one is drawn again once nothing waits.
+  // A host sends a prompt's request only to the subscribers it had at the time, so a join's rebuilt
+  // copy can hold no question at all.
   const streamed: Turn = {
     user: "go",
     parts: [],
@@ -547,9 +543,9 @@ test("a run held on a prompt draws the transcript's copy, which carries the ques
   const held: ThreadState = {
     ...initial,
     status: "ready",
-    rows: ASKING,
+    rows: PROMPT_ROWS,
     live: { turn: streamed, replaces: true },
-    waiting: ASKED,
+    waiting: PROMPT,
   }
   const drawn = threadTurns(held).at(-1)!
   assert.ok(
@@ -572,7 +568,7 @@ test("a question asked on this device's own turn still draws that turn", () => {
       { ...initial, status: "ready", rows: FINISHED },
       { type: "sent", user: "go again", at: 1 },
     ),
-    waiting: ASKED,
+    waiting: PROMPT,
   }
   assert.equal(threadTurns(state).at(-1)?.user, "go again", "the turn just sent is drawn")
 })
