@@ -2373,3 +2373,37 @@ runs first, and a re-run clears it.
   of the abort and the resolution is observed first, at the sizes `LONG` uses.
 - Why it is not applied here: it is a paging race in code this branch never touches, and a fix needs the
   timing proven before it is written — not guessed inside a progress-reminders review.
+
+# Deferred: both screens read liveness off a row, so a run the host lists can read as no run
+
+The steer offer is now honest on chat-next: `canSteer` is the screen's capability and `busy` is the
+only liveness fact, so a run the host lists offers its steer whether or not the page has joined its
+events (`chat-next/page.tsx`, the `steer-offer` flow). The current screen (`routes/chat.tsx`,
+`CurrentChatPage`) still answers liveness from the device's own streaming row — `busy =
+Boolean(streaming)` (`:850`), where that row is written only when `adoptRun` has caught the
+transcript up (`lib/chat.ts:1264-1304`) — and takes `steerable` from that row's `runId` plus a
+`/capabilities` probe (`:919`). A run the host lists but this device has not adopted therefore reads
+as no run: the field says `Message …` and Enter starts a fresh run beside the live one. chat-next's
+`busy` has the same shape (below), though its offer no longer waits on the join.
+
+- Cost: the two screens answer "is a reply running" differently for the same host state, so the bug
+  class this branch fixed survives on the screen most builds open; sending during that window posts a
+  concurrent run instead of steering or queueing, which is what the plugin's queue exists to avoid.
+- Suggested fix: feed that screen's `busy` from the shared rule the rest of the app already uses —
+  `runFinished({ live: runStatus, local: { streaming: busy }, subagents })` (`lib/session-work.ts`,
+  as `chat.tsx:1088` does for `runLive`) — and let `steerable` stay a capability. That also moves Stop,
+  `activity` and the thread's look at a handover, so it wants its own branch and a flow that opens a
+  session mid-run on the current screen.
+- Why it is not applied here: it changes what the composer, Stop and the activity line do on the app's
+  busiest screen, and this branch's flow covers chat-next only; doing it half-way would leave the two
+  screens disagreeing in a third way.
+
+chat-next has the same shape in `busy`: `doing.running || Boolean(hostRunId && !last?.done &&
+!last?.failed)` (`app/src/chat-next/page.tsx`) reads `last` as the device's own last turn, so a
+session returned to that already holds the previous finished turn reads idle while the host lists a
+run — measured on the component harness (`host.hold(0)` + `host.startElsewhere` after one finished
+turn): the field read `Message A bot…` for 3s, Enter opened a second run beside the live one, and no
+steer row was written. The offer above is fixed either way; what is not is the liveness half.
+
+Found by the simplify pass (altitude and reuse reviewers, converging on `page.tsx`'s two liveness
+facts) and by the review's spec axis, which probed the chat-next case; it does not block that fix.

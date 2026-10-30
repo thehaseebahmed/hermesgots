@@ -17,20 +17,20 @@ ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
 
-The registry in `app/scripts/e2e/cli.mjs` holds **80 keys**, and every one of them has a row
-below. `pnpm e2e list` prints the same 80 keys, and the rows here are grouped by the ticket that
+The registry in `app/scripts/e2e/cli.mjs` holds **81 keys**, and every one of them has a row
+below. `pnpm e2e list` prints the same 81 keys, and the rows here are grouped by the ticket that
 takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
 | --------- | ------ |
-| stay | 21 |
+| stay | 22 |
 | component | 55 |
 | plugin | 2 |
 | delete | 2 |
-| **total** | **80** |
+| **total** | **81** |
 
-Of those 80, 74 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
-reuses `todos.mjs`, so 73 distinct files there) and 6 point at the older
+Of those 81, 75 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
+reuses `todos.mjs`, so 74 distinct files) and 6 point at the older
 `app/scripts/regression-*.mjs`.
 
 #297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**.
@@ -120,18 +120,18 @@ before, the flow fails: the line being read moves by the height of what was adde
 
 `app/scripts/test-e2e-registry.mjs`, a unit test, holds the registry and this page to each other:
 a key with no row here, a row with no key, a verdict outside the four, a count in the table above
-that its rows don't add up to, or a stay beyond the twenty-one fails the app's gates. A new flow is then
+that its rows don't add up to, or a stay beyond the twenty-two fails the app's gates. A new flow is then
 an argument this page has to carry, never a default (ADR 0019).
 
 Check any of it in one line:
 
 ```bash
-grep -c '^| `' docs/e2e-flow-audit.md                           # 80 rows, one per registry key
-grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 21
+grep -c '^| `' docs/e2e-flow-audit.md                           # 81 rows, one per registry key
+grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 22
 grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 55
 grep -c '^| `[a-z0-9-]*` | delete |' docs/e2e-flow-audit.md    # 2
 grep -c '^| `[a-z0-9-]*` | plugin |' docs/e2e-flow-audit.md    # 2
-cd app && pnpm -s e2e list | wc -l                             # 80 keys in the registry
+cd app && pnpm -s e2e list | wc -l                             # 81 keys in the registry
 git show 8a4e842^:app/scripts/e2e/cli.mjs |
   sed -n '/^const FLOWS = {/,/^}$/p' | grep -c '^  [a-z"-]*: {'  # 61, before goal mode left
 ```
@@ -317,7 +317,7 @@ One key, the only one that walks the whole feature: #417–#421 each brought the
 | ------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `bot-threads` | stay | A bot opens its Main from home; its threads are cards at their start times, the first between the messages written either side of it and the last closing the flow; a card opens its thread and back returns to Main; `/thread` with text opens a thread holding that message, whose card is back on Main at its start and drawn without a marker. Then, on a mock answering `MOCK_TRIAGE=new`, the message leaves Main as its new thread's card carrying Undo and no marker; on one answering `MOCK_TRIAGE=thread` it keeps the Moved marker, linking the older thread it went to, with no card carrying the move. Last, at tablet width with the dark theme, a card, Main's day heading and the Moved line still draw, and the move's Undo is still there. Then the switch itself is sampled a painted frame at a time, on the pane the shell names, with a second bot added beside the first: a card's thread opened and back on a phone, and a bot's Main switched from the sidebar and back on a laptop, the thread beside it sampled through the same two switches — its lane only ever drawing the thread of the bot being left, the one asked for, or nothing while that one answers, never a lane calling the bot thread-less while its list is still answering. Every painted frame between the two chats is the one left, the one asked for, or the pane waiting on it — inert, untitled and carrying neither chat's words — never the setup copy, a `New chat` header or the new-chat hero, and never the chat left once a frame has left it; a long chat asked for may open on its newest rows, its title over rows of its own, and is drawn whole by the time the switch settles; the frame the arriving scroller holds itself invisible on, while it places the chat and its items still stand at their `content-visibility` estimate, is not a painted one and does not count, and from the first frame it does paint the arriving chat's content the last thing drawn there never moves: the reader is left at the end, and still. The chat is also read and captured ready, at 390, 768 and 1440px, light and dark. On a laptop, a thread's header holds its title on its pane's centre and its actions ending on the row's right edge, each within 2px. | Every rule it walks is a component test's — a card's place in Main (#417), the marker and the triage-opened card's Undo (#419), `/thread` and the name the switch picks (#420) — and the flow leaves them there. What stays a browser's is the layout those tests cannot measure — on a laptop a thread's header puts its title on its pane's centre and its actions at the row's right edge — and that they compose: a real route change, a real reload onto the mock's chat list, and the mock's own triage and moves answering a send. | `app/scripts/test-main-cards.tsx`, `test-card-undo.tsx`, `test-main-triage.tsx` and `test-slash.mjs` carry the rules, and #417–#421 landed them green. The flow stays in the registry as the one proof the path holds end to end, which no component test mounts. |
 
-## The twenty-one that stay, and why only a browser can assert each
+## The twenty-two that stay, and why only a browser can assert each
 
 Every one of these earns its browser by a mechanism no lower tier reproduces, and a stay is
 replaced by itself. With `bot-settings`, `bot-threads` and `question-card`, whose rows are in their
@@ -331,6 +331,7 @@ them — they are what the end-to-end registry holds once the other 59 keys leav
 | `live-poll` | stay | `runs/live` is read by one shared poll: at most 3 reads in 25s with a session, its project and the sidebar all open. | A request rate over wall-clock, with three screens mounted at once. |
 | `idle-requests` | stay | An idle open chat makes at most 12 requests in 65s. | A request budget over 65 seconds of real time and a real fetch stack. |
 | `foreign-run` | stay | A run started elsewhere shows as running in Code and on the open session screen, is followed to its end, and leaves no duplicate. | A run this browser never started, on a host that owns it: the app only discovers it. |
+| `steer-offer` | stay | A code session returned to mid-run, with two turns queued behind its run: the field offers "Steer the response…" for each of the three runs the page follows and never reads "Queue a message…", sampled from the screen's first paint, with the two queued turns' own ends gating the assertions. | The state it catches is a run the host lists that this page is not following. The component harness has no state where the pre-fix value is observable: an empty chat draws the fallback form, whose field carries no placeholder, and a chat holding a finished turn reads `Message …` on both trees (the liveness gap recorded in `fixes.md`). At the base commit a returned-to session reads `Queue a message…` for the run's whole duration, and that is what this measures. |
 | `compressed-run` | stay | A chat another device started and Hermes compressed before this device loaded it lands its transcript and follows its run to its end — whether the rotation came before the run or mid-run. | A test host rotating the session id mid-run, the mechanism the plugin's run keying broke on. A faked HTTP boundary would answer the shape the code expects rather than the one the host sends. |
 | `chat-archive` | stay | A chat Hermes compacted in place, opened on a device that never held it: the pane draws the live window alone with nothing older on the device, and when the reader reaches the top the archived turns come back — each once, the cursor cleared at the chat's first row, the thread grown above the pane — with the compaction's divider still below the turns it carried and above the row written after it. | A reach and a prepend: the pane's scroll offset at its top edge deciding when the window grows, and the thread's height changing under a reader who has not been thrown. jsdom has no scroll offset and no height, so `test-archive-thread.tsx` proves the same rows draw right but would pass whether the archive arrived on a scroll, on a button, or not at all. | `test-archive-thread.tsx` holds the draw (each turn once, the divider's place) and `test-history-window.mjs` the walk's rule; this flow is the only place the reach is made. |
 | `chat-next-older` | stay | A chat of thirty turns opened on chat-next with the host holding its older pages back: the newest page is drawn and the pane stands on its end, the loader sits at the top of the pane and not among the thread's rows, then the older pages are put above — one after another, newest first — and the loader goes with the last: a reader at the end keeps the newest reply on the same line of the page, a reader up in the thread keeps the line they are reading, and the pane moved down the thread by what was added. | A prepend under a reader: the line a reply stands on after rows are added above it, and a loader that adds or takes away a row at the top of the flow. jsdom has no layout, so `test-chat-next-older.tsx` proves the pages arrive in order above the same rows under the same ids, but would pass had the thread jumped by a screen. | `test-chat-next-pages.mjs` holds the paging rule (which page is read next, when the chat is whole, how pages join) and `test-chat-next-older.tsx` the draw; this flow is the only place the reader's place is measured. |

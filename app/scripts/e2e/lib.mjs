@@ -211,6 +211,15 @@ export async function setUpBot(page) {
 
 const hostAuth = { Authorization: "Bearer mock-key", "Content-Type": "application/json" }
 
+/** What the plugin holds for a session's queue: the items waiting, and the runs it started. */
+export async function queueOf(sessionId) {
+  const res = await fetch(
+    `${mock}/api/plugins/memento/sessions/${encodeURIComponent(sessionId)}/queue`,
+    { headers: hostAuth },
+  )
+  return res.json()
+}
+
 /** Starts a turn straight on the host, as another device would. */
 export async function startRun(sessionId, input) {
   const res = await fetch(`${mock}/v1/runs`, {
