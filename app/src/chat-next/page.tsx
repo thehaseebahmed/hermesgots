@@ -615,9 +615,12 @@ export function ChatNextThread({
   )
   const drawn = useRef<{ turns: Turn[]; origin: number }>({ turns: [], origin: 0 })
   const { turns, origin } = useMemo(() => {
-    const next = shared(drawn.current.turns, turnsOf(folded, held?.live))
+    const next = shared(
+      drawn.current.turns,
+      turnsOf(folded, held?.live, doing.waiting !== undefined),
+    )
     return (drawn.current = { turns: next, origin: originOf(drawn.current, next) })
-  }, [folded, held?.live])
+  }, [folded, held?.live, doing.waiting])
   const [draft, setDraft] = useState("")
   const [earlier, setEarlier] = useState<"idle" | "reading" | "failed">("idle")
   // The older pages of the transcript, read one after another once the newest is drawn. A token is

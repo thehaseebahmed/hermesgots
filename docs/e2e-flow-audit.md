@@ -135,9 +135,13 @@ page (a phone asleep, a proxy closing idle connections, a slow subscriber let go
 question with it. The wait is the run's to settle, so the reducer keeps it through a whole transcript
 read that cannot see the turn end and through a read that failed, and the page rejoins the run on its
 next poll; the component tests hold that rule over a `withhold`ing host whose stream closes or breaks
-(`test-chat-next-waiting.tsx`, `test-chat-next-state.tsx`). What none of them draws is the app's own
-composer and thread (`AppChatNextThread`), nor the wall clock of a rejoin, which is what the flow
-watches for twenty seconds of drops. So the registry holds 82 + 1 = **83** keys, the component
+(`test-chat-next-waiting.tsx`, `test-chat-next-state.tsx`). The thread's own line is the same story one
+layer up: a join rebuilds the turn from the stream, and a host that never re-sends the request leaves
+the rebuilt copy without the call the question was asked by, so the thread would blink its waiting
+line away at each rejoin — `turnsOf` draws the transcript's copy while a wait is on, which is the
+copy carrying that call, and `test-chat-next-state.tsx` holds the rule. What none of them draws is
+the app's own composer and thread (`AppChatNextThread`), nor the wall clock of a rejoin, which is
+what the flow watches for twenty seconds of drops. So the registry holds 82 + 1 = **83** keys, the component
 verdicts unchanged at **55**, and the stays are 23 + 1: **24**.
 
 `app/scripts/test-e2e-registry.mjs`, a unit test, holds the registry and this page to each other:

@@ -208,8 +208,16 @@ function reach(turn: Turn) {
  * joined from its start is replaying, so the transcript's copy of the turn stays drawn until the
  * replay has caught up with it (`LiveTurn.replay`), and the reply never shrinks as it joins.
  */
-export function turnsOf(folded: Turn[], live?: LiveTurn): Turn[] {
+export function turnsOf(folded: Turn[], live?: LiveTurn, waiting?: boolean): Turn[] {
   if (!live || live.replay) return folded
+  // A run held on a prompt writes nothing more, so the turn it holds is drawn from the transcript —
+  // the copy that carries the call the question was asked by. A join rebuilds the turn from the
+  // stream instead, and a host sends a prompt's request only to the subscribers it had at the time,
+  // so the rebuilt copy can hold less than the transcript's: the thread would lose the one line it
+  // draws while the run waits, for as long as the replay takes to catch up. A streamed copy holding
+  // more than the transcript does is the newer one — this device's own turn, whose rows lag.
+  const copy = folded.at(-1)
+  if (waiting && copy && reach(copy).calls >= reach(live.turn).calls) return folded
   return withoutRepeatedFailures(
     live.replaces ? [...folded.slice(0, -1), live.turn] : [...folded, live.turn],
   )
@@ -535,4 +543,8 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
 
 /** The turns a state draws. */
 export const threadTurns = (state: ThreadState) =>
-  turnsOf(foldedOf(state.rows, state.archived, state.partial), state.live)
+  turnsOf(
+    foldedOf(state.rows, state.archived, state.partial),
+    state.live,
+    state.waiting !== undefined,
+  )

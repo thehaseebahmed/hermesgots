@@ -534,3 +534,52 @@ test("the host naming no run ends a wait the page never saw settle", () => {
     "and a status read still carrying the prompt does not put it back",
   )
 })
+
+test("a run held on a prompt draws the transcript's copy, which carries the question's call", () => {
+  // A join rebuilds the turn from the stream, and a host sends a prompt's request only to the
+  // subscribers it had at the time: the rebuilt copy can hold no question at all, and the thread
+  // would lose the one line it draws while the run waits. Nothing streams then, so the transcript's
+  // copy is what it draws — and the streamed one is drawn again once nothing waits.
+  const asked: Waiting = {
+    kind: "question",
+    run: "r",
+    promptId: "p1",
+    generation: 1,
+    question: "Tea?",
+    choices: ["yes", "no"],
+    multiSelect: false,
+  }
+  const rows: Row[] = [
+    { id: 1, role: "user", content: "go" },
+    {
+      id: 2,
+      role: "assistant",
+      content: "",
+      finish_reason: "tool_calls",
+      tool_calls: [{ id: "c1", function: { name: "clarify", arguments: "{}" } }],
+    },
+  ]
+  const streamed: Turn = {
+    user: "go",
+    parts: [],
+    done: false,
+    delivered: [],
+  }
+  const held: ThreadState = {
+    ...initial,
+    status: "ready",
+    rows,
+    live: { turn: streamed, replaces: true },
+    waiting: asked,
+  }
+  const drawn = threadTurns(held).at(-1)!
+  assert.ok(
+    drawn.parts.some((part) => part.kind === "tools" && part.calls.some((c) => c.name === "clarify")),
+    "the question's call is drawn while the run waits",
+  )
+  assert.equal(
+    threadTurns({ ...held, waiting: undefined }).at(-1),
+    streamed,
+    "the streamed copy is drawn once nothing waits",
+  )
+})

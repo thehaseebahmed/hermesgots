@@ -38,6 +38,7 @@ const body =
     await waitingLine.first().waitFor({ timeout: 20_000 })
     for (const end = Date.now() + HELD_MS; Date.now() < end;) {
       assert.ok(await form.isVisible().catch(() => false), "the form stays up")
+      assert.equal(await waitingLine.count(), 1, "the thread keeps its one waiting line")
       await page.waitForTimeout(500)
     }
     // Nothing in the thread reads as a question nobody answered, through every drop.
