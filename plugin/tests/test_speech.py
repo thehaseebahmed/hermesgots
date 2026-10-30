@@ -167,6 +167,14 @@ class ReadTest(TempStore):
         self.assertTrue(rows["small"]["downloading"], "the next take downloads it")
         self.assertFalse(rows["base"]["downloading"])
 
+    def test_the_read_carries_who_hears_a_take(self) -> None:
+        who = {"name": "local", "backend": "local", "cloud": False}
+        with Host(stt("small")), mock.patch.object(
+            speech.dictation, "heard_by_config", return_value=who
+        ):
+            payload = speech.read(self.config, self.path, {})
+        self.assertEqual(payload["provider"], who, "the page draws the same answer the mic reads")
+
     def test_a_hand_written_model_is_still_named_as_the_one_in_use(self) -> None:
         with Host(stt("my-own-whisper")):
             payload = speech.read(self.config, self.path, {})

@@ -1,10 +1,7 @@
-"""Dictation: a clip recorded in the Gots app, turned into text by the host's faster-whisper.
+"""Dictation: a clip recorded in the Gots app, turned into text by the host's speech provider.
 
 Hermes's own transcription route (``POST /api/audio/transcribe``) lives on the dashboard, which the
-app can't reach, so the clip comes here. It goes straight to Hermes's local faster-whisper path
-(``_transcribe_local``) rather than ``transcribe_audio``: that one sends audio to whichever provider
-the host picked for voice notes, which may be a cloud one, and dictation is only offered on the host's
-own model. Faster-whisper's local path doesn't stream, so a clip is transcribed whole once it's done.
+app can't reach, so the clip comes here.
 
 Every Hermes internal here is read with ``getattr``: one that moves only means dictation is off.
 """
@@ -12,11 +9,16 @@ Every Hermes internal here is read with ``getattr``: one that moves only means d
 from __future__ import annotations
 
 import importlib.util
+import inspect
+import logging
 import os
 import tempfile
+import threading
 import time
 from dataclasses import dataclass, replace
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
+
+logger = logging.getLogger(__name__)
 
 # The API server refuses bodies over 10 MB (``MAX_REQUEST_BYTES``); Opus at 24 kbps is ~180 KB a minute.
 MAX_BYTES = 9 * 1024 * 1024
@@ -27,6 +29,20 @@ MAX_CONTEXT = 400
 # A bot's vocabulary is a short list, so the decoder's prompt stays inside the tokens Whisper keeps.
 MAX_VOCABULARY = 50
 MAX_WORD = 40
+
+# The providers that hear a take on the host itself, one piece at a time.
+LOCAL_BACKENDS = frozenset({"local", "local_command"})
+
+# A held take is dropped this long after its deepest piece: the app cuts a piece every few seconds,
+# so a minute of silence means the take ended, or died, without its last piece ever arriving.
+BUFFER_SECONDS = 60.0
+
+# What a host with no usable provider is told: our own sentence, since Hermes's own hint lists every
+# provider's environment variable and reads as a manual on a phone.
+NO_PROVIDER = (
+    "No speech provider on this host can hear a take. "
+    "Install faster-whisper, or set a provider's key."
+)
 
 SUFFIXES = {
     "audio/webm": ".webm",
@@ -46,6 +62,12 @@ class DictationError(Exception):
         self.status = status
 
 
+# One held take per profile. The route serialises a profile's clips; this lock spans the profiles
+# one process serves.
+_buffers: Dict[str, Dict[str, Any]] = {}
+_buffer_lock = threading.Lock()
+
+
 def _tools() -> Any:
     from tools import transcription_tools
 
@@ -61,6 +83,56 @@ def _installed(tt: Any) -> bool:
         return importlib.util.find_spec("faster_whisper") is not None
     except (ImportError, ValueError):
         return False
+
+
+def _ask(tt: Any, attr: str, *args: Any) -> Optional[str]:
+    probe = getattr(tt, attr, None)
+    if not callable(probe):
+        return None
+    try:
+        return str(probe(*args) or "").strip().lower() or None
+    except Exception:
+        logger.debug("memento: Hermes couldn't answer %s", attr, exc_info=True)
+        return None
+
+
+def _provider(tt: Any, cfg: Dict[str, Any]) -> Optional[str]:
+    """Hermes's answer, ``none`` when nothing can hear a take, or None when it can't be asked."""
+    name = _ask(tt, "_get_provider", cfg)
+    if name is not None:
+        return name
+    return "local" if _installed(tt) else None
+
+
+def _backend(tt: Any) -> Optional[str]:
+    return _ask(tt, "_detect_local_backend") or ("local" if _installed(tt) else None)
+
+
+def provider_name(cfg: Dict[str, Any]) -> str:
+    try:
+        return _provider(_tools(), cfg) or ""
+    except Exception:
+        logger.debug("memento: no speech provider to name", exc_info=True)
+        return ""
+
+
+def heard_by(tt: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Who hears a take, as both the mic and the Speech-to-text page read it."""
+    name = _provider(tt, cfg) or ""
+    return {
+        "name": name,
+        "backend": _backend(tt) if name in LOCAL_BACKENDS else None,
+        "cloud": bool(name) and name not in LOCAL_BACKENDS and name != "none",
+    }
+
+
+def heard_by_config(cfg: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    try:
+        tt = _tools()
+        return heard_by(tt, cfg if cfg is not None else _local_config(tt))
+    except Exception:
+        logger.debug("memento: no speech provider to name", exc_info=True)
+        return None
 
 
 def _local_config(tt: Any) -> Dict[str, Any]:
@@ -79,44 +151,71 @@ def _model_name(tt: Any, cfg: Dict[str, Any]) -> str:
 
 
 def info() -> Dict[str, Any]:
-    """Whether this profile can dictate. Never installs anything or loads the model."""
+    """Whether this profile can dictate, and by whom. Never installs anything or loads the model."""
     try:
         tt = _tools()
     except Exception:
         return {"ready": False, "reason": "This Hermes has no speech-to-text."}
-    if not callable(getattr(tt, "_transcribe_local", None)):
-        return {"ready": False, "reason": "This Hermes has no local speech-to-text."}
+    if not callable(getattr(tt, "transcribe_audio", None)):
+        return {"ready": False, "reason": "This Hermes has no speech-to-text."}
     try:
         cfg = _local_config(tt)
         enabled = tt.is_stt_enabled(cfg)
         model = _model_name(tt, cfg)
-        language = tt._resolve_stt_language("local", cfg) or ""
+        route = heard_by(tt, cfg)
+        language = tt._resolve_stt_language(route["name"] or "local", cfg) or ""
     except Exception:
         return {"ready": False, "reason": "Couldn't read the host's speech-to-text settings."}
     if not enabled:
         return {"ready": False, "reason": "Speech-to-text is turned off on the host.", "model": model}
-    if not _installed(tt):
+    if route["name"] in {"", "none"}:
+        return {"ready": False, "reason": NO_PROVIDER, "model": model, "provider": route}
+    # A local take is decoded by Hermes's local path, so a host without it can't hear one even
+    # though its dispatcher is there.
+    if not route["cloud"] and not callable(getattr(tt, "_transcribe_local", None)):
         return {
             "ready": False,
-            "reason": "faster-whisper isn't installed on the host. Run `hermes tools` and pick Local Whisper.",
+            "reason": "This Hermes has no local speech-to-text.",
             "model": model,
+            "provider": route,
         }
-    return {"ready": True, "model": model, "language": language}
+    return {
+        "ready": True,
+        "model": model,
+        "language": language,
+        "provider": route,
+    }
 
 
 def warm() -> Dict[str, Any]:
-    """Loads the model into Hermes's own cache slot while the user is still talking. Never raises."""
+    """Loads the model while the user talks, reaching Hermes's lazy install when nothing is ready."""
     started = time.monotonic()
     try:
-        if not info().get("ready"):
-            return {"warmed": False}
+        state = info()
+        route = state.get("provider") or {}
+        if state.get("ready") and route.get("cloud"):
+            return {"warmed": False, "action": "noop"}
         try:
             from tools.stt_lease import warm_stt_provider
         except ImportError:
             warm_stt_provider = None
         if warm_stt_provider is not None:
-            result = warm_stt_provider(provider="local")
-            return {"warmed": bool(result.get("warmed")), "ms": int((time.monotonic() - started) * 1000)}
+            # A ready host warms the backend it resolved; one resolving nobody asks for `local`,
+            # which is the only backend an install can fill.
+            asked = str(state.get("provider") or "local") if state.get("ready") else "local"
+            result = warm_stt_provider(provider=asked)
+            answer = {
+                "warmed": bool(result.get("warmed")),
+                "action": result.get("action"),
+                "ms": int((time.monotonic() - started) * 1000),
+            }
+            if not state.get("ready") and not answer["warmed"]:
+                answer["reason"] = state.get("reason")
+                if result.get("error"):
+                    answer["error"] = result.get("error")
+            return answer
+        if not state.get("ready"):
+            return {"warmed": False, "reason": state.get("reason")}
         # The stable release has no warm-up helper; fill the same slot transcription reads.
         tt = _tools()
         cfg = _local_config(tt)
@@ -218,6 +317,84 @@ class DictationHearingPrompt:
         return " ".join(part for part in parts if part).strip()
 
 
+def _landed(result: Any, started: float) -> Dict[str, Any]:
+    if not isinstance(result, dict):
+        raise DictationError("Transcription failed.")
+    if not result.get("success"):
+        error = str(result.get("error") or "Transcription failed.")
+        if "empty transcript" in error.lower():
+            result = {"transcript": ""}
+        else:
+            raise DictationError(error)
+    text = str(result.get("transcript") or "").strip()
+    if _hallucination(text):
+        text = ""
+    return {"text": text, "ms": int((time.monotonic() - started) * 1000)}
+
+
+def _hold(
+    data: bytes, *, first: bool = False, last: bool = False, profile: Optional[Any] = None
+) -> Optional[bytes]:
+    """Keeps a cloud take's pieces until its last one; a new take's first piece drops the old hold."""
+    key = str(profile or "")
+    now = time.monotonic()
+    with _buffer_lock:
+        stale = [one for one, held in _buffers.items() if now - float(held["at"]) > BUFFER_SECONDS]
+        for one in stale:
+            _buffers.pop(one, None)
+        if stale:
+            logger.debug("memento: dropped %d dictation take(s) left alone", len(stale))
+        held = None if first else _buffers.get(key)
+        if held is None:
+            held = {"take": bytearray(), "at": now}
+        if len(held["take"]) + len(data) > MAX_BYTES:
+            _buffers.pop(key, None)
+            raise DictationError("The recording is too long.", 413)
+        held["take"].extend(data)
+        held["at"] = now
+        if not last:
+            _buffers[key] = held
+            return None
+        _buffers.pop(key, None)
+        return bytes(held["take"])
+
+
+def _dispatcher(tt: Any) -> Callable[[str], Any]:
+    """Hermes's own dispatcher, given the caller label only where that Hermes knows it."""
+    call = tt.transcribe_audio
+    try:
+        named = "source" in inspect.signature(call).parameters
+    except (TypeError, ValueError):
+        named = False
+    return (lambda path: call(path, source="dictation")) if named else call
+
+
+def _cloud_take(
+    tt: Any,
+    data: bytes,
+    content_type: Optional[str],
+    *,
+    first: bool,
+    last: bool,
+    profile: Optional[Any],
+) -> Dict[str, Any]:
+    audio = _hold(data, first=first, last=last, profile=profile)
+    if audio is None:
+        return {"text": "", "ms": 0}
+    started = time.monotonic()
+    fd, path = tempfile.mkstemp(prefix="memento-dictation-", suffix=suffix_for(content_type))
+    try:
+        with os.fdopen(fd, "wb") as file:
+            file.write(audio)
+        result = _dispatcher(tt)(path)
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            logger.debug("memento: couldn't delete the clip it wrote", exc_info=True)
+    return _landed(result, started)
+
+
 def transcribe(
     data: bytes,
     content_type: Optional[str],
@@ -226,6 +403,9 @@ def transcribe(
     vocabulary: Optional[Sequence[str]] = None,
     *,
     hearing: bool,
+    first: bool = False,
+    last: bool = False,
+    profile: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """The clip's text, ``""`` when nobody spoke. DictationError when the host can't.
 
@@ -234,10 +414,18 @@ def transcribe(
     is the bot's Hearing prompt setting, and it is the one place the rule lives: false composes no
     prompt at all, so the model hears the audio alone and the cleanup carries the names instead
     (ADR 0067). It has no default, since a caller that forgets it would prompt a bot that withheld.
+
+    ``first`` and ``last`` delimit a take: a cloud take holds its pieces from the first and uploads
+    them on the last, so a cancelled take's audio is dropped rather than carried into the next one.
+    A local take ignores both. ``profile`` is the store path the take is held under.
     """
     state = info()
     if not state.get("ready"):
         raise DictationError(state.get("reason") or "Dictation is off on the host.", 409)
+    if (state.get("provider") or {}).get("cloud"):
+        return _cloud_take(
+            _tools(), data, content_type, first=first, last=last, profile=profile
+        )
     tt = _tools()
     cfg = _local_config(tt)
     prompt = ""
@@ -261,16 +449,5 @@ def transcribe(
         try:
             os.unlink(path)
         except OSError:
-            pass
-    if not isinstance(result, dict):
-        raise DictationError("Transcription failed.")
-    if not result.get("success"):
-        error = str(result.get("error") or "Transcription failed.")
-        if "empty transcript" in error.lower():
-            result = {"transcript": ""}
-        else:
-            raise DictationError(error)
-    text = str(result.get("transcript") or "").strip()
-    if _hallucination(text):
-        text = ""
-    return {"text": text, "ms": int((time.monotonic() - started) * 1000)}
+            logger.debug("memento: couldn't delete the clip it wrote", exc_info=True)
+    return _landed(result, started)

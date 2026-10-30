@@ -70,6 +70,11 @@ function availability(key: string): DictationAvailability {
   return offs.get(reason)!
 }
 
+/** A bot's host sends a take to a cloud provider, from the last `info` read. */
+function leavesHost(key: string): boolean {
+  return infos.get(key)?.info?.provider?.cloud === true
+}
+
 /** Whether the bot's host can dictate, and a way to ask it again; null for a bot without a key. */
 export function useDictationInfo(config: HermesConfig) {
   const key = config.apiKey && config.baseUrl ? infoKey(config) : ""
@@ -90,6 +95,8 @@ export const MAX_MS = 10 * 60 * 1000
 const MIN_MS = 300
 /** A cold host may load (or first download) its model inside this request. */
 const TRANSCRIBE_MS = 120_000
+/** The take's last piece carries a whole cloud take, so it gets a budget of its own (ADR 0069). */
+const FINAL_TRANSCRIBE_MS = 300_000
 /**
  * A whole dictation's cleanup is one call, and the host bounds its own at 8 s: past this the words
  * are landed as they were heard. It only applies to an ending with no wait of its own, such as a
@@ -199,6 +206,10 @@ interface Session {
   failure: DictationFailure | null
   /** The recorders still closing after the take died; a retry waits for them. */
   stopping: Promise<void> | null
+  /** The take is over, so its last piece is the one a cloud provider uploads the whole of. */
+  takeEnded?: boolean
+  lastPieceSent?: boolean
+  timer?: number
   /** Cancelled or done: nothing more is kept. */
   closed: boolean
   restored?: boolean
@@ -285,13 +296,20 @@ export async function keptText(
   const audio = keptAudio(pieces)
   if (!audio) return before
   const controller = new AbortController()
-  const timer = window.setTimeout(() => controller.abort(), TRANSCRIBE_MS)
+  const timer = window.setTimeout(() => controller.abort(), FINAL_TRANSCRIBE_MS)
   const stop = () => controller.abort()
   signal?.addEventListener("abort", stop, { once: true })
   try {
     return joinText(
       before,
-      await transcribeClip(config, audio, hint, before, vocabulary, controller.signal),
+      await transcribeClip(config, audio, {
+        hint,
+        context: before,
+        vocabulary,
+        signal: controller.signal,
+        first: true,
+        last: true,
+      }),
     )
   } finally {
     window.clearTimeout(timer)
@@ -301,6 +319,11 @@ export async function keptText(
 
 /** A take that ended stops transcribing: whatever is in flight is dropped. */
 function stopInflight(current: Session) {
+  // The wait goes with it: a host that never answers must not leave a timer alive after the take.
+  if (current.timer !== undefined) {
+    window.clearTimeout(current.timer)
+    current.timer = undefined
+  }
   const inflight = current.inflight
   current.inflight = null
   inflight?.abort()
@@ -394,27 +417,36 @@ export function useChunkedDictation(
         if (index < 0) return true
         const piece = current.pieces[index]
         const before = takeText(current.pieces.slice(0, index))
+        // The take's own last piece, once the take is over: a cloud provider uploads the whole of
+        // it there.
+        const last = Boolean(current.takeEnded) && index === current.pieces.length - 1
         const controller = new AbortController()
         current.inflight = controller
-        const timer = window.setTimeout(() => controller.abort(), TRANSCRIBE_MS)
+        const timer = window.setTimeout(
+          () => controller.abort(),
+          last ? FINAL_TRANSCRIBE_MS : TRANSCRIBE_MS,
+        )
+        current.timer = timer
         try {
           const { config, hint, vocabulary } = latest.current
-          const text = await transcribeClip(
-            config,
-            piece.blob,
+          const text = await transcribeClip(config, piece.blob, {
             hint,
-            before,
+            context: before,
             vocabulary,
-            controller.signal,
-          )
+            signal: controller.signal,
+            last,
+            first: index === 0,
+          })
           if (current.inflight !== controller) return false
           piece.text = text
           current.error = null
+          if (last) current.lastPieceSent = true
         } catch (failure) {
           if (current.inflight === controller) current.error = failure
           return false
         } finally {
           window.clearTimeout(timer)
+          if (current.timer === timer) current.timer = undefined
           if (current.inflight === controller) current.inflight = null
         }
         save(current, true)
@@ -565,7 +597,7 @@ export function useChunkedDictation(
     session.current = current
     setFailure(null)
     setStatus("listening")
-    void warmDictation(latest.current.config).catch(() => {})
+    if (!leavesHost(profile)) void warmDictation(latest.current.config).catch(() => {})
     let stream: MediaStream
     try {
       stream = await navigator.mediaDevices.getUserMedia({
@@ -656,7 +688,32 @@ export function useChunkedDictation(
           : await within(draining, Math.max(0, deadline - Date.now()))
       if (session.current !== current) return null
       if (done) {
-        const heard = takeText(current.pieces)
+        let heard = takeText(current.pieces)
+        // A cloud take whose last piece never went is uploaded here, so its audio isn't stranded;
+        // one whose last piece did go is never uploaded twice, however silent it was (ADR 0069).
+        if (!heard && !current.lastPieceSent && current.pieces.length) {
+          if (!infos.has(current.profile)) await readDictationInfo(latest.current.config, true)
+          if (leavesHost(current.profile)) {
+            const controller = new AbortController()
+            current.inflight = controller
+            try {
+              heard = await keptText(
+                latest.current.config,
+                current.pieces,
+                latest.current.hint,
+                latest.current.vocabulary,
+                controller.signal,
+              )
+            } catch (failure) {
+              current.error = failure
+              showFailure(clipFailure(failure))
+              return null
+            } finally {
+              if (current.inflight === controller) current.inflight = null
+            }
+            if (session.current !== current) return null
+          }
+        }
         const budget = deadline === undefined ? TIDY_MS : deadline - Date.now()
         const text = await tidy(current, heard, budget)
         if (session.current !== current) return null
@@ -668,12 +725,18 @@ export function useChunkedDictation(
         return land(current, heard, heard)
       }
       const spoken = current.pieces.filter((piece) => piece.text !== null)
-      if (spoken.length) {
-        const text = joinText(...spoken.map((piece) => piece.text ?? ""))
+      const said = joinText(...spoken.map((piece) => piece.text ?? ""))
+      // A cloud take's pieces land empty until its last upload, so a failed upload keeps the take
+      // for Retry instead of landing nothing and dropping its audio (ADR 0069).
+      const uploadFailedUnheard = spoken.length > 0 && !said && current.error !== null
+      if (uploadFailedUnheard) {
+        for (const piece of current.pieces) piece.text = null
+        save(current, true)
+      } else if (spoken.length) {
         const ms = spokenLong(spoken)
         current.pieces = current.pieces.filter((piece) => piece.text === null)
         save(current, true)
-        if (text) latest.current.onCommitted?.(text, ms, text)
+        if (said) latest.current.onCommitted?.(said, ms, said)
       }
       showFailure(
         current.error !== null
@@ -747,6 +810,8 @@ export function useChunkedDictation(
           const last = recording.segments.at(-1)
           if (last && current.pieces.length && Date.now() - last.startedAt < MIN_MS)
             last.skip = true
+          // Set before the last segment closes: the drain it starts is what sends that piece.
+          current.takeEnded = true
           const stopping = end(recording)
           current.stopping = stopping
           await stopping
@@ -803,8 +868,7 @@ export function useChunkedDictation(
       const current = session.current
       session.current = null
       if (!current) return
-      current.inflight?.abort()
-      current.inflight = null
+      stopInflight(current)
       releaseTake(current.profile, current.lock)
       current.lock = null
       const recording = current.recording

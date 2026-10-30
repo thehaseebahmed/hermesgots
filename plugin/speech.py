@@ -40,7 +40,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
-from . import dictation_cleanup
+from . import dictation, dictation_cleanup
 from .store import get_setting, put_setting
 
 logger = logging.getLogger(__name__)
@@ -213,6 +213,7 @@ def read(
         "models": rows,
         "cleanup": cleanup_state(path, gate),
         "hearing": {"sent": read_hearing(path)},
+        "provider": dictation.heard_by_config(stt),
     }
     if with_stt:
         try:
@@ -257,7 +258,7 @@ KEY_ENV = {
     "deepinfra": "DEEPINFRA_API_KEY",
 }
 TURNED_OFF = "Speech-to-text is turned off on this host."
-NOTHING_USABLE = "No speech provider on this host can hear a take."
+NOTHING_USABLE = dictation.NO_PROVIDER
 
 
 def _defaults() -> Dict[str, Any]:
@@ -346,18 +347,11 @@ def _on(section: Dict[str, Any]) -> bool:
 
 
 def _resolved(section: Dict[str, Any]) -> Dict[str, Optional[str]]:
-    """Which provider Hermes would use, and — where it can use none — its reason in plain words."""
-    try:
-        from tools.transcription_tools import _get_provider
-    except Exception:
-        logger.debug("memento: no provider resolver on this host", exc_info=True)
+    """Which provider Hermes would use, and its reason where it can use none."""
+    name = dictation.provider_name(section)
+    if not name:
         return {"name": "", "reason": None}
-    try:
-        name = str(_get_provider(dict(section)) or "")
-    except Exception as error:
-        logger.debug("memento: couldn't resolve a speech provider", exc_info=True)
-        return {"name": "none", "reason": str(error) or NOTHING_USABLE}
-    if name and name != "none":
+    if name != "none":
         return {"name": name, "reason": None}
     return {"name": "none", "reason": NOTHING_USABLE if _on(section) else TURNED_OFF}
 

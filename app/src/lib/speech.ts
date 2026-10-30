@@ -113,6 +113,14 @@ export interface SpeechPick {
   model: string
 }
 
+/** Who hears a take: Hermes's resolved provider name, and the local backend behind a local one. */
+export interface HeardBy {
+  name: string
+  backend: string | null
+  /** The take leaves the host: a cloud provider hears it (ADR 0069). */
+  cloud: boolean
+}
+
 export interface SpeechSettings {
   model: string
   models: SpeechModel[]
@@ -122,6 +130,8 @@ export interface SpeechSettings {
   hearing: { sent: boolean }
   /** Every other speech setting the host carries, where it advertises them (ADR 0063). */
   stt?: SttSettings
+  /** Who hears this bot's takes, where the host answers it (ADR 0069). */
+  provider?: HeardBy
 }
 
 /** A host's level as one of the four, reading the default where it names none (ADR 0066). */
@@ -158,6 +168,7 @@ export function readSpeech(raw: unknown): SpeechSettings {
   // The rest of the `stt` section only where the host sends it: a plugin without the feature
   // leaves the field out rather than promising settings it never described (ADR 0063).
   const stt = readStt(speech.stt)
+  const provider = readHeardBy(speech.provider)
   return {
     model: typeof speech.model === "string" ? speech.model : "",
     models: Array.isArray(speech.models)
@@ -171,7 +182,28 @@ export function readSpeech(raw: unknown): SpeechSettings {
     },
     hearing: { sent: hearing.sent === true },
     ...(stt ? { stt } : {}),
+    ...(provider ? { provider } : {}),
   }
+}
+
+/** Who hears a take, where the host names them; a field the plugin doesn't send is left out. */
+export function readHeardBy(raw: unknown): HeardBy | undefined {
+  const row = (raw ?? {}) as Record<string, unknown>
+  if (typeof row.name !== "string" || !row.name) return undefined
+  return {
+    name: row.name,
+    backend: typeof row.backend === "string" ? row.backend : null,
+    cloud: row.cloud === true,
+  }
+}
+
+/** The Dictation tab's line under the speech model, where a take goes somewhere worth saying. */
+export function heardLine(provider: HeardBy | undefined): string | null {
+  if (!provider || !provider.name || provider.name === "none") return null
+  if (provider.cloud) return "A take is uploaded to this provider, not heard on this host."
+  if (provider.backend === "local_command")
+    return "This host's whisper CLI drops the Hearing prompt and Vocabulary."
+  return null
 }
 
 /** The model list with the size a pick is weighed on, in the units a download is read in. */

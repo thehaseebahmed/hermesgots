@@ -24,6 +24,7 @@ import { useSpeech } from "@/lib/host-speech"
 import { botModel, fullModel, useModelInfo } from "@/lib/model-info"
 import {
   CLEANUP_LEVEL_ROWS,
+  heardLine,
   levelName,
   marked,
   modelSize,
@@ -75,6 +76,7 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
   const [open, setOpen] = useState<SttSetting>()
   const models = settings ? modelsFor(settings, block) : []
   const otherProviders = block ? providerRows(block) : []
+  const heard = settings ? heardLine(settings.provider) : null
   // The Hearing prompt's value is the bot's, on the host, however many devices write it.
   const developer = useLiveQuery(async () => Boolean((await getSettings()).developer), [])
 
@@ -127,6 +129,19 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
           profile={profile}
           words={words}
         />
+      )}
+
+      {/* Where a take goes, where it isn't heard on this host (ADR 0069). */}
+      {settings && heard && (
+        <Group>
+          <ValueRow
+            title="Heard by"
+            purpose={heard}
+            value={providerLabel(settings.provider?.name ?? "")}
+            muted
+            data-setting="heard-by"
+          />
+        </Group>
       )}
 
       {block && otherProviders.length > 0 && (

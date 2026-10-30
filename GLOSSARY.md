@@ -456,7 +456,7 @@ One finished take as the log keeps it: the bot that heard it, when, how many wor
 _Avoid_: recording, transcript, entry, voice note
 
 **Heard**:
-The words a take's host speech model wrote down, before Cleanup: one text, its pieces joined in the order they were cut. A dictation keeps it beside the words that landed, and the two are the same text when the cleanup found nothing to change or never answered.
+The words a take's speech provider wrote down, before Cleanup: one text, its pieces joined in the order they were cut. A dictation keeps it beside the words that landed, and the two are the same text when the cleanup found nothing to change or never answered.
 _Avoid_: raw, raw transcript, uncorrected text, whisper output
 
 **Cleaned up**:
@@ -492,7 +492,7 @@ The one backend a bot's Hermes sends audio to. Until it is picked it is **Automa
 _Avoid_: STT backend, engine, speech service, voice provider
 
 **Heard on the host**:
-The path a bot's speech-to-text actually runs: the host's own model, whatever the speech provider says about voice notes elsewhere. Tuning under it is what a take honours.
+The path a bot's speech-to-text actually runs: the host's own model where its Hermes resolves `local` or `local_command`, and otherwise the cloud **Speech provider** its host picked — the same one its voice notes use. The app reads which from the host (`info.dictation.provider`), and the Dictation tab names the provider whenever a take leaves the host.
 _Avoid_: local mode, offline mode, on-device
 
 ## Settings

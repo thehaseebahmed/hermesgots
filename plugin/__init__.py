@@ -1883,8 +1883,14 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             {"object": "memento.attachment", "name": saved.name, "path": str(saved), "size": len(data)}
         )
 
-    # One clip at a time, so a long dictation can't starve the agent's turns of CPU.
-    dictating = asyncio.Lock()
+    # One take at a time per profile: a vendor upload can hold its slot for minutes.
+    dictating: Dict[str, "asyncio.Lock"] = {}
+
+    def dictating_lock(key: str) -> "asyncio.Lock":
+        lock = dictating.get(key)
+        if lock is None:
+            lock = dictating[key] = asyncio.Lock()
+        return lock
 
     async def dictate(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1900,11 +1906,14 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "The recording is too long.", 413)
         # A bot whose Hearing prompt is not sent decodes from the audio alone: `transcribe` composes
         # no prompt on that flag, so what the query carries costs nothing (ADR 0067).
-        hearing = await asyncio.to_thread(_hearing_prompt, store_path())
+        path = store_path()
+        hearing = await asyncio.to_thread(_hearing_prompt, path)
         hint = dictation.clean_hint(request.query.get("hint"))
         context = dictation.clean_context(request.query.get("context"))
         vocabulary = dictation.clean_vocabulary(request.query.getall("vocabulary", []))
-        async with dictating:
+        first = request.query.get("first") == "1"
+        last = request.query.get("last") == "1"
+        async with dictating_lock(str(path)):
             try:
                 result = await asyncio.to_thread(
                     dictation.transcribe,
@@ -1914,6 +1923,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     context,
                     vocabulary,
                     hearing=hearing,
+                    first=first,
+                    last=last,
+                    profile=path,
                 )
             except dictation.DictationError as error:
                 return _error(web, str(error), error.status)

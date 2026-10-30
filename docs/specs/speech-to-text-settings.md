@@ -160,7 +160,9 @@ provider's own page, whose **Done** returns to the page. Those pages hold:
 - Hermes's own text-to-speech section (`tts.*`), and the `voice` section above it.
 - The cleanup model and Vocabulary, which stay exactly as they are (ADR 0036, ADR 0060).
 - Any change in `hermes-agent`: the read uses what the host already declares.
-- Cloud trim's effect on Gots's own takes: a take is never uploaded to a cloud provider.
+- Cloud trim's effect on Gots's own takes is the host's own business: a take is heard by whichever
+  provider the host resolves, and Hermes trims and chunks it there (ADR 0069). The page draws the
+  provider's settings; it never applies them.
 
 ## Further Notes
 

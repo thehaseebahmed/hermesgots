@@ -554,3 +554,32 @@ test("a host too old to take a level offers the cleanup model alone", async () =
     assert.equal(row("cleanup-level"), null, "and no level the host would refuse to store")
   })
 })
+
+test("a host that hears takes elsewhere says where, in the provider's own name", async () => {
+  await seed(
+    "heard-by-vendor",
+    ["dictation", "speech_model"],
+    {},
+    { speech: speech({ provider: { name: "groq", backend: null, cloud: true } }) },
+  )
+  await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    await until(async () => Boolean(row("heard-by")), "the row naming who hears a take")
+    const drawn = lines(row("heard-by"))
+    assert.equal(drawn[0], "Heard by", "the row names what it is about")
+    assert.match(drawn.join(" "), /uploaded to this provider/, "and that the take goes off the host")
+    assert.equal(drawn.at(-1), "Groq", "with the provider the host resolves as its value")
+  })
+})
+
+test("a host hearing takes on its own model draws no line about it", async () => {
+  await seed(
+    "heard-by-local",
+    ["dictation", "speech_model"],
+    {},
+    { speech: speech({ provider: { name: "local", backend: "local", cloud: false } }) },
+  )
+  await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    await until(async () => Boolean(row("speech-model")), "the model row the page always draws")
+    assert.equal(row("heard-by"), null, "the model row already says where takes are heard")
+  })
+})

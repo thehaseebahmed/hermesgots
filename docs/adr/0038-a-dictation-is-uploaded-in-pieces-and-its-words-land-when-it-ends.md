@@ -5,8 +5,11 @@
 [ADR 0067](0067-the-decoder-may-be-spared-its-prompt-and-the-bot-decides.md):** a cleanup now runs at
 one of four levels a bot picks, so an answer that compresses the words is no longer discarded by
 being a rewrite; and the decode may be given no prompt at all, in which case the vocabulary reaches
-the cleanup alone. Everything else this ADR decided — pieces cut at pauses, no words on the bar, one
-text landed at the ending, the bounded waits — stands.
+the cleanup alone. **And in its local-only clause by
+[ADR 0069](0069-a-take-is-heard-by-whatever-provider-its-host-resolves.md):** a take is heard by
+whichever provider the host resolves, so a cloud provider holds its pieces and uploads them once.
+Everything else this ADR decided — pieces cut at pauses, no words on the bar, one text landed at the
+ending, the bounded waits — stands.
 
 A dictation shows no words while the user talks. The recording is cut into pieces at pauses, each
 piece is transcribed by the bot's host while the rest is still being spoken, and the whole text lands
