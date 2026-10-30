@@ -116,7 +116,9 @@ reticle verify http://127.0.0.1:15173 --expect '{"kind":"text","contains":"Gots"
 ```
 
 There is no display server in the container, so Reticle drives the headless shell that ships with
-the Chromium the image installs; `reticle doctor` names the browser it will use.
+the Chromium the image installs; `reticle doctor` names the browser it will use. The Reticle skill in
+`.agents/skills/reticle/` carries the whole workflow — what to run, the predicate kinds, and what a
+verdict does and does not prove.
 
 ---
 
