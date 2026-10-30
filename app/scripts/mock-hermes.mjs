@@ -3889,16 +3889,9 @@ http
                 reason:
                   "No speech provider on this host can hear a take. Install faster-whisper, or set a provider's key.",
                 model: "base",
-                provider: "none",
-                cloud: false,
+                provider: { name: "none", backend: null, cloud: false },
               }
-            : {
-                ready: true,
-                model: "base",
-                language: "en",
-                provider: heardBy().name,
-                cloud: heardBy().cloud,
-              },
+            : { ready: true, model: "base", language: "en", provider: heardBy() },
       })
     }
     if (

@@ -168,7 +168,7 @@ export function readSpeech(raw: unknown): SpeechSettings {
   // The rest of the `stt` section only where the host sends it: a plugin without the feature
   // leaves the field out rather than promising settings it never described (ADR 0063).
   const stt = readStt(speech.stt)
-  const provider = heardBy(speech.provider)
+  const provider = readHeardBy(speech.provider)
   return {
     model: typeof speech.model === "string" ? speech.model : "",
     models: Array.isArray(speech.models)
@@ -187,7 +187,7 @@ export function readSpeech(raw: unknown): SpeechSettings {
 }
 
 /** Who hears a take, where the host names them; a field the plugin doesn't send is left out. */
-function heardBy(raw: unknown): HeardBy | undefined {
+export function readHeardBy(raw: unknown): HeardBy | undefined {
   const row = (raw ?? {}) as Record<string, unknown>
   if (typeof row.name !== "string" || !row.name) return undefined
   return {

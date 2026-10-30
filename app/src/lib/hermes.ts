@@ -1,6 +1,6 @@
 import { connectionKey } from "@/lib/connection"
 import { heardOf } from "@/lib/dictation-log"
-import type { SpeechPatch } from "@/lib/speech"
+import { readHeardBy, type HeardBy, type SpeechPatch } from "@/lib/speech"
 import { pluginRoot, serverRoot } from "@/lib/host-url"
 import { READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
 import type {
@@ -2630,10 +2630,8 @@ export interface DictationInfo {
   /** Why it can't: nobody to hear a take, speech-to-text turned off, or a plugin from before dictation. */
   reason: string | null
   model?: string
-  /** The provider Hermes resolves: `local`, `local_command`, a cloud provider's name, or `none`. */
-  provider?: string
-  /** Whether a take leaves the host, which decides the warm-up and the line the page draws. */
-  cloud?: boolean
+  /** Who hears this bot's takes, where the host answers it — the same shape `GET speech` carries. */
+  provider?: HeardBy
 }
 
 export async function getDictationInfo(config: HermesConfig): Promise<DictationInfo> {
@@ -2648,8 +2646,7 @@ export async function getDictationInfo(config: HermesConfig): Promise<DictationI
     ready: Boolean(raw.ready),
     reason: typeof raw.reason === "string" ? raw.reason : null,
     model: typeof raw.model === "string" ? raw.model : undefined,
-    provider: typeof raw.provider === "string" ? raw.provider : undefined,
-    cloud: raw.cloud === true,
+    provider: readHeardBy(raw.provider),
   }
 }
 
@@ -2662,23 +2659,34 @@ export async function warmDictation(config: HermesConfig) {
 }
 
 /**
- * A recorded clip's text, `""` when nobody spoke. `vocabulary` is the bot's own words (its
- * Dictation tab), sent as one repeated query param each, so a decode spells a name the way the bot
- * spells it; a plugin that doesn't know the param ignores it.
+ * A recorded clip, and the take it belongs to: `vocabulary` is the bot's own words (its Dictation
+ * tab), sent as one repeated query param each; `context` is the text heard before this clip.
  *
  * `first` and `last` delimit a take: a host hearing it on a cloud provider holds the pieces from
  * the first and uploads the whole take on the last, answering `""` to every piece in between and
  * dropping anything still held when a new take begins (ADR 0069). A local host ignores both.
  */
+export interface ClipOptions {
+  hint?: string
+  context?: string
+  vocabulary?: string[]
+  signal?: AbortSignal
+  first?: boolean
+  last?: boolean
+}
+
+/** A recorded clip's text, `""` when nobody spoke. */
 export async function transcribeClip(
   config: HermesConfig,
   clip: Blob,
-  hint: string,
-  context: string,
-  vocabulary: string[] = [],
-  signal?: AbortSignal,
-  last = false,
-  first = false,
+  {
+    hint = "",
+    context = "",
+    vocabulary = [],
+    signal,
+    first = false,
+    last = false,
+  }: ClipOptions = {},
 ) {
   const query = new URLSearchParams()
   if (hint) query.set("hint", hint)

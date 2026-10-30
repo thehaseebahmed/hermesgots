@@ -62,8 +62,7 @@ class InfoTest(unittest.TestCase):
                     "ready": True,
                     "model": "small",
                     "language": "en",
-                    "provider": "local",
-                    "cloud": False,
+                    "provider": {"name": "local", "backend": "local", "cloud": False},
                 },
             )
 
@@ -72,7 +71,8 @@ class InfoTest(unittest.TestCase):
         with patch:
             state = dictation.info()
         self.assertTrue(state["ready"])
-        self.assertEqual((state["provider"], state["cloud"]), ("groq", True))
+        self.assertEqual(state["provider"]["name"], "groq")
+        self.assertTrue(state["provider"]["cloud"])
 
     def test_a_host_with_nobody_to_hear_it_says_what_to_fix(self) -> None:
         _, patch = hermes(_get_provider=lambda cfg: "none")
@@ -81,6 +81,7 @@ class InfoTest(unittest.TestCase):
         self.assertFalse(state["ready"])
         self.assertEqual(state["reason"], dictation.NO_PROVIDER)
         self.assertIn("faster-whisper", state["reason"])
+        self.assertEqual(state["provider"]["name"], "none")
 
     def test_a_host_whose_hermes_has_no_provider_resolver_falls_back_to_faster_whisper(self) -> None:
         tt, patch = hermes()
@@ -145,13 +146,13 @@ class HeardByTest(unittest.TestCase):
                 {"name": "none", "backend": None, "cloud": False},
             )
 
-    def test_a_raising_resolver_answers_nothing_rather_than_crashing(self) -> None:
+    def test_a_raising_resolver_falls_back_to_the_package_check(self) -> None:
         def boom(cfg):
             raise RuntimeError("no config")
 
         tt, patch = hermes(_get_provider=boom)
         with patch:
-            self.assertEqual(dictation.heard_by(tt, {})["name"], "")
+            self.assertEqual(dictation.heard_by(tt, {})["name"], "local")
 
 
 class HearingPromptTest(unittest.TestCase):

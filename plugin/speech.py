@@ -260,7 +260,8 @@ KEY_ENV = {
     "deepinfra": "DEEPINFRA_API_KEY",
 }
 TURNED_OFF = "Speech-to-text is turned off on this host."
-NOTHING_USABLE = "No speech provider on this host can hear a take."
+# One sentence for one host state, wherever it is read: the mic's reason and this page's note.
+NOTHING_USABLE = dictation.NO_PROVIDER
 
 
 def _defaults() -> Dict[str, Any]:
@@ -349,18 +350,15 @@ def _on(section: Dict[str, Any]) -> bool:
 
 
 def _resolved(section: Dict[str, Any]) -> Dict[str, Optional[str]]:
-    """Which provider Hermes would use, and — where it can use none — its reason in plain words."""
-    try:
-        from tools.transcription_tools import _get_provider
-    except Exception:
-        logger.debug("memento: no provider resolver on this host", exc_info=True)
+    """Which provider Hermes would use, and — where it can use none — its reason in plain words.
+
+    The answer is ``dictation``'s, since that is what hears a take; this only adds the sentence the
+    page draws under a provider row that can't work.
+    """
+    name = dictation.provider_name(section)
+    if not name:
         return {"name": "", "reason": None}
-    try:
-        name = str(_get_provider(dict(section)) or "")
-    except Exception as error:
-        logger.debug("memento: couldn't resolve a speech provider", exc_info=True)
-        return {"name": "none", "reason": str(error) or NOTHING_USABLE}
-    if name and name != "none":
+    if name != "none":
         return {"name": name, "reason": None}
     return {"name": "none", "reason": NOTHING_USABLE if _on(section) else TURNED_OFF}
 
