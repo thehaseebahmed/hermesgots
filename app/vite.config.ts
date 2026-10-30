@@ -1,5 +1,6 @@
 import { execSync } from "node:child_process"
 import path from "node:path"
+import { reticle } from "@reticlehq/vite-plugin"
 import tailwindcss from "@tailwindcss/vite"
 import react from "@vitejs/plugin-react"
 import { defineConfig } from "vite"
@@ -25,6 +26,9 @@ export default defineConfig(({ mode }) => ({
     __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
   },
   plugins: [
+    // Dev-only: the Reticle verification SDK's build plugin (see the Dockerfile). It stamps source
+    // locations and injects the connect call while the dev server runs, and is inert in a build.
+    reticle(),
     react(),
     tailwindcss(),
     VitePWA({

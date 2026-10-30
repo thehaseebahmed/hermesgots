@@ -28,3 +28,8 @@ dist-ssr
 # Python
 __pycache__
 .astro
+
+# Reticle (see the Dockerfile): the daemon writes session state here, and `reticle init` writes the
+# pairing token beside it. Both are local, both change on every run.
+.reticle
+reticle.local.js

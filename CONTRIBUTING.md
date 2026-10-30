@@ -74,7 +74,7 @@ Under plain `pnpm dev`, the Sync card stays hidden and sign-in is not required.
 
 ## Development Container
 
-A Docker container image (`ghcr.io/thehaseebahmed/gots-dev:latest`) is available with all required toolchains (Node 22, pnpm 10, Python 3.13, headless Chromium):
+A Docker container image (`ghcr.io/thehaseebahmed/gots-dev:latest`) is available with all required toolchains (Node 22, pnpm 10, Python 3.13, headless Chromium, and the [Reticle](https://reticle.sh) verification CLI):
 
 ```bash
 docker pull ghcr.io/thehaseebahmed/gots-dev:latest
@@ -104,6 +104,19 @@ docker run --rm -v "$PWD:/workspace" -w /workspace gots-dev sh -lc '
   until curl -sf http://127.0.0.1:15173 >/dev/null; do sleep 0.5; done
   pnpm e2e chat-message --app http://127.0.0.1:15173'
 ```
+
+To verify a change against the running app with Reticle, start its daemon in one shell and ask it a
+question from another. The app carries `@reticlehq/vite-plugin`, so the page connects by itself:
+
+```bash
+# shell 1: the daemon owns :4400 and opens the app in a browser it drives
+reticle serve --port 4400 --drive http://127.0.0.1:15173
+# shell 2: a predicate answered against the running app; exit 0 means it held
+reticle verify http://127.0.0.1:15173 --expect '{"kind":"text","contains":"Gots"}'
+```
+
+There is no display server in the container, so the image points `RETICLE_CHROMIUM_PATH` at the
+headless shell the e2e flows already installed; `reticle doctor` reports it as the browser in use.
 
 ---
 
