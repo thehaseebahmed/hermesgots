@@ -321,55 +321,73 @@ test("a plan waiting is approved from its card: the mode moves and the plan's ru
   })
 })
 
-/** Whether an element reads in the chat's face, from itself or any ancestor. */
-const inChatFace = (element: Element | null, what: string) => {
+/** Whether an element reads in the code face, from itself or any ancestor. */
+const inCodeFace = (element: Element | null, what: string) => {
   assert.ok(element, `${what} is on screen`)
   return Boolean(element.closest(".font-code"))
 }
 
-for (const [name, project] of [
-  ["a code session", true],
-  ["a plain chat", false],
-] as const) {
-  test(`${name} reads what is said in it in JetBrains Mono, and none of the chrome`, async () => {
-    const id = project ? "c-mono" : "c-mono-chat"
-    const host = project ? await sessionOnChatNext(id) : (await onChatNext(id)).host
-    host.seed([{ user: "Look around", reply: "Found it.", tools: 1 }])
-    await mount(chatScreen(id), async () => {
-      await until(() => replies().length > 0, "the turn is drawn")
-      const pane = find("[data-chat-next]")
-      assert.equal(pane?.classList.contains("font-code"), false, "the pane is not in the face")
-      assert.equal(inChatFace(find('[data-slot="header-row"]'), "the header"), false, "the header")
-      assert.ok(inChatFace(composerField(), "the composer"), "the composer's text")
-      assert.ok(
-        inChatFace(find('[data-chat-next] [data-slot="bubble-content"]'), "the user's bubble"),
-        "the user's bubble",
-      )
-      assert.ok(
-        inChatFace(find('[data-chat-next] [data-slot="markdown"]'), "the reply"),
-        "the reply's words",
-      )
-      const row = find('[data-chat-next] [data-slot="tool-group"]')
-      assert.ok(row?.querySelector(".font-code"), "the tool call's row label")
+test("a code session reads what is said in it in JetBrains Mono, and none of the chrome", async () => {
+  const host = await sessionOnChatNext("c-mono")
+  host.seed([{ user: "Look around", reply: "Found it.", tools: 1 }])
+  await mount(chatScreen("c-mono"), async () => {
+    await until(() => replies().length > 0, "the turn is drawn")
+    const pane = find("[data-chat-next]")
+    assert.equal(pane?.classList.contains("font-code"), false, "the pane is not in the face")
+    assert.equal(inCodeFace(find('[data-slot="header-row"]'), "the header"), false, "the header")
+    assert.ok(inCodeFace(composerField(), "the composer"), "the composer's text")
+    assert.ok(
+      inCodeFace(find('[data-chat-next] [data-slot="bubble-content"]'), "the user's bubble"),
+      "the user's bubble",
+    )
+    assert.ok(
+      inCodeFace(find('[data-chat-next] [data-slot="markdown"]'), "the reply"),
+      "the reply's words",
+    )
+    const row = find('[data-chat-next] [data-slot="tool-group"]')
+    assert.ok(row?.querySelector(".font-code"), "the tool call's row label")
 
-      await click(row)
-      assert.equal(
-        inChatFace(find('[data-slot="sheet-title"]'), "the sheet's heading"),
-        false,
-        "the sheet's heading",
-      )
-      const call = findAll("ol button")[0] ?? null
-      assert.ok(inChatFace(call, "the call"), "the call in the sheet's list")
-      await click(call)
-      assert.ok(inChatFace(find("pre"), "the call's output"), "the call's input or output")
-      assert.equal(
-        inChatFace(find('[data-slot="sheet-title"]'), "the sheet's heading"),
-        false,
-        "the detail's heading",
-      )
-    })
+    await click(row)
+    assert.equal(
+      inCodeFace(find('[data-slot="sheet-title"]'), "the sheet's heading"),
+      false,
+      "the sheet's heading",
+    )
+    const call = findAll("ol button")[0] ?? null
+    assert.ok(inCodeFace(call, "the call"), "the call in the sheet's list")
+    await click(call)
+    assert.ok(inCodeFace(find("pre"), "the call's output"), "the call's input or output")
+    assert.equal(
+      inCodeFace(find('[data-slot="sheet-title"]'), "the sheet's heading"),
+      false,
+      "the detail's heading",
+    )
   })
-}
+})
+
+test("a chat with a bot keeps the app's face, except a tool call's input and output", async () => {
+  const { host } = await onChatNext("c-sans")
+  host.seed([{ user: "Look around", reply: "Found it.", tools: 1 }])
+  await mount(chatScreen("c-sans"), async () => {
+    await until(() => replies().length > 0, "the turn is drawn")
+    assert.equal(inCodeFace(composerField(), "the composer"), false, "the composer")
+    assert.equal(
+      inCodeFace(find('[data-chat-next] [data-slot="bubble-content"]'), "the user's bubble"),
+      false,
+      "the user's bubble",
+    )
+    assert.equal(
+      inCodeFace(find('[data-chat-next] [data-slot="markdown"]'), "the reply"),
+      false,
+      "the reply's words",
+    )
+    const row = find('[data-chat-next] [data-slot="tool-group"]')
+    assert.equal(row?.querySelector(".font-code") ?? null, null, "the tool call's row label")
+    await click(row)
+    await click(findAll("ol button")[0] ?? null)
+    assert.ok(inCodeFace(find("pre"), "the call's output"), "the call's input or output")
+  })
+})
 
 test("a delegation draws as the app's agent card, which follows its child to done", async () => {
   const { host } = await onChatNext("c-agents", {}, { plugin: true })

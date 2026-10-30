@@ -518,11 +518,14 @@ export function AppChatNextThread({
   chatId,
   main,
   blank,
+  code,
   ...props
 }: ComponentProps<typeof ChatNextThread> & {
   chatId: string
   main?: MainView
   blank?: BlankView
+  /** A code session: what is said in it reads in the code face. */
+  code?: boolean
 }) {
   // Held by its fields, so a parent's render that changes nothing about Main draws nothing again.
   const mainKey = main ? JSON.stringify(main) : ""
@@ -536,7 +539,7 @@ export function AppChatNextThread({
     [chatId, mainKey, blankKey],
   )
   return (
-    <CodeFaceProvider value={CHAT_FACE}>
+    <CodeFaceProvider value={code ? CHAT_FACE : undefined}>
       <ChatOf.Provider value={chat}>
         <ChatNextThread {...props} View={AppThreadView} Prompt={AppPrompt} />
       </ChatOf.Provider>

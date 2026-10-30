@@ -461,6 +461,7 @@ function NextChat({
               <ChatNextThread
                 key={chat.hermesSessionId}
                 chatId={id}
+                code={Boolean(chat.projectId)}
                 blank={unstarted ? { botId: bot.botId, repos: sessionRepos } : undefined}
                 main={
                   mainOn
@@ -1605,7 +1606,7 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   })
 
   return (
-    <CodeFaceProvider value={CHAT_FACE}>
+    <CodeFaceProvider value={session ? CHAT_FACE : undefined}>
       <div
         data-slot="chat-pane"
         data-pane={slot}

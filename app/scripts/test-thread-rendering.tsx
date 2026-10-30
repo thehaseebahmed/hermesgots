@@ -10,7 +10,6 @@ import { MemoryRouter, Route, Routes } from "react-router"
 import { useState } from "react"
 
 import { AgentCards, AgentPopup } from "@/components/chat/agent-card"
-import { CHAT_FACE, CodeFaceProvider } from "@/components/chat/code-face"
 import { AgentsContext } from "@/lib/agents"
 import { DELEGATE_TOOL } from "@/lib/spawn"
 import { db, type Message, type Profile, type Settings } from "@/lib/db"
@@ -149,7 +148,14 @@ test("a chat and a coding session draw one thread", async () => {
     session = drawn()
   })
   assert.equal(chat.length, 2, "the chat draws both turns")
-  assert.deepEqual(session, chat, "and the session's thread is the same markup, not a variant")
+  // The session reads in the code face, which is the one thing it draws differently.
+  const faceless = (html: string) =>
+    html.replace(/ ?\bfont-(code|mono)\b/g, "").replaceAll('class=" ', 'class="')
+  assert.deepEqual(
+    session.map(faceless),
+    chat.map(faceless),
+    "and the session's thread is the same markup, not a variant",
+  )
 })
 
 test("the agent's reply sits on the page, with no bubble and no picture", async () => {
@@ -304,20 +310,18 @@ test("a delegated agent's sub-thread draws the same thread", async () => {
     chat = drawn()
   })
   await mount(
-    <CodeFaceProvider value={CHAT_FACE}>
-      <Opening
-        tool={tool}
-        agent={{
-          id: "agent-1",
-          goal,
-          model: "test/model",
-          startedAt: 1,
-          endedAt: 2,
-          toolCalls: 1,
-          status: "done",
-        }}
-      />
-    </CodeFaceProvider>,
+    <Opening
+      tool={tool}
+      agent={{
+        id: "agent-1",
+        goal,
+        model: "test/model",
+        startedAt: 1,
+        endedAt: 2,
+        toolCalls: 1,
+        status: "done",
+      }}
+    />,
     async () => {
       const card = document.querySelector("button")
       assert.ok(card, "the delegation is a card in the thread")
