@@ -199,7 +199,12 @@ export const FLOWS = {
   "file-message": {
     script: "e2e/file-message.mjs",
     about:
-      "A message sent with a file and a photo draws the photo in the Gallery and the file as a row, and a tap on that row downloads the file under its own name",
+      "A message sent with a note, an archive and a photo draws the photo in the Gallery and the files as rows, a tap on the photo opens the app's Previewer, and a tap on a row opens a new tab — showing the note and saving the archive under its own name",
+  },
+  "media-clip": {
+    script: "e2e/media-clip.mjs",
+    about:
+      "A clip sent on a message draws a cell with the browser's own first frame, and a tap opens the app's Previewer on a player that starts paused, plays and seeks",
   },
   todos: {
     script: "e2e/todos.mjs",
