@@ -43,6 +43,7 @@ import {
   type TurnUsage,
 } from "@/lib/hermes"
 import { attachmentsText, splitAttachments } from "@/lib/attachment-text"
+import { isProgressReminder } from "@/lib/progress-reminder"
 import { measureReply } from "@/lib/reply-stats"
 import { wireContent } from "@/lib/attachments"
 import { refreshContext } from "@/lib/context"
@@ -301,7 +302,7 @@ function raiseApproval(turn: Turn, event: ApprovalRequestEvent) {
   touch()
 }
 
-function streamHandlers(turn: Turn): StreamHandlers {
+export function streamHandlers(turn: Turn): StreamHandlers {
   const { draft, touch } = turn
   const watchedHere = !turn.resumed
   const started = () => {
@@ -344,6 +345,18 @@ function streamHandlers(turn: Turn): StreamHandlers {
       const existing = event.toolCallId
         ? draft.tools.find((t) => t.toolCallId === event.toolCallId)
         : draft.tools.find((t) => t.status === "running" && t.tool === event.tool)
+      // A run's `tool.completed` carries no call id (`hermes.ts`), so the refusal is matched the way
+      // every completion is: by id, else the oldest running call of its tool.
+      if (event.status !== "running" && isProgressReminder(event.result)) {
+        if (!existing) return
+        const at = draft.tools.indexOf(existing)
+        const previous = draft.tools[at - 1]?.toolCallId
+        draft.tools = draft.tools.filter((t) => t !== existing)
+        // The thinking that follows belongs to the call before this one, as the settled fold places it.
+        if (anchor === existing.toolCallId) anchor = previous
+        touch()
+        return
+      }
       if (existing) {
         existing.status = event.status
         if (event.status !== "running") existing.endedAt = Date.now()

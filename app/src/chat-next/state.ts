@@ -1,5 +1,6 @@
 import { clarifyAnswered, type ClarifyResponse } from "@/lib/clarify"
 import type { LiveTurn, MessageStats } from "@/lib/db"
+import { isProgressReminder } from "@/lib/progress-reminder"
 import { measureReply } from "@/lib/reply-stats"
 
 import type { Agent } from "./agents"
@@ -96,6 +97,27 @@ export type ThreadEvent =
   | { type: "failed"; error: string }
 
 export const initial: ThreadState = { status: "loading", rows: [], running: false }
+
+/** A call the thread should not hold any more: a run of calls that empties goes with it. */
+function dropCall(turn: Turn, pick: (call: ToolCall) => boolean): Turn {
+  let changed = false
+  const parts: Part[] = []
+  for (const part of turn.parts) {
+    if (part.kind !== "tools") {
+      parts.push(part)
+      continue
+    }
+    const at = part.calls.findLastIndex(pick)
+    if (at === -1) {
+      parts.push(part)
+      continue
+    }
+    changed = true
+    const calls = part.calls.filter((_, index) => index !== at)
+    if (calls.length) parts.push({ ...part, calls })
+  }
+  return changed ? { ...turn, parts } : turn
+}
 
 /**
  * The turn with one call replaced — the first, or the last, the predicate picks — and the part it
@@ -228,7 +250,15 @@ function live(turn: Turn, event: RunEvent, now?: number): Turn {
       return { ...rest, parts: [...parts.slice(0, -1), { ...last, calls: [...last.calls, call] }] }
     return { ...rest, parts: [...parts, { kind: "tools", calls: [call] }] }
   }
-  if (event.event === "tool.completed" && event.tool_call_id) {
+  if (event.event === "tool.completed" && (event.tool_call_id || event.tool)) {
+    // A call the progress reminder refused never ran: the note its result carries is the host
+    // talking to the model, so the card goes rather than spending the run showing machinery
+    // (`progress-reminder.ts`, ADR 0068). Matched by id, else the newest call of that tool.
+    if (isProgressReminder(event.preview))
+      return dropCall(turn, (one) =>
+        event.tool_call_id ? one.id === event.tool_call_id : one.name === event.tool,
+      )
+    if (!event.tool_call_id) return turn
     // A completion says only that the call ended: its preview is empty on the served turn, so the
     // result an answer already wrote is kept rather than emptied — what `chat.ts`'s `onTool` guards
     // too. A preview that says something is the host's own result and wins.

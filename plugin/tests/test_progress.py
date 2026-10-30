@@ -58,11 +58,24 @@ class ProgressTest(unittest.TestCase):
         self.assertEqual(self.calls(progress.CALLS_BETWEEN["normal"]), [None] * progress.CALLS_BETWEEN["normal"])
         self.assertIsNotNone(self.call())
 
-    def test_a_frequent_bot_is_asked_sooner(self) -> None:
-        self.at("frequent")
-        sooner = progress.CALLS_BETWEEN["frequent"]
+    def test_a_chatty_bot_is_asked_sooner(self) -> None:
+        self.at("chatty")
+        sooner = progress.CALLS_BETWEEN["chatty"]
         self.assertEqual(self.calls(sooner), [None] * sooner)
         self.assertIsNotNone(self.call())
+
+    def test_a_quiet_bot_is_asked_later(self) -> None:
+        self.at("quiet")
+        later = progress.CALLS_BETWEEN["quiet"]
+        self.assertEqual(self.calls(later), [None] * later)
+        self.assertIsNotNone(self.call())
+
+    def test_the_four_levels_ask_at_the_counts_they_name(self) -> None:
+        self.assertEqual(
+            progress.CALLS_BETWEEN, {"off": None, "quiet": 50, "normal": 25, "chatty": 10}
+        )
+        self.assertEqual(progress.LEVELS, ("off", "quiet", "normal", "chatty"))
+        self.assertEqual(progress.DEFAULT_LEVEL, "normal")
 
     def test_an_off_bot_is_never_asked(self) -> None:
         self.at("off")
@@ -78,12 +91,27 @@ class ProgressTest(unittest.TestCase):
         self.assertIsNotNone(self.call())
 
     def test_a_level_changed_mid_stretch_lands_on_the_next_call(self) -> None:
-        # Frequent asks after fewer calls than the stretch has already run.
-        self.calls(progress.CALLS_BETWEEN["frequent"])
-        self.at("frequent")
+        # Chatty asks after fewer calls than the stretch has already run.
+        self.calls(progress.CALLS_BETWEEN["chatty"])
+        self.at("chatty")
         self.assertIsNotNone(self.call())
+        self.at("quiet")
+        self.assertIsNone(self.call())
         self.at("off")
         self.assertIsNone(self.call())
+
+    def test_a_store_from_before_the_four_names_reads_as_chatty(self) -> None:
+        # The same ten calls, so a bot that chose Frequent goes on behaving exactly as it did.
+        put_setting(self.store, progress.LEVEL_KEY, "frequent")
+        self.assertEqual(progress.level(self.store), "chatty")
+        self.calls(progress.CALLS_BETWEEN["chatty"])
+        self.assertIsNotNone(self.call())
+
+    def test_a_level_an_older_app_sends_is_stored_as_chatty(self) -> None:
+        # A second device on a cached build still sends the old name: the same ten calls, so it is
+        # accepted and written under the name this host holds rather than refused mid-update.
+        self.assertEqual(progress.set_level(self.store, "frequent"), "chatty")
+        self.assertEqual(progress.level(self.store), "chatty")
 
     def test_a_value_the_host_does_not_know_reads_as_normal(self) -> None:
         put_setting(self.store, progress.LEVEL_KEY, "loud")
@@ -108,13 +136,13 @@ class ProgressTest(unittest.TestCase):
     def test_two_bots_keep_their_own(self) -> None:
         other = temp_hermes_home(self)
         self.at("off")
-        progress.set_level(db_path(other), "frequent")
+        progress.set_level(db_path(other), "chatty")
         self.assertEqual(progress.level(self.store), "off")
-        self.assertEqual(progress.level(db_path(other)), "frequent")
+        self.assertEqual(progress.level(db_path(other)), "chatty")
 
     def test_the_record_names_the_level(self) -> None:
         self.assertEqual(
-            progress.record("frequent"), {"object": progress.OBJECT, "level": "frequent"}
+            progress.record("chatty"), {"object": progress.OBJECT, "level": "chatty"}
         )
 
     # The count ------------------------------------------------------------
@@ -125,6 +153,26 @@ class ProgressTest(unittest.TestCase):
         self.assertEqual(blocked["action"], "block")
         self.assertIn("update", blocked["message"])
         self.assertNotIn(str(progress.CALLS_BETWEEN["normal"]), blocked["message"])
+
+    def test_the_reminder_also_asks_for_the_todo_list(self) -> None:
+        # The list is the one thing the user reads mid-run, and a long silent stretch is when it
+        # drifts. The ask names no tool: the todo tool has two spellings (`todo_list`, `todo`), and
+        # the prompt's own rule states it the same way, so a bot on either finds it.
+        self.assertIn("todo list up to date", progress.REMINDER)
+        self.assertIn("where the plan has moved", progress.REMINDER)
+        self.assertNotIn("todo_list", progress.REMINDER)
+
+    def test_the_reminder_says_it_is_internal(self) -> None:
+        # The note is the host talking to the model, so the model is told not to mention it: a bot
+        # that announces "I was asked to update you" hands the reader the machinery, not the work.
+        self.assertIn("internal", progress.REMINDER)
+        self.assertIn("don't mention it", progress.REMINDER)
+
+    def test_the_reminder_opens_with_the_pinned_header(self) -> None:
+        # The app recognises the call it lands on by this opening and draws nothing for it, so the
+        # header is a shape the plugin owns: one line, colon after it, the app's reader matching it.
+        self.assertTrue(progress.REMINDER.startswith(f"{progress.REMINDER_HEADER}:"))
+        self.assertNotIn("\n", progress.REMINDER)
 
     def test_a_model_ignoring_the_reminder_gets_its_tool_back(self) -> None:
         self.calls(progress.CALLS_BETWEEN["normal"])

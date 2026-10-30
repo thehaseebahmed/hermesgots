@@ -3231,6 +3231,9 @@ const ROOT_RUN_IDS = process.env.MOCK_RUNS_LIVE_ROOT_IDS !== "0"
 const pushSubscriptions = new Map()
 // The main model the plugin's `model` route set, per profile ("" is the default one).
 const hostModels = new Map()
+const REMINDER_LEVELS = ["off", "quiet", "normal", "chatty"]
+const LEGACY_REMINDER_LEVELS = { frequent: "chatty" }
+const reminderLevels = new Map()
 // What the host runs when a turn asks for no model: the one picked for this profile, else the model
 // its endpoint is configured with. The plugin's hook records a call either way, so a chat whose turns
 // were never picked for still has rows to read.
@@ -3822,6 +3825,7 @@ http
           ...(SKILLS ? ["skills", "skills_write", "skills_remove", "skills_view"] : []),
           "queue",
           "failed_turn_clear",
+          "progress_reminders",
           "dictation",
           ...(DICTATIONS ? ["dictations"] : []),
           "speech_model",
@@ -4359,6 +4363,22 @@ http
         object: "memento.host_model",
         provider: provider.trim(),
         model: model.trim(),
+      })
+    }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/reminders") {
+      const key = pluginProfile ?? ""
+      if (req.method === "POST") {
+        const { level } = await readBody(req)
+        const held = LEGACY_REMINDER_LEVELS[level] ?? level
+        if (!REMINDER_LEVELS.includes(held))
+          return json(res, 400, {
+            error: { message: `level must be one of ${REMINDER_LEVELS.join(", ")}` },
+          })
+        reminderLevels.set(key, held)
+      }
+      return json(res, 200, {
+        object: "memento.progress_reminders",
+        level: reminderLevels.get(key) ?? "normal",
       })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/fallbacks") {

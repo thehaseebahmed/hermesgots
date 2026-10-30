@@ -2346,3 +2346,30 @@ the speech settings, so it cannot read the level it is racing against.
   side is missed.
 - Suggested fix: let the host state its own bound — a `cleanup.deadline_ms` on the speech record, or
   on the cleanup's answer — and derive both waits from it.
+
+# Deferred: one chat-next test flakes, and the invariant behind it is unenforced
+
+`app/scripts/test-chat-next-older.tsx`'s "a thread left unfinished picks up where it stopped, from the
+rows the device holds" fails about one run in four or five, on `assert.equal(await
+database.sessionRows.count(), 2 * PAGE, "it was not written for nobody")`: 180 rows land where the page
+already written is 100. It is not this branch's: with `app/src/chat-next/fold.ts` and
+`app/src/chat-next/state.ts` checked back out from the merge-base it still failed, 1 run in 5, and
+neither that test file nor `chat-next/page.tsx` is touched here. It reds the app's gates on whichever PR
+runs first, and a re-run clears it.
+
+## Risky
+
+### 1. Nothing decides whether a page that lands as the device closes is written
+
+- What is known: the walk is `page.tsx`'s `readOlder` loop, which stops when `olderRun.current` moves —
+  `stopOlder` bumps it, and the device's unmount calls it beside `alive.current.abort()`. Yet a run
+  sometimes writes every remaining page after the close. Which side wins is timing: the abort's rejection
+  and the page's own resolution race, and the assertion says the wrong one sometimes gets there first.
+- Cost: the invariant the assertion guards — a closed device is not written for nobody — is only checked
+  by a test that fails on its own now and then, so nobody trusts the red; and a flaky gate costs every
+  PR a re-run.
+- Suggested fix: one answer for "this run is over", checked where the page is applied rather than after
+  it is awaited, and a test that waits on that answer instead of `wait(50)`. It needs its own probe: which
+  of the abort and the resolution is observed first, at the sizes `LONG` uses.
+- Why it is not applied here: it is a paging race in code this branch never touches, and a fix needs the
+  timing proven before it is written — not guessed inside a progress-reminders review.

@@ -1218,21 +1218,27 @@ export async function setTriageModel(
 
 /** The levels a bot's reminders may be set to, `off` asking never. The counts behind each are the
  * host's, so a level it learns before this list does reads as Normal here. */
-export const REMINDER_LEVELS = ["off", "normal", "frequent"] as const
+export const REMINDER_LEVELS = ["off", "quiet", "normal", "chatty"] as const
 export type ReminderLevel = (typeof REMINDER_LEVELS)[number]
 
-/**
- * How often Gots asks this bot to say what it is doing (`progress.py`, ADR 0066): `off`, `normal`
- * or `frequent`, held per bot on its host, which owns the counts behind them. A host from before
- * the route answers nothing, which reads as the level every bot had.
- */
+/** The name a store written before the four names holds: the same ten calls as Chatty. */
+const LEGACY_LEVELS = new Map<string, ReminderLevel>([["frequent", "chatty"]])
+
+const isLevel = (value: unknown): value is ReminderLevel =>
+  typeof value === "string" && (REMINDER_LEVELS as readonly string[]).includes(value)
+
+/** The level a host's answer names: what it says, else an older host's name, else Normal. */
+const asLevel = (value: unknown): ReminderLevel =>
+  isLevel(value) ? value : (LEGACY_LEVELS.get(String(value)) ?? "normal")
+
+/** How often Gots asks this bot to say what it is doing (`progress.py`, ADR 0068), held per bot on
+ * its host, which owns the counts behind the names. */
 export async function getReminderLevel(config: HermesConfig, signal?: AbortSignal) {
   const response = await request(`${pluginRoot(config.baseUrl)}/reminders`, {
     headers: headers(config),
     signal,
   })
-  const level = (await response.json())?.level
-  return REMINDER_LEVELS.includes(level) ? (level as ReminderLevel) : "normal"
+  return asLevel((await response.json())?.level)
 }
 
 /** Writes the bot's level, and answers the host's record as it now stands. */
@@ -1247,7 +1253,7 @@ export async function setReminderLevel(
     body: JSON.stringify({ level }),
     signal,
   })
-  return ((await response.json())?.level ?? level) as ReminderLevel
+  return asLevel((await response.json())?.level ?? level)
 }
 
 /**

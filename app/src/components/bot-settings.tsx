@@ -172,18 +172,16 @@ function MutedSetting({ profile }: { profile: Profile }) {
 /** What each level is called on the row. The levels themselves are the host's vocabulary. */
 const REMINDER_LABELS: Record<ReminderLevel, string> = {
   off: "Off",
+  quiet: "Quiet",
   normal: "Normal",
-  frequent: "Frequent",
+  chatty: "Chatty",
 }
 
 /**
  * How often Gots asks this bot to say what it is doing (`progress.py`, ADR 0068): a value held per
  * bot on its host, set where the switches beside it are set, since a control that acts where it
- * sits is what the row is (ADR 0055).
- *
- * The words name what Gots does, not what the bot will do: however often it is asked, how much it
- * says is the model's own choice, and the line under the row tells the reader so. Nothing here
- * shows a count — twenty calls and ten are the loop's business, not the reader's.
+ * sits is what the row is (ADR 0055). No count is drawn beside a level — the counts are the loop's
+ * business, and the host changing one later is not an app release.
  */
 function RemindersSetting({ profile }: { profile: Profile }) {
   const { value, supported, settled, saving, save } = useReminders(profile)

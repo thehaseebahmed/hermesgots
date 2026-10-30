@@ -19,6 +19,7 @@ import { failureReason } from "@/lib/tools"
 import { actionOf, spawnStamp } from "@/lib/spawn"
 import { labelComparable } from "@/lib/tool-preview"
 import { clip, describeCall, parseArgs, patchStats, writeStats } from "@/lib/tool-calls"
+import { refusedCallIds } from "@/lib/progress-reminder"
 
 export { MAX_TEXT_CHARS, patchStats } from "@/lib/tool-calls"
 import { isSubagentResult } from "@/lib/subagent-results.ts"
@@ -265,6 +266,7 @@ function foldRows(
 ) {
   const { summaries } = options
   const messages: Message[] = []
+  const refused = refusedCallIds(rows)
   let reply: Message | undefined
   // Where the reply's text since its last tool call starts, and the notice that text was cut by.
   let segment = 0
@@ -394,6 +396,7 @@ function foldRows(
     const calls = toolCalls(row)
     if (row.content || calls.length) notice = undefined
     for (const call of calls) {
+      if (refused.has(call.id)) continue
       const event: ToolEvent = {
         toolCallId: call.id,
         tool: call.name,

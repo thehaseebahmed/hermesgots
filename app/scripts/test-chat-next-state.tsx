@@ -9,6 +9,7 @@ import type { RunEvent } from "@/chat-next/api"
 import { initial, reduce, threadTurns, type ThreadState } from "@/chat-next/state"
 import type { Row } from "@/chat-next/fold"
 import { events as recordedEvents, fixture as recorded } from "./chat-next-fixtures.ts"
+import { stored } from "./progress-reminder-fixture.ts"
 
 /** Plays events into a thread that has just sent a turn. */
 function play(events: RunEvent[]): ThreadState {
@@ -364,4 +365,28 @@ test("a replay that never reaches the transcript's copy is let go when the run e
   )
   state = reduce(state, { type: "run", event: { event: "run.completed" } })
   assert.equal(textOf(state), "Short.", "the run's end is the live turn's to say")
+})
+
+test("a call the progress reminder refused leaves no card in the live thread", () => {
+  // The live reducer is the other place a card is drawn: the run shows the note for the whole turn
+  // unless this drops it, and only the next transcript read would tidy it away (ADR 0068).
+  const state = play([
+    { event: "tool.started", tool: "read_file", tool_call_id: "A" },
+    { event: "tool.completed", tool: "read_file", tool_call_id: "A", preview: stored() },
+  ])
+  assert.deepEqual(calls(state), [], "the note is the host's, so the card goes")
+})
+
+test("a completion naming no call still drops the refused card, and only that one", () => {
+  const refused = play([
+    { event: "tool.started", tool: "read_file", tool_call_id: "A" },
+    { event: "tool.completed", tool: "read_file", preview: stored() } as RunEvent,
+  ])
+  assert.deepEqual(calls(refused), [], "matched by tool where the wire names no call id")
+
+  const ordinary = play([
+    { event: "tool.started", tool: "read_file", tool_call_id: "A" },
+    { event: "tool.completed", tool: "read_file", preview: "export const a = 1" } as RunEvent,
+  ])
+  assert.equal(calls(ordinary).length, 1, "a completion with no id and no note changes nothing")
 })

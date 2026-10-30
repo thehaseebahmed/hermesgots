@@ -1,6 +1,7 @@
 import { splitAttachments } from "../lib/attachment-text.ts"
 import { isSeamScaffolding, seamDrawnContent } from "../lib/compaction-seam.ts"
 import type { MessageStats } from "../lib/db.ts"
+import { refusedCallIds } from "../lib/progress-reminder.ts"
 import { steerText } from "../lib/steer.ts"
 
 import type { Timing } from "../lib/reply-stats.ts"
@@ -169,6 +170,7 @@ const msOf = (row: Row) => (typeof row.timestamp === "number" ? row.timestamp * 
 export function foldTurns(rows: Row[], partial = false): Turn[] {
   const turns: Turn[] = []
   const callOf = new Map<string, ToolCall>()
+  const refused = refusedCallIds(rows)
   /** The rows just read are a compaction, or the carried copy of work already drawn: the next reply may be the copy of one too. */
   let seamed = false
   for (const row of rows) {
@@ -266,6 +268,7 @@ export function foldTurns(rows: Row[], partial = false): Turn[] {
     // After a compaction Hermes writes the work it carried forward again, under the ids it had: a
     // call already drawn is that call, and the first reply back is the one already given.
     const asked = row.tool_calls ?? []
+    const drawn = asked.filter((one) => !refused.has(one.id))
     const first = seamed
     seamed = false
     if (asked.length && asked.every((one) => callOf.has(one.id))) {
@@ -280,11 +283,11 @@ export function foldTurns(rows: Row[], partial = false): Turn[] {
     // The row's thinking goes before whatever the row says or does first, so it follows the call
     // before it and is read with the words or the call it led to.
     let thought = row.reasoning ?? row.reasoning_content ?? undefined
-    if (row.content || (thought && !asked.length)) {
+    if (row.content || (thought && !drawn.length)) {
       turn.parts.push({ kind: "text", text: row.content ?? "", ...(thought ? { thought } : {}) })
       thought = undefined
     }
-    for (const one of asked) {
+    for (const one of drawn) {
       const call: ToolCall = {
         id: one.id,
         name: one.function.name,
