@@ -4,14 +4,21 @@ A reply names a file with a ``MEDIA:<path>`` tag, and a message the user sent na
 ``<attachment>`` line. The thread draws or downloads every one of them through this module's
 route: a remote frontend can't read a server path, so it asks here, behind the same key as every
 other route. The route serves any type — a clip, a recording, a document, code — and hands over
-the ones a browser can't show as a download named as the file.
+the ones a browser can't show as a download named as the file. An ``<img>`` or a ``<video>`` can't
+carry that key, so the app is handed a URL this module signs instead: one path, one profile, a few
+minutes. Nothing is fetched into the app and held, so a clip streams, seeks and carries a cap that
+answers by kind.
 """
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import re
+import secrets
+import time
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional, Tuple
 from urllib.parse import quote
 
 # The raster the route serves as an image: what a browser shows in place.
@@ -23,8 +30,18 @@ MEDIA_TYPES: Dict[str, str] = {
     ".webp": "image/webp",
     ".bmp": "image/bmp",
 }
-# A generous cap: the response streams from disk, and generated images (charts, renders) get big.
-MAX_BYTES = 25 * 1024 * 1024
+# A cap that answers by kind: a file the platform streams — an image, a clip, a recording — is
+# served up to this much, since nothing buffers it any more; a file handed over as a download keeps
+# the cap this route has always had.
+STREAM_MAX_BYTES = 200 * 1024 * 1024
+DOWNLOAD_MAX_BYTES = 25 * 1024 * 1024
+# How long a minted URL is worth. Minutes, so a URL that leaks into a log or a screenshot is worth
+# one path until it expires rather than a key worth everything for ever.
+URL_LIFETIME_S = 10 * 60
+# The query the media route takes a signature in, in place of the Bearer header an element can't send.
+URL_PARAM = "token"
+# Where this profile's signing secret is kept in `memento.db`'s `host_settings`.
+KEY_SETTING = "media_key"
 
 VIDEO_TYPES: Dict[str, str] = {
     ".mp4": "video/mp4",
@@ -114,13 +131,30 @@ def disposition(path: Path) -> str | None:
     return f"attachment; filename=\"{_BAD_ASCII.sub('_', name)}\"; filename*=UTF-8''{quote(name)}"
 
 
+def streams(path: Path) -> bool:
+    """Whether the platform plays or paints this in a stream, rather than saving it to open."""
+    return content_type(path).startswith(("image/", "video/", "audio/"))
+
+
+def limit_for(path: Path) -> int:
+    """The cap this file is held to: what the platform streams gets the larger one."""
+    return STREAM_MAX_BYTES if streams(path) else DOWNLOAD_MAX_BYTES
+
+
+def too_large(path: Path, streamed: bool) -> str:
+    """A refusal that names the file and the limit it met, so "too large" never stands alone."""
+    limit = STREAM_MAX_BYTES if streamed else DOWNLOAD_MAX_BYTES
+    what = "media" if streamed else "a file that downloads"
+    return f"{path.name} is larger than the {limit // (1024 * 1024)} MB limit for {what}."
+
+
 def _validated_path(path_str: str, missing: str) -> Path:
     """A safe absolute path to a file on the host, or raises :class:`MediaError`.
 
     Hermes's own ``validate_media_delivery_path`` does the safety work (symlinks resolved, the
     credential / system denylist applied), the same check its messaging adapters make before
-    uploading a ``MEDIA:`` tag's file. Every served file is capped at ``MAX_BYTES``, so one huge
-    file can't be buffered whole by whoever reads it.
+    uploading a ``MEDIA:`` tag's file. Every served file is capped by its kind — see
+    :func:`limit_for` — so one huge file can't be served past what its kind is meant to carry.
     """
     try:
         from gateway.platforms.base import validate_media_delivery_path
@@ -133,11 +167,61 @@ def _validated_path(path_str: str, missing: str) -> Path:
     try:
         if not path.is_file():
             raise MediaError(missing, 404)
-        if path.stat().st_size > MAX_BYTES:
-            raise MediaError("The file is too large.", 413)
+        streamed = streams(path)
+        limit = STREAM_MAX_BYTES if streamed else DOWNLOAD_MAX_BYTES
+        if path.stat().st_size > limit:
+            raise MediaError(too_large(path, streamed), 413)
     except OSError:
         raise MediaError(missing, 404)
     return path
+
+
+def signing_key(store: Path) -> bytes:
+    """This profile's media signing secret, made once and kept in its own store.
+
+    The app never sees it: a URL it holds was signed here, over one path and one expiry, and the
+    route beside this one checks the signature with the same secret.
+    """
+    from .store import get_setting, put_setting
+
+    held = get_setting(store, KEY_SETTING)
+    if isinstance(held, str) and held:
+        try:
+            return bytes.fromhex(held)
+        except ValueError:
+            pass
+    fresh = secrets.token_bytes(32).hex()
+    put_setting(store, KEY_SETTING, fresh)
+    # Two asks at once can both have made one; the store's answer is the one both sides keep.
+    settled = get_setting(store, KEY_SETTING)
+    return bytes.fromhex(settled if isinstance(settled, str) and settled else fresh)
+
+
+def _signature(key: bytes, path: str, profile: str, expires: int) -> str:
+    message = f"{expires}\n{profile}\n{path}".encode("utf-8")
+    return hmac.new(key, message, hashlib.sha256).hexdigest()
+
+
+def mint(
+    key: bytes,
+    path: str,
+    profile: str,
+    lifetime: int = URL_LIFETIME_S,
+    now: Optional[float] = None,
+) -> Tuple[str, int]:
+    """A signature over this path, this profile and an expiry, and the moment it expires."""
+    expires = int((time.time() if now is None else now) + lifetime)
+    return f"{expires}.{_signature(key, path, profile, expires)}", expires
+
+
+def covers(key: bytes, token: str, path: str, profile: str, now: Optional[float] = None) -> bool:
+    """Whether this token was signed here, for this path and profile, and hasn't run out."""
+    expires, _, signature = (token or "").partition(".")
+    if not expires.isdigit() or not signature:
+        return False
+    if int(expires) <= int(time.time() if now is None else now):
+        return False
+    return hmac.compare_digest(signature, _signature(key, path, profile, int(expires)))
 
 
 def media_file(path_str: str) -> Path:
