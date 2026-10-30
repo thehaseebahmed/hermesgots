@@ -449,6 +449,10 @@ _Avoid_: carousel, thumbnails, media strip, lightbox
 The app's own full-screen look at one piece of media, holding the name, the size and where the reader is in the message's media: a photo at its own shape, a clip on a player that starts paused, a recording on a player. A file the app can't show is handed to the platform instead — a new tab on the web, the phone's own app in the Android app — and never drawn in the Previewer.
 _Avoid_: lightbox, image viewer, gallery popup, media sheet
 
+**Signed URL**:
+The address a bot's host mints for one file — a signature over its path, the profile and a few minutes of expiry — which the app draws every photo, clip and recording from, and a file's row opens. It stands in for the bot's key, which an `<img>` or a `<video>` can't send, and it is asked for once per file and kept for the page.
+_Avoid_: media link, token URL, blob URL, download link
+
 ## Speech-to-text
 
 **Speech-to-text**:
