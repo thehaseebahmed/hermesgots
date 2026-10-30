@@ -389,6 +389,39 @@ test("a chat with a bot keeps the app's face, except a tool call's input and out
   })
 })
 
+test("a chat this device holds nothing of loads under one loader mid-screen, not words", async () => {
+  const { host } = await onChatNext("c-fresh")
+  host.seed([{ user: "Look around", reply: "Found it.", tools: 0 }])
+  const first = host.hold(0)
+  await mount(chatScreen("c-fresh"), async () => {
+    await until(() => Boolean(find("[data-loading-fresh]")), "the first read has the one loader")
+    assert.equal(find("[data-catching-up]"), null, "and no words say it is catching up")
+    first.release()
+    await until(() => replies().length > 0, "the chat arrives")
+    assert.equal(find("[data-loading-fresh]"), null, "the loader goes with the rows")
+  })
+})
+
+test("a chat this device already holds is caught up in the status line's words, with no loader", async () => {
+  const { host } = await onChatNext("c-held")
+  host.seed([{ user: "Look around", reply: "Found it.", tools: 0 }])
+  await mount(chatScreen("c-held"), async () => {
+    await until(() => replies().length > 0, "the chat is held")
+  })
+  const second = host.hold(0)
+  await mount(chatScreen("c-held"), async () => {
+    await until(() => Boolean(find("[data-catching-up]")), "the held thread says it is catching up")
+    const words = find("[data-catching-up] [data-slot=status-words]")?.textContent ?? ""
+    assert.ok(
+      BUSY_WORDS.catching.some((word) => words === `${word}…`),
+      `in one of the catching words, not a fixed phrase: ${words}`,
+    )
+    assert.equal(find("[data-loading-fresh]"), null, "and no loader mid-screen")
+    assert.ok(replies().length > 0, "over the rows it already holds")
+    second.release()
+  })
+})
+
 test("a delegation draws as the app's agent card, which follows its child to done", async () => {
   const { host } = await onChatNext("c-agents", {}, { plugin: true })
   await mount(chatScreen("c-agents"), async () => {

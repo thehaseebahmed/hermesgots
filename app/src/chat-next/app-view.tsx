@@ -231,6 +231,9 @@ export function AppThreadView({
   // A Main still being read is not an empty one: its greeting would say there is nothing here.
   const empty = Boolean(main) && !flow.length && !moved.trailing.length && !streaming && !catchingUp
   const unstarted = Boolean(blank) && !messages.length && !streaming && !queue?.items.length
+  // A thread this device holds nothing of has nothing to say "catching up" under: its first read
+  // is one loader in the middle of the pane, and only a thread already held says it in words.
+  const loadingFresh = catchingUp && !messages.length && !streaming && !unstarted
   const running = source.agents.filter((agent) => agent.status === "running").length
   const lastId = messages.at(-1)?.id
   const inline = running > 0 && messages.at(-1)?.status === "streaming"
@@ -242,6 +245,10 @@ export function AppThreadView({
           <EmptyState botId={blank.botId} configured session={{ repos: blank.repos }} id={chatId} />
         ) : empty && main ? (
           <MainEmptyState botId={main.botId} id={chatId} onSend={(text) => send(text, [])} />
+        ) : loadingFresh ? (
+          <div className="flex min-h-0 flex-1 items-center justify-center" data-loading-fresh>
+            <Spinner className="size-6 text-primary" />
+          </div>
         ) : (
           <MessageScrollerProvider autoScroll defaultScrollPosition="end">
             <MessageScroller className="flex-1">
@@ -342,7 +349,7 @@ export function AppThreadView({
                       </div>
                     )}
                   </AgentsContext.Provider>
-                  {catchingUp && (
+                  {catchingUp && messages.length > 0 && (
                     <div className={COLUMN_BOX} data-catching-up>
                       <StatusLine text={CATCHING_ACTIVITY} seed={chatId} />
                     </div>

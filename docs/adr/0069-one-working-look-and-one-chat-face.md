@@ -1,4 +1,4 @@
-# One working look for the status line and the thinking row, and a code face for coding sessions
+# One working look for the status line and the thinking row, a code face for coding sessions, and one loader for a thread not held yet
 
 **Amends [ADR 0066](0066-the-status-line-wears-a-rotating-word-and-a-loading-thread-says-so.md)**
 on one point: the thinking row's "Thinking…" is no longer left literal. It also makes the code
@@ -21,3 +21,9 @@ app's face, and the chrome — headers, pills, buttons, a sheet's heading — ke
 call's input and output are the one part that is always `font-code` (`tool-card.tsx`), chat or session.
 The font loads with the app's styles rather than chat-next's chunk, since the current chat screen
 draws it too; the files themselves are fetched only when a glyph needs them.
+
+**A thread's first read is one loader when there is nothing to show, and words when there is.** A
+chat or session this device holds no rows of has nothing for "Catching up…" to sit under, so its
+first read is a single spinner in the middle of the pane (`data-loading-fresh`); once any row is
+held — a chat opened before, or one a read has begun to fill — the same read is said in the status
+line's rotating `catching` word under the rows, as ADR 0066 has it.
