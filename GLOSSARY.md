@@ -344,7 +344,7 @@ Why a project's sweep claimed nothing, in the host's own words: GitHub's answer,
 _Avoid_: error, failure, block
 
 **Usage threshold**:
-The share of the bot's account usage at which AFK stops picking tasks up, one number for the bot and off until it is set.
+The share of the bot's account usage at which AFK stops picking tasks up: a used percent from 50 to 100, one number for the bot and off until it is set, set in its Coding tab. Judged afresh at every pickup, so a task already claimed runs to the end of its work; a **refusal** names the deciding window and its percent against it.
 _Avoid_: cap, quota, budget, limit
 
 **Deciding window**:
