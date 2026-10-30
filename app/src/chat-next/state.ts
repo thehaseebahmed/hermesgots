@@ -97,6 +97,12 @@ export type ThreadEvent =
       answer?: { question: string; choicesOffered: string[] | null; value: string }
     }
   | { type: "ended" }
+  /**
+   * The host names no run on this session: one it still holds a prompt for is listed there, so a
+   * prompt this page draws has settled without it — answered or stopped from another device, or a
+   * window that closed. The page's only way to learn that with the run's stream gone.
+   */
+  | { type: "gone" }
   | { type: "agents"; agents: Agent[] }
   | { type: "queue"; items: Queued[]; paused: boolean }
   /** `at` is this device's clock as the event arrived, which a turn it sent is timed by. */
@@ -393,9 +399,13 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         running: false,
         // The host's own rows are the turn now, in place of the copy this page streamed.
         live: undefined,
-        // A finished turn waits on nothing, and the end of a followed run settles what it was on.
-        waiting: event.final || done ? undefined : state.waiting,
-        ...(event.final || done ? { settled: settledWith(state) } : {}),
+        // A turn that finished waits on nothing. A whole read of a thread whose last turn is still
+        // unfinished says nothing about a prompt the run holds: a stream that dies mid-wait (a phone
+        // asleep, a host dropping its subscriber) ends the follow without ending the run, and the
+        // question must not go with the socket. Only the turn's own end, an answer given here or the
+        // host's `*.settled` event takes a wait away.
+        waiting: done ? undefined : state.waiting,
+        ...(done ? { settled: settledWith(state) } : {}),
       }
     }
     case "older": {
@@ -464,6 +474,10 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       // was comes from the transcript, which a later read may supply if the one for this end was
       // superseded.
       return { ...state, running: false }
+    case "gone":
+      // Nothing this page could read said the prompt settled; the host's own list of runs does.
+      if (state.waiting === undefined) return state
+      return { ...state, waiting: undefined, settled: settledWith(state) }
     case "answered": {
       // The card goes at once; the host's `*.settled` event confirms it. A question's call reads
       // the answer from here until the transcript's own result reaches it.
@@ -507,12 +521,13 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       return { ...state, waiting, settled, live: moved }
     }
     case "failed":
+      // What this page could not read is not what the host settled. A prompt the run still holds stays
+      // on screen — the stream that carried it can die while the run waits — and the turn's own end,
+      // the next settle event or an answer given here is what takes it away.
       return {
         ...state,
         status: "failed",
         running: false,
-        waiting: undefined,
-        settled: settledWith(state),
         error: event.error,
       }
   }

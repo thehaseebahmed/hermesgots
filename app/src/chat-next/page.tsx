@@ -1016,7 +1016,13 @@ export function ChatNextThread({
             return void follow(run)
           }
           streaming.current = false
-          if (run === null) setHostIdleAt(tipNow.current)
+          if (run === null) {
+            // The host lists no run on this session, and it lists one that still holds a prompt: so a
+            // prompt this page draws has settled without it. It is the only way to learn that with the
+            // run's own stream gone, and without it the dead form would keep the composer away.
+            dispatch({ type: "gone" })
+            setHostIdleAt(tipNow.current)
+          }
         }
         void catchUp()
       },

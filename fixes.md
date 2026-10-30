@@ -2445,3 +2445,39 @@ same rule, where before it drew the raw marker line as the steer's text.
   and a reload draws the same, so the thread states the same thing twice.
 - Suggested fix: give the steer part a `files` list the way a turn has one, draw it with the thread's
   own media components, and map it through `messages.ts` beside the turn's.
+
+---
+
+# Deferred: the thread's waiting line goes with a stream that dies, on a host that keeps no replay
+
+The new chat screen holds a waiting question's form through an event stream that dies (this branch's
+fix: the wait is the run's to settle, not the page's). The `question-drop` flow watches that for
+twenty seconds of drops against the `dropped` mock, which both withholds a prompt's request and cuts
+every run's stream a second and a half in. Its laptop look passes; its phone look found that the
+*thread's* one waiting line — `Waiting for your answer`, the line `ClarifyCard` draws for a running
+clarify call — can be missing while the composer's form is up.
+
+The two screens' state is not in doubt: `inFlight` is true (the wait is on), so `messagesOf` marks
+the tail turn's calls running. What is missing is the *call*: a rejoin's `attach` builds the live turn
+as `{...last, parts: [], done: false}` and lets the replayed events fill it, and a host that sends a
+prompt's request only to the subscribers it had at the time never re-sends `clarify.request`. The
+live turn therefore holds no clarify call until `turnsOf`'s replay check lets the transcript's copy
+back in, and a stream that dies before that leaves the thread with no line for as long as the follow
+lasts. A host that replays its events (what the mock's `live` is, and what Hermes's own runs keep)
+gives the call back on the rejoin, so this is a withholder's shape — the same one #685 fixed for the
+form.
+
+- Cost: the composer holds a question the thread does not mention, and the two surfaces disagree for
+  as long as the drops keep coming. Nothing is lost — the answer still lands, and the transcript draws
+  the call once the follow settles.
+- Suggested fix: seed the live turn's calls from the transcript's copy in `attach` (`state.ts`) rather
+  than from nothing, letting the replay overwrite them as its events arrive, or keep the transcript's
+  copy drawn while the run holds a prompt whose call the live turn does not yet carry. Both move
+  `turnsOf`/`reach`, which every rejoin uses.
+- Why it is deferred here: it is a second rule about what a rejoin draws, and this branch's claim is
+  that the form survives — changing what a replay seeds would need its own pass over the rejoin
+  flows (`question-reload`, `history-pages`, `history-generations`) rather than riding along.
+
+---
+
+Found by `question-drop`'s phone look while verifying this branch's fix; it does not block it.

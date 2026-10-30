@@ -532,6 +532,9 @@ export function fakeHost(
 
   const frame = (sent: { seq: number }) => `id: ${sent.seq}\ndata: ${JSON.stringify(sent)}\n\n`
 
+  /** The open streams, each with the way to break it: a read that dies, not a stream that ends. */
+  const breakers = new Set<() => void>()
+
   /** `after` is `?last_seq=`: only what came after that number is replayed. */
   const events = (runId: string, after = -1) => {
     const state = runs.get(runId)!
@@ -550,6 +553,7 @@ export function fakeHost(
           else controller.close()
         }
         state.listeners.add(listener)
+        breakers.add(() => controller.error(new TypeError("network error")))
       },
       cancel: () => void state.listeners.delete(listener),
     })
@@ -920,6 +924,18 @@ export function fakeHost(
       })
       state.listeners.clear()
     }
+    breakers.clear()
+  }
+
+  /** Every open event stream breaks mid-read, as a network does: the reader rejects, nothing closes. */
+  function breakConnections() {
+    const breaking = [...breakers]
+    breakers.clear()
+    for (const breakNow of breaking) {
+      try {
+        breakNow()
+      } catch {}
+    }
   }
 
   /** A turn another device sent: the host runs it with no screen of ours watching. */
@@ -977,6 +993,7 @@ export function fakeHost(
     triage,
     session,
     dropConnections,
+    breakConnections,
     startElsewhere,
   }
 }

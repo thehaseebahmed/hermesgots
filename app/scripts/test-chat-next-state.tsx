@@ -454,3 +454,83 @@ test("a status read raises the wait a late subscriber never heard, and never one
     "the answer this screen gave is not undone by it",
   )
 })
+
+test("a wait outlives a read that could not see the run end, and goes when the turn does", () => {
+  // The wait is the run's to settle, not the page's: a stream that dies while the run holds a prompt
+  // ends the follow without ending the run, and neither a whole read of the transcript nor a read that
+  // failed says anything about the prompt. Only the turn's own end (a final row, or a failed turn,
+  // which `fold` finishes too), an answer given here, or the host's `*.settled` event takes it away.
+  const asked: Waiting = {
+    kind: "question",
+    run: "r",
+    promptId: "p1",
+    generation: 1,
+    question: "Tea?",
+    choices: ["yes", "no"],
+    multiSelect: false,
+  }
+  const raised = reduce(
+    reduce(initial, { type: "attach", run: "r" }),
+    { type: "waiting", waiting: asked },
+  )
+  // The turn the question was asked in: the user's row, and the assistant's carrying the clarify call
+  // with no result and no answer to stop on.
+  const asking: Row[] = [
+    { id: 1, role: "user", content: "go" },
+    {
+      id: 2,
+      role: "assistant",
+      content: "",
+      finish_reason: "tool_calls",
+      tool_calls: [{ id: "c1", function: { name: "clarify", arguments: "{}" } }],
+    },
+  ]
+  const whole = reduce(raised, { type: "transcript", rows: asking, final: true })
+  assert.deepEqual(whole.waiting, asked, "a whole read of an unfinished turn keeps the question")
+  assert.equal(whole.running, false, "the read still takes the page out of its follow")
+  assert.equal(
+    reduce(raised, { type: "failed", error: "Can't reach the host." }).waiting,
+    asked,
+    "a read that failed settles nothing",
+  )
+  assert.deepEqual(
+    reduce(
+      reduce(raised, { type: "failed", error: "Can't reach the host." }),
+      { type: "waiting", waiting: { ...asked } },
+    ).waiting,
+    asked,
+    "and the next read that finds it is not turned away as already settled",
+  )
+  // The turn's own end: the reply's row stops the turn, and the wait goes with it.
+  const ended = reduce(raised, {
+    type: "transcript",
+    rows: [...asking, { id: 3, role: "assistant", content: "Tea it is.", finish_reason: "stop" }],
+    final: true,
+  })
+  assert.equal(ended.waiting, undefined, "a finished turn waits on nothing")
+})
+
+test("the host naming no run ends a wait the page never saw settle", () => {
+  // A run stopped from another device, or one whose window closed, ends while this page's stream is
+  // gone: no `clarify.settled` arrives and the transcript's turn is not finished, so the host's own
+  // list of runs is the only answer — and it lists a run that still holds a prompt.
+  const asked: Waiting = {
+    kind: "question",
+    run: "r",
+    promptId: "p1",
+    generation: 1,
+    question: "Tea?",
+    choices: ["yes", "no"],
+    multiSelect: false,
+  }
+  const attached = reduce(initial, { type: "attach", run: "r" })
+  const raised = reduce(attached, { type: "waiting", waiting: asked })
+  assert.equal(reduce(attached, { type: "gone" }), attached, "nothing waited, so nothing changed")
+  const gone = reduce(raised, { type: "gone" })
+  assert.equal(gone.waiting, undefined, "the form goes with the run the host no longer lists")
+  assert.equal(
+    reduce(gone, { type: "waiting", waiting: { ...asked } }).waiting,
+    undefined,
+    "and a status read still carrying the prompt does not put it back",
+  )
+})
