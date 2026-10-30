@@ -442,8 +442,12 @@ An attachment the thread can show rather than only hand over: an image, a video 
 _Avoid_: image, file, rich media
 
 **Gallery**:
-The row of media in a thread: images and video side by side, each opened in the platform's own viewer. Audio is not in it; it sits in the thread as its own row.
+The row of media in a thread: images and video side by side, each opened in the Previewer. Audio is not in it; it sits in the thread as its own row, and its tap opens that same Previewer.
 _Avoid_: carousel, thumbnails, media strip, lightbox
+
+**Previewer**:
+The app's own full-screen look at one piece of media, holding the name, the size and where the reader is in the message's media: a photo at its own shape, a clip on a player that starts paused, a recording on a player. A file the app can't show is handed to the platform instead — a new tab on the web, the phone's own app in the Android app — and never drawn in the Previewer.
+_Avoid_: lightbox, image viewer, gallery popup, media sheet
 
 ## Speech-to-text
 
