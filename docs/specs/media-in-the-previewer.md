@@ -2,9 +2,11 @@
 
 Status: grilled 2026-10-30, every decision settled and recorded in
 [ADR 0071](adr/0071-media-opens-in-the-apps-own-previewer-from-a-signed-url.md), with the glossary's
-*Previewer* entry written alongside and *Gallery* amended to name it. The tracker issue, its tickets
-and the gate issue that holds the work until this file merges are named in the follow-up commit that
-lands once they exist; the build order at the end is the tickets' shape when implementation starts.
+*Previewer* entry written alongside and *Gallery* amended to name it. Published as #709 with tickets
+#710 to #714; the build order at the end is the tickets' shape when implementation starts. #709 is
+blocked by the gate issue (#715) that the docs pull request carrying this file (#708) closes — work
+starts on that merge. The spec carries `ready-for-agent` and the tickets stay bare, so the agent claims
+the spec and works the graph in order.
 
 ## Problem Statement
 
@@ -250,21 +252,19 @@ minutes its expiry names and one path.
 
 ## Tickets
 
-Published after this file landed; the checklist below names them once they exist, and the build order
-is the tickets' shape.
-
-- [ ] the host signs a URL, and the thread reads every file from one
-- [ ] the previewer draws a photo, a clip and a recording
-- [ ] a tap on a cell, a row or an agent's image opens the previewer
-- [ ] a file the previewer cannot show opens outside the app
-- [ ] a photo or a clip never becomes a download row
+- [ ] #710 — the host signs a URL, and the thread reads every file from one
+- [ ] #711 — the previewer draws a photo, a clip and a recording
+- [ ] #712 — a photo or a clip never becomes a download row
+- [ ] #713 — a tap on a cell, a row or an agent's image opens the previewer
+- [ ] #714 — a file the previewer cannot show opens outside the app
 
 ## Build order
 
-The first ticket is the source of bytes and gates everything: nothing else can draw a file from a URL
-that does not exist yet.
+#710 is the source of bytes and gates everything: nothing else can draw a file from a URL that does
+not exist yet.
 
-The second and the fifth start once it lands and can go in either order: one builds the previewer's
-three kinds over the composer's own staged media, the other stops a picture being drawn as a download.
-The third and the fourth wait on the previewer: one routes every thread tap into it, the other hands the
-files it cannot show to the platform.
+#711 and #712 start once #710 lands and can go in either order: one builds the previewer's three kinds
+over the composer's own staged media, the other stops a picture being drawn as a download.
+
+#713 and #714 wait on #711: one routes every thread tap into the previewer, the other hands the files it
+cannot show to the platform.
