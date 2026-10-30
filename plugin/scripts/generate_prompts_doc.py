@@ -9,7 +9,9 @@ task's own briefs are left out: they are briefed for a workflow's stage and name
 The Prompts doc workflow (``.github/workflows/prompts-doc.yml``) runs it whenever the builder
 changes and opens a pull request when the doc moves. Absolute paths (the repo checkout and the
 throwaway dirs below) are scrubbed to a placeholder, so the doc is byte-identical on every machine
-and an unchanged builder produces no pull request.
+and an unchanged builder produces no pull request. Because that workflow only runs on ``main``,
+``plugin/tests/test_prompts_doc.py`` holds the checked-in doc to what ``build()`` writes, so a prompt
+module that changes shape fails the tests of the branch that moved it rather than the workflow later.
 """
 
 from __future__ import annotations
@@ -156,6 +158,11 @@ def _level(level: str, note: str) -> tuple:
     return (f"Dictation cleanup: {level}", note, _model_prompt(asked.system, asked.instructions, WHOLE))
 
 
+def _shorter(level: str) -> float:
+    """The least a level's answer may run to, read from the facts its prompt is built with."""
+    return dictation_cleanup.LEVEL_FACTS[level].shorter
+
+
 def _speech_prompt() -> str:
     """What faster-whisper is given as its prompt, in the order `dictation.py` builds it.
 
@@ -181,20 +188,20 @@ DICTATION_VARIANTS = [
         "A take's whole text is tidied once when it ends, at the level its bot runs (ADR 0066). "
         f"Light removes what was stumbled over — fillers, a false start, a slip — and repairs the "
         f"grammar, punctuation, casing and numbers, keeping every other word. An answer outside "
-        f"{dictation_cleanup.SHORTER['light']}x–{dictation_cleanup.LONGER}x of the text is thrown "
+        f"{_shorter(dictation_cleanup.LIGHT)}x–{dictation_cleanup.LONGER}x of the text is thrown "
         f"away, and the words as heard land instead.",
     ),
     _level(
         "medium",
         "Medium does Light's work and tightens: wordiness, redundancy and run-ons go, without "
-        f"dropping information. Its answer may run to {dictation_cleanup.SHORTER['medium']}x of the "
+        f"dropping information. Its answer may run to {_shorter(dictation_cleanup.MEDIUM)}x of the "
         "text before it is thrown away.",
     ),
     _level(
         "high",
         "High compresses: it may restructure a sentence and drop what a listener could not act on, "
         f"keeping every fact, number, name and request. Its answer may run to "
-        f"{dictation_cleanup.SHORTER['high']}x of the text, and it is given "
+        f"{_shorter(dictation_cleanup.HIGH)}x of the text, and it is given "
         f"{dictation_cleanup.HIGH_DEADLINE_S:.0f} s rather than {dictation_cleanup.DEADLINE_S:.0f} s.",
     ),
     (
