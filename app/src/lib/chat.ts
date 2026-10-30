@@ -43,6 +43,7 @@ import {
   type TurnUsage,
 } from "@/lib/hermes"
 import { attachmentsText, splitAttachments } from "@/lib/attachment-text"
+import { isProgressReminder } from "@/lib/progress-reminder"
 import { measureReply } from "@/lib/reply-stats"
 import { wireContent } from "@/lib/attachments"
 import { refreshContext } from "@/lib/context"
@@ -341,6 +342,17 @@ function streamHandlers(turn: Turn): StreamHandlers {
       touch()
     },
     onTool(event) {
+      // A call the progress reminder refused never ran: its result is the note Gots wrote to the
+      // model, so the thread keeps no card of it and shows the call the model makes again instead
+      // (ADR 0068). Read here too, since a stream can carry the refusal hours before any reload.
+      if (isProgressReminder(event.result)) {
+        const kept = draft.tools.filter((t) => t.toolCallId !== event.toolCallId)
+        if (kept.length !== draft.tools.length) {
+          draft.tools = kept
+          touch()
+        }
+        return
+      }
       const existing = event.toolCallId
         ? draft.tools.find((t) => t.toolCallId === event.toolCallId)
         : draft.tools.find((t) => t.status === "running" && t.tool === event.tool)

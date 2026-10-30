@@ -172,8 +172,9 @@ function MutedSetting({ profile }: { profile: Profile }) {
 /** What each level is called on the row. The levels themselves are the host's vocabulary. */
 const REMINDER_LABELS: Record<ReminderLevel, string> = {
   off: "Off",
+  quiet: "Quiet",
   normal: "Normal",
-  frequent: "Frequent",
+  chatty: "Chatty",
 }
 
 /**
@@ -181,9 +182,9 @@ const REMINDER_LABELS: Record<ReminderLevel, string> = {
  * bot on its host, set where the switches beside it are set, since a control that acts where it
  * sits is what the row is (ADR 0055).
  *
- * The words name what Gots does, not what the bot will do: however often it is asked, how much it
- * says is the model's own choice, and the line under the row tells the reader so. Nothing here
- * shows a count — twenty calls and ten are the loop's business, not the reader's.
+ * Three of the four names describe the ask rather than the bot, and Chatty does not: however often
+ * it is asked, how much it says is the model's own choice, which is what the line under the row is
+ * for. Nothing here shows a count — the four counts are the loop's business, not the reader's.
  */
 function RemindersSetting({ profile }: { profile: Profile }) {
   const { value, supported, settled, saving, save } = useReminders(profile)

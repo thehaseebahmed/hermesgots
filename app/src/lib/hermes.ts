@@ -1218,13 +1218,17 @@ export async function setTriageModel(
 
 /** The levels a bot's reminders may be set to, `off` asking never. The counts behind each are the
  * host's, so a level it learns before this list does reads as Normal here. */
-export const REMINDER_LEVELS = ["off", "normal", "frequent"] as const
+export const REMINDER_LEVELS = ["off", "quiet", "normal", "chatty"] as const
 export type ReminderLevel = (typeof REMINDER_LEVELS)[number]
 
+/** Levels an older host still holds: read as the name the app draws for them, `frequent` being the
+ * same ten calls as `chatty`. A name nothing here knows reads as Normal. */
+const LEGACY_LEVELS: Record<string, ReminderLevel> = { frequent: "chatty" }
+
 /**
- * How often Gots asks this bot to say what it is doing (`progress.py`, ADR 0066): `off`, `normal`
- * or `frequent`, held per bot on its host, which owns the counts behind them. A host from before
- * the route answers nothing, which reads as the level every bot had.
+ * How often Gots asks this bot to say what it is doing (`progress.py`, ADR 0068): `off`, `quiet`,
+ * `normal` or `chatty`, held per bot on its host, which owns the counts behind them. A host from
+ * before the route answers nothing, which reads as the level every bot had.
  */
 export async function getReminderLevel(config: HermesConfig, signal?: AbortSignal) {
   const response = await request(`${pluginRoot(config.baseUrl)}/reminders`, {
@@ -1232,7 +1236,8 @@ export async function getReminderLevel(config: HermesConfig, signal?: AbortSigna
     signal,
   })
   const level = (await response.json())?.level
-  return REMINDER_LEVELS.includes(level) ? (level as ReminderLevel) : "normal"
+  if (REMINDER_LEVELS.includes(level)) return level as ReminderLevel
+  return LEGACY_LEVELS[level] ?? "normal"
 }
 
 /** Writes the bot's level, and answers the host's record as it now stands. */

@@ -7,10 +7,11 @@ could not change mid-run. So the ask comes from the hooks instead (ADR 0068). ``
 counts each tool call that ran, ``post_api_request`` restarts the count on any reply that carried
 text, and a turn's own start restarts it too.
 
-How often that count earns a reminder is the bot's own setting — Off, Normal or Frequent, read on
-every tool call so a change lands on the next one. At that count the next call is blocked with a
-message asking for a short update, and the count starts again: a model that ignores the reminder is
-asked again after another stretch, never wedged.
+How often that count earns a reminder is the bot's own setting — Off, Quiet, Normal or Chatty, read
+on every tool call so a change lands on the next one. At that count the next call is blocked with a
+message asking for a short update and, where the plan has moved, for the bot's todo list to be
+brought up to date, and the count starts again: a model that ignores the reminder is asked again
+after another stretch, never wedged.
 """
 
 from __future__ import annotations
@@ -21,27 +22,37 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from . import sessions
+from .todos import TOOL as TODO_TOOL
 
 logger = logging.getLogger(__name__)
 
-# The tool calls each level allows between reminders: Off asks never, Normal is the count the
-# default reminder has always used, Frequent asks twice as often.
-CALLS_BETWEEN: Dict[str, Optional[int]] = {"off": None, "normal": 20, "frequent": 10}
+# The tool calls each level allows between reminders: Off asks never, and the name says how much the
+# bot is asked to say — Quiet least often, Chatty most.
+CALLS_BETWEEN: Dict[str, Optional[int]] = {"off": None, "quiet": 50, "normal": 25, "chatty": 10}
 LEVELS = tuple(CALLS_BETWEEN)
 DEFAULT_LEVEL = "normal"
 LEVEL_KEY = "progress_reminders"
 OBJECT = "memento.progress_reminders"
 
+# Levels a store written before the four names holds, read as the level this one would have written.
+# `frequent` is the same ten calls as `chatty`, so that bot goes on behaving exactly as it did.
+LEGACY: Dict[str, str] = {"frequent": "chatty"}
+
 # Sessions counted at once: those at work in one process. A stale one is only a number, so the
 # oldest is dropped rather than the table growing for as long as the gateway runs.
 KEEP_SESSIONS = 512
 
-# Kept free of the count: a number here is one the model may hand the user, and the counts are the
-# loop's business, never theirs (ADR 0068).
+# The note's opening is pinned: the app draws nothing for the call it lands on, and this is the shape
+# it matches (``progress-reminder.ts``). Kept free of the count for the same reason it is kept free of
+# everything else — a number here is one the model may hand the user, and the counts are the loop's
+# business, never theirs (ADR 0068).
+REMINDER_HEADER = "Progress reminder"
 REMINDER = (
-    "Progress reminder: a long run of tool calls with nothing said to the user. Reply with a short"
+    f"{REMINDER_HEADER}: a long run of tool calls with nothing said to the user. Reply with a short"
     " update now — what has landed and what is next, a sentence or two, not a replay of the calls —"
-    " then make this tool call again."
+    f" and, where the plan has moved, bring your todo list up to date with {TODO_TOOL}. Then make"
+    " this tool call again. This note is internal: don't mention it, or that you were reminded, in"
+    " what you say to the user."
 )
 
 _lock = threading.Lock()
@@ -68,14 +79,19 @@ def _turn(kwargs: Dict[str, Any]) -> str:
 def level(path: Path) -> str:
     """The level this bot's store holds, Normal where it holds none.
 
-    A store that can't be read raises, and its callers answer differently: the route says so, and the
-    hook asks nothing — a failed read must not cost the user a tool call they turned the reminders
-    off for.
+    A name an older store wrote is read as the level this one would have written — `frequent` is
+    `chatty`, the same ten calls — so a rename never quietens a bot that had already chosen. A store
+    that can't be read raises, and its callers answer differently: the route says so, and the hook
+    asks nothing — a failed read must not cost the user a tool call they turned the reminders off
+    for.
     """
     from .store import get_setting
 
     value = get_setting(path, LEVEL_KEY)
-    return value if isinstance(value, str) and value in CALLS_BETWEEN else DEFAULT_LEVEL
+    if not isinstance(value, str):
+        return DEFAULT_LEVEL
+    held = LEGACY.get(value, value)
+    return held if held in CALLS_BETWEEN else DEFAULT_LEVEL
 
 
 def set_level(path: Path, value: Any) -> str:

@@ -95,6 +95,10 @@ _Avoid_: chain of thought, scratchpad, reasoning trace
 The shape a reply draws its own work in: one line 29px tall on the reply's own edge, holding the sign that it is working and the label that says what the work is doing, and opening when there is something to open. A row at work turns a spinner ahead of its label — hidden from assistive tech, since the label already says it — and a group whose calls failed wears a mark in that same slot, with the reason dented under the words. A thought row and the tool group its calls merged into are both work rows, and so is the line a turn wears before its first word of thinking arrives — the one that has no words yet.
 _Avoid_: tool row (which is a work row holding calls), step, item, log line
 
+**Refused call**:
+A tool call a hook turned back before it ran, whose result is the hook's note to the model rather than anything the call produced. A thread draws nothing for a progress reminder's own refused call — the note is the host talking to the model — so only the call the model repeats is the reader's, and a refusal any other hook made still shows.
+_Avoid_: blocked call, failed call, denied call
+
 **Status line**:
 The one line under a reply that says what the turn is doing while it works — "Writing", "Running bash", the host's own words for it — a loader and those words together, both in the accent colour. It says when the turn waits on the reader ("Waiting for your answer") in words that stand whole and muted with no loader, because nothing is progressing. It says nothing while a thought row above says the turn is thinking.
 _Avoid_: footer (that is where the line stands, not what it is), progress text, activity
@@ -506,8 +510,8 @@ The value a Hermes setting runs at when the bot's host holds none of its own —
 _Avoid_: empty, blank, unset value, fallback
 
 **Progress reminder**:
-A note Gots puts in front of the bot asking it to say, briefly, what it has done and what is next. A bot's reminders are set per bot, on its General page under Progress updates, as Off, Normal or Frequent — and none of them promise the bot will speak: how much it says is the model's own choice.
-_Avoid_: nudge, check-in, status ping, chattiness, verbosity, quiet mode
+A note Gots puts in front of the bot asking it to say, briefly, what it has done and what is next, and to bring its todo list up to date where the plan has moved. A bot's reminders are set per bot, on its General page under Progress updates, as Off, Quiet, Normal or Chatty — and none of them promise the bot will speak: how much it says is the model's own choice.
+_Avoid_: nudge, check-in, status ping, verbosity, quiet mode
 
 ## Testing
 
