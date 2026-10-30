@@ -14,6 +14,13 @@ stories, rules and tests go with it.
 spinner ahead of its label again, hidden from assistive tech, and a failed group wears its X with the
 reason dented under it. Everything struck through below is the passage that shipped and came out.
 
+**Amended 2026-10-30:** the colours and the loaders below are now
+[ADR 0070](adr/0070-the-status-line-is-muted-and-the-count-is-the-only-blue.md)'s, and the code has
+not moved yet. The status line and its loader are muted rather than accent, a waiting line keeps its
+loader turning, the count of subagents is the only thing in the info colour (and a loader wears blue
+only when it turns for the count alone), the row a turn wears before its first word of thinking is
+gone, and the three rows stand in one order at a reply's foot.
+
 ## Problem Statement
 
 ~~A reply says it is working with a spinner — the same turning ring on the thought row while its
