@@ -16,7 +16,7 @@ const run = async ({ page, until, shot }) => {
     if (path === "/v1/skills") hermes.push(path)
   })
   page.on("console", (message) => noted.push(message.text()))
-  const composer = page.getByLabel("Message")
+  const composer = page.getByLabel("Message", { exact: true })
   const menu = page.getByRole("listbox", { name: "Commands and skills" })
 
   await composer.fill("/")

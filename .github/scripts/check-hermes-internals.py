@@ -13,6 +13,10 @@ The prompt caps are pinned for the same reason rather than mirrored by Gots: a s
 past its cap is dropped whole, and a context file past its own is truncated. Gots tells neither —
 the host reads SOUL.md as the session's identity — so what drifts is what Gots believed about the host.
 
+The line the API server writes into a message's own row for each photo it committed is pinned too: the
+app reads it as the host's trailer, and a reword there would put a cache path back in the user's
+bubble.
+
 Everything here reads source text — a substring of a Hermes file, a module-level string constant, or
 the same on the plugin side — so it runs against any checkout with no host and no network. The
 plugin is never imported: its import chain wants a Hermes host (``plugin/__init__.py`` pulls
@@ -26,7 +30,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 # What the plugin reads by name, and the notice text it mirrors, in the Hermes checkout. A tuple of
 # relative paths means "any of these holds it" — the API server's run table has moved once already.
@@ -64,6 +68,8 @@ ANCHORS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
     (("tools/process_registry_notifications.py",), "matched watch pattern"),
     (("tools/process_registry_notifications.py",), "heartbeat #"),
     (("tools/process_registry_notifications.py",), "background processes completed."),
+    # The function that names a committed photo's copy in the row; the app's hints are pinned to it.
+    (("agent/session_persistence.py",), "_image_marker"),
     # The caps on what a plugin may add to the system prompt as a section, and on the host's own
     # context files. A section past the first is dropped whole at render — the reason
     # plugin/openui.py refuses to register one — and SOUL.md past the third is truncated head and
@@ -83,6 +89,8 @@ REPLAY_REL = "agent/context_compressor.py"
 TODO_REL = "tools/todo_tool.py"
 RELOAD_REL = "agent/conversation_compression.py"
 SUMMARY_REL = "agent/context_compressor.py"
+MEDIA_REL = "gateway/session_api_media.py"
+PLACEHOLDER_REL = "agent/session_persistence.py"
 
 CONSTANTS: Tuple[Tuple[str, str, str, str], ...] = (
     (FOOTER_REL, "INTERNAL_NOTIFICATION_FOOTER", "footer", "the machine-provenance footer"),
@@ -111,19 +119,41 @@ COPIES: Tuple[Tuple[str, str, str], ...] = (
 )
 
 APP_SEAM_REL = "app/src/lib/compaction-seam.ts"
+APP_ATTACHMENTS_REL = "app/src/lib/attachment-text.ts"
 
 # `whole` is how much of the host's text the app's copy carries: the three headers word for word, the
 # notice's body as the opening that tells it from a message quoting the header.
-APP_COPIES: Tuple[Tuple[str, str, str, bool], ...] = (
-    ("REPLAY_HEADER", "replay", "the restatement's header", True),
-    ("TASK_SNAPSHOT_HEADER", "snapshot", "the preserved task list's header", True),
-    ("RELOAD_NOTICE_HEADER", "reload", "the reload notice's header", True),
-    ("RELOAD_NOTICE_BODY", "reloadBody", "the notice's own opening", False),
-    ("SUMMARY_HEADER", "summary", "the compaction summary's opening", False),
-    ("LEGACY_SUMMARY_HEADER", "legacySummary", "an older summary's opening", True),
-    ("SUMMARY_END", "summaryEnd", "the line every summary ends on", True),
-    ("PRIOR_CONTEXT_HEADER", "prior", "a summary merged into a reply's opening", True),
-    ("MERGED_SUMMARY_DELIMITER", "mergedDelimiter", "where a merged summary begins", True),
+APP_COPIES: Tuple[Tuple[str, str, str, str, bool], ...] = (
+    (APP_SEAM_REL, "REPLAY_HEADER", "replay", "the restatement's header", True),
+    (APP_SEAM_REL, "TASK_SNAPSHOT_HEADER", "snapshot", "the preserved task list's header", True),
+    (APP_SEAM_REL, "RELOAD_NOTICE_HEADER", "reload", "the reload notice's header", True),
+    (APP_SEAM_REL, "RELOAD_NOTICE_BODY", "reloadBody", "the notice's own opening", False),
+    (APP_SEAM_REL, "SUMMARY_HEADER", "summary", "the compaction summary's opening", False),
+    (APP_SEAM_REL, "LEGACY_SUMMARY_HEADER", "legacySummary", "an older summary's opening", True),
+    (APP_SEAM_REL, "SUMMARY_END", "summaryEnd", "the line every summary ends on", True),
+    (APP_SEAM_REL, "PRIOR_CONTEXT_HEADER", "prior", "a summary merged into a reply's opening", True),
+    (
+        APP_SEAM_REL,
+        "MERGED_SUMMARY_DELIMITER",
+        "mergedDelimiter",
+        "where a merged summary begins",
+        True,
+    ),
+    (APP_ATTACHMENTS_REL, "IMAGE_PLACEHOLDER", "placeholder", "an inline image's line", True),
+    (
+        APP_ATTACHMENTS_REL,
+        "IMAGE_ATTACHED_AT",
+        "hintAt",
+        "the line naming a photo's committed copy",
+        False,
+    ),
+    (
+        APP_ATTACHMENTS_REL,
+        "IMAGE_ATTACHED",
+        "hintRemote",
+        "the line naming a photo's address",
+        False,
+    ),
 )
 
 # The plugin's own half of the names above: a rename here would leave the checks below passing while
@@ -134,8 +164,26 @@ PLUGIN_NAMES: Tuple[Tuple[str, str], ...] = (
     ("interrupt_subagent", "core's per-child stop"),
 )
 
+# The checks whose value is a set rather than a sentence: the app's list, the host's, and the entry
+# the app adds to the host's (a task item's `?` marker has no host status behind it).
+SET_COPIES: Tuple[Tuple[str, str, str, str, Optional[str]], ...] = (
+    (APP_SEAM_REL, "SNAPSHOT_MARKERS", "markers", "an item's status markers", "?"),
+    (
+        APP_ATTACHMENTS_REL,
+        "SCREENSHOT_DETAILS",
+        "details",
+        "the details a placeholder may carry",
+        None,
+    ),
+)
+
 TOTAL = (
-    len(ANCHORS) + len(CONSTANTS) + len(COPIES) + len(APP_COPIES) + len(PLUGIN_NAMES) + 1
+    len(ANCHORS)
+    + len(CONSTANTS)
+    + len(COPIES)
+    + len(APP_COPIES)
+    + len(SET_COPIES)
+    + len(PLUGIN_NAMES)
 )
 
 _OPENING = re.compile(r"(?:[rRbBuUfF]{0,2})('''|\"\"\"|'|\")")
@@ -280,6 +328,12 @@ def _todo_markers(src: str) -> Optional[List[str]]:
     return found or None
 
 
+def _screenshot_details(src: str) -> Optional[List[str]]:
+    """The detail values an inline image's placeholder may carry, which ``_image_marker`` prints."""
+    match = re.search(r"detail in \(([^)]*)\)", src)
+    return re.findall(r'"(\w+)"', match.group(1)) if match else None
+
+
 def _status_mark(src: str) -> Optional[str]:
     """The Status line's truncation suffix, which core appends inline rather than naming."""
     match = re.search(r'"(\s*\[TRUNCATED:[^"\n]*max_iterations[^"\n]*\])"', src)
@@ -351,7 +405,9 @@ def main(argv: List[str]) -> int:
         if not any(literal in (read(hermes / rel) or "") for rel in rels):
             failures.append(f"hermes:{' or '.join(rels)}: missing {literal!r}")
 
-    derived: Dict[str, Tuple[str, str]] = {}
+    # A text constant, or the set of them a check compares (an item's status markers, a
+    # placeholder's details).
+    derived: Dict[str, Tuple[Union[str, List[str]], str]] = {}
 
     def derive(key: str, rel: str, source: Optional[str], reader, what: str) -> None:
         if source is None:
@@ -392,6 +448,34 @@ def main(argv: List[str]) -> int:
         "the reload notice's own opening",
     )
     derive("markers", TODO_REL, sourced(TODO_REL), _todo_markers, "the status markers an item prints")
+    derive(
+        "hintAt",
+        MEDIA_REL,
+        sourced(MEDIA_REL),
+        lambda src: _joined(src, "'[Image attached at: "),
+        "the line naming a photo's committed copy",
+    )
+    derive(
+        "hintRemote",
+        MEDIA_REL,
+        sourced(MEDIA_REL),
+        lambda src: _joined(src, "'[Image attached: "),
+        "the line naming a photo's address",
+    )
+    derive(
+        "placeholder",
+        PLACEHOLDER_REL,
+        sourced(PLACEHOLDER_REL),
+        lambda src: _joined(src, '"[screenshot]"'),
+        "the line an inline image leaves in a row",
+    )
+    derive(
+        "details",
+        PLACEHOLDER_REL,
+        sourced(PLACEHOLDER_REL),
+        _screenshot_details,
+        "the details an inline image's placeholder may carry",
+    )
 
     # The plugin side: the same names, and the same sentences.
     delegation = plugin / "delegation.py"
@@ -421,54 +505,67 @@ def main(argv: List[str]) -> int:
                     f"hermes {expected!r} plugin {value!r}"
                 )
 
-    seam = read(plugin.parent / APP_SEAM_REL)
-    if seam is None:
-        failures.append(f"app:{APP_SEAM_REL}: missing file")
-    else:
+    def app_source(rel: str) -> Optional[str]:
+        """The app file a copy is read from, reported once if it is missing."""
+        source = read(plugin.parent / rel)
+        if source is None:
+            failures.append(f"app:{rel}: missing file")
+        return source
 
-        def app_pair(constant: str, key: str, what: str) -> Optional[Tuple[str, str, str]]:
-            """The app's copy, the host's text and the file it came from: ``None`` once reported."""
-            value = _ts_constant(seam, constant)
-            if value is None:
-                failures.append(f"app:{APP_SEAM_REL}: missing constant {constant} ({what})")
-                return None
-            if key not in derived:
-                failures.append(
-                    f"app:{APP_SEAM_REL}: {constant} ({what}) compares against unknown check {key!r}"
-                )
-                return None
-            expected, rel = derived[key]
-            return value, expected, rel
+    def app_pair(
+        rel: str, source: str, constant: str, key: str, what: str
+    ) -> Optional[Tuple[str, str, str]]:
+        """The app's copy, the host's text and the file it came from: ``None`` once reported."""
+        value = _ts_constant(source, constant)
+        if value is None:
+            failures.append(f"app:{rel}: missing constant {constant} ({what})")
+            return None
+        if key not in derived:
+            failures.append(f"app:{rel}: {constant} ({what}) compares against unknown check {key!r}")
+            return None
+        expected, host_rel = derived[key]
+        return value, expected, host_rel
 
-        for constant, key, what, whole in APP_COPIES:
-            pair = app_pair(constant, key, what)
-            if not pair:
-                continue
-            value, expected, rel = pair
-            held = _canonical(value) == _canonical(expected) if whole else (
-                _canonical(expected).startswith(_canonical(value))
-            )
-            if not held:
-                failures.append(
-                    f"app:{APP_SEAM_REL}: {constant} ({what}) "
-                    f"{'is not' if whole else 'does not open'} what hermes:{rel} writes — "
-                    f"hermes {expected!r} app {value!r}"
-                )
-
-        marks = _ts_strings(seam, "SNAPSHOT_MARKERS")
-        if marks is None:
-            failures.append(f"app:{APP_SEAM_REL}: missing SNAPSHOT_MARKERS (an item's status markers)")
-        elif "markers" not in derived:
+    sources: Dict[str, Optional[str]] = {}
+    for rel, constant, key, what, whole in APP_COPIES:
+        if rel not in sources:
+            sources[rel] = app_source(rel)
+        source = sources[rel]
+        if source is None:
+            continue
+        pair = app_pair(rel, source, constant, key, what)
+        if not pair:
+            continue
+        value, expected, host_rel = pair
+        held = _canonical(value) == _canonical(expected) if whole else (
+            _canonical(expected).startswith(_canonical(value))
+        )
+        if not held:
             failures.append(
-                f"app:{APP_SEAM_REL}: SNAPSHOT_MARKERS compares against unknown check 'markers'"
+                f"app:{rel}: {constant} ({what}) "
+                f"{'is not' if whole else 'does not open'} what hermes:{host_rel} writes — "
+                f"hermes {expected!r} app {value!r}"
             )
-        else:
-            expected_marks, rel = derived["markers"]
-            if sorted(marks) != sorted(list(expected_marks) + ["?"]):
-                failures.append(
-                    f"app:{APP_SEAM_REL}: SNAPSHOT_MARKERS (an item's status markers) is not what "
-                    f"hermes:{rel} prints — hermes {sorted(expected_marks)!r} app {sorted(marks)!r}"
-                )
+
+    for rel, constant, key, what, own in SET_COPIES:
+        if rel not in sources:
+            sources[rel] = app_source(rel)
+        source = sources[rel]
+        if source is None:
+            continue
+        value = _ts_strings(source, constant)
+        if value is None:
+            failures.append(f"app:{rel}: missing {constant} ({what})")
+            continue
+        if key not in derived:
+            failures.append(f"app:{rel}: {constant} ({what}) compares against unknown check {key!r}")
+            continue
+        expected, host_rel = derived[key]
+        if sorted(value) != sorted(list(expected) + ([own] if own else [])):
+            failures.append(
+                f"app:{rel}: {constant} ({what}) is not what hermes:{host_rel} prints — "
+                f"hermes {sorted(expected)!r} app {sorted(value)!r}"
+            )
 
     if failures:
         print("\n".join(failures))

@@ -1,8 +1,7 @@
-import { splitAttachments } from "../lib/attachment-text.ts"
+import { splitAttachments, steerWords } from "../lib/attachment-text.ts"
 import { isSeamScaffolding, seamDrawnContent } from "../lib/compaction-seam.ts"
 import type { MessageStats } from "../lib/db.ts"
 import { refusedCallIds } from "../lib/progress-reminder.ts"
-import { steerText } from "../lib/steer.ts"
 
 import type { Timing } from "../lib/reply-stats.ts"
 
@@ -53,6 +52,8 @@ export interface SentFile {
   size: number
   image: boolean
   path?: string
+  /** A photo the row's own hint named, never a file the user sent: drawn, never carried back. */
+  host?: true
 }
 
 export interface Turn {
@@ -180,7 +181,7 @@ export function foldTurns(rows: Row[], partial = false): Turn[] {
       if (row.display_kind === "model_switch") continue
       // A steer is the user's, but it goes on the reply it steered rather than opening a turn.
       if (row.display_kind === "steer") {
-        turns.at(-1)?.parts.push({ kind: "steer", text: steerText(row.content ?? "") })
+        turns.at(-1)?.parts.push({ kind: "steer", text: steerWords(row.content ?? "") })
         continue
       }
       if (RESTATED.test(row.content ?? "")) continue
@@ -226,12 +227,13 @@ export function foldTurns(rows: Row[], partial = false): Turn[] {
         ...(at !== undefined ? { at } : {}),
         ...(attachments.length
           ? {
-              files: attachments.map(({ name, type, size, image, path }) => ({
+              files: attachments.map(({ name, type, size, image, path, host }) => ({
                 name,
                 type,
                 size,
                 image: Boolean(image),
                 ...(path ? { path } : {}),
+                ...(host ? { host } : {}),
               })),
             }
           : {}),

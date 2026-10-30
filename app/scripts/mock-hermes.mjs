@@ -171,6 +171,7 @@ import { basename, extname, join } from "node:path"
 
 import { handleMeetings } from "./mock-meetings.mjs"
 import { handleResearch } from "./mock-research.mjs"
+import { durableUserRow } from "./host-row.mjs"
 
 // Two real turns whose tool rows rendered in the wrong place (from session exports), replayed by
 // saying "tool placement plan" or "tool placement report".
@@ -468,15 +469,10 @@ function json(res, status, body) {
   res.end(JSON.stringify(body))
 }
 
-/** Like Hermes's transcript: a message's text parts, with each inline image as `[screenshot]`. */
+/** The newest message's content as the host's `user` row keeps it (`host-row.mjs`). */
 function durable(content) {
   if (!Array.isArray(content)) return String(content ?? "")
-  return content
-    .map((part) =>
-      part?.type === "text" ? part.text : part?.type === "image_url" ? "[screenshot]" : null,
-    )
-    .filter((part) => part != null)
-    .join("\n")
+  return durableUserRow(content)
 }
 
 async function readRaw(req) {
@@ -2688,7 +2684,7 @@ async function playTurn(req, body, last, out) {
 
   const attached = [...last.matchAll(/^<attachment name="([^"]*)"/gm)].map((m) => m[1])
   if (attached.length) {
-    const images = (last.match(/^\[screenshot\]$/gm) ?? []).length
+    const images = (last.match(/^\[screenshot(?: detail=(?:low|high|auto))?\]$/gm) ?? []).length
     await say(
       `Got ${attached.length === 1 ? attached[0] : `${attached.length} attachments: ${attached.join(", ")}`}` +
         (images ? `, ${images === 1 ? "an image" : `${images} images`} I can see` : "") +

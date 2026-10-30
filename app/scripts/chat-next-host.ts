@@ -19,6 +19,8 @@
  * test compares a device with what the host authored, never with the code under test.
  */
 
+import { durableUserRow } from "./host-row.mjs"
+
 interface Row {
   id: number
   session_id: string
@@ -139,7 +141,7 @@ const reply = (body: unknown, status = 200) =>
  */
 /**
  * The user row Hermes keeps for a run's input: a plain string as it came, or the newest message of a
- * list, its text parts joined and each inline image kept as the `[screenshot]` line it becomes.
+ * list, whose content `host-row.mjs` writes the way the host's own row is written.
  */
 function durable(input: unknown): string | null {
   if (input === null || input === undefined) return null
@@ -148,12 +150,7 @@ function durable(input: unknown): string | null {
   const content = last?.content
   if (typeof content === "string") return content
   if (!Array.isArray(content)) return ""
-  return content
-    .map((part: { type?: string; text?: string }) =>
-      part.type === "text" ? (part.text ?? "") : part.type === "image_url" ? "[screenshot]" : "",
-    )
-    .filter(Boolean)
-    .join("\n")
+  return durableUserRow(content)
 }
 
 export function fakeHost(

@@ -2407,3 +2407,41 @@ steer row was written. The offer above is fixed either way; what is not is the l
 
 Found by the simplify pass (altitude and reuse reviewers, converging on `page.tsx`'s two liveness
 facts) and by the review's spec axis, which probed the chat-next case; it does not block that fix.
+
+## A photo a message named by address is dropped, not drawn
+
+`splitAttachments` reads `[Image attached: <url>]` as part of the host's trailer and drops it, so the
+line stops reading as the user's words — but nothing draws the photo behind it: `Attachment` carries a
+`path` on the host, never an address, and `media-source.ts` has no remote source to hand a cell.
+
+- Cost: a message whose photo arrived as an `image_url` rather than a file shows neither the words nor
+  the image, where before it showed the host's handle as its text. The path form, which is what this
+  app's sends produce, is drawn.
+- Suggested fix: give `Attachment` a `url`, have `attachmentSources` pass it through, and let a cell
+  draw from an address, so the fold keeps the reference instead of dropping it. Its own task — it
+  changes the media-source contract, not the text fold.
+
+## The sentence the host writes for a wordless photo still reads as the message
+
+`restore_api_images` gives a message that carried a photo and no text of its own the words "What do
+you see in this image?", and the row's text then opens with them. `splitAttachments` drops the hint
+line and the placeholder but not that sentence, so a row written that way would draw a question the
+user never asked.
+
+- Cost: nothing today — every message this app sends carries a `<attachment>` marker text part, so the
+  host never reaches that branch for a Gots send. The two test hosts now write that shape, so it is
+  one fixture away from being visible.
+- Suggested fix: pin the sentence beside the hint lines and drop it where the row carries no marker,
+  the same condition as the hint-drawn photo, so a user who typed it keeps their words.
+
+## A steer that carried a photo draws its words and no photo
+
+Both screens fold a steer to its words (`steerWords`), and neither a `Turn` part nor a `Reply`'s
+steers list carries the files it named — so a photo steered into a running reply is not drawn at all.
+The classic screen has worked this way since the fold existed; this branch brings the new screen to the
+same rule, where before it drew the raw marker line as the steer's text.
+
+- Cost: a steered photo is invisible on both screens. Nothing is lost on the host — the row keeps it —
+  and a reload draws the same, so the thread states the same thing twice.
+- Suggested fix: give the steer part a `files` list the way a turn has one, draw it with the thread's
+  own media components, and map it through `messages.ts` beside the turn's.

@@ -14,6 +14,7 @@ const FILE = "cleanup-notes.md"
 const NOTES = "# Cleanup notes\n\nNothing renamed, nothing lost.\n"
 const SIZE = `${Buffer.byteLength(NOTES)} B`
 const PHOTO = "chart.png"
+const SAID = "here is the plan"
 
 /** A PNG of the page's own making, so the flow carries no binary of its own. */
 const png = (page) =>
@@ -78,8 +79,8 @@ await flow("file-message", async ({ page, seed, until, shot }) => {
   await page.getByRole("button", { name: `Remove ${FILE}` }).waitFor({ timeout: 10_000 })
   await page.getByRole("button", { name: `Remove ${PHOTO}` }).waitFor({ timeout: 10_000 })
 
-  const composer = page.getByLabel("Message")
-  await composer.fill("here is the plan")
+  const composer = page.getByLabel("Message", { exact: true })
+  await composer.fill(SAID)
   await composer.press("Enter")
 
   // The thread: the photo in a cell of the Gallery, the file as a row that names it and its size.
@@ -137,6 +138,16 @@ await flow("file-message", async ({ page, seed, until, shot }) => {
   const restored = await row.innerText()
   assert.match(restored, new RegExp(FILE.replace(".", "\\.")), "the row names the file here too")
   assert.match(restored, new RegExp(SIZE), "and carries the size the transcript kept")
+  assert.equal(
+    await page.getByText(SAID).first().innerText(),
+    SAID,
+    "the restored bubble holds the words that were typed",
+  )
+  assert.equal(
+    await page.getByText(/\[Image attached/).count(),
+    0,
+    "the host's line naming the copy never reads as the message",
+  )
   await shot("elsewhere")
 
   // A tap saves it: the bytes come through the plugin's route, and the browser writes them under
