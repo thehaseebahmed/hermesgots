@@ -22,7 +22,7 @@ import {
   SAFETY_MS,
   SEND_CAUGHT_UP_MS,
 } from "@/lib/freshness"
-import { COLUMN_BOX, REPLY_INSET } from "@/lib/layout"
+import { COLUMN_BOX } from "@/lib/layout"
 import type { ComposerControls } from "@/chat-next/page"
 import { opensOnChatNext } from "@/chat-next/route"
 import { prepareTurn, queueTurn, startTurn, steerTurn, triageTurn } from "@/chat-next/turn"
@@ -146,9 +146,11 @@ import { dictationHint } from "@/lib/dictation-hint"
 import { draftKey } from "@/lib/drafts"
 import { AgentsContext, runningAgents, stopSubagents, useSessionAgents } from "@/lib/agents"
 import { spawnInFlight } from "@/lib/spawn"
+import { carriesCount } from "@/lib/thinking"
 import { usePluginFeature, usePluginFeatureOn } from "@/lib/features"
 import { AgentPopup } from "@/components/chat/agent-card"
-import { SubagentLine } from "@/components/chat/subagent-line"
+import { StatusLine } from "@/components/chat/status-line"
+import { SubagentCount } from "@/components/chat/subagent-count"
 import { SubagentsSheet } from "@/components/chat/subagents"
 
 const NO_ROWS: Message[] = []
@@ -1021,9 +1023,9 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   const spawning = useMemo(() => spawnInFlight(messages), [messages])
   const agents = useSessionAgents(conversation ?? undefined, profile, spawning, busy)
   const subagentsRunning = useMemo(() => runningAgents(agents).length, [agents])
-  // The count is drawn once, by whichever row is last: the reply's own while it streams, else the foot.
   const lastId = thread?.at(-1)?.id
-  const drawsInline = subagentsRunning > 0 && streaming?.id === lastId
+  // The count is drawn once: on the last reply's own line, or at the thread's foot where it draws none.
+  const drawsInline = subagentsRunning > 0 && Boolean(thread?.at(-1) && carriesCount(thread.at(-1)!))
   const [agentView, setAgentView] = useState<DelegatedAgent>()
   const [agentsOpen, setAgentsOpen] = useState(false)
   const showSubagents = useCallback(() => setAgentsOpen(true), [setAgentsOpen])
@@ -1387,9 +1389,13 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
                   {compacted.trailing && <Compacted compaction={compacted.trailing} />}
                   {moved.trailing.map(moveMarker)}
                   {subagentsRunning > 0 && !drawsInline && (
-                    <div className={`${COLUMN_BOX} ${REPLY_INSET}`}>
-                      <SubagentLine count={subagentsRunning} onOpen={showSubagents} />
-                    </div>
+                    <StatusLine>
+                      <SubagentCount
+                        count={subagentsRunning}
+                        onOpen={showSubagents}
+                        place="alone"
+                      />
+                    </StatusLine>
                   )}
                 </AgentsContext.Provider>
               </MessageScrollerContent>

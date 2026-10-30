@@ -8,16 +8,12 @@ import { cn } from "@/lib/utils"
 /**
  * The one row shape the thread's two accounts of the work share — a run of tool calls and a run of
  * thinking — so the pair read and open the same way by construction (ADR 0050). It stands 29px
- * tall, the exception the app's 44px touch target makes for a reply's work rows (ADR 0058).
+ * tall, the exception the app's 44px touch target makes for a reply's work rows (ADR 0058), and it
+ * is muted: a working row says so by its loader, never by the accent, which is kept for what a
+ * reader can press (ADR 0070).
  */
 export const WORK_ROW_CLASS =
   "relative flex min-h-[29px] w-full items-center gap-2 text-left text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-
-/**
- * What a row wears while the turn works behind it: the status line's loader and word and the
- * thinking row's are this one look, so a turn moving between the two never changes how it reads.
- */
-export const WORKING_ROW_CLASS = "text-primary"
 
 /** The sign's own box: the 16px `WORK_LABEL_DENT` clears along with the row's 8px gap. */
 const SIGN = "size-4 shrink-0"

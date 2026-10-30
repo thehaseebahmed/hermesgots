@@ -26,7 +26,7 @@ import { Compacted, ModelChange } from "@/components/chat/model-change"
 import { QuestionCard } from "@/components/chat/question-card"
 import { AskAgainContext } from "@/components/chat/session-cards"
 import { StatusLine } from "@/components/chat/status-line"
-import { SubagentLine } from "@/components/chat/subagent-line"
+import { SubagentCount } from "@/components/chat/subagent-count"
 import { SubagentsSheet } from "@/components/chat/subagents"
 import { ThreadCard } from "@/components/chat/thread-card"
 import { Button } from "@/components/ui/button"
@@ -39,7 +39,7 @@ import {
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller"
 import { Spinner } from "@/components/ui/spinner"
-import { AgentsContext, type AgentsSource } from "@/lib/agents"
+import { AgentsContext, runningAgents, type AgentsSource } from "@/lib/agents"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { attachmentsText } from "@/lib/attachment-text"
 import { compactionMarks } from "@/lib/compactions"
@@ -51,6 +51,7 @@ import { COLUMN_BOX, REPLY_INSET } from "@/lib/layout"
 import { modelChanges } from "@/lib/model-changes"
 import { useDraws } from "@/lib/openui-draws"
 import type { RepoRef } from "@/lib/workspace"
+import { carriesCount } from "@/lib/thinking"
 import { cn } from "@/lib/utils"
 
 import { delegated } from "./agents"
@@ -235,9 +236,12 @@ export function AppThreadView({
   // A thread this device holds nothing of has nothing to say "catching up" under: its first read
   // is one loader in the middle of the pane, and only a thread already held says it in words.
   const loadingFresh = catchingUp && !messages.length && !streaming && !unstarted
-  const running = source.agents.filter((agent) => agent.status === "running").length
+  const running = runningAgents(source.agents).length
   const lastId = messages.at(-1)?.id
-  const inline = running > 0 && messages.at(-1)?.status === "streaming"
+  // The count is drawn once: on the last reply's own line, or at the thread's foot where it draws none.
+  const inline = running > 0 && Boolean(messages.at(-1) && carriesCount(messages.at(-1)!))
+  // Stable, so a reply's own memo holds: a fresh callback would redraw every row on every token.
+  const showSubagents = useCallback(() => setSheet(true), [])
 
   return (
     <AskAgainContext.Provider value={ask}>
@@ -322,7 +326,7 @@ export function AppThreadView({
                             showStats
                             busy={streaming}
                             subagents={message.id === lastId ? running : undefined}
-                            onShowSubagents={() => setSheet(true)}
+                            onShowSubagents={showSubagents}
                             subagentsInline={message.id === lastId && inline}
                           />
                           {message.id === retryId && (
@@ -345,9 +349,9 @@ export function AppThreadView({
                     {compacted.trailing && <Compacted compaction={compacted.trailing} />}
                     {moved.trailing.map(marker)}
                     {running > 0 && !inline && (
-                      <div className={cn(COLUMN_BOX, REPLY_INSET)}>
-                        <SubagentLine count={running} onOpen={() => setSheet(true)} />
-                      </div>
+                      <StatusLine>
+                        <SubagentCount count={running} onOpen={showSubagents} place="alone" />
+                      </StatusLine>
                     )}
                   </AgentsContext.Provider>
                   {catchingUp && messages.length > 0 && (

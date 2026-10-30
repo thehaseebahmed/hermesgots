@@ -5,22 +5,42 @@
 // reaches, and the row is the only place a reader touches thinking now: it opens the working-out in
 // the same sheet the tool row opens, and the sheet's follow on a live run, the wheel inside it that
 // stops that follow and the whole height of its body are all geometry the browser has and jsdom
-// cannot give. See ADR 0050.
-import { assert, app, flow, pass, settled } from "./lib.mjs"
+// cannot give.
+// The cluster's colours are read here too, as the theme resolves them: a thought row's own word and
+// the muted loader beside it, the muted status line and its loader, and the count of subagents at
+// work in the info blue — turning a loader of its own in that blue only where it stands alone, the
+// turn done and its subagent still running. See ADR 0050 and ADR 0070.
+import { assert, app, flow, mock, mockPost, pass, settled } from "./lib.mjs"
 // What a row reads is the app's own rule, imported rather than restated: a second copy of the label
 // format here could drift from the one the thread draws and still pass.
 import { BUSY_WORDS } from "../../src/lib/busy-words.ts"
-import { thinkingLabel } from "../../src/lib/thinking.ts"
+import { THINKING_WORD, thinkingLabel } from "../../src/lib/thinking.ts"
 
 /** The reply's own item on the page: its rows, its calls and the sheet are all drawn inside it. */
 const ITEM = "[data-slot=message-scroller-item]"
 const WORKING = "[data-slot=status-line]"
-const SAYING = BUSY_WORDS.thinking.map((word) => `${word}…`)
-/** A row still thinking says one of the status line's thinking words, never a fixed phrase. */
+/** The status line's thinking words, which rotate: it is the one line of a reply that says them. */
+const LINE_SAYING = BUSY_WORDS.thinking.map((word) => `${word}…`)
+/** The literal word a row still thinking says — the rotating words are the status line's alone. */
+const SAYING = [THINKING_WORD]
+/** A row still thinking says that one word; a finished one reads what it measured. */
 const saysThinking = (label) => SAYING.includes(label ?? "")
 const saysWriting = (words) => BUSY_WORDS.writing.some((word) => words === `${word}…`)
-const THINKING = new RegExp(`^(${SAYING.join("|")}|Thought it through|Thought for \\d+[sm])`)
+/** Whether the line says the turn is working at all, in a word that rotates. */
+const saysWorking = (words) => saysWriting(words) || LINE_SAYING.includes(words ?? "")
+/** Every label a thought row reads: still thinking, or the span a folded run's row took. */
+const THINKING = new RegExp(
+  `^(${[...SAYING, "Thought it through"].join("|")}|Thought for \\d+[sm])$`,
+)
 const SPAN = /^Thought for \d+s$/
+/**
+ * What the count reads for the one subagent this leg dispatches. `format.ts` owns those words but
+ * imports through the app's `@/` aliases, which a plain-node flow cannot load, so they are written
+ * here; a reword breaks this leg loudly rather than passing on a stale string.
+ */
+const COUNT = "1 subagent running"
+/** How long the wake a finished delegation owes is held back, so the moment after its turn exists. */
+const WAKE_HELD_MS = 30_000
 const ROW = "[data-slot=thinking-line]"
 const SHEET = "[data-slot=thinking-sheet]"
 const BODY = "[data-slot=thinking-body]"
@@ -46,6 +66,61 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   const chatId = new URL(page.url()).pathname.split("/").at(-1)
   const item = page.locator(ITEM).last()
   const rows = item.locator(ROW).locator("button")
+
+  // The cluster's colours as this theme resolves them, read once before the waits: they cannot change
+  // inside a flow, and a poll that re-derived them would colour a span on the live chat at every turn
+  // of a wait. The design's names are `--color-muted-foreground` and `--color-info`, but `@theme
+  // inline` folds those into the utilities it generates and leaves no such property on the page, so
+  // each is probed at the token it points at — what `text-muted-foreground` and `text-info` resolve
+  // to — the way `--color-primary` is, its own name still emitted.
+  const tone = await page.evaluate(() => {
+    const probe = (property) => {
+      const span = document.createElement("span")
+      span.style.color = `var(${property})`
+      document.body.append(span)
+      const colour = getComputedStyle(span).color
+      span.remove()
+      return colour
+    }
+    return {
+      accent: probe("--color-primary"),
+      muted: probe("--muted-foreground"),
+      info: probe("--info"),
+    }
+  })
+
+  // The reply's status line, as the browser draws it: the words it says, the loader beside them, the
+  // count of subagents at work riding their end or standing alone — and the colour each one took.
+  const lineState = () =>
+    page.evaluate(
+      ({ item: itemSlot, line, words }) => {
+        const box = [...document.querySelectorAll(itemSlot)].at(-1)?.querySelector(line)
+        if (!box) return null
+        const span = box.querySelector(words)
+        const loader = box.querySelector("[data-slot=spinner]")
+        const count = box.querySelector("button")
+        return {
+          words: span?.textContent ?? "",
+          loader: Boolean(loader),
+          // One loader per line: its own word's, or the count's where the count stands alone.
+          loaders: box.querySelectorAll("[data-slot=spinner]").length,
+          colour: getComputedStyle(box).color,
+          wordsColour: span ? getComputedStyle(span).color : "",
+          loaderColour: loader ? getComputedStyle(loader).color : "",
+          count: count?.textContent?.trim() ?? "",
+          countColour: count ? getComputedStyle(count).color : "",
+          countLoaders: count?.querySelectorAll("[data-slot=spinner]").length ?? 0,
+          // The count rides the end of the words, never the head of them.
+          after:
+            span && count
+              ? Boolean(span.compareDocumentPosition(count) & Node.DOCUMENT_POSITION_FOLLOWING)
+              : null,
+          // The dot that sets a riding count off from the words it is a suffix of.
+          separator: box.querySelectorAll("[data-slot=status-separator]").length,
+        }
+      },
+      { item: ITEM, line: WORKING, words: STATUS_WORDS },
+    )
 
   // Everything the reply draws that only the browser has: each row's label and whether it spins,
   // the order the rows and calls are drawn in, the sheet when one is open — its words, its box and
@@ -86,10 +161,15 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
           // row holds none of them in the thread.
           rows: lines.map((drawn) => {
             const control = drawn.firstElementChild
+            const spinner = control?.querySelector("[data-slot=spinner]")
             return {
               label: control?.textContent?.trim() ?? null,
               expanded: control?.getAttribute("aria-expanded") ?? null,
-              spins: Boolean(control?.querySelector("[data-slot=spinner]")),
+              spins: Boolean(spinner),
+              // The row's own colour, and the loader's: a working row says so by its loader, never
+              // by the accent, and both read muted (ADR 0070).
+              colour: control ? getComputedStyle(control).color : "",
+              loaderColour: spinner ? getComputedStyle(spinner).color : "",
             }
           }),
           // The reply's drawn things in the order they are drawn: a thinking row is a button whose
@@ -275,10 +355,11 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     await settled(page)
   }
 
-  // The turn's own pause and lead-in: nothing has arrived, so the row carries the turn — its words
-  // spinning on screen from the first moment the reply works, before a word of thinking arrives.
-  // The store is waited on first (the row and the footer's line are drawn in one render), then the
-  // row itself through the thread's own probe, which is where every other reading of it comes from.
+  // The turn's own pause and lead-in: nothing has arrived, so the status line carries the turn — its
+  // words spinning on screen from the first moment the reply works, before a word of thinking
+  // arrives. A reply with no word of thinking in it yet draws no row at all (ADR 0070), so the line
+  // is the whole of the account here: the store is waited on first (the line is drawn in the same
+  // render as the reply), then the line itself through this flow's own probe.
   await until(
     async () =>
       page.evaluate(async (id) => {
@@ -292,27 +373,22 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   )
   const before = await until(
     async () => {
-      const state = await threadState()
-      return state.rows.length === 1 && saysThinking(state.rows[0].label) ? state : null
+      const state = await lineState()
+      return state && saysWorking(state.words) ? state : null
     },
     10_000,
-    "the row carrying the turn before any thinking lands",
+    "the line carrying the turn before any thinking lands",
   )
-  assert.equal(before.rows.length, 1, "the row is on screen from the first moment the turn works")
-  assert.equal(before.rows[0].spins, true, "its spinner turning, before a word of thinking arrives")
-  assert.equal(
-    before.rows[0].expanded,
-    null,
-    "as a status row with nothing to open: its stretch has not arrived",
-  )
-  assert.equal(before.sheet, null, "and no sheet drawn for a row holding no words")
-  const says = await page.evaluate((sel) => document.querySelector(sel)?.textContent ?? "", WORKING)
-  assert.ok(
-    !/Writing…/.test(says) && !saysThinking(says),
-    "the footer says nothing while the row says it",
-  )
+  const pending = await threadState()
+  assert.equal(pending.rows.length, 0, "no row of thinking stands before a word of it arrives")
+  assert.equal(pending.sheet, null, "and no sheet, there being no row to open")
+  assert.equal(before.loader, true, "a loader turns beside the line's words from that moment")
+  assert.equal(before.colour, tone.muted, "the line reads muted, not the accent")
+  assert.equal(before.wordsColour, tone.muted, "its word takes that colour too, not just the row")
+  assert.equal(before.loaderColour, tone.muted, "and the loader beside it")
+  assert.notEqual(before.wordsColour, tone.accent, "nothing of the line is in the accent colour")
   await shot("working")
-  pass("the row spins from the turn's first working moment, the footer silent")
+  pass(`the line says "${before.words}" in ${before.colour} from the turn's first working moment`)
 
   // The first stretch landing with more of it still to come, and nothing said: a single block would
   // have put the whole working-out on the row at once, which is what the mock is told not to do.
@@ -334,6 +410,18 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     "the thinking to reach the row",
   )
   assert.equal(streaming.rows[0].spins, true, "the row spins: it is still thinking")
+  assert.equal(
+    streaming.rows[0].label,
+    "thinking",
+    "saying the literal word, never one of the status line's rotating ones",
+  )
+  assert.equal(streaming.rows[0].colour, tone.muted, "in the row's own muted colour")
+  assert.equal(streaming.rows[0].loaderColour, tone.muted, "its loader too")
+  assert.notEqual(
+    streaming.rows[0].loaderColour,
+    tone.accent,
+    "never the accent: a working row says so by its loader",
+  )
   assert.equal(streaming.rows[0].expanded, "false", "and its words are shut in the sheet")
   assert.equal(streaming.sheet, null, "with no sheet open")
   await inThread(FIRST, "while the turn thinks")
@@ -473,16 +561,21 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     "the row to read its spans",
   )
   assert.match(frozen.rows[0].label ?? "", SPAN, "the row reads a span, not a plain phrase")
-  assert.notEqual(
-    frozen.rows[0].label,
-    thinkingLabel({ thinking: false, spanMs: spans[0] }),
-    "and reads every stretch's span added, not the first of them alone",
-  )
-  assert.notEqual(
-    frozen.rows[0].label,
-    thinkingLabel({ thinking: false, spanMs: spans[1] + spans[2] }),
-    "nor the two that followed the first call",
-  )
+  // The sum of every stretch is what the row read, where a stretch alone, or the two after the first
+  // call alone, would read less. The label's own resolution is a second — a stretch this device
+  // watched land inside one prints the same words as the whole of them — so a partial reading is
+  // compared only where the app's rule words it differently from the sum.
+  const total = spans[0] + spans[1] + spans[2]
+  for (const partial of [spans[0], spans[1] + spans[2]]) {
+    const alone = thinkingLabel({ thinking: false, spanMs: partial })
+    if (alone === labels[0]) continue
+    assert.notEqual(
+      frozen.rows[0].label,
+      alone,
+      `and reads every stretch's span added, not the ${partial}ms of them that would read "${alone}"`,
+    )
+  }
+  assert.ok(total > spans[0], "the sum carries the stretches after the first call as well")
   assert.ok(
     frozen.rows.every((one) => one.spins === false),
     "with nothing spinning in the row the turn thought in",
@@ -493,31 +586,6 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   )
   assert.equal(frozen.sheet, null, "the answer closes no sheet: none was open")
 
-  // The accent as this theme resolves it, read once before the wait: it cannot change inside a flow,
-  // and a poll that re-derived it would colour a span on the live chat at every turn of the wait.
-  const accent = await page.evaluate(() => {
-    const probe = document.createElement("span")
-    probe.style.color = "var(--color-primary)"
-    document.body.append(probe)
-    const colour = getComputedStyle(probe).color
-    probe.remove()
-    return colour
-  })
-  const lineState = () =>
-    page.evaluate(
-      ({ line, words }) => {
-        const box = document.querySelector(line)
-        if (!box) return null
-        const span = box.querySelector(words)
-        return {
-          words: span?.textContent ?? "",
-          loader: Boolean(box.querySelector("[data-slot=spinner]")),
-          colour: getComputedStyle(box).color,
-          wordsColour: span ? getComputedStyle(span).color : "",
-        }
-      },
-      { line: WORKING, words: STATUS_WORDS },
-    )
   const writing = await until(
     async () => {
       const state = await lineState()
@@ -527,8 +595,19 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     "the footer's line to say the turn is writing",
   )
   assert.ok(writing.loader, "a loader turns beside the words")
-  assert.equal(writing.colour, accent, "the loader and its words both read in the accent colour")
-  assert.equal(writing.wordsColour, accent, "the words' own text takes it too, not just the row")
+  assert.equal(writing.loaders, 1, "the line turns one loader and no more")
+  assert.equal(writing.colour, tone.muted, "the line reads muted")
+  assert.equal(
+    writing.wordsColour,
+    tone.muted,
+    "the words' own text takes it too, not just the row",
+  )
+  assert.equal(writing.loaderColour, tone.muted, "and the loader beside them")
+  assert.notEqual(
+    writing.colour,
+    tone.accent,
+    "never the accent: that is kept for what a reader presses",
+  )
   await page.waitForTimeout(STEADY_MS)
   const steady = await lineState()
   assert.ok(saysWriting(steady?.words), "the words stand whole: nothing types itself in")
@@ -785,4 +864,135 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   pass(
     "the sheet draws the whole run at 390px and at 1024px, in light and in dark, with no cap, fade or Show more anywhere",
   )
+
+  // A turn that hands the digging to a subagent: the count of them at work is the status line's own,
+  // never a row below it (ADR 0070), so the line is read at both moments the count has. The mock's
+  // child ends with the turn that dispatched it, so the plugin's own row — read here while the child
+  // really works — is what the host keeps answering for this chat, and the wake such a delegation
+  // owes is held back: the moment after a turn whose subagent is still at work is then a readable
+  // one, and both are the host's state, never the app's drawing of it.
+  const held = await mockPost("/__mock/wake", { delay: WAKE_HELD_MS })
+  try {
+    assert.equal((await held.json()).delay, WAKE_HELD_MS, "the wake is held for the window read below")
+    const sessionId = await page.evaluate(async (id) => {
+      const { db } = await import("/src/lib/db.ts")
+      return (await db.conversations.get(id))?.hermesSessionId
+    }, chatId)
+    assert.ok(sessionId, "the chat has a Hermes session")
+    const hosted = async () => {
+      const answered = await fetch(
+        `${mock}/api/plugins/memento/sessions/${encodeURIComponent(sessionId)}/agents`,
+      )
+      return (await answered.json()).agents ?? []
+    }
+    /** The count itself, page-wide: drawn once on the line, with no second row of it anywhere below. */
+    const countRows = () =>
+      page.evaluate((label) => {
+        const named = [...document.querySelectorAll("button")].filter(
+          (one) => (one.textContent ?? "").trim() === label,
+        )
+        return {
+          drawn: named.length,
+          onLine: named.filter((one) => one.closest("[data-slot=status-line]")).length,
+        }
+      }, COUNT)
+
+    // Read in the light theme the colours above were probed in, whatever the plates before this left.
+    await until(
+      async () =>
+        (await page.evaluate(() => !document.documentElement.classList.contains("dark")))
+          ? true
+          : null,
+      10_000,
+      "the app to draw the light theme these colours were probed in",
+    )
+
+    await send("delegate and ask the subagent what is filling /var/log on this host")
+    const delegated = await until(
+      async () => {
+        const found = await hosted()
+        return found.length && found.every((agent) => agent.status === "running") ? found : null
+      },
+      20_000,
+      "the plugin to list the subagent at work",
+    )
+    assert.equal(delegated.length, 1, "one subagent was dispatched")
+    await page.route(/\/sessions\/[^/]+\/agents$/, (route) =>
+      route.fulfill({ json: { object: "memento.agents", agents: delegated } }),
+    )
+
+    // The question the delegation asked in the composer's place, answered: the turn goes on working
+    // with the subagent running under it, and the count rides the words the line says for it.
+    const answer = page.getByRole("button", { name: "Yes, cap everything" })
+    await answer.waitFor({ timeout: 20_000 })
+    await answer.click()
+    await page.getByRole("button", { name: "Send" }).click()
+    const riding = await until(
+      async () => {
+        const state = await lineState()
+        return state && saysWriting(state.words) && state.count === COUNT ? state : null
+      },
+      20_000,
+      "the count to ride the line's words while the turn works",
+    )
+    assert.equal(riding.loaders, 1, "the line turns one loader, serving its words and the count")
+    assert.equal(riding.countLoaders, 0, "the count carries no loader of its own")
+    assert.equal(riding.after, true, "it rides the end of the words, not their head")
+    assert.equal(riding.separator, 1, "set off from them by the line's own dot")
+    assert.equal(riding.colour, tone.muted, "the line reads muted")
+    assert.equal(riding.wordsColour, tone.muted, "its words too")
+    assert.equal(riding.loaderColour, tone.muted, "and the loader beside them")
+    assert.equal(riding.countColour, tone.info, "while the count alone reads in the info blue")
+    assert.notEqual(
+      riding.countColour,
+      tone.accent,
+      "not the accent, which is kept for what a reader can press",
+    )
+    assert.deepEqual(
+      await countRows(),
+      { drawn: 1, onLine: 1 },
+      "the count is drawn once, on the line, with no row of it below",
+    )
+    await shot("count-riding")
+    pass(
+      `the count rides "${riding.words}" in ${riding.countColour}, the muted line's one loader beside it`,
+    )
+
+    // The turn's own end with the subagent still at work: nothing is left on the line but the count,
+    // and the loader it turns now is its own, in that same blue.
+    await until(
+      async () => ((await lastReply(chatId))?.status === "done" ? true : null),
+      60_000,
+      "the delegating turn to finish",
+    )
+    await settled(page)
+    const alone = await until(
+      async () => {
+        const state = await lineState()
+        return state && !state.words && state.count === COUNT ? state : null
+      },
+      15_000,
+      "the count to stand alone on the line",
+    )
+    assert.equal(alone.separator, 0, "with no words of the line's to be set off from")
+    assert.equal(alone.countLoaders, 1, "its own loader turns now: it alone keeps the line live")
+    assert.equal(alone.loaders, 1, "the line's one loader, which is the count's")
+    assert.equal(alone.countColour, tone.info, "the count reads in the info blue")
+    assert.equal(alone.loaderColour, tone.info, "and its loader turns in that same blue")
+    assert.equal(alone.colour, tone.muted, "the line it stands on still muted")
+    assert.deepEqual(
+      await countRows(),
+      { drawn: 1, onLine: 1 },
+      "the count is the line's own here too: no second row of it below",
+    )
+    await shot("count-alone")
+    pass(
+      `a done turn with a subagent at work leaves "${alone.count}" alone on its muted line, loader ${alone.loaderColour}`,
+    )
+  } finally {
+    // The hold this flow put on the wake is its own: put back however the legs above ended, so
+    // nothing run after it on this mock waits on a window that was here to be measured.
+    await mockPost("/__mock/wake", { delay: 0 })
+    await page.unroute(/\/sessions\/[^/]+\/agents$/)
+  }
 })

@@ -2,18 +2,11 @@ import { memo, useCallback, useEffect, useRef, useState } from "react"
 import { ChevronRightIcon } from "lucide-react"
 
 import { Markdown } from "@/components/chat/markdown"
-import {
-  WORK_ROW_CLASS,
-  WORKING_ROW_CLASS,
-  WorkLabel,
-  WorkRow,
-  WorkSign,
-} from "@/components/chat/work-row"
+import { WorkLabel, WorkRow, WorkSign } from "@/components/chat/work-row"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { COLUMN } from "@/lib/layout"
 import { prefersReducedMotion } from "@/lib/media"
-import { thinkingLabel } from "@/lib/thinking"
-import { useBusyWord } from "@/lib/use-busy-word"
+import { THINKING_WORD, thinkingLabel } from "@/lib/thinking"
 import { cn } from "@/lib/utils"
 
 /** How close to the sheet's bottom still counts as its end, for words that landed in view already. */
@@ -54,33 +47,26 @@ function watchAway(view: HTMLElement, away: () => void) {
 }
 
 /**
- * One stretch of a reply's thinking — or the stretch still to come, while the reply works and its
- * model has said nothing yet, drawn as a status row with nothing to open until words arrive. The
- * row says what the turn is doing: it turns a spinner ahead of the label while the thinking still
- * arrives, and wears no sign at all once this device has measured how long the run took. It opens
- * the working-out in the same sheet the tool row opens, so the thread's two accounts of the work read
- * and open the same way. A live run opened in the sheet lands on its newest words and keeps them in
- * view while they arrive, until the reader scrolls away inside the sheet; the sheet never closes
- * itself — when the thinking ends the label beside it just reads the span. While it thinks the row
- * is the status line's own look, saying the same rotating word it would (ADR 0069), though its
- * name for assistive tech and its sheet's heading stay "Thinking…". See ADR 0050 and ADR 0064.
+ * One stretch of a reply's thinking. The row says what it is doing in its own word: while the
+ * thinking still arrives it turns a loader beside the literal word "thinking", both in the row's
+ * own muted colour, and wears no sign at all once this device has measured how long the run took.
+ * The rotating words belong to the status line alone (ADR 0070). It opens the working-out in the
+ * same sheet the tool row opens, so the thread's two accounts of the work read and open the same
+ * way. A live run opened in the sheet lands on its newest words and keeps them in view while they
+ * arrive, until the reader scrolls away inside the sheet; the sheet never closes itself — when the
+ * thinking ends the label beside it just reads the span. Its name for assistive tech and its
+ * sheet's heading stay "Thinking…", and it is drawn only once a word of thinking has arrived: the
+ * status line says a turn's first working moment. See ADR 0050, ADR 0064 and ADR 0070.
  */
 export const ThinkingLine = memo(function ThinkingLine({
   reasoning,
-  seed = "",
   thinking,
-  pending,
   spanMs,
   className,
 }: {
   reasoning: string
-  /** What the rotating word is drawn from: the reply's own, as its status line's is. */
-  seed?: string
-  /** The model is still thinking, so the row turns a spinner beside "Thinking…" wherever it is drawn. */
+  /** The model is still thinking, so the row turns a loader beside its word wherever it is drawn. */
   thinking: boolean
-  /** The turn works but its stretch has not arrived: the row turns its spinner over no words and
-   * offers no tap. */
-  pending?: boolean
   /** How long this device watched the turn think, when it watched it at all. */
   spanMs?: number
   /** The part's own classes: the reply's inset, and the gap the pair's upper half drops (ADR 0058). */
@@ -104,7 +90,9 @@ export const ThinkingLine = memo(function ThinkingLine({
   }, [])
   const following = useRef(false)
   const label = thinkingLabel({ thinking, spanMs })
-  const words = useBusyWord(thinking ? "thinking" : undefined, seed) ?? label
+  // The row's own word while its thinking arrives: never a rotating one, which is the status
+  // line's alone, and never the sheet's name — that stays "Thinking…" (ADR 0070).
+  const words = thinking ? THINKING_WORD : label
 
   // While the run still thinks, the sheet opened over it lands on its newest words and keeps them
   // in view as they arrive — bounded by the sheet's own body rather than the thread's end. A run
@@ -154,42 +142,30 @@ export const ThinkingLine = memo(function ThinkingLine({
 
   return (
     <div className={cn("flex flex-col", className, COLUMN)} data-slot="thinking-line">
-      {pending ? (
-        // The turn's own stretch has not arrived: the row names what the turn is doing and offers
-        // no tap — under this same key, the run's row takes over the moment its words land.
-        <div className={cn(WORK_ROW_CLASS, WORKING_ROW_CLASS)} data-slot="thinking-pending">
-          <WorkSign />
-          <WorkLabel>{words}</WorkLabel>
-        </div>
-      ) : (
-        <WorkRow
-          aria-haspopup="dialog"
-          aria-expanded={open}
-          aria-label={label}
-          onClick={() => setOpen(true)}
-          className={thinking ? WORKING_ROW_CLASS : undefined}
-          before={thinking ? <WorkSign /> : null}
-          after={<ChevronRightIcon className="size-4 shrink-0" aria-hidden />}
-        >
-          <WorkLabel>{words}</WorkLabel>
-        </WorkRow>
-      )}
-      {!pending && (
-        <Popup open={open} onOpenChange={setOpen}>
-          <PopupContent dataSlot="thinking-sheet" scrollRef={sheetRef}>
-            <PopupHeader className="pb-3">
-              <PopupTitle>{label}</PopupTitle>
-            </PopupHeader>
-            <div className="flex flex-col px-6 pb-6">
-              <div ref={bodyRef} data-slot="thinking-body" className="flex min-w-0 flex-col">
-                <Markdown className="text-sm leading-relaxed text-muted-foreground">
-                  {reasoning}
-                </Markdown>
-              </div>
+      <WorkRow
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-label={label}
+        onClick={() => setOpen(true)}
+        before={thinking ? <WorkSign /> : null}
+        after={<ChevronRightIcon className="size-4 shrink-0" aria-hidden />}
+      >
+        <WorkLabel>{words}</WorkLabel>
+      </WorkRow>
+      <Popup open={open} onOpenChange={setOpen}>
+        <PopupContent dataSlot="thinking-sheet" scrollRef={sheetRef}>
+          <PopupHeader className="pb-3">
+            <PopupTitle>{label}</PopupTitle>
+          </PopupHeader>
+          <div className="flex flex-col px-6 pb-6">
+            <div ref={bodyRef} data-slot="thinking-body" className="flex min-w-0 flex-col">
+              <Markdown className="text-sm leading-relaxed text-muted-foreground">
+                {reasoning}
+              </Markdown>
             </div>
-          </PopupContent>
-        </Popup>
-      )}
+          </div>
+        </PopupContent>
+      </Popup>
     </div>
   )
 })

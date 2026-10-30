@@ -275,7 +275,11 @@ test("the count of what runs is drawn once, by the thread's last row", async () 
       /** The row the count is drawn in, or null where it is the thread's own foot. */
       const inRow = () => count()[0]?.closest("[data-slot=message]") ?? null
       assert.equal(count()[0]?.textContent, "1 subagent running", "the count, said once")
-      assert.equal(inRow(), null, "nothing streams, so it stands at the thread's foot")
+      assert.equal(
+        inRow(),
+        rows().at(-1),
+        "nothing streams but the thread ends on a reply, so its own line carries the count",
+      )
       const last = async () => {
         const all = await db.messages.where("conversationId").equals("chat-1").toArray()
         return all.sort((a, b) => a.createdAt - b.createdAt).at(-1)!

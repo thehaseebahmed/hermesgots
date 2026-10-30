@@ -246,7 +246,7 @@ export function ClarifyCard({
   }
   // While the run waits the form itself is in the composer slot, so the thread says only that it
   // waits: a card there would repeat the question beside the one being answered.
-  if (running) return <StatusLine text={WAITING_FOR_ANSWER} waiting />
+  if (running) return <StatusLine text={WAITING_FOR_ANSWER} />
   return (
     <ExchangeCard icon={<MessageCircleQuestionIcon className="size-4" />} title={title}>
       {missed ? (

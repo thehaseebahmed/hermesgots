@@ -1,5 +1,4 @@
 import type { Message } from "@/lib/db"
-import { runsOf } from "@/lib/thinking"
 import { activityOf } from "@/lib/tools"
 
 export function formatDuration(ms: number) {
@@ -36,8 +35,15 @@ export function formatRelative(timestamp: number, now: number) {
 /** What the chat says while the run waits on a question: its status line and the thread's own. */
 export const WAITING_FOR_ANSWER = "Waiting for your answer"
 
+/** What the status line says while the run waits on an approval, in the same place as the answer's. */
+export const WAITING_FOR_APPROVAL = "Waiting for your approval…"
+
 /** What a send is turned down with while the run is held on a prompt. */
 export const WAITING_ON_ANSWER = "The bot is waiting on your answer"
+
+/** How many subagents a session has at work, in words: the **Subagent count**'s own. */
+export const subagentCountLabel = (count: number) =>
+  `${count} subagent${count === 1 ? "" : "s"} running`
 
 /** The two activity lines the status line dresses in a rotating word (`busy-words.ts`). */
 export const THINKING_ACTIVITY = "Thinking…"
@@ -51,8 +57,9 @@ export function describeActivity(message: Message) {
   const tool = message.tools?.findLast((t) => t.status === "running")
   if (tool) return `${activityOf(tool)}…`
   if (message.statusText) return message.statusText
-  if (runsOf(message).length > 0 && !message.content) return THINKING_ACTIVITY
-  // After a tool round the model works out its next step before it writes anything.
+  // A turn that has written nothing — its first word, or the next one after a tool round — is still
+  // working out what to say, so it is not writing yet.
+  if (!message.content) return THINKING_ACTIVITY
   const last = message.tools?.at(-1)
   if (last && (last.contentOffset ?? 0) >= message.content.length) return THINKING_ACTIVITY
   return WRITING_ACTIVITY

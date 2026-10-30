@@ -10,7 +10,9 @@ import {
   forgetRuns,
   mergeThoughtRows,
   noteRunThinking,
+  placeThinking,
   runsOf,
+  statusLineOf,
   thinkingLabel,
   thinkingRows,
 } from "../src/lib/thinking.ts"
@@ -62,7 +64,11 @@ test("the same anchor keeps growing its run, so a steer or an approval breaks no
 })
 
 test("nothing empty is ever a run", () => {
-  assert.deepEqual(appendThinking(undefined, "call-1", "", false), [], "an empty delta adds nothing")
+  assert.deepEqual(
+    appendThinking(undefined, "call-1", "", false),
+    [],
+    "an empty delta adds nothing",
+  )
   const runs = appendThinking(undefined, "call-1", "Something.", false)
   assert.deepEqual(
     appendThinking(runs, "call-2", "", true),
@@ -78,7 +84,11 @@ test("appendThinking never mutates the array it was given", () => {
   assert.notEqual(grown[0], runs[0], "nor the run object")
   assert.equal(runs[0].text, "First.", "so a flushed row cannot be rewritten in place")
   // An empty piece adds nothing, so there is nothing to copy: the same array comes back untouched.
-  assert.equal(appendThinking(runs, undefined, "", false), runs, "and an empty delta copies nothing")
+  assert.equal(
+    appendThinking(runs, undefined, "", false),
+    runs,
+    "and an empty delta copies nothing",
+  )
 })
 
 test("a row stored before runs folds into one run at the top", () => {
@@ -102,7 +112,6 @@ test("the rows a reply draws are its runs, marked where the turn still thinks", 
   })
   assert.equal(row.thinking, true, "the reply's newest run has no words still arriving")
   assert.equal(row.key, "run-0", "keyed by its place, as every drawn row is")
-  assert.equal(row.pending, undefined, "it has words of its own, so it is not the pending row")
 
   const afterCall = thinkingRows({
     content: "Text.",
@@ -111,32 +120,31 @@ test("the rows a reply draws are its runs, marked where the turn still thinks", 
     tools: [{ toolCallId: "c1", status: "completed", contentOffset: 5 }],
   })
   assert.equal(afterCall.length, 1, "the run after the call is the row that says its quiet")
-  assert.equal(afterCall[0].thinking, true, "so it spins")
+  assert.equal(afterCall[0].thinking, true, "so it turns its loader")
 
   const done = thinkingRows({
     content: "Text.",
     status: "done",
     reasoningRuns: [{ text: "Weighing it." }],
   })
-  assert.equal(done[0].thinking, false, "a reply done thinking draws its run without the spinner")
-  assert.equal(done[0].pending, undefined, "and never as a waiting row")
+  assert.equal(done[0].thinking, false, "a reply done thinking draws its run without the loader")
 })
 
-test("before a word arrives, the row is a pending status with nothing to open", () => {
+test("a turn with no word of thinking draws no row at all", () => {
   assert.deepEqual(
     thinkingRows({ content: "", status: "streaming" }),
-    [{ key: "run-0", text: "", thinking: true, pending: true }],
-    "the turn works but its model has said nothing: one row, with no tap in it",
+    [],
+    "the turn works but its model has said nothing: the status line says so, not an empty row",
   )
-  const afterCall = thinkingRows({
-    content: "Text.",
-    status: "streaming",
-    tools: [{ toolCallId: "c1", status: "completed", contentOffset: 5 }],
-  })
-  assert.equal(afterCall.length, 1, "the quiet behind a call draws one pending row too")
-  assert.equal(afterCall[0].afterToolId, "c1", "placed after the call it follows")
-  assert.equal(afterCall[0].text, "", "with no words to open")
-
+  assert.deepEqual(
+    thinkingRows({
+      content: "Text.",
+      status: "streaming",
+      tools: [{ toolCallId: "c1", status: "completed", contentOffset: 5 }],
+    }),
+    [],
+    "the quiet behind a call draws no row either, so nothing stands below the call it is about",
+  )
   assert.deepEqual(
     thinkingRows({ content: "", status: "streaming", waiting: true }),
     [],
@@ -355,7 +363,11 @@ test("a transcript's run keeps its span though a row arrived above it", () => {
   ]
   assert.deepEqual(
     carrySpans(
-      [{ text: "one" }, { text: "another run", afterToolId: "x" }, { text: "two", afterToolId: "c" }],
+      [
+        { text: "one" },
+        { text: "another run", afterToolId: "x" },
+        { text: "two", afterToolId: "c" },
+      ],
       local,
     ),
     [
@@ -366,15 +378,139 @@ test("a transcript's run keeps its span though a row arrived above it", () => {
     "a run is matched by the call it follows and its own words, not by its place",
   )
   assert.deepEqual(
-    carrySpans([{ text: "a" }, { text: "b" }], [
-      { text: "a", spanMs: 1_000 },
-      { text: "b", spanMs: 2_000 },
-    ]),
+    carrySpans(
+      [{ text: "a" }, { text: "b" }],
+      [
+        { text: "a", spanMs: 1_000 },
+        { text: "b", spanMs: 2_000 },
+      ],
+    ),
     [
       { text: "a", spanMs: 1_000 },
       { text: "b", spanMs: 2_000 },
     ],
     "two runs with no call between them are matched in the order they arrived",
+  )
+})
+
+test("the three rows a working reply ends on stand thought, tools, status", () => {
+  const row = (run) => ({ kind: "thinking", ...run })
+  const text = (at) => ({ kind: "text", at, text: `words ${at}` })
+  const call = (...ids) => ({ kind: "tools", tools: ids.map((id) => ({ toolCallId: id })) })
+  const card = (id) => ({ kind: "agent", tool: { toolCallId: id } })
+  const kinds = (parts) => parts.map((one) => one.kind)
+
+  assert.deepEqual(
+    placeThinking([text(0), call("c1")], [], row),
+    [text(0), call("c1")],
+    "a turn with no word of thinking draws no row, so the foot is its text and its call",
+  )
+
+  assert.deepEqual(
+    kinds(
+      placeThinking(
+        [text(0), call("c1")],
+        [row({ key: "r", text: "why", thinking: true, afterToolId: "c1" })],
+        row,
+      ),
+    ),
+    ["text", "thinking", "tools"],
+    "the thought row stands above the call it led into, never below it",
+  )
+
+  const runs = [
+    { key: "r1", text: "first", thinking: false, afterToolId: "c1" },
+    { key: "r2", text: "second", thinking: true, afterToolId: "c2" },
+  ]
+  assert.deepEqual(
+    kinds(placeThinking([text(0), call("c1"), text(1), call("c2")], runs, row)),
+    ["text", "thinking", "tools", "text", "thinking", "tools"],
+    "the order is per cluster, and nothing already placed moves",
+  )
+
+  assert.deepEqual(
+    kinds(
+      placeThinking(
+        [text(0), call("c1", "c2")],
+        [row({ key: "r", text: "why", thinking: false, afterToolId: "c2" })],
+        row,
+      ),
+    ),
+    ["text", "thinking", "tools"],
+    "a call the reply grouped with another is still found, and its row stands above the whole group",
+  )
+
+  assert.deepEqual(
+    kinds(
+      placeThinking(
+        [card("a1"), text(0)],
+        [row({ key: "r", text: "why", thinking: false, afterToolId: "a1" })],
+        row,
+      ),
+    ),
+    ["agent", "thinking", "text"],
+    "a stretch that follows a card stays behind it, not above it",
+  )
+
+  assert.deepEqual(
+    kinds(placeThinking([text(0)], [row({ key: "r", text: "top", thinking: false })], row)),
+    ["thinking", "text"],
+    "a run at the top of a reply opens it",
+  )
+})
+
+test("the foot of a reply says one thing: its line, its count, or nothing", () => {
+  const working = { status: "streaming", activity: "Writing…" }
+
+  assert.deepEqual(
+    statusLineOf({ ...working, thinks: true }),
+    undefined,
+    "a thought row above already says the turn is thinking, so no line joins it",
+  )
+  assert.deepEqual(
+    statusLineOf({ ...working, runningCall: true }),
+    undefined,
+    "a call running is its own row's to say",
+  )
+  assert.deepEqual(
+    statusLineOf({ ...working, waiting: true, activity: "Waiting for your answer" }),
+    { text: "Waiting for your answer", count: "none", countLoader: false },
+    "the wait words take the busy words' place, and keep the line live",
+  )
+  assert.deepEqual(
+    statusLineOf({ ...working, count: 2, countShown: true }),
+    { text: "Writing…", count: "suffix", countLoader: false },
+    "the count rides the words, and the line's one loader serves both",
+  )
+  assert.deepEqual(
+    statusLineOf({ status: "streaming", runningCall: true, count: 2, countShown: true }),
+    { count: "alone", countLoader: false },
+    "with a call running the line says only the count, and turns no second loader",
+  )
+  assert.deepEqual(
+    statusLineOf({ status: "done", count: 2, countShown: true }),
+    { count: "alone", countLoader: true },
+    "a finished turn's count is the line's only words, and its loader turns in the blue",
+  )
+  assert.deepEqual(
+    statusLineOf({ status: "done", count: 2, countShown: false }),
+    undefined,
+    "a finished reply with nothing at work draws no line at all",
+  )
+  assert.deepEqual(
+    statusLineOf({ status: "done", count: 0, countShown: true }),
+    undefined,
+    "and a count of nothing is no count",
+  )
+  assert.equal(
+    statusLineOf({ status: "error", activity: "Writing…" }),
+    undefined,
+    "a reply that failed wears its error where the line would stand",
+  )
+  assert.equal(
+    statusLineOf({ status: "stopped", activity: "Writing…" }),
+    undefined,
+    'and a stopped one wears "Stopped" there',
   )
 })
 

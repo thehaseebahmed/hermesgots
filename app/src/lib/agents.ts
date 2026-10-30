@@ -216,7 +216,11 @@ type TieBreak = "closest" | "newest"
 function goalMatch(
   wanted: string,
   agents: DelegatedAgent[],
-  { either = false, tie = "newest", at = 0 }: { either?: boolean; tie?: TieBreak; at?: number } = {},
+  {
+    either = false,
+    tie = "newest",
+    at = 0,
+  }: { either?: boolean; tie?: TieBreak; at?: number } = {},
 ) {
   const label = words(wanted)
   if (label.length < GOAL_MIN_CHARS) return undefined
@@ -293,8 +297,6 @@ export function agentLine(agent: DelegatedAgent) {
     .filter(Boolean)
     .join(" · ")
 }
-
-export const subagentsLine = (count: number) => `${count} subagent${count === 1 ? "" : "s"} running`
 
 /** An agent's transcript, its newest rows. */
 export const agentTranscript = (server: HermesConfig, agentId: string, limit = 500) =>
