@@ -1,5 +1,13 @@
 # A bot's progress reminders are a setting, not a prompt line
 
+**Amended 2026-10-30**: a Developer switch on the device, *Show progress reminders*, has the thread
+draw each reminder as a row of its own where the refused call was, outside the run's tool group and
+uncounted in it, opening the note unchanged on a tap — on both chat screens, on a live run and from a
+transcript. It is a display choice of the tester's device: it changes nothing about the four levels,
+the counts or the hook, nothing is written to a bot's host, and with the switch off the thread draws
+what it drew before. The decision below that a refused call is never drawn, and the sentence saying
+the app draws nothing for the call a reminder lands on, both read as amended.
+
 Until now a bot said what it was doing because the prompt every run is told asked it to ("Post a
 short update between checkpoints: what landed, what's next"). The user now wants to choose, per bot,
 how chatty the bot is, at one of four levels. That choice is recorded here, in the decisions below,
@@ -79,7 +87,10 @@ trick and the same reason as the wake run's header — nothing in the row says w
 pinned line is a shape only this hook writes. Only this hook's refusals are skipped, because a
 security hook's block is a thing the user should read and its note carries its own words. What the
 reader gets instead is the model's update and then the same call, run this time, which is what the
-transcript would show if the reminder had never been needed.
+transcript would show if the reminder had never been needed. The device's developer view is the one
+exception, and reads as amended at the top of this page: with *Show progress reminders* on, the
+refusal comes back as a row of its own rather than as the call's card, saying what it is instead of
+wearing an error mark.
 
 **The app offers all four names and an older host refuses the ones it doesn't hold.** The vocabulary
 is the host's, but a refusal is something a user can read, so the app draws the four options the
