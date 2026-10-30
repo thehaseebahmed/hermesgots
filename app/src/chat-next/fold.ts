@@ -1,4 +1,5 @@
 import { splitAttachments } from "../lib/attachment-text.ts"
+import { isSeamScaffolding, seamDrawnContent } from "../lib/compaction-seam.ts"
 import type { MessageStats } from "../lib/db.ts"
 import { steerText } from "../lib/steer.ts"
 
@@ -137,7 +138,8 @@ const isRequest = (row: Row) =>
   row.display_kind !== "steer" &&
   row.display_kind !== "model_switch" &&
   !DELIVERY.test(row.content ?? "") &&
-  !RESTATED.test(row.content ?? "")
+  !RESTATED.test(row.content ?? "") &&
+  !isSeamScaffolding(row)
 
 /**
  * The line Hermes opens the active request's restatement with after a compaction. The request it
@@ -180,6 +182,9 @@ export function foldTurns(rows: Row[], partial = false): Turn[] {
         continue
       }
       if (RESTATED.test(row.content ?? "")) continue
+      // The task snapshot, the pruned-skills notice and a summary on its own are the host's
+      // bookkeeping, matched by their text because the host stores no flag for them.
+      if (isSeamScaffolding(row)) continue
       if (row.display_kind === "hidden") {
         seamed = true
         const last = turns.at(-1)
@@ -200,7 +205,7 @@ export function foldTurns(rows: Row[], partial = false): Turn[] {
         else if (last.parts.at(-1)?.kind !== "compaction") last.parts.push(seam)
         continue
       }
-      const content = row.content ?? ""
+      const content = seamDrawnContent(row)
       if (DELIVERY.test(content)) {
         const last = turns.at(-1)
         const wake =
