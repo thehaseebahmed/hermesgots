@@ -7,7 +7,7 @@
 // None of that has a lower tier: a `<video>` that decodes and plays is the browser's own pipeline,
 // a canvas has no frames to paint in a DOM without one, and the bytes are what the mock host was
 // actually handed rather than a stand-in it serves.
-import { app, assert, flow, pass, runId } from "./lib.mjs"
+import { app, assert, flow, pass, runId, settled } from "./lib.mjs"
 
 const CLIP = "take.webm"
 
@@ -149,6 +149,25 @@ await flow("media-clip", async ({ page, seed, until, shot }) => {
     "and it streams, rather than waiting for the whole file",
   )
   pass("a tap on the clip opened the app's Previewer, paused, playing on press and seekable")
+
+  // The Previewer at a phone's width in the dark and a tablet's in the light: the player keeps its
+  // own shape, and the name, the size and the reader's place stay on top of it.
+  for (const [width, scheme] of [
+    [390, "dark"],
+    [1024, "light"],
+  ]) {
+    await page.setViewportSize({ width, height: width < 768 ? 844 : 900 })
+    await page.emulateMedia({ colorScheme: scheme })
+    await settled(page)
+    const box = await player.boundingBox()
+    assert.ok(box && box.width <= width - 32, `the player fits the ${width}px pane`)
+    const title = await preview.locator("header").first().innerText()
+    assert.match(title, new RegExp(CLIP.replace(".", "\\.")), `named at ${width}px`)
+    assert.match(title, /\d+ (B|KB|MB)/, "and the size the host answered")
+    await shot(`previewer-${width}-${scheme}`)
+  }
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.emulateMedia({ colorScheme: "light" })
 
   // Closing it leaves the thread where it was, with the clip's cell still in it.
   await page.getByRole("button", { name: "Close" }).click()

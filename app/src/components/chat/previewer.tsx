@@ -140,7 +140,7 @@ function Shown({ item, onRetry }: { item: PreviewItem; onRetry?: (item: PreviewI
         preload="metadata"
         aria-label={item.name}
         onError={() => onRetry?.(item)}
-        className="max-h-full max-w-full rounded-2xl bg-muted"
+        className="h-full w-full rounded-2xl bg-muted object-contain"
       />
     )
   return (
