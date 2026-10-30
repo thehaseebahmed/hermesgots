@@ -1020,7 +1020,8 @@ export function ChatNextThread({
           }
           streaming.current = false
           if (run === null) {
-            dispatch({ type: "gone", run: lastRun.current ?? "" })
+            const joined = lastRun.current
+            if (joined) dispatch({ type: "gone", run: joined })
             setHostIdleAt(tipNow.current)
           }
         }

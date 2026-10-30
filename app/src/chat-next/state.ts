@@ -204,11 +204,10 @@ function reach(turn: Turn) {
 }
 
 /**
- * Whether the transcript's copy is the one to draw: a join's rebuilt turn stands in for the
- * transcript's own turn, and drawing it while it holds fewer calls than that copy takes the
- * question's call off the screen.
+ * Whether the transcript's copy of the held turn is ahead of the join's rebuilt one: drawing a
+ * rebuilt copy that holds fewer calls takes the question's call off the screen.
  */
-const copyHoldsTheWait = (copy: Turn | undefined, live: LiveTurn) =>
+const copyIsAhead = (copy: Turn | undefined, live: LiveTurn) =>
   live.replaces && copy !== undefined && reach(copy).calls >= reach(live.turn).calls
 
 /**
@@ -223,7 +222,7 @@ export function turnsOf(folded: Turn[], live?: LiveTurn, waiting?: Waiting): Tur
   // to the subscribers it had at the time, so a join's rebuilt copy can hold less than that one, and
   // the thread would lose the one line it draws while the run waits.
   const copy = folded.at(-1)
-  if (waiting && copyHoldsTheWait(copy, live)) return folded
+  if (waiting && copyIsAhead(copy, live)) return folded
   return withoutRepeatedFailures(
     live.replaces ? [...folded.slice(0, -1), live.turn] : [...folded, live.turn],
   )

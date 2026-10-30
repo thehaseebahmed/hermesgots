@@ -265,11 +265,7 @@ test.describe("a run already waiting when the chat opens", () => {
     const run = host.startElsewhere("from the laptop")
     run.ask(TEA)
     await withDevice(openDevice(host, SLOW), async (phone) => {
-      await eventually(
-        () => assert.deepEqual(questionOf(phone), asking),
-        "the question, and its form",
-        200,
-      )
+      await waitingOn(host, phone)
       const started = host.asked.runs
       await phone.send("never mind")
       await eventually(
