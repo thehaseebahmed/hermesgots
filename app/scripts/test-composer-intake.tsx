@@ -12,7 +12,9 @@ import { Composer } from "@/components/chat/composer"
 import { MAX_FILE_BYTES } from "@/lib/attachment-caps"
 import type { Attachment } from "@/lib/db"
 
-import { connection, findAll, mount, settle } from "./component-kit.tsx"
+import { PreviewerProvider } from "@/components/chat/previewer"
+
+import { click, connection, findAll, mount, settle, until } from "./component-kit.tsx"
 
 const bot = connection("composer-intake")
 
@@ -80,7 +82,9 @@ const note = (name: string, body = "hello") =>
   new File([body], name, { type: "text/plain", lastModified: 1_700_000_000_000 })
 
 async function removeAttachment(name: string) {
-  const button = findAll("button").find((one) => one.getAttribute("aria-label") === `Remove ${name}`)
+  const button = findAll("button").find(
+    (one) => one.getAttribute("aria-label") === `Remove ${name}`,
+  )
   assert.ok(button, `the ${name} tile's remove button`)
   await act(async () => {
     button.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))
@@ -220,5 +224,73 @@ test("a clip picked from the gallery lands, and one over nine megabytes is refus
     })
   } finally {
     toast.error = original
+  }
+})
+
+test("a staged photo and clip open the screen's Previewer, and Remove takes one off the message", async () => {
+  const sent: { text: string; attachments: Attachment[] }[] = []
+  const real = { create: URL.createObjectURL, revoke: URL.revokeObjectURL }
+  URL.createObjectURL = (blob: Blob | MediaSource) => `blob:${(blob as Blob).type || "bytes"}`
+  URL.revokeObjectURL = () => {}
+  try {
+    await mount(<PreviewerProvider>{composer(sent)}</PreviewerProvider>, async () => {
+      await paste([
+        new File(["png"], "cat.png", { type: "image/png", lastModified: 4 }),
+        new File(["webm"], "take.webm", { type: "video/webm", lastModified: 4 }),
+      ])
+      assert.deepEqual(tileNames(), ["cat.png", "take.webm"], "both are on the message")
+
+      // A tap opens the app's own Previewer on the photo, with Remove where a staged file is.
+      await click(
+        findAll("button").find((one) => one.getAttribute("aria-label") === "Open cat.png"),
+      )
+      await until(async () => document.querySelector('img[alt="cat.png"]') !== null, "the photo")
+      assert.equal(
+        findAll("button").some((one) => one.textContent === "Remove"),
+        true,
+        "Remove is the composer's",
+      )
+
+      // Stepping moves to the clip, which opens on a player that is paused until pressed.
+      await click(findAll("button").find((one) => one.getAttribute("aria-label") === "Next"))
+      await until(async () => document.querySelector("video") !== null, "the clip's player")
+      assert.equal(document.querySelector("video")!.hasAttribute("autoplay"), false)
+
+      // Remove takes the clip off the message, from where the reader is looking at it.
+      await click(findAll("button").find((one) => one.textContent === "Remove"))
+      await settle()
+      assert.deepEqual(tileNames(), ["cat.png"], "the clip left the message")
+      assert.deepEqual(sent, [], "nothing was sent")
+    })
+  } finally {
+    URL.createObjectURL = real.create
+    URL.revokeObjectURL = real.revoke
+  }
+})
+
+test("a staged file this device holds is handed to the platform from its own bytes", async () => {
+  const sent: { text: string; attachments: Attachment[] }[] = []
+  const real = { create: URL.createObjectURL, revoke: URL.revokeObjectURL, open: window.open }
+  const opened: string[] = []
+  URL.createObjectURL = (blob: Blob | MediaSource) => `blob:${(blob as Blob).type || "bytes"}`
+  URL.revokeObjectURL = () => {}
+  window.open = ((url: string | URL) => {
+    opened.push(String(url))
+    return null
+  }) as typeof window.open
+  try {
+    await mount(<PreviewerProvider>{composer(sent)}</PreviewerProvider>, async () => {
+      await drop([new File(["PK"], "logs.zip", { type: "application/zip", lastModified: 5 })])
+      await click(
+        findAll("button").find((one) => one.getAttribute("aria-label") === "Open logs.zip"),
+      )
+      await until(async () => opened.length > 0, "the tab")
+      assert.match(opened[0], /^blob:/, "the bytes this device holds, which the host never saw")
+      assert.equal(document.querySelector('[role="dialog"]'), null, "a file is never previewed")
+    })
+  } finally {
+    URL.createObjectURL = real.create
+    URL.revokeObjectURL = real.revoke
+    window.open = real.open
   }
 })
