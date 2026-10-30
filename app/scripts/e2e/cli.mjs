@@ -110,6 +110,7 @@ export const FLOWS = {
     script: "e2e/steer-offer.mjs",
     about:
       "A code session returned to mid-run keeps offering the steer across the turns it follows, and never calls a listed run a queue",
+    alsoPolling: true,
   },
   "compressed-run": {
     script: "e2e/compressed-run.mjs",

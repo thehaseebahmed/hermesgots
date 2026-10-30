@@ -19,8 +19,7 @@ import { usePluginFeatureOn } from "@/lib/features"
 import { SAFETY_MS } from "@/lib/freshness"
 import { CATCHING_ACTIVITY } from "@/lib/format"
 import { onSessionMoved, useLive } from "@/lib/live"
-import { knownLiveRun, useLiveRun, useLiveRunId, useHostBusy } from "@/lib/waiting"
-import { steerOffered } from "@/lib/steer"
+import { knownLiveRun, useLiveRunId, useHostBusy } from "@/lib/waiting"
 import { db, type Attachment, type MessageStats, type SessionDb } from "@/lib/db"
 
 import { equal } from "./equal"
@@ -499,7 +498,7 @@ export interface PromptProps {
 
 /** What a composer drawn by the app is handed to drive the thread with. */
 export interface ComposerControls {
-  /** A turn of this device's is running: a message sent now would land in the middle of it. */
+  /** Whether a turn is under way — one this device streams, or one the host lists for the session. */
   busy: boolean
   /** Rejects when nothing reached the host, so the composer can hand the message back. */
   send: (text: string, attachments: Attachment[]) => Promise<void>
@@ -507,7 +506,8 @@ export interface ComposerControls {
   queue: (text: string, attachments: Attachment[]) => Promise<void>
   /** Gives the running reply a message it reads after its current calls. */
   steer: (text: string, attachments: Attachment[]) => Promise<void>
-  /** Whether a run this thread follows can take a steer at all. */
+  /** Whether this screen can steer a running reply at all — the other half, with `busy`, of the
+   * field's offer. */
   canSteer: boolean
   /** How many of the session's subagents are still at work, which keep it Stop rather than Send. */
   subagents: number
@@ -1025,10 +1025,6 @@ export function ChatNextThread({
     },
     [follow, dispatch],
   )
-  const hostRun = useLiveRun(
-    server && key ? { baseUrl: server, apiKey: key } : undefined,
-    session ?? undefined,
-  )
   // Keyed by the run, not its status: one run handing over to the next leaves the status as it was.
   const hostRunId = useLiveRunId(
     server && key ? { baseUrl: server, apiKey: key } : undefined,
@@ -1239,16 +1235,12 @@ export function ChatNextThread({
     <Composer
       controls={{
         // A run the host works that this page has not joined yet is a turn running all the same.
-        busy: doing.running || Boolean(hostRun && !last?.done && !last?.failed),
+        busy: doing.running || Boolean(hostRunId && !last?.done && !last?.failed),
         send: sendTurn,
         queue: queueMessage,
         steer: steerMessage,
-        // Steered by the run's own id, so the offer stands whether or not this page has joined it.
-        canSteer: steerOffered({
-          followed: doing.running,
-          liveRun: hostRunId,
-          steerable: Boolean(steerTurn),
-        }),
+        // What this screen can do, never what is running: `busy` above is the liveness half.
+        canSteer: Boolean(steerTurn),
         subagents,
         stop,
       }}
