@@ -70,6 +70,22 @@ test("a call without its result runs only while the turn streams here", () => {
   assert.equal(settled.tools[0].status, "completed")
 })
 
+test("a call without its result runs while the host still works the turn", () => {
+  // A phone that opens a chat whose run waits on a question streams nothing here: the call the host
+  // has not answered is still running, so the thread says it waits rather than that it was missed.
+  const rows = [
+    row(1, "user", "go"),
+    row(2, "assistant", "", { tool_calls: [call("a", "clarify", { question: "Tea?" })] }),
+  ]
+  const [, inFlight] = messagesOf("chat", foldTurns(rows), { inFlight: true })
+  assert.equal(inFlight.tools[0].status, "running")
+  assert.equal(inFlight.status, "done", "the reply is not drawn as streaming here")
+
+  // A host that says it works nothing leaves the call one that ended with no result.
+  const [, atRest] = messagesOf("chat", foldTurns(rows))
+  assert.equal(atRest.tools[0].status, "completed")
+})
+
 test("a reply not begun still draws while it streams, so the thread shows it working", () => {
   const rows = messagesOf("chat", [{ user: "hi", parts: [], done: false, delivered: [] }], {
     streaming: true,

@@ -1,5 +1,6 @@
 import { pluginRoot, serverRoot } from "../lib/host-url.ts"
 import { READ_TIMEOUT_MS } from "../lib/freshness.ts"
+import { promptOf } from "../lib/run-prompt.ts"
 
 import type { Agent } from "./agents"
 import type { Row } from "./fold"
@@ -51,7 +52,13 @@ const within = (signal?: AbortSignal) =>
   AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(READ_TIMEOUT_MS)])
 /** A read that got no answer at all (no connection, or none in time): the host is away. */
 export class HostAway extends Error {}
+/**
+ * A write the host turned down with 409: something it holds refuses it, such as a run already
+ * waiting on the user, which takes no second turn.
+ */
+export class HostRefused extends Error {}
 const ensure = (response: Response) => {
+  if (response.status === 409) throw new HostRefused("The host answered 409.")
   if (!response.ok) throw new Error(`The host answered ${response.status}.`)
 }
 
@@ -190,6 +197,28 @@ export async function readLiveRun(
     if (!response.ok) return undefined
     const { run_ids } = (await response.json()) as { run_ids?: Record<string, string> }
     return run_ids ? (run_ids[session] ?? null) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * What a run's status says it is held up on, read from `GET /v1/runs/{id}`. A host sends a prompt's
+ * request only to the subscribers it has at the time, so a screen that joins a run already waiting
+ * has no other way to learn it. Undefined where the host cannot answer.
+ */
+export async function readRun(
+  connection: Connection,
+  runId: string,
+  signal?: AbortSignal,
+): Promise<{ waiting?: Waiting } | undefined> {
+  try {
+    const response = await fetch(`${root(connection)}/v1/runs/${encodeURIComponent(runId)}`, {
+      headers: headers(connection),
+      signal: within(signal),
+    })
+    if (!response.ok) return undefined
+    return { waiting: promptOf((await response.json()) as unknown, runId) }
   } catch {
     return undefined
   }

@@ -24,6 +24,7 @@ const MOCKS = {
   "no-dictation": { port: MOCK_BASE + 3, env: { MOCK_DICTATION: "off" } },
   "triage-new": { port: MOCK_BASE + 4, env: { MOCK_TRIAGE: "new" } },
   "triage-thread": { port: MOCK_BASE + 5, env: { MOCK_TRIAGE: "thread" } },
+  withheld: { port: MOCK_BASE + 6, env: { MOCK_WITHHOLD_PROMPT: "1" } },
 }
 // The app is shared: lanes drive it in separate browsers and one Vite serves them all.
 const APP_PORT = Number(process.env.E2E_APP_PORT ?? 15173)
@@ -85,6 +86,12 @@ export const FLOWS = {
     script: "e2e/question-card.mjs",
     about:
       'On the new chat screen a question is the composer\'s alone — one waiting line in the thread, no card of it there — and reads answered once given, never "No answer"',
+  },
+  "question-reload": {
+    script: "e2e/question-reload.mjs",
+    mock: "withheld",
+    about:
+      'A chat whose run already waits on a question opens with the question\'s form, read off the run\'s own status on a host that never re-sends the request: never a "No answer" card while it waits, and the answer reading back once given',
   },
   "failed-send": {
     script: "e2e/failed-send.mjs",

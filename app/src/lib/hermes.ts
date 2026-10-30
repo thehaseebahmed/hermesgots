@@ -28,6 +28,7 @@ import {
 } from "@/lib/workflow"
 import { isNative } from "@/lib/native"
 import type { Fingerprint, Totals } from "@/lib/dictation-log"
+import { promptEntry, promptKindOf } from "@/lib/run-prompt"
 import type { CronSchedule } from "@/lib/schedule"
 import { readStt, type SttValue } from "@/lib/stt-settings"
 import {
@@ -3807,8 +3808,19 @@ export async function getRun(config: HermesConfig, runId: string, signal?: Abort
     signal,
   })
   const body = await response.json()
-  const pending = body?.status === "waiting_for_approval" ? body.approval : undefined
-  const clarify = body?.clarify
+  // Where the status keeps a prompt is one reader's business (`lib/run-prompt`): the host names it on
+  // the status itself, or among `pending_controls`.
+  const entry = promptEntry(body)
+  const pending =
+    body?.status === "waiting_for_approval" && entry && promptKindOf(entry) === "approval"
+      ? entry
+      : undefined
+  const clarify =
+    entry && promptKindOf(entry) === "question" && typeof entry.clarify_id === "string"
+      ? // The prompt on the status is the plugin's own event, field for field; read as one so the
+        // screen that answers it sees the shape it answers everywhere.
+        ({ ...entry, run_id: String(entry.run_id ?? runId) } as unknown as ClarifyRequestEvent)
+      : undefined
   return {
     status: String(body?.status ?? ""),
     /** When the run started, in the host's Unix seconds. */

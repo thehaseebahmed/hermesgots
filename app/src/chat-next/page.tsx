@@ -33,15 +33,18 @@ import {
   readLiveRun,
   readNewest,
   readPage,
+  readRun,
   readTranscript,
   respond,
   startRun,
   stopRun,
   HostAway,
+  HostRefused,
   type Connection,
   type Queued,
 } from "./api"
 import { clarifyRead } from "@/lib/clarify"
+import { WAITING_ON_ANSWER } from "@/lib/format"
 import { foldTurns, type Row, type ToolCall, type Turn } from "./fold"
 import { isLast, nextOffset, originOf, shift } from "./pages"
 import { foldedOf, threadTurns, turnsOf, type ThreadEvent, type Waiting } from "./state"
@@ -375,6 +378,12 @@ export interface ThreadViewProps {
   onOpenCard: (card: Card) => void
   /** The prompt the run is held up on, drawn where the composer goes. */
   waiting: ReactNode
+  /**
+   * A run the host has on this session, whether or not this page has joined it: what the thread
+   * draws as still running it is still writing, so a call in it that has no result yet is still
+   * running too, and a question in it is the one the run waits on rather than a missed one.
+   */
+  inFlight: boolean
   composer: ReactNode
   /** What the turns this device watched cost, by the id of the row that opened each. */
   stats?: Record<string, MessageStats>
@@ -818,6 +827,11 @@ export function ChatNextThread({
     last !== undefined &&
     !last.done &&
     hostIdleAt !== tip
+  // The thread's last turn is still the host's work — joined by this page or not yet: a call in it
+  // that has no result is still running, and a question in it is the one the run waits on rather
+  // than one that went unanswered. The host saying no run works the session ends that, and the
+  // transcript is all there is to read.
+  const inFlight = Boolean(last && !last.done && hostIdleAt !== tip)
   // A turn that lands from the host — another device's, or a wake — settles the chat too.
   // What was settled when the page opened is the open's to read, not a turn's.
   const settledTurns = last?.done ? origin + turns.length : 0
@@ -921,6 +935,21 @@ export function ChatNextThread({
     },
     [server, key, session, catchUp, dispatch, store, asked],
   )
+  /**
+   * Asks a run the page is joining what it waits on. A host sends a question's or an approval's
+   * request only to the subscribers it has at the time, so one that comes back to a run already
+   * waiting would otherwise never hear it — and with nothing to answer, its only recourse would be
+   * a message the host refuses.
+   */
+  const readWait = useCallback(
+    (run: string, signal: AbortSignal) => {
+      if (!server || !key) return
+      void readRun({ server, key }, run, signal).then((read) => {
+        if (read && !signal.aborted) dispatch({ type: "waiting", waiting: read.waiting })
+      })
+    },
+    [server, key, dispatch],
+  )
 
   // A server that streams its changes says when this session moved, so the timer below only has to
   // be a safety net while the stream is open.
@@ -970,7 +999,8 @@ export function ChatNextThread({
           const run = await readLiveRun({ server, key }, session, alive.current.signal)
           if (run) {
             reads.current++
-            dispatch({ type: "attach" })
+            dispatch({ type: "attach", run })
+            readWait(run, alive.current.signal)
             return void follow(run)
           }
           streaming.current = false
@@ -989,6 +1019,7 @@ export function ChatNextThread({
     catchUp,
     follow,
     dispatch,
+    readWait,
     server,
     key,
     session,
@@ -1013,6 +1044,9 @@ export function ChatNextThread({
         pendingRun.current = run
         return
       }
+      // What the run waits on is asked for beside the first read of the thread: the prompt is the
+      // form in the composer, which the thread's own rows are not needed for.
+      readWait(run, signal)
       await firstRows.current?.promise
       if (signal.aborted || lastRun.current === run) return
       if (streaming.current) {
@@ -1020,10 +1054,10 @@ export function ChatNextThread({
         return
       }
       reads.current++
-      dispatch({ type: "attach" })
+      dispatch({ type: "attach", run })
       void follow(run)
     },
-    [follow, dispatch],
+    [follow, dispatch, readWait],
   )
   // Keyed by the run, not its status: one run handing over to the next leaves the status as it was.
   const hostRunId = useLiveRunId(
@@ -1101,8 +1135,16 @@ export function ChatNextThread({
       streaming.current = false
       prepared?.settled(false)
       if (alive.current.signal.aborted) return
-      dispatch({ type: "unsent", error: error instanceof Error ? error.message : String(error) })
-      throw error
+      // A run held up on a question or an approval takes no turn of its own: the screen says what
+      // the host's refusal means, and the message goes back to the composer with it.
+      const words =
+        error instanceof HostRefused
+          ? WAITING_ON_ANSWER
+          : error instanceof Error
+            ? error.message
+            : String(error)
+      dispatch({ type: "unsent", error: words })
+      throw new Error(words)
     }
     prepared?.settled(true)
     void follow(run)
@@ -1301,6 +1343,7 @@ export function ChatNextThread({
       }
       onOpenCard={open}
       waiting={waitingCard}
+      inFlight={inFlight}
       composer={composer}
       stats={held?.stats}
       send={sendTurn}

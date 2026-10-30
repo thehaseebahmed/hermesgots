@@ -48,6 +48,7 @@ The CLI reuses any server that is already up, so after `pnpm e2e up` each run st
 | 18645 | Mock `no-dictation`: `MOCK_DICTATION=off` |
 | 18646 | Mock `triage-new`: `MOCK_TRIAGE=new`, so triage opens a new thread |
 | 18647 | Mock `triage-thread`: `MOCK_TRIAGE=thread`, so triage sends into the newest plain thread |
+| 18648 | Mock `withheld`: `MOCK_WITHHOLD_PROMPT=1`, a host that never re-sends a prompt's request to a subscriber that arrives after it |
 
 A `--jobs N` sweep runs N lanes at once: lane n takes the mock ports 18642 + 4n (its own mock
 state) and every lane drives the one app on 15173. `pnpm e2e down` stops every lane's servers.
@@ -69,6 +70,7 @@ elsewhere, set `PLAYWRIGHT_MODULE` to its `index.mjs`. The CommonJS `index.js` l
 | `history-pages` | A session opened mid-turn from another device loads the running turn whole, pages back a turn longer than a page twice, and keeps one reply per turn, at the end; a chat an older version split is mended by Load earlier. Main showed the running turn twice |
 | `history-generations` | A session compacted on the host while this device already showed its turns keeps each of them shown once, in the thread and on screen, across a carried tail of two turns. Main showed the carried turns twice, around the messages sent since |
 | `question-from-push` | A question opened from a notification in a chat not loaded here shows as waiting from the first frame, never "No answer", then its form; a chat not on the device yet opens once the chat list syncs. Main showed "No answer" and sent the second home |
+| `question-reload` | A chat whose run already waits on a question, opened again on a host that never re-sends the request, recovers the form from the run's status within a second, draws no "No answer" card even for a frame of the load, and reads the answer back on the card |
 | `live-poll` | `runs/live` is read by one shared poll: at most 3 times in 25s with the session, its project and the sidebar open. Main read it 4 times |
 | `photo-progress` | A message with a photo shows its reply's tool calls while it runs, on the `legacy` mock where the app follows the turn in the transcript. Main showed none |
 | `stream-writes` | A streaming reply is written to IndexedDB at most 6 times a second on the mock. Main wrote it 7.5 times |

@@ -17,18 +17,27 @@ import type { ToolCall, Turn } from "./fold.ts"
 export function messagesOf(
   chat: string,
   turns: Turn[],
-  options: { streaming?: boolean; stats?: Record<string, MessageStats>; origin?: number } = {},
+  options: {
+    streaming?: boolean
+    /** A run the host has on this session: its last turn's calls without a result are still running. */
+    inFlight?: boolean
+    stats?: Record<string, MessageStats>
+    origin?: number
+  } = {},
 ): Message[] {
   return turns.flatMap((turn, at) => {
     const index = (options.origin ?? 0) + at
     const live = Boolean(options.streaming) && at === turns.length - 1 && !turn.done
+    // A turn the host still works, on a page that is not streaming it: a call it has not answered
+    // yet is running, not one that ended without a result.
+    const running = live || (Boolean(options.inFlight) && at === turns.length - 1 && !turn.done)
     // What a turn cost: as it was just measured, else as the device kept it with the row that opened it.
     const stats = turn.stats ?? (turn.row !== undefined ? options.stats?.[turn.row] : undefined)
     // The page hands back the very turn it drew where nothing in it moved, so its rows are too.
-    const key = `${turnId(chat, index)}-${live}`
+    const key = `${turnId(chat, index)}-${live}-${running}`
     const held = drawn.get(turn)
     if (held?.key === key && held.stats === stats) return held.rows
-    const rows = rowsOf(chat, turnId(chat, index), turn, live, stats)
+    const rows = rowsOf(chat, turnId(chat, index), turn, live, running, stats)
     drawn.set(turn, { key, stats, rows })
     return rows
   })
@@ -90,6 +99,8 @@ function rowsOf(
   id: string,
   turn: Turn,
   live: boolean,
+  /** A call in the turn that has no result yet is still running, by the run or by this stream. */
+  running: boolean,
   stats?: MessageStats,
 ): Message[] {
   const createdAt = turn.at ?? 0
@@ -128,7 +139,7 @@ function rowsOf(
     } else if (part.kind === "tools")
       for (const call of part.calls) {
         think(call.thought)
-        tools.push(toolOf(call, content.length, createdAt, live))
+        tools.push(toolOf(call, content.length, createdAt, running))
       }
     else if (part.kind === "steer")
       steers.push({
@@ -166,7 +177,7 @@ function rowsOf(
 }
 
 /** A call as a tool row: named and worded as the transcript's parse words it, timed where it can be. */
-function toolOf(call: ToolCall, offset: number, turnAt: number, live: boolean): ToolEvent {
+function toolOf(call: ToolCall, offset: number, turnAt: number, running: boolean): ToolEvent {
   const args = call.arguments === undefined ? undefined : parseArgs(call.arguments)
   // A streamed call has only the host's preview, which already names what the call is about.
   const described =
@@ -183,9 +194,9 @@ function toolOf(call: ToolCall, offset: number, turnAt: number, live: boolean): 
     toolCallId: call.id,
     tool: described.name,
     label: clip(described.label) || described.name,
-    status: call.result === undefined && live ? "running" : "completed",
+    status: call.result === undefined && running ? "running" : "completed",
     startedAt,
-    ...(call.result !== undefined || !live ? { endedAt: call.endedAt ?? startedAt } : {}),
+    ...(call.result !== undefined || !running ? { endedAt: call.endedAt ?? startedAt } : {}),
     contentOffset: offset,
     ...(action ? { action } : {}),
     ...stats,
