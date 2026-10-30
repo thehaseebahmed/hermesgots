@@ -5,7 +5,7 @@
 // it is given, rather than a beat later when the transcript lands, is the reducer's claim
 // (`scripts/test-chat-next-state.tsx`): here the mock's transcript answers too promptly to hold
 // the window open, so this flow proves the shape of the thread, not the instant.
-import { app, assert, flow, pass, runId, settled } from "./lib.mjs"
+import { answerQuestion, assert, flow, openChatNext, pass, settled } from "./lib.mjs"
 
 const QUESTION = "Which logs should I count as old?"
 const ANSWER = "Older than 90 days"
@@ -18,15 +18,7 @@ for (const [width, dark] of [
   await flow(
     `question-card-${look}`,
     async ({ page, seed, send, shot }) => {
-      // The new screen is a Developer switch: a chat of its own opens on it with both on.
-      await page.evaluate(async () => {
-        const { saveSettings } = await import("/src/lib/db.ts")
-        await saveSettings({ developer: true, chatNext: true })
-      })
-      const chat = `e2e-question-card-${runId()}`
-      await seed([{ id: chat, title: "Question card" }])
-      await page.goto(`${app}/c/${chat}`)
-      await page.locator("[data-chat-next]").first().waitFor({ timeout: 20_000 })
+      await openChatNext({ page, seed }, { id: "e2e-question-card", title: "Question card" })
 
       await send("ask me something")
       const choice = page.getByRole("button", { name: new RegExp(ANSWER) })
@@ -55,11 +47,7 @@ for (const [width, dark] of [
       )
       await shot("asked")
 
-      await choice.first().click()
-      await page.getByRole("button", { name: "Send", exact: true }).click()
-      await thread.getByText("Answered", { exact: true }).waitFor({ timeout: 20_000 })
-      await thread.getByText(ANSWER, { exact: true }).waitFor({ timeout: 20_000 })
-      assert.equal(await thread.getByText("No answer", { exact: true }).count(), 0, "not a miss")
+      await answerQuestion(page, ANSWER)
       assert.equal(
         await thread.getByRole("button", { name: "Ask again" }).count(),
         0,

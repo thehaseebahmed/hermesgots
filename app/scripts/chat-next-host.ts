@@ -118,9 +118,18 @@ export interface Run {
   finish(output: string): void
 }
 
+/** One open event stream: what it is sent, and the two ways it can end. */
+interface Stream {
+  send: (event: object) => void
+  /** Ends it, as a host does when the run is over: the stream closes and is let go. */
+  close: () => void
+  /** Kills the read mid-frame, as a network does; the stream does not end. */
+  break: () => void
+}
+
 interface RunState {
   events: { seq: number; event: string }[]
-  listeners: Set<(event: object | null) => void>
+  streams: Set<Stream>
   done: boolean
   /** `POST /v1/runs/{id}/stop`: the run ends as cancelled and its stream closes. */
   cancel?: () => void
@@ -263,18 +272,18 @@ export function fakeHost(
   /** A turn: the user's message, or `null` for a wake turn, which answers no message of theirs. */
   function start(input: string | null): { id: string; run: Run } {
     const id = `run_${++nextRun}`
-    const state: RunState = { events: [], listeners: new Set(), done: false }
+    const state: RunState = { events: [], streams: new Set(), done: false }
     runs.set(id, state)
     const push = (event: string, body: object) => {
       const sent = { event, run_id: id, timestamp: ++clock, ...body, seq: state.events.length }
       state.events.push(sent)
-      state.listeners.forEach((listen) => listen(sent))
+      state.streams.forEach((stream) => stream.send(sent))
     }
     state.cancel = () => {
       if (state.done) return
       push("run.cancelled", {})
       state.done = true
-      state.listeners.forEach((listen) => listen(null))
+      for (const stream of [...state.streams]) stream.close()
     }
     if (input !== null) write("user", input)
     expected.push({ user: input ?? "", texts: [], tools: 0, asks: [], agents: [], seams: 0 })
@@ -462,7 +471,7 @@ export function fakeHost(
         turn.texts.push(output)
         push("run.completed", { output, usage: { input_tokens: 1, output_tokens: 1 } })
         state.done = true
-        state.listeners.forEach((listen) => listen(null))
+        for (const stream of [...state.streams]) stream.close()
       },
     }
     return { id, run }
@@ -536,7 +545,7 @@ export function fakeHost(
   const events = (runId: string, after = -1) => {
     const state = runs.get(runId)!
     const encoder = new TextEncoder()
-    let listener: (event: object | null) => void
+    let stream: Stream | undefined
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(encoder.encode(": open\n\n"))
@@ -545,13 +554,23 @@ export function fakeHost(
           if (sent.seq > after && !(withhold && PROMPT_EVENTS.has(sent.event)))
             controller.enqueue(encoder.encode(frame(sent)))
         if (state.done) return controller.close()
-        listener = (sent) => {
-          if (sent) controller.enqueue(encoder.encode(frame(sent as { seq: number })))
-          else controller.close()
+        const gone = () => state.streams.delete(stream!)
+        stream = {
+          send: (sent) => controller.enqueue(encoder.encode(frame(sent as { seq: number }))),
+          close: () => {
+            gone()
+            controller.close()
+          },
+          break: () => {
+            gone()
+            controller.error(new TypeError("network error"))
+          },
         }
-        state.listeners.add(listener)
+        state.streams.add(stream)
       },
-      cancel: () => void state.listeners.delete(listener),
+      cancel: () => {
+        if (stream) state.streams.delete(stream)
+      },
     })
     return new Response(body, { headers: { "content-type": "text/event-stream" } })
   }
@@ -911,15 +930,19 @@ export function fakeHost(
 
   /** Every open event stream dies without a word, as a phone's does when it goes to sleep. */
   function dropConnections() {
-    for (const state of runs.values()) {
-      // A finished run's stream is already closed, and closing it again throws.
-      state.listeners.forEach((listen) => {
-        try {
-          listen(null)
-        } catch {}
-      })
-      state.listeners.clear()
-    }
+    // Each stream closes itself and drops its own handle, so a finished run's is never closed twice.
+    for (const state of runs.values()) for (const stream of [...state.streams]) stream.close()
+  }
+
+  /** Every open event stream breaks mid-read, as a network does: the reader rejects, nothing closes. */
+  function breakConnections() {
+    let broke = 0
+    for (const state of runs.values())
+      for (const stream of [...state.streams]) {
+        stream.break()
+        broke++
+      }
+    if (!broke) throw new Error("No open stream to break.")
   }
 
   /** A turn another device sent: the host runs it with no screen of ours watching. */
@@ -977,6 +1000,7 @@ export function fakeHost(
     triage,
     session,
     dropConnections,
+    breakConnections,
     startElsewhere,
   }
 }

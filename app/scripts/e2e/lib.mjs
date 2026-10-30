@@ -260,6 +260,60 @@ export async function addBot(page, { name, messages, hour = 3_600_000 }) {
   )
 }
 
+/**
+ * A chat of its own on the new chat screen (chat-next), which two Developer switches turn on: seeded,
+ * drawn, and ready for a send.
+ */
+export async function openChatNext({ page, seed }, { id, title }) {
+  await page.evaluate(async () => {
+    const { saveSettings } = await import("/src/lib/db.ts")
+    await saveSettings({ developer: true, chatNext: true })
+  })
+  const chat = `${id}-${runId()}`
+  await seed([{ id: chat, title }])
+  await page.goto(`${app}/c/${chat}`)
+  await page.locator("[data-chat-next]").first().waitFor({ timeout: 20_000 })
+}
+
+/** Answers the question the host asked with `choice`, and waits for the thread's card to read it. */
+export async function answerQuestion(page, choice) {
+  const thread = page.locator("[aria-label=Messages]")
+  await page.getByRole("button", { name: new RegExp(choice) }).first().click()
+  await page.getByRole("button", { name: "Send", exact: true }).click()
+  await thread.getByText("Answered", { exact: true }).waitFor({ timeout: 30_000 })
+  await thread.getByText(choice, { exact: true }).waitFor({ timeout: 30_000 })
+  assert.equal(await thread.getByText("No answer", { exact: true }).count(), 0, "not a miss")
+}
+
+/**
+ * Counts, frame by frame, the frames in which a waiting question's form left the composer or its one
+ * line left the thread *after* being drawn. A blink is what the claim is about, and a poll sees only
+ * the frames it lands on; `window.__questionLost()` reads the counts and ends the watching.
+ */
+export async function watchQuestion(page) {
+  await page.evaluate(() => {
+    const state = { formSeen: false, form: 0, lineSeen: false, line: 0 }
+    const scan = () => {
+      const slot = document.querySelector("[data-slot=composer-slot]")
+      const thread = document.querySelector("[aria-label=Messages]")
+      const form = Boolean(slot?.textContent?.includes("Question"))
+      const line = Boolean(thread?.textContent?.includes("Waiting for your answer"))
+      if (form) state.formSeen = true
+      else if (state.formSeen) state.form += 1
+      if (line) state.lineSeen = true
+      else if (state.lineSeen) state.line += 1
+      return state
+    }
+    const observer = new MutationObserver(scan)
+    observer.observe(document, { subtree: true, childList: true, characterData: true })
+    scan()
+    window.__questionLost = () => {
+      observer.disconnect()
+      return state
+    }
+  })
+}
+
 /** The signed-in account the wizard flows start from, and the one `flow`'s `account` seeds. */
 export const accountUser = {
   id: "11111111-2222-4333-8444-555555555555",

@@ -49,8 +49,9 @@ The CLI reuses any server that is already up, so after `pnpm e2e up` each run st
 | 18646 | Mock `triage-new`: `MOCK_TRIAGE=new`, so triage opens a new thread |
 | 18647 | Mock `triage-thread`: `MOCK_TRIAGE=thread`, so triage sends into the newest plain thread |
 | 18648 | Mock `withheld`: `MOCK_WITHHOLD_PROMPT=1`, a host that never re-sends a prompt's request to a subscriber that arrives after it |
+| 18649 | Mock `dropped`: `MOCK_WITHHOLD_PROMPT=1` and `MOCK_DROP_EVENTS_MS=1500`, a host that keeps no replay of a prompt's request and cuts every run's event stream a second and a half in |
 
-A `--jobs N` sweep runs N lanes at once: lane n takes its own mock ports, starting at 18642 + 8n (its own mock
+A `--jobs N` sweep runs N lanes at once: lane n takes its own mock ports, starting at 18642 + 9n (its own mock
 state) and every lane drives the one app on 15173. `pnpm e2e down` stops every lane's servers.
 
 The CLI looks for Playwright in `app/node_modules`, then globally (`npm root -g`). If it's
@@ -71,6 +72,7 @@ elsewhere, set `PLAYWRIGHT_MODULE` to its `index.mjs`. The CommonJS `index.js` l
 | `history-generations` | A session compacted on the host while this device already showed its turns keeps each of them shown once, in the thread and on screen, across a carried tail of two turns. Main showed the carried turns twice, around the messages sent since |
 | `question-from-push` | A question opened from a notification in a chat not loaded here shows as waiting from the first frame, never "No answer", then its form; a chat not on the device yet opens once the chat list syncs. Main showed "No answer" and sent the second home |
 | `question-reload` | A chat whose run already waits on a question, opened again on a host that never re-sends the request, recovers the form from the run's status within a second, draws no "No answer" card even for a frame of the load, and reads the answer back on the card |
+| `question-drop` | A chat whose run waits on a question on a host that cuts the run's event stream a second and a half in, over and over: the question's form stays in the composer and the thread keeps its one waiting line across the drops, nothing reads as a missed question, and the answer still lands |
 | `live-poll` | `runs/live` is read by one shared poll: at most 3 times in 25s with the session, its project and the sidebar open. Main read it 4 times |
 | `photo-progress` | A message with a photo shows its reply's tool calls while it runs, on the `legacy` mock where the app follows the turn in the transcript. Main showed none |
 | `stream-writes` | A streaming reply is written to IndexedDB at most 6 times a second on the mock. Main wrote it 7.5 times |

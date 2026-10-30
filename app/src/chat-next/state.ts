@@ -97,6 +97,12 @@ export type ThreadEvent =
       answer?: { question: string; choicesOffered: string[] | null; value: string }
     }
   | { type: "ended" }
+  /**
+   * The host names no run on this session: one it still holds a prompt for is listed there, so the
+   * prompt this page draws for `run` has settled without it — answered or stopped from another
+   * device, or a window that closed. The page's only way to learn that with the run's stream gone.
+   */
+  | { type: "gone"; run: string }
   | { type: "agents"; agents: Agent[] }
   | { type: "queue"; items: Queued[]; paused: boolean }
   /** `at` is this device's clock as the event arrived, which a turn it sent is timed by. */
@@ -198,12 +204,27 @@ function reach(turn: Turn) {
 }
 
 /**
+ * Whether the transcript's copy of the held turn carries the question's call and the join's rebuilt
+ * one does not yet: calls are what a wait is drawn from, and a rebuilt copy holding fewer of them
+ * would take the one line it draws off the screen. Words are not weighed here — a host may hold the
+ * call in the transcript before it holds the reply's text.
+ */
+const copyIsAhead = (copy: Turn | undefined, live: LiveTurn) =>
+  live.replaces && copy !== undefined && reach(copy).calls >= reach(live.turn).calls
+
+/**
  * The turns the screen draws: the transcript's, with the streamed one laid over the last. A run
  * joined from its start is replaying, so the transcript's copy of the turn stays drawn until the
  * replay has caught up with it (`LiveTurn.replay`), and the reply never shrinks as it joins.
  */
-export function turnsOf(folded: Turn[], live?: LiveTurn): Turn[] {
+export function turnsOf(folded: Turn[], live?: LiveTurn, waiting?: Waiting): Turn[] {
   if (!live || live.replay) return folded
+  // A run held on a prompt writes nothing more, so the turn it holds is drawn from the transcript —
+  // the copy that carries the call the question was asked by. A host sends a prompt's request only
+  // to the subscribers it had at the time, so a join's rebuilt copy can hold less than that one, and
+  // the thread would lose the one line it draws while the run waits.
+  const copy = folded.at(-1)
+  if (waiting && copyIsAhead(copy, live)) return folded
   return withoutRepeatedFailures(
     live.replaces ? [...folded.slice(0, -1), live.turn] : [...folded, live.turn],
   )
@@ -393,9 +414,13 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         running: false,
         // The host's own rows are the turn now, in place of the copy this page streamed.
         live: undefined,
-        // A finished turn waits on nothing, and the end of a followed run settles what it was on.
-        waiting: event.final || done ? undefined : state.waiting,
-        ...(event.final || done ? { settled: settledWith(state) } : {}),
+        // A turn that finished waits on nothing. A whole read of a thread whose last turn is still
+        // unfinished says nothing about a prompt the run holds: a stream that dies mid-wait (a phone
+        // asleep, a host dropping its subscriber) ends the follow without ending the run, and the
+        // question must not go with the socket. Only the turn's own end, an answer given here or the
+        // host's `*.settled` event takes a wait away.
+        waiting: done ? undefined : state.waiting,
+        ...(done ? { settled: settledWith(state) } : {}),
       }
     }
     case "older": {
@@ -436,7 +461,11 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       // The run's events are replayed from its start, so the turn, and what it waits on, are drawn
       // again from nothing — but the wait this page read off the run's own status is the run's, and
       // a join of the same run keeps it.
-      const last = turnsOf(foldedOf(state.rows, state.archived, state.partial), state.live).at(-1)
+      const last = turnsOf(
+        foldedOf(state.rows, state.archived, state.partial),
+        state.live,
+        state.waiting,
+      ).at(-1)
       const waiting = state.waiting?.run === event.run ? state.waiting : undefined
       return {
         ...state,
@@ -464,6 +493,11 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       // was comes from the transcript, which a later read may supply if the one for this end was
       // superseded.
       return { ...state, running: false }
+    case "gone":
+      // Only the run this page was following can have settled that way: a wait raised since belongs
+      // to another run, and a `gone` still in flight from an earlier look is not about it.
+      if (state.waiting === undefined || state.waiting.run !== event.run) return state
+      return { ...state, waiting: undefined, settled: settledWith(state) }
     case "answered": {
       // The card goes at once; the host's `*.settled` event confirms it. A question's call reads
       // the answer from here until the transcript's own result reaches it.
@@ -507,12 +541,11 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       return { ...state, waiting, settled, live: moved }
     }
     case "failed":
+      // What this page could not read is not what the host settled.
       return {
         ...state,
         status: "failed",
         running: false,
-        waiting: undefined,
-        settled: settledWith(state),
         error: event.error,
       }
   }
@@ -520,4 +553,4 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
 
 /** The turns a state draws. */
 export const threadTurns = (state: ThreadState) =>
-  turnsOf(foldedOf(state.rows, state.archived, state.partial), state.live)
+  turnsOf(foldedOf(state.rows, state.archived, state.partial), state.live, state.waiting)

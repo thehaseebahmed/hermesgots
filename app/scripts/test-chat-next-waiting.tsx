@@ -14,7 +14,9 @@ import {
   openDevice,
   sendFrom,
   showsEverything,
+  wait,
   type Device,
+  type Host,
   withDevice,
 } from "./chat-next-devices.tsx"
 import { WAITING_ON_ANSWER } from "@/lib/format"
@@ -46,7 +48,27 @@ const answerElsewhere = (run: string, prompt_id: string, answer: string) =>
     body: JSON.stringify({ request_id: prompt_id, execution_generation: 1, answer }),
   })
 
+/** Another device stopping it: the run ends as cancelled and its stream closes. */
+const stopElsewhere = (run: string) =>
+  fetch(`http://hermes.test/v1/runs/${run}/stop`, { method: "POST" })
+
 const questionOf = (device: Device) => device.waiting().question
+
+/** An open chat's pace between turns: slow enough that a poll cannot take back what a test is looking at. */
+const SLOW = { pollMs: 5_000, idleMs: 5_000 }
+
+const waitingOn = async (host: Host, device: Device) => {
+  await eventually(
+    () => assert.deepEqual(questionOf(device), asking),
+    "the question, and its form",
+    200,
+  )
+  await eventually(
+    () => assert.ok(host.asked.subscriptions > 0),
+    "the run's events are being read",
+    200,
+  )
+}
 
 test.describe("a question the agent asked", () => {
   test("the device that sent the turn sees it arrive, answers it, and the run carries on", async () => {
@@ -189,18 +211,61 @@ test.describe("a run already waiting when the chat opens", () => {
     })
   })
 
+  // The follow ends without the run ending: a phone asleep, a host dropping a slow subscriber, a
+  // network that goes. The question is the run's to settle, so the form must outlive the socket.
+  test("the stream dies with the question still owed, and the form stays up", async () => {
+    const host = withholding("q-drop")
+    const run = host.startElsewhere("from the laptop")
+    run.ask(TEA)
+    await withDevice(openDevice(host, SLOW), async (phone) => {
+      await waitingOn(host, phone)
+      const read = host.asked.subscriptions
+      host.dropConnections()
+      await wait(300)
+      assert.deepEqual(questionOf(phone), asking, "the form outlives the stream that brought it")
+      assert.equal(phone.alert(), undefined, "and nothing says the page failed")
+      await eventually(
+        () => assert.ok(host.asked.subscriptions > read),
+        "the page rejoins the run once its poll comes round",
+        1_000,
+      )
+    })
+  })
+
+  test("a stream that breaks mid-read leaves the form up too", async () => {
+    const host = withholding("q-break")
+    const run = host.startElsewhere("from the laptop")
+    run.ask(TEA)
+    await withDevice(openDevice(host, SLOW), async (phone) => {
+      await waitingOn(host, phone)
+      host.breakConnections()
+      await wait(300)
+      assert.deepEqual(questionOf(phone), asking, "a read that died settles nothing")
+    })
+  })
+
+  test("a run stopped while the stream is gone takes the form with it", async () => {
+    const host = withholding("q-stopped")
+    const run = host.startElsewhere("from the laptop")
+    run.ask(TEA)
+    await withDevice(openDevice(host), async (phone) => {
+      await waitingOn(host, phone)
+      host.dropConnections()
+      await stopElsewhere(host.latest.id!)
+      await eventually(
+        () => assert.equal(questionOf(phone), undefined),
+        "the form goes once the host holds no run",
+        1_000,
+      )
+    })
+  })
+
   test("a message sent while the prompt waits is turned down in the app's own words", async () => {
     const host = withholding("q-send")
     const run = host.startElsewhere("from the laptop")
     run.ask(TEA)
-    // Read slowly, as an open chat does between turns: the failure the host's 409 becomes is the
-    // page's until the next read, and a poll every 20ms would take it back before it was drawn.
-    await withDevice(openDevice(host, { pollMs: 5_000, idleMs: 5_000 }), async (phone) => {
-      await eventually(
-        () => assert.deepEqual(questionOf(phone), asking),
-        "the question, and its form",
-        200,
-      )
+    await withDevice(openDevice(host, SLOW), async (phone) => {
+      await waitingOn(host, phone)
       const started = host.asked.runs
       await phone.send("never mind")
       await eventually(
@@ -217,7 +282,7 @@ test.describe("a run already waiting when the chat opens", () => {
 
 test("a refusal that is not a waiting bot keeps the host's own words", async () => {
   const host = setUp("q-blocked")
-  await withDevice(openDevice(host, { pollMs: 5_000, idleMs: 5_000 }), async (phone) => {
+  await withDevice(openDevice(host, SLOW), async (phone) => {
     const answer = globalThis.fetch
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
       new URL(String(input)).pathname === "/v1/runs" && init?.method === "POST"

@@ -17,20 +17,20 @@ ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
 
-The registry in `app/scripts/e2e/cli.mjs` holds **82 keys**, and every one of them has a row
-below. `pnpm e2e list` prints the same 82 keys, and the rows here are grouped by the ticket that
+The registry in `app/scripts/e2e/cli.mjs` holds **83 keys**, and every one of them has a row
+below. `pnpm e2e list` prints the same 83 keys, and the rows here are grouped by the ticket that
 takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
 | --------- | ------ |
-| stay | 23 |
+| stay | 24 |
 | component | 55 |
 | plugin | 2 |
 | delete | 2 |
-| **total** | **82** |
+| **total** | **83** |
 
-Of those 82, 76 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
-reuses `todos.mjs`, so 75 distinct files) and 6 point at the older
+Of those 83, 77 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
+reuses `todos.mjs`, so 76 distinct files) and 6 point at the older
 `app/scripts/regression-*.mjs`.
 
 #297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**.
@@ -129,9 +129,24 @@ is the app's own thread (`AppChatNextThread`), and no DOM test has the wall cloc
 frames a card could appear in between. So the registry holds 81 + 1 = **82** keys, the component
 verdicts unchanged at **55**, and the stays are 22 + 1: **23**.
 
+A twenty-fourth stay has arrived with this branch: `question-drop`, because the other half of coming
+back to a waiting question is staying with it — a host that cuts the run's event stream under the
+page (a phone asleep, a proxy closing idle connections, a slow subscriber let go) must not take the
+question with it. The wait is the run's to settle, so the reducer keeps it through a whole transcript
+read that cannot see the turn end and through a read that failed, and the page rejoins the run on its
+next poll; the component tests hold that rule over a `withhold`ing host whose stream closes or breaks
+(`test-chat-next-waiting.tsx`, `test-chat-next-state.tsx`). The thread's own line is the same story one
+layer up: a join rebuilds the turn from the stream, and a host that never re-sends the request leaves
+the rebuilt copy without the call the question was asked by, so the thread would blink its waiting
+line away at each rejoin — `turnsOf` draws the transcript's copy while a wait is on, which is the
+copy carrying that call, and `test-chat-next-state.tsx` holds the rule. What none of them draws is
+the app's own composer and thread (`AppChatNextThread`), nor the wall clock of a rejoin, which is
+what the flow watches for twenty seconds of drops. So the registry holds 82 + 1 = **83** keys, the
+component verdicts unchanged at **55**, and the stays are 23 + 1: **24**.
+
 `app/scripts/test-e2e-registry.mjs`, a unit test, holds the registry and this page to each other:
 a key with no row here, a row with no key, a verdict outside the four, a count in the table above
-that its rows don't add up to, or a stay beyond the twenty-three fails the app's gates. A new flow is then
+that its rows don't add up to, or a stay beyond the twenty-four fails the app's gates. A new flow is then
 an argument this page has to carry, never a default (ADR 0019).
 
 Check any of it in one line:
@@ -194,6 +209,7 @@ reads, and a question whose window closed.
 | `clarify-missed` | component | A question whose window closed stays as a No answer card with the question it asked, and Ask again starts a new turn that asks afresh. | The expired card's render and its retry wiring; nothing resumes the expired call, so no host behaviour is at stake. | The same test: an expired card offers Ask again and sends a new turn. |
 | `question-card` | stay | On the new chat screen (chat-next) a waiting question is the composer's form alone: the thread says it in one line and draws no card of the question, and once answered the thread's card reads the answer and reads it again from the host's transcript after a reload. The instant the card takes the answer, rather than a beat later when the transcript lands, is the reducer test's (`test-chat-next-state.tsx`): the mock's transcript answers too promptly to hold that window open. | The new screen is only drawn through the app (`ChatPage` picks it, the settings switch and the Developer switch decide), and the claim is one question in two places at two widths: the device harness draws chat-next's own plain markup, never `AppChatNextThread`'s rows, so no component tier can stand in. | Nothing yet — it is the only flow that drives the new screen, and the tier it would move to waits for a harness that mounts `AppChatNextThread` over a fake host. |
 | `question-reload` | stay | A chat whose run already waits on a question, opened again on a host that never re-sends the request: the question's form is in the composer within a second of the chat drawing, the thread draws its one waiting line and never a "No answer" card through the loading window, and the answer reads back on the card at once. | The wait is read off the run's own status, which a component test over a `withhold`ing host rules (`test-chat-next-waiting.tsx`), as it does the send a pending prompt turns down, and the status read itself (`test-chat-next-reads.mjs`); what no lower tier holds is the app's own thread under a real reload — the device harness draws chat-next's plain markup, never `AppChatNextThread`'s rows — and the sub-second window, which is wall clock. | Nothing yet: the recovery, the refused send and the parse are components, and the flow keeps the reload and the absence of the card watched frame by frame. |
+| `question-drop` | stay | A chat whose run waits on a question, on a host that cuts the run's event stream a second and a half in, over and over: the question's form stays in the composer across the drops and the thread keeps its one waiting line, so the answer still lands and reads back on the card. | The wait is the run's to settle, and the rule that neither a whole read of the transcript nor a failed one settles it is a component test over a `withhold`ing host whose stream dies (`test-chat-next-waiting.tsx`) beside the reducer's (`test-chat-next-state.tsx`); what no lower tier holds is the app's own composer under a stream that keeps dying — the device harness draws chat-next's plain markup, never `AppChatNextThread`'s rows — and the wall clock of the page rejoining the run. | Nothing yet: the card's survival over twenty seconds of drops is the shape a phone asleep has, and the flow watches the form and the thread's line together. |
 
 ### The composer — #308
 

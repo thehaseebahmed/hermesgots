@@ -26,6 +26,10 @@ const MOCKS = {
   "triage-new": { port: MOCK_BASE + 4, env: { MOCK_TRIAGE: "new" } },
   "triage-thread": { port: MOCK_BASE + 5, env: { MOCK_TRIAGE: "thread" } },
   withheld: { port: MOCK_BASE + 6, env: { MOCK_WITHHOLD_PROMPT: "1" } },
+  dropped: {
+    port: MOCK_BASE + 7,
+    env: { MOCK_WITHHOLD_PROMPT: "1", MOCK_DROP_EVENTS_MS: "1500" },
+  },
 }
 // How many ports a lane's mocks take, and so how far apart two lanes' sets start.
 const LANE_PORTS = Object.keys(MOCKS).length
@@ -95,6 +99,12 @@ export const FLOWS = {
     mock: "withheld",
     about:
       "A chat whose run already waits on a question opens with the question's form, read off the run's own status on a host that never re-sends the request: never a \"No answer\" card while it waits, and the answer reading back once given",
+  },
+  "question-drop": {
+    script: "e2e/question-drop.mjs",
+    mock: "dropped",
+    about:
+      "A chat whose run waits on a question, on a host whose event stream keeps dying under it: the form stays in the composer and the thread keeps its waiting line, so the answer still lands",
   },
   "failed-send": {
     script: "e2e/failed-send.mjs",

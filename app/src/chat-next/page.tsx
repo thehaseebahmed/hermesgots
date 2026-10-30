@@ -615,9 +615,9 @@ export function ChatNextThread({
   )
   const drawn = useRef<{ turns: Turn[]; origin: number }>({ turns: [], origin: 0 })
   const { turns, origin } = useMemo(() => {
-    const next = shared(drawn.current.turns, turnsOf(folded, held?.live))
+    const next = shared(drawn.current.turns, turnsOf(folded, held?.live, doing.waiting))
     return (drawn.current = { turns: next, origin: originOf(drawn.current, next) })
-  }, [folded, held?.live])
+  }, [folded, held?.live, doing.waiting])
   const [draft, setDraft] = useState("")
   const [earlier, setEarlier] = useState<"idle" | "reading" | "failed">("idle")
   // The older pages of the transcript, read one after another once the newest is drawn. A token is
@@ -911,7 +911,9 @@ export function ChatNextThread({
         )
       } catch (error) {
         if (alive.current.signal.aborted) return
-        dispatch(failure(error))
+        // A stream that died mid-read is not a page that failed: the run carries on without us and the
+        // next poll rejoins it. Anything the host answered with — a refused key, no stream at all — is.
+        if (!(error instanceof TypeError)) dispatch(failure(error))
       } finally {
         streaming.current = false
         if (followingRun.current === run) followingRun.current = undefined
@@ -998,9 +1000,11 @@ export function ChatNextThread({
             )
           return
         }
-        // Subagents the host still runs, or wake turns it owes, are not a stall however quiet the
-        // thread is: the next turn is theirs to start.
-        if (busy && !hostBusy && Date.now() - progress.current.at > stallMs) return
+        // Subagents the host still runs, wake turns it owes, and a run held on the user's answer are
+        // not a stall however quiet the thread is: the next turn, or the read that ends the wait, is
+        // still owed one.
+        if (busy && !hostBusy && !doing.waiting && Date.now() - progress.current.at > stallMs)
+          return
         const known =
           server && key && session
             ? knownLiveRun({ baseUrl: server, apiKey: key }, session)
@@ -1016,7 +1020,11 @@ export function ChatNextThread({
             return void follow(run)
           }
           streaming.current = false
-          if (run === null) setHostIdleAt(tipNow.current)
+          if (run === null) {
+            const joined = lastRun.current ?? store.get().run
+            if (joined) dispatch({ type: "gone", run: joined })
+            setHostIdleAt(tipNow.current)
+          }
         }
         void catchUp()
       },
@@ -1028,6 +1036,7 @@ export function ChatNextThread({
     following,
     busy,
     starting,
+    doing.waiting,
     catchUp,
     follow,
     dispatch,
