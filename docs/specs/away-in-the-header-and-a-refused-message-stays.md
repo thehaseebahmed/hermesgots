@@ -4,8 +4,9 @@ Status: grilled 2026-10-30, every decision settled and recorded in
 [ADR 0071](adr/0071-away-is-the-headers-word-and-a-refused-message-stays-in-the-thread.md), which amends
 ADR 0066 on one point, with the glossary's **Away** entry written alongside and **Catching up** amended.
 Published as #701 with tickets #702 to #705; the build order at the end is the tickets' shape when
-implementation starts. The spec carries `ready-for-agent` and the tickets stay bare, so the agent claims
-the spec and works the graph in order.
+implementation starts. #701 is blocked by the gate issue (#707) that the docs pull request carrying this
+file (#706) closes — work starts on that merge. The spec carries `ready-for-agent` and the tickets stay
+bare, so the agent claims the spec and works the graph in order.
 
 ## Problem Statement
 
