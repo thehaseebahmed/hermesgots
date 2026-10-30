@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Doctor for a Gots verification instance: one read-only answer to "is this instance worth
 # driving?". It checks the app and the mock Hermes servers the e2e CLI runs (ports 15173 and
-# 18642-18645), who owns those processes, and whether the toolchain that drives them resolves.
-# Exit 0 when the instance is worth driving, 1 when it is not. Nothing here writes.
+# 18642-18647), who owns those processes, whether the toolchain that drives them resolves, and
+# whether a Reticle daemon is there for a Reticle check. Exit 0 when the instance is worth driving,
+# 1 when it is not. Nothing here writes.
 set -u
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -31,6 +32,8 @@ hit mock-live "http://localhost:$base/health"
 hit mock-polling "http://localhost:$((base + 1))/health"
 hit mock-legacy "http://localhost:$((base + 2))/health"
 hit mock-no-dictation "http://localhost:$((base + 3))/health"
+hit mock-triage-new "http://localhost:$((base + 4))/health"
+hit mock-triage-thread "http://localhost:$((base + 5))/health"
 
 echo "processes"
 # Pids by their short process name first: a cmdline pattern would match the wrapper shell this runs
@@ -90,6 +93,21 @@ if [ -n "${PLAYWRIGHT_BROWSERS_PATH:-}" ] || [ -d "$HOME/.cache/ms-playwright" ]
   echo "ok    browsers ${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}"
 else
   echo "note  no browsers path found; a local Playwright needs its Chromium installed"
+fi
+
+echo "reticle"
+# A Reticle check is optional, so everything here is a note: the flows and gates verify the
+# instance without it, and a missing daemon is not a reason to refuse to drive.
+rport=${RETICLE_PORT:-4400}
+if command -v reticle >/dev/null 2>&1; then
+  echo "ok    reticle $(reticle --version 2>/dev/null | head -1) — page dials :$rport"
+  if curl -s -o /dev/null -m 1 "http://127.0.0.1:$rport/" 2>/dev/null; then
+    echo "ok    something answers on :$rport (a Reticle daemon, if one is up)"
+  else
+    echo "note  nothing on :$rport; a Reticle check needs 'reticle serve --port $rport --drive $APP_URL'"
+  fi
+else
+  echo "note  no reticle CLI on PATH; the flows and gates still verify this instance"
 fi
 
 echo "run"
