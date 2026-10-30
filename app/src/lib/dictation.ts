@@ -70,10 +70,7 @@ function availability(key: string): DictationAvailability {
   return offs.get(reason)!
 }
 
-/**
- * Whether this bot's host sends a take to a cloud provider, from the last `info` read: nothing is
- * resident there to warm, so the call would buy a request and no text (ADR 0069).
- */
+/** A bot's host sends a take to a cloud provider, from the last `info` read. */
 function leavesHost(key: string): boolean {
   return infos.get(key)?.info?.provider?.cloud === true
 }
@@ -98,10 +95,7 @@ export const MAX_MS = 10 * 60 * 1000
 const MIN_MS = 300
 /** A cold host may load (or first download) its model inside this request. */
 const TRANSCRIBE_MS = 120_000
-/**
- * The take's last piece carries the whole of a vendor take — minutes of audio, chunked by the host
- * past the provider's own upload cap — so it is given a budget of its own (ADR 0069).
- */
+/** The take's last piece carries a whole cloud take, so it gets a budget of its own (ADR 0069). */
 const FINAL_TRANSCRIBE_MS = 300_000
 /**
  * A whole dictation's cleanup is one call, and the host bounds its own at 8 s: past this the words
@@ -212,11 +206,9 @@ interface Session {
   failure: DictationFailure | null
   /** The recorders still closing after the take died; a retry waits for them. */
   stopping: Promise<void> | null
-  /** The take is over: its last piece is the one a cloud provider uploads the whole of (ADR 0069). */
-  final?: boolean
-  /** Whether a piece already carried that flag, so the ending doesn't upload the take twice. */
-  finalSent?: boolean
-  /** The wait a clip is under, so a take that is abandoned takes its timer with it. */
+  /** The take is over, so its last piece is the one a cloud provider uploads the whole of. */
+  takeEnded?: boolean
+  lastPieceSent?: boolean
   timer?: number
   /** Cancelled or done: nothing more is kept. */
   closed: boolean
@@ -304,7 +296,6 @@ export async function keptText(
   const audio = keptAudio(pieces)
   if (!audio) return before
   const controller = new AbortController()
-  // The whole take in one clip: as much budget as the last piece of a spoken take gets (ADR 0069).
   const timer = window.setTimeout(() => controller.abort(), FINAL_TRANSCRIBE_MS)
   const stop = () => controller.abort()
   signal?.addEventListener("abort", stop, { once: true })
@@ -328,7 +319,7 @@ export async function keptText(
 
 /** A take that ended stops transcribing: whatever is in flight is dropped. */
 function stopInflight(current: Session) {
-  // The wait goes with it: a host that never answers must not keep a timer alive after the take.
+  // The wait goes with it: a host that never answers must not leave a timer alive after the take.
   if (current.timer !== undefined) {
     window.clearTimeout(current.timer)
     current.timer = undefined
@@ -426,9 +417,9 @@ export function useChunkedDictation(
         if (index < 0) return true
         const piece = current.pieces[index]
         const before = takeText(current.pieces.slice(0, index))
-        // The take's own last piece, once the take is over: a vendor provider uploads the whole of
-        // it there, and every piece before it answers nothing (ADR 0069).
-        const last = Boolean(current.final) && index === current.pieces.length - 1
+        // The take's own last piece, once the take is over: a cloud provider uploads the whole of
+        // it there.
+        const last = Boolean(current.takeEnded) && index === current.pieces.length - 1
         const controller = new AbortController()
         current.inflight = controller
         const timer = window.setTimeout(
@@ -449,7 +440,7 @@ export function useChunkedDictation(
           if (current.inflight !== controller) return false
           piece.text = text
           current.error = null
-          if (last) current.finalSent = true
+          if (last) current.lastPieceSent = true
         } catch (failure) {
           if (current.inflight === controller) current.error = failure
           return false
@@ -698,34 +689,30 @@ export function useChunkedDictation(
       if (session.current !== current) return null
       if (done) {
         let heard = takeText(current.pieces)
-        // A cloud take is uploaded on its last piece, and one whose last piece never went — a final
-        // segment too short to send, a piece cut before the take ended — is uploaded here instead,
-        // rather than landing nothing with its audio still on the device (ADR 0069). A take whose
-        // last piece did go is never uploaded twice, however silent it was.
-        if (!heard && !current.finalSent && current.pieces.length) {
-          // The host's answer decides this, and the cache may never have held one — a take begun
-          // before the first read finished would otherwise strand its audio (ADR 0069).
+        // A cloud take whose last piece never went is uploaded here, so its audio isn't stranded;
+        // one whose last piece did go is never uploaded twice, however silent it was (ADR 0069).
+        if (!heard && !current.lastPieceSent && current.pieces.length) {
           if (!infos.has(current.profile)) await readDictationInfo(latest.current.config, true)
-        }
-        if (!heard && !current.finalSent && current.pieces.length && leavesHost(current.profile)) {
-          const controller = new AbortController()
-          current.inflight = controller
-          try {
-            heard = await keptText(
-              latest.current.config,
-              current.pieces,
-              latest.current.hint,
-              latest.current.vocabulary,
-              controller.signal,
-            )
-          } catch (failure) {
-            current.error = failure
-            showFailure(clipFailure(failure))
-            return null
-          } finally {
-            if (current.inflight === controller) current.inflight = null
+          if (leavesHost(current.profile)) {
+            const controller = new AbortController()
+            current.inflight = controller
+            try {
+              heard = await keptText(
+                latest.current.config,
+                current.pieces,
+                latest.current.hint,
+                latest.current.vocabulary,
+                controller.signal,
+              )
+            } catch (failure) {
+              current.error = failure
+              showFailure(clipFailure(failure))
+              return null
+            } finally {
+              if (current.inflight === controller) current.inflight = null
+            }
+            if (session.current !== current) return null
           }
-          if (session.current !== current) return null
         }
         const budget = deadline === undefined ? TIDY_MS : deadline - Date.now()
         const text = await tidy(current, heard, budget)
@@ -739,9 +726,10 @@ export function useChunkedDictation(
       }
       const spoken = current.pieces.filter((piece) => piece.text !== null)
       const said = joinText(...spoken.map((piece) => piece.text ?? ""))
-      if (spoken.length && !said && current.error !== null) {
-        // A vendor take's pieces land empty until its last upload, so a failed upload would leave
-        // an empty landing and no audio: the whole take is kept for Retry instead (ADR 0069).
+      // A cloud take's pieces land empty until its last upload, so a failed upload keeps the take
+      // for Retry instead of landing nothing and dropping its audio (ADR 0069).
+      const uploadFailedUnheard = spoken.length > 0 && !said && current.error !== null
+      if (uploadFailedUnheard) {
         for (const piece of current.pieces) piece.text = null
         save(current, true)
       } else if (spoken.length) {
@@ -822,9 +810,8 @@ export function useChunkedDictation(
           const last = recording.segments.at(-1)
           if (last && current.pieces.length && Date.now() - last.startedAt < MIN_MS)
             last.skip = true
-          // Set before the last segment closes: the drain it starts is what sends that piece, and
-          // a vendor host only uploads the take on a piece that knows it is the last (ADR 0069).
-          current.final = true
+          // Set before the last segment closes: the drain it starts is what sends that piece.
+          current.takeEnded = true
           const stopping = end(recording)
           current.stopping = stopping
           await stopping

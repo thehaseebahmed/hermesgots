@@ -16,11 +16,6 @@ from plugin import dictation
 
 
 def hermes(**overrides):
-    """A fake ``tools`` package standing in for Hermes's transcription module.
-
-    Its ``_get_provider`` answers ``local`` unless a test says otherwise, which is the answer a host
-    with faster-whisper gives; ``transcribe_audio`` is the dispatcher a vendor take goes through.
-    """
     tt = types.ModuleType("tools.transcription_tools")
     tt._HAS_FASTER_WHISPER = True
     tt.calls = []

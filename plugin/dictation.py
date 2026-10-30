@@ -1,12 +1,7 @@
 """Dictation: a clip recorded in the Gots app, turned into text by the host's speech provider.
 
 Hermes's own transcription route (``POST /api/audio/transcribe``) lives on the dashboard, which the
-app can't reach, so the clip comes here. Which backend hears it is Hermes's answer, not ours: the
-plugin asks ``_get_provider`` what the host resolves and follows it (ADR 0069). A ``local`` or
-``local_command`` host decodes each piece as it arrives, through ``_transcribe_local``; any other
-provider is a vendor, and a take for one is held until its last piece and uploaded once through
-``transcribe_audio``, so that provider's trim, its model and its chunking of an oversized take are
-the host's settings rather than copies of them.
+app can't reach, so the clip comes here.
 
 Every Hermes internal here is read with ``getattr``: one that moves only means dictation is off.
 """
@@ -80,7 +75,6 @@ def _tools() -> Any:
 
 
 def _installed(tt: Any) -> bool:
-    """Whether faster-whisper can be imported here — the fallback for a Hermes without a resolver."""
     # Hermes reads this at import; a `hermes tools` install since then needs no restart to show here.
     if getattr(tt, "_HAS_FASTER_WHISPER", False):
         return True
@@ -92,7 +86,6 @@ def _installed(tt: Any) -> bool:
 
 
 def _ask(tt: Any, attr: str, *args: Any) -> Optional[str]:
-    """One of Hermes's own answers, lowercased, or None where it isn't there or can't answer."""
     probe = getattr(tt, attr, None)
     if not callable(probe):
         return None
@@ -103,41 +96,29 @@ def _ask(tt: Any, attr: str, *args: Any) -> Optional[str]:
         return None
 
 
-def _provider(tt: Any, cfg: Dict[str, Any]) -> str:
-    """Which provider Hermes resolves for this host's speech: a name, ``none``, or nothing.
-
-    Nothing is "couldn't ask" — a resolver this Hermes doesn't have, or one that raised — and it
-    falls back to the package check, so such a host goes on dictating rather than reading broken.
-    ``none`` is Hermes's own answer that nothing can hear a take.
-    """
+def _provider(tt: Any, cfg: Dict[str, Any]) -> Optional[str]:
+    """Hermes's answer, ``none`` when nothing can hear a take, or None when it can't be asked."""
     name = _ask(tt, "_get_provider", cfg)
     if name is not None:
         return name
-    return "local" if _installed(tt) else ""
+    return "local" if _installed(tt) else None
 
 
 def _backend(tt: Any) -> Optional[str]:
-    """Which local backend Hermes finds, ``local`` or ``local_command``, or None for neither."""
     return _ask(tt, "_detect_local_backend") or ("local" if _installed(tt) else None)
 
 
 def provider_name(cfg: Dict[str, Any]) -> str:
-    """Hermes's answer for the ``stt`` section a caller already holds, or "" where it can't ask."""
     try:
-        return _provider(_tools(), cfg)
+        return _provider(_tools(), cfg) or ""
     except Exception:
         logger.debug("memento: no speech provider to name", exc_info=True)
         return ""
 
 
 def heard_by(tt: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
-    """Who hears this bot's takes, as both surfaces read it: the mic, and the Speech-to-text page.
-
-    ``name`` is Hermes's own answer, ``backend`` the local backend behind a local one, and ``cloud``
-    says the take leaves the host — which is what the app draws a line about, and what decides a
-    buffered take.
-    """
-    name = _provider(tt, cfg)
+    """Who hears a take, as both the mic and the Speech-to-text page read it."""
+    name = _provider(tt, cfg) or ""
     return {
         "name": name,
         "backend": _backend(tt) if name in LOCAL_BACKENDS else None,
@@ -146,7 +127,6 @@ def heard_by(tt: Any, cfg: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def heard_by_config(cfg: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
-    """The same answer for a caller that already holds the ``stt`` section, or None where it can't ask."""
     try:
         tt = _tools()
         return heard_by(tt, cfg if cfg is not None else _local_config(tt))
@@ -208,13 +188,7 @@ def info() -> Dict[str, Any]:
 
 
 def warm() -> Dict[str, Any]:
-    """Loads the model into Hermes's own cache slot while the user is still talking. Never raises.
-
-    Hermes's own warm-up fills that slot, and lazy-installs faster-whisper where the host is missing
-    it — so this is the one action that can clear a host with no local backend: it is an action the
-    user started, which is the category Hermes allows an install on. A host whose takes already go
-    to a cloud provider has nothing resident to load and is answered without asking.
-    """
+    """Loads the model while the user talks, reaching Hermes's lazy install when nothing is ready."""
     started = time.monotonic()
     try:
         state = info()
@@ -317,7 +291,7 @@ class DictationHearingPrompt:
     Whisper reads a prompt as what was just said, so the parts go in one order and the text before
     this clip comes last: ``DictationHearingPrompt().WithInitialPrompt(…).WithHint(…)
     .WithVocabulary(…).WithContext(…).Build()`` answers the one string the decode is given. A bot's
-    Hearing prompt setting decides whether that string is sent at all, and a vendor never gets it.
+    Hearing prompt setting decides whether that string is sent at all.
     """
 
     initial_prompt: str = ""
@@ -344,7 +318,6 @@ class DictationHearingPrompt:
 
 
 def _landed(result: Any, started: float) -> Dict[str, Any]:
-    """A provider's answer as a piece's landing: its text, or the reason it heard nothing."""
     if not isinstance(result, dict):
         raise DictationError("Transcription failed.")
     if not result.get("success"):
@@ -362,13 +335,7 @@ def _landed(result: Any, started: float) -> Dict[str, Any]:
 def _hold(
     data: bytes, *, first: bool = False, last: bool = False, profile: Optional[Any] = None
 ) -> Optional[bytes]:
-    """Keeps a cloud take's pieces until its last one, then answers the whole recording.
-
-    A take's first piece drops whatever the profile was still holding — so a take that was cancelled
-    or died is never uploaded inside the next one — and so does every hold nothing has added to for
-    a minute. None means the take is still being spoken; a DictationError is the recording growing
-    past what one take may be.
-    """
+    """Keeps a cloud take's pieces until its last one; a new take's first piece drops the old hold."""
     key = str(profile or "")
     now = time.monotonic()
     with _buffer_lock:
@@ -411,12 +378,6 @@ def _cloud_take(
     last: bool,
     profile: Optional[Any],
 ) -> Dict[str, Any]:
-    """A take on a cloud provider: nothing while it is spoken, then one upload of the whole thing.
-
-    Decoded by Hermes's dispatcher rather than ours, so the host's provider, its trim and its
-    chunking of a take past that provider's own cap all apply. No prompt is composed: a cloud
-    provider reads the audio alone and the cleanup carries the bot's names (ADR 0067).
-    """
     audio = _hold(data, first=first, last=last, profile=profile)
     if audio is None:
         return {"text": "", "ms": 0}

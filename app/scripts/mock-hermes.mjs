@@ -3158,11 +3158,7 @@ function speechReading() {
     stt: sttReading(),
   }
 }
-/**
- * Who hears a take (plugin/dictation.py's `heard_by`): the provider the host resolves, the local
- * backend behind a local one, and whether the take leaves the host. A `stt.provider` pick is what
- * decides it here, as the host's own resolver would.
- */
+/** Who hears a take, as `plugin/dictation.py`'s `heard_by` answers it. */
 function heardBy() {
   const name = sttReading().provider.name
   const local = name === "local" || name === "local_command"
@@ -5250,8 +5246,8 @@ http
     ) {
       const data = await readRaw(req)
       if (!data.length) return json(res, 400, { error: { message: "The recording is empty." } })
-      // The last piece of a take, which a vendor host answers with the whole recording's text
-      // (plugin/dictation.py's buffered take, ADR 0069). Every piece before it lands nothing.
+      // The last piece of a take, which a cloud host answers with the whole recording's text
+      // (ADR 0069); every piece before it lands nothing.
       const last = url.searchParams.get("last") === "1"
       dictationClips.push({
         bytes: data.length,

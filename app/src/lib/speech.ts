@@ -197,11 +197,7 @@ export function readHeardBy(raw: unknown): HeardBy | undefined {
   }
 }
 
-/**
- * The line the Dictation tab draws under the speech model, where a take goes somewhere worth
- * saying: a provider that hears it instead of the host, or a whisper CLI that drops the Hearing
- * prompt and Vocabulary (ADR 0069). A host's own model needs no line — the model row says it.
- */
+/** The Dictation tab's line under the speech model, where a take goes somewhere worth saying. */
 export function heardLine(provider: HeardBy | undefined): string | null {
   if (!provider || !provider.name || provider.name === "none") return null
   if (provider.cloud) return "A take is uploaded to this provider, not heard on this host."

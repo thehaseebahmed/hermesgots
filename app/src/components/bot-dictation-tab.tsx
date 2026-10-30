@@ -76,7 +76,6 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
   const [open, setOpen] = useState<SttSetting>()
   const models = settings ? modelsFor(settings, block) : []
   const otherProviders = block ? providerRows(block) : []
-  // Where a take goes, where it isn't this host's own model — the one line that says so.
   const heard = settings ? heardLine(settings.provider) : null
   // The Hearing prompt's value is the bot's, on the host, however many devices write it.
   const developer = useLiveQuery(async () => Boolean((await getSettings()).developer), [])
@@ -132,9 +131,7 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
         />
       )}
 
-      {/* Where a take goes, where that is worth saying: a provider that hears it instead of this
-          host, or a whisper CLI that drops the Hearing prompt and Vocabulary (ADR 0069). A host's
-          own model needs no line of its own — the model row above says it. */}
+      {/* Where a take goes, where it isn't heard on this host (ADR 0069). */}
       {settings && heard && (
         <Group>
           <ValueRow

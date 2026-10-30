@@ -1883,7 +1883,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             {"object": "memento.attachment", "name": saved.name, "path": str(saved), "size": len(data)}
         )
 
-    # One take at a time per profile, so a long vendor upload on one bot can't starve another's.
+    # One take at a time per profile: a vendor upload can hold its slot for minutes.
     dictating: Dict[str, "asyncio.Lock"] = {}
 
     def dictating_lock(key: str) -> "asyncio.Lock":
@@ -1911,8 +1911,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         hint = dictation.clean_hint(request.query.get("hint"))
         context = dictation.clean_context(request.query.get("context"))
         vocabulary = dictation.clean_vocabulary(request.query.getall("vocabulary", []))
-        # The take's first and last piece: a cloud take is held from the first and uploaded on the
-        # last, and a local one ignores both.
         first = request.query.get("first") == "1"
         last = request.query.get("last") == "1"
         async with dictating_lock(str(path)):
