@@ -14,6 +14,11 @@ being proven. `.agents/skills/e2e-testing/SKILL.md` documents the same harness f
 flows; this skill is the contract for a verification run: what to launch, how to tell the instance
 is worth driving, what counts as proof, and how to tear down.
 
+A flow proves the state it stands up. Where the claim is a consequence no flow asserts — the request
+that fired, the console line that must not appear, an element's own box at a width — a **Reticle
+check** answers that against the same stack (`.agents/skills/reticle/` has the whole surface). Its
+verdict sits beside the flows: `verified: yes` replaces neither a flow nor a gate.
+
 ## Launch
 
 From `app/`, once per checkout: `pnpm install`. Nothing else is built — Vite serves the app.
@@ -35,6 +40,12 @@ at once.
 | 18643 | Mock `polling`: `MOCK_NO_EVENTS=1`, polling like an older plugin |
 | 18644 | Mock `legacy`: `MOCK_BLOCK_RUN_EVENTS=1`, Hermes v2026.9.24's blocked run stream |
 | 18645 | Mock `no-dictation`: `MOCK_DICTATION=off` |
+| 18646 | Mock `triage-new`: `MOCK_TRIAGE=new` |
+| 18647 | Mock `triage-thread`: `MOCK_TRIAGE=thread` |
+| 4400 | Reticle's daemon, for a **Reticle check**; `pnpm e2e` never starts it |
+
+Under `--jobs` each lane moves its mock ports — `cli.mjs` takes the base `18642 + 4 × lane` — so treat
+the lines `pnpm e2e up` printed as the truth for the stack you started, not this table.
 
 The CLI serves the app on `127.0.0.1` and its readiness probe accepts any family, so launch works
 whether `localhost` here resolves to IPv4 or IPv6 (see the e2e-testing skill's gotcha).
@@ -66,9 +77,11 @@ Read-only. It answers, in order: the app and each mock respond (the CLI's own pr
 500); the mock and Vite processes are up and which working directory owns each pid (so a stale
 server from another tree is visible); the thread budget this cgroup has left (a lane wants ~150 per
 concurrent browser); Playwright resolves (as the CLI finds it — `app/node_modules`, `npm root -g`,
-then `PLAYWRIGHT_MODULE`); and it prints the build being driven (git head, app version), the
-artifact directory, and the fact that the mock's fixed key leaves no credential to validate. Exit 0 is "worth driving", 1 is not. **Run it first whenever anything looks off** — a
-flow failing with a missing control is often a stale server, not a regression.
+then `PLAYWRIGHT_MODULE`); whether the Reticle CLI resolves and a daemon answers on `4400`; and it
+prints the build being driven (git head, app version), the artifact directory, and the fact that the
+mock's fixed key leaves no credential to validate. A missing Reticle is a `note`, never the doctor's
+failure: the flows and gates verify the instance without it. Exit 0 is "worth driving", 1 is not. **Run it first whenever anything looks off** —
+a flow failing with a missing control is often a stale server, not a regression.
 
 ## Drive
 
@@ -149,6 +162,42 @@ list, `fail` fails a tool call, `image` answers with images, `think out loud` st
 production boundary — and nothing else is mocked: IndexedDB, the plugin's routes and the render
 path are the real code.
 
+## Reticle check
+
+A flow asserts what its author wrote down. A Reticle check drives the same stack's page and reports
+what happened — the request that fired, the console line that appeared, an element's own state — so
+it is the cheaper instrument for a claim no flow asserts, and the wrong one for anything a flow
+already covers. The full surface (predicates, actions, saved flows, the MCP tools, the harness) is
+`.agents/skills/reticle/SKILL.md`; this is the shape a verification run uses.
+
+```bash
+cd app
+reticle serve --port 4400 --drive http://127.0.0.1:15173    # a daemon and a tab on the app
+reticle verify http://127.0.0.1:15173 \
+  --expect '{"kind":"element","query":{"role":"textbox"},"state":"visible"}'   # exit 0 = verified: yes
+reticle stop
+```
+
+Four rules, each measured against this checkout:
+
+- **The port is 4400, not "a port".** The page dials `ws://localhost:4400/reticle`, named by
+  `@reticlehq/vite-plugin` in `app/vite.config.ts`. A daemon on any other port leaves a tab that
+  loads and never dials: `reticle verify` answers `verified: unknown` with `sdk_never_dialled`.
+  `unknown` and `no` are both not-proofs; only `verified: yes` — exit 0 — is a pass.
+- **`--expect` asks a daemon, it never starts one** (`reticle verify --help`). With the port free it
+  exits 1 saying *the predicate did not run, and nothing was proved* — an unproved check that reads
+  like a red. This repo has no saved flows, so `--expect` is the whole CLI path: a claim that needs a
+  click or a fill is a flow, or a session with the `reticle_*` MCP tools registered.
+- **Read the screen the tab is on, not the one the flow would have stood up.** The daemon drives its
+  own browser, and here that tab arrived already onboarded — the composer visible, no `Welcome to
+  Gots` heading — where `flow()` starts from a fresh profile and readies it with `setUpBot`. Prove
+  the screen first (`--expect` on the marker the claim needs), then read the verdict about it; a
+  first-run claim needs the wizard driven on purpose.
+- **The app's console carries Reticle's retries.** With no daemon listening, every page logs
+  `[Reticle] this page could not open a websocket to ws://localhost:4400/reticle` as a *warning*, over
+  and over (`/tmp/memento-e2e-logs/app.log`). It is dev noise, and the reason a "console is clean"
+  predicate should name its level rather than the console as a whole.
+
 ## Evidence
 
 Proof artifacts live outside the repo, in `GOTS_VERIFY_ARTIFACTS` (default
@@ -179,6 +228,10 @@ Proof standards:
 Each drive ends with `PASS: …` lines per step; a failure saves `<flow>-failed.png` and the run ends
 `FAILED: <flows>`. Server logs are in `$TMPDIR/memento-e2e-logs/`. Keep, per run: the flow's PNGs,
 the `PASS:` transcript, and any read-back values the journey asserted (reply length, request counts).
+A **Reticle check**'s verdict is text: keep its `verified:` block beside that transcript. Its own
+screenshot needs a writable state directory (`RETICLE_STATE_DIR` — a read-only `HOME` costs it its
+journal, and the shot comes back `pending`), and a verdict never stands in for a PNG the template
+asks for.
 Record the feature id and the entry point used with every artifact.
 
 ## Cleanup
@@ -199,11 +252,16 @@ state dies with its process. **It never removes the evidence**: after `down`, co
 transcripts still sit in `GOTS_VERIFY_ARTIFACTS`. If a drive failed midway, run `down` before the
 next attempt so a broken run can't strand a port.
 
+A **Reticle check**'s daemon is not the CLI's to stop: `reticle stop` after the last drive that used
+one, then probe `4400` with the stack's other ports.
+
 ## Helpers
 
 - `.agents/skills/verify-gots/doctor.sh` — the read-only instance check (see **Doctor**):
   `GOTS_VERIFY_ARTIFACTS=… .agents/skills/verify-gots/doctor.sh`
 - `app/scripts/e2e/lib.mjs` — every drive helper, listed under **Drive**.
+- `.agents/skills/reticle/SKILL.md` — the surface behind a **Reticle check**: predicates, actions,
+  saved flows, the MCP tools.
 - `.agents/skills/e2e-testing/e2e` — the same CLI from anywhere in the repo.
 - `app/scripts/mock-hermes.mjs` — the mock's words and env vars, in its header.
 
@@ -227,3 +285,12 @@ If the app's readiness probe loops its full 60s against a Vite that is up, the V
 while the probe reached `localhost` over IPv4 — the CLI now probes every family and starts its own
 app on `127.0.0.1`, so only an app started elsewhere needs the manual workaround: `--host
 127.0.0.1` and `--app http://127.0.0.1:<port>`.
+
+Reticle answers about its own browser, so `reticle doctor` can report `chromium ✗ missing` on a box
+that runs every flow: it wants the full Chromium of the Playwright revision `@reticlehq/server`
+bundles (`chromium-1248` for 3.9.0), while a headless stand-in may hold only the headless shell of
+another revision (`chromium_headless_shell-1243` here). Install the one it names into a path of its
+own — `node <server>/node_modules/playwright/cli.js install chromium` — and give the daemon that
+`PLAYWRIGHT_BROWSERS_PATH`; one path for both fails the flows on the revision their shell is missing.
+Its daemon also needs somewhere to write: with a read-only `HOME` it exits
+`reticle_daemon_state_unwritable` before serving anything, so pass `RETICLE_STATE_DIR`.
