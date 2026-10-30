@@ -17,6 +17,7 @@ import {
   type Device,
   withDevice,
 } from "./chat-next-devices.tsx"
+import { WAITING_ON_ANSWER } from "@/lib/format"
 
 const TEA: Ask = {
   question: "Which do you prefer?",
@@ -29,6 +30,14 @@ const setUp = (name: string) => {
   const host = fakeHost(`memento-waiting-${name}`, { plugin: true })
   return host
 }
+
+/**
+ * A host that keeps no replay of a prompt's request: it goes only to the subscribers there when it
+ * was made, so a device that opens the chat afterwards has the run's status to read it from — what
+ * a phone coming back to a waiting run meets.
+ */
+const withholding = (name: string) =>
+  fakeHost(`memento-withheld-${name}`, { plugin: true, withhold: true })
 
 /** Another device answering: a request straight to the host, with no screen of ours involved. */
 const answerElsewhere = (run: string, prompt_id: string, answer: string) =>
@@ -135,6 +144,100 @@ test.describe("a question the agent asked", () => {
       run.finish("Tea it is.")
       await showsEverything(phone, host, "the turn, with the answer the other device gave")
     })
+  })
+})
+
+test.describe("a run already waiting when the chat opens", () => {
+  test("a question the events never carried is read off the run's status", async () => {
+    const host = withholding("q-status")
+    const run = host.startElsewhere("from the laptop")
+    run.ask(TEA)
+    await withDevice(openDevice(host), async (phone) => {
+      await eventually(
+        () => assert.deepEqual(questionOf(phone), asking),
+        "the question, read from the run's status",
+        200,
+      )
+      await phone.choose("coffee")
+      await eventually(() => assert.equal(host.answers.length, 1), "the host was given the answer")
+      run.finish("Coffee it is.")
+      await showsEverything(phone, host, "the turn, with the question and its answer")
+    })
+  })
+
+  test("an approval the events never carried is read off the run's status", async () => {
+    const host = withholding("a-status")
+    const run = host.startElsewhere("from the laptop")
+    run.requestApproval("rm -rf /tmp/x", "delete in root path")
+    await withDevice(openDevice(host), async (phone) => {
+      await eventually(
+        () =>
+          assert.deepEqual(phone.waiting().approval, {
+            command: "rm -rf /tmp/x",
+            choices: ["once", "deny", "session", "always"],
+          }),
+        "the command, read from the run's status",
+        200,
+      )
+      await phone.approve("deny")
+      await eventually(
+        () => assert.equal(host.approvals.length, 1),
+        "the host was given the choice",
+      )
+      run.finish("It was denied.")
+      await showsEverything(phone, host, "the turn, the denied call counted")
+    })
+  })
+
+  test("a message sent while the prompt waits is turned down in the app's own words", async () => {
+    const host = withholding("q-send")
+    const run = host.startElsewhere("from the laptop")
+    run.ask(TEA)
+    // Read slowly, as an open chat does between turns: the failure the host's 409 becomes is the
+    // page's until the next read, and a poll every 20ms would take it back before it was drawn.
+    await withDevice(openDevice(host, { pollMs: 5_000, idleMs: 5_000 }), async (phone) => {
+      await eventually(
+        () => assert.deepEqual(questionOf(phone), asking),
+        "the question, and its form",
+        200,
+      )
+      const started = host.asked.runs
+      await phone.send("never mind")
+      await eventually(
+        () => assert.equal(phone.alert(), WAITING_ON_ANSWER),
+        "the screen says what the refusal means",
+        200,
+      )
+      assert.equal(host.asked.runs, started, "no turn was started")
+      assert.equal(phone.draft(), "never mind", "the message comes back to the composer")
+      assert.deepEqual(questionOf(phone), asking, "the form is still there to answer")
+    })
+  })
+})
+
+test("a refusal that is not a waiting bot keeps the host's own words", async () => {
+  const host = setUp("q-blocked")
+  await withDevice(openDevice(host, { pollMs: 5_000, idleMs: 5_000 }), async (phone) => {
+    const answer = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
+      new URL(String(input)).pathname === "/v1/runs" && init?.method === "POST"
+        ? new Response(
+            JSON.stringify({
+              error: { message: "This workspace is blocked.", code: "workspace_blocked" },
+            }),
+            { status: 409 },
+          )
+        : answer(input, init)) as typeof fetch
+    try {
+      await phone.send("never mind")
+      await eventually(
+        () => assert.equal(phone.alert(), "This workspace is blocked."),
+        "the host's reason is what the screen says",
+        200,
+      )
+    } finally {
+      globalThis.fetch = answer
+    }
   })
 })
 

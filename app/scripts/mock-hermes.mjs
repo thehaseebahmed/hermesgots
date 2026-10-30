@@ -3030,6 +3030,9 @@ async function streamCompletion(req, res, body) {
 // forgets its events once that (blocked) subscriber leaves, so only GET /v1/runs/{id} is left.
 // MOCK_STALL_EVENTS_MS detaches a stream's listener after that long: the run and its keepalives
 // carry on, but no further events reach the client, like a server whose event fan-out went quiet.
+// MOCK_WITHHOLD_PROMPT=1 sends a prompt's request (`clarify.request`, `approval.request`) only to the
+// listeners there when it was made: a subscriber that arrives afterwards gets none of it on the
+// replay, so the run's status is the one place its wait can be read — what a phone comes back to.
 const runs = new Map()
 // Sessions a finished subagent still owes a wake turn to — `waking` on runs/live, what the plugin
 // reports between a turn ending and its wake turn starting, so no screen reads the session at rest
@@ -3216,6 +3219,9 @@ const RUN_BACKLOG = Number(process.env.MOCK_RUN_BACKLOG ?? 1000)
 const DROP_EVENTS_MS = Number(process.env.MOCK_DROP_EVENTS_MS ?? 0)
 const BLOCK_RUN_EVENTS = process.env.MOCK_BLOCK_RUN_EVENTS === "1"
 const STALL_EVENTS_MS = Number(process.env.MOCK_STALL_EVENTS_MS ?? 0)
+// A request that is only ever sent to the listeners there when it was made, never replayed.
+const WITHHOLD_PROMPT = process.env.MOCK_WITHHOLD_PROMPT === "1"
+const PROMPT_EVENTS = new Set(["clarify.request", "approval.request"])
 // On by default: runs/live answers under the session a chat started as, mirroring the plugin's
 // `chat_session` walk, so a compressed chat's run stays findable on a device that only knows the id
 // the chat began with. `MOCK_RUNS_LIVE_ROOT_IDS=0` restores the old keying — the run's own session id
@@ -3664,7 +3670,11 @@ function streamRunEvents(req, res, run, lastSeq) {
       `data: ${JSON.stringify({ event: "replay.truncated", run_id: run.id, oldest_retained_seq: replay[0].seq })}\n\n`,
     )
   }
-  replay.forEach(send)
+  // A withheld request is the one a late subscriber never hears: what the run's status says is all
+  // there is to read.
+  replay
+    .filter((event) => !(WITHHOLD_PROMPT && PROMPT_EVENTS.has(event.event)))
+    .forEach(send)
   // A finished run's stream ends at once, the way Hermes's does, however it finished.
   if (["completed", "cancelled", "failed"].includes(run.status))
     return res.end(": stream closed\n\n")

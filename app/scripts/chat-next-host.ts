@@ -6,7 +6,9 @@
  *   transcript pages newest-first by offset with each page oldest-first.
  * - A run writes its user row at once and its calls and reply as it goes. Its events carry a `seq`
  *   from 0, an SSE `id:`, and a `tool_call_id` on every call; every subscriber is sent all of them,
- *   even after the run is over, and `?last_seq=` resumes after a number.
+ *   even after the run is over, and `?last_seq=` resumes after a number — unless the host is made to
+ *   `withhold` its prompt requests, which then go only to the subscribers there when they were made,
+ *   as a host that keeps no replay of them does.
  * - A run held up on the user is a prompt in its status's `pending_controls` and an event
  *   (`approval.request`, `clarify.request`); answering it takes exactly `{request_id,
  *   execution_generation, choice | answer}` and ends it with `approval.settled` / `clarify.settled`.
@@ -117,7 +119,7 @@ export interface Run {
 }
 
 interface RunState {
-  events: { seq: number }[]
+  events: { seq: number; event: string }[]
   listeners: Set<(event: object | null) => void>
   done: boolean
   /** `POST /v1/runs/{id}/stop`: the run ends as cancelled and its stream closes. */
@@ -135,9 +137,13 @@ const reply = (body: unknown, status = 200) =>
     headers: { "content-type": "application/json" },
   })
 
+/** The events that carry a prompt's request, which a host need not keep for a late subscriber. */
+const PROMPT_EVENTS = new Set(["clarify.request", "approval.request"])
+
 /**
  * `plugin` serves the Gots plugin's `runs/live`; `version` is what `/health` says Hermes is;
- * `latency` is how long, in ms, a transcript read takes to be answered.
+ * `latency` is how long, in ms, a transcript read takes to be answered; `withhold` sends a prompt's
+ * request only to the subscribers there when it was made, never to one that joins afterwards.
  */
 /**
  * The user row Hermes keeps for a run's input: a plain string as it came, or the newest message of a
@@ -159,7 +165,8 @@ export function fakeHost(
     plugin = false,
     version = "0.22.5",
     latency = 0,
-  }: { plugin?: boolean; version?: string; latency?: number } = {},
+    withhold = false,
+  }: { plugin?: boolean; version?: string; latency?: number; withhold?: boolean } = {},
 ) {
   const rows: Row[] = []
   const expected: ExpectedTurn[] = []
@@ -535,7 +542,8 @@ export function fakeHost(
         controller.enqueue(encoder.encode(": open\n\n"))
         asked.subscriptions++
         for (const sent of state.events)
-          if (sent.seq > after) controller.enqueue(encoder.encode(frame(sent)))
+          if (sent.seq > after && !(withhold && PROMPT_EVENTS.has(sent.event)))
+            controller.enqueue(encoder.encode(frame(sent)))
         if (state.done) return controller.close()
         listener = (sent) => {
           if (sent) controller.enqueue(encoder.encode(frame(sent as { seq: number })))
@@ -597,8 +605,16 @@ export function fakeHost(
       return reply({ run_id: stopping[1], status: "stopping" })
     }
     if (path === "/v1/runs" && init?.method === "POST") {
-      asked.runs++
       const body = JSON.parse(String(init.body))
+      // Hermes takes no second turn on a session whose run is held on the user: it answers 409, which
+      // is what a send made while that run waits meets.
+      const target = typeof body.session_id === "string" ? body.session_id : session
+      if (target === session && [...runs.values()].some((state) => !state.done && state.waiting))
+        return reply(
+          { error: { message: "Run is waiting on the user", code: "run_waiting_for_user" } },
+          409,
+        )
+      asked.runs++
       const { id, run } = start(durable(body.input))
       latest.run = run
       latest.id = id

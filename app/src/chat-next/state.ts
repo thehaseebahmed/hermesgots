@@ -2,6 +2,7 @@ import { clarifyAnswered, type ClarifyResponse } from "@/lib/clarify"
 import type { LiveTurn, MessageStats } from "@/lib/db"
 import { isProgressReminder } from "@/lib/progress-reminder"
 import { measureReply } from "@/lib/reply-stats"
+import { promptFrom, type RunPrompt } from "@/lib/run-prompt"
 
 import type { Agent } from "./agents"
 import type { Queued, RunEvent } from "./api"
@@ -43,31 +44,30 @@ export interface ThreadState {
   live?: LiveTurn
   /** This device has a turn running; while it does, what the host's transcript says waits. */
   running: boolean
+  /** The run this page joined, whose status its wait is read from; none before it has joined one. */
+  run?: string
   /** What the run is held up on, until the user's answer or someone else's takes it away. */
   waiting?: Waiting
+  /**
+   * The prompt that has settled since this page opened, whether this screen answered it or another
+   * one did: a status read still carrying it arrived too late to be drawn.
+   */
+  settled?: Settled
   error?: string
 }
 
-/** A prompt the run is held up on. Each question is a prompt of its own, one at a time. */
-export type Waiting =
-  | {
-      kind: "question"
-      run: string
-      promptId: string
-      generation: number
-      question: string
-      choices: string[]
-      multiSelect: boolean
-    }
-  | {
-      kind: "approval"
-      run: string
-      promptId: string
-      generation: number
-      command: string
-      description?: string
-      choices: string[]
-    }
+/** The prompt a page has seen settle, with the run that asked it. */
+interface Settled {
+  run: string
+  promptId: string
+  generation: number
+}
+
+/**
+ * A prompt the run is held up on, as `lib/run-prompt` reads it off the run's own status — the one
+ * account of the prompt's fields, whether it arrived as an event or as a read.
+ */
+export type Waiting = RunPrompt
 
 export type ThreadEvent =
   /**
@@ -83,7 +83,14 @@ export type ThreadEvent =
   | { type: "unsent"; error: string }
   /** A message the host sent somewhere else (triage, ADR 0029): it leaves this thread, unfailed. */
   | { type: "moved" }
-  | { type: "attach" }
+  /** `run` is the run being joined: a wait this page already read for it is that run's own. */
+  | { type: "attach"; run: string }
+  /**
+   * The prompt the run's own status says it waits on, read as the page joins it: a host sends a
+   * request only to the subscribers it has at the time, so one that joins in flight has no other
+   * way to learn it.
+   */
+  | { type: "waiting"; waiting: Waiting }
   /** The card goes; `answer` is what the question got, where the user gave one. */
   | {
       type: "answered"
@@ -315,29 +322,40 @@ const sameQueue = (a: ThreadState["queue"], b: NonNullable<ThreadState["queue"]>
 const SETTLED = ["approval.settled", "clarify.settled"]
 const ENDINGS = ["run.completed", "run.failed", "run.cancelled", "run.interrupted"]
 
+/** The prompt this state is dropping, kept so a status read that still carries it lands nothing. */
+const settledWith = (state: ThreadState): Settled | undefined =>
+  state.waiting
+    ? {
+        run: state.waiting.run,
+        promptId: state.waiting.promptId,
+        generation: state.waiting.generation,
+      }
+    : state.settled
+
+const sameSettled = (
+  a: Pick<Settled, "run" | "promptId"> | undefined,
+  b: Pick<Settled, "run" | "promptId"> | undefined,
+) => a?.run === b?.run && a?.promptId === b?.promptId
+
+/**
+ * A read is the wait only where it is the one this page could answer: its run is the one joined (or
+ * none is joined yet, the read being the join's own), it has not already settled by this screen's
+ * answer or another's, and it is not the prompt already on screen.
+ */
+function readChangesNothing(state: ThreadState, read: Waiting): boolean {
+  if (state.run !== undefined && read.run !== state.run) return true
+  if (sameSettled(state.settled, { run: read.run, promptId: read.promptId })) return true
+  const gone = state.settled
+  if (gone && read.run === gone.run && read.generation < gone.generation) return true
+  return read.promptId === state.waiting?.promptId
+}
+
 /** What a live event says the run is waiting on, if it says anything. */
 function waitingAfter(waiting: Waiting | undefined, event: RunEvent): Waiting | undefined {
-  const base = {
-    run: event.run_id ?? "",
-    promptId: event.prompt_id ?? "",
-    generation: event.execution_generation ?? 0,
-  }
-  if (event.event === "clarify.request" && event.prompt_id)
-    return {
-      kind: "question",
-      ...base,
-      question: event.question ?? "",
-      choices: event.choices ?? [],
-      multiSelect: Boolean(event.multi_select),
-    }
-  if (event.event === "approval.request" && event.prompt_id)
-    return {
-      kind: "approval",
-      ...base,
-      command: event.command ?? "",
-      ...(event.description ? { description: event.description } : {}),
-      choices: event.choices ?? [],
-    }
+  const raised = ["clarify.request", "approval.request"].includes(event.event)
+    ? promptFrom(event, event.run_id ?? "")
+    : undefined
+  if (raised) return raised
   // A prompt that settles is the one on screen, or an old one the screen has moved on from.
   if (SETTLED.includes(event.event))
     return event.prompt_id === waiting?.promptId ? undefined : waiting
@@ -367,16 +385,17 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
           ? { ...state.stats, [last.row]: measured }
           : state.stats
       return {
+        ...state,
         status: "ready",
         rows,
-        ...(partial ? { partial } : {}),
-        archived: state.archived,
-        agents: state.agents,
-        queue: state.queue,
+        partial: partial ? true : undefined,
         stats,
         running: false,
+        // The host's own rows are the turn now, in place of the copy this page streamed.
+        live: undefined,
         // A finished turn waits on nothing, and the end of a followed run settles what it was on.
         waiting: event.final || done ? undefined : state.waiting,
+        ...(event.final || done ? { settled: settledWith(state) } : {}),
       }
     }
     case "older": {
@@ -393,14 +412,10 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       return { ...state, archived: event.rows }
     case "sent":
       return {
+        ...state,
         status: "ready",
-        rows: state.rows,
-        partial: state.partial,
         running: true,
-        archived: state.archived,
-        agents: state.agents,
-        queue: state.queue,
-        stats: state.stats,
+        error: undefined,
         live: {
           turn: {
             user: event.user,
@@ -419,12 +434,15 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       return { ...state, live: undefined, running: false }
     case "attach": {
       // The run's events are replayed from its start, so the turn, and what it waits on, are drawn
-      // again from nothing.
+      // again from nothing — but the wait this page read off the run's own status is the run's, and
+      // a join of the same run keeps it.
       const last = turnsOf(foldedOf(state.rows, state.archived, state.partial), state.live).at(-1)
+      const waiting = state.waiting?.run === event.run ? state.waiting : undefined
       return {
         ...state,
+        run: event.run,
         running: true,
-        waiting: undefined,
+        waiting,
         live: last
           ? { turn: { ...last, parts: [], done: false }, replaces: true, replay: reach(last) }
           : undefined,
@@ -433,6 +451,11 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
     case "queue": {
       const next = { items: event.items, paused: event.paused }
       return sameQueue(state.queue, next) ? state : { ...state, queue: next }
+    }
+    case "waiting": {
+      const read = event.waiting
+      if (readChangesNothing(state, read)) return state
+      return { ...state, waiting: read }
     }
     case "agents":
       return sameAgents(state.agents, event.agents) ? state : { ...state, agents: event.agents }
@@ -449,10 +472,24 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       const live = held && answered && answered !== held.turn ? { ...held, turn: answered } : held
       // An answer that changed nothing on screen is no state at all, as every arm above says.
       if (state.waiting === undefined && live === held) return state
-      return { ...state, waiting: undefined, ...(live ? { live } : {}) }
+      return {
+        ...state,
+        waiting: undefined,
+        ...(state.waiting ? { settled: settledWith(state) } : {}),
+        ...(live ? { live } : {}),
+      }
     }
     case "run": {
       const waiting = waitingAfter(state.waiting, event.event)
+      // A prompt the stream says is settled is not raised again by a status read still carrying it.
+      const settled =
+        SETTLED.includes(event.event.event) && event.event.prompt_id
+          ? {
+              run: event.event.run_id ?? state.run ?? "",
+              promptId: event.event.prompt_id,
+              generation: event.event.execution_generation ?? 0,
+            }
+          : state.settled
       const held = state.live
       const turn = held && live(held.turn, event.event, event.at)
       let moved = held && turn && turn !== held.turn ? { ...held, turn } : held
@@ -465,11 +502,19 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         )
           moved = { ...moved, replay: undefined }
       }
-      if (waiting === state.waiting && moved === held) return state
-      return { ...state, waiting, live: moved }
+      if (waiting === state.waiting && moved === held && sameSettled(settled, state.settled))
+        return state
+      return { ...state, waiting, settled, live: moved }
     }
     case "failed":
-      return { ...state, status: "failed", running: false, waiting: undefined, error: event.error }
+      return {
+        ...state,
+        status: "failed",
+        running: false,
+        waiting: undefined,
+        settled: settledWith(state),
+        error: event.error,
+      }
   }
 }
 

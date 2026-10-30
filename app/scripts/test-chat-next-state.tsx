@@ -6,7 +6,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import type { RunEvent } from "@/chat-next/api"
-import { initial, reduce, threadTurns, type ThreadState } from "@/chat-next/state"
+import { initial, reduce, threadTurns, type ThreadState, type Waiting } from "@/chat-next/state"
 import type { Row } from "@/chat-next/fold"
 import { events as recordedEvents, fixture as recorded } from "./chat-next-fixtures.ts"
 import { stored } from "./progress-reminder-fixture.ts"
@@ -194,13 +194,26 @@ test("the answer the app gave is the call's result, since the served turn's comp
   // A call that asked a second question is answered once per prompt: both answers stay, in order.
   const sugar = reduce(
     { ...completed, waiting: { ...state.waiting!, promptId: "p2", question: "Sugar?" } },
-    { type: "answered", answer: { question: "Sugar?", choicesOffered: ["yes", "no"], value: "no" } },
+    {
+      type: "answered",
+      answer: { question: "Sugar?", choicesOffered: ["yes", "no"], value: "no" },
+    },
   )
   assert.deepEqual(
     JSON.parse(calls(sugar)[0].result ?? "{}").responses,
     [
-      { question: "Tea?", choices_offered: ["yes", "no"], status: "answered", user_response: "yes" },
-      { question: "Sugar?", choices_offered: ["yes", "no"], status: "answered", user_response: "no" },
+      {
+        question: "Tea?",
+        choices_offered: ["yes", "no"],
+        status: "answered",
+        user_response: "yes",
+      },
+      {
+        question: "Sugar?",
+        choices_offered: ["yes", "no"],
+        status: "answered",
+        user_response: "no",
+      },
     ],
     "one call's answers are all of them",
   )
@@ -389,4 +402,55 @@ test("a completion naming no call still drops the refused card, and only that on
     { event: "tool.completed", tool: "read_file", preview: "export const a = 1" } as RunEvent,
   ])
   assert.equal(calls(ordinary).length, 1, "a completion with no id and no note changes nothing")
+})
+
+test("a status read raises the wait a late subscriber never heard, and never one that settled", () => {
+  // A host sends a prompt's request only to the subscribers it has at the time, so a page that joins
+  // a run already waiting reads the wait off the run's own status instead.
+  const asked: Waiting = {
+    kind: "question",
+    run: "r",
+    promptId: "p1",
+    generation: 1,
+    question: "Tea?",
+    choices: ["yes", "no"],
+    multiSelect: false,
+  }
+  const attached = reduce(initial, { type: "attach", run: "r" })
+  const raised = reduce(attached, { type: "waiting", waiting: asked })
+  assert.deepEqual(raised.waiting, asked, "the prompt the status carries is drawn")
+  // A join of the run the wait was read for keeps it — the read may land before the join does — and
+  // another run's wait is not carried over.
+  assert.deepEqual(
+    reduce(raised, { type: "attach", run: "r" }).waiting,
+    asked,
+    "the run's own wait survives its join",
+  )
+  assert.equal(
+    reduce(raised, { type: "attach", run: "another" }).waiting,
+    undefined,
+    "a wait of another run goes",
+  )
+  assert.equal(reduce(raised, { type: "waiting", waiting: { ...asked } }), raised, "once only")
+
+  // A prompt that settles while the read is out is not raised again, whichever end settled it.
+  const settled = reduce(raised, {
+    type: "run",
+    event: { event: "clarify.settled", prompt_id: "p1" } as RunEvent,
+  })
+  assert.equal(settled.waiting, undefined, "the card goes")
+  assert.equal(
+    reduce(settled, { type: "waiting", waiting: { ...asked } }).waiting,
+    undefined,
+    "the read still carrying it lands nothing",
+  )
+  const answered = reduce(raised, {
+    type: "answered",
+    answer: { question: "Tea?", choicesOffered: ["yes", "no"], value: "yes" },
+  })
+  assert.equal(
+    reduce(answered, { type: "waiting", waiting: { ...asked } }).waiting,
+    undefined,
+    "the answer this screen gave is not undone by it",
+  )
 })

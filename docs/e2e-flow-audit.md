@@ -17,20 +17,20 @@ ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
 
-The registry in `app/scripts/e2e/cli.mjs` holds **81 keys**, and every one of them has a row
-below. `pnpm e2e list` prints the same 81 keys, and the rows here are grouped by the ticket that
+The registry in `app/scripts/e2e/cli.mjs` holds **82 keys**, and every one of them has a row
+below. `pnpm e2e list` prints the same 82 keys, and the rows here are grouped by the ticket that
 takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
 | --------- | ------ |
-| stay | 22 |
+| stay | 23 |
 | component | 55 |
 | plugin | 2 |
 | delete | 2 |
-| **total** | **81** |
+| **total** | **82** |
 
-Of those 81, 75 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
-reuses `todos.mjs`, so 74 distinct files) and 6 point at the older
+Of those 82, 76 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
+reuses `todos.mjs`, so 75 distinct files) and 6 point at the older
 `app/scripts/regression-*.mjs`.
 
 #297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**.
@@ -118,20 +118,31 @@ loader only while a page is read, a failed page retried, the app's rows keeping 
 jumped by a screen when a page landed. Run with the rows' ids counted from the thread's start, as
 before, the flow fails: the line being read moves by the height of what was added.
 
+A twenty-third stay has arrived with #683: `question-reload`, because the claim is what a phone comes
+back to — a run already held on a question, on a host that keeps no replay of the request for the
+subscriber that arrives after it, so the wait is read off the run's own status. The form has to be in
+the composer within a second of the chat drawing, and the thread must not draw a missed-question card
+for even one frame of the load. The device harness over a `withhold`ing host rules the recovery, the
+answer and the send a pending prompt turns down
+(`test-chat-next-waiting.tsx`), and `test-chat-next-reads.mjs` the read itself; what those never draw
+is the app's own thread (`AppChatNextThread`), and no DOM test has the wall clock a reload takes or the
+frames a card could appear in between. So the registry holds 81 + 1 = **82** keys, the component
+verdicts unchanged at **55**, and the stays are 22 + 1: **23**.
+
 `app/scripts/test-e2e-registry.mjs`, a unit test, holds the registry and this page to each other:
 a key with no row here, a row with no key, a verdict outside the four, a count in the table above
-that its rows don't add up to, or a stay beyond the twenty-two fails the app's gates. A new flow is then
+that its rows don't add up to, or a stay beyond the twenty-three fails the app's gates. A new flow is then
 an argument this page has to carry, never a default (ADR 0019).
 
 Check any of it in one line:
 
 ```bash
-grep -c '^| `' docs/e2e-flow-audit.md                           # 81 rows, one per registry key
+grep -c '^| `' docs/e2e-flow-audit.md                           # 82 rows, one per registry key
 grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 22
 grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 55
 grep -c '^| `[a-z0-9-]*` | delete |' docs/e2e-flow-audit.md    # 2
 grep -c '^| `[a-z0-9-]*` | plugin |' docs/e2e-flow-audit.md    # 2
-cd app && pnpm -s e2e list | wc -l                             # 81 keys in the registry
+cd app && pnpm -s e2e list | wc -l                             # 82 keys in the registry
 git show 8a4e842^:app/scripts/e2e/cli.mjs |
   sed -n '/^const FLOWS = {/,/^}$/p' | grep -c '^  [a-z"-]*: {'  # 61, before goal mode left
 ```
@@ -182,6 +193,7 @@ reads, and a question whose window closed.
 | `clarify-transcript` | component | A fresh transcript reads as Answered, No answer, Not answered or Skipped, with the answers the card holds. | A mapping from a tool row to a title and its answers, plus a render. | The same test: the four outcomes (the mapping itself a unit test), single- and multi-select answers, on one shared fixture. |
 | `clarify-missed` | component | A question whose window closed stays as a No answer card with the question it asked, and Ask again starts a new turn that asks afresh. | The expired card's render and its retry wiring; nothing resumes the expired call, so no host behaviour is at stake. | The same test: an expired card offers Ask again and sends a new turn. |
 | `question-card` | stay | On the new chat screen (chat-next) a waiting question is the composer's form alone: the thread says it in one line and draws no card of the question, and once answered the thread's card reads the answer and reads it again from the host's transcript after a reload. The instant the card takes the answer, rather than a beat later when the transcript lands, is the reducer test's (`test-chat-next-state.tsx`): the mock's transcript answers too promptly to hold that window open. | The new screen is only drawn through the app (`ChatPage` picks it, the settings switch and the Developer switch decide), and the claim is one question in two places at two widths: the device harness draws chat-next's own plain markup, never `AppChatNextThread`'s rows, so no component tier can stand in. | Nothing yet — it is the only flow that drives the new screen, and the tier it would move to waits for a harness that mounts `AppChatNextThread` over a fake host. |
+| `question-reload` | stay | A chat whose run already waits on a question, opened again on a host that never re-sends the request: the question's form is in the composer within a second of the chat drawing, the thread draws its one waiting line and never a "No answer" card through the loading window, and the answer reads back on the card at once. | The wait is read off the run's own status, which a component test over a `withhold`ing host rules (`test-chat-next-waiting.tsx`), as it does the send a pending prompt turns down, and the status read itself (`test-chat-next-reads.mjs`); what no lower tier holds is the app's own thread under a real reload — the device harness draws chat-next's plain markup, never `AppChatNextThread`'s rows — and the sub-second window, which is wall clock. | Nothing yet: the recovery, the refused send and the parse are components, and the flow keeps the reload and the absence of the card watched frame by frame. |
 
 ### The composer — #308
 

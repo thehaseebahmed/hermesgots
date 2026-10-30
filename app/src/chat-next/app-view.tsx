@@ -104,6 +104,7 @@ export function AppThreadView({
   earlier,
   queue,
   waiting,
+  inFlight,
   composer,
   stats,
   send,
@@ -131,11 +132,11 @@ export function AppThreadView({
   const messages = useMemo(
     () =>
       withHeldFiles(
-        messagesOf(chatId, turns, { streaming, stats, origin }),
+        messagesOf(chatId, turns, { streaming, inFlight, stats, origin }),
         sentFiles &&
           new Map(sentFiles.flatMap((file) => (file ? [[file.path, file.blob] as const] : []))),
       ),
-    [chatId, turns, streaming, stats, origin, sentFiles],
+    [chatId, turns, streaming, inFlight, stats, origin, sentFiles],
   )
   // The send a card asks for is the latest one, behind an identity that never changes, so a streamed
   // flush never wakes the cards that hold it.

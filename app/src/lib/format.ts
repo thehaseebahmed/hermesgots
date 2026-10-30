@@ -36,6 +36,9 @@ export function formatRelative(timestamp: number, now: number) {
 /** What the chat says while the run waits on a question: its status line and the thread's own. */
 export const WAITING_FOR_ANSWER = "Waiting for your answer"
 
+/** What a send is turned down with while the run is held on a prompt. */
+export const WAITING_ON_ANSWER = "The bot is waiting on your answer"
+
 /** The two activity lines the status line dresses in a rotating word (`busy-words.ts`). */
 export const THINKING_ACTIVITY = "Thinking…"
 export const WRITING_ACTIVITY = "Writing…"

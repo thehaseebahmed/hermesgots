@@ -25,9 +25,13 @@ export type Host = ReturnType<typeof fakeHost>
 export const wait = (ms: number) =>
   act(async () => new Promise((resolve) => setTimeout(resolve, ms)))
 
-/** Retries a throwing check while the page settles, and lets it fail with its own message at the end. */
-export async function eventually(check: () => void, what: string) {
-  for (let tries = 0; tries < 60; tries++) {
+/**
+ * Retries a throwing check while the page settles, and lets it fail with its own message at the end.
+ * `tries` widens the wait for a claim that costs the page more than the one read a poll makes, such
+ * as a wait recovered from a second read of the run.
+ */
+export async function eventually(check: () => void, what: string, tries = 60) {
+  for (let attempt = 0; attempt < tries; attempt++) {
     try {
       return check()
     } catch {
@@ -39,9 +43,10 @@ export async function eventually(check: () => void, what: string) {
 }
 
 /**
- * A device is polled at 20ms while the page is busy, and while idle at `idleMs`, which is as fast by
- * default so a test needs no waiting. A test about what keeps the page busy gives it a slow one, so
- * that only the busy poll can have done the reading.
+ * A device is polled at `pollMs` while the page is busy (20ms), and while idle at `idleMs`, which is
+ * as fast by default so a test needs no waiting. A test about what keeps the page busy gives it a
+ * slow one, so that only the busy poll can have done the reading; one about what the page says until
+ * its next read gives both a slow one, so the answer is not taken back before it is looked at.
  */
 let devices = 0
 
@@ -54,7 +59,11 @@ export function deviceDatabase(): SessionDb {
 
 export async function openDevice(
   host: Host,
-  { idleMs = 20, database = deviceDatabase() }: { idleMs?: number; database?: SessionDb } = {},
+  {
+    pollMs = 20,
+    idleMs = 20,
+    database = deviceDatabase(),
+  }: { pollMs?: number; idleMs?: number; database?: SessionDb } = {},
 ) {
   const container = document.createElement("div")
   document.body.append(container)
@@ -66,7 +75,7 @@ export async function openDevice(
         <Routes>
           <Route
             path="/next"
-            element={<ChatNextPage pollMs={20} idleMs={idleMs} database={database} />}
+            element={<ChatNextPage pollMs={pollMs} idleMs={idleMs} database={database} />}
           />
         </Routes>
       </MemoryRouter>,
@@ -77,6 +86,10 @@ export async function openDevice(
   return {
     database,
     composer: () => Boolean(one("[data-composer]")),
+    /** What the page says went wrong, in the words the plain view draws it in. */
+    alert: () => one("[role=alert]")?.textContent ?? undefined,
+    /** The words the composer holds, as a send that never landed hands them back. */
+    draft: () => (one("[data-composer]") as HTMLTextAreaElement | null)?.value ?? undefined,
     /** Whether the thread says it is catching up, as the first read of it is still out. */
     catching: () => Boolean(one("[data-catching-up]")),
     /** The line a host that can't be reached is given, over what the device holds. */

@@ -104,7 +104,7 @@ test("a thread opened again starts from the device's copy, running and waiting o
   const database = deviceDatabase()
   const first = opened(database, "s-again")
   await first.store.apply({ type: "transcript", rows: [user(1, "go")] })
-  await first.store.apply({ type: "attach" })
+  await first.store.apply({ type: "attach", run: "run_1" })
   await first.store.apply({
     type: "run",
     event: run({

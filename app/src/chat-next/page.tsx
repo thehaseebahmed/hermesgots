@@ -33,15 +33,19 @@ import {
   readLiveRun,
   readNewest,
   readPage,
+  readRun,
   readTranscript,
   respond,
   startRun,
   stopRun,
   HostAway,
+  HostRefused,
   type Connection,
   type Queued,
 } from "./api"
 import { clarifyRead } from "@/lib/clarify"
+import { WAITING_ON_ANSWER } from "@/lib/format"
+import { PROMPT_RETRY_MS } from "@/lib/freshness"
 import { foldTurns, type Row, type ToolCall, type Turn } from "./fold"
 import { isLast, nextOffset, originOf, shift } from "./pages"
 import { foldedOf, threadTurns, turnsOf, type ThreadEvent, type Waiting } from "./state"
@@ -375,6 +379,12 @@ export interface ThreadViewProps {
   onOpenCard: (card: Card) => void
   /** The prompt the run is held up on, drawn where the composer goes. */
   waiting: ReactNode
+  /**
+   * The thread's last turn is still the host's to work, whether or not this page streams it, or its
+   * run holds a prompt: a call in it that has no result yet is still running, and a question in it
+   * is the one the run waits on rather than one that went unanswered.
+   */
+  inFlight: boolean
   composer: ReactNode
   /** What the turns this device watched cost, by the id of the row that opened each. */
   stats?: Record<string, MessageStats>
@@ -812,12 +822,11 @@ export function ChatNextThread({
     tipNow.current = tip
   })
   const [hostIdleAt, setHostIdleAt] = useState<string>()
-  const following =
-    doing.status !== "loading" &&
-    !doing.running &&
-    last !== undefined &&
-    !last.done &&
-    hostIdleAt !== tip
+  // The last turn is not finished, and the host has not said it stopped working it.
+  const turnWorking = Boolean(last && !last.done && !last.failed && hostIdleAt !== tip)
+  const following = doing.status !== "loading" && !doing.running && turnWorking
+  // A call with no result is running while the turn is, or while its run still holds a prompt.
+  const inFlight = turnWorking || doing.waiting !== undefined
   // A turn that lands from the host — another device's, or a wake — settles the chat too.
   // What was settled when the page opened is the open's to read, not a turn's.
   const settledTurns = last?.done ? origin + turns.length : 0
@@ -921,6 +930,38 @@ export function ChatNextThread({
     },
     [server, key, session, catchUp, dispatch, store, asked],
   )
+  const waitsAsking = useRef(new Map<string, Promise<Waiting | undefined>>())
+  /** Asks a run what it waits on: a host never re-sends a prompt to a subscriber that came later. */
+  const readWait = useCallback(
+    (run: string, again = false): Promise<Waiting | undefined> => {
+      if (!server || !key) return Promise.resolve(undefined)
+      const asking = again ? undefined : waitsAsking.current.get(run)
+      if (asking) return asking
+      // Its own timeout, not the mount's signal: a remount must not cancel the only read that raises
+      // the form.
+      const once = (left: number): Promise<Waiting | undefined> =>
+        readRun({ server, key }, run).then(
+          (prompt) =>
+            prompt ??
+            (left > 1
+              ? new Promise<undefined>((done) => setTimeout(done, PROMPT_RETRY_MS)).then(() =>
+                  once(left - 1),
+                )
+              : undefined),
+        )
+      const started = once(3)
+      waitsAsking.current.set(run, started)
+      return started
+        .then((prompt) => {
+          if (prompt) dispatch({ type: "waiting", waiting: prompt })
+          return prompt
+        })
+        .finally(() => {
+          if (waitsAsking.current.get(run) === started) waitsAsking.current.delete(run)
+        })
+    },
+    [server, key, dispatch],
+  )
 
   // A server that streams its changes says when this session moved, so the timer below only has to
   // be a safety net while the stream is open.
@@ -970,7 +1011,8 @@ export function ChatNextThread({
           const run = await readLiveRun({ server, key }, session, alive.current.signal)
           if (run) {
             reads.current++
-            dispatch({ type: "attach" })
+            dispatch({ type: "attach", run })
+            readWait(run)
             return void follow(run)
           }
           streaming.current = false
@@ -989,6 +1031,7 @@ export function ChatNextThread({
     catchUp,
     follow,
     dispatch,
+    readWait,
     server,
     key,
     session,
@@ -1013,6 +1056,9 @@ export function ChatNextThread({
         pendingRun.current = run
         return
       }
+      // What the run waits on is asked for beside the first read of the thread: the prompt is the
+      // form in the composer, which the thread's own rows are not needed for.
+      readWait(run)
       await firstRows.current?.promise
       if (signal.aborted || lastRun.current === run) return
       if (streaming.current) {
@@ -1020,10 +1066,10 @@ export function ChatNextThread({
         return
       }
       reads.current++
-      dispatch({ type: "attach" })
+      dispatch({ type: "attach", run })
       void follow(run)
     },
-    [follow, dispatch],
+    [follow, dispatch, readWait],
   )
   // Keyed by the run, not its status: one run handing over to the next leaves the status as it was.
   const hostRunId = useLiveRunId(
@@ -1065,6 +1111,20 @@ export function ChatNextThread({
   )
 
   /**
+   * Puts the form up after the host refused a send — the joined run, or the one the plugin names —
+   * and says whether the run really was holding a prompt.
+   */
+  async function askWait(): Promise<boolean> {
+    const named =
+      lastRun.current ??
+      (server && key && session ? await readLiveRun({ server, key }, session) : undefined)
+    if (!named) return false
+    const prompt = await readWait(named, true)
+    if (named !== lastRun.current) void join(named)
+    return prompt !== undefined
+  }
+
+  /**
    * Sends a message as a turn. A send that never reached the host leaves nothing in the thread and
    * rejects, so the composer that sent it gets the words back.
    */
@@ -1101,8 +1161,19 @@ export function ChatNextThread({
       streaming.current = false
       prepared?.settled(false)
       if (alive.current.signal.aborted) return
-      dispatch({ type: "unsent", error: error instanceof Error ? error.message : String(error) })
-      throw error
+      // A run held on a prompt takes no new turn, and the form is what answers it: asking also puts
+      // the form up, for a page that had not read the wait when the send went out. Any other refusal
+      // keeps the host's own words.
+      const waiting = error instanceof HostRefused ? await askWait() : false
+      const said = waiting
+        ? WAITING_ON_ANSWER
+        : error instanceof Error
+          ? error.message
+          : String(error)
+      dispatch({ type: "unsent", error: said })
+      const failure = error instanceof Error ? error : new Error(said)
+      failure.message = said
+      throw failure
     }
     prepared?.settled(true)
     void follow(run)
@@ -1235,6 +1306,7 @@ export function ChatNextThread({
     <Composer
       controls={{
         // A run the host works that this page has not joined yet is a turn running all the same.
+        // The plugin naming a run makes a send wait; the thread's rows queue on nothing.
         busy: doing.running || Boolean(hostRunId && !last?.done && !last?.failed),
         send: sendTurn,
         queue: queueMessage,
@@ -1301,6 +1373,7 @@ export function ChatNextThread({
       }
       onOpenCard={open}
       waiting={waitingCard}
+      inFlight={inFlight}
       composer={composer}
       stats={held?.stats}
       send={sendTurn}

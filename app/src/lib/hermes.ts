@@ -28,6 +28,7 @@ import {
 } from "@/lib/workflow"
 import { isNative } from "@/lib/native"
 import type { Fingerprint, Totals } from "@/lib/dictation-log"
+import { promptEntry } from "@/lib/run-prompt"
 import type { CronSchedule } from "@/lib/schedule"
 import { readStt, type SttValue } from "@/lib/stt-settings"
 import {
@@ -3807,7 +3808,8 @@ export async function getRun(config: HermesConfig, runId: string, signal?: Abort
     signal,
   })
   const body = await response.json()
-  const pending = body?.status === "waiting_for_approval" ? body.approval : undefined
+  const pending =
+    body?.status === "waiting_for_approval" ? promptEntry(body, "approval") : undefined
   const clarify = body?.clarify
   return {
     status: String(body?.status ?? ""),

@@ -1,5 +1,6 @@
 import { pluginRoot, serverRoot } from "../lib/host-url.ts"
 import { READ_TIMEOUT_MS } from "../lib/freshness.ts"
+import { promptOf } from "../lib/run-prompt.ts"
 
 import type { Agent } from "./agents"
 import type { Row } from "./fold"
@@ -51,8 +52,16 @@ const within = (signal?: AbortSignal) =>
   AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(READ_TIMEOUT_MS)])
 /** A read that got no answer at all (no connection, or none in time): the host is away. */
 export class HostAway extends Error {}
+/** A 409 on a run start: whatever the host says of it, where it says anything. */
+export class HostRefused extends Error {}
 const ensure = (response: Response) => {
   if (!response.ok) throw new Error(`The host answered ${response.status}.`)
+}
+
+/** What a refused host says, where its body says anything. */
+const refusal = async (response: Response): Promise<string | undefined> => {
+  const body = await response.json().catch(() => null)
+  return typeof body?.error?.message === "string" ? body.error.message : undefined
 }
 
 /**
@@ -156,6 +165,7 @@ export async function postRun(
     body: JSON.stringify(body),
     signal: within(signal),
   })
+  if (response.status === 409) throw new HostRefused(await refusal(response))
   ensure(response)
   const { run_id } = (await response.json()) as { run_id?: unknown }
   if (typeof run_id !== "string") throw new Error("The host didn't start the run.")
@@ -190,6 +200,29 @@ export async function readLiveRun(
     if (!response.ok) return undefined
     const { run_ids } = (await response.json()) as { run_ids?: Record<string, string> }
     return run_ids ? (run_ids[session] ?? null) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * What a run's status says it is held up on, read from `GET /v1/runs/{id}`. A host sends a prompt's
+ * request only to the subscribers it has at the time, so a screen that joins a run already waiting
+ * has no other way to learn it. Undefined where the host cannot answer, or waits on nothing this
+ * screen can answer.
+ */
+export async function readRun(
+  connection: Connection,
+  runId: string,
+  signal?: AbortSignal,
+): Promise<Waiting | undefined> {
+  try {
+    const response = await fetch(`${root(connection)}/v1/runs/${encodeURIComponent(runId)}`, {
+      headers: headers(connection),
+      signal: within(signal),
+    })
+    if (!response.ok) return undefined
+    return promptOf((await response.json()) as unknown, runId)
   } catch {
     return undefined
   }
