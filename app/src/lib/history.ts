@@ -266,8 +266,6 @@ function foldRows(
 ) {
   const { summaries } = options
   const messages: Message[] = []
-  // A call the progress reminder refused never ran, and its result is the note Gots wrote to the
-  // model: no card is drawn for it, so the reader sees the call the model made again (ADR 0068).
   const refused = refusedCallIds(rows)
   let reply: Message | undefined
   // Where the reply's text since its last tool call starts, and the notice that text was cut by.
@@ -398,8 +396,6 @@ function foldRows(
     const calls = toolCalls(row)
     if (row.content || calls.length) notice = undefined
     for (const call of calls) {
-      // The reminder's own refusal: the note is the host talking to the model, and the call the
-      // model makes again is the one the reader waited on.
       if (refused.has(call.id)) continue
       const event: ToolEvent = {
         toolCallId: call.id,

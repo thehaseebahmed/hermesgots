@@ -5,6 +5,7 @@
  * where it holds nothing — a value's tap opening its edit as a pushed screen and its pick as a bottom
  * sheet, and the write each lands at the fetch boundary.
  */
+import { toast } from "sonner"
 import assert from "node:assert/strict"
 import test from "node:test"
 import { useLiveQuery } from "dexie-react-hooks"
@@ -67,6 +68,7 @@ function host({
   health,
   away = false,
   level = "normal" as string | null,
+  refuse,
 }: {
   features?: string[]
   version?: string | null
@@ -75,8 +77,10 @@ function host({
   health?: string
   /** A host that hasn't answered at all: no feature list, so no page has a gate to read. */
   away?: boolean
-  /** The reminders level this host holds — `frequent` for a plugin from before the four names. */
+  /** The level this host holds — `frequent` from a plugin written before the four names. */
   level?: string | null
+  /** A level this host won't take, as a plugin from before the four names won't take Quiet. */
+  refuse?: string
 } = {}) {
   const calls: Sent[] = []
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -105,8 +109,12 @@ function host({
         ],
       })
     if (url.pathname.endsWith("/models")) return json({ data: models.map((id) => ({ id })) })
-    if (url.pathname.endsWith("/plugins/memento/reminders"))
+    if (url.pathname.endsWith("/plugins/memento/reminders")) {
+      // A host older than the four names refuses one it doesn't hold, in its own words (ADR 0068).
+      if (refuse && body?.level === refuse)
+        return json({ error: { message: `level must be one of off, normal, frequent` } }, 400)
       return json({ object: "memento.progress_reminders", level: body?.level ?? level })
+    }
     if (url.pathname.endsWith("/health"))
       return health ? json({ error: { message: health } }, 500) : json({ ok: true })
     return json({})
@@ -597,8 +605,6 @@ test("the reminders row is chosen where it sits, and shows no count", async () =
 })
 
 test("an older host's stored level reads as the level this app draws for it", async () => {
-  // The four names are this app's; a plugin that predates them still holds `frequent`, which is the
-  // same ten calls as Chatty. Read as Normal it would draw a quiet level over a chatty bot.
   await seed("general-legacy-reminders", { hostId: "host-1" }, [...FEATURES, "progress_reminders"], {
     level: "frequent",
   })
@@ -608,6 +614,42 @@ test("an older host's stored level reads as the level this app draws for it", as
       findAll('[data-setting="reminders"] [aria-checked="true"]').map((one) => words(one))
     assert.deepEqual(chosen(), ["Chatty"], "the old name draws as the level it behaves as")
   })
+})
+
+test("a level the host refuses says so, and the row keeps what the host holds", async () => {
+  const said: unknown[] = []
+  const real = toast.error
+  toast.error = ((message: unknown) => {
+    said.push(message)
+    return ""
+  }) as typeof toast.error
+  try {
+    const calls = await seed(
+      "general-refused-reminder",
+      { hostId: "host-1" },
+      [...FEATURES, "progress_reminders"],
+      { refuse: "quiet" },
+    )
+    await mount(general(), async () => {
+      await until(() => Boolean(row("reminders")), "the reminders row")
+      const quiet = findAll('[data-setting="reminders"] [role="radio"]').find(
+        (one) => words(one) === "Quiet",
+      )
+      assert.ok(quiet, "the four names are offered whatever the host holds")
+      await click(quiet)
+      await until(
+        () => calls.some((one) => one.method === "POST" && one.path.endsWith("/reminders")),
+        "the level's write",
+      )
+      await until(() => said.length > 0, "the host's refusal")
+      assert.match(String(said[0]), /level must be one of/, "the host's words reach the user")
+      const chosen = () =>
+        findAll('[data-setting="reminders"] [aria-checked="true"]').map((one) => words(one))
+      assert.deepEqual(chosen(), ["Normal"], "and the row still draws the level the host holds")
+    })
+  } finally {
+    toast.error = real
+  }
 })
 
 test("a plugin that doesn't advertise reminders draws no row", async () => {

@@ -2,9 +2,9 @@
 
 Until now a bot said what it was doing because the prompt every run is told asked it to ("Post a
 short update between checkpoints: what landed, what's next"). The user now wants to choose, per bot,
-how chatty the bot is, at one of four levels. That choice is recorded here — in the decisions below,
-and in the two the second pass added, marked as such — alongside the reminder this branch adds: a
-hook that counts a turn's silent tool calls and blocks one with the same ask.
+how chatty the bot is, at one of four levels. That choice is recorded here, in the decisions below,
+alongside the reminder this branch adds: a hook that counts a turn's silent tool calls and blocks one
+with the same ask.
 
 **The prompt stops asking, and the hooks are the only enforcement.** Two things asking for the same
 behaviour have to be changed together or they drift, and they answer to different clocks: the prompt
@@ -37,23 +37,26 @@ that.
 twenty-five, Chatty every ten; Off asks never. A count of tool calls is an implementation detail of
 the loop, not something a reader should weigh — which is why the row says the four names and never
 the four numbers — so the app sends a level name and the host owns the threshold, which also means
-changing the counts later is not an app release. A bot whose host holds no level runs at Normal, the
-count the default reminder has always used. A store written before the four levels reads `frequent`
-as `chatty`, the same ten calls, so that bot behaves exactly as it did; `normal` keeps its name and
-takes the new count. That is not quite the old behaviour, and the difference is deliberate: the
-prompt line above leaves for every bot, so a Normal bot that used to say something at each checkpoint
-now says nothing until twenty-five calls pass with no words. A user who wants chatter as before has
-Chatty, and a bot that is asked still decides how much it says.
+changing the counts later is not an app release. A bot whose host holds no level runs at Normal. A
+store written before the four levels reads `frequent` as `chatty`, the same ten calls, so that bot
+behaves exactly as it did, and a write naming it is stored as `chatty` — a second device on a cached
+build keeps working mid-update instead of meeting a refusal; `normal` keeps its name and takes the
+new count. That is not the old behaviour, and the difference is deliberate: the prompt line above
+leaves for every bot, so a Normal bot that used to say something at each checkpoint now says nothing
+until twenty-five calls pass with no words. A user who wants chatter as before has Chatty, and a bot
+that is asked still decides how much it says.
 
 **A reminder asks for the todo list as well as the words.** A long silent stretch is exactly when a
 bot's plan drifts from what it is doing, and that plan is the one thing the user reads on the phone
-mid-run, so the same ask carries one clause naming the todo tool and permission to leave the list
-alone when the plan hasn't moved. It is asked at every level, Quiet included: the rarer the ask, the
-longer the drift it finds. It is asked and not enforced — a bot with no list is not told to invent
-one, and a bot that already brought the list up to date answers by writing the sentence about its
-work and nothing else — because the list is the bot's own plan and a nudged plan is worth less than
-none. The todo call the bot then makes stays a card in the thread: the list changing is work the
-reader may want to see, unlike the note that asked for it.
+mid-run, so the same ask carries one clause asking for the list — worded as the prompt's standing
+rule words it ("keep the todo list current"), and naming no tool, since the todo tool answers to two
+names (`todo_list` and the older `todo`) and a note that picked one would send a bot after a tool it
+hasn't got. It carries permission to leave the list alone when the plan hasn't moved. It is asked at
+every level, Quiet included: the rarer the ask, the longer the drift it finds. It is asked and not
+enforced — a bot with no list is not told to invent one, and a bot that already brought the list up to
+date answers by writing the sentence about its work and nothing else — because the list is the bot's
+own plan and a nudged plan is worth less than none. The todo call the bot then makes stays a card in
+the thread: the list changing is work the reader may want to see, unlike the note that asked for it.
 
 **A stretch is continuous since the agent last said anything.** Any reply that carried text restarts
 the count, and a reply of tool calls alone does not, which is what makes "twenty-five continuous

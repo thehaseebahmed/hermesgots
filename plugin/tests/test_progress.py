@@ -107,6 +107,12 @@ class ProgressTest(unittest.TestCase):
         self.calls(progress.CALLS_BETWEEN["chatty"])
         self.assertIsNotNone(self.call())
 
+    def test_a_level_an_older_app_sends_is_stored_as_chatty(self) -> None:
+        # A second device on a cached build still sends the old name: the same ten calls, so it is
+        # accepted and written under the name this host holds rather than refused mid-update.
+        self.assertEqual(progress.set_level(self.store, "frequent"), "chatty")
+        self.assertEqual(progress.level(self.store), "chatty")
+
     def test_a_value_the_host_does_not_know_reads_as_normal(self) -> None:
         put_setting(self.store, progress.LEVEL_KEY, "loud")
         self.assertEqual(progress.level(self.store), progress.DEFAULT_LEVEL)
@@ -150,10 +156,11 @@ class ProgressTest(unittest.TestCase):
 
     def test_the_reminder_also_asks_for_the_todo_list(self) -> None:
         # The list is the one thing the user reads mid-run, and a long silent stretch is when it
-        # drifts; the ask names the tool the bot has to call, and leaves it free to skip the call
-        # where the plan hasn't moved.
-        self.assertIn("todo_list", progress.REMINDER)
+        # drifts. The ask names no tool: the todo tool has two spellings (`todo_list`, `todo`), and
+        # the prompt's own rule states it the same way, so a bot on either finds it.
+        self.assertIn("todo list up to date", progress.REMINDER)
         self.assertIn("where the plan has moved", progress.REMINDER)
+        self.assertNotIn("todo_list", progress.REMINDER)
 
     def test_the_reminder_says_it_is_internal(self) -> None:
         # The note is the host talking to the model, so the model is told not to mention it: a bot

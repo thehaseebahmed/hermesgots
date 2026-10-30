@@ -180,11 +180,8 @@ const REMINDER_LABELS: Record<ReminderLevel, string> = {
 /**
  * How often Gots asks this bot to say what it is doing (`progress.py`, ADR 0068): a value held per
  * bot on its host, set where the switches beside it are set, since a control that acts where it
- * sits is what the row is (ADR 0055).
- *
- * Three of the four names describe the ask rather than the bot, and Chatty does not: however often
- * it is asked, how much it says is the model's own choice, which is what the line under the row is
- * for. Nothing here shows a count — the four counts are the loop's business, not the reader's.
+ * sits is what the row is (ADR 0055). No count is drawn beside a level — the counts are the loop's
+ * business, and the host changing one later is not an app release.
  */
 function RemindersSetting({ profile }: { profile: Profile }) {
   const { value, supported, settled, saving, save } = useReminders(profile)

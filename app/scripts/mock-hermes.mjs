@@ -3231,8 +3231,8 @@ const ROOT_RUN_IDS = process.env.MOCK_RUNS_LIVE_ROOT_IDS !== "0"
 const pushSubscriptions = new Map()
 // The main model the plugin's `model` route set, per profile ("" is the default one).
 const hostModels = new Map()
-// Each bot's progress-update level, as the plugin holds it in its own settings store: `off`,
-// `quiet`, `normal` or `chatty`, a bot holding none at `normal` (ADR 0068).
+const REMINDER_LEVELS = ["off", "quiet", "normal", "chatty"]
+const LEGACY_REMINDER_LEVELS = { frequent: "chatty" }
 const reminderLevels = new Map()
 // What the host runs when a turn asks for no model: the one picked for this profile, else the model
 // its endpoint is configured with. The plugin's hook records a call either way, so a chat whose turns
@@ -3825,8 +3825,6 @@ http
           ...(SKILLS ? ["skills", "skills_write", "skills_remove", "skills_view"] : []),
           "queue",
           "failed_turn_clear",
-          // How often a bot is asked for a progress update (`progress.py`): the four levels, read
-          // and written on the route below. A row the app draws on the bot's General page.
           "progress_reminders",
           "dictation",
           ...(DICTATIONS ? ["dictations"] : []),
@@ -4368,15 +4366,14 @@ http
       })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/reminders") {
-      // The bot's own progress-update level, as a plugin holds it in its settings store: the app
-      // sends a name and reads back what the host now holds. `frequent` is a store from before the
-      // four names, answered as `chatty` — the same ten calls (ADR 0068).
       const key = pluginProfile ?? ""
       if (req.method === "POST") {
         const { level } = await readBody(req)
-        const held = level === "frequent" ? "chatty" : level
-        if (!["off", "quiet", "normal", "chatty"].includes(held))
-          return json(res, 400, { error: { message: "level must be one of off, quiet, normal, chatty" } })
+        const held = LEGACY_REMINDER_LEVELS[level] ?? level
+        if (!REMINDER_LEVELS.includes(held))
+          return json(res, 400, {
+            error: { message: `level must be one of ${REMINDER_LEVELS.join(", ")}` },
+          })
         reminderLevels.set(key, held)
       }
       return json(res, 200, {

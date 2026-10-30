@@ -302,7 +302,7 @@ function raiseApproval(turn: Turn, event: ApprovalRequestEvent) {
   touch()
 }
 
-function streamHandlers(turn: Turn): StreamHandlers {
+export function streamHandlers(turn: Turn): StreamHandlers {
   const { draft, touch } = turn
   const watchedHere = !turn.resumed
   const started = () => {
@@ -342,20 +342,21 @@ function streamHandlers(turn: Turn): StreamHandlers {
       touch()
     },
     onTool(event) {
-      // A call the progress reminder refused never ran: its result is the note Gots wrote to the
-      // model, so the thread keeps no card of it and shows the call the model makes again instead
-      // (ADR 0068). Read here too, since a stream can carry the refusal hours before any reload.
-      if (isProgressReminder(event.result)) {
-        const kept = draft.tools.filter((t) => t.toolCallId !== event.toolCallId)
-        if (kept.length !== draft.tools.length) {
-          draft.tools = kept
-          touch()
-        }
-        return
-      }
       const existing = event.toolCallId
         ? draft.tools.find((t) => t.toolCallId === event.toolCallId)
         : draft.tools.find((t) => t.status === "running" && t.tool === event.tool)
+      // A run's `tool.completed` carries no call id (`hermes.ts`), so the refusal is matched the way
+      // every completion is: by id, else the oldest running call of its tool.
+      if (event.status !== "running" && isProgressReminder(event.result)) {
+        if (!existing) return
+        const at = draft.tools.indexOf(existing)
+        const previous = draft.tools[at - 1]?.toolCallId
+        draft.tools = draft.tools.filter((t) => t !== existing)
+        // The thinking that follows belongs to the call before this one, as the settled fold places it.
+        if (anchor === existing.toolCallId) anchor = previous
+        touch()
+        return
+      }
       if (existing) {
         existing.status = event.status
         if (event.status !== "running") existing.endedAt = Date.now()
