@@ -2624,12 +2624,16 @@ export async function uploadAttachment(
   return body.path as string
 }
 
-/** Whether the bot's host can turn speech into text with its own faster-whisper (`info`'s `dictation`). */
+/** Whether the bot's host can turn speech into text, and by whom (`info`'s `dictation`, ADR 0069). */
 export interface DictationInfo {
   ready: boolean
-  /** Why it can't: no faster-whisper, speech-to-text turned off, or a plugin from before dictation. */
+  /** Why it can't: nobody to hear a take, speech-to-text turned off, or a plugin from before dictation. */
   reason: string | null
   model?: string
+  /** The provider Hermes resolves: `local`, `local_command`, a cloud provider's name, or `none`. */
+  provider?: string
+  /** Whether a take leaves the host, which decides the warm-up and the line the page draws. */
+  cloud?: boolean
 }
 
 export async function getDictationInfo(config: HermesConfig): Promise<DictationInfo> {
@@ -2644,6 +2648,8 @@ export async function getDictationInfo(config: HermesConfig): Promise<DictationI
     ready: Boolean(raw.ready),
     reason: typeof raw.reason === "string" ? raw.reason : null,
     model: typeof raw.model === "string" ? raw.model : undefined,
+    provider: typeof raw.provider === "string" ? raw.provider : undefined,
+    cloud: raw.cloud === true,
   }
 }
 
@@ -2659,6 +2665,10 @@ export async function warmDictation(config: HermesConfig) {
  * A recorded clip's text, `""` when nobody spoke. `vocabulary` is the bot's own words (its
  * Dictation tab), sent as one repeated query param each, so a decode spells a name the way the bot
  * spells it; a plugin that doesn't know the param ignores it.
+ *
+ * `first` and `last` delimit a take: a host hearing it on a cloud provider holds the pieces from
+ * the first and uploads the whole take on the last, answering `""` to every piece in between and
+ * dropping anything still held when a new take begins (ADR 0069). A local host ignores both.
  */
 export async function transcribeClip(
   config: HermesConfig,
@@ -2667,11 +2677,15 @@ export async function transcribeClip(
   context: string,
   vocabulary: string[] = [],
   signal?: AbortSignal,
+  last = false,
+  first = false,
 ) {
   const query = new URLSearchParams()
   if (hint) query.set("hint", hint)
   // A plugin before 0.35 ignores the text heard before this clip.
   if (context) query.set("context", context.slice(-400))
+  if (first) query.set("first", "1")
+  if (last) query.set("last", "1")
   for (const word of vocabulary) if (word) query.append("vocabulary", word)
   const search = query.toString() ? `?${query}` : ""
   const response = await request(`${pluginRoot(config.baseUrl)}/dictation${search}`, {

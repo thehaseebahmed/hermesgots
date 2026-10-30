@@ -3,6 +3,7 @@ import test from "node:test"
 
 import {
   CLEANUP_LEVEL_ROWS,
+  heardLine,
   marked,
   modelSize,
   modelSpeed,
@@ -143,4 +144,34 @@ test("a row says in use before it says slow, and a download before either", () =
   assert.equal(marked(large), "Too slow on a CPU")
   assert.equal(marked({ ...large, inUse: true, downloading: false }), "In use · too slow on a CPU")
   assert.equal(marked(base), null)
+})
+
+test("who hears a take reads back from the host's answer", () => {
+  const speech = readSpeech({
+    ...settings,
+    provider: { name: "groq", backend: null, cloud: true },
+  })
+  assert.deepEqual(speech.provider, { name: "groq", backend: null, cloud: true })
+})
+
+test("a host that names no provider leaves the field out rather than guessing", () => {
+  assert.equal(readSpeech(settings).provider, undefined)
+  assert.equal(readSpeech({ ...settings, provider: {} }).provider, undefined)
+})
+
+test("a cloud take is said to be uploaded, not heard on the host", () => {
+  assert.equal(
+    heardLine({ name: "groq", backend: null, cloud: true }),
+    "A take is uploaded to this provider, not heard on this host.",
+  )
+})
+
+test("a whisper CLI says what it drops; a host's own model says nothing", () => {
+  assert.equal(
+    heardLine({ name: "local_command", backend: "local_command", cloud: false }),
+    "This host's whisper CLI drops the Hearing prompt and Vocabulary.",
+  )
+  assert.equal(heardLine({ name: "local", backend: "local", cloud: false }), null)
+  assert.equal(heardLine({ name: "none", backend: null, cloud: false }), null)
+  assert.equal(heardLine(undefined), null)
 })

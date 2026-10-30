@@ -24,6 +24,7 @@ import { useSpeech } from "@/lib/host-speech"
 import { botModel, fullModel, useModelInfo } from "@/lib/model-info"
 import {
   CLEANUP_LEVEL_ROWS,
+  heardLine,
   levelName,
   marked,
   modelSize,
@@ -127,6 +128,21 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
           profile={profile}
           words={words}
         />
+      )}
+
+      {/* Where a take goes, where that is worth saying: a provider that hears it instead of this
+          host, or a whisper CLI that drops the Hearing prompt and Vocabulary (ADR 0069). A host's
+          own model needs no line of its own — the model row above says it. */}
+      {settings && heardLine(settings.provider) && (
+        <Group>
+          <ValueRow
+            title="Heard by"
+            purpose={heardLine(settings.provider) ?? undefined}
+            value={providerLabel(settings.provider?.name ?? "")}
+            muted
+            data-setting="heard-by"
+          />
+        </Group>
       )}
 
       {block && otherProviders.length > 0 && (

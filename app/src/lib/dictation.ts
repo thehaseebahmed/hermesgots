@@ -70,6 +70,14 @@ function availability(key: string): DictationAvailability {
   return offs.get(reason)!
 }
 
+/**
+ * Whether this bot's host sends a take to a cloud provider, from the last `info` read: nothing is
+ * resident there to warm, so the call would buy a request and no text (ADR 0069).
+ */
+function leavesHost(key: string): boolean {
+  return infos.get(key)?.info?.cloud === true
+}
+
 /** Whether the bot's host can dictate, and a way to ask it again; null for a bot without a key. */
 export function useDictationInfo(config: HermesConfig) {
   const key = config.apiKey && config.baseUrl ? infoKey(config) : ""
@@ -90,6 +98,11 @@ export const MAX_MS = 10 * 60 * 1000
 const MIN_MS = 300
 /** A cold host may load (or first download) its model inside this request. */
 const TRANSCRIBE_MS = 120_000
+/**
+ * The take's last piece carries the whole of a vendor take — minutes of audio, chunked by the host
+ * past the provider's own upload cap — so it is given a budget of its own (ADR 0069).
+ */
+const FINAL_TRANSCRIBE_MS = 300_000
 /**
  * A whole dictation's cleanup is one call, and the host bounds its own at 8 s: past this the words
  * are landed as they were heard. It only applies to an ending with no wait of its own, such as a
@@ -199,6 +212,10 @@ interface Session {
   failure: DictationFailure | null
   /** The recorders still closing after the take died; a retry waits for them. */
   stopping: Promise<void> | null
+  /** The take is over: its last piece is the one a vendor provider uploads the whole of (ADR 0069). */
+  final?: boolean
+  /** The wait a clip is under, so a take that is abandoned takes its timer with it. */
+  timer?: number
   /** Cancelled or done: nothing more is kept. */
   closed: boolean
   restored?: boolean
@@ -285,13 +302,14 @@ export async function keptText(
   const audio = keptAudio(pieces)
   if (!audio) return before
   const controller = new AbortController()
-  const timer = window.setTimeout(() => controller.abort(), TRANSCRIBE_MS)
+  // The whole take in one clip: as much budget as the last piece of a spoken take gets (ADR 0069).
+  const timer = window.setTimeout(() => controller.abort(), FINAL_TRANSCRIBE_MS)
   const stop = () => controller.abort()
   signal?.addEventListener("abort", stop, { once: true })
   try {
     return joinText(
       before,
-      await transcribeClip(config, audio, hint, before, vocabulary, controller.signal),
+      await transcribeClip(config, audio, hint, before, vocabulary, controller.signal, true, true),
     )
   } finally {
     window.clearTimeout(timer)
@@ -301,6 +319,11 @@ export async function keptText(
 
 /** A take that ended stops transcribing: whatever is in flight is dropped. */
 function stopInflight(current: Session) {
+  // The wait goes with it: a host that never answers must not keep a timer alive after the take.
+  if (current.timer !== undefined) {
+    window.clearTimeout(current.timer)
+    current.timer = undefined
+  }
   const inflight = current.inflight
   current.inflight = null
   inflight?.abort()
@@ -394,9 +417,16 @@ export function useChunkedDictation(
         if (index < 0) return true
         const piece = current.pieces[index]
         const before = takeText(current.pieces.slice(0, index))
+        // The take's own last piece, once the take is over: a vendor provider uploads the whole of
+        // it there, and every piece before it answers nothing (ADR 0069).
+        const last = Boolean(current.final) && index === current.pieces.length - 1
         const controller = new AbortController()
         current.inflight = controller
-        const timer = window.setTimeout(() => controller.abort(), TRANSCRIBE_MS)
+        const timer = window.setTimeout(
+          () => controller.abort(),
+          last ? FINAL_TRANSCRIBE_MS : TRANSCRIBE_MS,
+        )
+        current.timer = timer
         try {
           const { config, hint, vocabulary } = latest.current
           const text = await transcribeClip(
@@ -406,6 +436,8 @@ export function useChunkedDictation(
             before,
             vocabulary,
             controller.signal,
+            last,
+            index === 0,
           )
           if (current.inflight !== controller) return false
           piece.text = text
@@ -415,6 +447,7 @@ export function useChunkedDictation(
           return false
         } finally {
           window.clearTimeout(timer)
+          if (current.timer === timer) current.timer = undefined
           if (current.inflight === controller) current.inflight = null
         }
         save(current, true)
@@ -565,7 +598,7 @@ export function useChunkedDictation(
     session.current = current
     setFailure(null)
     setStatus("listening")
-    void warmDictation(latest.current.config).catch(() => {})
+    if (!leavesHost(profile)) void warmDictation(latest.current.config).catch(() => {})
     let stream: MediaStream
     try {
       stream = await navigator.mediaDevices.getUserMedia({
@@ -656,7 +689,25 @@ export function useChunkedDictation(
           : await within(draining, Math.max(0, deadline - Date.now()))
       if (session.current !== current) return null
       if (done) {
-        const heard = takeText(current.pieces)
+        let heard = takeText(current.pieces)
+        // A cloud take is uploaded on its last piece, and one whose last piece never went — a final
+        // segment too short to send, a piece cut before the take ended — is uploaded here instead,
+        // rather than landing nothing with its audio still on the device (ADR 0069).
+        if (!heard && current.pieces.length && leavesHost(current.profile)) {
+          try {
+            heard = await keptText(
+              latest.current.config,
+              current.pieces,
+              latest.current.hint,
+              latest.current.vocabulary,
+            )
+          } catch (failure) {
+            current.error = failure
+            showFailure(clipFailure(failure))
+            return null
+          }
+          if (session.current !== current) return null
+        }
         const budget = deadline === undefined ? TIDY_MS : deadline - Date.now()
         const text = await tidy(current, heard, budget)
         if (session.current !== current) return null
@@ -668,12 +719,17 @@ export function useChunkedDictation(
         return land(current, heard, heard)
       }
       const spoken = current.pieces.filter((piece) => piece.text !== null)
-      if (spoken.length) {
-        const text = joinText(...spoken.map((piece) => piece.text ?? ""))
+      const said = joinText(...spoken.map((piece) => piece.text ?? ""))
+      if (spoken.length && !said && current.error !== null) {
+        // A vendor take's pieces land empty until its last upload, so a failed upload would leave
+        // an empty landing and no audio: the whole take is kept for Retry instead (ADR 0069).
+        for (const piece of current.pieces) piece.text = null
+        save(current, true)
+      } else if (spoken.length) {
         const ms = spokenLong(spoken)
         current.pieces = current.pieces.filter((piece) => piece.text === null)
         save(current, true)
-        if (text) latest.current.onCommitted?.(text, ms, text)
+        if (said) latest.current.onCommitted?.(said, ms, said)
       }
       showFailure(
         current.error !== null
@@ -747,6 +803,9 @@ export function useChunkedDictation(
           const last = recording.segments.at(-1)
           if (last && current.pieces.length && Date.now() - last.startedAt < MIN_MS)
             last.skip = true
+          // Set before the last segment closes: the drain it starts is what sends that piece, and
+          // a vendor host only uploads the take on a piece that knows it is the last (ADR 0069).
+          current.final = true
           const stopping = end(recording)
           current.stopping = stopping
           await stopping

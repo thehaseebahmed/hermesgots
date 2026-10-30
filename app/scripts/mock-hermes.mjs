@@ -3154,8 +3154,19 @@ function speechReading() {
       level: speech.level,
     },
     hearing: { sent: speech.hearing },
+    provider: heardBy(),
     stt: sttReading(),
   }
+}
+/**
+ * Who hears a take (plugin/dictation.py's `heard_by`): the provider the host resolves, the local
+ * backend behind a local one, and whether the take leaves the host. A `stt.provider` pick is what
+ * decides it here, as the host's own resolver would.
+ */
+function heardBy() {
+  const name = sttReading().provider.name
+  const local = name === "local" || name === "local_command"
+  return { name, backend: local ? name : null, cloud: !local && name !== "none" }
 }
 // plugin/moves.py: the messages triage moved out of each Main session, for its Moved markers.
 const moves = new Map()
@@ -3876,10 +3887,18 @@ http
             ? {
                 ready: false,
                 reason:
-                  "faster-whisper isn't installed on the host. Run `hermes tools` and pick Local Whisper.",
+                  "No speech provider on this host can hear a take. Install faster-whisper, or set a provider's key.",
                 model: "base",
+                provider: "none",
+                cloud: false,
               }
-            : { ready: true, model: "base", language: "en" },
+            : {
+                ready: true,
+                model: "base",
+                language: "en",
+                provider: heardBy().name,
+                cloud: heardBy().cloud,
+              },
       })
     }
     if (
@@ -5238,15 +5257,23 @@ http
     ) {
       const data = await readRaw(req)
       if (!data.length) return json(res, 400, { error: { message: "The recording is empty." } })
+      // The last piece of a take, which a vendor host answers with the whole recording's text
+      // (plugin/dictation.py's buffered take, ADR 0069). Every piece before it lands nothing.
+      const last = url.searchParams.get("last") === "1"
       dictationClips.push({
         bytes: data.length,
         type: req.headers["content-type"],
         hint: url.searchParams.get("hint"),
         context: url.searchParams.get("context"),
         vocabulary: url.searchParams.getAll("vocabulary"),
+        last,
       })
       if (DICTATION === "off")
-        return json(res, 409, { error: { message: "faster-whisper isn't installed on the host." } })
+        return json(res, 409, {
+          error: { message: "No speech provider on this host can hear a take." },
+        })
+      if (heardBy().cloud && !last)
+        return json(res, 200, { object: "memento.dictation", text: "", ms: 0 })
       await new Promise((resolve) => setTimeout(resolve, 700))
       if (DICTATION === "fail")
         return json(res, 502, {

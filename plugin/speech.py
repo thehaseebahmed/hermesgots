@@ -40,7 +40,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
-from . import dictation_cleanup
+from . import dictation, dictation_cleanup
 from .store import get_setting, put_setting
 
 logger = logging.getLogger(__name__)
@@ -213,6 +213,9 @@ def read(
         "models": rows,
         "cleanup": cleanup_state(path, gate),
         "hearing": {"sent": read_hearing(path)},
+        # Who hears a take, from the same answer the mic reads, so the page cannot say Automatic
+        # while dictation insists on a model this host doesn't have (ADR 0069).
+        "provider": dictation.heard_by_config(stt),
     }
     if with_stt:
         try:

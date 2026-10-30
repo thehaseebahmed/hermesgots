@@ -1904,6 +1904,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         hint = dictation.clean_hint(request.query.get("hint"))
         context = dictation.clean_context(request.query.get("context"))
         vocabulary = dictation.clean_vocabulary(request.query.getall("vocabulary", []))
+        # The take's first and last piece: a cloud take is held from the first and uploaded on the
+        # last, and a local one ignores both.
+        first = request.query.get("first") == "1"
+        last = request.query.get("last") == "1"
         async with dictating:
             try:
                 result = await asyncio.to_thread(
@@ -1914,6 +1918,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     context,
                     vocabulary,
                     hearing=hearing,
+                    first=first,
+                    last=last,
+                    profile=store_path(),
                 )
             except dictation.DictationError as error:
                 return _error(web, str(error), error.status)
