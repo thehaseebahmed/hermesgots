@@ -32,33 +32,29 @@ RUN npm install -g --cache /tmp/npm-cache pnpm@10 \
  && rm -rf /tmp/npm-cache
 
 # The e2e flows drive the app in headless Chromium. `app/scripts/e2e/cli.mjs` resolves Playwright
-# from `app/node_modules` or the global node_modules, so it is installed globally here. Only the
-# headless shell is installed: `--headed` needs a display server, which no flow here sets up.
-RUN npm install -g --cache /tmp/npm-cache playwright@1.63.0 \
- && playwright install --with-deps chromium --only-shell \
+# from `app/node_modules` or the global node_modules, so it is installed globally here.
+#
+# Playwright is one version, 1.64.1, because two tools in the image drive a browser and a browser
+# build belongs to the Playwright revision that asks for it: Reticle bundles its own Playwright
+# (`@reticlehq/server` depends on `^1.63.0`, which resolves to this version), and a second one would
+# mean a second Chromium — fetched at first launch, mid-session, into the root-owned browsers root.
+#
+# Chromium is installed whole, not `--only-shell`: Reticle's preflight reads
+# `chromium.executablePath()` — the full build — before it will drive anything, and Playwright's
+# headless launches then use the headless shell that ships beside it. Shell-only left Reticle
+# believing no browser existed and reaching for a download at runtime.
+RUN npm install -g --cache /tmp/npm-cache playwright@1.64.1 \
+ && playwright install --with-deps chromium \
  && rm -rf /tmp/npm-cache /var/lib/apt/lists/*
 
 # Reticle (https://reticle.sh), the verification CLI an agent drives from inside the container: it
 # runs a dev-only SDK in the app's page and answers what actually happened. Pinned to the version the
-# app's SDK is pinned to (`app/package.json`), because the two halves speak one protocol.
-#
-# It brings its own Playwright, at a newer revision than the pinned one above, so the browser it
-# would want is a second ~190 MiB download — one it would attempt at first launch, mid-session, into
-# the root-owned `/opt/ms-playwright` that a container running as another user cannot write. Instead
-# it is pointed at the headless shell the e2e step already installs: a container has no display
-# server, so that shell is the only browser a launch here could use anyway. The symlink is resolved
-# from the pinned Playwright's own revision directory, so a version bump above keeps working, and
-# `test -x` fails the build rather than leaving a path that resolves to nothing.
+# app's SDK is pinned to (`app/package.json`), and required to agree with the Playwright above — the
+# check fails the build rather than letting a rebuild quietly fetch a second browser that Reticle
+# would then want and not find.
 RUN npm install -g --cache /tmp/npm-cache @reticlehq/server@3.9.0 \
- && mkdir -p /usr/local/lib/reticle \
- && ln -sf "$(find "$PLAYWRIGHT_BROWSERS_PATH" -name chrome-headless-shell -type f | head -n 1)" \
-      /usr/local/lib/reticle/chromium \
- && test -x /usr/local/lib/reticle/chromium \
+ && node -e "const v = require('/usr/local/lib/node_modules/@reticlehq/server/node_modules/playwright/package.json').version; if (v !== '1.64.1') { console.error('reticle bundles playwright ' + v + ' but this image pins 1.64.1; bump the pin above so one chromium build serves both'); process.exit(1) }" \
  && rm -rf /tmp/npm-cache
-
-# Where `reticle doctor` and every launch find their browser. Set for every shell in the container,
-# so an agent gets the same answer in a tool call as a person does at the prompt.
-ENV RETICLE_CHROMIUM_PATH=/usr/local/lib/reticle/chromium
 
 # Warm the store from the lockfiles, so an install inside the container is quick and works
 # without the registry. Tied to the lockfiles as of build time; `pnpm install` still reconciles
@@ -73,7 +69,7 @@ RUN cd /tmp/warm/app && pnpm fetch \
 ARG BUILD_REVISION=unknown
 LABEL org.opencontainers.image.source="https://github.com/thehaseebahmed/memento" \
       org.opencontainers.image.title="Gots development container" \
-      org.opencontainers.image.description="Node 22, pnpm 10, Python 3.13, headless Chromium and the Reticle verification CLI for developing the Gots app, plugin and website" \
+      org.opencontainers.image.description="Node 22, pnpm 10, Python 3.13, Chromium and the Reticle verification CLI for developing the Gots app, plugin and website" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.revision=$BUILD_REVISION
 

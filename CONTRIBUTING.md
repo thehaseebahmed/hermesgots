@@ -115,8 +115,8 @@ reticle serve --port 4400 --drive http://127.0.0.1:15173
 reticle verify http://127.0.0.1:15173 --expect '{"kind":"text","contains":"Gots"}'
 ```
 
-There is no display server in the container, so the image points `RETICLE_CHROMIUM_PATH` at the
-headless shell the e2e flows already installed; `reticle doctor` reports it as the browser in use.
+There is no display server in the container, so Reticle drives the headless shell that ships with
+the Chromium the image installs; `reticle doctor` names the browser it will use.
 
 ---
 
