@@ -11,6 +11,7 @@ import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-rou
 
 import { AfkPopup } from "@/components/afk"
 import { AppShell } from "@/components/app-shell"
+import { BUSY_WORDS } from "@/lib/busy-words"
 import { DEFAULT_SETTINGS, db, type Message, type Profile, type Settings } from "@/lib/db"
 import { fingerprintOf, orderOf } from "@/lib/dictation-log"
 import type { SessionMessage } from "@/lib/hermes"
@@ -509,6 +510,10 @@ export function onlyThinkingLine() {
 }
 
 export const lineLabel = (line: Element) => line.textContent?.trim() ?? ""
+
+/** Whether a live thinking row says one of the thinking words the status line says (ADR 0069). */
+export const saysThinking = (text: string) =>
+  BUSY_WORDS.thinking.some((word) => text === `${word}…`)
 
 export const expanded = (line: Element) => line.getAttribute("aria-expanded")
 

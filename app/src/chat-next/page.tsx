@@ -1,5 +1,3 @@
-// A code session's face (`font-code`), declared here so it loads only with chat-next.
-import "@fontsource-variable/jetbrains-mono/index.css"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   memo,

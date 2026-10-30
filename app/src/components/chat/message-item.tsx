@@ -11,6 +11,7 @@ import { toast } from "sonner"
 
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { MediaItems, type MediaItem } from "@/components/chat/media-gallery"
+import { useCodeFace } from "@/components/chat/code-face"
 import { Markdown } from "@/components/chat/markdown"
 import { AgentCards } from "@/components/chat/agent-card"
 import { SubagentLine } from "@/components/chat/subagent-line"
@@ -314,12 +315,13 @@ function SentAttachments({
 
 /** Something the user steered the reply with, where it reached the agent. */
 function SteerBubble({ text }: { text: string }) {
+  const face = useCodeFace()
   const said = splitAttachments(text).text
   return (
     <MessageRow align="end" className={COLUMN}>
       <MessageContent className="items-end gap-1">
         <Bubble variant="default" align="end">
-          <BubbleContent className="px-4 py-2.5 text-[15px] whitespace-pre-wrap">
+          <BubbleContent className={cn("px-4 py-2.5 text-[15px] whitespace-pre-wrap", face)}>
             {said}
           </BubbleContent>
         </Bubble>
@@ -452,6 +454,7 @@ export const MessageItem = memo(function MessageItem({
   subagentsInline,
   compactions,
 }: MessageItemProps) {
+  const face = useCodeFace()
   // Replies type out a word at a time, however Hermes delivers them.
   const content = useReveal(message.role === "assistant" ? message.content : "")
   const spans = useMemo(
@@ -533,7 +536,9 @@ export const MessageItem = memo(function MessageItem({
               )}
               {message.content && (
                 <Bubble variant="default" align="end" className={dim ? "opacity-60" : undefined}>
-                  <BubbleContent className="px-4 py-2.5 text-[15px] whitespace-pre-wrap">
+                  <BubbleContent
+                    className={cn("px-4 py-2.5 text-[15px] whitespace-pre-wrap", face)}
+                  >
                     {message.content}
                   </BubbleContent>
                 </Bubble>
@@ -722,6 +727,7 @@ export const MessageItem = memo(function MessageItem({
             {(parts.length > 0 || (last && footerShown)) && (
               <AssistantRow
                 conversationId={message.conversationId}
+                seed={message.id}
                 busy={busy}
                 parts={last && reserve ? [...parts, RESERVE] : parts}
               >
@@ -761,11 +767,14 @@ const PARTS = "gap-0 space-y-3"
 
 function AssistantRow({
   conversationId,
+  seed,
   busy,
   parts,
   children,
 }: {
   conversationId: string
+  /** The reply's id: what its rotating word is drawn from, in the thinking row as in the status line. */
+  seed: string
   /** A reply is streaming in this chat, so a card that sends (a missed question) waits. */
   busy?: boolean
   parts: Part[]
@@ -802,6 +811,7 @@ function AssistantRow({
               <ThinkingLine
                 key={part.key}
                 reasoning={part.text}
+                seed={seed}
                 thinking={part.thinking}
                 pending={part.pending}
                 spanMs={part.spanMs}

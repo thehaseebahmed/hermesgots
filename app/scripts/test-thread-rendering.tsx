@@ -10,6 +10,7 @@ import { MemoryRouter, Route, Routes } from "react-router"
 import { useState } from "react"
 
 import { AgentCards, AgentPopup } from "@/components/chat/agent-card"
+import { CHAT_FACE, CodeFaceProvider } from "@/components/chat/code-face"
 import { AgentsContext } from "@/lib/agents"
 import { DELEGATE_TOOL } from "@/lib/spawn"
 import { db, type Message, type Profile, type Settings } from "@/lib/db"
@@ -22,6 +23,7 @@ import {
   findAll,
   json,
   lineLabel,
+  saysThinking,
   mount,
   seedSettings,
   settle,
@@ -264,7 +266,10 @@ test("a reply's code and quotes read on the page", async () => {
  * A card and the pop-up the thread it belongs to opens (the chat screen owns that pop-up now), so a
  * tap still shows the agent's own thread.
  */
-function Opening({ agent, ...rest }: React.ComponentProps<typeof AgentCards> & { agent: DelegatedAgent }) {
+function Opening({
+  agent,
+  ...rest
+}: React.ComponentProps<typeof AgentCards> & { agent: DelegatedAgent }) {
   const [open, setOpen] = useState<DelegatedAgent | undefined>(undefined)
   return (
     <AgentsContext.Provider value={{ agents: [agent], server, onOpen: (one) => setOpen(one) }}>
@@ -299,18 +304,20 @@ test("a delegated agent's sub-thread draws the same thread", async () => {
     chat = drawn()
   })
   await mount(
-    <Opening
-      tool={tool}
-      agent={{
-        id: "agent-1",
-        goal,
-        model: "test/model",
-        startedAt: 1,
-        endedAt: 2,
-        toolCalls: 1,
-        status: "done",
-      }}
-    />,
+    <CodeFaceProvider value={CHAT_FACE}>
+      <Opening
+        tool={tool}
+        agent={{
+          id: "agent-1",
+          goal,
+          model: "test/model",
+          startedAt: 1,
+          endedAt: 2,
+          toolCalls: 1,
+          status: "done",
+        }}
+      />
+    </CodeFaceProvider>,
     async () => {
       const card = document.querySelector("button")
       assert.ok(card, "the delegation is a card in the thread")
@@ -407,7 +414,7 @@ test("a sub-thread draws its thinking shut, as a chat's reply does", async () =>
     await settle()
     const [line] = thinkingLines()
     assert.ok(line, "the chat's reply draws its thinking")
-    assert.equal(lineLabel(line), "Thinking…", "still thinking, so the label says so")
+    assert.ok(saysThinking(lineLabel(line)), "still thinking, so the label says so")
     assert.equal(expanded(line), "false", "and its sheet stays shut rather than opening itself")
   })
   await mount(

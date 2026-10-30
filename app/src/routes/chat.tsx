@@ -33,6 +33,7 @@ import { useBreakReminderEligibility } from "@/components/break-reminder-context
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { ChatHeader } from "@/components/chat/chat-header"
+import { CHAT_FACE, CodeFaceProvider } from "@/components/chat/code-face"
 import { ChatActions, LimitNotice, useChatUsage } from "@/components/chat/chat-actions"
 import { FollowAfterApproval, FollowOnSend } from "@/components/chat/follow"
 import { useFirstRows } from "@/components/chat/first-rows"
@@ -460,7 +461,6 @@ function NextChat({
               <ChatNextThread
                 key={chat.hermesSessionId}
                 chatId={id}
-                code={Boolean(chat.projectId)}
                 blank={unstarted ? { botId: bot.botId, repos: sessionRepos } : undefined}
                 main={
                   mainOn
@@ -1605,13 +1605,15 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   })
 
   return (
-    <div
-      data-slot="chat-pane"
-      data-pane={slot}
-      className="relative flex min-h-0 flex-1 flex-col"
-      inert={!ready}
-    >
-      {ready ? frame : <PendingChat />}
-    </div>
+    <CodeFaceProvider value={CHAT_FACE}>
+      <div
+        data-slot="chat-pane"
+        data-pane={slot}
+        className="relative flex min-h-0 flex-1 flex-col"
+        inert={!ready}
+      >
+        {ready ? frame : <PendingChat />}
+      </div>
+    </CodeFaceProvider>
   )
 }

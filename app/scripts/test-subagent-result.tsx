@@ -594,7 +594,7 @@ test("a wake reply keeps its row when its run is adopted, delivery and all", asy
         const before = drawn()
         assert.match(
           rows().at(-1)?.textContent ?? "",
-          /Thinking|Writing/,
+          new RegExp([...BUSY_WORDS.thinking, ...BUSY_WORDS.writing].join("|")),
           "the wake reply is drawn, last, saying it is still at work",
         )
         assert.ok(

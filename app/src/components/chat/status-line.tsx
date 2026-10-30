@@ -1,6 +1,7 @@
 import type { ReactNode } from "react"
 
-import { Spinner } from "@/components/ui/spinner"
+import { useCodeFace } from "@/components/chat/code-face"
+import { WORK_ROW_CLASS, WORKING_ROW_CLASS, WorkSign } from "@/components/chat/work-row"
 import { CATCHING_ACTIVITY, THINKING_ACTIVITY, WRITING_ACTIVITY } from "@/lib/format"
 import type { BusyKind } from "@/lib/busy-words"
 import { REPLY_INSET } from "@/lib/layout"
@@ -35,17 +36,20 @@ export function StatusLine({
   const working = Boolean(text) && !waiting
   const kind = working && text ? KIND_OF.get(text) : undefined
   const word = useBusyWord(kind, seed) ?? text
+  const face = useCodeFace()
   return (
     <div
       className={cn(
         REPLY_INSET,
-        "flex items-center gap-2 text-sm",
-        working ? "text-primary" : "text-muted-foreground",
+        WORK_ROW_CLASS,
+        "w-auto",
+        face,
+        working ? WORKING_ROW_CLASS : "text-muted-foreground",
       )}
       aria-live="polite"
       data-slot="status-line"
     >
-      {working && <Spinner aria-hidden />}
+      {working && <WorkSign />}
       {word && (
         <span className="min-w-0 truncate" data-slot="status-words">
           {word}

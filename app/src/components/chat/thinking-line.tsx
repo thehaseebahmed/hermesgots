@@ -2,11 +2,18 @@ import { memo, useCallback, useEffect, useRef, useState } from "react"
 import { ChevronRightIcon } from "lucide-react"
 
 import { Markdown } from "@/components/chat/markdown"
-import { WORK_ROW_CLASS, WorkLabel, WorkRow, WorkSign } from "@/components/chat/work-row"
+import {
+  WORK_ROW_CLASS,
+  WORKING_ROW_CLASS,
+  WorkLabel,
+  WorkRow,
+  WorkSign,
+} from "@/components/chat/work-row"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { COLUMN } from "@/lib/layout"
 import { prefersReducedMotion } from "@/lib/media"
 import { thinkingLabel } from "@/lib/thinking"
+import { useBusyWord } from "@/lib/use-busy-word"
 import { cn } from "@/lib/utils"
 
 /** How close to the sheet's bottom still counts as its end, for words that landed in view already. */
@@ -54,16 +61,21 @@ function watchAway(view: HTMLElement, away: () => void) {
  * the working-out in the same sheet the tool row opens, so the thread's two accounts of the work read
  * and open the same way. A live run opened in the sheet lands on its newest words and keeps them in
  * view while they arrive, until the reader scrolls away inside the sheet; the sheet never closes
- * itself — when the thinking ends the label beside it just reads the span. See ADR 0050 and ADR 0064.
+ * itself — when the thinking ends the label beside it just reads the span. While it thinks the row
+ * is the status line's own look, saying the same rotating word it would (ADR 0069), though its
+ * name for assistive tech and its sheet's heading stay "Thinking…". See ADR 0050 and ADR 0064.
  */
 export const ThinkingLine = memo(function ThinkingLine({
   reasoning,
+  seed = "",
   thinking,
   pending,
   spanMs,
   className,
 }: {
   reasoning: string
+  /** What the rotating word is drawn from: the reply's own, as its status line's is. */
+  seed?: string
   /** The model is still thinking, so the row turns a spinner beside "Thinking…" wherever it is drawn. */
   thinking: boolean
   /** The turn works but its stretch has not arrived: the row turns its spinner over no words and
@@ -92,6 +104,7 @@ export const ThinkingLine = memo(function ThinkingLine({
   }, [])
   const following = useRef(false)
   const label = thinkingLabel({ thinking, spanMs })
+  const words = useBusyWord(thinking ? "thinking" : undefined, seed) ?? label
 
   // While the run still thinks, the sheet opened over it lands on its newest words and keeps them
   // in view as they arrive — bounded by the sheet's own body rather than the thread's end. A run
@@ -144,9 +157,9 @@ export const ThinkingLine = memo(function ThinkingLine({
       {pending ? (
         // The turn's own stretch has not arrived: the row names what the turn is doing and offers
         // no tap — under this same key, the run's row takes over the moment its words land.
-        <div className={WORK_ROW_CLASS} data-slot="thinking-pending">
+        <div className={cn(WORK_ROW_CLASS, WORKING_ROW_CLASS)} data-slot="thinking-pending">
           <WorkSign />
-          <WorkLabel>{label}</WorkLabel>
+          <WorkLabel>{words}</WorkLabel>
         </div>
       ) : (
         <WorkRow
@@ -154,10 +167,11 @@ export const ThinkingLine = memo(function ThinkingLine({
           aria-expanded={open}
           aria-label={label}
           onClick={() => setOpen(true)}
+          className={thinking ? WORKING_ROW_CLASS : undefined}
           before={thinking ? <WorkSign /> : null}
           after={<ChevronRightIcon className="size-4 shrink-0" aria-hidden />}
         >
-          <WorkLabel>{label}</WorkLabel>
+          <WorkLabel>{words}</WorkLabel>
         </WorkRow>
       )}
       {!pending && (
