@@ -121,6 +121,8 @@ export interface Run {
 interface RunState {
   events: { seq: number; event: string }[]
   listeners: Set<(event: object | null) => void>
+  /** Each open stream's way to break it — a read that dies, not a stream that ends. */
+  breaks: Set<() => void>
   done: boolean
   /** `POST /v1/runs/{id}/stop`: the run ends as cancelled and its stream closes. */
   cancel?: () => void
@@ -263,7 +265,7 @@ export function fakeHost(
   /** A turn: the user's message, or `null` for a wake turn, which answers no message of theirs. */
   function start(input: string | null): { id: string; run: Run } {
     const id = `run_${++nextRun}`
-    const state: RunState = { events: [], listeners: new Set(), done: false }
+    const state: RunState = { events: [], listeners: new Set(), breaks: new Set(), done: false }
     runs.set(id, state)
     const push = (event: string, body: object) => {
       const sent = { event, run_id: id, timestamp: ++clock, ...body, seq: state.events.length }
@@ -532,14 +534,12 @@ export function fakeHost(
 
   const frame = (sent: { seq: number }) => `id: ${sent.seq}\ndata: ${JSON.stringify(sent)}\n\n`
 
-  /** The open streams, each with the way to break it: a read that dies, not a stream that ends. */
-  const breakers = new Set<() => void>()
-
   /** `after` is `?last_seq=`: only what came after that number is replayed. */
   const events = (runId: string, after = -1) => {
     const state = runs.get(runId)!
     const encoder = new TextEncoder()
     let listener: (event: object | null) => void
+    let breakIt: () => void
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(encoder.encode(": open\n\n"))
@@ -548,14 +548,26 @@ export function fakeHost(
           if (sent.seq > after && !(withhold && PROMPT_EVENTS.has(sent.event)))
             controller.enqueue(encoder.encode(frame(sent)))
         if (state.done) return controller.close()
+        // One stream, one entry: closing or breaking it takes its listener and its break with it, so
+        // neither helper walks handles of streams that are gone.
         listener = (sent) => {
-          if (sent) controller.enqueue(encoder.encode(frame(sent as { seq: number })))
-          else controller.close()
+          if (sent) return controller.enqueue(encoder.encode(frame(sent as { seq: number })))
+          state.listeners.delete(listener)
+          state.breaks.delete(breakIt)
+          controller.close()
+        }
+        breakIt = () => {
+          state.listeners.delete(listener)
+          state.breaks.delete(breakIt)
+          controller.error(new TypeError("network error"))
         }
         state.listeners.add(listener)
-        breakers.add(() => controller.error(new TypeError("network error")))
+        state.breaks.add(breakIt)
       },
-      cancel: () => void state.listeners.delete(listener),
+      cancel: () => {
+        state.listeners.delete(listener)
+        if (breakIt) state.breaks.delete(breakIt)
+      },
     })
     return new Response(body, { headers: { "content-type": "text/event-stream" } })
   }
@@ -915,27 +927,20 @@ export function fakeHost(
 
   /** Every open event stream dies without a word, as a phone's does when it goes to sleep. */
   function dropConnections() {
-    for (const state of runs.values()) {
-      // A finished run's stream is already closed, and closing it again throws.
-      state.listeners.forEach((listen) => {
-        try {
-          listen(null)
-        } catch {}
-      })
-      state.listeners.clear()
-    }
-    breakers.clear()
+    // Each stream closes itself and drops its own handles, so a finished run's is never closed twice.
+    for (const state of runs.values()) [...state.listeners].forEach((listen) => listen(null))
   }
 
   /** Every open event stream breaks mid-read, as a network does: the reader rejects, nothing closes. */
   function breakConnections() {
-    const breaking = [...breakers]
-    breakers.clear()
-    for (const breakNow of breaking) {
-      try {
-        breakNow()
-      } catch {}
-    }
+    let broke = 0
+    for (const state of runs.values())
+      for (const breakIt of [...state.breaks]) {
+        breakIt()
+        broke++
+      }
+    // A break that broke nothing is a test that never opened a stream: say so rather than passing.
+    if (!broke) throw new Error("No open stream to break.")
   }
 
   /** A turn another device sent: the host runs it with no screen of ours watching. */

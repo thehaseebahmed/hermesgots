@@ -2,47 +2,44 @@
 // asleep, a proxy closing idle connections, a slow subscriber a host lets go of. The stream is only
 // how the page watches the run, so the question is the run's to settle: its form stays in the
 // composer, the thread keeps its one waiting line, and the answer still lands.
-import { app, assert, flow, LOOKS, pass, runId, settled } from "./lib.mjs"
+import {
+  answerQuestion,
+  assert,
+  flow,
+  LOOKS,
+  openChatNext,
+  pass,
+  settled,
+  watchQuestion,
+} from "./lib.mjs"
 
 const CHOICE = "Older than 90 days"
-/** How long the form is watched while the mock keeps cutting the stream (`MOCK_DROP_EVENTS_MS`). */
+/** How long the card is watched while the mock keeps cutting the stream (`MOCK_DROP_EVENTS_MS`). */
 const HELD_MS = 20_000
 
 const body =
   (look) =>
   async ({ page, seed, send, shot, watchText, sawText, stopText }) => {
-    // The new screen is a Developer switch: a chat of its own opens on it with both on.
-    await page.evaluate(async () => {
-      const { saveSettings } = await import("/src/lib/db.ts")
-      await saveSettings({ developer: true, chatNext: true })
-    })
     await watchText("No answer")
-    const chat = `e2e-question-drop-${runId()}`
-    await seed([{ id: chat, title: "Waiting question" }])
-    await page.goto(`${app}/c/${chat}`)
-    await page.locator("[data-chat-next]").first().waitFor({ timeout: 20_000 })
+    await openChatNext({ page, seed }, { id: "e2e-question-drop", title: "Waiting question" })
 
     await send("ask me something")
     const form = page.locator("[data-slot=composer-slot]").getByText("Question", { exact: true })
-    for (const end = Date.now() + 30_000; ;) {
-      if (await form.isVisible().catch(() => false)) break
-      assert.ok(Date.now() < end, "the question's form is up")
-      await page.waitForTimeout(50)
-    }
+    await form.waitFor({ timeout: 30_000 })
     await settled(page)
-
-    // Held across several streams, each cut by the host a second and a half in: the form is the
-    // run's, and the socket coming and going is not its to take away.
     const thread = page.locator("[aria-label=Messages]")
-    const waitingLine = thread.getByText("Waiting for your answer", { exact: true })
-    await waitingLine.first().waitFor({ timeout: 20_000 })
-    for (const end = Date.now() + HELD_MS; Date.now() < end;) {
-      assert.ok(await form.isVisible().catch(() => false), "the form stays up")
-      assert.equal(await waitingLine.count(), 1, "the thread keeps its one waiting line")
-      await page.waitForTimeout(500)
-    }
-    // Nothing in the thread reads as a question nobody answered, through every drop.
-    await settled(page)
+    await thread.getByText("Waiting for your answer", { exact: true }).first().waitFor({
+      timeout: 20_000,
+    })
+
+    // Held across several streams, each cut by the host a second and a half in. A blink is what this
+    // watches for, so the page counts the frames: an observer sees every one, a poll sees whichever it
+    // lands on.
+    await watchQuestion(page)
+    await page.waitForTimeout(HELD_MS)
+    const lost = await page.evaluate(() => window.__questionLost())
+    assert.equal(lost.form, 0, "the form never left the composer")
+    assert.equal(lost.line, 0, "the thread never stopped saying it waits")
     assert.equal(await sawText(), false, "the waiting question never read as unanswered")
     assert.equal(
       await page.getByRole("button", { name: "Ask again" }).count(),
@@ -51,14 +48,7 @@ const body =
     )
     await shot("held")
 
-    await page
-      .getByRole("button", { name: new RegExp(CHOICE) })
-      .first()
-      .click()
-    await page.getByRole("button", { name: "Send", exact: true }).click()
-    await thread.getByText("Answered", { exact: true }).waitFor({ timeout: 30_000 })
-    await thread.getByText(CHOICE, { exact: true }).waitFor({ timeout: 30_000 })
-    assert.equal(await thread.getByText("No answer", { exact: true }).count(), 0, "not a miss")
+    await answerQuestion(page, CHOICE)
     await shot("answered")
     await stopText()
     pass(`a waiting question outlives the stream that brought it (${look})`)

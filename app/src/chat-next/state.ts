@@ -98,11 +98,11 @@ export type ThreadEvent =
     }
   | { type: "ended" }
   /**
-   * The host names no run on this session: one it still holds a prompt for is listed there, so a
-   * prompt this page draws has settled without it — answered or stopped from another device, or a
-   * window that closed. The page's only way to learn that with the run's stream gone.
+   * The host names no run on this session: one it still holds a prompt for is listed there, so the
+   * prompt this page draws for `run` has settled without it — answered or stopped from another
+   * device, or a window that closed. The page's only way to learn that with the run's stream gone.
    */
-  | { type: "gone" }
+  | { type: "gone"; run: string }
   | { type: "agents"; agents: Agent[] }
   | { type: "queue"; items: Queued[]; paused: boolean }
   /** `at` is this device's clock as the event arrived, which a turn it sent is timed by. */
@@ -211,13 +211,13 @@ function reach(turn: Turn) {
 export function turnsOf(folded: Turn[], live?: LiveTurn, waiting?: boolean): Turn[] {
   if (!live || live.replay) return folded
   // A run held on a prompt writes nothing more, so the turn it holds is drawn from the transcript —
-  // the copy that carries the call the question was asked by. A join rebuilds the turn from the
-  // stream instead, and a host sends a prompt's request only to the subscribers it had at the time,
-  // so the rebuilt copy can hold less than the transcript's: the thread would lose the one line it
-  // draws while the run waits, for as long as the replay takes to catch up. A streamed copy holding
-  // more than the transcript does is the newer one — this device's own turn, whose rows lag.
+  // the copy that carries the call the question was asked by. A join rebuilds that same turn from
+  // the stream (`replaces`), and a host sends a prompt's request only to the subscribers it had at
+  // the time, so the rebuilt copy can hold less than the transcript's: the thread would lose the one
+  // line it draws while the run waits, for as long as the replay takes to catch up. A rebuilt copy
+  // holding more than the transcript does is the newer one, and is drawn.
   const copy = folded.at(-1)
-  if (waiting && copy && reach(copy).calls >= reach(live.turn).calls) return folded
+  if (waiting && live.replaces && copy && reach(copy).calls >= reach(live.turn).calls) return folded
   return withoutRepeatedFailures(
     live.replaces ? [...folded.slice(0, -1), live.turn] : [...folded, live.turn],
   )
@@ -483,8 +483,10 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       // superseded.
       return { ...state, running: false }
     case "gone":
-      // Nothing this page could read said the prompt settled; the host's own list of runs does.
-      if (state.waiting === undefined) return state
+      // Nothing this page could read said the prompt settled; the host's own list of runs does. Only
+      // the run this page was following can have settled that way — a wait raised since belongs to
+      // another run, and a `gone` still in flight from an earlier look is not about it.
+      if (state.waiting === undefined || state.waiting.run !== event.run) return state
       return { ...state, waiting: undefined, settled: settledWith(state) }
     case "answered": {
       // The card goes at once; the host's `*.settled` event confirms it. A question's call reads

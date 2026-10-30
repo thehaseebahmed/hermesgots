@@ -614,13 +614,11 @@ export function ChatNextThread({
     [rows, archived, held?.partial],
   )
   const drawn = useRef<{ turns: Turn[]; origin: number }>({ turns: [], origin: 0 })
+  const waitOn = doing.waiting !== undefined
   const { turns, origin } = useMemo(() => {
-    const next = shared(
-      drawn.current.turns,
-      turnsOf(folded, held?.live, doing.waiting !== undefined),
-    )
+    const next = shared(drawn.current.turns, turnsOf(folded, held?.live, waitOn))
     return (drawn.current = { turns: next, origin: originOf(drawn.current, next) })
-  }, [folded, held?.live, doing.waiting])
+  }, [folded, held?.live, waitOn])
   const [draft, setDraft] = useState("")
   const [earlier, setEarlier] = useState<"idle" | "reading" | "failed">("idle")
   // The older pages of the transcript, read one after another once the newest is drawn. A token is
@@ -912,9 +910,10 @@ export function ChatNextThread({
           (event) => dispatch({ type: "run", event, at: Date.now() }),
           alive.current.signal,
         )
-      } catch (error) {
+      } catch {
+        // A stream that died is not a page that failed: the run carries on without us, the next poll
+        // rejoins it, and the read below is what says whether the host is still there at all.
         if (alive.current.signal.aborted) return
-        dispatch(failure(error))
       } finally {
         streaming.current = false
         if (followingRun.current === run) followingRun.current = undefined
@@ -1001,9 +1000,10 @@ export function ChatNextThread({
             )
           return
         }
-        // Subagents the host still runs, or wake turns it owes, are not a stall however quiet the
-        // thread is: the next turn is theirs to start.
-        if (busy && !hostBusy && Date.now() - progress.current.at > stallMs) return
+        // Subagents the host still runs, wake turns it owes, and a run held on the user's answer are
+        // not a stall however quiet the thread is: the next turn, or the read that ends the wait, is
+        // still owed one.
+        if (busy && !hostBusy && !waitOn && Date.now() - progress.current.at > stallMs) return
         const known =
           server && key && session
             ? knownLiveRun({ baseUrl: server, apiKey: key }, session)
@@ -1020,10 +1020,10 @@ export function ChatNextThread({
           }
           streaming.current = false
           if (run === null) {
-            // The host lists no run on this session, and it lists one that still holds a prompt: so a
-            // prompt this page draws has settled without it. It is the only way to learn that with the
-            // run's own stream gone, and without it the dead form would keep the composer away.
-            dispatch({ type: "gone" })
+            // The host lists no run on this session — and it would list one that still held a prompt —
+            // so the prompt this page draws has settled without it. That is the only way to learn it
+            // with the run's own stream gone, and without it a dead form would keep the composer away.
+            dispatch({ type: "gone", run: lastRun.current ?? "" })
             setHostIdleAt(tipNow.current)
           }
         }
@@ -1037,6 +1037,7 @@ export function ChatNextThread({
     following,
     busy,
     starting,
+    waitOn,
     catchUp,
     follow,
     dispatch,
@@ -1049,8 +1050,6 @@ export function ChatNextThread({
     stallMs,
     streamOpen,
     hostBusy,
-    server,
-    key,
   ])
 
   // A run the host says is working is joined at once, whatever the transcript's last turn looks like:

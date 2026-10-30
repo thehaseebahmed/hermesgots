@@ -16,6 +16,7 @@ import {
   showsEverything,
   wait,
   type Device,
+  type Host,
   withDevice,
 } from "./chat-next-devices.tsx"
 import { WAITING_ON_ANSWER } from "@/lib/format"
@@ -47,7 +48,25 @@ const answerElsewhere = (run: string, prompt_id: string, answer: string) =>
     body: JSON.stringify({ request_id: prompt_id, execution_generation: 1, answer }),
   })
 
+/** Another device stopping it: the run ends as cancelled and its stream closes. */
+const stopElsewhere = (run: string) =>
+  fetch(`http://hermes.test/v1/runs/${run}/stop`, { method: "POST" })
+
 const questionOf = (device: Device) => device.waiting().question
+
+/** Waits for this device to hold the question, and for it to be reading the run's events. */
+const waitingOn = async (host: Host, device: Device) => {
+  await eventually(
+    () => assert.deepEqual(questionOf(device), asking),
+    "the question, and its form",
+    200,
+  )
+  await eventually(
+    () => assert.ok(host.asked.subscriptions > 0),
+    "the run's events are being read",
+    200,
+  )
+}
 
 test.describe("a question the agent asked", () => {
   test("the device that sent the turn sees it arrive, answers it, and the run carries on", async () => {
@@ -199,16 +218,7 @@ test.describe("a run already waiting when the chat opens", () => {
     // Read slowly, as an open chat does between turns: a poll every 20ms would put the form back
     // before a gone one could be told from one that never went.
     await withDevice(openDevice(host, { pollMs: 5_000, idleMs: 5_000 }), async (phone) => {
-      await eventually(
-        () => assert.deepEqual(questionOf(phone), asking),
-        "the question, and its form",
-        200,
-      )
-      await eventually(
-        () => assert.ok(host.asked.subscriptions > 0),
-        "the run's events are being read",
-        200,
-      )
+      await waitingOn(host, phone)
       host.dropConnections()
       await wait(300)
       assert.deepEqual(questionOf(phone), asking, "the form outlives the stream that brought it")
@@ -221,16 +231,7 @@ test.describe("a run already waiting when the chat opens", () => {
     const run = host.startElsewhere("from the laptop")
     run.ask(TEA)
     await withDevice(openDevice(host, { pollMs: 5_000, idleMs: 5_000 }), async (phone) => {
-      await eventually(
-        () => assert.deepEqual(questionOf(phone), asking),
-        "the question, and its form",
-        200,
-      )
-      await eventually(
-        () => assert.ok(host.asked.subscriptions > 0),
-        "the run's events are being read",
-        200,
-      )
+      await waitingOn(host, phone)
       host.breakConnections()
       await wait(300)
       assert.deepEqual(questionOf(phone), asking, "a read that died settles nothing")
@@ -242,20 +243,11 @@ test.describe("a run already waiting when the chat opens", () => {
     const run = host.startElsewhere("from the laptop")
     run.ask(TEA)
     await withDevice(openDevice(host), async (phone) => {
-      await eventually(
-        () => assert.deepEqual(questionOf(phone), asking),
-        "the question, and its form",
-        200,
-      )
-      await eventually(
-        () => assert.ok(host.asked.subscriptions > 0),
-        "the run's events are being read",
-        200,
-      )
+      await waitingOn(host, phone)
       // Stopped from another device, with this page's stream already dead: no settle event reaches
       // it and the transcript's turn is not finished, so the host's list of runs is what says so.
       host.dropConnections()
-      await fetch(`http://hermes.test/v1/runs/${host.latest.id}/stop`, { method: "POST" })
+      await stopElsewhere(host.latest.id!)
       await eventually(
         () => assert.equal(questionOf(phone), undefined),
         "the form goes once the host holds no run",
