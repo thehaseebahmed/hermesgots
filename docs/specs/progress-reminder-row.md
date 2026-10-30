@@ -1,6 +1,6 @@
 # A Developer switch shows the progress reminders a thread hides
 
-Status: ready for a human to read. Design: [ADR 0068](../adr/0068-a-bots-progress-reminders-are-a-setting-not-a-prompt-line.md), amended in place. Its tickets are #690 and #691.
+Status: ready for a human to read. Design: [ADR 0068](../adr/0068-a-bots-progress-reminders-are-a-setting-not-a-prompt-line.md), amended in place. Its tickets are #690 and #691. These docs land in pull request #692, which closes the gate issue #693 — and #693 blocks the spec until that pull request merges.
 
 ## Problem Statement
 
