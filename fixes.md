@@ -2445,3 +2445,28 @@ same rule, where before it drew the raw marker line as the steer's text.
   and a reload draws the same, so the thread states the same thing twice.
 - Suggested fix: give the steer part a `files` list the way a turn has one, draw it with the thread's
   own media components, and map it through `messages.ts` beside the turn's.
+
+---
+
+# Deferred: a status read that confirms no prompt cannot settle a wait
+
+The new chat screen now keeps a run's waiting question alive through a dead event stream. Every way
+that wait ends is a positive signal: the turn's last row finished, the user's answer, the host's
+`*.settled` event, or the plugin's run list no longer naming the run (`gone`). What is missing is the
+negative from the run's own status: `readWait` (`app/src/chat-next/page.tsx`) dispatches only when the
+read *found* a prompt, and `readRun` (`app/src/chat-next/api.ts`) answers `undefined` for "the host
+holds no prompt" and "the host could not be asked" alike — so the module whose docstring calls the
+status the authority for a prompt can raise a wait and never settle one.
+
+- Cost: a prompt answered while this page's stream is dead recovers only when the rejoin replays
+  `clarify.settled` or the turn ends. A host whose replay is truncated (`replay.truncated`, which the
+  reducer ignores) leaves the form holding the composer for the rest of the run.
+- Suggested fix: make the status read three-state — the prompt, "none", or "unknown" — the shape
+  `readLiveRun` already uses with `null`/`undefined`, and settle the held wait from the negative while
+  it is held. That rule subsumes `gone`, and its negative may only come from an answer that landed.
+- Why it is deferred: it restructures `readRun`/`readWait`, which every wait and every refused send
+  reads, and it is a second authority for the same fact — one focused task, not a rider on this fix.
+
+---
+
+Found by the code review's spec axis while verifying this branch; it does not block it.

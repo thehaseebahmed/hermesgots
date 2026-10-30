@@ -909,10 +909,11 @@ export function ChatNextThread({
           (event) => dispatch({ type: "run", event, at: Date.now() }),
           alive.current.signal,
         )
-      } catch {
-        // A stream that died is not a page that failed: the run carries on without us, the next poll
-        // rejoins it, and the read below is what says whether the host is still there at all.
+      } catch (error) {
         if (alive.current.signal.aborted) return
+        // A stream that died mid-read is not a page that failed: the run carries on without us and the
+        // next poll rejoins it. Anything the host answered with — a refused key, no stream at all — is.
+        if (!(error instanceof TypeError)) dispatch(failure(error))
       } finally {
         streaming.current = false
         if (followingRun.current === run) followingRun.current = undefined
@@ -1020,7 +1021,7 @@ export function ChatNextThread({
           }
           streaming.current = false
           if (run === null) {
-            const joined = lastRun.current
+            const joined = lastRun.current ?? store.get().run
             if (joined) dispatch({ type: "gone", run: joined })
             setHostIdleAt(tipNow.current)
           }
@@ -1048,6 +1049,8 @@ export function ChatNextThread({
     stallMs,
     streamOpen,
     hostBusy,
+    server,
+    key,
   ])
 
   // A run the host says is working is joined at once, whatever the transcript's last turn looks like:

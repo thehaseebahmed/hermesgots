@@ -204,8 +204,10 @@ function reach(turn: Turn) {
 }
 
 /**
- * Whether the transcript's copy of the held turn is ahead of the join's rebuilt one: drawing a
- * rebuilt copy that holds fewer calls takes the question's call off the screen.
+ * Whether the transcript's copy of the held turn carries the question's call and the join's rebuilt
+ * one does not yet: calls are what a wait is drawn from, and a rebuilt copy holding fewer of them
+ * would take the one line it draws off the screen. Words are not weighed here — a host may hold the
+ * call in the transcript before it holds the reply's text.
  */
 const copyIsAhead = (copy: Turn | undefined, live: LiveTurn) =>
   live.replaces && copy !== undefined && reach(copy).calls >= reach(live.turn).calls
