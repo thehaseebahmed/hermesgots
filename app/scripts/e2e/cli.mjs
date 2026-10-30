@@ -106,6 +106,11 @@ export const FLOWS = {
     about: "A run started elsewhere shows as running in Code and on the open session screen",
     alsoPolling: true,
   },
+  "steer-offer": {
+    script: "e2e/steer-offer.mjs",
+    about:
+      "A code session returned to mid-run keeps offering the steer across the turns it follows, and never calls a listed run a queue",
+  },
   "compressed-run": {
     script: "e2e/compressed-run.mjs",
     about:

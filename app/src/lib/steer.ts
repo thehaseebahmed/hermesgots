@@ -42,6 +42,27 @@ export function steerAsked(
   return chosen ? chosen === "steer" : byDefault && steerable
 }
 
+/**
+ * Whether the composer may offer a steer. The offer follows the run, not the event stream this page
+ * happens to hold: returning to a session joins its run a moment later and a phone that went away
+ * drops the stream, while the send itself reaches the run by its id — so an offer gated on the join
+ * flips between Steer and Queue a message as one run hands over to the next.
+ */
+export function steerOffered({
+  followed = false,
+  liveRun,
+  steerable,
+}: {
+  /** This page follows the run's events now. */
+  followed?: boolean
+  /** The run the host lists for the session. */
+  liveRun?: string
+  /** A host that takes a steer. */
+  steerable: boolean
+}) {
+  return steerable && (followed || Boolean(liveRun))
+}
+
 /** A steer's own text, without the marker Hermes wraps it in for the model. */
 export function steerText(content: string) {
   return content

@@ -20,6 +20,7 @@ import { SAFETY_MS } from "@/lib/freshness"
 import { CATCHING_ACTIVITY } from "@/lib/format"
 import { onSessionMoved, useLive } from "@/lib/live"
 import { knownLiveRun, useLiveRun, useLiveRunId, useHostBusy } from "@/lib/waiting"
+import { steerOffered } from "@/lib/steer"
 import { db, type Attachment, type MessageStats, type SessionDb } from "@/lib/db"
 
 import { equal } from "./equal"
@@ -1242,7 +1243,12 @@ export function ChatNextThread({
         send: sendTurn,
         queue: queueMessage,
         steer: steerMessage,
-        canSteer: doing.running && Boolean(steerTurn),
+        // Steered by the run's own id, so the offer stands whether or not this page has joined it.
+        canSteer: steerOffered({
+          followed: doing.running,
+          liveRun: hostRunId,
+          steerable: Boolean(steerTurn),
+        }),
         subagents,
         stop,
       }}

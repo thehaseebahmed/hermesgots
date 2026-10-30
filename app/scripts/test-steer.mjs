@@ -5,7 +5,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { canSteer, midReply, steerAsked } from "../src/lib/steer.ts"
+import { canSteer, midReply, steerAsked, steerOffered } from "../src/lib/steer.ts"
 
 const note = { id: "f1", name: "notes.txt", type: "text/plain", size: 12, image: false }
 const photo = { id: "f2", name: "cat.png", type: "image/png", size: 12, image: true }
@@ -48,4 +48,20 @@ test("a send's own command outranks the setting, and an unsteerable reply only d
   assert.equal(steerAsked(undefined, setting), true)
   assert.equal(steerAsked(undefined, { byDefault: true, steerable: false }), false)
   assert.equal(steerAsked(undefined, { byDefault: false, steerable: true }), false)
+})
+
+test("a steer is offered for a run, whether or not this page has joined its events", () => {
+  const steerable = { steerable: true }
+  assert.equal(steerOffered({ ...steerable, liveRun: "run_1" }), true, "a run the host lists")
+  assert.equal(steerOffered({ ...steerable, liveRun: "run_1", followed: true }), true, "and joined")
+  assert.equal(steerOffered({ ...steerable, followed: true }), true, "a run this page follows")
+  // The join comes and goes as a session is returned to and its turns hand over; the offer doesn't.
+  const run = { liveRun: "run_1", steerable: true }
+  assert.equal(steerOffered({ ...run, followed: false }), steerOffered({ ...run, followed: true }))
+  assert.equal(steerOffered({ ...steerable }), false, "nothing to steer")
+  assert.equal(
+    steerOffered({ liveRun: "run_1", followed: true, steerable: false }),
+    false,
+    "a host with no steer route takes none",
+  )
 })

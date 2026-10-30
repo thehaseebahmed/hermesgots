@@ -17,20 +17,20 @@ ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
 
-The registry in `app/scripts/e2e/cli.mjs` holds **80 keys**, and every one of them has a row
-below. `pnpm e2e list` prints the same 80 keys, and the rows here are grouped by the ticket that
+The registry in `app/scripts/e2e/cli.mjs` holds **81 keys**, and every one of them has a row
+below. `pnpm e2e list` prints the same 81 keys, and the rows here are grouped by the ticket that
 takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
 | --------- | ------ |
-| stay | 21 |
+| stay | 22 |
 | component | 55 |
 | plugin | 2 |
 | delete | 2 |
-| **total** | **80** |
+| **total** | **81** |
 
-Of those 80, 74 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
-reuses `todos.mjs`, so 73 distinct files there) and 6 point at the older
+Of those 81, 75 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
+reuses `todos.mjs`, so 74 distinct files) and 6 point at the older
 `app/scripts/regression-*.mjs`.
 
 #297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**.
@@ -126,12 +126,12 @@ an argument this page has to carry, never a default (ADR 0019).
 Check any of it in one line:
 
 ```bash
-grep -c '^| `' docs/e2e-flow-audit.md                           # 80 rows, one per registry key
-grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 21
+grep -c '^| `' docs/e2e-flow-audit.md                           # 81 rows, one per registry key
+grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 22
 grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 55
 grep -c '^| `[a-z0-9-]*` | delete |' docs/e2e-flow-audit.md    # 2
 grep -c '^| `[a-z0-9-]*` | plugin |' docs/e2e-flow-audit.md    # 2
-cd app && pnpm -s e2e list | wc -l                             # 80 keys in the registry
+cd app && pnpm -s e2e list | wc -l                             # 81 keys in the registry
 git show 8a4e842^:app/scripts/e2e/cli.mjs |
   sed -n '/^const FLOWS = {/,/^}$/p' | grep -c '^  [a-z"-]*: {'  # 61, before goal mode left
 ```
@@ -331,6 +331,7 @@ them — they are what the end-to-end registry holds once the other 59 keys leav
 | `live-poll` | stay | `runs/live` is read by one shared poll: at most 3 reads in 25s with a session, its project and the sidebar all open. | A request rate over wall-clock, with three screens mounted at once. |
 | `idle-requests` | stay | An idle open chat makes at most 12 requests in 65s. | A request budget over 65 seconds of real time and a real fetch stack. |
 | `foreign-run` | stay | A run started elsewhere shows as running in Code and on the open session screen, is followed to its end, and leaves no duplicate. | A run this browser never started, on a host that owns it: the app only discovers it. |
+| `steer-offer` | stay | A code session returned to mid-run, with two turns queued behind the run, keeps offering "Steer the response…" for as long as the host lists a run and never says "Queue a message…": the field's two words do not swap as one run hands over to the next. | The join: chat-next attaches a run a poll after the session opens and drops it when the turn ends, so the flip only appears across real handovers in wall-clock time — a component test hands the page a state, not a stream that attaches, ends and attaches again. |
 | `compressed-run` | stay | A chat another device started and Hermes compressed before this device loaded it lands its transcript and follows its run to its end — whether the rotation came before the run or mid-run. | A test host rotating the session id mid-run, the mechanism the plugin's run keying broke on. A faked HTTP boundary would answer the shape the code expects rather than the one the host sends. |
 | `chat-archive` | stay | A chat Hermes compacted in place, opened on a device that never held it: the pane draws the live window alone with nothing older on the device, and when the reader reaches the top the archived turns come back — each once, the cursor cleared at the chat's first row, the thread grown above the pane — with the compaction's divider still below the turns it carried and above the row written after it. | A reach and a prepend: the pane's scroll offset at its top edge deciding when the window grows, and the thread's height changing under a reader who has not been thrown. jsdom has no scroll offset and no height, so `test-archive-thread.tsx` proves the same rows draw right but would pass whether the archive arrived on a scroll, on a button, or not at all. | `test-archive-thread.tsx` holds the draw (each turn once, the divider's place) and `test-history-window.mjs` the walk's rule; this flow is the only place the reach is made. |
 | `chat-next-older` | stay | A chat of thirty turns opened on chat-next with the host holding its older pages back: the newest page is drawn and the pane stands on its end, the loader sits at the top of the pane and not among the thread's rows, then the older pages are put above — one after another, newest first — and the loader goes with the last: a reader at the end keeps the newest reply on the same line of the page, a reader up in the thread keeps the line they are reading, and the pane moved down the thread by what was added. | A prepend under a reader: the line a reply stands on after rows are added above it, and a loader that adds or takes away a row at the top of the flow. jsdom has no layout, so `test-chat-next-older.tsx` proves the pages arrive in order above the same rows under the same ids, but would pass had the thread jumped by a screen. | `test-chat-next-pages.mjs` holds the paging rule (which page is read next, when the chat is whole, how pages join) and `test-chat-next-older.tsx` the draw; this flow is the only place the reader's place is measured. |
