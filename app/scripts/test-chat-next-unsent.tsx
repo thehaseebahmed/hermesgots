@@ -7,6 +7,7 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
+import { toast } from "sonner"
 
 import type { Unsent } from "@/lib/db"
 import { fakeHost } from "./chat-next-host.ts"
@@ -262,10 +263,15 @@ test("a retry that fails again leaves the row exactly where it was", async () =>
   }
 })
 
-test("a host that turns a send down keeps the message, and says why in the chat's own error", async () => {
+test("a host that turns a send down keeps the message, and says why where the reader is", async () => {
   const REFUSAL = "Rate limit exceeded. Try again in a few seconds."
   const host = fakeHost("memento-unsent-refused")
   const device = await openDevice(host)
+  const said: string[] = []
+  const original = toast.error
+  toast.error = ((message: unknown) => {
+    said.push(String(message))
+  }) as typeof toast.error
   try {
     const answer = refuseSends(REFUSAL)
     try {
@@ -278,13 +284,53 @@ test("a host that turns a send down keeps the message, and says why in the chat'
       answer()
     }
     assert.equal(device.unsent()[0].state, "Not sent", "marked as one that didn't go")
-    assert.equal(device.alert(), REFUSAL, "the reason is the chat's own error")
+    assert.deepEqual(
+      said,
+      [REFUSAL],
+      "the host's reason is said once, the way every request here that came back with an error is",
+    )
+    assert.equal(
+      device.alert(),
+      undefined,
+      "and not left as the thread's first line, above the viewport of a thread that scrolls",
+    )
     assert.doesNotMatch(
       device.unsent()[0].text + device.unsent()[0].state,
       /Rate limit/,
       "and is never repeated under the message",
     )
   } finally {
+    toast.error = original
+    await device.close()
+  }
+})
+
+test("a send the host never answers says what is known, not what a failed read says", async () => {
+  const host = fakeHost("memento-unsent-unanswered")
+  const device = await openDevice(host)
+  const said: string[] = []
+  const original = toast.error
+  toast.error = ((message: unknown) => {
+    said.push(String(message))
+  }) as typeof toast.error
+  try {
+    const answer = refuseSends("away")
+    try {
+      await device.send("this one gets no answer")
+      await eventually(
+        () => assert.equal(device.unsent().length, 1),
+        "the unanswered message to be kept",
+      )
+    } finally {
+      answer()
+    }
+    // The reads still land, so this is not an away host: the chat's header keeps its own subject and
+    // the send is the only thing that failed.
+    assert.deepEqual(said, ["This host didn't take the message."], "what the app knows is said")
+    assert.equal(device.away(), false, "the host is not called away by a send that failed")
+    assert.equal(device.alert(), undefined, "and nothing is drawn above the thread")
+  } finally {
+    toast.error = original
     await device.close()
   }
 })
