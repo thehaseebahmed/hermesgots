@@ -8,6 +8,12 @@ blocked by the gate issue (#715) that the docs pull request carrying this file (
 starts on that merge. The spec carries `ready-for-agent` and the tickets stay bare, so the agent claims
 the spec and works the graph in order.
 
+Amended by [ADR 0075](adr/0075-a-drawn-file-stays-drawn-and-a-url-is-never-drawn-from-spent.md): the
+media URL is no longer kept for the page's life. A mint's expiry is carried with the URL and another is
+minted when it runs out — a page outlives the ten minutes a signature lives for — and what a cell has
+drawn (a photo's bytes, a clip's first frame) is kept on the device and drawn from there first. The
+decisions below about where a tap goes, the cap by kind and a cell that keeps its place all stand.
+
 ## Problem Statement
 
 Three things about media are wrong at once, and a user sees all three.
@@ -178,10 +184,11 @@ instead of demoting the file. The distinction the app keeps is "not read yet", "
 buffering and the paused start are the platform's behaviour rather than a player the app draws. The app
 draws no transport of its own beyond what the Previewer already has for stepping between files.
 
-**Both screens, no storage, no schema.** The threads are drawn by the current chat screen and by the
-chat screen behind the Developer switch, and both read the same media module. Nothing new is stored on
-the device, no IndexedDB schema changes, and the attachment record keeps the fields it has; the only
-new wire is the URL-minting route's response.
+**Both screens, one new store.** The threads are drawn by the current chat screen and by the chat
+screen behind the Developer switch, and both read the same media module. The attachment record keeps
+the fields it has, and the only new wire is the URL-minting route's response; what a cell has drawn is
+kept in the device's own table (`mediaCache`, Dexie v30), which ADR 0075 adds and bounds. [Amended: this
+decision first read "no storage, no schema", and the schema grew one table.]
 
 **The signature is the host's, minted per request for a URL.** The app never computes a signature, so
 the bot's key stays a key the app sends and not a secret it derives from; a URL that leaks is worth the
@@ -232,7 +239,8 @@ minutes its expiry names and one path.
 - A media gallery for a whole chat, or any way to browse media outside the thread it was sent in.
 - Thumbnails on the host, transcoding, or any poster frame the host would generate: a clip's first frame
   is still read by the browser.
-- Offline reading of media, and any device-side cache of the bytes that outlives the page.
+- Offline reading of media as a feature, and any device-side cache beyond the drawn-copy store ADR 0075
+  bounds (the bytes a cell has painted, filed by bot and path, dropped oldest-first).
 - Analysing, describing or transcribing a clip or a recording on the host.
 
 ## Further Notes

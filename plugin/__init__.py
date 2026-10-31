@@ -2074,8 +2074,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     async def sign_media_url(request: "web.Request") -> "web.Response":
         """Mints a URL for one file: a signature over the path, this profile and an expiry.
 
-        The app can't send its key with an ``<img>`` or a ``<video>``, so it asks here once per file
-        and keeps the URL for the page's life. What it mints is worth one path until it expires.
+        The app can't send its key with an ``<img>`` or a ``<video>``, so it asks here for a URL and
+        keeps it only while the expiry this answer names is worth drawing from — a page outlives the
+        minutes a signature lives for, so it mints another when one runs out (ADR 0075). What it mints
+        is worth one path until it expires.
         """
         denied = unauthorized(request)
         if denied is not None:

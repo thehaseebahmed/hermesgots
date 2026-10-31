@@ -100,3 +100,13 @@ export const AFK_MS = 5_000
 export const LIST_MS = 60_000
 /** Whether the host can dictate. */
 export const DICTATION_INFO_MS = 5 * 60_000
+/**
+ * The life a URL the host signed is not trusted with: a load that starts in the last of its
+ * signature would outlive it, so the app mints another instead (ADR 0075).
+ */
+export const MEDIA_URL_SKEW_MS = 60_000
+/**
+ * How stale a kept file's clock may be before a draw rewrites it. The clock only decides the order
+ * files are let go of, so this is what stops every draw from being a write.
+ */
+export const MEDIA_TOUCH_MS = 60 * 60_000

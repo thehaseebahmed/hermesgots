@@ -56,6 +56,7 @@ export function mediaItems(tags: MediaTagItem[], sources: MediaSources): TaggedM
       name: tag.name,
       type: read?.type ?? "",
       size: read?.size,
+      path: tag.path,
       src: read?.url,
       state: mediaStage(state),
       note: state?.status === "failed" ? state.note : undefined,

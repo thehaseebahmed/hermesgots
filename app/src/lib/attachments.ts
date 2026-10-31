@@ -14,7 +14,7 @@ import {
 import { attachmentParts } from "@/lib/attachment-text"
 import type { Attachment } from "@/lib/db"
 import type { ContentPart } from "@/lib/hermes"
-import { loadMediaUrl } from "@/lib/media-url"
+import { loadHostMediaUrl } from "@/lib/media-url"
 import { isNative, openMediaViewer } from "@/lib/native"
 import { noteFailure } from "@/lib/report"
 import { createSignal } from "@/lib/store"
@@ -185,13 +185,11 @@ export type Handover = Pick<Attachment, "name" | "type" | "path" | "blob"> & {
  */
 export async function openAttachment(conversationId: string | null, file: Handover) {
   try {
-    // The URL first, where the thread holds one: the host names the file in how it serves it, which
-    // this device's own blob can't. A staged file has no URL, so its bytes are all there is.
+    // A staged file has no path on the host: its own bytes are all there is, and they have no name
+    // of their own in a URL, so the platform's own app is handed the name with them.
     if (!file.src && !file.path && file.blob) {
       const url = URL.createObjectURL(file.blob)
       try {
-        // A staged file's bytes have no name of their own in a URL: the browser saves them under
-        // the blob's, and the platform's app is handed the name with the bytes.
         if (!isNative) window.open(url, "_blank", "noopener")
         else await openMediaViewer(url, { type: file.type, name: file.name })
       } finally {
@@ -200,11 +198,12 @@ export async function openAttachment(conversationId: string | null, file: Handov
       }
       return
     }
-    const read =
-      file.src ??
-      (conversationId && file.path
-        ? (await loadMediaUrl(conversationId, file.path))?.url
-        : undefined)
+    // A file the host holds is asked for a URL here, whatever one the thread was drawing from: the
+    // host names the file in how it serves it, which a copy this device kept cannot, and what it
+    // answers is fresh.
+    const minted =
+      conversationId && file.path ? await loadHostMediaUrl(conversationId, file.path) : null
+    const read = minted?.url ?? file.src
     if (!read) throw new Error(`There is no copy of ${file.name}.`)
     await openMediaViewer(read, { type: file.type, name: file.name })
   } catch (error) {

@@ -242,6 +242,9 @@ export async function seedChats(
   await db.profiles.bulkPut(bots)
   await db.conversations.clear()
   await db.messages.clear()
+  // What an earlier test taught this device to keep is not this one's: a device seeded empty is
+  // empty of the media it has drawn too.
+  await db.mediaCache.clear()
   const at = (chat: SeededChat, place: number) => chat.at ?? 10 + place
   await db.conversations.bulkPut(
     chats.map((chat, place) => ({
@@ -337,6 +340,7 @@ export async function seedChat({
   await db.profiles.put(profile)
   await db.messages.clear()
   await db.conversations.clear()
+  await db.mediaCache.clear()
   await db.conversations.put({
     id,
     profileId: profile.id,
@@ -568,6 +572,8 @@ export function mediaHost({
   failure = 404,
   refusal,
   type,
+  life = 600,
+  namesLife = true,
   asked = [],
 }: {
   /** The host whose URLs this answers; every host when it is left empty. */
@@ -582,6 +588,10 @@ export function mediaHost({
   refusal?: string
   /** What a path is served as, where it isn't the type its suffix names. */
   type?: (path: string) => string
+  /** How many seconds a minted URL is worth; a negative one is a URL that has already run out. */
+  life?: number
+  /** Whether the mint names a lifetime at all: a host from before `expires` names none. */
+  namesLife?: boolean
   /** Requests recorded so far, so a second host keeps one count going. */
   asked?: HostAsk[]
 } = {}) {
@@ -612,6 +622,7 @@ export function mediaHost({
         object: "memento.media_url",
         path,
         url: `${media}?path=${encodeURIComponent(path)}&token=mock-token`,
+        ...(namesLife ? { expires: Math.floor(Date.now() / 1000) + life } : {}),
         type: kind,
         size: 12,
       })

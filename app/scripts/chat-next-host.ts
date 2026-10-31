@@ -148,6 +148,8 @@ const reply = (body: unknown, status = 200) =>
 
 /** The events that carry a prompt's request, which a host need not keep for a late subscriber. */
 const PROMPT_EVENTS = new Set(["clarify.request", "approval.request"])
+/** The life a signed media URL is minted with, in seconds: the plugin's own ten minutes. */
+const MEDIA_LIFE_S = 600
 
 /**
  * `plugin` serves the Gots plugin's `runs/live`; `version` is what `/health` says Hermes is;
@@ -677,6 +679,7 @@ export function fakeHost(
         url: `${url.origin}${path.replace(/\/url$/, "")}?path=${encodeURIComponent(file)}&token=mock-token`,
         type,
         size: 5,
+        expires: Math.floor(Date.now() / 1000) + MEDIA_LIFE_S,
       })
     }
     if (plugin && path === "/api/plugins/memento/media") {

@@ -5,6 +5,7 @@ import type { Queued } from "@/chat-next/api"
 import type { Row, Turn } from "@/chat-next/fold"
 import { BOTS, LEGACY_BOT_IDS } from "@/components/bots"
 import { connectionKey } from "@/lib/connection"
+import { mediaKeyPrefix } from "@/lib/media-key"
 import { forgetRead } from "@/lib/read-marks"
 import type { Compaction, ModelChange, Move, ProviderUsage, Skill, Tidied } from "@/lib/hermes"
 import type { SessionPipeline } from "@/lib/pipeline"
@@ -820,6 +821,23 @@ export type SessionDb = Dexie & {
   sentFiles: Table<SentFile, [string, string]>
 }
 
+/**
+ * A file a thread has drawn, kept on this device: a photo's bytes, or the first frame of a clip.
+ * A URL the host signed runs out in minutes, so what a cell drew is drawn again from here — no
+ * mint, no network, and the same picture with the host away or the app left open for an hour. The
+ * key is the bot's server, what the row is for, and the path on the host, so two bots never share
+ * one file's bytes; `at` is the moment it was last drawn, which is the order it is let go of in.
+ */
+export interface MediaCacheRow {
+  key: string
+  blob: Blob
+  /** What the bytes are: the type the host serves them as. */
+  type: string
+  /** How many bytes they are, which is what the cache is bounded by. */
+  size: number
+  at: number
+}
+
 export const db = new Dexie("memento") as Dexie & {
   settings: EntityTable<Settings, "id">
   profiles: EntityTable<Profile, "id">
@@ -839,6 +857,7 @@ export const db = new Dexie("memento") as Dexie & {
   sessionRows: SessionDb["sessionRows"]
   sessionStates: SessionDb["sessionStates"]
   sentFiles: SessionDb["sentFiles"]
+  mediaCache: EntityTable<MediaCacheRow, "key">
 }
 
 db.version(1).stores({
@@ -1122,6 +1141,9 @@ db.version(28).stores({
 })
 // v29: the files this device sent into a session, kept to draw them with the host away.
 db.version(29).stores({ sentFiles: SESSION_STORES.sentFiles })
+// v30: what a thread has drawn, kept on the device — a photo's bytes and a clip's first frame —
+// so a page opened again, or left open past the URL it holds, draws them without the host (ADR 0075).
+db.version(30).stores({ mediaCache: "key, at" })
 
 db.on("populate", (tx) => seedProfile(tx))
 
@@ -1234,6 +1256,7 @@ export async function deleteProfile(id: string, { remote = false, last = false }
     db.dictationStats,
     db.skills,
     db.meetingRecordings,
+    db.mediaCache,
   ]
   return db.transaction("rw", tables, async () => {
     const alone = (await db.profiles.count()) <= 1
@@ -1248,12 +1271,14 @@ export async function deleteProfile(id: string, { remote = false, last = false }
     await db.meetingRecordings.filter((recording) => recording.profileId === id).delete()
     // The bot's own device state, keyed by its server: a twin bot sharing the connection refills it.
     // Its dictations go with it (ADR 0060) — what its host holds outlives the link, so adding the
-    // bot again restores them.
+    // bot again restores them. The media it drew is the same shape: filed under its server, and
+    // drawn again from the host when the bot comes back (ADR 0075).
     if (profile) {
       const key = connectionKey(profile)
       await db.skills.delete(key)
       await db.dictationLog.where("connection").equals(key).delete()
       await db.dictationStats.delete(key)
+      await db.mediaCache.where("key").startsWith(mediaKeyPrefix(profile.baseUrl)).delete()
     }
     await db.conversations.bulkDelete(ids)
     await db.profiles.delete(id)
@@ -1400,6 +1425,7 @@ export async function clearAllData() {
     db.sessionRows,
     db.sessionStates,
     db.sentFiles,
+    db.mediaCache,
   ]
   await db.transaction("rw", tables, async () => {
     await Promise.all(tables.map((table) => table.clear()))

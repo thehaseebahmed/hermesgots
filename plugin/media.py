@@ -6,8 +6,9 @@ route: a remote frontend can't read a server path, so it asks here, behind the s
 other route. The route serves any type — a clip, a recording, a document, code — and hands over
 the ones a browser can't show as a download named as the file. An ``<img>`` or a ``<video>`` can't
 carry that key, so the app is handed a URL this module signs instead: one path, one profile, a few
-minutes. Nothing is fetched into the app and held, so a clip streams, seeks and carries a cap that
-answers by kind.
+minutes — and the mint names the moment it runs out, which is what the app reads to mint another
+rather than draw a spent one (ADR 0075). A clip streams and seeks from that URL, and an image the app
+has already drawn it keeps on the device in its own bounded cache, so the route stays the only way in.
 """
 
 from __future__ import annotations
