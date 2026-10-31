@@ -92,7 +92,7 @@ export const FLOWS = {
   "question-card": {
     script: "e2e/question-card.mjs",
     about:
-      'On the new chat screen a question is the composer\'s alone — one waiting line in the thread, no card of it there — and reads answered once given, never "No answer"; and a question longer than the screen keeps its own Skip and Send on it, the card stopping at half the screen and scrolling the choices inside',
+      'On the new chat screen a question is the composer\'s alone — one waiting line in the thread, no card of it there — and reads answered once given, never "No answer"; a question longer than the screen keeps its own Skip and Send on it, the card stopping at half the screen and scrolling the choices inside; and one call\'s five questions are asked one prompt at a time, each as the question it names rather than the call\'s first again, every answer reaching the run with the chat left open',
   },
   "question-reload": {
     script: "e2e/question-reload.mjs",

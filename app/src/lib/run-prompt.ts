@@ -35,6 +35,17 @@ const held = (raw: unknown): Record<string, unknown> | undefined =>
 const strings = (raw: unknown): string[] =>
   Array.isArray(raw) ? raw.filter((one): one is string => typeof one === "string") : []
 
+const heldAll = (raw: unknown): Record<string, unknown>[] =>
+  Array.isArray(raw)
+    ? raw.flatMap((one): Record<string, unknown>[] => {
+        const entry = held(one)
+        return entry ? [entry] : []
+      })
+    : []
+
+const trimmedQuestion = (entry: Record<string, unknown>) =>
+  typeof entry.question === "string" ? entry.question.trim() : ""
+
 /** The execution the prompt belongs to, which an answer names so a settled one cannot be re-raised. */
 const generationOf = (entry: Record<string, unknown>) =>
   typeof entry.execution_generation === "number" ? entry.execution_generation : 0
@@ -45,13 +56,9 @@ const ENDED = ["completed", "cancelled", "failed", "interrupted"]
 function promptEntries(status: unknown): Record<string, unknown>[] {
   const body = held(status)
   if (!body || (typeof body.status === "string" && ENDED.includes(body.status))) return []
-  const listed = Array.isArray(body.pending_controls) ? body.pending_controls : []
-  const pending = listed.flatMap((one): Record<string, unknown>[] => {
-    const entry = held(one)
-    return entry ? [entry] : []
-  })
+  const pending = heldAll(body.pending_controls)
   if (pending.length) return pending.reverse()
-  return [held(body.clarify), held(body.approval)].flatMap((one) => (one ? [one] : []))
+  return heldAll([body.clarify, body.approval])
 }
 
 /** A control this build does not know is no prompt at all, not a question by default. */
@@ -71,10 +78,26 @@ export function promptEntry(
   return promptEntries(status).find((entry) => promptKindOf(entry) === kind)
 }
 
-/** The question an entry asks: its own, or the first of Hermes's list of them, which carries its own. */
+/**
+ * The question an entry asks: the one it names, and the shape that question's own row gives it out
+ * of the call's `questions` list where the list holds it — a prompt serving one question of several
+ * may carry no choices of its own, or an empty list, where its row has them. The row is where a
+ * question's choices and multi-select live; the prompt's fields stand where the row is silent, and
+ * its own wording and id are what the answer goes to. An entry naming no question of its own, but
+ * carrying a prompt id, takes the list's head; the plugin's batch shape, which carries no id, is
+ * refused before this is asked, since there is no route to answer it on.
+ */
 function askedOf(entry: Record<string, unknown>): Record<string, unknown> {
-  const listed = Array.isArray(entry.questions) ? entry.questions : []
-  return held(listed[0]) ?? entry
+  const named = trimmedQuestion(entry)
+  const listed = heldAll(entry.questions)
+  if (!named) return listed[0] ?? entry
+  const twin = listed.find((one) => trimmedQuestion(one) === named)
+  if (!twin) return entry
+  return {
+    ...entry,
+    ...(strings(twin.choices).length ? { choices: twin.choices } : {}),
+    ...(typeof twin.multi_select === "boolean" ? { multi_select: twin.multi_select } : {}),
+  }
 }
 
 /** One prompt from a status entry or the event with the same fields; nothing where no route answers it. */

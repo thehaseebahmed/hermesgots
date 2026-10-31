@@ -4,6 +4,7 @@ import test from "node:test"
 
 import { readNewest, readRun, readTranscript } from "../src/chat-next/api.ts"
 import { overlay } from "../src/chat-next/pages.ts"
+import { promptFrom } from "../src/lib/run-prompt.ts"
 import { recorded } from "./chat-next-fixtures.ts"
 
 const connection = { server: "http://hermes.test/v1", key: "k" }
@@ -160,4 +161,67 @@ test("what the status holds now wins, and a control this build cannot answer is 
     clarify: { clarify_id: "cl1", questions: [{ question: "Which?" }] },
   })
   assert.equal(await readRun(connection, "run_x"), undefined)
+})
+
+test("a prompt that names its own question asks it, off the status and off the event", async () => {
+  // A call that asked several questions is served one prompt per question: each names its own, and
+  // only the first of them is the call's list head. Read off the event here, and off the status
+  // below, so the two ways a prompt reaches a screen cannot drift apart.
+  const asked = {
+    event: "clarify.request",
+    run_id: "run_second",
+    prompt_id: "p1-1",
+    execution_generation: 0,
+    questions: [
+      { id: "q0", question: "Which environment?", choices: ["staging", "production"] },
+      { id: "q1", question: "Which services?", choices: ["api", "worker"], multi_select: true },
+    ],
+    question: "Which services?",
+    choices: ["api", "worker"],
+    multi_select: true,
+  }
+  const want = {
+    kind: "question",
+    run: "run_second",
+    promptId: "p1-1",
+    generation: 0,
+    question: "Which services?",
+    choices: ["api", "worker"],
+    multiSelect: true,
+  }
+  assert.deepEqual(promptFrom(asked, "run_second"), want)
+  statusHost({ run_id: "run_second", status: "waiting_for_approval", clarify: asked })
+  assert.deepEqual(await readRun(connection, "run_second"), want)
+
+  // The prompt carrying no choices of its own takes that question's row off the list — the wrong
+  // question with the right choices would be no better than the reverse.
+  const thin = { ...asked }
+  delete thin.choices
+  statusHost({ run_id: "run_thin", clarify: thin })
+  assert.deepEqual(await readRun(connection, "run_thin"), want)
+
+  // A host that serialises the field writes an empty list rather than leaving it out, and an empty
+  // list is no choice to make either: the row's choices are the question's.
+  statusHost({ run_id: "run_empty", clarify: { ...asked, choices: [] } })
+  assert.deepEqual(await readRun(connection, "run_empty"), want)
+
+  // A name the call's list does not hold is the prompt on its own: no row to borrow a question or
+  // its choices from, and never the list's head standing in for it.
+  statusHost({
+    run_id: "run_absent",
+    clarify: {
+      prompt_id: "p3-1",
+      questions: [{ question: "Which environment?", choices: ["staging", "production"] }],
+      question: "Which bucket?",
+    },
+  })
+  assert.deepEqual(await readRun(connection, "run_absent"), {
+    kind: "question",
+    run: "run_absent",
+    promptId: "p3-1",
+    generation: 0,
+    question: "Which bucket?",
+    choices: [],
+    multiSelect: false,
+  })
 })
