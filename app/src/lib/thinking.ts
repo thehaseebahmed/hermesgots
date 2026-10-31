@@ -279,6 +279,29 @@ export const drawsFootLine = (status?: string) => status !== "error" && status !
 export const carriesCount = (message: { role?: string; status?: string }) =>
   message.role === "assistant" && drawsFootLine(message.status)
 
+/** Where the count of subagents at work is drawn, once — the one place a thread says it. */
+export type CountHome = "catching" | "reply" | "foot" | "none"
+
+/**
+ * Where a thread draws the count of subagents at work: one row, never two (ADR 0070). While the
+ * thread is catching up, its one line is the catch-up line — it stands where a reply's line would
+ * (ADR 0066) — so the count is that line's words, its loader turning in the blue. Otherwise the
+ * count is the last reply's to draw on its own line, and only where that reply draws none does it
+ * fall to the thread's foot.
+ */
+export function countHome(input: {
+  /** How many subagents the session has at work. */
+  running: number
+  /** Whether the catch-up line stands: the thread's first read is still out and it holds rows. */
+  catching: boolean
+  /** Whether the last reply draws a line of its own to hold the count. */
+  drawsLine: boolean
+}): CountHome {
+  if (input.running <= 0) return "none"
+  if (input.catching) return "catching"
+  return input.drawsLine ? "reply" : "foot"
+}
+
 /** Where the count of subagents at work sits, once it is the status line's own (ADR 0070). */
 export type FootCount = "suffix" | "alone" | "none"
 

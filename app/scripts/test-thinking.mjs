@@ -6,6 +6,7 @@ import {
   appendThinking,
   carrySpans,
   closeRun,
+  countHome,
   formatThoughtSpan,
   forgetRuns,
   mergeThoughtRows,
@@ -511,6 +512,34 @@ test("the foot of a reply says one thing: its line, its count, or nothing", () =
     statusLineOf({ status: "stopped", activity: "Writing…" }),
     undefined,
     'and a stopped one wears "Stopped" there',
+  )
+})
+
+test("the thread draws the count of subagents at work once, and never on two rows", () => {
+  assert.equal(
+    countHome({ running: 0, catching: true, drawsLine: true }),
+    "none",
+    "no subagent at work is no count, whatever else the thread is doing",
+  )
+  assert.equal(
+    countHome({ running: 1, catching: true, drawsLine: true }),
+    "catching",
+    "while the thread catches up its one line is the catch-up line, so the count is that line's",
+  )
+  assert.equal(
+    countHome({ running: 1, catching: true, drawsLine: false }),
+    "catching",
+    "and it stays there whether or not the last reply would draw a line of its own",
+  )
+  assert.equal(
+    countHome({ running: 1, catching: false, drawsLine: true }),
+    "reply",
+    "with no catch-up line the last reply's own line holds it",
+  )
+  assert.equal(
+    countHome({ running: 1, catching: false, drawsLine: false }),
+    "foot",
+    "and where that reply draws no line the thread's foot takes it",
   )
 })
 

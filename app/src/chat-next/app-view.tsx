@@ -51,7 +51,7 @@ import { COLUMN_BOX, REPLY_INSET } from "@/lib/layout"
 import { modelChanges } from "@/lib/model-changes"
 import { useDraws } from "@/lib/openui-draws"
 import type { RepoRef } from "@/lib/workspace"
-import { carriesCount } from "@/lib/thinking"
+import { carriesCount, countHome } from "@/lib/thinking"
 import { cn } from "@/lib/utils"
 
 import { delegated } from "./agents"
@@ -218,8 +218,16 @@ export function AppThreadView({
   const loadingFresh = catchingUp && !messages.length && !streaming && !unstarted
   const running = runningAgents(source.agents).length
   const lastId = messages.at(-1)?.id
-  // The count is drawn once: on the last reply's own line, or at the thread's foot where it draws none.
-  const inline = running > 0 && Boolean(messages.at(-1) && carriesCount(messages.at(-1)!))
+  // The thread's one line while its first read is out: the catch-up line stands where a reply's
+  // line would, so the count of subagents at work is drawn there and nowhere else (ADR 0070).
+  const catching = catchingUp && messages.length > 0
+  // The count is drawn once: on the catching-up line, on the last reply's own line, or at the
+  // thread's foot where it draws none.
+  const home = countHome({
+    running,
+    catching,
+    drawsLine: Boolean(messages.at(-1) && carriesCount(messages.at(-1)!)),
+  })
   // Stable, so a reply's own memo holds: a fresh callback would redraw every row on every token.
   const showSubagents = useCallback(() => setSheet(true), [])
 
@@ -302,7 +310,7 @@ export function AppThreadView({
                             busy={streaming}
                             subagents={message.id === lastId ? running : undefined}
                             onShowSubagents={showSubagents}
-                            subagentsInline={message.id === lastId && inline}
+                            subagentsInline={message.id === lastId && home === "reply"}
                           />
                           {message.id === retryId && (
                             <div className={cn(COLUMN_BOX, REPLY_INSET)}>
@@ -323,7 +331,7 @@ export function AppThreadView({
                     })}
                     {compacted.trailing && <Compacted compaction={compacted.trailing} />}
                     {moved.trailing.map(marker)}
-                    {running > 0 && !inline && (
+                    {home === "foot" && (
                       <StatusLine>
                         <SubagentCount count={running} onOpen={showSubagents} place="alone" />
                       </StatusLine>
@@ -340,9 +348,22 @@ export function AppThreadView({
                       </div>
                     </MessageScrollerItem>
                   ))}
-                  {catchingUp && messages.length > 0 && (
+                  {catching && (
                     <div className={COLUMN_BOX} data-catching-up>
-                      <StatusLine text={CATCHING_ACTIVITY} seed={chatId} />
+                      {/* One line, one loader: the count of subagents at work takes the line's words
+                          where there are any, and turns the line's loader in its own blue. */}
+                      <StatusLine
+                        text={home === "catching" ? undefined : CATCHING_ACTIVITY}
+                        seed={chatId}
+                      >
+                        {home === "catching" && (
+                          <SubagentCount
+                            count={running}
+                            onOpen={showSubagents}
+                            place="alone-loading"
+                          />
+                        )}
+                      </StatusLine>
                     </div>
                   )}
                   {queue?.items.map((item) => (
