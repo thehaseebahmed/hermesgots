@@ -1,6 +1,6 @@
 # A take is uploaded blind and answered in one call
 
-Status: ready for a human to read. Design: [ADR 0074](../adr/0074-a-take-is-the-hosts-and-one-call-answers-its-words.md), which supersedes ADR 0038's clauses on how a take's Pieces are orchestrated and tidied and ADR 0069's held-buffer clause. Its tickets are #753, #754, #755, #756 and #757.
+Status: ready for a human to read. Design: [ADR 0074](../adr/0074-a-take-is-the-hosts-and-one-call-answers-its-words.md), which supersedes ADR 0038's clauses on how a take's Pieces are orchestrated and tidied and ADR 0069's held-buffer clause. Its tickets are #753, #754, #755, #756 and #757. These docs land in pull request #758, which closes the gate issue #759 — and #759 blocks the spec until that pull request merges.
 
 ## Problem Statement
 
