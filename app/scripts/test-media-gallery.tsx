@@ -124,7 +124,6 @@ test("a message's photo and clip draw in one Gallery, its recording in a row, it
       "every file the message carries, asked for once",
     )
 
-    // A tap on a cell opens the app's own Previewer: the clip plays there, paused.
     await click(cell("clip.mp4"))
     await until(async () => document.querySelector("video") !== null, "the clip's player")
     const player = document.querySelector("video")!
@@ -132,7 +131,6 @@ test("a message's photo and clip draw in one Gallery, its recording in a row, it
     assert.equal(player.hasAttribute("autoplay"), false, "paused until it is pressed")
     await click(findAll("button").find((one) => one.getAttribute("aria-label") === "Close"))
 
-    // And the recording opens the same Previewer, on a player of its own.
     await click(row("voice.mp3"))
     await until(async () => document.querySelector("audio") !== null, "the recording's player")
     assert.match(

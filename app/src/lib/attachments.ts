@@ -185,11 +185,13 @@ export type Handover = Pick<Attachment, "name" | "type" | "path" | "blob"> & {
  */
 export async function openAttachment(conversationId: string | null, file: Handover) {
   try {
-    if (file.blob) {
+    // The URL first, where the thread holds one: the host names the file in how it serves it, which
+    // this device's own blob can't. A staged file has no URL, so its bytes are all there is.
+    if (!file.src && !file.path && file.blob) {
       const url = URL.createObjectURL(file.blob)
       try {
-        // A link names the file and keeps the tap's own gesture, so a browser that saves it writes
-        // it under the name the user picked rather than the blob's.
+        // A staged file's bytes have no name of their own in a URL: the browser saves them under
+        // the blob's, and the platform's app is handed the name with the bytes.
         if (!isNative) window.open(url, "_blank", "noopener")
         else await openMediaViewer(url, { type: file.type, name: file.name })
       } finally {

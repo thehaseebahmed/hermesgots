@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import type { Attachment } from "@/lib/db"
 import { askMediaUrl, forgetMediaUrl, type MediaAsk, type MediaUrl } from "@/lib/media-url"
@@ -87,21 +87,19 @@ export function useMediaSources(conversationId: string, sources: MediaSource[]):
     }
   }, [conversationId, joined, revision])
 
-  const retry = useCallback(
-    (key: string) => {
-      const path = sources.find((source) => source.key === key)?.path
-      if (!path) return
-      answered.current.paths.delete(path)
-      setHost((current) => {
-        const next = new Map(current)
-        next.delete(path)
-        return next
-      })
-      void forgetMediaUrl(conversationId, path)
-      setRevision((count) => count + 1)
-    },
-    [conversationId, sources],
-  )
+  // Not memoised on purpose: a caller builds its sources per render, so a memo here would never hold.
+  const retry = (key: string) => {
+    const path = sources.find((source) => source.key === key)?.path
+    if (!path) return
+    answered.current.paths.delete(path)
+    setHost((current) => {
+      const next = new Map(current)
+      next.delete(path)
+      return next
+    })
+    void forgetMediaUrl(conversationId, path)
+    setRevision((count) => count + 1)
+  }
 
   const states = new Map<string, MediaState>()
   for (const source of sources) {

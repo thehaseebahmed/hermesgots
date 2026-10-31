@@ -240,7 +240,6 @@ test("a staged photo and clip open the screen's Previewer, and Remove takes one 
       ])
       assert.deepEqual(tileNames(), ["cat.png", "take.webm"], "both are on the message")
 
-      // A tap opens the app's own Previewer on the photo, with Remove where a staged file is.
       await click(
         findAll("button").find((one) => one.getAttribute("aria-label") === "Open cat.png"),
       )
@@ -251,12 +250,10 @@ test("a staged photo and clip open the screen's Previewer, and Remove takes one 
         "Remove is the composer's",
       )
 
-      // Stepping moves to the clip, which opens on a player that is paused until pressed.
       await click(findAll("button").find((one) => one.getAttribute("aria-label") === "Next"))
       await until(async () => document.querySelector("video") !== null, "the clip's player")
       assert.equal(document.querySelector("video")!.hasAttribute("autoplay"), false)
 
-      // Remove takes the clip off the message, from where the reader is looking at it.
       await click(findAll("button").find((one) => one.textContent === "Remove"))
       await settle()
       assert.deepEqual(tileNames(), ["cat.png"], "the clip left the message")

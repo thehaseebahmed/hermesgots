@@ -110,7 +110,6 @@ await flow("media-clip", async ({ page, seed, until, shot }) => {
   await shot("cell")
   pass("a sent clip draws a Gallery cell with its first frame painted by the browser")
 
-  // A tap opens the app's own Previewer, on a player that is paused until it is pressed.
   const tabs = []
   page.context().on("page", (tab) => tabs.push(tab))
   await page.getByRole("button", { name: `Open ${CLIP}` }).click()
@@ -129,7 +128,6 @@ await flow("media-clip", async ({ page, seed, until, shot }) => {
   assert.equal(tabs.length, 0, "nothing left the app")
   await shot("previewer")
 
-  // Pressing play leaves it playing, and it can be sought: both are the element's own pipeline.
   await player.evaluate((video) => video.play())
   await until(
     () => player.evaluate((video) => !video.paused && video.currentTime > 0),

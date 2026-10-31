@@ -31,6 +31,7 @@ import { filesReason, fresh, isPhoto, MAX_ATTACHMENTS } from "@/lib/attachment-c
 import { openAttachment, prepareIntake } from "@/lib/attachments"
 import { attachmentUrl } from "@/lib/attachment-url"
 import { mediaCell, mediaKind } from "@/lib/media-kind"
+import { previewItem } from "@/lib/media-items"
 import type { Attachment } from "@/lib/db"
 import type { PluginFeatureAnswer } from "@/lib/features"
 
@@ -362,24 +363,22 @@ export function Composer({
   const removeAttachment = (attachment: Attachment) =>
     setAttachments((current) => current.filter((a) => a.id !== attachment.id))
 
-
   // A staged file's bytes exist only on this device: the previewer draws them from their own URL,
   // which is the one place an object URL is still what a file is read from.
-  const kindOf = (attachment: Attachment): PreviewItem["kind"] => {
-    const kind = mediaKind(attachment.type, attachment.name)
-    return kind === "file" ? "image" : kind
-  }
-  const staged = (attachment: Attachment): PreviewItem => ({
-    key: attachment.id,
-    name: attachment.name,
-    type: attachment.type,
-    size: attachment.size,
-    kind: kindOf(attachment),
-    src: attachmentUrl(attachment),
-    state: "ready",
-    width: attachment.width,
-    height: attachment.height,
-  })
+  const staged = (attachment: Attachment): PreviewItem =>
+    previewItem(
+      {
+        key: attachment.id,
+        kind: mediaKind(attachment.type, attachment.name),
+        cell: mediaCell(attachment.type, attachment.name),
+        name: attachment.name,
+        type: attachment.type,
+        size: attachment.size,
+        src: attachmentUrl(attachment),
+        state: "ready",
+      },
+      { width: attachment.width, height: attachment.height },
+    )
   const media = attachments.filter(
     (attachment) => mediaCell(attachment.type, attachment.name) !== "file",
   )

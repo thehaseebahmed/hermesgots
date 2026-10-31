@@ -192,7 +192,6 @@ test("a thread's sent media and a reply's tags draw through the same cells", asy
         "a sent photo is read from the host's URL too",
       )
 
-      // Nothing is played in the thread: a tap opens the app's own Previewer instead.
       assert.equal(document.querySelector("video"), null, "no clip is played in the thread")
       assert.equal(document.querySelector("audio"), null)
       await click(cell("render.mp4"))
@@ -217,14 +216,12 @@ test("a thread's sent media and a reply's tags draw through the same cells", asy
       assert.equal(browser.opened.length, 0, "stepping never leaves the app")
       await click(findAll("button").find((one) => one.getAttribute("aria-label") === "Close"))
 
-      // A recording's row opens the same Previewer, on a player of its own.
       await click(row("take.mp3"))
       await until(async () => document.querySelector("audio") !== null, "the recording's player")
       assert.equal(document.querySelector("video"), null, "the clip is not on screen")
       assert.equal(browser.opened.length, 0, "and nothing left the app for it")
       await click(findAll("button").find((one) => one.getAttribute("aria-label") === "Close"))
 
-      // A file's row hands the file to the platform: a new tab at the URL the host signed.
       await click(download("report.pdf"))
       await until(async () => browser.opened.length > 0, "the new tab")
       assert.equal(browser.opened.length, 1, "one tab for one tap")

@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { formatBytes } from "@/lib/attachment-caps"
 import { useImageReady } from "@/lib/image"
 import type { MediaKind } from "@/lib/media-kind"
+import type { MediaStage } from "@/lib/media-stage"
 import { cn } from "@/lib/utils"
 
 /** One piece of media the Previewer can draw: a photo, a clip or a recording. */
@@ -20,7 +21,7 @@ export interface PreviewItem {
   kind: Extract<MediaKind, "image" | "video" | "audio">
   /** Where it is read from, once the host has answered; a staged file's own bytes before that. */
   src?: string
-  state: "reading" | "ready" | "failed"
+  state: MediaStage
   /** A photo's own shape, where the record keeps it, so its box is right from the first frame. */
   width?: number
   height?: number

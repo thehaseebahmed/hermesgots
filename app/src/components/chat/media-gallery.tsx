@@ -6,6 +6,7 @@ import { usePreviewer } from "@/components/chat/previewer"
 import { Skeleton } from "@/components/ui/skeleton"
 import { boundedStore } from "@/lib/bounded-cache"
 import { previewItem } from "@/lib/media-items"
+import type { MediaStage } from "@/lib/media-stage"
 import type { MediaCell, MediaKind } from "@/lib/media-kind"
 import { useImageReady } from "@/lib/image"
 import { cn } from "@/lib/utils"
@@ -14,8 +15,8 @@ import { cn } from "@/lib/utils"
 // as media arrives. A reply's single image has always taken it, and still does.
 const CELL = "h-24 w-full rounded-xl border md:h-32 xl:h-40"
 
-/** How far a file's bytes are in: still asked for, drawn, or the read failed and can be asked again. */
-export type MediaItemState = "reading" | "ready" | "failed"
+/** How far a file's bytes are in, as the cell that keeps its place draws them. */
+export type MediaItemState = MediaStage
 
 /** One piece of media a thread draws: what it is, where it draws, and where it is read from. */
 export interface MediaItem {
@@ -309,7 +310,10 @@ export function MediaItems({
     live.current = playable
   })
   useEffect(() => {
-    update(owner, live.current.map((one) => previewItem(one)))
+    update(
+      owner,
+      live.current.map((one) => previewItem(one)),
+    )
   }, [owner, signature, update])
   const open = (item: MediaItem) =>
     preview(

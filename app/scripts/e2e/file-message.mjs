@@ -73,7 +73,11 @@ await flow("file-message", async ({ page, seed, until, shot }) => {
   // Files reach Hermes only through the plugin's upload route, so the picker is offered for the
   // bot whose host advertises it.
   assert.equal(
-    await pick(page, "Files", { name: NOTE, mimeType: "text/markdown", buffer: Buffer.from(NOTES) }),
+    await pick(page, "Files", {
+      name: NOTE,
+      mimeType: "text/markdown",
+      buffer: Buffer.from(NOTES),
+    }),
     true,
     "a host with the plugin offers Files",
   )
@@ -87,7 +91,6 @@ await flow("file-message", async ({ page, seed, until, shot }) => {
     mimeType: "image/png",
     buffer: Buffer.from(await png(page), "base64"),
   })
-  // All three are on the message before it goes.
   for (const name of [NOTE, ARCHIVE, PHOTO])
     await page.getByRole("button", { name: `Remove ${name}` }).waitFor({ timeout: 10_000 })
 
@@ -95,7 +98,6 @@ await flow("file-message", async ({ page, seed, until, shot }) => {
   await composer.fill(SAID)
   await composer.press("Enter")
 
-  // The thread: the photo in a cell of the Gallery, the files as rows that name them and their size.
   const note = page.getByRole("button", { name: `Download ${NOTE}` })
   const archive = page.getByRole("button", { name: `Download ${ARCHIVE}` })
   await note.waitFor({ timeout: 20_000 })
@@ -207,10 +209,16 @@ await flow("file-message", async ({ page, seed, until, shot }) => {
     page.context().waitForEvent("download", { timeout: 20_000 }),
     archive.click(),
   ])
-  assert.equal(download.suggestedFilename(), ARCHIVE, "the browser saves the file under its own name")
+  assert.equal(
+    download.suggestedFilename(),
+    ARCHIVE,
+    "the browser saves the file under its own name",
+  )
   const path = await download.path()
   assert.ok(path, "the browser wrote the file out")
   assert.ok(statSync(path).size > 0, "and it holds the bytes the host served")
   assert.ok(reads.length > 0, "every file was read from a URL the host signed")
-  pass(`a tap on the archive downloaded ${download.suggestedFilename()} from the host's media route`)
+  pass(
+    `a tap on the archive downloaded ${download.suggestedFilename()} from the host's media route`,
+  )
 })

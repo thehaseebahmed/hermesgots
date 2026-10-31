@@ -143,10 +143,9 @@ def limit_for(path: Path) -> int:
     return STREAM_MAX_BYTES if streams(path) else DOWNLOAD_MAX_BYTES
 
 
-def too_large(path: Path, streamed: bool) -> str:
+def too_large(path: Path, limit: int) -> str:
     """A refusal that names the file and the limit it met, so "too large" never stands alone."""
-    limit = STREAM_MAX_BYTES if streamed else DOWNLOAD_MAX_BYTES
-    what = "media" if streamed else "a file that downloads"
+    what = "media" if streams(path) else "a file that downloads"
     return f"{path.name} is larger than the {limit // (1024 * 1024)} MB limit for {what}."
 
 
@@ -169,10 +168,9 @@ def _validated_path(path_str: str, missing: str) -> Path:
     try:
         if not path.is_file():
             raise MediaError(missing, 404)
-        streamed = streams(path)
-        limit = STREAM_MAX_BYTES if streamed else DOWNLOAD_MAX_BYTES
+        limit = limit_for(path)
         if path.stat().st_size > limit:
-            raise MediaError(too_large(path, streamed), 413)
+            raise MediaError(too_large(path, limit), 413)
     except OSError:
         raise MediaError(missing, 404)
     return path

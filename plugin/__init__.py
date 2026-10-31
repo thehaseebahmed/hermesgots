@@ -2016,9 +2016,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, str(error), error.status)
         key = await asyncio.to_thread(media.signing_key, store_path())
         token, expires = media.mint(key, path, _request_profile() or "")
-        # This route's own address, at the media route beside it: a bot at /p/<profile> keeps its
-        # prefix, so the URL is minted where the request came in.
-        # The media route is this one's address without `/url` on the end.
+        # The media route beside this one: this address without `/url`, so a bot at /p/<profile>
+        # keeps its prefix.
         url = str(
             request.url.with_path(request.path.removesuffix("/url")).with_query(
                 {"path": path, media.URL_PARAM: token}

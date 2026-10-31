@@ -133,8 +133,8 @@ test("a file the host never took is drawn, and a tap says there is no copy of it
   }
 })
 
-test("a file this device holds opens from its own bytes, without asking the host", async () => {
-  // The composer's own tile before the message goes: the host has never seen these bytes.
+test("a staged file, which the host has never been given, opens from its own bytes", async () => {
+  // The composer's own tile before the message goes: no path, so these bytes are all there is.
   const profile = botProfile("attachment-row")
   await seedSettings()
   await seedChat({
@@ -144,6 +144,7 @@ test("a file this device holds opens from its own bytes, without asking the host
       message([
         {
           ...attachment,
+          path: undefined,
           blob: new Blob(["pdf bytes"], { type: "application/pdf" }),
         },
       ]),
