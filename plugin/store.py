@@ -14,7 +14,7 @@ import logging
 import sqlite3
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, Iterable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +68,32 @@ def get_setting(path: Path, key: str) -> Optional[Any]:
     except ValueError:
         logger.debug("memento: the %s setting isn't valid JSON", key)
         return None
+
+
+def get_settings(path: Path, keys: Iterable[str]) -> Dict[str, Any]:
+    """Several settings in one look at the store, by key; a key that isn't there is absent.
+
+    For a route that answers numbers a sheet reads together: one connection and one statement
+    rather than one per setting, on a read that is polled.
+    """
+    wanted = list(keys)
+    if not wanted or not path.exists():
+        return {}
+    conn = connect(path)
+    try:
+        rows = conn.execute(
+            f"SELECT key, value FROM host_settings WHERE key IN ({', '.join('?' * len(wanted))})",
+            wanted,
+        ).fetchall()
+    finally:
+        conn.close()
+    found: Dict[str, Any] = {}
+    for key, value in rows:
+        try:
+            found[key] = json.loads(value)
+        except ValueError:
+            logger.debug("memento: the %s setting isn't valid JSON", key)
+    return found
 
 
 def put_setting(path: Path, key: str, value: Optional[Any]) -> None:

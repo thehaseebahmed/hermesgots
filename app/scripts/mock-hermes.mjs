@@ -249,6 +249,9 @@ const MOCK_DEFAULT_PROMPT = "Work in checkpoints: small slices of the issue, one
 // Both are the host's own numbers: a write is read back on the next read, like the switch.
 const afkPickCounts = new Map()
 let afkPickBudget = 5
+// The bot's usage threshold: the used share of its account at which AFK stops picking tasks up, 50
+// to 100, off (null) until it is set — one number for the bot, beside the budget (ADR 0026).
+let afkUsageThreshold = null
 // The library, seeded from the plugin's presets on first read (`workflows.PRESETS`): presets are
 // read-only, and a write through the routes adds or rewrites one of the account's own rows.
 let workflowRows = []
@@ -1625,13 +1628,19 @@ function afkAnswer(project, reason) {
     // The bot's own two numbers, answered here so one read draws the sheet's budget line.
     pick_budget: afkPickBudget,
     holds_held: afkHeldCount(),
+    usage_threshold: afkUsageThreshold,
     ...skills,
   }
 }
 
-/** The bot's own AFK row: the pick budget it works within, and the holds counted against it. */
+/** The bot's own AFK row: the pick budget, the usage threshold and the holds counted against them. */
 function botAfkAnswer() {
-  return { object: "memento.afk.bot", pick_budget: afkPickBudget, holds_held: afkHeldCount() }
+  return {
+    object: "memento.afk.bot",
+    pick_budget: afkPickBudget,
+    holds_held: afkHeldCount(),
+    usage_threshold: afkUsageThreshold,
+  }
 }
 
 /** Why a project can't be left to work, as the plugin's `afk.reason` answers it, or null. */
@@ -4522,16 +4531,35 @@ http
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/afk") {
       // The bot's own AFK row, beside the projects and naming none of them: the budget this bot
-      // works within and the holds counted against it (`afk.bot_read`, ADR 0042). A write names the
-      // budget alone, and anything else is refused the way the plugin refuses it.
+      // works within, the usage threshold beside it and the holds counted against them (`afk.bot_read`,
+      // ADR 0042, ADR 0026). A write names either or both of the two numbers, and anything else is
+      // refused the way the plugin refuses it.
       if (req.method !== "POST") return json(res, 200, botAfkAnswer())
       const body = await readBody(req)
-      const budget = body.pick_budget
-      if (!Number.isInteger(budget) || budget < 1 || budget > 10)
-        return json(res, 400, {
-          error: { message: "pick_budget must be a whole number from 1 to 10." },
-        })
-      afkPickBudget = budget
+      const named = {}
+      if ("pick_budget" in body) {
+        const budget = body.pick_budget
+        if (!Number.isInteger(budget) || budget < 1 || budget > 10)
+          return json(res, 400, {
+            error: { message: "pick_budget must be a whole number from 1 to 10." },
+          })
+        named.budget = budget
+      }
+      if ("usage_threshold" in body) {
+        const threshold = body.usage_threshold
+        if (
+          threshold !== null &&
+          (!Number.isInteger(threshold) || threshold < 50 || threshold > 100)
+        )
+          return json(res, 400, {
+            error: { message: "usage_threshold must be a whole number from 50 to 100." },
+          })
+        named.threshold = threshold
+      }
+      if (named.budget === undefined && named.threshold === undefined)
+        return json(res, 400, { error: { message: "pick_budget or usage_threshold is needed." } })
+      if (named.budget !== undefined) afkPickBudget = named.budget
+      if (named.threshold !== undefined) afkUsageThreshold = named.threshold
       return json(res, 200, botAfkAnswer())
     }
     if (
@@ -4969,14 +4997,16 @@ http
                   used_percent: Math.min(100, pct * 0.6),
                   resets_at: next(7 * 86400_000),
                   detail: null,
+                  scope: "account",
                 },
                 {
                   label: "Monthly",
                   used_percent: pct,
                   resets_at: next(30 * 86400_000),
                   detail: null,
+                  scope: "account",
                 },
-                { label: "Credits", used_percent: 0, resets_at: null, detail: "$25.00" },
+                { label: "Credits", used_percent: 0, resets_at: null, detail: "$25.00", scope: "account" },
               ]
             : [
                 {
@@ -4984,16 +5014,27 @@ http
                   used_percent: pct,
                   resets_at: next(2 * 3600_000),
                   detail: null,
+                  scope: "account",
                 },
                 {
                   label: "Weekly",
                   used_percent: Math.min(100, pct * 0.8),
                   resets_at: next(7 * 86400_000),
                   detail: null,
+                  scope: "account",
                 },
               ]
           : []
-      return json(res, 200, { object: "memento.usage", provider, plan: "Pro", windows })
+      // The window the pickup rule judges deciding, worked out the way `usage.deciding` does: a
+      // balance with room left is capacity, and otherwise the tightest window, passing over one the
+      // account marks model-scoped (ADR 0007, ADR 0026).
+      const scoped = windows.filter((window) => window.scope !== "model")
+      const balances = scoped.filter((window) => !window.resets_at)
+      const pool = balances.length ? balances : scoped
+      const deciding = balances.some((window) => window.used_percent < 100)
+        ? null
+        : ([...pool].sort((a, b) => b.used_percent - a.used_percent)[0] ?? null)
+      return json(res, 200, { object: "memento.usage", provider, plan: "Pro", windows, deciding })
     }
     const sessionTodos = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/todos$/.exec(url.pathname)
     if (PLUGIN && !profile && req.method === "GET" && sessionTodos) {

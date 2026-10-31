@@ -51,6 +51,7 @@ import logging
 import sqlite3
 import time
 import uuid
+from functools import cached_property
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Set, Tuple
 
@@ -65,9 +66,11 @@ from . import (
     sessions,
     ship,
     tasks,
+    usage,
     workflows,
 )
-from .store import connect, db_path, get_setting, put_setting
+from .profile_scope import profile_scope
+from .store import connect, db_path, get_setting, get_settings, put_setting
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +112,23 @@ PICK_BUDGET_FULL = (
     "This bot's pick budget is full ({held} of {budget} held), so no task is claimed. "
     "Let one finish, or raise the budget in the bot's Coding tab."
 )
+# The bot's usage threshold: the used share of its account at which AFK stops picking tasks up, the
+# range it may be set to, and the settings row it lives under (ADR 0026). One number for the bot,
+# because the account is one, and absent means off — a bot with no threshold never reads the account.
+LOWEST_USAGE_THRESHOLD = 50
+HIGHEST_USAGE_THRESHOLD = 100
+USAGE_THRESHOLD_KEY = "afk_usage_threshold"
+# Why a project claims nothing when its account is at or over the bot's threshold: it names the
+# window that decided, that window's own percent and the number the user set, so the hold reads as a
+# figure to wait on rather than as a failure (ADR 0026). The switch stays on, so the sheet shows it.
+USAGE_HELD = (
+    "The account's {window} window is at {percent}% used, at or above this bot's {threshold}% usage "
+    "threshold, so no task is claimed. Wait for it to reset, or raise the threshold in the bot's "
+    "Coding tab."
+)
+# A window's label as the refusal says it: core names every window, and one that names nothing is
+# still one the account answered with.
+UNNAMED_WINDOW = "usage"
 # How long a claim may sit with nothing running it before the app is told it stalled. A start makes
 # the session's worktrees first, which can take a while on a big repository, so a claim just taken is
 # given that much room; a run that ends says why at once. Every hold has its own clock, so a task
@@ -272,9 +292,12 @@ def read(
         # words a run would read rather than a blank field.
         "prompt": found["prompt"] or prompt_builder.DEFAULT_PROMPT,
         # The bot's pick budget and the holds against it, answered on the project's read so the
-        # sheet's one read draws the usage line beside the pick count (ADR 0042).
+        # sheet's one read draws the usage line beside the pick count (ADR 0042); and the bot's usage
+        # threshold beside them, so one read still answers both of the numbers a pickup is judged by
+        # (ADR 0026).
         "pick_budget": bot["pick_budget"],
         "holds_held": bot["holds_held"],
+        "usage_threshold": bot["usage_threshold"],
         # The stage the oldest task it holds is in, for the sheet's own Working row (ADR 0018):
         # None for a project holding nothing, and for a task that isn't staged. Its own name comes
         # beside it, so a workflow's own words — "Migrate", "Verify" — are what the row says.
@@ -346,6 +369,20 @@ def _pick_count(found: Dict[str, Any]) -> int:
     return max(LOWEST_PICK_COUNT, min(MAX_PICK_COUNT, value))
 
 
+def _budget_of(value: Any) -> int:
+    """A stored budget as the bot works it: five where none is usable, clamped to 1–10."""
+    if not _whole(value):
+        return DEFAULT_PICK_BUDGET
+    return max(LOWEST_PICK_BUDGET, min(HIGHEST_PICK_BUDGET, value))
+
+
+def _threshold_of(value: Any) -> Optional[int]:
+    """A stored threshold as the bot holds it: None where it is off or a row nothing could have set."""
+    if not _whole(value) or not LOWEST_USAGE_THRESHOLD <= value <= HIGHEST_USAGE_THRESHOLD:
+        return None
+    return value
+
+
 def pick_budget(hermes_home: Path) -> int:
     """How many tasks this bot's projects hold together: five unless it says, and never outside 1–10.
 
@@ -353,10 +390,31 @@ def pick_budget(hermes_home: Path) -> int:
     five the way an empty Prompt reads as the bot's default method: an old store, a row somebody
     wrote by hand and a bot that never opened its Coding tab all answer the same number (ADR 0042).
     """
-    value = get_setting(db_path(hermes_home), PICK_BUDGET_KEY)
-    if not _whole(value):
-        return DEFAULT_PICK_BUDGET
-    return max(LOWEST_PICK_BUDGET, min(HIGHEST_PICK_BUDGET, value))
+    return _budget_of(get_setting(db_path(hermes_home), PICK_BUDGET_KEY))
+
+
+def usage_threshold(hermes_home: Path) -> Optional[int]:
+    """The used share of its account at which this bot stops picking up, or None while it is off.
+
+    Absent is off — a bot that never set one behaves exactly as it did before the setting existed,
+    and never reads the account at all. A row somebody wrote by hand outside the range reads as off
+    too rather than as a clamp: a threshold nobody asked for, silently held, would stop the bot's
+    work (ADR 0026).
+    """
+    return _threshold_of(get_setting(db_path(hermes_home), USAGE_THRESHOLD_KEY))
+
+
+def set_usage_threshold(hermes_home: Path, threshold: Optional[int]) -> None:
+    """Records the bot's usage threshold, or takes it away (None is Off).
+
+    Raising it or turning it off is worth a wake — the projects it was holding back may claim now —
+    while lowering it frees nothing: a hold already taken stays until its own work is done, and every
+    pickup after this one simply asks the tighter number (ADR 0026).
+    """
+    before = usage_threshold(hermes_home)
+    put_setting(db_path(hermes_home), USAGE_THRESHOLD_KEY, threshold)
+    if before is not None and (threshold is None or threshold > before):
+        wake()
 
 
 def holds_held(hermes_home: Path) -> int:
@@ -375,13 +433,18 @@ def holds_held(hermes_home: Path) -> int:
 
 
 def bot_read(hermes_home: Path) -> Dict[str, Any]:
-    """The bot's own AFK numbers: the pick budget it works within, and how much of it is held.
+    """The bot's own AFK numbers: the pick budget, how much of it is held, and the usage threshold.
 
-    Answered by the bot-level route, and beside the project's own read so one read still carries both
-    numbers, whatever project it is: the pop-up draws no usage line for now (ADR 0042), but the wire
-    keeps answering them for whatever reads them next.
+    Answered by the bot-level route, and beside the project's own read so one read still carries every
+    number, whatever project it is. Both settings come out of one look at the store, since the sheet
+    this answers is polled.
     """
-    return {"pick_budget": pick_budget(hermes_home), "holds_held": holds_held(hermes_home)}
+    stored = get_settings(db_path(hermes_home), (PICK_BUDGET_KEY, USAGE_THRESHOLD_KEY))
+    return {
+        "pick_budget": _budget_of(stored.get(PICK_BUDGET_KEY)),
+        "holds_held": holds_held(hermes_home),
+        "usage_threshold": _threshold_of(stored.get(USAGE_THRESHOLD_KEY)),
+    }
 
 
 def _legacy(found: Dict[str, Any]) -> bool:
@@ -597,6 +660,50 @@ def budget_from(body: Dict[str, Any]) -> int:
     return value
 
 
+def threshold_from(body: Dict[str, Any]) -> Optional[int]:
+    """The usage threshold a bot write names: a whole number from 50 to 100, or None for Off.
+
+    An explicit null is the same Off an absent row reads as, so the Coding tab's Off pill is a write
+    like any other; a value outside the range is refused with a message naming both ends, like the
+    budget (ADR 0026). Whole tens are what the control offers, not what the host insists on.
+    """
+    value = body.get("usage_threshold")
+    if value is None:
+        return None
+    if not _whole(value) or not LOWEST_USAGE_THRESHOLD <= value <= HIGHEST_USAGE_THRESHOLD:
+        raise ValueError(
+            _range("usage_threshold", LOWEST_USAGE_THRESHOLD, HIGHEST_USAGE_THRESHOLD)
+        )
+    return value
+
+
+def bot_writes(body: Dict[str, Any]) -> Dict[str, Any]:
+    """The bot-level writes a body names, keyed by settings row, or ValueError.
+
+    Both of the bot's numbers ride one route, so a body may name either or both: the Coding tab
+    writes one pill's choice at a time, and a client that knows both may send them together. Nothing
+    named is a client's mistake rather than a no-op, and it says which fields it takes. Everything
+    named is validated before anything is written, so a body with one good field and one bad one
+    writes neither.
+    """
+    writes: Dict[str, Any] = {}
+    if "pick_budget" in body:
+        writes[PICK_BUDGET_KEY] = budget_from(body)
+    if "usage_threshold" in body:
+        writes[USAGE_THRESHOLD_KEY] = threshold_from(body)
+    if not writes:
+        raise ValueError("pick_budget or usage_threshold is needed.")
+    return writes
+
+
+def write_bot(hermes_home: Path, writes: Dict[str, Any]) -> None:
+    """Applies what a bot-level body named, each field through its own writer."""
+    if PICK_BUDGET_KEY in writes:
+        set_pick_budget(hermes_home, writes[PICK_BUDGET_KEY])
+    if USAGE_THRESHOLD_KEY in writes:
+        set_usage_threshold(hermes_home, writes[USAGE_THRESHOLD_KEY])
+
+
 def set_pick_budget(hermes_home: Path, budget: int) -> None:
     """Records how much AFK work the whole bot may hold at once, across all of its projects.
 
@@ -780,6 +887,71 @@ class _Budget:
         self.held = max(0, self.held - count)
 
 
+class _Account:
+    """This bot's account, read at most once per pass and only for a project that could otherwise claim.
+
+    The threshold is the bot's own number, so a bot without one never reads the account at all. The
+    read is the profile's main model's provider — the account a pickup's first run will spend, not a
+    chat's pick, not a held session's pin, and never a fallback — and its answer is reused by every
+    project of the pass, so a bot serving five projects costs one read (ADR 0026).
+
+    Anything that stops an answer — no key, no fetcher for the provider, a provider that is down, an
+    answer with no windows, a main model the host can't name — is no hold at all: a host that can't
+    read an account is not a reason to stop working, and nothing is recorded.
+    """
+
+    def __init__(self, hermes_home: Path) -> None:
+        self.hermes_home = hermes_home
+        self.threshold = usage_threshold(hermes_home)
+
+    @cached_property
+    def deciding(self) -> Optional[Dict[str, Any]]:
+        """The account's deciding window, read on first use; None where it can run or can't be read."""
+        return _deciding_window(self.hermes_home)
+
+    def refusal(self) -> Optional[str]:
+        """Why the account stops this project claiming, or None while it can run or can't be read."""
+        if self.threshold is None:
+            return None
+        window = self.deciding
+        if window is None:
+            return None
+        used = float(window.get("used_percent") or 0.0)
+        if used < self.threshold:
+            return None
+        return USAGE_HELD.format(
+            window=window.get("label") or UNNAMED_WINDOW,
+            percent=_percent(used),
+            threshold=self.threshold,
+        )
+
+
+def _percent(value: float) -> str:
+    """A used percent as a sentence says it: whole where it is whole, and no trailing zero where not."""
+    return f"{value:g}"
+
+
+def _deciding_window(hermes_home: Path) -> Optional[Dict[str, Any]]:
+    """The window that decides this bot's account, or None where it can't be read.
+
+    The provider is ``_starting_pin``'s read of the profile's main model — the account a pickup's
+    first run will spend, read here rather than from a session because a pickup happens before any
+    session exists to carry a pin. Every failure is no answer rather than a hold (ADR 0026).
+    """
+    main = _starting_pin(hermes_home)
+    if not main or not main.get("provider"):
+        return None
+    try:
+        with profile_scope(hermes_home):
+            answer = usage.fetch(main["provider"])
+    except Exception:
+        logger.debug("memento: couldn't read this bot's account usage", exc_info=True)
+        return None
+    if not answer:
+        return None
+    return answer.get("deciding")
+
+
 class Plan(NamedTuple):
     """One project's part of a pass: the tasks it could claim, oldest first, and nothing else.
 
@@ -820,6 +992,10 @@ def sweep(
     held and the switch left on, so the sheet says why; the next sweep is the next attempt, not an
     immediate one.
 
+    The bot's usage threshold, where it has one, is asked before the frontier is read: an account at
+    or over it claims nothing and records the window that decided, so a bot left alone stops before it
+    spends the last of an account it cannot finish a task on (ADR 0026).
+
     ``skills`` is the names the profile can run, read once for a whole sweep; a project whose chosen
     build or critique skill isn't among them claims nothing and records why, with its switch still
     on, so a choice the user forgot about is visible instead of silently working around it (ADR
@@ -834,6 +1010,7 @@ def sweep(
         archived,
         skills=skills,
         budget=budget,
+        account=_Account(hermes_home),
         promised=set(),
     )
     return [task for _, task in _claims(hermes_home, [plan], budget)]
@@ -847,16 +1024,21 @@ def _plan(
     *,
     skills: Optional[Iterable[str]],
     budget: _Budget,
+    account: _Account,
     promised: Set[Tuple[Any, Any]],
 ) -> Plan:
     """What one project could claim in this pass, and the reason it can claim nothing at all.
 
     Everything a claim needs is decided here but nothing is claimed: the holds this project's closed
     sessions gave back, the reason its switch can't claim, the places its pick count and the bot's
-    budget leave it, and the frontier read that fills them — one GitHub read per project per pass,
-    and none at all for a project with no free place or one the bot's budget already holds back.
-    A refusal recorded here is the project's own answer for this pass: GitHub's, a skill the bot has
-    lost, or the bot's budget being full.
+    budget leave it, the skill the bot has lost, the account the pickup would spend, and the frontier
+    read that fills them — one GitHub read per project per pass, and none at all for a project with no
+    free place or one the bot's budget, a lost skill or a spent account already holds back. A refusal
+    recorded here is the project's own answer for this pass: GitHub's, a skill the bot has lost, the
+    bot's budget being full, or its account being at the bot's usage threshold.
+
+    The account is asked only here, after the bot's own numbers and its skill, so the read is spent on
+    a project that would otherwise claim.
 
     ``promised`` is the tasks an earlier project of this pass has already planned (or claimed): two
     projects can point at one repository, so their frontiers are the same list, and a task planned
@@ -896,6 +1078,12 @@ def _plan(
         if missing is not None:
             _refuse(hermes_home, project_id, MISSING_SKILL.format(name=missing))
             return Plan(project_id, [])
+    # Beside the lost-skill branch rather than inside it: a project that runs one prompt names no
+    # skill, so a check written there would never run for it (ADR 0026).
+    spent = account.refusal()
+    if spent is not None:
+        _refuse(hermes_home, project_id, spent)
+        return Plan(project_id, [])
     try:
         ready = tasks.frontier(hermes_home, folders)
     except github.GitHubError as error:
@@ -1268,6 +1456,10 @@ def sweep_all(hermes_home: Path) -> List[Tuple[str, Dict[str, Any]]]:
     # longer has stops that project's sweep (ADR 0018), and a host that can't list its skills
     # judges nothing. Read only when a project has picked one to judge.
     skills = _profile_skills(hermes_home) if workflows.any_steps(hermes_home) else None
+    # And one look at the bot's account, for every project of the pass: the threshold is the bot's,
+    # so its account is too, and the read is made only when a project reaches the point of claiming
+    # what it has left (ADR 0026).
+    account = _Account(hermes_home)
     plans: List[Plan] = []
     # The tasks this pass has already given to a project: two projects can point at one repository,
     # so their frontiers are one list and each task is planned once.
@@ -1286,6 +1478,7 @@ def sweep_all(hermes_home: Path) -> List[Tuple[str, Dict[str, Any]]]:
                     bool(getattr(project, "archived", False)),
                     skills=skills,
                     budget=budget,
+                    account=account,
                     promised=promised,
                 )
             )

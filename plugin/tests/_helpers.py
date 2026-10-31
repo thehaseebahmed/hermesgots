@@ -273,6 +273,23 @@ def temp_hermes_home(case: unittest.TestCase) -> Path:
     return home
 
 
+def usage_window(
+    label: str, used: float, resets: Optional[str] = None, scope: Optional[str] = None
+) -> Dict[str, Any]:
+    """A usage window as ``usage.serialize`` writes it onto the wire.
+
+    ``resets`` is its reset time as ISO, or None for a balance; ``scope`` is what the account marked
+    it with. Spelled once, so a field ``serialize`` gains is one edit here rather than one per suite.
+    """
+    return {
+        "label": label,
+        "used_percent": used,
+        "resets_at": resets,
+        "detail": None,
+        "scope": scope,
+    }
+
+
 def issue_row(
     number: int,
     *,

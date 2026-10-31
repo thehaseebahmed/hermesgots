@@ -2396,17 +2396,29 @@ export interface UsageWindow {
   usedPercent: number
   resetsAt?: number
   detail?: string
+  /**
+   * What the account marked this window with: `account` for the login's own, `model` for one model
+   * family, and nothing where a plugin older than the fact answers. Carried so the app can tell a
+   * model-scoped window from an account's own without reading its label (ADR 0026).
+   */
+  scope?: string
 }
 
 export interface ProviderUsage {
   provider: string
   plan?: string
   windows: UsageWindow[]
+  /**
+   * The window the plugin's pickup rule judged deciding, or absent where none does — a balance with
+   * room left is capacity, and then nothing is judged. Answered by the host so a screen shows the
+   * figure the sweep judged instead of deriving a second copy of the rule, and a caller holding a
+   * threshold of its own compares this window's percent against it (ADR 0026).
+   */
+  deciding?: UsageWindow
   at: number
 }
 
-/**
- * The provider's account-usage windows (plan quota), from the Gots plugin's
+/** The provider's account-usage windows (plan quota), from the Gots plugin's
  * route that calls Hermes core's fetch_account_usage. Null when the provider has
  * no live windows; a failed read throws, so the caller can tell a missing plugin
  * (an older one, no route) from a busy server.
@@ -2414,39 +2426,53 @@ export interface ProviderUsage {
 export async function getProviderUsage(
   config: HermesConfig,
   provider: string,
+  signal?: AbortSignal,
 ): Promise<ProviderUsage | null> {
   const response = await request(
     `${pluginRoot(config.baseUrl)}/usage?provider=${encodeURIComponent(provider)}`,
-    { headers: headers(config) },
+    { headers: headers(config), ...(signal ? { signal } : {}) },
   )
   const body = await response.json()
   const rawWindows: unknown[] = Array.isArray(body?.windows) ? body.windows : []
   const now = Date.now()
   const windows: UsageWindow[] = []
   for (const raw of rawWindows) {
-    if (!raw || typeof raw !== "object") continue
-    const r = raw as Record<string, unknown>
-    const pct =
-      typeof r.used_percent === "number" && Number.isFinite(r.used_percent)
-        ? r.used_percent
-        : undefined
-    if (pct === undefined) continue
-    const resetIso = typeof r.resets_at === "string" && r.resets_at ? r.resets_at : undefined
-    const resetMs = resetIso ? Date.parse(resetIso) : NaN
-    if (resetIso && (!Number.isFinite(resetMs) || resetMs <= now)) continue
-    windows.push({
-      label: typeof r.label === "string" ? r.label : "",
-      usedPercent: Math.max(0, Math.min(100, pct)),
-      ...(Number.isFinite(resetMs) ? { resetsAt: resetMs } : {}),
-      ...(typeof r.detail === "string" && r.detail ? { detail: r.detail } : {}),
-    })
+    const window = parseUsageWindow(raw, now)
+    if (window) windows.push(window)
   }
   if (!windows.length) return null
+  const deciding = parseUsageWindow(body?.deciding, now)
   return {
     provider,
     ...(typeof body?.plan === "string" && body.plan ? { plan: body.plan } : {}),
     windows,
+    ...(deciding ? { deciding } : {}),
     at: now,
+  }
+}
+
+/**
+ * One window as the usage route writes it, or undefined where it isn't one — a window with no used
+ * percent, or one whose reset time has already passed, since the plugin drops those before it
+ * answers and a deciding window that isn't among the windows would read as a figure from nowhere.
+ */
+function parseUsageWindow(raw: unknown, now: number): UsageWindow | undefined {
+  if (!raw || typeof raw !== "object") return undefined
+  const r = raw as Record<string, unknown>
+  const pct =
+    typeof r.used_percent === "number" && Number.isFinite(r.used_percent)
+      ? r.used_percent
+      : undefined
+  if (pct === undefined) return undefined
+  const resetIso = typeof r.resets_at === "string" && r.resets_at ? r.resets_at : undefined
+  const resetMs = resetIso ? Date.parse(resetIso) : NaN
+  if (resetIso && (!Number.isFinite(resetMs) || resetMs <= now)) return undefined
+  return {
+    label: typeof r.label === "string" ? r.label : "",
+    usedPercent: Math.max(0, Math.min(100, pct)),
+    ...(Number.isFinite(resetMs) ? { resetsAt: resetMs } : {}),
+    ...(typeof r.detail === "string" && r.detail ? { detail: r.detail } : {}),
+    ...(typeof r.scope === "string" && r.scope ? { scope: r.scope } : {}),
   }
 }
 
@@ -3191,6 +3217,11 @@ export interface BotAfk {
   /** How many tasks it may hold across its projects, 1–10; null where the host answers none. */
   pickBudget: number | null
   /**
+   * The share of its account already used at which the bot stops picking tasks up, 50–100; null is
+   * Off, which is what a bot that never set one answers (ADR 0026).
+   */
+  usageThreshold: number | null
+  /**
    * How many tasks it holds right now, every project's holds including the stalled ones; null where
    * the host answers no count. The AFK sheet draws it against `pickBudget` — the usage those numbers
    * are about. The bot editor's Coding tab sets the budget and draws the budget alone: what a bot
@@ -3429,11 +3460,12 @@ function botAfkPath(config: HermesConfig) {
 function parseBotAfk(body: Record<string, unknown> | null): BotAfk {
   return {
     pickBudget: parseWhole(body?.pick_budget),
+    usageThreshold: parseWhole(body?.usage_threshold),
     holdsHeld: parseWhole(body?.holds_held),
   }
 }
 
-/** A bot's own AFK numbers, read from its host: its pick budget and how many tasks it holds now. */
+/** A bot's own AFK numbers, read from its host: its pick budget, its usage threshold, its holds. */
 export async function getBotAfk(config: HermesConfig, signal?: AbortSignal): Promise<BotAfk> {
   const response = await request(botAfkPath(config), { headers: headers(config), signal })
   return parseBotAfk((await response.json()) as Record<string, unknown> | null)
@@ -3448,10 +3480,26 @@ export async function setBotAfkPickBudget(
   config: HermesConfig,
   pickBudget: number,
 ): Promise<BotAfk> {
+  return writeBotAfk(config, { pick_budget: pickBudget })
+}
+
+/**
+ * The share of its account the bot stops picking up at, 50–100, or null for Off: the same
+ * bot-level route, naming the threshold alone. Off is a write like any other — the row's own first
+ * segment — and a value the host refuses leaves what it already held (ADR 0026).
+ */
+export async function setBotAfkUsageThreshold(
+  config: HermesConfig,
+  threshold: number | null,
+): Promise<BotAfk> {
+  return writeBotAfk(config, { usage_threshold: threshold })
+}
+
+async function writeBotAfk(config: HermesConfig, body: Record<string, unknown>): Promise<BotAfk> {
   const response = await request(botAfkPath(config), {
     method: "POST",
     headers: headers(config),
-    body: JSON.stringify({ pick_budget: pickBudget }),
+    body: JSON.stringify(body),
     signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
   })
   return parseBotAfk((await response.json()) as Record<string, unknown> | null)

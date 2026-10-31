@@ -35,3 +35,20 @@ export const PICK_COUNTS = Array.from(
  * a bot has more room than any one project does, since it spans them.
  */
 export const PICK_BUDGET = { least: 1, most: 10, unset: 5 } as const
+
+/**
+ * The bot's usage threshold: the share of its account already used at which AFK stops picking tasks
+ * up, and the whole tens from 50 to 100 the control offers (ADR 0026). Off is the same control's
+ * first segment rather than a switch of its own, so `null` — not a number — is the bot with no limit;
+ * a bot that never set one behaves exactly as it did before the setting existed.
+ */
+export const USAGE_THRESHOLD = { least: 50, most: 100, step: 10 } as const
+
+/** Every value that range offers, Off first, in the order the row's segments read them. */
+export const USAGE_THRESHOLDS: (number | null)[] = [
+  null,
+  ...Array.from(
+    { length: (USAGE_THRESHOLD.most - USAGE_THRESHOLD.least) / USAGE_THRESHOLD.step + 1 },
+    (_, index) => USAGE_THRESHOLD.least + index * USAGE_THRESHOLD.step,
+  ),
+]

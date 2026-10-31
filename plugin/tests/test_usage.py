@@ -16,6 +16,7 @@ from typing import Optional
 from unittest import mock
 
 from plugin import usage, usage_ollama
+from plugin.tests._helpers import usage_window
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,8 @@ class FakeWindow:
     used_percent: Optional[float] = None
     reset_at: Optional[datetime] = None
     detail: Optional[str] = None
+    # What core marks a window with: ``account`` for the login's own, ``model`` for one model family.
+    scope: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -144,6 +147,111 @@ class TestSerialize(unittest.TestCase):
 
     def test_none_snapshot(self) -> None:
         self.assertIsNone(usage.serialize(None, now=self.now))
+
+
+class TestDeciding(unittest.TestCase):
+    """The window that decides whether the account can run: ADR 0007's rule, moved into the plugin.
+
+    These fabricate serialized windows the way the route writes them, since the pickup only ever
+    reads the wire shape (ADR 0026).
+    """
+
+    future = "2026-11-01T00:00:00+00:00"
+
+    def test_the_tightest_period_decides(self) -> None:
+        windows = [
+            usage_window("Session", 12.0, self.future),
+            usage_window("Weekly", 88.0, self.future),
+            usage_window("Monthly", 41.0, self.future),
+        ]
+        self.assertEqual(usage.deciding(windows)["label"], "Weekly", "the least left is what decides")
+
+    def test_a_balance_with_room_left_is_capacity(self) -> None:
+        windows = [
+            usage_window("Monthly", 100.0, self.future),
+            usage_window("Credits", 60.0),
+        ]
+        self.assertIsNone(usage.deciding(windows), "there is still something to spend")
+
+    def test_a_spent_balance_decides(self) -> None:
+        windows = [
+            usage_window("Monthly", 100.0, self.future),
+            usage_window("Credits", 100.0),
+        ]
+        self.assertEqual(usage.deciding(windows)["label"], "Credits", "the balance is at zero too")
+
+    def test_a_model_scoped_window_is_passed_over(self) -> None:
+        windows = [
+            usage_window("Opus week", 100.0, self.future, scope="model"),
+            usage_window("Session", 30.0, self.future, scope="account"),
+        ]
+        self.assertEqual(usage.deciding(windows)["label"], "Session")
+
+    def test_an_unscoped_window_beside_a_model_one_decides(self) -> None:
+        windows = [
+            usage_window("Opus week", 100.0, self.future, scope="model"),
+            usage_window("Session", 70.0, self.future),
+        ]
+        self.assertEqual(usage.deciding(windows)["label"], "Session", "no scope is treated as deciding")
+
+    def test_only_model_scoped_windows_leave_nothing_to_judge(self) -> None:
+        windows = [usage_window("Opus week", 100.0, self.future, scope="model")]
+        self.assertIsNone(usage.deciding(windows), "the account's own windows are what decide")
+
+    def test_no_windows_is_no_answer(self) -> None:
+        self.assertIsNone(usage.deciding([]))
+
+    def test_serialize_keeps_each_windows_scope_and_answers_the_deciding_one(self) -> None:
+        snap = FakeSnapshot(
+            provider="anthropic",
+            windows=(
+                FakeWindow(
+                    label="Opus week", used_percent=100.0, reset_at=datetime(2026, 11, 1, tzinfo=timezone.utc), scope="model"
+                ),
+                FakeWindow(
+                    label="Session", used_percent=95.0, reset_at=datetime(2026, 11, 1, tzinfo=timezone.utc), scope="account"
+                ),
+            ),
+        )
+        result = usage.serialize(snap, now=datetime(2026, 10, 30, tzinfo=timezone.utc))
+        assert result is not None
+        self.assertEqual([w["scope"] for w in result["windows"]], ["model", "account"])
+        self.assertEqual(
+            result["deciding"]["label"],
+            "Session",
+            "the route answers the window the pickup judged, not one a screen derives again",
+        )
+
+    def test_serialize_answers_the_deciding_window_even_while_it_has_room(self) -> None:
+        snap = FakeSnapshot(
+            provider="anthropic",
+            windows=(
+                FakeWindow(
+                    label="Session",
+                    used_percent=40.0,
+                    reset_at=datetime(2026, 11, 1, tzinfo=timezone.utc),
+                ),
+            ),
+        )
+        result = usage.serialize(snap, now=datetime(2026, 10, 30, tzinfo=timezone.utc))
+        assert result is not None
+        self.assertEqual(result["deciding"]["label"], "Session")
+
+    def test_serialize_answers_no_deciding_window_where_a_balance_is_capacity(self) -> None:
+        snap = FakeSnapshot(
+            provider="openrouter",
+            windows=(
+                FakeWindow(
+                    label="Monthly",
+                    used_percent=100.0,
+                    reset_at=datetime(2026, 11, 1, tzinfo=timezone.utc),
+                ),
+                FakeWindow(label="Credits", used_percent=60.0),
+            ),
+        )
+        result = usage.serialize(snap, now=datetime(2026, 10, 30, tzinfo=timezone.utc))
+        assert result is not None
+        self.assertIsNone(result["deciding"], "the account can still run, so nothing is decided")
 
 
 class TestFetch(unittest.TestCase):
