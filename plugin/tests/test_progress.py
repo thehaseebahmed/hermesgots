@@ -7,15 +7,19 @@ Run: python3 -m unittest plugin.tests.test_progress -v
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from plugin import progress
 from plugin.store import db_path, put_setting
-from plugin.tests._helpers import Context, temp_hermes_home
+from plugin.tests._helpers import Context, js_constant, temp_hermes_home
 
 SESSION = "memento-abc"
 TURN = "turn-1"
 AFK_SESSION = "memento-afk-1a2b3c4d5e6f"
+FIXTURE = (
+    Path(__file__).resolve().parents[2] / "app" / "scripts" / "progress-reminder-fixture.ts"
+)
 
 
 class ProgressTest(unittest.TestCase):
@@ -154,13 +158,16 @@ class ProgressTest(unittest.TestCase):
         self.assertIn("update", blocked["message"])
         self.assertNotIn(str(progress.CALLS_BETWEEN["normal"]), blocked["message"])
 
-    def test_the_reminder_also_asks_for_the_todo_list(self) -> None:
-        # The list is the one thing the user reads mid-run, and a long silent stretch is when it
-        # drifts. The ask names no tool: the todo tool has two spellings (`todo_list`, `todo`), and
-        # the prompt's own rule states it the same way, so a bot on either finds it.
-        self.assertIn("todo list up to date", progress.REMINDER)
-        self.assertIn("where the plan has moved", progress.REMINDER)
-        self.assertNotIn("todo_list", progress.REMINDER)
+    def test_the_reminder_asks_for_the_todo_list_by_name(self) -> None:
+        # A bot told to bring its list up to date without the tool's name goes looking for one.
+        self.assertIn("`todo_list`", progress.REMINDER)
+        self.assertIn("has fallen behind", progress.REMINDER)
+
+    def test_the_reminder_says_the_reply_is_not_the_turns_last(self) -> None:
+        # Text and no tool call is Hermes's final answer; the ordering is the fix (ADR 0073).
+        note = progress.REMINDER
+        self.assertIn("this is not your last turn", note)
+        self.assertLess(note.index("this is not your last turn"), note.index("todo_list"))
 
     def test_the_reminder_says_it_is_internal(self) -> None:
         # The note is the host talking to the model, so the model is told not to mention it: a bot
@@ -240,6 +247,15 @@ class ProgressTest(unittest.TestCase):
         asked = context.hooks["pre_tool_call"]
         self.assertLess(asked.index(progress.before_tool), asked.index(sessions.before_tool))
         self.assertIn(progress.after_tool, context.hooks["post_tool_call"])
+
+
+class FixtureTest(unittest.TestCase):
+    """The app's own copy of the note, held to the plugin's."""
+
+    def test_the_fixture_holds_the_note_word_for_word(self) -> None:
+        # The device's developer view draws this note and nine app assertions compare against it, so a
+        # stale copy proves round-tripping of text no host writes.
+        self.assertEqual(js_constant(FIXTURE.read_text(), "NOTE"), progress.REMINDER)
 
 
 if __name__ == "__main__":

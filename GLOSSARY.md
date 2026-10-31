@@ -526,7 +526,7 @@ The value a Hermes setting runs at when the bot's host holds none of its own —
 _Avoid_: empty, blank, unset value, fallback
 
 **Progress reminder**:
-A note Gots puts in front of the bot asking it to say, briefly, what it has done and what is next, and to bring its todo list up to date where the plan has moved. A bot's reminders are set per bot, on its General page under Progress updates, as Off, Quiet, Normal or Chatty — and none of them promise the bot will speak: how much it says is the model's own choice. A thread draws nothing for the note, since it is the host talking to the model; the one place it is drawn is the device's own developer view, behind **Show progress reminders** in Developer settings, where it stands as a row of its own with the note behind a tap.
+A note Gots puts in front of the bot asking it to say, briefly, what it has done and what is next, then to carry on with the work rather than end there: a reply of words and no tool call ends the run. Where the list has fallen behind it also asks for it, naming `todo_list`. A bot's reminders are set per bot, on its General page under Progress updates, as Off, Quiet, Normal or Chatty — and none of them promise the bot will speak: how much it says is the model's own choice. A thread draws nothing for the note, since it is the host talking to the model; the one place it is drawn is the device's own developer view, behind **Show progress reminders** in Developer settings, where it stands as a row of its own with the note behind a tap.
 _Avoid_: nudge, check-in, status ping, verbosity, quiet mode
 
 ## Testing

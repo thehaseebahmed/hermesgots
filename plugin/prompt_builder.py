@@ -32,9 +32,12 @@ _GOTS_OPENING = (
 _DO = "## Do"
 
 # How a run carries the work and reports it, one line each. These were paragraphs under `## Tools`,
-# which named tools that were not tools: a guideline is the same in every run either way.
+# which named tools that were not tools: a guideline is the same in every run either way — but the
+# todo rule names `todo_list`, the tool `todos.equip` hands the agent, since a rule about a list with
+# no tool's name sends the model looking for one (ADR 0073).
 _DO_RULES = """- Work in checkpoints: the smallest piece whose behaviour can be seen, its checks finished before the next one starts.
-- Keep the todo list current — it is the user's view of where the work is.
+- Keep your todo list current with the `todo_list` tool — the user's view of where the work is: mark each item as it lands, and only rewrite the plan where it has moved.
+- A progress update is not the end of the turn: if work remains, carry on with the work.
 - Say what you tried when something keeps failing, before you try again.
 - Read your own diff as someone who didn't write it, before you commit it.
 - Say where you stopped and what blocks you, if you can't finish."""

@@ -14,6 +14,13 @@ how chatty the bot is, at one of four levels. That choice is recorded here, in t
 alongside the reminder this branch adds: a hook that counts a turn's silent tool calls and blocks one
 with the same ask.
 
+**Amended 2026-10-31**: the paragraph below now names the tool where it named none — `todo_list`, the
+spelling `todos.equip` puts on the agent — and both that note and the shared Do rules say the reply is
+not the turn's last, because a reply of text and no tool call is Hermes's final answer and ended the run
+half done (ADR 0073). What this page decides is unchanged: the rate is the bot's setting, the hooks are
+what ask for an update, and the prompt still asks for none — its Do rule says only that an update is not
+the end of the run.
+
 **The prompt stops asking, and the hooks are the only enforcement.** Two things asking for the same
 behaviour have to be changed together or they drift, and they answer to different clocks: the prompt
 is fixed when a session starts, so a bot's level could not change it mid-run, while the hook reads
@@ -56,10 +63,11 @@ that is asked still decides how much it says.
 
 **A reminder asks for the todo list as well as the words.** A long silent stretch is exactly when a
 bot's plan drifts from what it is doing, and that plan is the one thing the user reads on the phone
-mid-run, so the same ask carries one clause asking for the list — worded as the prompt's standing
-rule words it ("keep the todo list current"), and naming no tool, since the todo tool answers to two
-names (`todo_list` and the older `todo`) and a note that picked one would send a bot after a tool it
-hasn't got. It carries permission to leave the list alone when the plan hasn't moved. It is asked at
+mid-run, so the same ask carries one clause asking for the list — the concern the prompt's own rule
+states, and, since ADR 0073, naming the tool (`todo_list`, the spelling `todos.equip` puts on the
+agent), so neither text sends a bot looking for a name it hasn't got. It carries permission to leave
+the list alone when the plan hasn't moved, which is why the note asks only "if your todo list has fallen
+behind". It is asked at
 every level, Quiet included: the rarer the ask, the longer the drift it finds. It is asked and not
 enforced — a bot with no list is not told to invent one, and a bot that already brought the list up to
 date answers by writing the sentence about its work and nothing else — because the list is the bot's
