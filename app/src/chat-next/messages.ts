@@ -6,8 +6,10 @@ import type {
   Seam,
   Steer,
   ToolEvent,
+  Unsent,
 } from "../lib/db.ts"
 import { actionOf, spawnStamp } from "../lib/spawn.ts"
+import { NOT_SENT } from "../lib/words.ts"
 import { clip, describeCall, parseArgs, patchStats, writeStats } from "../lib/tool-calls.ts"
 import { appendThinking, type ReasoningRun } from "../lib/thinking.ts"
 import { actionOfPreview, failureReason } from "../lib/tools.ts"
@@ -55,6 +57,25 @@ export const turnId = (chat: string, index: number) => `${chat}-${index}`
 
 /** The id of the reply row a turn draws, which is where its failure and Retry are drawn. */
 export const replyId = (chat: string, index: number) => `${turnId(chat, index)}-a`
+
+/**
+ * A message a send could not get to the host, as the app's own rows draw it: the words and the
+ * files the user left in the thread, in the shape the current screen writes for one that didn't go
+ * — a user message with the error status and "Not sent" beside it (ADR 0071). The reason a host gave
+ * for a refusal is the chat's own error, so nothing here carries it.
+ */
+export function heldMessage(chat: string, row: Unsent): Message {
+  return {
+    id: row.id,
+    conversationId: chat,
+    role: "user",
+    content: row.text,
+    ...(row.attachments.length ? { attachments: row.attachments } : {}),
+    status: "error",
+    statusText: NOT_SENT,
+    createdAt: row.at,
+  }
+}
 
 /**
  * The rows with the bytes this device holds for the files they carry, found by the path the host

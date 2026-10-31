@@ -35,6 +35,7 @@ import type { Attachment, Message, ProgressReminder, ToolEvent } from "@/lib/db"
 import { compactionOf } from "@/lib/compactions"
 import type { Compaction } from "@/lib/hermes"
 import { describeActivity, formatDuration, WAITING_FOR_APPROVAL } from "@/lib/format"
+import { NOT_SENT } from "@/lib/words"
 import { COLUMN, REPLY_INSET } from "@/lib/layout"
 import { mediaCell, mediaKind, type MediaCell } from "@/lib/media-kind"
 import { attachmentSources, mediaRead, useMediaSources } from "@/lib/media-source"
@@ -343,6 +344,8 @@ function HeldActions({
   lead,
   send,
   dismiss,
+  onSend,
+  onDismiss,
 }: {
   message: Message
   /** What the row is, before the controls; a failed one is already marked beside its bubble. */
@@ -351,6 +354,8 @@ function HeldActions({
   send?: { label: string; icon: ReactNode }
   /** What the X does, for a screen reader. */
   dismiss: string
+  onSend?: (message: Message) => void
+  onDismiss?: (message: Message) => void
 }) {
   return (
     <div className="-my-2 flex items-center gap-1 text-xs text-muted-foreground">
@@ -360,11 +365,12 @@ function HeldActions({
           variant="ghost"
           size="sm"
           className="min-h-11 text-xs"
-          onClick={() =>
+          onClick={() => {
+            if (onSend) return onSend(message)
             void sendQueued(message).catch((error) =>
               toast.error(error instanceof Error ? error.message : "Couldn't send your message."),
             )
-          }
+          }}
         >
           {send.icon}
           {send.label}
@@ -375,11 +381,12 @@ function HeldActions({
         size="icon-sm"
         className="size-11"
         aria-label={dismiss}
-        onClick={() =>
+        onClick={() => {
+          if (onDismiss) return onDismiss(message)
           void removeQueued(message).catch((error) =>
             toast.error(error instanceof Error ? error.message : "Couldn't remove your message."),
           )
-        }
+        }}
       >
         <XIcon />
       </Button>
@@ -414,12 +421,20 @@ function QueuedActions({ message, paused }: { message: Message; paused: boolean 
  * didn't go — it stays dim with the mark beside it — so nothing here repeats why. Retry stays live
  * while a reply streams: it queues the message to go next, the way a send from the composer does,
  * rather than sitting there greyed out with nothing to say. */
-function FailedActions({ message }: { message: Message }) {
+function FailedActions({
+  message,
+  actions,
+}: {
+  message: Message
+  actions?: { retry: (id: string) => void; cancel: (id: string) => void }
+}) {
   return (
     <HeldActions
       message={message}
       send={{ label: "Retry", icon: <RotateCcwIcon data-icon="inline-start" /> }}
       dismiss="Cancel failed message"
+      onSend={actions && ((one) => actions.retry(one.id))}
+      onDismiss={actions && ((one) => actions.cancel(one.id))}
     />
   )
 }
@@ -437,6 +452,12 @@ interface MessageItemProps {
   subagentsInline?: boolean
   /** The host's record of this chat's compactions, which says how full the context was at each. */
   compactions?: Compaction[]
+  /**
+   * What Retry and Cancel do for a message that didn't go — one object, so a row is never half
+   * wired. A screen with its own send (chat-next) hands its own two in; every other row keeps the
+   * current screen's.
+   */
+  actions?: { retry: (id: string) => void; cancel: (id: string) => void }
 }
 
 /**
@@ -453,6 +474,7 @@ export const MessageItem = memo(function MessageItem({
   onShowSubagents,
   subagentsInline,
   compactions,
+  actions,
 }: MessageItemProps) {
   const face = useCodeFace()
   const remindersShown = useRemindersShown(Boolean(message.reminders?.length))
@@ -531,7 +553,7 @@ export const MessageItem = memo(function MessageItem({
               {failed && (
                 <AlertCircleIcon
                   role="img"
-                  aria-label="Not sent"
+                  aria-label={NOT_SENT}
                   className="size-4 shrink-0 text-destructive"
                 />
               )}
@@ -547,7 +569,7 @@ export const MessageItem = memo(function MessageItem({
             </div>
           )}
           {queued && <QueuedActions message={message} paused={paused} />}
-          {failed && <FailedActions message={message} />}
+          {failed && <FailedActions message={message} actions={actions} />}
         </MessageContent>
       </MessageRow>
     )

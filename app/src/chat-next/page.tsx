@@ -15,13 +15,17 @@ import { useSearchParams } from "react-router"
 import { Markdown } from "@/components/chat/markdown"
 import { ReminderRow } from "@/components/chat/reminder-row"
 import { stopSubagents } from "@/lib/agents"
+import { sendTimeoutMs } from "@/lib/away"
 import { connectionKey } from "@/lib/connection"
 import { usePluginFeatureOn } from "@/lib/features"
-import { SAFETY_MS } from "@/lib/freshness"
+import { READ_TIMEOUT_MS, SAFETY_MS } from "@/lib/freshness"
 import { CATCHING_ACTIVITY } from "@/lib/format"
+import { NOT_SENT } from "@/lib/words"
 import { onSessionMoved, useLive } from "@/lib/live"
 import { knownLiveRun, useLiveRunId, useHostBusy } from "@/lib/waiting"
-import { db, getSettings, type Attachment, type MessageStats, type SessionDb } from "@/lib/db"
+import { db, getSettings, type Attachment, type MessageStats, type SessionDb, type Unsent } from "@/lib/db"
+import { randomId } from "@/lib/utils"
+import { toast } from "sonner"
 
 import { equal } from "@/lib/equal"
 import { progressRemindersShown } from "@/lib/progress-reminder"
@@ -359,8 +363,6 @@ export interface ThreadViewProps {
   /** What each child was asked, by its id. */
   goals: Record<string, string>
   agents: Agent[]
-  /** The host can't be reached: what is drawn is what the device holds. */
-  away: boolean
   failure?: string
   /**
    * The first read of the thread is still out and the host hasn't been found away: what is drawn is
@@ -377,6 +379,11 @@ export interface ThreadViewProps {
   /** Offered where a compaction archived rows the reader hasn't asked for. */
   earlier?: { state: "idle" | "reading" | "failed"; load: () => void }
   queue?: { items: Queued[]; paused: boolean; act: (id: string, action: "remove" | "send") => void }
+  /**
+   * Messages a send could not get to the host, drawn at the end of the thread in the app's own
+   * not-sent shape: sent again by the user's tap, or taken back (ADR 0071).
+   */
+  unsent?: { items: Unsent[]; retry: (id: string) => void; cancel: (id: string) => void }
   /** The child whose transcript a card opened. */
   child?: { goal: string; rows: Row[]; close: () => void }
   onOpenCard: (card: Card) => void
@@ -395,18 +402,52 @@ export interface ThreadViewProps {
   send: (text: string, attachments: Attachment[]) => Promise<void>
 }
 
+function HeldRow({
+  marker,
+  text,
+  files,
+  children,
+}: {
+  marker: "unsent" | "queued"
+  text: string
+  files: string[]
+  children: ReactNode
+}) {
+  return (
+    <div
+      {...(marker === "unsent" ? { "data-unsent": true } : { "data-queued": true })}
+      className="ml-auto w-fit max-w-[85%] space-y-1 text-right"
+    >
+      {files.length ? (
+        <p data-held-files className="text-xs text-muted-foreground">
+          {files.join(", ")}
+        </p>
+      ) : null}
+      {text ? (
+        <p
+          data-held-text
+          className="rounded-2xl bg-muted px-4 py-2 text-left whitespace-pre-wrap opacity-60"
+        >
+          {text}
+        </p>
+      ) : null}
+      <div className="flex justify-end gap-3 text-xs text-muted-foreground">{children}</div>
+    </div>
+  )
+}
+
 /** chat-next's own markup: the dev route's, and the one its tests read. */
 function PlainView({
   turns,
   cards,
   goals,
-  away,
   failure,
   catchingUp,
   older,
   origin,
   earlier,
   queue,
+  unsent,
   child,
   onOpenCard,
   waiting,
@@ -414,11 +455,6 @@ function PlainView({
 }: ThreadViewProps) {
   return (
     <main className="mx-auto w-full max-w-3xl space-y-6 p-4">
-      {away ? (
-        <p data-away role="status" className="text-sm text-muted-foreground">
-          Can't reach this host right now.
-        </p>
-      ) : null}
       {failure !== undefined ? <p role="alert">{failure}</p> : null}
       {catchingUp ? (
         <p data-catching-up role="status" className="text-sm text-muted-foreground">
@@ -462,28 +498,39 @@ function PlainView({
           onOpen={onOpenCard}
         />
       ))}
+      {unsent?.items.map((row) => (
+        <HeldRow
+          key={row.id}
+          marker="unsent"
+          text={row.text}
+          files={row.attachments.map((file) => file.name)}
+        >
+          <span data-unsent-state>{NOT_SENT}</span>
+          <button type="button" data-unsent-retry onClick={() => unsent.retry(row.id)}>
+            Retry
+          </button>
+          <button
+            type="button"
+            data-unsent-cancel
+            aria-label="Cancel failed message"
+            onClick={() => unsent.cancel(row.id)}
+          >
+            Cancel
+          </button>
+        </HeldRow>
+      ))}
       {queue?.items.map((item) => (
-        <div key={item.id} data-queued className="ml-auto w-fit max-w-[85%] space-y-1 text-right">
-          {item.files.length ? (
-            <p className="text-xs text-muted-foreground">{item.files.join(", ")}</p>
-          ) : null}
-          {item.text ? (
-            <p className="rounded-2xl bg-muted px-4 py-2 text-left whitespace-pre-wrap opacity-60">
-              {item.text}
-            </p>
-          ) : null}
-          <div className="flex justify-end gap-3 text-xs text-muted-foreground">
-            <span data-queued-state>{item.error ?? "Queued"}</span>
-            {queue.paused || item.error ? (
-              <button type="button" data-send-queued onClick={() => queue.act(item.id, "send")}>
-                Send now
-              </button>
-            ) : null}
-            <button type="button" data-remove-queued onClick={() => queue.act(item.id, "remove")}>
-              Remove
+        <HeldRow key={item.id} marker="queued" text={item.text} files={item.files}>
+          <span data-queued-state>{item.error ?? "Queued"}</span>
+          {queue.paused || item.error ? (
+            <button type="button" data-send-queued onClick={() => queue.act(item.id, "send")}>
+              Send now
             </button>
-          </div>
-        </div>
+          ) : null}
+          <button type="button" data-remove-queued onClick={() => queue.act(item.id, "remove")}>
+            Remove
+          </button>
+        </HeldRow>
       ))}
       {child ? <ChildThread goal={child.goal} rows={child.rows} onClose={child.close} /> : null}
       {waiting}
@@ -549,6 +596,8 @@ interface ThreadOptions {
    * where the app reads again what the plugin holds for the chat beside its transcript.
    */
   onSettled?: (reason: "opened" | "turn", thread: { turns: number }) => void
+  /** Told whether the host can be reached, which is the chat header's word while it cannot. */
+  onAway?: (away: boolean) => void
   /** The app's own composer; without it, a bare text box. */
   Composer?: ComponentType<{ controls: ComposerControls }>
   /** What draws the prompt a run is held up on; without it, chat-next's own bare cards. */
@@ -593,6 +642,7 @@ export function ChatNextThread({
   steerTurn,
   triageTurn,
   onSettled,
+  onAway,
   Composer,
   Prompt,
   View = PlainView,
@@ -642,14 +692,13 @@ export function ChatNextThread({
   const olderRun = useRef(0)
   const olderOn = useRef(false)
   const olderFailed = useRef(false)
-  // A host that cannot be reached is away, not failing: the chat is what the device holds, and the
-  // next read that gets an answer says it is back.
   const [away, setAway] = useState(false)
   const ready = Boolean(server && key && session)
   // A read begun before a send or a joined run is stale and does not land. Reads of the transcript
   // run one at a time, and a request that comes while one is out waits for it and is answered by
   // one more read after it, so a read that takes longer than the poll interval still lands.
   const reads = useRef(0)
+  const failureSaid = useRef<string>(undefined)
   const reading = useRef<Promise<void> | null>(null)
   const queued = useRef<{ final: boolean } | null>(null)
   const alive = useRef(new AbortController())
@@ -660,6 +709,11 @@ export function ChatNextThread({
   // Settles once the page's first read of the transcript has landed (or failed): a run joined before
   // that would be replayed over a thread with no turn to put it in.
   const firstRows = useRef<{ promise: Promise<void>; resolve: () => void }>(null)
+  useEffect(() => {
+    onAway?.(away)
+  }, [away, onAway])
+  // A page that goes takes its word with it: the route draws one header for whichever chat follows.
+  useEffect(() => () => onAway?.(false), [onAway])
 
   /** Drops the older read in flight, if any: what it lands would go above rows it was not read for. */
   const stopOlder = useCallback(() => {
@@ -746,6 +800,7 @@ export function ChatNextThread({
             : await readNewest({ server, key }, session, alive.current.signal, store.get().rows)
           if (mine === reads.current) {
             setAway(false)
+            failureSaid.current = undefined
             // Rows that replace the ones held make a page in flight for them stale.
             if (read.more !== undefined) stopOlder()
             // A write the device refuses leaves its copy behind, as it does for every event: the next
@@ -772,9 +827,13 @@ export function ChatNextThread({
           }
         } catch (error) {
           if (alive.current.signal.aborted || mine !== reads.current) return
-          // A host that answered says what is wrong; one that did not is away.
           if (error instanceof HostAway) setAway(true)
-          else dispatch(failure(error))
+          else {
+            const said = error instanceof Error ? error.message : String(error)
+            if (failureSaid.current !== said) toast.error(said)
+            failureSaid.current = said
+            dispatch({ type: "read-failed" })
+          }
         } finally {
           firstRows.current?.resolve()
           reading.current = null
@@ -1150,25 +1209,34 @@ export function ChatNextThread({
   }
 
   /**
-   * Sends a message as a turn. A send that never reached the host leaves nothing in the thread and
-   * rejects, so the composer that sent it gets the words back.
+   * Sends a message as a turn. A send that does not reach the host keeps the message in the thread,
+   * in the app's not-sent shape, with the files it was sent with — `retrying` is the row it is, sent
+   * again — so the words never go back to the field and nothing has to be typed twice (ADR 0071).
    */
-  async function sendTurn(text: string, attachments: Attachment[] = []) {
+  async function sendTurn(text: string, attachments: Attachment[] = [], retrying?: Unsent) {
     const words = text.trim()
     if ((!words && !attachments.length) || !server || !key || !session) return
+    const at = retrying?.at ?? Date.now()
+    // The message's own id is the run's idempotency key too, so a send that timed out but reached
+    // the host is answered by the run it started rather than run a second time.
+    const id = retrying?.id ?? randomId()
     reads.current++
     streaming.current = true
-    dispatch({
-      type: "sent",
+    const drawn = {
+      type: "sent" as const,
       user: words,
-      at: Date.now(),
+      at,
       files: attachments.map(({ name, type, size, image }) => ({
         name,
         type,
         size,
         image: Boolean(image),
       })),
-    })
+    }
+    // A fresh send is drawn in the flow the moment it goes, as the thread has always drawn it; a
+    // message sent again from its row keeps the row until the host takes it, so a retry that fails
+    // again leaves it exactly where it was (ADR 0071).
+    if (!retrying) dispatch(drawn)
     let prepared: PreparedTurn | undefined
     let run: string
     try {
@@ -1179,27 +1247,34 @@ export function ChatNextThread({
         return dispatch({ type: "moved" })
       }
       prepared = prepareTurn ? await prepareTurn(words, kept) : undefined
+      const posting = { signal: alive.current.signal, timeoutMs: sendTimeoutMs(away, READ_TIMEOUT_MS) }
       run = prepared
-        ? await postRun({ server, key }, prepared.body, prepared.key, alive.current.signal)
-        : await startRun({ server, key }, session, words, alive.current.signal)
+        ? await postRun({ server, key }, prepared.body, id, posting)
+        : await startRun({ server, key }, session, words, id, posting)
     } catch (error) {
       streaming.current = false
       prepared?.settled(false)
       if (alive.current.signal.aborted) return
       // A run held on a prompt takes no new turn, and the form is what answers it: asking also puts
-      // the form up, for a page that had not read the wait when the send went out. Any other refusal
-      // keeps the host's own words.
-      const waiting = error instanceof HostRefused ? await askWait() : false
-      const said = waiting
-        ? WAITING_ON_ANSWER
-        : error instanceof Error
-          ? error.message
-          : String(error)
-      dispatch({ type: "unsent", error: said })
-      const failure = error instanceof Error ? error : new Error(said)
-      failure.message = said
-      throw failure
+      // the form up, for a page that had not read the wait when the send went out.
+      if (error instanceof HostRefused && (await askWait())) {
+        dispatch({ type: "unsent", row: { id, text: words, at, attachments }, error: WAITING_ON_ANSWER })
+        return
+      }
+      // A send nothing answered keeps its words and files in the row, and the reads are what say the
+      // host is away. The files go as the host saved them where it already had them, so sending it
+      // again uploads nothing twice; a refusal the host words is the chat's own error instead.
+      if (error instanceof HostAway) {
+        dispatch({ type: "unsent", row: { id, text: words, at, attachments: prepared?.sent ?? attachments } })
+        return
+      }
+      const said = error instanceof Error ? error.message : String(error)
+      dispatch({ type: "unsent", row: { id, text: words, at, attachments: prepared?.sent ?? attachments }, error: said })
+      return
     }
+    // The host has taken it: only now does the row leave, and the turn the thread follows draws the
+    // message in its place.
+    if (retrying) dispatch({ ...drawn, replaces: retrying.id })
     prepared?.settled(true)
     void follow(run)
   }
@@ -1207,8 +1282,32 @@ export function ChatNextThread({
   async function send() {
     const text = draft
     setDraft("")
-    await sendTurn(text).catch(() => setDraft((now) => now || text))
+    await sendTurn(text)
   }
+
+  function retryUnsent(id: string) {
+    const row = store.get().unsent?.find((one) => one.id === id)
+    if (row) void sendTurn(row.text, row.attachments, row)
+  }
+
+  const latestHeld = useRef(retryUnsent)
+  useEffect(() => {
+    latestHeld.current = retryUnsent
+  })
+  const heldActions = useMemo(
+    () => ({
+      retry: (id: string) => latestHeld.current(id),
+      cancel: (id: string) => void dispatch({ type: "cancelled", id }),
+    }),
+    [dispatch],
+  )
+  const unsentView = useMemo(
+    () =>
+      held?.unsent?.length
+        ? { items: held.unsent, retry: heldActions.retry, cancel: heldActions.cancel }
+        : undefined,
+    [held?.unsent, heldActions],
+  )
 
   // Mid-reply too, a Main's message is triaged first: one for another thread goes there at once,
   // and the rest queue or steer behind the reply.
@@ -1327,7 +1426,7 @@ export function ChatNextThread({
         onChoose={(choice) => void answer(doing.waiting as Waiting, choice)}
       />
     ) : null
-  const composer = away ? null : Composer ? (
+  const composer = Composer ? (
     <Composer
       controls={{
         // A run the host works that this page has not joined yet is a turn running all the same.
@@ -1375,8 +1474,9 @@ export function ChatNextThread({
       cards={cards}
       goals={goals}
       agents={agents}
-      away={away}
-      failure={doing.status === "failed" ? (doing.error ?? "") : undefined}
+      // A refusal's reason is the chat's own error: said above the thread until the next send clears
+      // it, never repeated under the row it kept (that row says "Not sent" alone, ADR 0071).
+      failure={doing.error}
       catchingUp={doing.status === "loading" && !away}
       older={older === "idle" ? undefined : { state: older, retry }}
       origin={origin}
@@ -1391,6 +1491,7 @@ export function ChatNextThread({
           ? { items: held.queue.items, paused: held.queue.paused, act: onQueued }
           : undefined
       }
+      unsent={unsentView}
       child={
         opened && openedRows?.id === opened.id
           ? { goal: opened.goal, rows: openedRows.rows, close: () => setOpened(undefined) }

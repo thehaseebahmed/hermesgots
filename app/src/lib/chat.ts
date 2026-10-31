@@ -47,6 +47,7 @@ import { attachmentsText, splitAttachments } from "@/lib/attachment-text"
 import { progressReminderNote, progressRemindersShown } from "@/lib/progress-reminder"
 import { measureReply } from "@/lib/reply-stats"
 import { wireContent } from "@/lib/attachments"
+import { NOT_SENT } from "@/lib/words"
 import { refreshContext } from "@/lib/context"
 import { refreshChatProviderUsage } from "@/lib/provider-usage"
 import {
@@ -1526,7 +1527,7 @@ export async function settleTriaging(conversationId: string) {
     .where("conversationId")
     .equals(conversationId)
     .filter((m) => m.status === "triaging")
-    .modify({ status: "error", statusText: "Not sent" })
+    .modify({ status: "error", statusText: NOT_SENT })
 }
 
 /** Holds a message until the current reply finishes, and answers the row it added. */

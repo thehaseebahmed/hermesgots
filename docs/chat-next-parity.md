@@ -25,6 +25,8 @@ What the current chat screen (`CurrentChatPage` in `app/src/routes/chat.tsx`, ov
 | Break reminders | A streaming reply counts as background-safe work until it waits on the user or its session closes |
 | Dictation's hint | `dictationHint` (title, project, repos) |
 | This device's own photos | `sentFiles` (Dexie 29) keeps the bytes of what was sent by the path the host saved it at, so they draw with the host away |
+| A message the host never took | It stays at the end of the thread in the app's own failed row (`MessageItem`), dimmed and marked "Not sent" with Retry and Cancel, from the device store (`SessionState.unsent`) until it is sent or taken back; Retry sends its words and files again (ADR 0071) |
+| Away | The chat header's subtitle, in one of two wordings (`away.ts`), instead of the thread's notice; the composer stays, and a send made while away is given a few seconds rather than a read's fifteen. A read the host answers with an error is a toast, as elsewhere in the app, and draws nothing in the thread (ADR 0071) |
 
 ## Decided
 

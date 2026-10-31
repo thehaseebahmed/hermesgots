@@ -153,7 +153,7 @@ test("the app's composer sends a turn the way every send goes, and pins the chat
   })
 })
 
-test("a send the host refuses hands the words back and pins nothing", async () => {
+test("a send the host refuses keeps the message in the thread, marked, and pins nothing", async () => {
   await onChatNext("c-refused")
   const answer = globalThis.fetch
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
@@ -162,11 +162,52 @@ test("a send the host refuses hands the words back and pins nothing", async () =
       : answer(input, init)) as typeof fetch
   await mount(chatScreen("c-refused"), async () => {
     await sendFromComposer("Will this go?")
-    await until(() => composerField()?.value === "Will this go?", "the words are back in the field")
-    // The thread drops the optimistic row through its store, a beat after the field has the words.
-    await until(() => requests().length === 0, "and nothing is left drawn as sent")
+    await until(
+      () => Boolean(find('[data-unsent] [aria-label="Not sent"]')),
+      "the message is kept in the thread, marked not sent",
+    )
+    assert.equal(
+      find('[data-unsent] [data-slot="bubble-content"]')?.textContent,
+      "Will this go?",
+      "and is still drawn where it was sent, in its own bubble",
+    )
+    assert.equal(composerField()?.value, "", "the words are not handed back to the field")
+    assert.ok(find('[data-unsent] button[aria-label="Cancel failed message"]'), "it can be taken back")
+    assert.ok(
+      findAll('[data-unsent] button').some((one) => one.textContent?.includes("Retry")),
+      "and sent again from where it stands",
+    )
     assert.equal((await db.conversations.get("c-refused"))?.modelChoice, undefined)
   })
+})
+
+test("a host that isn't answering is the header's word, and the composer stays", async () => {
+  await onChatNext("c-away")
+  const answer = globalThis.fetch
+  globalThis.fetch = (async () => {
+    throw new TypeError("Failed to fetch")
+  }) as typeof fetch
+  try {
+    await mount(chatScreen("c-away"), async () => {
+      await until(
+        () => find('[data-slot="header-line"]')?.textContent === "This host isn't answering",
+        "the header to name the host",
+      )
+      assert.ok(find('textarea[aria-label="Message"]'), "the composer is still drawn")
+      assert.equal(find('[data-chat-next] [data-away]'), null, "and no notice in the thread")
+      assert.equal(find('[data-chat-next] [role="alert"]'), null, "nor a banner about the host")
+
+      Object.defineProperty(window.navigator, "onLine", { configurable: true, get: () => false })
+      await act(async () => void window.dispatchEvent(new Event("offline")))
+      await until(
+        () => find('[data-slot="header-line"]')?.textContent === "You're offline",
+        "the header to name the device",
+      )
+    })
+  } finally {
+    globalThis.fetch = answer
+    Object.defineProperty(window.navigator, "onLine", { configurable: true, get: () => true })
+  }
 })
 
 test("Stop stops the run the thread is following", async () => {

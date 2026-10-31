@@ -782,6 +782,20 @@ export interface SessionState {
   stats?: Record<string, MessageStats>
   /** What the plugin holds for the session, as it last listed it. */
   queue?: { items: Queued[]; paused: boolean }
+  /** Messages a send could not get to the host, kept until one is sent again or taken back. */
+  unsent?: Unsent[]
+}
+
+/**
+ * A message a send could not get to the host (ADR 0071): the words, the files that went with them,
+ * and when they were first sent — which is where it stands in the thread. It belongs to this
+ * device: never written to the host's transcript, and never synced.
+ */
+export interface Unsent {
+  id: string
+  text: string
+  attachments: Attachment[]
+  at: number
 }
 
 /** A streamed turn: a new one after the transcript's, or the transcript's last one drawn again. */
