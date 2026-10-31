@@ -288,6 +288,42 @@ def mirror_for_profiles(app: Any, web: Any) -> None:
         )
 
 
+async def repair_labelled_sources(homes: List[Path]) -> List[Path]:
+    """Puts each home's relabelled sessions back on the API source before a turn can arrive.
+
+    Answers the homes that could not be repaired — a store another writer held at boot — so the
+    caller can try them again. See ``sessions.heal_sources`` for why this cannot wait.
+    """
+    failed: List[Path] = []
+    for home in homes or ():
+        try:
+            moved = await asyncio.to_thread(sessions.heal_sources, home)
+        except Exception:
+            logger.warning("memento: couldn't repair session labels in %s", home, exc_info=True)
+            failed.append(home)
+            continue
+        if moved is None:
+            failed.append(home)
+        elif moved:
+            logger.info("memento: put %d relabelled session(s) back on the API source in %s", moved, home)
+    return failed
+
+
+async def retry_labelled_sources(homes: List[Path]) -> None:
+    """Two more tries at a repair a locked store refused, then a line an operator can act on: a
+    chat stays un-runnable by the API edge until one of them lands."""
+    for wait in (5, 20):
+        await asyncio.sleep(wait)
+        homes = await repair_labelled_sources(homes)
+        if not homes:
+            return
+    logger.error(
+        "memento: couldn't repair relabelled sessions in %s; those chats keep answering "
+        "permission_denied until a restart heals them",
+        ", ".join(str(home) for home in homes),
+    )
+
+
 def _wire_api_server(app: Any, adapter: Any) -> None:
     from aiohttp import web
 
@@ -322,6 +358,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             await asyncio.to_thread(repos.resume, home)
         except Exception:
             logger.debug("memento: couldn't resume project clones", exc_info=True)
+        # A chat an older plugin relabelled is un-runnable until these rows are repaired; see
+        # sessions.heal_sources.
+        failed = await repair_labelled_sources(link.served_homes(adapter))
         tasks = [
             asyncio.ensure_future(cleanup.run_daily(adapter, home)),
             # Linked profiles keep their bot record current in the Gots registry; see link.py.
@@ -342,6 +381,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             # A stopped turn takes the subagents it started with it; see delegation.py.
             asyncio.ensure_future(delegation.watch_stops(adapter)),
         ]
+        if failed:
+            # A store another writer held at boot: try again rather than leave those chats dead.
+            tasks.append(asyncio.ensure_future(retry_labelled_sources(failed)))
         # A chat's title lands after the turn that caused it, sometimes long after the app was put
         # away; it is noted for every device, listening or not; see stream.py.
         open_db = getattr(adapter, "_ensure_session_db_async", None)
@@ -356,7 +398,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     try:
         app.cleanup_ctx.append(daily_cleanup)
     except RuntimeError:
+        # Loaded into a server that is already taking turns: no startup pass, but the rows still
+        # have to be back before the next one, so repair them from here.
         logger.warning("memento: the API server already started; no daily cleanup until restart")
+        asyncio.ensure_future(repair_labelled_sources(link.served_homes(adapter)))
 
     def unauthorized(request: "web.Request"):
         # The API server's own Bearer check, so the routes take the same key as /v1. Fail closed if
@@ -412,7 +457,6 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 "version": VERSION,
                 "features": [
                     "cron_runs",
-                    "session_label",
                     "chats",
                     "draft_text",
                     "context",
@@ -546,26 +590,21 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return web.json_response({"object": "cron_runs", "jobs": jobs})
 
     async def label_session(request: "web.Request") -> "web.Response":
-        """Answers a session's own source; it no longer relabels the row.
+        """Answers with the API server's own source, and touches nothing.
 
-        This route used to write ``Gots``/``Gots Code`` into ``sessions.source`` so the dashboard
-        showed it. Hermes's session authority reads that column as the surface that OWNS the
-        session, and refuses an API turn onto any other (409 ``permission_denied``), so a labelled
-        chat could not be continued from its next message on — ``sessions.heal_sources`` puts those
-        rows back. The route stays so an app that still calls it gets an answer.
+        This route used to relabel the session ``Gots`` (``Gots Code`` for a project session) so the
+        Hermes dashboard showed that name. Hermes's session authority reads ``source`` as the surface
+        that OWNS the session and refuses an API turn onto any other, so a labelled chat answered
+        ``permission_denied`` from its next message on; ``sessions.heal_sources`` puts those rows back
+        before the server accepts a turn. It stays because a shipped app still calls it and ignores
+        the answer.
         """
         denied = unauthorized(request)
         if denied is not None:
             return denied
-        session_id = request.match_info["session_id"]
-        open_db = getattr(adapter, "_ensure_session_db_async", None)
-        db = await open_db() if callable(open_db) else None
-        if db is None or not callable(getattr(db, "_execute_write", None)):
-            return _error(web, "Session database unavailable", 503)
-        source = await asyncio.to_thread(sessions.source_of, db, session_id)
-        if not source:
-            return _error(web, "Session not found", 404)
-        return web.json_response({"id": session_id, "source": source})
+        return web.json_response(
+            {"id": request.match_info["session_id"], "source": sessions.API_SOURCE}
+        )
 
     async def set_host_model(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)

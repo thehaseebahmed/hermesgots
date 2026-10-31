@@ -170,7 +170,7 @@ pnpm mock
 | GET | `/api/plugins/memento/projects/{id}/tasks` | The project's tasks as AFK reads them: a project left to work has claimed its oldest (265) so it is claimed and only 266 is ready; otherwise two ready (265, 266), one claimed (267, `mock-user`), one blocked by 267; empty groups while the project clones, 409 without a GitHub account |
 | GET/POST | `/api/plugins/memento/projects/{id}/afk` | AFK's switch for the project: `{ on, reason, task, refusal }`, kept per project in the mock so a reload reads it back, with the task AFK holds while on (`task`, its oldest ready one, on the read after the switch rather than in the POST's own answer) and no refusal; that same read publishes the session the sweep starts for it — a chat record marked `afk` and its transcript's first row, `Title: …`, `Description:`, the body and `[Issue #265](<url>)` — so Code shows the AFK session and opening it shows the issue itself; `POST { on }` writes it, 409 with the reason where the project can't be worked — no repository, no GitHub account, or archived — and archiving or deleting the project turns it off |
 | GET/POST | `/api/plugins/memento/chats` | Chat list sync (newer record wins) |
-| POST | `/api/plugins/memento/sessions/{id}/label` | Mark session as Gots-owned |
+| POST | `/api/plugins/memento/sessions/{id}/label` | Answer a chat's own source; an older app still asks, nothing is relabelled |
 | GET | `/api/plugins/memento/sessions/{id}/context` | Latest model call prompt/output tokens |
 | GET | `/api/plugins/memento/sessions/{id}/todos` | Todo list from transcript |
 | POST | `/api/plugins/memento/runs/{id}/clarify` | Answer clarify questions |

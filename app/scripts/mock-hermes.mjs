@@ -3874,7 +3874,6 @@ http
         version: PLUGIN_VERSION,
         features: [
           "cron_runs",
-          "session_label",
           "chats",
           "draft_text",
           "context",
@@ -5048,8 +5047,6 @@ http
     const sessionLabel = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/label$/.exec(url.pathname)
     if (PLUGIN && !profile && req.method === "POST" && sessionLabel) {
       const id = decodeURIComponent(sessionLabel[1])
-      if (!chatTitles.has(id)) return json(res, 404, { error: { message: "Session not found" } })
-      // An older app still asks; the answer is the row's own source, and nothing is relabelled.
       return json(res, 200, { id, source: "api_server" })
     }
     const sessionContext = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/context$/.exec(
