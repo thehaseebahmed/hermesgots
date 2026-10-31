@@ -255,6 +255,15 @@ def _hearing_prompt(path: Path) -> bool:
     return _stored(lambda: speech.read_hearing(path), False, "the hearing prompt setting")
 
 
+def _dictation_info(path: Optional[Path]) -> Dict[str, Any]:
+    """What this bot can dictate, with the bound its Cleanup level earns it.
+
+    ``path`` is resolved on the loop, where the request's profile is scoped; the level's store read
+    and the rest run here, off it.
+    """
+    return dictation.info(_cleanup_level(path) if path is not None else None)
+
+
 def mirror_for_profiles(app: Any, web: Any) -> None:
     """Serve every route again at ``PREFIX/p/{profile}/...`` for bots at ``/p/<profile>``.
 
@@ -435,6 +444,13 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return None
         return lambda run_id: owners.get(run_id) == mine
 
+    def _dictation_store() -> Optional[Path]:
+        try:
+            return store_path()
+        except Exception:
+            logger.debug("memento: no dictation store to read a level from", exc_info=True)
+            return None
+
     async def info(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -561,7 +577,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 "clarify": asks,
                 "todo_tool": todo_tool,
                 "hooks": hooks_live(),
-                "dictation": await asyncio.to_thread(dictation.info),
+                # Whether a bot can dictate, by whom, and the one bound its bar holds to.
+                "dictation": await asyncio.to_thread(_dictation_info, _dictation_store()),
                 "research": {
                     "ready": research.available() is None,
                     "reason": research.available(),
@@ -1941,16 +1958,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             {"object": "memento.attachment", "name": saved.name, "path": str(saved), "size": len(data)}
         )
 
-    # One take at a time per profile: a vendor upload can hold its slot for minutes.
-    dictating: Dict[str, "asyncio.Lock"] = {}
-
-    def dictating_lock(key: str) -> "asyncio.Lock":
-        lock = dictating.get(key)
-        if lock is None:
-            lock = dictating[key] = asyncio.Lock()
-        return lock
-
-    async def dictate(request: "web.Request") -> "web.Response":
+    async def dictation_piece(request: "web.Request") -> "web.Response":
+        """One Piece of a take, uploaded blind: the host records it and answers with no words."""
         denied = unauthorized(request)
         if denied is not None:
             return denied
@@ -1958,39 +1967,35 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             data = await request.read()
         except web.HTTPRequestEntityTooLarge:
             return _error(web, "The recording is too long.", 413)
-        if not data:
-            return _error(web, "The recording is empty.", 400)
-        if len(data) > dictation.MAX_BYTES:
-            return _error(web, "The recording is too long.", 413)
-        # A bot whose Hearing prompt is not sent decodes from the audio alone: `transcribe` composes
-        # no prompt on that flag, so what the query carries costs nothing (ADR 0067).
+        try:
+            index = int(request.query.get("index", ""))
+            ms = int(request.query.get("ms") or 0)
+        except ValueError:
+            index = -1
+            ms = 0
+        if index < 0 or ms < 0:
+            return _error(web, "A Piece needs its index in the take.", 400)
+        # The read is handed over rather than made: a take's Hearing prompt is fixed at its first Piece.
         path = store_path()
-        hearing = await asyncio.to_thread(_hearing_prompt, path)
-        hint = dictation.clean_hint(request.query.get("hint"))
-        context = dictation.clean_context(request.query.get("context"))
-        vocabulary = dictation.clean_vocabulary(request.query.getall("vocabulary", []))
-        first = request.query.get("first") == "1"
-        last = request.query.get("last") == "1"
-        async with dictating_lock(str(path)):
-            try:
-                result = await asyncio.to_thread(
-                    dictation.transcribe,
-                    data,
-                    request.headers.get("content-type"),
-                    hint,
-                    context,
-                    vocabulary,
-                    hearing=hearing,
-                    first=first,
-                    last=last,
-                    profile=path,
-                )
-            except dictation.DictationError as error:
-                return _error(web, str(error), error.status)
-            except Exception:
-                logger.warning("memento: dictation failed", exc_info=True)
-                return _error(web, "Transcription failed.", 502)
-        return web.json_response({"object": "memento.dictation", **result})
+        try:
+            recorded = await asyncio.to_thread(
+                dictation.upload,
+                path,
+                request.match_info["take"],
+                index,
+                data,
+                request.headers.get("content-type"),
+                hint=dictation.clean_hint(request.query.get("hint")),
+                vocabulary=dictation.clean_vocabulary(request.query.getall("vocabulary", [])),
+                hearing=lambda: _hearing_prompt(path),
+                ms=ms,
+            )
+        except dictation.DictationError as error:
+            return _error(web, str(error), error.status)
+        except Exception:
+            logger.warning("memento: couldn't take a dictation Piece", exc_info=True)
+            return _error(web, "Transcription failed.", 502)
+        return web.json_response({"object": "memento.dictation_piece", **recorded}, status=202)
 
     async def warm_dictation(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1999,34 +2004,49 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         result = await asyncio.to_thread(dictation.warm)
         return web.json_response({"object": "memento.dictation_warm", **result})
 
-    async def clean_dictation(request: "web.Request") -> "web.Response":
-        """A finished dictation tidied at the bot's cleanup level (ADR 0038, ADR 0066)."""
+    async def confirm_dictation(request: "web.Request") -> "web.Response":
+        """The one call that carries a take's words: what was heard, tidied at the bot's level."""
         denied = unauthorized(request)
         if denied is not None:
             return denied
         body = await json_body(request)
         if body is None:
             return _error(web, "Body must be a JSON object", 400)
-        vocabulary = dictation.clean_vocabulary(body.get("vocabulary"))
-        hint = dictation.clean_hint(body.get("hint"))
         path = store_path()
-        cleanup_model = await asyncio.to_thread(_cleanup_pick, path)
-        level = await asyncio.to_thread(_cleanup_level, path)
+        # The level and the pick are independent, and each is its own store open: read them together.
+        level, cleanup_model = await asyncio.to_thread(
+            lambda: (_cleanup_level(path), _cleanup_pick(path))
+        )
         try:
             result = await asyncio.to_thread(
-                dictation_cleanup.finish,
-                body.get("text"),
-                vocabulary,
-                hint=hint,
-                prompt=dictation_cleanup.DictationCleanupPrompt.ForLevel(level).Build(),
+                dictation.confirm,
+                path,
+                request.match_info["take"],
+                body.get("pieces"),
+                level=level,
                 model=cleanup_model,
+            )
+        except dictation.MissingPieces as error:
+            # The app sends exactly these once more and confirms again; a second miss fails the take.
+            return web.json_response(
+                {"error": {"message": str(error)}, "missing": error.missing}, status=409
             )
         except dictation.DictationError as error:
             return _error(web, str(error), error.status)
         except Exception:
-            logger.warning("memento: couldn't tidy a dictation", exc_info=True)
-            return _error(web, "Couldn't tidy the dictation.", 502)
-        return web.json_response({"object": "memento.dictation_cleanup", **result})
+            logger.warning("memento: couldn't answer a dictation take", exc_info=True)
+            return _error(web, "Transcription failed.", 502)
+        return web.json_response({"object": "memento.dictation", **result})
+
+    async def cancel_dictation(request: "web.Request") -> "web.Response":
+        """Takes a take off the host at once, rather than leaving its audio to expire."""
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        removed = await asyncio.to_thread(
+            dictation.cancel, store_path(), request.match_info["take"]
+        )
+        return web.json_response({"object": "memento.dictation_cancelled", "removed": bool(removed)})
 
     async def served_file(
         request: "web.Request", resolve: Any, allowed: Any = None
@@ -2118,9 +2138,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         )
 
     app.router.add_get(f"{PREFIX}/library/file", serve_library_file)
-    app.router.add_post(f"{PREFIX}/dictation", dictate)
     app.router.add_post(f"{PREFIX}/dictation/warm", warm_dictation)
-    app.router.add_post(f"{PREFIX}/dictation/cleanup", clean_dictation)
+    # A take's three verbs (ADR 0074): a Piece goes up blind, the Confirm answers for the whole take,
+    # and Cancel takes its audio away at once.
+    app.router.add_post(f"{PREFIX}/dictation/{{take}}/piece", dictation_piece)
+    app.router.add_post(f"{PREFIX}/dictation/{{take}}/confirm", confirm_dictation)
+    app.router.add_delete(f"{PREFIX}/dictation/{{take}}", cancel_dictation)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/attachments", upload_attachment)
     app.router.add_get(f"{PREFIX}/runs/live", live_runs)
     app.router.add_get(f"{PREFIX}/events", stream_events)

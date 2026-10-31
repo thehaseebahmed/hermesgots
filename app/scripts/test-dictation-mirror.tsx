@@ -34,6 +34,10 @@ type Held = {
   id: string
   text: string
   heard?: string
+  level?: string
+  cleaned?: boolean
+  provider?: string
+  model?: string
   words: number
   ms: number
   at: number
@@ -332,7 +336,11 @@ test("a take is written with the words its host heard, on the device and on the 
   const server = host()
   const { profile } = await fresh()
 
-  await writeDictation(serverConfig(profile), "Tidy words.", 4_200, "  um tidy words ")
+  await writeDictation(serverConfig(profile), {
+    text: "Tidy words.",
+    heard: "  um tidy words ",
+    ms: 4_200,
+  })
   await until(async () => (await mirror()).length === 1, "the mirror's row")
   const written = (await mirror())[0]
   assert.equal(written?.text, "Tidy words.")
@@ -351,7 +359,7 @@ test("a take with no words as heard is written without them", async () => {
   const server = host()
   const { profile } = await fresh()
 
-  await writeDictation(serverConfig(profile), "Only what landed.", 900)
+  await writeDictation(serverConfig(profile), { text: "Only what landed.", heard: "", ms: 900 })
   await until(async () => server.posts.length === 1, "the post")
 
   assert.equal("heard" in ((await mirror())[0] ?? {}), false)
@@ -362,7 +370,11 @@ test("a host that keeps no words as heard takes them off the mirror's copy", asy
   const server = host({ old: true })
   const { profile } = await fresh()
 
-  await writeDictation(serverConfig(profile), "Tidy words.", 4_200, "um tidy words")
+  await writeDictation(serverConfig(profile), {
+    text: "Tidy words.",
+    heard: "um tidy words",
+    ms: 4_200,
+  })
   await until(async () => server.posts.length === 1, "the post")
   await until(
     async () => (await mirror())[0]?.heard === undefined,
@@ -372,4 +384,86 @@ test("a host that keeps no words as heard takes them off the mirror's copy", asy
   const kept = (await mirror())[0]
   assert.equal(kept?.text, "Tidy words.", "the words that landed stay")
   assert.equal(kept?.heard, undefined, "and the heard ones go, since this host keeps none")
+})
+
+test("what tidied a take rides the device's row and its host's copy alike", async () => {
+  const server = host()
+  const { profile } = await fresh()
+
+  await writeDictation(serverConfig(profile), {
+    text: "Tidy words.",
+    heard: "um tidy words",
+    ms: 4_200,
+    level: "high",
+    cleaned: true,
+    provider: "local",
+    model: "small",
+  })
+  await until(async () => server.posts.length === 1, "the post")
+  const written = (await mirror())[0]
+  assert.equal(written?.level, "high", "the row keeps the level that tidied it")
+  assert.equal(written?.cleaned, true, "and that the cleanup changed the words")
+  assert.equal(written?.provider, "local", "and who heard the take")
+  assert.equal(written?.model, "small", "with the model behind it")
+  assert.deepEqual(
+    {
+      level: server.posts[0]?.level,
+      cleaned: server.posts[0]?.cleaned,
+      provider: server.posts[0]?.provider,
+      model: server.posts[0]?.model,
+    },
+    { level: "high", cleaned: true, provider: "local", model: "small" },
+    "the host is told the same four",
+  )
+})
+
+test("a host's copy fills in what the device's row never recorded", async () => {
+  const { profile } = await fresh()
+  const key = connectionKey(serverConfig(profile))
+  await db.dictationLog.put({
+    id: "bare",
+    connection: key,
+    text: "Said and heard",
+    words: 3,
+    ms: 1_000,
+    at: 5,
+    seenAt: 5,
+    loggedAt: 5,
+    posted: true,
+  })
+  // A host that holds the row with the cleanup recorded beside it, and one more the mirror lacks:
+  // the fingerprint diverges, the page is read, and the richer copy replaces the bare one.
+  host({
+    holds: [
+      {
+        id: "newer",
+        text: "Heard later",
+        level: "light",
+        cleaned: false,
+        words: 2,
+        ms: 800,
+        at: 9,
+        seenAt: 9,
+      },
+      {
+        id: "bare",
+        text: "Said and heard",
+        level: "medium",
+        cleaned: false,
+        provider: "groq",
+        model: "whisper-1",
+        words: 3,
+        ms: 1_000,
+        at: 5,
+        seenAt: 5,
+      },
+    ],
+  })
+
+  await reconcileDictations(profile)
+  const merged = await db.dictationLog.get("bare")
+  assert.equal(merged?.level, "medium", "the host's level fills the row in")
+  assert.equal(merged?.cleaned, false, "and that its cleanup found nothing to change")
+  assert.equal(merged?.provider, "groq", "with the provider that heard it")
+  assert.equal(merged?.model, "whisper-1", "and the model")
 })

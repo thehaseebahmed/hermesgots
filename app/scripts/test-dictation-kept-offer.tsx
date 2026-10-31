@@ -34,8 +34,8 @@ async function seed(name: string, patch: Partial<SavedDictation> = {}) {
   await db.dictations.put({
     id: CHAT,
     pieces: [
-      { blob: new Blob(["first "], { type: "audio/webm" }), text: null },
-      { blob: new Blob(["second"], { type: "audio/webm" }), text: null },
+      { blob: new Blob(["first "], { type: "audio/webm" }) },
+      { blob: new Blob(["second"], { type: "audio/webm" }) },
     ],
     at: 1,
     kind: "pieces",
@@ -71,31 +71,37 @@ test("a take the app was killed in is offered, and its text lands where it began
 
     await click(button("Retry"))
     await until(async () => field() === `Before hello there after`, "the words in the draft")
-    assert.equal(hosted.clips().length, 1, "one clip asked for")
+    assert.equal(hosted.pieces().length, 2, "every Piece the device holds goes up again")
+    assert.deepEqual(
+      hosted.pieces().map((one) => one.index),
+      [0, 1],
+      "in the order they were recorded",
+    )
     assert.equal(
-      await (hosted.clips()[0].body as Blob).text(),
-      "first second",
-      "the slices went as one recording",
+      await (hosted.pieces()[0].body as Blob).text(),
+      "first ",
+      "each Piece is the audio it was recorded as",
     )
     assert.equal(await db.dictations.count(), 0, "its text is in, so nothing is kept")
   })
 })
 
-test("a take with its words already had is asked for only for the audio left", async () => {
-  await seed("half-done", {
-    pieces: [
-      { blob: new Blob(["first "], { type: "audio/webm" }), text: "said already" },
-      { blob: new Blob(["second"], { type: "audio/webm" }), text: null },
-    ],
-  })
+test("a kept take is sent under a Take id of its own", async () => {
+  await seed("kept")
   const hosted = host()
   await mount(composer, async () => {
     await click(button("Retry"))
-    await until(async () => field() === `Before said already hello there after`, "the words")
+    await until(async () => field() === `Before hello there after`, "the words")
+    assert.equal(hosted.pieces().length, 2, "both Pieces went up")
+    assert.match(
+      hosted.pieces()[0].take ?? "",
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+      "a take restored after a reload mints its own id",
+    )
     assert.equal(
-      await (hosted.clips()[0].body as Blob).text(),
-      "second",
-      "only the piece without text is sent",
+      new Set(hosted.pieces().map((one) => one.take)).size,
+      1,
+      "and every Piece of it names the same take",
     )
   })
 })
@@ -108,7 +114,7 @@ test("discarding a kept take removes it, and leaves the draft as it was", async 
     await click(find('[aria-label="Discard"]'))
     await until(async () => (await db.dictations.count()) === 0, "the take gone from the device")
     assert.equal(field(), DRAFT, "the draft is untouched")
-    assert.equal(hosted.clips().length, 0, "nothing was sent")
+    assert.equal(hosted.pieces().length, 0, "nothing was sent")
   })
 })
 
@@ -125,7 +131,7 @@ test("deleting the chat, or the bot, takes its kept takes with it", async () => 
   })
   await db.dictations.put({
     id: "new:bot-1",
-    pieces: [{ blob: new Blob(["slice"], { type: "audio/webm" }), text: null }],
+    pieces: [{ blob: new Blob(["slice"], { type: "audio/webm" }) }],
     at: 1,
     kind: "pieces",
   })

@@ -11,7 +11,6 @@ import {
   monthLabel,
   orderOf,
   pooledRate,
-  spokenOf,
   sumTotals,
   heardOf,
   textsOf,
@@ -26,12 +25,6 @@ test("a take's words are counted on whitespace", () => {
   assert.equal(countWords("   "), 0)
   assert.equal(countWords(" one  two\nthree "), 3)
   assert.equal(countWords("a hyphenated-word is one"), 4)
-})
-
-test("a take's spoken span is its pieces, pauses left out", () => {
-  assert.equal(spokenOf([]), 0)
-  assert.equal(spokenOf([1200, 800]), 2000)
-  assert.equal(spokenOf([1200, -400]), 1200, "a span that isn't one can't take away from the total")
 })
 
 test("a dictation's month is the key two of them are grouped under", () => {

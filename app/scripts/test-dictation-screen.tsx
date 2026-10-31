@@ -401,6 +401,85 @@ test("a dictation draws the words as heard over the tidied ones, and Copy takes 
   })
 })
 
+test("the sheet says what tidied a take, and whether it changed anything", async () => {
+  const tidied = "Draft the reply to Haseeb."
+  const heard = "um draft the reply to haseeb"
+  await seed([
+    {
+      name: "a",
+      label: "Aria",
+      features: ["dictations"],
+      rows: [
+        {
+          id: "high",
+          text: tidied,
+          heard,
+          level: "high",
+          cleaned: true,
+          provider: "local",
+          model: "small",
+          words: 5,
+          ms: 2_400,
+          at: at(2026, 10, 24),
+        },
+        {
+          id: "none",
+          text: heard,
+          heard,
+          level: "none",
+          cleaned: false,
+          provider: "groq",
+          model: "whisper-large-v3-turbo",
+          words: 5,
+          ms: 2_400,
+          at: at(2026, 10, 23),
+        },
+      ],
+    },
+  ])
+  await mount(screen(), async () => {
+    await until(async () => rows().length === 2, "the dictations")
+    const byId = (id: string) =>
+      rows().find((row) => row.getAttribute("data-dictation") === id) ?? null
+
+    await click(byId("high"))
+    await until(async () => Boolean(sheet()), "the first sheet")
+    const high = find("[data-dictation-tidied]")
+    assert.equal(
+      high?.textContent?.trim(),
+      "Cleaned up at High · changed the words · local · small",
+      "the level, what the cleanup did, and who heard it",
+    )
+    await click(document.querySelector('[aria-label="Close"]') ?? null)
+    await until(async () => !sheet(), "the first sheet closed")
+
+    await click(byId("none"))
+    await until(async () => Boolean(find("[data-dictation-tidied]")), "the second sheet")
+    assert.equal(
+      find("[data-dictation-tidied]")?.textContent?.trim(),
+      "Not tidied · groq · whisper-large-v3-turbo",
+      "a None take reads as not tidied, not as tidied and unchanged",
+    )
+  })
+})
+
+test("a row whose cleanup was never recorded says nothing about it", async () => {
+  await seed([
+    {
+      name: "a",
+      label: "Aria",
+      features: ["dictations"],
+      rows: [{ id: "old", text: "Said and heard.", heard: "Said and heard.", words: 3, ms: 900, at: at(2026, 10, 22) }],
+    },
+  ])
+  await mount(screen(), async () => {
+    await until(async () => rows().length === 1, "the dictation")
+    await click(rows()[0] ?? null)
+    await until(async () => Boolean(heardBlock()), "the sheet")
+    assert.equal(find("[data-dictation-tidied]"), null, "nothing is claimed about its cleanup")
+  })
+})
+
 test("a take the cleanup left alone reads as one block, named Heard", async () => {
   copied = []
   const words = "Send it as it is."

@@ -12,26 +12,32 @@ import { within } from "@/lib/within"
 import { createSignal } from "@/lib/store"
 import { connectionKey } from "@/lib/connection"
 import { db, type DictationPiece, type SavedDictation } from "@/lib/db"
-import { spokenOf } from "@/lib/dictation-log"
 import {
   blockedMicrophone,
   clipFailure,
   failure as failureOf,
   microphoneFailure,
+  tookTooLong,
   type DictationFailure,
 } from "@/lib/dictation-failure"
-import { RESTORED, SAVE_MS, keptAudio } from "@/lib/dictation-kept"
+import { RESTORED, SAVE_MS } from "@/lib/dictation-kept"
 import { holdTake, releaseTake } from "@/lib/dictation-lock"
 import { prefersReducedMotion } from "@/lib/media"
 import {
+  MissingPieces,
+  cancelDictation,
+  confirmDictation,
   getDictationInfo,
-  tidyDictation,
-  transcribeClip,
+  uploadPiece,
   warmDictation,
+  type ConfirmedTake,
   type DictationInfo,
   type HermesConfig,
 } from "@/lib/hermes"
 import { usePoll } from "@/lib/poll"
+import { quietly } from "@/lib/report"
+import { randomId } from "@/lib/utils"
+import { MIN_PLUGIN_VERSION } from "@/lib/version"
 
 const infos = new Map<string, { at: number; info?: DictationInfo }>()
 const { subscribe, notify } = createSignal()
@@ -93,17 +99,10 @@ export function useDictationInfo(config: HermesConfig) {
 /** The longest recording; at 24 kbps it stays far under the API server's 10 MB body limit. */
 export const MAX_MS = 10 * 60 * 1000
 const MIN_MS = 300
-/** A cold host may load (or first download) its model inside this request. */
-const TRANSCRIBE_MS = 120_000
-/** The take's last piece carries a whole cloud take, so it gets a budget of its own (ADR 0069). */
-const FINAL_TRANSCRIBE_MS = 300_000
-/**
- * A whole dictation's cleanup is one call, and the host bounds its own at 8 s: past this the words
- * are landed as they were heard. It only applies to an ending with no wait of its own, such as a
- * Retry, which has nothing else to be bounded by.
- */
-const TIDY_MS = 12_000
-const MIN_TIDY_MS = 1000
+/** One hung Upload must not hold the take: the bound the host stated covers the rest (ADR 0074). */
+const UPLOAD_MS = 60_000
+const UPLOAD_TRIES = 3
+const RETRY_MS = 400
 const TYPES = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4", "audio/webm"]
 export const BARS = 32
 export const SAMPLE_MS = 50
@@ -118,29 +117,29 @@ export const QUIET_MAX = 0.05
 export const STOP_MS = 1500
 export const DICTATION = "dictation"
 
-/**
- * How long a Send waits for a take's ending — the pieces still with the host and the one cleanup
- * that tidies the whole of it — before it goes with the words the take already has. A Send is in
- * front of the user, so it is the shorter wait, but a finished dictation is one call to tidy, not a
- * phrase's: the host bounds its own at 8 s, or 12 s at High (ADR 0038, ADR 0066), and the pieces
- * come before it.
- */
-export const SEND_WAIT_MS = 4000
-/**
- * How long a Stop waits for the same ending. Longer than a Send because a Stop is the user asking
- * for the whole take. It is one clock for both halves: the pieces still being heard come first and
- * the cleanup spends whatever is left of it, which is what the host's own 12 s at High is measured
- * against (ADR 0066) — a take whose last piece was still in flight can therefore land its heard
- * words instead of a tidied answer, which is the trade this wait makes. Past it the take goes with
- * what it has, so a wedged host can't hold the composer's place for ever.
- */
-export const STOP_WAIT_MS = 12_000
-/** A live track whose recorder has sent nothing by now is a dead one: silence still encodes. */
+/** A host that cannot say how long its Confirm takes cannot be held to a bar: it is too old to hear a take. */
+const OUTDATED = `This bot's Gots plugin is too old to hear a take. Update it to ${MIN_PLUGIN_VERSION} or newer.`
 export const SILENT_MS = 2500
 export const STOPPED = "The recording stopped."
 export const TAKEN = "The microphone is in use by another app."
 export const SILENT = "The microphone isn't picking up any sound."
 export const TAKE_RUNNING = "A speech-to-text take is already being heard on this bot."
+
+/** A wait that ran out, told apart from an answer: a Confirm past its bound is a failed take. */
+const TIMED_OUT = Symbol("timed out")
+
+/** A Confirm given at most `ms`; a rejection is the host's own, and only the wait running out is ours. */
+async function bounded<T>(promise: Promise<T>, ms: number): Promise<T | typeof TIMED_OUT> {
+  let timer: number | undefined
+  const wait = new Promise<typeof TIMED_OUT>((done) => {
+    timer = window.setTimeout(() => done(TIMED_OUT), ms)
+  })
+  try {
+    return await Promise.race([promise, wait])
+  } finally {
+    window.clearTimeout(timer)
+  }
+}
 
 /** A click from Enter or Space: no pointer made it (a touch's click can also have no detail). */
 export function keyboardClick(event: MouseEvent) {
@@ -166,6 +165,9 @@ export function micError(error: unknown, otherwise: string) {
 
 export type DictationStatus = "idle" | "listening" | "transcribing" | "failed"
 
+/** The take, once it is final: what landed, how long it took to say, and what tidied it. */
+export type Committed = (take: ConfirmedTake) => void
+
 interface Segment {
   recorder: MediaRecorder
   chunks: Blob[]
@@ -175,7 +177,7 @@ interface Segment {
   skip?: boolean
   stopped: Promise<void>
   watch?: number
-  /** Turns what the recorder flushed into a phrase, once: a stop, an error and the timeout land here. */
+  /** Turns what the recorder flushed into a Piece, once: a stop, an error and the timeout land here. */
   close: () => void
 }
 
@@ -195,24 +197,26 @@ interface Session {
   profile: string
   lock: symbol | null
   key?: string
+  /** The app's Take id, minted when the recording starts and replaced whenever a Retry begins. */
+  take: string
   pieces: DictationPiece[]
   caret?: number
   recording: Recording | null
+  /** The Uploads in flight, one Piece after another; true when every Piece the take holds is up. */
+  uploading: Promise<boolean> | null
+  /** The indexes the host has taken, so a Retry and a 409's re-send know what is left. */
+  sent: Set<number>
   inflight: AbortController | null
-  draining: Promise<boolean> | null
+  /** The Confirm in flight: a slot of its own, so an Upload can never clobber it or the other way. */
+  asking: AbortController | null
   finishing: Promise<string | null> | null
   error: unknown
-  /** Why the take itself died (the recorder errored, the track ended): Retry still sends its phrases. */
+  /** Why the take itself died (the recorder errored, the track ended): Retry still sends its Pieces. */
   failure: DictationFailure | null
   /** The recorders still closing after the take died; a retry waits for them. */
   stopping: Promise<void> | null
-  /** The take is over, so its last piece is the one a cloud provider uploads the whole of. */
-  takeEnded?: boolean
-  lastPieceSent?: boolean
-  timer?: number
   /** Cancelled or done: nothing more is kept. */
   closed: boolean
-  restored?: boolean
   saving: Promise<unknown>
   saveTimer?: number
 }
@@ -226,11 +230,14 @@ const newSession = (
   profile,
   lock: null,
   key,
+  take: randomId(),
   pieces,
   caret,
   recording: null,
+  uploading: null,
+  sent: new Set(),
   inflight: null,
-  draining: null,
+  asking: null,
   finishing: null,
   error: null,
   failure: null,
@@ -246,10 +253,6 @@ export function joinText(...parts: string[]) {
     .join(" ")
 }
 
-const takeText = (pieces: DictationPiece[]) => joinText(...pieces.map((piece) => piece.text ?? ""))
-
-/** How long the pieces ran for, pauses left out: what the logged dictation reports (ADR 0060). */
-const spokenLong = (pieces: DictationPiece[]) => spokenOf(pieces.map((piece) => piece.ms ?? 0))
 function save(session: Session, now = false) {
   if (!session.key || session.closed) return
   if (!now) {
@@ -263,9 +266,9 @@ function save(session: Session, now = false) {
     .filter((segment) => segment.chunks.length)
     .map((segment) => ({
       blob: new Blob(segment.chunks, { type: segment.recorder.mimeType || "audio/webm" }),
-      text: null,
     }))
-  const pieces = [...session.pieces.map((piece) => ({ ...piece })), ...live]
+  // A take keeps its audio, never its words: the words exist on the host until the take is answered.
+  const pieces = [...session.pieces, ...live]
   session.saving = session.saving
     .then(async () => {
       if (pieces.length)
@@ -285,48 +288,19 @@ export async function readKept(key: string): Promise<SavedDictation | undefined>
   return db.dictations.get(key).catch(() => undefined)
 }
 
-export async function keptText(
-  config: HermesConfig,
-  pieces: DictationPiece[],
-  hint: string,
-  vocabulary: string[] = [],
-  signal?: AbortSignal,
-): Promise<string> {
-  const before = takeText(pieces)
-  const audio = keptAudio(pieces)
-  if (!audio) return before
-  const controller = new AbortController()
-  const timer = window.setTimeout(() => controller.abort(), FINAL_TRANSCRIBE_MS)
-  const stop = () => controller.abort()
-  signal?.addEventListener("abort", stop, { once: true })
-  try {
-    return joinText(
-      before,
-      await transcribeClip(config, audio, {
-        hint,
-        context: before,
-        vocabulary,
-        signal: controller.signal,
-        first: true,
-        last: true,
-      }),
-    )
-  } finally {
-    window.clearTimeout(timer)
-    signal?.removeEventListener("abort", stop)
-  }
+/** The bound the bar holds to, as the bot's own host states it; null on a plugin too old to say. */
+function boundOf(profile: string): number | null {
+  const wait = infos.get(profile)?.info?.wait_ms
+  return typeof wait === "number" && wait > 0 ? wait : null
 }
 
-/** A take that ended stops transcribing: whatever is in flight is dropped. */
 function stopInflight(current: Session) {
-  // The wait goes with it: a host that never answers must not leave a timer alive after the take.
-  if (current.timer !== undefined) {
-    window.clearTimeout(current.timer)
-    current.timer = undefined
-  }
   const inflight = current.inflight
+  const asking = current.asking
   current.inflight = null
+  current.asking = null
   inflight?.abort()
+  asking?.abort()
 }
 
 function forget(session: Session) {
@@ -347,7 +321,7 @@ function release(recording: Recording) {
   recording.audio = undefined
 }
 
-/** Stops the recorders and lets the mic go; resolves once the last phrase is in. */
+/** Stops the recorders and lets the mic go; resolves once the last Piece is in. */
 async function end(recording: Recording) {
   const stopping = stopSegments(recording)
   release(recording)
@@ -376,17 +350,39 @@ function stopSegments(recording: Recording) {
   )
 }
 
+/** One Piece, tried twice more before the take gives up on it (ADR 0074). */
+async function sendPiece(
+  config: HermesConfig,
+  take: string,
+  index: number,
+  piece: DictationPiece,
+  hint: string,
+  vocabulary: string[],
+  signal: AbortSignal,
+) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await uploadPiece(config, take, index, piece.blob, {
+        hint,
+        vocabulary,
+        ms: piece.ms ?? 0,
+        signal,
+      })
+      return
+    } catch (error) {
+      if (signal.aborted || attempt >= UPLOAD_TRIES) throw error
+      await new Promise((done) => window.setTimeout(done, RETRY_MS * attempt))
+    }
+  }
+}
+
 export function useChunkedDictation(
   config: HermesConfig,
   hint: string,
   key?: string,
   vocabulary: string[] = [],
-  /**
-   * The take's words, once they are final: where they landed, how long they took to say, and the same
-   * take as the host heard it before Cleanup, which differs from the landed words by exactly what the
-   * cleanup did (ADR 0062).
-   */
-  onCommitted?: (text: string, spokenMs: number, heard: string) => void,
+  /** The take's words, once they are final, with what tidied them (ADR 0062, ADR 0074). */
+  onCommitted?: Committed,
 ) {
   const [status, setStatus] = useState<DictationStatus>("idle")
   const [levels, setLevels] = useState<number[] | null>(null)
@@ -410,58 +406,49 @@ export function useChunkedDictation(
     setStatus("failed")
   }, [])
 
-  const drain = useCallback((current: Session) => {
-    const run = async () => {
+  /** Sends every Piece the host has not taken yet, one after another, off the recording's path. */
+  const push = useCallback((current: Session): Promise<boolean> => {
+    if (current.uploading) return current.uploading
+    const run = (async () => {
       for (;;) {
-        const index = current.pieces.findIndex((piece) => piece.text === null)
+        if (current.closed) return false
+        const index = current.pieces.findIndex((_, at) => !current.sent.has(at))
         if (index < 0) return true
-        const piece = current.pieces[index]
-        const before = takeText(current.pieces.slice(0, index))
-        // The take's own last piece, once the take is over: a cloud provider uploads the whole of
-        // it there.
-        const last = Boolean(current.takeEnded) && index === current.pieces.length - 1
         const controller = new AbortController()
         current.inflight = controller
-        const timer = window.setTimeout(
-          () => controller.abort(),
-          last ? FINAL_TRANSCRIBE_MS : TRANSCRIBE_MS,
-        )
-        current.timer = timer
+        const timer = window.setTimeout(() => controller.abort(), UPLOAD_MS)
         try {
           const { config, hint, vocabulary } = latest.current
-          const text = await transcribeClip(config, piece.blob, {
+          await sendPiece(
+            config,
+            current.take,
+            index,
+            current.pieces[index],
             hint,
-            context: before,
             vocabulary,
-            signal: controller.signal,
-            last,
-            first: index === 0,
-          })
+            controller.signal,
+          )
           if (current.inflight !== controller) return false
-          piece.text = text
+          current.sent.add(index)
           current.error = null
-          if (last) current.lastPieceSent = true
-        } catch (failure) {
-          if (current.inflight === controller) current.error = failure
+          save(current)
+        } catch (error) {
+          if (current.inflight === controller) current.error = error
           return false
         } finally {
           window.clearTimeout(timer)
-          if (current.timer === timer) current.timer = undefined
           if (current.inflight === controller) current.inflight = null
         }
-        save(current, true)
       }
-    }
-    if (!current.draining) {
-      const draining: Promise<boolean> = run().finally(() => {
-        if (current.draining === draining) current.draining = null
-      })
-      current.draining = draining
-    }
-    return current.draining
+    })()
+    const tracked: Promise<boolean> = run.finally(() => {
+      if (current.uploading === tracked) current.uploading = null
+    })
+    current.uploading = tracked
+    return tracked
   }, [])
 
-  /** Ends a take whose recorder died, keeping the phrases already cut so Retry can send them. */
+  /** Ends a take whose recorder died, keeping the Pieces already cut so Retry can send them. */
   const fail = useCallback(
     (current: Session, recording: Recording, failed: DictationFailure) => {
       if (session.current !== current || current.recording !== recording || current.stopping) return
@@ -484,7 +471,7 @@ export function useChunkedDictation(
         audioBitsPerSecond: 24_000,
       })
       let stopped!: () => void
-      // A stop, an error and the stop timeout can all land, and only one may make the segment a piece.
+      // A stop, an error and the stop timeout can all land, and only one may make the segment a Piece.
       let closed = false
       const close = () => {
         if (closed) return
@@ -494,11 +481,11 @@ export function useChunkedDictation(
         if (segment.chunks.length && !segment.skip) {
           const type = recorder.mimeType || recording.mimeType || "audio/webm"
           const ms = Math.max(0, Date.now() - segment.startedAt)
-          current.pieces.push({ blob: new Blob(segment.chunks, { type }), text: null, ms })
+          current.pieces.push({ blob: new Blob(segment.chunks, { type }), ms })
         }
         save(current, true)
         // A take that died waits for Retry instead, so its failure stays the bar's one message.
-        if (session.current === current && !current.failure) void drain(current)
+        if (session.current === current && !current.failure) void push(current)
         stopped()
       }
       const segment: Segment = {
@@ -527,13 +514,12 @@ export function useChunkedDictation(
       }
       recording.segments.push(segment)
       recorder.start(1000)
-      // A recorder that has sent nothing by now is dead, not quiet: silence still encodes.
       segment.watch = window.setTimeout(() => {
         if (!segment.chunks.length) fail(current, recording, microphoneFailure(SILENT))
       }, SILENT_MS)
       return segment
     },
-    [drain, fail],
+    [fail, push],
   )
 
   const monitor = useCallback(
@@ -581,7 +567,7 @@ export function useChunkedDictation(
           }
         }, SAMPLE_MS)
       } catch {
-        // Without a meter the recording goes whole, as one piece.
+        // Without a meter the recording goes whole, as one Piece.
       }
     },
     [openSegment],
@@ -617,7 +603,6 @@ export function useChunkedDictation(
       current.lock = null
       throw new Error(micError(failure, "Couldn't start the microphone."))
     }
-    // Cancelled while the mic was asked for.
     if (session.current !== current) {
       stream.getTracks().forEach((track) => track.stop())
       return
@@ -639,145 +624,110 @@ export function useChunkedDictation(
         track.addEventListener("ended", () => fail(current, recording, microphoneFailure(TAKEN))),
       )
     setStartedAt(recording.startedAt)
-    // Past the cap the recording stops growing; Stop or Send still turns it into text.
+    // Past the cap the recording stops growing; Stop or Send still turns it into a take.
     recording.cap = window.setTimeout(() => {
       void end(recording)
       if (session.current === current) setLevels(null)
     }, MAX_MS)
   }
 
-  const tidy = useCallback(async (current: Session, text: string, budgetMs = TIDY_MS) => {
-    if (!text || budgetMs < MIN_TIDY_MS) return text
-    const controller = new AbortController()
-    current.inflight = controller
-    const asking = tidyDictation(
-      latest.current.config,
-      text,
-      latest.current.vocabulary,
-      latest.current.hint,
-      controller.signal,
-    ).catch(() => null)
-    const tidied = await within(asking, budgetMs)
-    if (current.inflight !== controller) return text
-    current.inflight = null
-    controller.abort()
-    return tidied ?? text
-  }, [])
-
   const land = useCallback(
-    (current: Session, text: string, heard: string) => {
+    (current: Session, answer: ConfirmedTake) => {
       forget(current)
       session.current = null
       showIdle()
-      if (text) latest.current.onCommitted?.(text, spokenLong(current.pieces), heard)
+      const text = answer.text.trim()
+      if (text) latest.current.onCommitted?.(answer)
       return text
     },
     [showIdle],
   )
 
-  const settle = useCallback(
-    async (current: Session, deadline?: number) => {
-      setStatus("transcribing")
-      setLevels(null)
-      setFailure(null)
-      if (current.stopping) await current.stopping
-      const draining = drain(current)
-      const done =
-        deadline === undefined
-          ? await draining
-          : await within(draining, Math.max(0, deadline - Date.now()))
+  /**
+   * A take that could not be finished: its audio stays for a Retry, which sends it again under a
+   * fresh Take id, and nothing of it lands (ADR 0074).
+   */
+  const giveUp = useCallback(
+    (current: Session, failed: DictationFailure) => {
       if (session.current !== current) return null
-      if (done) {
-        let heard = takeText(current.pieces)
-        // A cloud take whose last piece never went is uploaded here, so its audio isn't stranded;
-        // one whose last piece did go is never uploaded twice, however silent it was (ADR 0069).
-        if (!heard && !current.lastPieceSent && current.pieces.length) {
-          if (!infos.has(current.profile)) await readDictationInfo(latest.current.config, true)
-          if (leavesHost(current.profile)) {
-            const controller = new AbortController()
-            current.inflight = controller
-            try {
-              heard = await keptText(
-                latest.current.config,
-                current.pieces,
-                latest.current.hint,
-                latest.current.vocabulary,
-                controller.signal,
-              )
-            } catch (failure) {
-              current.error = failure
-              showFailure(clipFailure(failure))
-              return null
-            } finally {
-              if (current.inflight === controller) current.inflight = null
-            }
-            if (session.current !== current) return null
-          }
-        }
-        const budget = deadline === undefined ? TIDY_MS : deadline - Date.now()
-        const text = await tidy(current, heard, budget)
-        if (session.current !== current) return null
-        return land(current, text, heard)
-      }
-      if (done === undefined && deadline !== undefined) {
-        stopInflight(current)
-        const heard = takeText(current.pieces)
-        return land(current, heard, heard)
-      }
-      const spoken = current.pieces.filter((piece) => piece.text !== null)
-      const said = joinText(...spoken.map((piece) => piece.text ?? ""))
-      // A cloud take's pieces land empty until its last upload, so a failed upload keeps the take
-      // for Retry instead of landing nothing and dropping its audio (ADR 0069).
-      const uploadFailedUnheard = spoken.length > 0 && !said && current.error !== null
-      if (uploadFailedUnheard) {
-        for (const piece of current.pieces) piece.text = null
-        save(current, true)
-      } else if (spoken.length) {
-        const ms = spokenLong(spoken)
-        current.pieces = current.pieces.filter((piece) => piece.text === null)
-        save(current, true)
-        if (said) latest.current.onCommitted?.(said, ms, said)
-      }
-      showFailure(
-        current.error !== null
-          ? clipFailure(current.error)
-          : (current.failure ?? clipFailure(undefined)),
-      )
-      // The host may have lost faster-whisper since; ask again so the mic hides if so.
+      stopInflight(current)
+      current.error = null
+      current.sent.clear()
+      save(current, true)
+      // The host may have lost its speech provider since, and it holds audio this take can never
+      // confirm again — a Retry mints a fresh id — so it is taken off the host now.
       void readDictationInfo(latest.current.config, true)
+      void cancelDictation(latest.current.config, current.take).catch(
+        quietly("Taking a failed take off its bot's host"),
+      )
+      showFailure({ ...failed, discard: true })
       return null
     },
-    [drain, land, showFailure, tidy],
+    [showFailure],
   )
 
-  const replay = useCallback(
+  const settle = useCallback(
     async (current: Session) => {
       setStatus("transcribing")
       setLevels(null)
       setFailure(null)
+      // The recorders closing and the host's own answer about itself are independent, so they go
+      // together: both are in front of the Confirm.
+      await Promise.all([
+        current.stopping,
+        infos.has(current.profile) ? null : readDictationInfo(latest.current.config),
+      ])
+      if (session.current !== current) return null
+      let bound = boundOf(current.profile)
+      if (!bound) {
+        await readDictationInfo(latest.current.config, true)
+        bound = boundOf(current.profile)
+      }
+      if (!bound) return giveUp(current, failureOf("clip", OUTDATED, { discard: true }))
+      const deadline = Date.now() + bound
+      const left = () => Math.max(0, deadline - Date.now())
+      const ranOut = () => giveUp(current, failureOf("clip", tookTooLong(bound), { discard: true }))
       const controller = new AbortController()
-      current.inflight = controller
+      current.asking = controller
+      const timer = window.setTimeout(() => controller.abort(), bound)
       try {
-        const text = await keptText(
-          latest.current.config,
-          current.pieces,
-          latest.current.hint,
-          latest.current.vocabulary,
-          controller.signal,
-        )
-        if (current.inflight !== controller) return null
-        return land(current, text, text)
-      } catch (failure) {
-        if (current.inflight !== controller) return null
-        current.error = failure
-        showFailure(clipFailure(failure))
-        void readDictationInfo(latest.current.config, true)
-        return null
+        const uploaded = await within(push(current), left())
+        if (session.current !== current) return null
+        if (uploaded === undefined) return ranOut()
+        if (!uploaded) return giveUp(current, clipFailure(current.error, bound))
+        for (let attempt = 0; ; attempt++) {
+          try {
+            const answered = await bounded(
+              confirmDictation(
+                latest.current.config,
+                current.take,
+                current.pieces.length,
+                controller.signal,
+              ),
+              left(),
+            )
+            if (answered === TIMED_OUT) return ranOut()
+            if (session.current !== current) return null
+            return land(current, answered)
+          } catch (error) {
+            if (attempt > 0 || !(error instanceof MissingPieces) || !error.missing.length)
+              return giveUp(current, clipFailure(error, bound))
+            // A host that names an index its own take never had can't send the app round in circles.
+            for (const index of error.missing) {
+              if (index >= 0 && index < current.pieces.length) current.sent.delete(index)
+            }
+            const resent = await within(push(current), left())
+            if (session.current !== current) return null
+            if (resent === undefined) return ranOut()
+            if (!resent) return giveUp(current, clipFailure(current.error, bound))
+          }
+        }
       } finally {
-        if (current.inflight === controller) current.inflight = null
+        window.clearTimeout(timer)
+        if (current.asking === controller) current.asking = null
       }
     },
-    [land, showFailure],
+    [giveUp, land, push],
   )
 
   const cancel = useCallback(() => {
@@ -787,65 +737,63 @@ export function useChunkedDictation(
       forget(current)
       stopInflight(current)
       if (current.recording) void end(current.recording)
+      void cancelDictation(latest.current.config, current.take).catch(
+        quietly("Taking a cancelled take off its bot's host"),
+      )
     }
     showIdle()
   }, [showIdle])
 
   /**
-   * Ends the recording and returns its text: `""` for a recording too short to hold speech, null
-   * when the host couldn't transcribe it (it's kept for `retry`).
+   * Ends the recording and returns its words: `""` for a recording too short to hold speech, null
+   * when the take could not be finished (it's kept for `retry`).
    */
-  const finish = useCallback(
-    (waitMs = STOP_WAIT_MS) => {
-      const current = session.current
-      if (!current || (!current.recording && !current.failure)) {
-        cancel()
-        return Promise.resolve("")
-      }
-      if (current.finishing) return current.finishing
-      const run = (async () => {
-        const deadline = Date.now() + waitMs
-        if (current.recording) {
-          const recording = current.recording
-          const last = recording.segments.at(-1)
-          if (last && current.pieces.length && Date.now() - last.startedAt < MIN_MS)
-            last.skip = true
-          // Set before the last segment closes: the drain it starts is what sends that piece.
-          current.takeEnded = true
-          const stopping = end(recording)
-          current.stopping = stopping
-          await stopping
-          if (session.current !== current) return null
-          current.recording = null
-          const length = (recording.stoppedAt ?? Date.now()) - recording.startedAt
-          if (length < MIN_MS || !current.pieces.length) {
-            cancel()
-            return ""
-          }
+  const finish = useCallback(() => {
+    const current = session.current
+    if (!current || (!current.recording && !current.failure)) {
+      cancel()
+      return Promise.resolve("")
+    }
+    if (current.finishing) return current.finishing
+    const run = (async () => {
+      if (current.recording) {
+        const recording = current.recording
+        const last = recording.segments.at(-1)
+        if (last && current.pieces.length && Date.now() - last.startedAt < MIN_MS) last.skip = true
+        const stopping = end(recording)
+        current.stopping = stopping
+        await stopping
+        if (session.current !== current) return null
+        current.recording = null
+        const length = (recording.stoppedAt ?? Date.now()) - recording.startedAt
+        if (length < MIN_MS || !current.pieces.length) {
+          cancel()
+          return ""
         }
-        return settle(current, deadline)
-      })()
-      current.finishing = run
-      const done = () => {
-        if (current.finishing === run) current.finishing = null
       }
-      void run.then(done, done)
-      return run
-    },
-    [cancel, settle],
-  )
+      return settle(current)
+    })()
+    current.finishing = run
+    const done = () => {
+      if (current.finishing === run) current.finishing = null
+    }
+    void run.then(done, done)
+    return run
+  }, [cancel, settle])
 
+  /** Sends the take again, under a fresh Take id, so no late Piece of the dead one can join it. */
   const retry = useCallback(async () => {
     const current = session.current
     if (!current) return null
-    // A take that recorded nothing has nothing to send: it is dropped, as Discard would.
     if (!current.pieces.length) {
       cancel()
       return ""
     }
-    if (current.restored) return replay(current)
+    current.take = randomId()
+    current.sent.clear()
+    current.error = null
     return settle(current)
-  }, [cancel, replay, settle])
+  }, [cancel, settle])
 
   useEffect(() => {
     let live = true
@@ -855,10 +803,9 @@ export function useChunkedDictation(
         session.current = newSession(
           connectionKey(latest.current.config),
           key,
-          saved.pieces,
+          saved.pieces.map((piece) => ({ blob: piece.blob, ms: piece.ms })),
           saved.caret,
         )
-        session.current.restored = true
         session.current.failure = failureOf("clip", RESTORED, { discard: true })
         setFailure(session.current.failure)
         setStatus("failed")

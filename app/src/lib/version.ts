@@ -2,10 +2,11 @@
 export const APP_VERSION = __APP_VERSION__
 
 /** The oldest Gots plugin this app works with. Raise it when the app starts relying on a route,
- * field or behaviour that only a newer plugin has. 0.95.0 is the first whose media route signs a URL
- * (`POST …/media/url`, `plugin/media.py`) and accepts that signature in place of the key: the thread
- * draws every file an `<img>` or a `<video>` can from it, and there is no second way to read bytes. */
-export const MIN_PLUGIN_VERSION = "0.95.0"
+ * field or behaviour that only a newer plugin has. 0.97.0 is the first whose dictation is a take's
+ * three verbs — a blind Piece, the one Confirm that answers a take's words, and a Cancel that
+ * deletes it (ADR 0074) — and whose dictation mirror carries what tidied each take. There is no
+ * second wire: a plugin from before it cannot hear a take at all. */
+export const MIN_PLUGIN_VERSION = "0.97.0"
 
 function parts(version: string) {
   const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(version.trim())

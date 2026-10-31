@@ -35,6 +35,7 @@ import {
   useDictationTotals,
 } from "@/lib/dictations"
 import { formatDuration } from "@/lib/format"
+import { levelName, namedLevel } from "@/lib/speech"
 import { useSpeech, type SpeechCheck } from "@/lib/host-speech"
 import { cn } from "@/lib/utils"
 
@@ -238,6 +239,24 @@ function Words({
   )
 }
 
+/**
+ * What tidied a take, in the app's words: the level, whether the cleanup changed anything, and who
+ * heard it. A None take reads as not tidied rather than as tidied and found nothing to change, which
+ * is the one difference the two texts alone cannot show (ADR 0074).
+ */
+function tidiedLine(row: DictationRecord): string | null {
+  const level = namedLevel(row.level)
+  const parts: string[] = []
+  if (level === "none") parts.push("Not tidied")
+  else if (level) {
+    parts.push(`Cleaned up at ${levelName(level)}`)
+    parts.push(row.cleaned ? "changed the words" : "found nothing to change")
+  }
+  const who = [row.provider, row.model].filter(Boolean).join(" · ")
+  if (who) parts.push(who)
+  return parts.length ? parts.join(" · ") : null
+}
+
 /** One dictation, whole: its words, what it was, a Copy and a way to delete it. */
 function EntrySheet({
   row,
@@ -252,6 +271,7 @@ function EntrySheet({
 }) {
   const { copied, noteCopied } = useCopied()
   const { heard, tidied } = textsOf(row)
+  const cleanup = tidiedLine(row)
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(row.text)
@@ -272,6 +292,11 @@ function EntrySheet({
           <p className="text-sm text-muted-foreground">
             {[bot, wordsLabel(row.words), spokenLabel(row.ms)].filter(Boolean).join(" · ")}
           </p>
+          {cleanup && (
+            <p className="text-sm text-muted-foreground" data-dictation-tidied>
+              {cleanup}
+            </p>
+          )}
           <div className="flex gap-2">
             <Button
               variant="outline"

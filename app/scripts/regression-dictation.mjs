@@ -63,9 +63,19 @@ function speech() {
   return path
 }
 
+/** What the mock's take registry holds: every Piece it was sent, and every Confirm it answered. */
 async function mockDictation() {
-  const { clips, cleanups } = await (await fetch(`${mock}/__mock/dictation`)).json()
-  return { clips, cleanups }
+  const { clips, confirms, refusals } = await (await fetch(`${mock}/__mock/dictation`)).json()
+  return { clips, confirms, refusals }
+}
+
+/** Arms the next Confirm to be refused for a missing Piece, so the take's one recovery runs. */
+async function refuseNextConfirm(count = 1) {
+  await fetch(`${mock}/__mock/dictation-refuse`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ count }),
+  })
 }
 
 const PHONE = { width: 390, height: 844 }
@@ -75,12 +85,17 @@ const botId = (page) =>
   page.evaluate(async () => (await (await import("/src/lib/db.ts")).db.profiles.toArray())[0].id)
 
 async function addWord(page, word) {
-  await page.goto(`${app}/settings/bots/${await botId(page)}/dictation`)
-  const tab = page.locator("[data-bot-dictation]")
-  await tab.waitFor({ timeout: 15_000 })
-  await tab.locator("#vocabulary-word").fill(word)
-  await tab.getByRole("button", { name: "Add" }).click()
-  await tab.getByRole("button", { name: `Remove ${word}` }).waitFor({ timeout: 5000 })
+  // The bot's words live on the Dictation tab's own page, which the tab drills into (ADR 0063).
+  const id = await botId(page)
+  await page.goto(`${app}/settings/bots/${id}/speech-to-text/vocabulary`)
+  const field = page.locator("#vocabulary-word")
+  await field.waitFor({ timeout: 15_000 })
+  await field.fill(word)
+  await page.getByRole("button", { name: "Add" }).click()
+  await page.getByRole("button", { name: `Remove ${word}` }).waitFor({ timeout: 10_000 })
+  // Back on the tab itself, where the page's other rows live.
+  await page.goto(`${app}/settings/bots/${id}/speech-to-text`)
+  await page.locator("[data-bot-dictation]").waitFor({ timeout: 15_000 })
 }
 
 /** Every recorder errors 1.2 s into its stretch, as an encoder that dies mid-take does. */
@@ -105,12 +120,14 @@ const exposeMic = () => {
 }
 
 /**
- * Retries a kept recording and its words land in the composer: a live take ends through the cleanup,
- * while one restored from the device is asked for whole and lands as the host heard it (ADR 0038
- * keeps the retry as it was).
+ * Retries a kept recording and its words land in the composer: the take goes up again under a fresh
+ * Take id, and its one Confirm answers with the tidied text (ADR 0074).
  */
 async function retried(page, words = SENTENCE) {
-  await page.getByRole("button", { name: "Retry" }).click()
+  // Focused and answered by keyboard: the developer image's Reticle button floats over the bar's
+  // right end, and a pointer press there lands on the widget instead of the take's Retry.
+  await page.getByRole("button", { name: "Retry" }).focus()
+  await page.keyboard.press("Enter")
   await page.getByRole("button", { name: "Voice", exact: true }).waitFor()
   assert.equal(await page.getByRole("textbox").last().inputValue(), words)
 }
@@ -200,7 +217,7 @@ try {
     await page.reload()
     await page.getByText("hasn't been transcribed yet").waitFor()
     await shot(page, "phone-light-6-kept")
-    await retried(page, HEARD)
+    await retried(page)
     await page.reload()
     await page.getByRole("button", { name: "Voice", exact: true }).waitFor()
     await page.close()
@@ -219,12 +236,19 @@ try {
     }
     const sent = (await mockDictation()).clips.slice(before)
     assert.equal(sent.length, 2, "two pieces sent before Stop")
-    assert.equal(sent[1].context, HEARD, "the second piece carries on from what the host heard")
+    assert.deepEqual(
+      sent.map((clip) => clip.index),
+      [0, 1],
+      "each Piece names its index in the take",
+    )
+    assert.equal(sent[0].take, sent[1].take, "and the take the app minted when it started")
+    assert.ok(sent[0].take, "a Take id, not a pair of flags")
     await page.waitForTimeout(1500)
     await page.getByRole("button", { name: "Stop" }).click()
     await page.getByRole("button", { name: "Voice", exact: true }).waitFor()
     const all = (await mockDictation()).clips.slice(before)
-    assert.equal(all.length, 3)
+    assert.equal(all.length, 3, "the last Piece went up at Stop, and no more")
+    // The Confirm tidies the whole take, so only the first "um" goes and the rest is as heard.
     assert.equal(
       await page.getByRole("textbox").last().inputValue(),
       [SENTENCE, HEARD, HEARD].join(" "),
@@ -320,7 +344,7 @@ try {
 
   // A host that can't check says why on a tap, and so does one that couldn't be asked.
   for (const [label, server, words] of [
-    ["off", offMock, "faster-whisper isn't installed"],
+    ["off", offMock, "No speech provider on this host can hear a take"],
     ["failed", "http://localhost:9", "Couldn't check with Hermes"],
   ]) {
     if (!server) continue
@@ -344,7 +368,8 @@ try {
     await addWord(page, "Gots")
     await shot(page, "phone-light-18-dictation-word")
 
-    await page.reload()
+    // The word the page wrote is the bot's on its host, so a reopen reads it back from there.
+    await page.goto(`${app}/settings/bots/${await botId(page)}/speech-to-text/vocabulary`)
     await page.getByRole("button", { name: "Remove Gots" }).waitFor({ timeout: 15_000 })
     assert.equal(
       await page.getByRole("button", { name: "Remove Gots" }).count(),
@@ -353,8 +378,10 @@ try {
     )
 
     // The speech model is picked from the field's own sheet, not a list on the page.
-    const trigger = page.locator("#speech-model")
-    const models = page.locator('[aria-label="Speech models"] button')
+    await page.goto(`${app}/settings/bots/${await botId(page)}/speech-to-text`)
+    const trigger = page.locator('[data-setting="speech-model"]')
+    // The pick is a pop-up of model rows (ADR 0055): a sheet on a phone, a card on a tablet.
+    const models = page.getByRole("dialog").locator("button")
     const row = (name) => models.filter({ hasText: new RegExp(`^${name}`) })
     const openPicker = async () => {
       await trigger.click()
@@ -362,28 +389,37 @@ try {
     }
 
     await trigger.waitFor({ timeout: 15_000 })
+    // The pick is made from whatever the host holds, so a run that follows another still proves one.
+    const held = (await trigger.innerText()).trim().endsWith("base") ? "base" : "small"
+    const picked = held === "base" ? "small" : "base"
     await openPicker()
-    assert.match(await row("small").innerText(), /In use/, "the model in play says so")
-    assert.equal(await row("base").getAttribute("aria-pressed"), "false")
+    assert.ok(await row(held).count(), "the model in play is offered")
+    assert.ok(await row(picked).count(), "and another beside it, to pick")
 
-    await row("base").click()
+    await row(picked).click()
+    // The row under the trigger reads the model the host now holds.
     await page.waitForFunction(
-      () => document.querySelector("#speech-model")?.getAttribute("aria-label") === "Speech model: base",
-      undefined,
+      (name) =>
+        document
+          .querySelector('[data-setting="speech-model"]')
+          ?.textContent?.trim()
+          .endsWith(name),
+      picked,
       { timeout: 10_000 },
     )
     await shot(page, "phone-light-19-dictation-model")
 
     await page.reload()
     await trigger.waitFor({ timeout: 15_000 })
-    await openPicker()
-    assert.equal(
-      await row("base").getAttribute("aria-pressed"),
-      "true",
-      "the pick written to the host is the one in play",
+    await page.waitForFunction(
+      (name) =>
+        document
+          .querySelector('[data-setting="speech-model"]')
+          ?.textContent?.trim()
+          .endsWith(name),
+      picked,
+      { timeout: 10_000 },
     )
-    assert.match(await row("base").innerText(), /In use/)
-    assert.equal(await row("small").getAttribute("aria-pressed"), "false", "the old one steps down")
     await page.close()
   }
 
@@ -405,11 +441,45 @@ try {
     const after = await mockDictation()
     const sent = after.clips.slice(before.clips.length)
     assert.equal(sent.length, 1)
-    assert.deepEqual(sent[0].vocabulary, ["Gots"], "the bot's word rode on the clip")
-    const tidied = after.cleanups.slice(before.cleanups.length)
-    assert.equal(tidied.length, 1, "one cleanup ended the dictation")
-    assert.equal(tidied[0].text, HEARD, "the cleanup was asked for the words as they were heard")
-    assert.deepEqual(tidied[0].vocabulary, ["Gots"], "…and carried the bot's word too")
+    assert.deepEqual(sent[0].vocabulary, ["Gots"], "the bot's word rode on the Piece")
+    const answered = after.confirms.slice(before.confirms.length)
+    assert.equal(answered.length, 1, "one Confirm answered the whole take")
+    assert.equal(answered[0].pieces, 1, "naming how many Pieces it sent")
+    assert.equal(answered[0].level, "light", "and tidied at the bot's level")
+    await page.close()
+  }
+
+  // A Confirm refused for a Piece the host did not hold: the app sends exactly that one and answers.
+  {
+    const page = await open(mock, PHONE)
+    await refuseNextConfirm(1)
+    const before = await mockDictation()
+    await page.getByRole("button", { name: "Voice", exact: true }).click()
+    await page.getByRole("button", { name: "Stop" }).waitFor()
+    await page.waitForTimeout(1200)
+    await page.getByRole("button", { name: "Stop" }).click()
+    await page.getByRole("button", { name: "Voice", exact: true }).waitFor({ timeout: 15_000 })
+    assert.equal(
+      await page.getByRole("textbox").last().inputValue(),
+      SENTENCE,
+      "the take recovered and landed",
+    )
+    const after = await mockDictation()
+    assert.equal(
+      after.refusals.length - before.refusals.length,
+      1,
+      "the Confirm was refused once for a Piece it did not hold",
+    )
+    assert.equal(
+      after.confirms.length - before.confirms.length,
+      1,
+      "and the take was answered once the missing Piece was sent again",
+    )
+    assert.equal(
+      after.clips.length - before.clips.length,
+      2,
+      "and exactly the missing Piece went up again",
+    )
     await page.close()
   }
 

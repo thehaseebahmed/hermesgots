@@ -1,5 +1,6 @@
 import { connectionKey } from "@/lib/connection"
 import { heardOf } from "@/lib/dictation-log"
+import { namedLevel, type CleanupLevel } from "@/lib/speech"
 import { readHeardBy, type HeardBy, type SpeechPatch } from "@/lib/speech"
 import { pluginRoot, serverRoot } from "@/lib/host-url"
 import { READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
@@ -151,12 +152,15 @@ export class HermesError extends Error {
   readonly status?: number
   /** The error envelope's `code`, such as `approval_not_pending`, when Hermes sent one. */
   readonly code?: string
+  /** The whole body the refusal carried, for the few routes whose recovery reads a field of it. */
+  readonly body?: unknown
 
-  constructor(message: string, status?: number, code?: string) {
+  constructor(message: string, status?: number, code?: string, body?: unknown) {
     super(message)
     this.name = "HermesError"
     this.status = status
     this.code = code
+    this.body = body
   }
 }
 
@@ -180,8 +184,8 @@ async function request(url: string, init: RequestInit) {
     throw new HermesError(networkHint(url))
   }
   if (!response.ok) {
-    const { message, code } = await errorBody(response)
-    throw new HermesError(message, response.status, code)
+    const { message, code, body } = await errorBody(response)
+    throw new HermesError(message, response.status, code, body)
   }
   return response
 }
@@ -195,13 +199,15 @@ function networkHint(url: string) {
   return `Can't reach Hermes. Check it's running and that API_SERVER_CORS_ORIGINS includes ${window.location.origin}.`
 }
 
-async function errorBody(response: Response): Promise<{ message: string; code?: string }> {
+async function errorBody(
+  response: Response,
+): Promise<{ message: string; code?: string; body?: unknown }> {
   let code: string | undefined
   try {
     const body = await response.json()
     if (typeof body?.error?.code === "string") code = body.error.code
     const message = body?.error?.message ?? body?.message
-    if (message) return { message: String(message), code }
+    if (message) return { message: String(message), code, body }
   } catch {
     // Not JSON; fall through.
   }
@@ -2665,7 +2671,7 @@ export async function uploadAttachment(
   return body.path as string
 }
 
-/** Whether the bot's host can turn speech into text, and by whom (`info`'s `dictation`, ADR 0069). */
+/** Whether the bot's host can turn speech into text, by whom (`info`'s `dictation`, ADR 0069). */
 export interface DictationInfo {
   ready: boolean
   /** Why it can't: nobody to hear a take, speech-to-text turned off, or a plugin from before dictation. */
@@ -2673,6 +2679,12 @@ export interface DictationInfo {
   model?: string
   /** Who hears this bot's takes, where the host answers it — the same shape `GET speech` carries. */
   provider?: HeardBy
+  /**
+   * The longest the host's Confirm can take, from arriving to answering: its own queue plus its
+   * Cleanup at the bot's level. The bar holds to this on both Send and Stop, so a fifth level or a
+   * slower provider moves it without an app release (ADR 0074). Absent on a plugin from before it.
+   */
+  wait_ms?: number
 }
 
 export async function getDictationInfo(config: HermesConfig): Promise<DictationInfo> {
@@ -2683,15 +2695,17 @@ export async function getDictationInfo(config: HermesConfig): Promise<DictationI
       ready: false,
       reason: "The Gots plugin on this bot's host is too old for speech-to-text.",
     }
+  const wait = finite(raw.wait_ms)
   return {
     ready: Boolean(raw.ready),
     reason: typeof raw.reason === "string" ? raw.reason : null,
     model: typeof raw.model === "string" ? raw.model : undefined,
     provider: readHeardBy(raw.provider),
+    ...(wait && wait > 0 ? { wait_ms: wait } : {}),
   }
 }
 
-/** Loads the host's speech model while the user talks, so the clip doesn't wait for it. */
+/** Loads the host's speech model while the user talks, so the take's Pieces don't wait for it. */
 export async function warmDictation(config: HermesConfig) {
   await request(`${pluginRoot(config.baseUrl)}/dictation/warm`, {
     method: "POST",
@@ -2699,77 +2713,123 @@ export async function warmDictation(config: HermesConfig) {
   })
 }
 
-/**
- * A recorded clip, and the take it belongs to: `vocabulary` is the bot's own words (its Dictation
- * tab), sent as one repeated query param each; `context` is the text heard before this clip.
- *
- * `first` and `last` delimit a take: a host hearing it on a cloud provider holds the pieces from
- * the first and uploads the whole take on the last, answering `""` to every piece in between and
- * dropping anything still held when a new take begins (ADR 0069). A local host ignores both.
- */
-export interface ClipOptions {
-  hint?: string
-  context?: string
-  vocabulary?: string[]
-  signal?: AbortSignal
-  first?: boolean
-  last?: boolean
+/** What tidied a take, as its Confirm answers it (ADR 0074). */
+export interface Tidied {
+  /** The Cleanup level the host tidied at: `none`, `light`, `medium` or `high`. */
+  level?: CleanupLevel
+  /** Whether the cleanup changed anything. False at `none` as well as where it found nothing. */
+  cleaned?: boolean
+  /** Who heard the take, and the model that did — where the host names them. */
+  provider?: string
+  model?: string
 }
 
-/** A recorded clip's text, `""` when nobody spoke. */
-export async function transcribeClip(
+/** A take, whole, as its one Confirm answers it: the only call in a take's life with words in it. */
+export interface ConfirmedTake extends Tidied {
+  /** The words that landed, after Cleanup. */
+  text: string
+  /** The words as the host heard them, before Cleanup. */
+  heard: string
+  /** How long the take took to say, from the Pieces' own spans — not the device's estimate. */
+  ms: number
+}
+
+/** A Confirm the host refused because it holds fewer Pieces than the take has: exactly what to send. */
+export class MissingPieces extends HermesError {
+  readonly missing: number[]
+
+  constructor(message: string, missing: number[]) {
+    super(message, 409)
+    this.name = "MissingPieces"
+    this.missing = missing
+  }
+}
+
+/**
+ * One Piece of a take, uploaded blind (ADR 0074): its `index` in the take, the bot's `vocabulary` as
+ * one repeated query param each, the `hint`, and how long it ran. The answer carries no words — the
+ * words come back at the Confirm, and only there.
+ */
+export interface PieceOptions {
+  hint?: string
+  vocabulary?: string[]
+  /** How long the Piece ran, which the host adds up into the take's spoken ms. */
+  ms?: number
+  signal?: AbortSignal
+}
+
+export async function uploadPiece(
   config: HermesConfig,
+  take: string,
+  index: number,
   clip: Blob,
-  {
-    hint = "",
-    context = "",
-    vocabulary = [],
-    signal,
-    first = false,
-    last = false,
-  }: ClipOptions = {},
+  { hint = "", vocabulary = [], ms = 0, signal }: PieceOptions = {},
 ) {
   const query = new URLSearchParams()
+  query.set("index", String(index))
+  if (ms > 0) query.set("ms", String(Math.round(ms)))
   if (hint) query.set("hint", hint)
-  // A plugin before 0.35 ignores the text heard before this clip.
-  if (context) query.set("context", context.slice(-400))
-  if (first) query.set("first", "1")
-  if (last) query.set("last", "1")
   for (const word of vocabulary) if (word) query.append("vocabulary", word)
-  const search = query.toString() ? `?${query}` : ""
-  const response = await request(`${pluginRoot(config.baseUrl)}/dictation${search}`, {
-    method: "POST",
-    headers: headers(config, { "Content-Type": clip.type || "audio/webm" }),
-    body: clip,
-    signal,
-  })
-  const text = (await response.json())?.text
-  return typeof text === "string" ? text : ""
+  await request(
+    `${pluginRoot(config.baseUrl)}/dictation/${encodeURIComponent(take)}/piece?${query}`,
+    {
+      method: "POST",
+      headers: headers(config, { "Content-Type": clip.type || "audio/webm" }),
+      body: clip,
+      signal,
+    },
+  )
 }
 
 /**
- * A finished dictation tidied whole (`POST dictation/cleanup`, ADR 0038): the words the host heard,
- * the bot's vocabulary and the names the take may mention in, the tidied text out (ADR 0066).
- *
- * The answer is null when the host didn't answer with text at all — a shape the route never sends,
- * and the take lands the words as it heard them. A refusal, a timeout or a host without the route
- * throws, as every call here does; a take treats those the same way and never fails over one.
+ * Ends a take: `pieces` is how many the app sent, and the answer is the take whole — its two texts,
+ * its spoken ms and what tidied it (ADR 0074). A host holding fewer Pieces refuses with
+ * `MissingPieces` and exactly the indexes it is missing; the caller sends those once more.
  */
-export async function tidyDictation(
+export async function confirmDictation(
   config: HermesConfig,
-  text: string,
-  vocabulary: string[] = [],
-  hint = "",
+  take: string,
+  pieces: number,
   signal?: AbortSignal,
-): Promise<string | null> {
-  const response = await request(`${pluginRoot(config.baseUrl)}/dictation/cleanup`, {
-    method: "POST",
+): Promise<ConfirmedTake> {
+  try {
+    const response = await request(
+      `${pluginRoot(config.baseUrl)}/dictation/${encodeURIComponent(take)}/confirm`,
+      { method: "POST", headers: headers(config), body: JSON.stringify({ pieces }), signal },
+    )
+    const answer = confirmedTake(await response.json())
+    if (!answer) throw new HermesError("The plugin didn't answer the take.")
+    return answer
+  } catch (error) {
+    const missing = (error instanceof HermesError ? error.body : undefined) as
+      { missing?: unknown } | undefined
+    if (error instanceof HermesError && error.status === 409 && Array.isArray(missing?.missing))
+      throw new MissingPieces(
+        error.message,
+        missing.missing.filter((index): index is number => finite(index) !== null),
+      )
+    throw error
+  }
+}
+
+/** Takes a take off its bot's host at once — Cancel, rather than waiting for the take to expire. */
+export async function cancelDictation(config: HermesConfig, take: string) {
+  await request(`${pluginRoot(config.baseUrl)}/dictation/${encodeURIComponent(take)}`, {
+    method: "DELETE",
     headers: headers(config),
-    body: JSON.stringify({ text, vocabulary, ...(hint ? { hint } : {}) }),
-    signal,
   })
-  const tidied = (await response.json())?.text
-  return typeof tidied === "string" && tidied.trim() ? tidied : null
+}
+
+/** A Confirm's answer as the app reads it: the words it can show, and what tidied them. */
+function confirmedTake(value: unknown): ConfirmedTake | null {
+  const raw = value as Record<string, unknown> | null
+  if (!raw || typeof raw.text !== "string") return null
+  return {
+    ...tidiedOf(raw),
+    text: raw.text,
+    heard: typeof raw.heard === "string" ? raw.heard : raw.text,
+    ms: finite(raw.ms) ?? 0,
+  }
 }
 
 /** The session's workspace, or null when it has none (or the plugin predates them). */
@@ -3930,7 +3990,7 @@ function dictationRoot(config: HermesConfig, entryId?: string) {
  * is when that host heard them, on its own — the log's order and its pages read `seenAt`, so a device
  * whose clock is wrong cannot misplace a take or hide one behind a page (ADR 0060).
  */
-export interface HostDictation {
+export interface HostDictation extends Tidied {
   id: string
   text: string
   /** The words as the host heard them, before Cleanup: absent where this host kept none (ADR 0062). */
@@ -3949,6 +4009,25 @@ function finite(raw: unknown): number | null {
   return typeof raw === "number" && Number.isFinite(raw) ? raw : null
 }
 
+/** What tidied a take, off a row written by either side of the wire (ADR 0074). */
+export function tidiedOf(row: {
+  level?: unknown
+  cleaned?: unknown
+  provider?: unknown
+  model?: unknown
+}): Tidied {
+  const named = (value: unknown) => (typeof value === "string" ? value.trim() : "")
+  const level = namedLevel(row.level)
+  const provider = named(row.provider)
+  const model = named(row.model)
+  return {
+    ...(level ? { level } : {}),
+    ...(typeof row.cleaned === "boolean" ? { cleaned: row.cleaned } : {}),
+    ...(provider ? { provider } : {}),
+    ...(model ? { model } : {}),
+  }
+}
+
 function dictationRow(value: unknown): HostDictation | null {
   const row = value as Partial<HostDictation> | null
   if (!row || typeof row.id !== "string" || !row.id || typeof row.text !== "string") return null
@@ -3958,6 +4037,7 @@ function dictationRow(value: unknown): HostDictation | null {
     id: row.id,
     text: row.text,
     ...(heard ? { heard } : {}),
+    ...tidiedOf(row),
     words: finite(row.words) ?? 0,
     ms: finite(row.ms) ?? 0,
     at,

@@ -25,8 +25,9 @@ function host(options: DictationHostOptions = {}) {
   return dictationHost({
     heard: HEARD,
     tidied: SENTENCE,
-    clipFails: [1],
-    clipError: "Local transcription failed: the model ran out of memory.",
+    // Every try at the take's only Piece fails, so the take fails with the host's own reason.
+    uploadFails: [1, 2, 3],
+    uploadError: "Local transcription failed: the model ran out of memory.",
     ...options,
   })
 }
@@ -81,7 +82,7 @@ async function reset(draftKey: string) {
   await db.drafts.put({ id: draftKey, text: "", at: 1 })
 }
 
-test("a clip the batch route couldn't transcribe says so, and the recording is retried", async () => {
+test("a Piece the host couldn't hear says so, and the recording is retried", async () => {
   const sent: { text: string; attachments: Attachment[] }[] = []
   const hosted = host()
   await reset("c:clip")
@@ -96,12 +97,12 @@ test("a clip the batch route couldn't transcribe says so, and the recording is r
     const line = await failedWith("Local transcription failed: the model ran out of memory.")
     assert.match(line, /Try again, or type it instead/, "the line says what to try")
     assert.ok(button("Discard"), "its recording is still kept, so it discards")
-    assert.equal(hosted.cleanups().length, 0, "a take with no words is not tidied")
+    assert.equal(hosted.confirms().length, 0, "a take whose Piece never went is not confirmed")
 
     await click(textButton("Retry"))
-    await until(async () => field()?.value === SENTENCE, "the clip's words, tidied")
-    assert.equal(hosted.clips().length, 2, "the recording was sent again")
-    assert.equal(hosted.cleanups().length, 1, "and the take was tidied once it was heard")
+    await until(async () => field()?.value === SENTENCE, "the take's words, tidied")
+    assert.equal(hosted.pieces().length, 4, "the recording was sent again, under a fresh Take id")
+    assert.equal(hosted.confirms().length, 1, "and answered once it was heard")
     await until(async () => Boolean(button("Voice")), "the bar back to idle")
   })
 })

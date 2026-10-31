@@ -26,9 +26,11 @@ import {
   getDictations,
   HermesError,
   postDictation,
+  tidiedOf,
   type HermesConfig,
   type DictationWrite,
   type HostDictation,
+  type ConfirmedTake,
   type HostDictationStats,
 } from "@/lib/hermes"
 import { quietly } from "@/lib/report"
@@ -63,15 +65,16 @@ function stored(row: RowFields): DictationRecord {
   return { ...row, loggedAt: orderOf(row) }
 }
 
-function entryOf(connection: string, text: string, ms: number, heard?: string): DictationRecord {
-  const asHeard = heardOf(heard)
+function entryOf(connection: string, take: ConfirmedTake): DictationRecord {
+  const asHeard = heardOf(take.heard)
   return stored({
     id: randomId(),
     connection,
-    text,
+    text: take.text.trim(),
     ...(asHeard ? { heard: asHeard } : {}),
-    words: countWords(text),
-    ms,
+    ...tidiedOf(take),
+    words: countWords(take.text),
+    ms: take.ms,
     at: Date.now(),
     posted: false,
   })
@@ -82,6 +85,7 @@ function hostOf(row: DictationRecord): DictationWrite {
     id: row.id,
     text: row.text,
     ...(row.heard ? { heard: row.heard } : {}),
+    ...tidiedOf(row),
     words: row.words,
     ms: row.ms,
     at: row.at,
@@ -180,15 +184,9 @@ async function askStats(config: HermesConfig, key: string): Promise<HostAnswer |
  * copy is fired without being awaited, so a host that is away — or too old to have the routes —
  * costs the take nothing, and a take the host never confirmed is posted again at the next reconcile.
  */
-export async function writeDictation(
-  config: HermesConfig,
-  text: string,
-  ms: number,
-  heard?: string,
-) {
-  const trimmed = text.trim()
-  if (!trimmed) return
-  const row = entryOf(connectionKey(config), trimmed, ms, heard)
+export async function writeDictation(config: HermesConfig, take: ConfirmedTake) {
+  if (!take.text.trim()) return
+  const row = entryOf(connectionKey(config), take)
   await db.dictationLog.put(row).catch(quietly("Logging a dictation on this device"))
   void post(config, row)
     .then((posting) => applyPostings([posting]))

@@ -14,17 +14,22 @@ const refused = (status, message) => Object.assign(new Error(message), { status 
 
 const aborted = () => new DOMException("The wait ran out.", "AbortError")
 
-test("a clip the batch route failed keeps its audio, in the host's own words", () => {
+test("a take the host failed keeps its audio, in the host's own words", () => {
   const clip = clipFailure(refused(502, "Local transcription failed: the model ran out of memory."))
   assert.equal(clip.message, "Local transcription failed: the model ran out of memory.")
-  assert.equal(clip.discard, true, "its recording is still on the device, so closing it discards")
+  assert.equal(clip.discard, true, "its audio is still on the device, so closing it discards")
   assert.match(clip.advice, /Try again, or type it instead/)
-  assert.match(clipFailure(aborted()).message, /took too long to transcribe/)
 })
 
-test("a transport failure is not a sentence to show a person, so the clip says its own", () => {
+test("a take past the host's bound says so, with the number the host stated", () => {
+  assert.equal(clipFailure(aborted(), 38_000).message, "The bot didn't answer the take in 38 s.")
+  assert.equal(clipFailure(aborted(), 150).message, "The bot didn't answer the take in 150 ms.")
+  assert.equal(clipFailure(aborted()).message, "The bot didn't answer the take.")
+})
+
+test("a transport failure is not a sentence to show a person, so the take says its own", () => {
   const lost = clipFailure(new TypeError("Failed to fetch"))
-  assert.equal(lost.message, "Couldn't transcribe the recording.")
+  assert.equal(lost.message, "Couldn't reach the bot's host to finish the take.")
   assert.match(lost.advice, /Try again, or type it instead/)
 })
 

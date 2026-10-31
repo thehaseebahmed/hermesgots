@@ -39,8 +39,6 @@ import { flushDrafts, loadDraft, saveDraft, useDraftText } from "@/lib/drafts"
 import type { HermesConfig } from "@/lib/hermes"
 import { COLUMN_BOX } from "@/lib/layout"
 import {
-  SEND_WAIT_MS,
-  STOP_WAIT_MS,
   canRecord,
   joinText,
   keyboardClick,
@@ -201,9 +199,9 @@ export function Composer({
     joinText(botName, dictationHint ?? ""),
     draftKey,
     dictationWords,
-    (text, spokenMs, heard) => {
-      placeLanded.current(text)
-      void writeDictation(connection, text, spokenMs, heard)
+    (take) => {
+      placeLanded.current(take.text)
+      void writeDictation(connection, take)
     },
   )
   const canDictate = dictationInfo?.status === "ready" && canRecord()
@@ -444,9 +442,10 @@ export function Composer({
     setTimeout(() => textarea.current?.focus())
   }
 
+  // Send and Stop hold the bar for the same bound: the one the bot's host states (ADR 0074).
   const endDictation = async (send: boolean) => {
     dictationSends.current = send
-    await dictation.finish(send ? SEND_WAIT_MS : STOP_WAIT_MS)
+    await dictation.finish()
   }
 
   placeLanded.current = placeDictation

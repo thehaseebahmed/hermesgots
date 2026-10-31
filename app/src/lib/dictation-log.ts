@@ -1,7 +1,10 @@
+import type { Tidied } from "@/lib/hermes"
+
 /**
  * The Dictation screen's rules: what one dictation counts as, which month it falls in, how a
  * device's mirror is compared with its bot's host, and the one rate the stats card shows (ADR 0060).
- * Import-free, so `scripts/test-dictation-log.mjs` runs it as a pure rule.
+ * Nothing it imports survives to runtime — a type is erased — so `scripts/test-dictation-log.mjs`
+ * still runs it as a pure rule.
  */
 
 /**
@@ -22,11 +25,6 @@ export interface Logged {
 export function countWords(text: string): number {
   const trimmed = text.trim()
   return trimmed ? trimmed.split(/\s+/).length : 0
-}
-
-/** How long the words took to say: the take's piece spans, pauses left out. */
-export function spokenOf(spans: number[]): number {
-  return spans.reduce((total, span) => total + (span > 0 ? span : 0), 0)
 }
 
 /** The month a dictation falls in, as `2026-10`: the key two rows are grouped under. */
@@ -123,11 +121,19 @@ export function toUpsert<T extends { id: string; at: number; heard?: string }>(
 }
 
 /**
- * What one row says that another can disagree with: its clock, and the words as heard it kept — so a
- * mirror holding a `heard` its host answered without takes the host's row instead (ADR 0062).
+ * What one row says that another can disagree with: its clock, the words as heard it kept, and what
+ * tidied it — so a mirror holding a row without those takes the host's copy, and one a host answers
+ * without them keeps the device's (ADR 0062, ADR 0074).
  */
-function stampOf(row: { at: number; heard?: string }): string {
-  return `${row.at}\u0000${row.heard ?? ""}`
+function stampOf(row: Tidied & { at: number; heard?: string }): string {
+  return [
+    row.at,
+    row.heard ?? "",
+    row.level ?? "",
+    row.cleaned === undefined ? "" : String(row.cleaned),
+    row.provider ?? "",
+    row.model ?? "",
+  ].join("\u0000")
 }
 
 export interface Totals {
