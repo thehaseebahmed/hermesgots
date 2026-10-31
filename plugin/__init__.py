@@ -465,6 +465,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "subagents_stop_all",
                     "attachments",
                     "media",
+                    # A URL signed for one file (`POST media/url`), which is how the thread draws
+                    # every photo, clip and recording: an element can't send the key. Advertised
+                    # apart from `media` because a host from before it serves the file but can't
+                    # sign for one, and the app would ask a route that isn't there.
+                    "media_url",
                     "profile_routes",
                     "pr_tool",
                     "close",
@@ -1969,31 +1974,91 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "Couldn't tidy the dictation.", 502)
         return web.json_response({"object": "memento.dictation_cleanup", **result})
 
-    async def served_file(request: "web.Request", resolve: Any, allowed: Any = None) -> "web.StreamResponse":
+    async def served_file(
+        request: "web.Request", resolve: Any, allowed: Any = None
+    ) -> "web.StreamResponse":
         """Serves the file a query's ``path`` names: ``resolve`` validates it, ``allowed`` may refuse
         it (a library file has to sit under a project's library folder). What the platform shows is
-        served in place; anything else is handed over as a download named as the file."""
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
+        served in place; anything else is handed over as a download named as the file. aiohttp's own
+        file response answers a ``Range`` with the span asked for, which is what lets a player seek.
+
+        It takes no view on who may ask: each route below says who it lets in, so no caller can
+        serve a file by handing this helper a flag.
+        """
         try:
             file = await asyncio.to_thread(resolve, request.query.get("path", ""))
         except media.MediaError as error:
             return _error(web, str(error), error.status)
         if allowed is not None and not await asyncio.to_thread(allowed, file):
             return _error(web, "Not a library file.", 404)
-        headers = {"content-type": media.content_type(file)}
+        headers = {"content-type": media.content_type(file), "accept-ranges": "bytes"}
         download = media.disposition(file)
         if download:
             headers["content-disposition"] = download
         return web.FileResponse(file, headers=headers)
 
+    async def sign_media_url(request: "web.Request") -> "web.Response":
+        """Mints a URL for one file: a signature over the path, this profile and an expiry.
+
+        The app can't send its key with an ``<img>`` or a ``<video>``, so it asks here once per file
+        and keeps the URL for the page's life. What it mints is worth one path until it expires.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        path = (body or {}).get("path")
+        if not isinstance(path, str) or not path:
+            return _error(web, "Body needs a path.", 400)
+        try:
+            file = await asyncio.to_thread(media.media_file, path)
+        except media.MediaError as error:
+            return _error(web, str(error), error.status)
+        key = await asyncio.to_thread(media.signing_key, store_path())
+        token, expires = media.mint(key, path, _request_profile() or "")
+        # The media route beside this one: this address without `/url`, so a bot at /p/<profile>
+        # keeps its prefix.
+        url = str(
+            request.url.with_path(request.path.removesuffix("/url")).with_query(
+                {"path": path, media.URL_PARAM: token}
+            )
+        )
+        return web.json_response(
+            {
+                "object": "memento.media_url",
+                "path": path,
+                "url": url,
+                "expires": expires,
+                "type": media.content_type(file),
+                "size": await asyncio.to_thread(lambda: file.stat().st_size),
+            }
+        )
+
     async def serve_media(request: "web.Request") -> "web.StreamResponse":
+        """The media route: this bot's key, or — where an element can't carry one — a URL it signed."""
+        path = request.query.get("path", "")
+        signed = request.query.get(media.URL_PARAM, "")
+        # A request with no signature is the ordinary one, behind the key like every other route.
+        if signed:
+            key = await asyncio.to_thread(media.signing_key, store_path())
+            permitted = await asyncio.to_thread(
+                media.covers, key, signed, path, _request_profile() or ""
+            )
+            if not permitted:
+                return _error(web, "Unauthorized", 401)
+        else:
+            denied = unauthorized(request)
+            if denied is not None:
+                return denied
         return await served_file(request, media.media_file)
 
     app.router.add_get(f"{PREFIX}/media", serve_media)
+    app.router.add_post(f"{PREFIX}/media/url", sign_media_url)
 
     async def serve_library_file(request: "web.Request") -> "web.StreamResponse":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
         return await served_file(
             request, media.media_file, lambda file: library.holds(hermes_home(), file)
         )

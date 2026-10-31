@@ -1890,20 +1890,35 @@ export async function getResearchWriters(config: HermesConfig) {
   return { model: Boolean(writers?.model), provider: Boolean(writers?.provider) }
 }
 
-/** An image the agent named with a `MEDIA:<path>` tag, from the plugin's media route. */
-export async function getPluginMedia(
+/** What the plugin's media route answers a mint: where the file can be read, and what it is. */
+export interface MediaUrlAnswer {
+  url: string
+  type: string
+  size: number
+}
+
+/**
+ * A URL the plugin signs for one file (`POST /media/url`): an `<img>` or a `<video>` can't carry the
+ * bot's key, so the host signs the path, the profile and a few minutes of expiry instead. The app
+ * asks once per file and keeps the answer for the page's life — nothing is fetched into it.
+ */
+export async function getPluginMediaUrl(
   config: HermesConfig,
   path: string,
   signal?: AbortSignal,
-): Promise<Blob> {
-  const response = await request(
-    `${pluginRoot(config.baseUrl)}/media?path=${encodeURIComponent(path)}`,
-    {
-      headers: headers(config),
-      signal,
-    },
-  )
-  return response.blob()
+): Promise<MediaUrlAnswer> {
+  const response = await request(`${pluginRoot(config.baseUrl)}/media/url`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ path }),
+    signal,
+  })
+  const body = await response.json()
+  // A URL is what every cell draws from: a mint that answers without one is a failure here, where
+  // it can be said, rather than an `undefined` that reaches an `<img src>` a layer away.
+  if (typeof body?.url !== "string" || !body.url)
+    throw new HermesError("The bot's plugin answered without a URL for the file.", 502)
+  return { url: body.url, type: String(body.type ?? ""), size: Number(body.size ?? 0) }
 }
 
 /** The plugin pings its change stream every 20s, so one quiet for longer has died unnoticed. */

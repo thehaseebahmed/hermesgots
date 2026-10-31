@@ -535,6 +535,8 @@ export interface HostAsk {
   host: string
   path: string
   search: string
+  /** What a write posted, where it posted one. */
+  body?: string
   authorization: string | null
 }
 
@@ -561,9 +563,10 @@ const SERVED: Record<string, string> = {
  */
 export function mediaHost({
   host = "",
-  features = ["attachments", "media"],
+  features = ["attachments", "media", "media_url"],
   fail = [],
   failure = 404,
+  refusal,
   type,
   asked = [],
 }: {
@@ -575,6 +578,8 @@ export function mediaHost({
   fail?: string[]
   /** The status a refused path is answered with. */
   failure?: number
+  /** What a refusal says, where the host's own sentence is the point of the test. */
+  refusal?: string
   /** What a path is served as, where it isn't the type its suffix names. */
   type?: (path: string) => string
   /** Requests recorded so far, so a second host keeps one count going. */
@@ -589,14 +594,32 @@ export function mediaHost({
       host: url.host,
       path: url.pathname,
       search: url.search,
+      body: typeof init?.body === "string" ? init.body : undefined,
       authorization: sent.get("authorization") ?? request?.headers.get("authorization") ?? null,
     })
     if (url.pathname.endsWith("/plugins/memento/info"))
       return features === "away" ? json({}, 503) : json({ name: "memento", features })
+    if (url.pathname.endsWith("/plugins/memento/media/url")) {
+      // The mint: a URL for one path, signed by the host and good for minutes. Nothing is read
+      // into the app here — an <img> or a <video> draws from this URL itself.
+      const path = String(JSON.parse(String(init?.body ?? "{}")).path ?? "")
+      if (fail.some((suffix) => path.endsWith(suffix)))
+        return json({ error: { message: refusal ?? "No such file." } }, failure)
+      const served = type?.(path) ?? SERVED[path.slice(path.lastIndexOf(".")).toLowerCase()]
+      const kind = served ?? "application/octet-stream"
+      const media = `${url.origin}${url.pathname.replace(/\/url$/, "")}`
+      return json({
+        object: "memento.media_url",
+        path,
+        url: `${media}?path=${encodeURIComponent(path)}&token=mock-token`,
+        type: kind,
+        size: 12,
+      })
+    }
     if (url.pathname.endsWith("/plugins/memento/media")) {
       const path = url.searchParams.get("path") ?? ""
       if (fail.some((suffix) => path.endsWith(suffix)))
-        return json({ error: "No such file." }, failure)
+        return json({ error: { message: "No such file." } }, failure)
       const served = type?.(path) ?? SERVED[path.slice(path.lastIndexOf(".")).toLowerCase()]
       const kind = served ?? "application/octet-stream"
       return new Response(new Blob(["bytes"], { type: kind }), {
@@ -612,11 +635,17 @@ export function mediaHost({
 export const askedFor = (asked: HostAsk[], part: string) =>
   asked.filter((one) => `${one.path}${one.search}`.includes(part)).length
 
-/** The paths a faked host's media route was asked for, in the order it was asked. */
-export const mediaReads = (asked: HostAsk[]) =>
+/** What a faked host was asked to sign a URL for, and the key it was asked with, in order. */
+export const mediaAsks = (asked: HostAsk[]) =>
   asked
-    .filter((one) => one.path.endsWith("/plugins/memento/media"))
-    .map((one) => new URLSearchParams(one.search).get("path") ?? "")
+    .filter((one) => one.path.endsWith("/plugins/memento/media/url"))
+    .map((one) => ({
+      path: String(JSON.parse(one.body ?? "{}").path ?? ""),
+      authorization: one.authorization,
+    }))
+
+/** The paths a faked host was asked to sign a URL for, in the order it was asked. */
+export const mediaReads = (asked: HostAsk[]) => mediaAsks(asked).map((one) => one.path)
 
 /** One hold as a test gives it: number and title, and the stage its session is in. */
 export type HoldRow = {

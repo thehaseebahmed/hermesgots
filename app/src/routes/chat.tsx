@@ -43,6 +43,7 @@ import { Composer } from "@/components/chat/composer"
 import { MessageItem } from "@/components/chat/message-item"
 import { Compacted, ModelChange } from "@/components/chat/model-change"
 import { DayHeading } from "@/components/chat/day-heading"
+import { PreviewerProvider } from "@/components/chat/previewer"
 import { ThreadCard } from "@/components/chat/thread-card"
 import { prLabel } from "@/components/chat/pr-look"
 import { Cheatsheet } from "@/components/chat/cheatsheet"
@@ -260,16 +261,20 @@ export function ChatPage(props: ChatPageProps) {
   // While the verdict for a chat just switched to is still out, the screen that drew the last one
   // keeps drawing: the current screen holds the chat it left until the new one is ready.
   const kind = verdict?.split("\n")[0]
-  if (kind === "next" && verdict === `next\n${id}` && id)
-    return (
+  // The screen this chat opens on, wrapped once: the one Previewer a screen mounts is the same
+  // instance whichever screen drew the thread.
+  const screen =
+    kind === "next" && verdict === `next\n${id}` && id ? (
       <NextChat
         id={id}
         slot={props.slot}
         pinned={Boolean(props.chatId)}
         paneThread={props.paneThread}
       />
-    )
-  if (kind === "current") return <CurrentChatPage {...props} />
+    ) : kind === "current" ? (
+      <CurrentChatPage {...props} />
+    ) : null
+  if (screen) return <PreviewerProvider>{screen}</PreviewerProvider>
   return (
     <div
       data-slot="chat-pane"

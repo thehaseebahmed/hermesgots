@@ -14,7 +14,8 @@ import {
 import { attachmentParts } from "@/lib/attachment-text"
 import type { Attachment } from "@/lib/db"
 import type { ContentPart } from "@/lib/hermes"
-import { loadMediaFile } from "@/lib/media-tags"
+import { loadMediaUrl } from "@/lib/media-url"
+import { isNative, openMediaViewer } from "@/lib/native"
 import { noteFailure } from "@/lib/report"
 import { createSignal } from "@/lib/store"
 import { randomId } from "@/lib/utils"
@@ -165,34 +166,51 @@ export async function prepareIntake(
   return { attachments, refusals }
 }
 
-/**
- * Saves an attachment under the file's own name: the bytes this device holds, else the host's copy,
- * read the way the thread reads it (`loadMediaFile`), so a file on screen is never fetched twice.
- * A failed save is said to the user here, so a caller only says which file to save.
- */
-export async function downloadAttachment(conversationId: string, attachment: Attachment) {
-  try {
-    const blob = attachment.blob ?? (await hostCopy(conversationId, attachment))
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement("a")
-    link.href = url
-    link.download = attachment.name
-    document.body.append(link)
-    link.click()
-    link.remove()
-    // The browser reads the bytes after the click returns, so the URL outlives it.
-    window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
-  } catch (error) {
-    noteFailure(`saving ${attachment.name}`, error)
-    toast.error(error instanceof Error ? error.message : `Couldn't download ${attachment.name}.`)
-  }
+/** A file a thread hands over: what it is called, what it is, and wherever its bytes are reachable. */
+export type Handover = Pick<Attachment, "name" | "type" | "path" | "blob"> & {
+  /** The URL the thread already holds for it, so a tap opens at once. */
+  src?: string
 }
 
-/** The host's copy of a file this device doesn't hold, through the media route's own read. */
-async function hostCopy(conversationId: string, attachment: Attachment) {
-  const file = attachment.path ? await loadMediaFile(conversationId, attachment.path) : null
-  if (!file) throw new Error(`There is no copy of ${attachment.name}.`)
-  return file.blob
+/**
+ * Hands a file to the platform, by one rule: the bytes this device holds, the URL the host signed
+ * for it, or — before that URL is in — one asked for here. On the web that is a new tab, where a PDF
+ * or a note is shown and anything else is saved under its own name; under Android the phone's own
+ * app, through the VIEW intent this app already uses for media. No second download affordance is
+ * drawn: the destination decides. A failed hand-over is said to the user here, so a caller only
+ * says which file to hand over.
+ *
+ * `conversationId` is null for a file this device picked and the host was never given: its own
+ * bytes are all there is, and nothing is asked of a host.
+ */
+export async function openAttachment(conversationId: string | null, file: Handover) {
+  try {
+    // The URL first, where the thread holds one: the host names the file in how it serves it, which
+    // this device's own blob can't. A staged file has no URL, so its bytes are all there is.
+    if (!file.src && !file.path && file.blob) {
+      const url = URL.createObjectURL(file.blob)
+      try {
+        // A staged file's bytes have no name of their own in a URL: the browser saves them under
+        // the blob's, and the platform's app is handed the name with the bytes.
+        if (!isNative) window.open(url, "_blank", "noopener")
+        else await openMediaViewer(url, { type: file.type, name: file.name })
+      } finally {
+        // The browser reads the bytes after the click returns, so the URL outlives it.
+        window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+      }
+      return
+    }
+    const read =
+      file.src ??
+      (conversationId && file.path
+        ? (await loadMediaUrl(conversationId, file.path))?.url
+        : undefined)
+    if (!read) throw new Error(`There is no copy of ${file.name}.`)
+    await openMediaViewer(read, { type: file.type, name: file.name })
+  } catch (error) {
+    noteFailure(`opening ${file.name}`, error)
+    toast.error(error instanceof Error ? error.message : `Couldn't open ${file.name}.`)
+  }
 }
 
 // Attachments being saved on the Hermes host right now, so their tiles can say so.

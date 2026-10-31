@@ -168,7 +168,7 @@
 
 import http from "node:http"
 import { randomUUID } from "node:crypto"
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs"
+import { mkdirSync, readFileSync, statSync, writeFileSync, existsSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, extname, join } from "node:path"
 
@@ -325,6 +325,8 @@ const MOCK_MEDIA_TYPES = {
   ".jpeg": "image/jpeg",
   ".svg": "image/svg+xml",
   ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".mov": "video/quicktime",
   ".mp3": "audio/mpeg",
   ".pdf": "application/pdf",
   ".md": "text/markdown",
@@ -341,6 +343,24 @@ const mockMediaInline = (type) =>
 // What the bytes are: the chart for a png, a line of text for anything a browser reads as text.
 const mockMediaBody = (type) =>
   type === "image/png" ? MOCK_PNG : Buffer.from(`A file the mock host keeps for ${type}.\n`)
+// A file the app uploaded to this mock, read back for the media route; nothing where it isn't one.
+const heldMedia = (path) => {
+  try {
+    return statSync(path).isFile() ? readFileSync(path) : null
+  } catch {
+    return null
+  }
+}
+// The span a Range asks for, as the plugin's route answers one, so a clip can be sought and played.
+const mockRange = (header, size) => {
+  const match = /^bytes=(\d*)-(\d*)$/.exec(String(header ?? "").trim())
+  if (!match || size <= 0) return null
+  const [, first, last] = match
+  const start = first ? Number(first) : Math.max(0, size - Number(last || 0))
+  const end = first && last ? Math.min(Number(last), size - 1) : size - 1
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= size) return null
+  return [start, end]
+}
 const githubRepos = [
   { full_name: "mock-user/memento", description: "A PWA companion for Hermes", private: false },
   { full_name: "mock-user/maze", description: "A tiny maze game", private: true },
@@ -3839,6 +3859,7 @@ http
           "clarify",
           "attachments",
           "media",
+          "media_url",
           "openui",
           "profile_routes",
           "pr_tool",
@@ -4323,18 +4344,57 @@ http
       pushSubscriptions.delete(endpoint)
       return json(res, 200, { object: "memento.push", subscribed: false })
     }
+    if (
+      PLUGIN &&
+      !profile &&
+      req.method === "POST" &&
+      url.pathname === "/api/plugins/memento/media/url"
+    ) {
+      // The signature the app draws from: one path, this profile and a moment a few minutes out.
+      // Nothing is read into the app here — an <img> or a <video> reads the URL itself.
+      const { path } = await readBody(req)
+      if (!path || /missing/i.test(String(path)))
+        return json(res, 404, { error: { message: "No such file." } })
+      const type = mockMediaType(path)
+      const media = new URL(url.pathname.replace(/\/url$/, ""), `http://${req.headers.host}`)
+      media.searchParams.set("path", path)
+      media.searchParams.set("token", "mock-token")
+      return json(res, 200, {
+        object: "memento.media_url",
+        path,
+        url: media.toString(),
+        expires: Math.floor(Date.now() / 1000) + 600,
+        type,
+        size: mockMediaBody(type).length,
+      })
+    }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/media") {
       const path = url.searchParams.get("path") ?? ""
+      // A signed URL carries its own proof, which is what lets an element read the file; a request
+      // with neither it nor the key is refused, as the plugin's route refuses one.
+      if (!url.searchParams.get("token") && !req.headers.authorization)
+        return json(res, 401, { error: { message: "Unauthorized" } })
       if (!path || /missing/i.test(path))
         return json(res, 404, { error: { message: "No such file." } })
       const type = mockMediaType(path)
-      const headers = { "Content-Type": type, ...cors }
+      const headers = { "Content-Type": type, "Accept-Ranges": "bytes", ...cors }
       // What a browser shows comes in place; everything else is handed over as a download named as
       // the file, the way the plugin's route answers.
       if (!mockMediaInline(type))
         headers["Content-Disposition"] = `attachment; filename="${basename(path)}"`
+      // A file this mock was handed — a clip or a recording the app uploaded — is served as it is,
+      // so the browser plays the bytes it was given rather than a stand-in.
+      const held = heldMedia(path)
+      const body = held ?? mockMediaBody(type)
+      const span = mockRange(req.headers.range, body.length)
+      if (span) {
+        headers["Content-Range"] = `bytes ${span[0]}-${span[1]}/${body.length}`
+        headers["Content-Length"] = String(span[1] - span[0] + 1)
+        res.writeHead(206, headers)
+        return res.end(body.subarray(span[0], span[1] + 1))
+      }
       res.writeHead(200, headers)
-      return res.end(mockMediaBody(type))
+      return res.end(body)
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/library/file") {
       // A filed file for opening it: an image as png bytes, markdown as text, anything else as

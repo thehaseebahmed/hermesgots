@@ -67,15 +67,16 @@ async function blobBytes(url: string) {
 }
 
 /**
- * Opens media in the platform's own viewer or player: the Android app is handed the bytes and a VIEW
- * intent for the file's type, and a browser opens the file in a new tab, where it plays the way that
- * browser plays anything. Nothing is embedded in the thread.
+ * Opens a file in the platform's own app: the Android app is handed the bytes and a VIEW intent for
+ * the file's type, and a browser opens the file in a new tab, where it shows what it can and saves
+ * what it can't. Nothing is embedded in the thread, and nothing is held here beyond the one file a
+ * tap hands over.
  */
 export async function openMediaViewer(
   url: string,
   { type, name }: { type: string; name?: string },
 ) {
-  if (isNative && url.startsWith("blob:")) {
+  if (isNative) {
     try {
       const bytes = await blobBytes(url)
       const opened = bytes.type || type
@@ -90,13 +91,11 @@ export async function openMediaViewer(
     } catch {
       // The tab below still opens it.
     }
-  }
-  if (isNative) {
     // A file that isn't ours to hand over; the platform opens the URL itself.
     void Browser.open({ url })
     return
   }
-  window.open(url, "_blank")
+  window.open(url, "_blank", "noopener")
 }
 
 /** A URL opened outside the app: the platform's browser in the Android app, a new tab on the web. */

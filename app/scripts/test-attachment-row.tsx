@@ -1,8 +1,9 @@
 /**
  * A message's file in the thread, over a seeded device database with the HTTP boundary faked: a
- * file draws as a row naming it and its size, and a tap saves it under its own name — from this
- * device's own bytes where it holds them, else from the bot's plugin media route, with the key a
- * plain link can't carry (spec #478, story 10).
+ * file draws as a row naming it and its size, and a tap hands it to the platform — on the web a new
+ * tab at the URL the host signed, where the browser shows a PDF and saves an archive under its own
+ * name. The thread reads every file through that URL, so the URL is already in hand when the tap
+ * comes. A file this device picked before the host was ever given it opens from its own bytes.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -14,14 +15,15 @@ import {
   chatScreen,
   click,
   findAll,
+  mediaAsks,
   mediaHost,
+  mediaReads,
   mount,
   seedChat,
   seedSettings,
   text,
   until,
 } from "./component-kit.tsx"
-import type { HostAsk } from "./component-kit.tsx"
 
 const NAME = "field notes.pdf"
 const HOST_PATH = "/home/h/.hermes/memento/attachments/session-1/field notes.pdf"
@@ -45,15 +47,6 @@ const message = (attachments: Attachment[]): Message => ({
   attachments,
 })
 
-/** What the media route was asked for, and the key it was asked with. */
-const reads = (asked: HostAsk[]) =>
-  asked
-    .filter((one) => one.path.endsWith("/plugins/memento/media"))
-    .map((one) => ({
-      path: new URLSearchParams(one.search).get("path") ?? "",
-      authorization: one.authorization,
-    }))
-
 const row = () =>
   findAll("button").find(
     (button) =>
@@ -61,43 +54,55 @@ const row = () =>
       button.getAttribute("aria-label") === `Open ${NAME}`,
   ) ?? null
 
-test("a message's file draws as a row naming it, and a tap saves it under its own name", async () => {
+/** jsdom has no tabs of its own: a tab opening and an object URL both stand in for the browser. */
+function stubBrowser() {
+  const real = { open: window.open, create: URL.createObjectURL, revoke: URL.revokeObjectURL }
+  const opened: string[] = []
+  window.open = ((url: string | URL) => {
+    opened.push(String(url))
+    return null
+  }) as typeof window.open
+  URL.createObjectURL = (blob: Blob | MediaSource) =>
+    `blob:${(blob as Blob).type || "bytes"}-${opened.length + 1}`
+  URL.revokeObjectURL = () => {}
+  return {
+    opened,
+    restore: () => {
+      window.open = real.open
+      URL.createObjectURL = real.create
+      URL.revokeObjectURL = real.revoke
+    },
+  }
+}
+
+test("a message's file draws as a row naming it, and a tap opens a tab at the host's URL", async () => {
   const profile = botProfile("attachment-row")
   await seedSettings()
   await seedChat({ id: "c1", profile, messages: [message([attachment])] })
   const asked = mediaHost({ host: "attachment-row" })
-
-  // jsdom has no object URLs and no download of its own, so both stand in for the browser's effect.
-  const saved: string[] = []
-  const anchor = window.HTMLAnchorElement.prototype
-  const real = {
-    create: URL.createObjectURL,
-    revoke: URL.revokeObjectURL,
-    click: anchor.click,
-  }
-  URL.createObjectURL = () => "blob:field-notes"
-  URL.revokeObjectURL = () => {}
-  anchor.click = function (this: HTMLAnchorElement) {
-    saved.push(this.download)
-  }
+  const browser = stubBrowser()
   try {
     await mount(chatScreen("c1"), async () => {
       await until(async () => row() !== null, "the file's row")
+      assert.equal(row()!.getAttribute("aria-label"), `Download ${NAME}`, "the row promises a save")
       assert.match(text(), /field notes\.pdf/, "the row names the file")
       assert.match(text(), /2 KB/, "with the size the message stored")
       await click(row())
-      await until(async () => saved.length > 0, "the download")
-      assert.deepEqual(saved, [NAME], "the browser is told the file's own name")
+      await until(async () => browser.opened.length > 0, "the tab")
+      assert.equal(browser.opened.length, 1, "one tab for one tap")
+      assert.match(
+        browser.opened[0],
+        /\/media\?path=[^&]*field%20notes\.pdf&token=/,
+        "the URL the host signed for the file",
+      )
       assert.deepEqual(
-        reads(asked),
+        mediaAsks(asked),
         [{ path: HOST_PATH, authorization: "Bearer test-key" }],
-        "the bytes come from the media route, behind the bot's key",
+        "and it was signed behind the bot's key, which is the app's alone",
       )
     })
   } finally {
-    URL.createObjectURL = real.create
-    URL.revokeObjectURL = real.revoke
-    anchor.click = real.click
+    browser.restore()
   }
 })
 
@@ -128,9 +133,8 @@ test("a file the host never took is drawn, and a tap says there is no copy of it
   }
 })
 
-test("a file this device holds is saved from its own bytes, without asking the host", async () => {
-  // The row a message holds the bytes of still saves them: it drew `Download` and its tap saves,
-  // rather than opening the viewer a file this device happens to hold.
+test("a staged file, which the host has never been given, opens from its own bytes", async () => {
+  // The composer's own tile before the message goes: no path, so these bytes are all there is.
   const profile = botProfile("attachment-row")
   await seedSettings()
   await seedChat({
@@ -140,36 +144,23 @@ test("a file this device holds is saved from its own bytes, without asking the h
       message([
         {
           ...attachment,
+          path: undefined,
           blob: new Blob(["pdf bytes"], { type: "application/pdf" }),
         },
       ]),
     ],
   })
   const asked = mediaHost({ host: "attachment-row" })
-  const saved: string[] = []
-  const anchor = window.HTMLAnchorElement.prototype
-  const real = {
-    create: URL.createObjectURL,
-    revoke: URL.revokeObjectURL,
-    click: anchor.click,
-  }
-  URL.createObjectURL = () => "blob:local-notes"
-  URL.revokeObjectURL = () => {}
-  anchor.click = function (this: HTMLAnchorElement) {
-    saved.push(this.download)
-  }
+  const browser = stubBrowser()
   try {
     await mount(chatScreen("c1"), async () => {
       await until(async () => row() !== null, "the file's row")
-      assert.equal(row()!.getAttribute("aria-label"), `Download ${NAME}`, "the row promises a save")
       await click(row())
-      await until(async () => saved.length > 0, "the download")
-      assert.deepEqual(saved, [NAME], "saved under the file's own name")
-      assert.deepEqual(reads(asked), [], "the bytes this device holds are never asked of the host")
+      await until(async () => browser.opened.length > 0, "the tab")
+      assert.match(browser.opened[0], /^blob:/, "the bytes this device holds")
+      assert.deepEqual(mediaReads(asked), [], "and nothing was asked of the host")
     })
   } finally {
-    URL.createObjectURL = real.create
-    URL.revokeObjectURL = real.revoke
-    anchor.click = real.click
+    browser.restore()
   }
 })

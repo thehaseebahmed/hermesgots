@@ -15,8 +15,9 @@ import { toast } from "sonner"
 
 import { AttachMenu } from "@/components/chat/attach-menu"
 import { useCodeFace } from "@/components/chat/code-face"
-import { AttachmentTile, AttachmentViewer } from "@/components/chat/attachments"
+import { AttachmentTile } from "@/components/chat/attachments"
 import type { ModeSettings } from "@/components/chat/mode-menu"
+import { usePreviewer, type PreviewItem } from "@/components/chat/previewer"
 import { SlashMenu } from "@/components/chat/slash-menu"
 import { VoiceBar } from "@/components/chat/voice-bar"
 import {
@@ -27,7 +28,10 @@ import {
 } from "@/components/ui/input-group"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { filesReason, fresh, isPhoto, MAX_ATTACHMENTS } from "@/lib/attachment-caps"
-import { prepareIntake } from "@/lib/attachments"
+import { openAttachment, prepareIntake } from "@/lib/attachments"
+import { attachmentUrl } from "@/lib/attachment-url"
+import { mediaCell, mediaKind } from "@/lib/media-kind"
+import { previewItem } from "@/lib/media-items"
 import type { Attachment } from "@/lib/db"
 import type { PluginFeatureAnswer } from "@/lib/features"
 
@@ -137,7 +141,8 @@ export function Composer({
   const recent = useRef(new Map<string, number>())
   // A file dragged over the composer, held until it is dropped or leaves.
   const [over, setOver] = useState(false)
-  const [viewing, setViewing] = useState<number | null>(null)
+  const { open: previewer, update: refresh } = usePreviewer()
+  const owner = useId()
   // The key whose draft the text is; until it has loaded nothing is saved over it.
   const [loaded, setLoaded] = useState<string>()
   const stored = useRef("")
@@ -358,6 +363,51 @@ export function Composer({
   const removeAttachment = (attachment: Attachment) =>
     setAttachments((current) => current.filter((a) => a.id !== attachment.id))
 
+  // A staged file's bytes exist only on this device: the previewer draws them from their own URL,
+  // which is the one place an object URL is still what a file is read from.
+  const staged = (attachment: Attachment): PreviewItem =>
+    previewItem(
+      {
+        key: attachment.id,
+        kind: mediaKind(attachment.type, attachment.name),
+        cell: mediaCell(attachment.type, attachment.name),
+        name: attachment.name,
+        type: attachment.type,
+        size: attachment.size,
+        src: attachmentUrl(attachment),
+        state: "ready",
+      },
+      { width: attachment.width, height: attachment.height },
+    )
+  const media = attachments.filter(
+    (attachment) => mediaCell(attachment.type, attachment.name) !== "file",
+  )
+  // A tap that means "look at this" opens the screen's own Previewer, here as in the thread; a file
+  // the Previewer can't draw is handed to the platform instead.
+  const open = (attachment: Attachment) => {
+    if (mediaCell(attachment.type, attachment.name) === "file") {
+      void openAttachment(null, attachment)
+      return
+    }
+    previewer(
+      {
+        items: media.map(staged),
+        index: media.findIndex((one) => one.id === attachment.id),
+        onRemove: (shown) => setAttachments((current) => current.filter((a) => a.id !== shown.key)),
+      },
+      owner,
+    )
+  }
+
+  const stagedKeys = media.map((one) => one.id).join("\n")
+  const stagedNow = useRef(media)
+  useEffect(() => {
+    stagedNow.current = media
+  })
+  useEffect(() => {
+    refresh(owner, stagedNow.current.map(staged))
+  }, [owner, stagedKeys, refresh])
+
   const attach = (
     <AttachMenu
       disabled={disabled}
@@ -576,11 +626,11 @@ export function Composer({
       {attachments.length + preparing.length > 0 && (
         // Room on the right so the last tile's remove button isn't cut off.
         <div className="-mt-3 mb-2 flex gap-2.5 overflow-x-auto pt-3 pr-4 pl-1">
-          {attachments.map((attachment, index) => (
+          {attachments.map((attachment) => (
             <AttachmentTile
               key={attachment.id}
               attachment={attachment}
-              onOpen={() => setViewing(index)}
+              onOpen={() => open(attachment)}
               onRemove={() => removeAttachment(attachment)}
             />
           ))}
@@ -589,12 +639,6 @@ export function Composer({
           ))}
         </div>
       )}
-      <AttachmentViewer
-        attachments={attachments}
-        index={viewing}
-        onIndex={setViewing}
-        onRemove={removeAttachment}
-      />
       <InputGroup
         className={cn(
           "bg-background shadow-lg shadow-black/5 has-data-[align=block-end]:rounded-[1.75rem] has-[textarea]:rounded-[1.75rem] dark:bg-input/30",
