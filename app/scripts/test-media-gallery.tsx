@@ -240,6 +240,11 @@ test("Escape closes the Previewer, and the cell it was opened from is where the 
     await until(async () => filled(cell("cat.png")), "the photo's cell")
     await click(cell("cat.png"))
     await until(() => Boolean(document.querySelector('[role="dialog"]')), "the Previewer")
+    assert.match(
+      document.querySelector('[role="dialog"]')!.className,
+      /motion-reduce:transition-none/,
+      "and it opens without a transition for a reader who asked for none",
+    )
     await act(async () => {
       document
         .querySelector('[role="dialog"]')!
