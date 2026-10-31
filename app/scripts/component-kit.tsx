@@ -664,6 +664,12 @@ export function afkHost({
   pickBudget = null,
   holdsHeld = null,
   budgetRefusal = null,
+  usageThreshold = null,
+  thresholdRefusal = null,
+  thresholdAnswer,
+  hostProvider = "anthropic",
+  windows = null,
+  deciding = null,
 }: {
   projectId?: string
   features?: string[]
@@ -687,6 +693,21 @@ export function afkHost({
   holdsHeld?: number | null
   /** What a pick budget write is refused with, where the host refuses one. */
   budgetRefusal?: string | null
+  /**
+   * The bot's usage threshold, 50–100; null is Off, which is what a bot with no limit answers. A write
+   * lands on this unless `thresholdAnswer` says what the host really keeps instead.
+   */
+  usageThreshold?: number | null
+  /** What a usage threshold write is refused with, where the host refuses one. */
+  thresholdRefusal?: string | null
+  /** What a threshold write answers with, where the host holds something other than what was asked. */
+  thresholdAnswer?: number | null
+  /** The provider the host reports as its main model, which is whose account the usage is read for. */
+  hostProvider?: string
+  /** The account's usage windows as the host answers them; null is a provider with no windows. */
+  windows?: { label: string; usedPercent: number }[] | null
+  /** The window the host judged deciding, or null where the account can still run. */
+  deciding?: { label: string; usedPercent: number } | null
 } = {}) {
   const library: Record<string, unknown>[] = [
     {
@@ -732,9 +753,12 @@ export function afkHost({
   // The bot's own budget: what the host holds, the host's default where it holds none, and what a
   // write leaves it at.
   let budget = pickBudget
+  // The bot's threshold, the same way: what the host holds, and what a write leaves it at.
+  let threshold = usageThreshold
   const botAnswer = () => ({
     object: "memento.afk.bot",
     pick_budget: budget ?? 5,
+    usage_threshold: threshold,
     holds_held: holdsHeld ?? 0,
   })
   const answer = () => ({
@@ -750,6 +774,7 @@ export function afkHost({
     ...(held === null ? {} : { holds: held }),
     ...(count === null ? {} : { pick_count: count }),
     ...(budget === null ? {} : { pick_budget: budget }),
+    usage_threshold: threshold,
     ...(holdsHeld === null ? {} : { holds_held: holdsHeld }),
     refusal: null,
     build_skill: null,
@@ -767,11 +792,46 @@ export function afkHost({
     const body = init?.body ? JSON.parse(String(init.body)) : null
     calls.push({ method, path: url.pathname, body })
     if (url.pathname.endsWith("/plugins/memento/info")) return json({ name: "memento", features })
+    // The host's main model, which is the account a pickup's first run spends: the Coding tab reads
+    // the provider from here and asks the usage route for that account's windows.
+    if (url.pathname.endsWith("/api/model/options"))
+      return json({
+        model: "test/model",
+        provider: hostProvider,
+        providers: [{ provider: hostProvider, authenticated: true, models: ["test/model"] }],
+      })
+    if (url.pathname.endsWith("/plugins/memento/usage"))
+      return json({
+        object: "memento.usage",
+        provider: hostProvider,
+        plan: null,
+        windows: (windows ?? []).map((window) => ({
+          label: window.label,
+          used_percent: window.usedPercent,
+          resets_at: null,
+          detail: null,
+          scope: "account",
+        })),
+        deciding: deciding
+          ? {
+              label: deciding.label,
+              used_percent: deciding.usedPercent,
+              resets_at: null,
+              detail: null,
+              scope: "account",
+            }
+          : null,
+      })
     // The bot's own AFK route, beside the project's: no project segment, one write of its own.
     if (url.pathname.endsWith("/plugins/memento/afk")) {
       if (method === "POST" && typeof body?.pick_budget === "number") {
         if (budgetRefusal) return json({ error: { message: budgetRefusal } }, 400)
         budget = body.pick_budget
+      }
+      if (method === "POST" && "usage_threshold" in (body ?? {})) {
+        if (thresholdRefusal) return json({ error: { message: thresholdRefusal } }, 400)
+        threshold =
+          thresholdAnswer !== undefined ? thresholdAnswer : (body.usage_threshold as number | null)
       }
       return json(botAnswer())
     }

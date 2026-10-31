@@ -3,9 +3,11 @@
 // A project that may hold several tasks holds one per place: raising its pick count fills them, the
 // Working block names every task it holds over a count of them against the pick count, and a reload
 // reads every count back. A GitHub refusal leaves the switch on and shows its
-// reason in the same pop-up. The bot's pick budget is written on the wire and drawn by its own
-// Coding page, which this flow reads back. The read is the plugin's own route, so the whole thing is
-// covered against the mock. Phone, tablet and laptop, light and dark, with no console error.
+// reason in the same pop-up. The bot's pick budget and its usage threshold are written on the wire
+// and drawn by its own Coding page, which this flow reads back — the threshold as seven segments, Off
+// and the six tens, which is the one thing a DOM without layout cannot say fits a phone. The read is
+// the plugin's own route, so the whole thing is covered against the mock. Phone, tablet and laptop,
+// light and dark, with no console error.
 import { afkOn, afkRead, app, assert, flow, makeProject, mock, openAfk, pass, say } from "./lib.mjs"
 
 const HELD = 265
@@ -31,6 +33,15 @@ const writeBudget = async (pick_budget) =>
     })
   ).json()
 
+const writeThreshold = async (usage_threshold) =>
+  (
+    await fetch(`${mock}/api/plugins/memento/afk`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ usage_threshold }),
+    })
+  ).json()
+
 const run = async ({ page, profileId, shot, until }) => {
   const errors = []
   page.on("pageerror", (error) => errors.push(error.message))
@@ -48,6 +59,10 @@ const run = async ({ page, profileId, shot, until }) => {
   assert.equal(smaller.pick_budget, 4, "the bot's budget is the number it was written")
   assert.equal((await botAfk()).pick_budget, 4, "and the next read answers it")
   await writeBudget(BUDGET)
+  assert.equal((await botAfk()).usage_threshold, null, "a bot with no limit reads Off")
+  const threshold = await writeThreshold(70)
+  assert.equal(threshold.usage_threshold, 70, "the bot's threshold is the number it was written")
+  assert.equal((await botAfk()).usage_threshold, 70, "and the next read answers it")
 
   // The page the budget belongs to: the bot's own Coding page draws the same number the wire
   // answers, so the screen and the route can't drift apart.
@@ -59,6 +74,71 @@ const run = async ({ page, profileId, shot, until }) => {
     String(BUDGET),
     "the Coding page reads the bot's budget back",
   )
+
+  // Seven segments in one row is the one thing only a laid-out page can say fits a phone's width.
+  const thresholdRow = page.locator('[role="radiogroup"][aria-label="Usage threshold"]')
+  await thresholdRow.waitFor({ timeout: 15_000 })
+  const segments = thresholdRow.locator('[role="radio"]')
+  assert.deepEqual(
+    await segments.allInnerTexts(),
+    ["Off", "50", "60", "70", "80", "90", "100"],
+    "Off first, then the whole tens from 50 to 100",
+  )
+  assert.equal(
+    await page.locator("[data-usage-threshold]").getAttribute("data-usage-threshold"),
+    "70",
+    "the page draws the threshold the wire answers",
+  )
+  assert.equal(
+    await thresholdRow.locator('[aria-checked="true"]').innerText(),
+    "70",
+    "and that segment is the one chosen",
+  )
+  const row = await thresholdRow.boundingBox()
+  const fits = async () => {
+    const boxes = []
+    for (const segment of await segments.all()) boxes.push(await segment.boundingBox())
+    return boxes.every(
+      (box) => box && box.x >= row.x - 0.5 && box.x + box.width <= row.x + row.width + 0.5,
+    )
+  }
+  assert.ok(await fits(), "the seven segments sit inside the row, with none running off its end")
+  const viewport = page.viewportSize()
+  assert.ok(
+    row.x >= 0 && row.x + row.width <= viewport.width + 0.5,
+    `the row itself fits the ${viewport.width}px screen it is drawn on`,
+  )
+
+  // A tap is what the host answers afterwards, and the figure beside the row names the window the
+  // pickup would judge: the mock's account is at 94%, so a 90% threshold is one it is holding back on.
+  await segments.filter({ hasText: "90" }).click()
+  await page.waitForFunction(
+    () =>
+      document.querySelector("[data-usage-threshold]")?.getAttribute("data-usage-threshold") ===
+      "90",
+    undefined,
+    { timeout: 10_000 },
+  )
+  assert.equal(
+    (await botAfk()).usage_threshold,
+    90,
+    "the tap wrote the threshold the host now holds",
+  )
+  assert.match(
+    (await page.locator("[data-usage-window]").innerText()).trim(),
+    /^Session is at 94% used, at or above this bot's 90% threshold\.$/,
+    "the row says which window decides and what it is at",
+  )
+  await shot("coding-threshold-held")
+  await segments.filter({ hasText: "Off" }).click()
+  await page.waitForFunction(
+    () =>
+      document.querySelector("[data-usage-threshold]")?.getAttribute("data-usage-threshold") ===
+      "off",
+    undefined,
+    { timeout: 10_000 },
+  )
+  assert.equal((await botAfk()).usage_threshold, null, "Off is a write of the same control")
   await shot("coding-tab")
 
   const projectId = await makeProject(until, "AFK claim")
