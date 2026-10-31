@@ -36,6 +36,13 @@ def db_path(hermes_home: Path) -> Path:
     return hermes_home / "memento" / "memento.db"
 
 
+def current_path() -> Path:
+    """This profile's store, read where its scope is visible — a thread started from it has none."""
+    from hermes_constants import get_hermes_home
+
+    return db_path(Path(get_hermes_home()))
+
+
 def connect(path: Path) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path, timeout=5, isolation_level=None)

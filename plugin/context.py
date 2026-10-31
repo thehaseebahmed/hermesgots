@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from .store import connect, db_path
+from .store import connect, current_path
 
 logger = logging.getLogger(__name__)
 
@@ -50,11 +50,9 @@ def _record(kwargs: Dict[str, Any]) -> None:
     prompt_tokens = _count(usage.get("prompt_tokens"))
     if not prompt_tokens:
         return
-    # Hermes runs the hook inside the request's profile scope, so this is that profile's home.
-    from hermes_constants import get_hermes_home
-
+    # Hermes runs the hook inside the request's profile scope, so this is that profile's store.
     now = int(time.time() * 1000)
-    conn = connect(db_path(Path(get_hermes_home())))
+    conn = connect(current_path())
     try:
         conn.execute(
             """INSERT INTO context

@@ -890,17 +890,73 @@ def live_runs(
     return live, run_ids
 
 
+def prompts(adapter: Any, run_ids: Dict[str, str]) -> Dict[str, Dict[str, Any]]:
+    """What each of this poll's own runs is held on, as ``waiting``'s reasons, by session id.
+
+    Hermes projects a run's pending prompts on ``GET /v1/runs/{id}``, from the admission row that
+    owns the run and the controls it holds: that is the one account of a hold, since a question
+    never lands on the run's status and an approval only lands on one of the two paths a run takes.
+    ``run_ids`` is already keyed by the session a chat started as, so nothing is walked here.
+
+    Empty where this Hermes has no such projection, or holds nothing — a host without it keeps the
+    run maps exactly as they were.
+    """
+    try:
+        from gateway.platforms.api_server_authority_runs import run_projection
+    except Exception:
+        return {}
+    found: Dict[str, Dict[str, Any]] = {}
+    for session_id, run_id in (run_ids or {}).items():
+        if not isinstance(run_id, str) or not run_id:
+            continue
+        try:
+            projection = run_projection(adapter, run_id)
+        except Exception:
+            continue
+        controls = (projection or {}).get("pending_controls")
+        for prompt in controls if isinstance(controls, list) else []:
+            kind = prompt.get("kind") if isinstance(prompt, dict) else None
+            if kind == "clarify":
+                reason = found.setdefault(session_id, {"kind": "question", "count": 0})
+                reason["count"] += 1
+            elif kind == "approval":
+                command = prompt.get("command")
+                reason: Dict[str, Any] = {"kind": "approval"}
+                if isinstance(command, str) and command.strip():
+                    reason["command"] = command.strip()
+                found.setdefault(session_id, reason)
+    return found
+
+
+def held_runs(live: Dict[str, str], asked: Dict[str, int]) -> Dict[str, str]:
+    """The run map with a run held on a question read as the wait it is, the run id kept.
+
+    Hermes sets a run's status to ``waiting_for_approval`` for an approval on one of its paths and
+    never for a question, so a held run reads as work in progress (``sessions.prompts``). The value
+    is the one the app groups Waiting for You by, exactly as an approval's is (ADR 0053).
+    """
+    return {
+        session_id: "waiting_for_approval" if state == "running" and session_id in (asked or {}) else state
+        for session_id, state in live.items()
+    }
+
+
 def waiting(
     adapter: Any,
     path: Path,
     hermes_home: Path,
     owned: Optional[Callable[[str], bool]] = None,
     roots: Optional[Dict[str, str]] = None,
+    asked: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Why each session waits on the user: its run's questions or approval, or a plan to review.
     A project session also names its project. Keyed by the session the chat started as, like
     ``live_runs``, so a wait on a compressed chat's child session is reported for the chat; its
-    ``roots`` cache is the one that call filled, so a poll walks each chat once."""
+    ``roots`` cache is the one that call filled, so a poll walks each chat once.
+
+    ``asked`` is what the host says each run holds (``sessions.prompts``): reported here so a hold
+    the run's status never carries reaches every screen, as the status's own approval already did. ``setdefault`` keeps the run's own account where it has one.
+    """
     found: Dict[str, Dict[str, Any]] = {}
     statuses = getattr(adapter, "_run_statuses", None)
     roots = {} if roots is None else roots
@@ -925,6 +981,8 @@ def waiting(
         if isinstance(command, str) and command.strip():
             reason["command"] = command.strip()
         found.setdefault(session_id, reason)
+    for session_id, reason in (asked or {}).items():
+        found.setdefault(session_id, dict(reason))
     if not path.exists():
         return found
     conn = connect(path)
