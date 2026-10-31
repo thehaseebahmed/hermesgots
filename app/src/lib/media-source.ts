@@ -24,7 +24,7 @@ export type MediaRead = MediaUrl
 export type MediaState =
   | { status: "reading" }
   | { status: "ready"; read: MediaRead }
-  | { status: "failed" }
+  | { status: "failed"; note?: string }
   | { status: "gone" }
 
 export type MediaSources = ReadonlyMap<string, MediaState>
@@ -40,7 +40,8 @@ export const mediaRead = (state?: MediaState) =>
 function stateOf(source: MediaSource, answer: MediaAsk | null | undefined): MediaState {
   if (!source.path || answer?.state === "gone") return { status: "gone" }
   if (!answer) return { status: "reading" }
-  return answer.state === "ready" ? { status: "ready", read: answer.read } : { status: "failed" }
+  if (answer.state === "ready") return { status: "ready", read: answer.read }
+  return answer.state === "refused" ? { status: "failed", note: answer.note } : { status: "failed" }
 }
 
 /** The states a screen draws, and the one way to ask a failed file again. */
@@ -49,6 +50,13 @@ export interface MediaAsks {
   /** Forgets what was answered for this item's file, and asks the host again. */
   retry: (key: string) => void
 }
+
+/**
+ * The paths a thread's media is read from, as one value an effect can compare: a reply streams a
+ * chunk at a time and hands this hook a new list every render, and the paths in it are what matter.
+ */
+const pathsKey = (sources: MediaSource[]) =>
+  [...new Set(sources.map((source) => source.path).filter(Boolean))].join("\n")
 
 export function useMediaSources(conversationId: string, sources: MediaSource[]): MediaAsks {
   const [host, setHost] = useState<ReadonlyMap<string, MediaAsk>>(new Map())
@@ -60,7 +68,7 @@ export function useMediaSources(conversationId: string, sources: MediaSource[]):
     paths: new Set(),
   })
   // Keyed by what the ask is about — the paths, which a filesystem path never holds a line break in.
-  const joined = [...new Set(sources.map((source) => source.path).filter(Boolean))].join("\n")
+  const joined = pathsKey(sources)
   useEffect(() => {
     if (answered.current.chat !== conversationId)
       answered.current = { chat: conversationId, paths: new Set() }

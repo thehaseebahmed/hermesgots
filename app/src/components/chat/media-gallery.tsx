@@ -8,7 +8,6 @@ import { boundedStore } from "@/lib/bounded-cache"
 import { previewItem } from "@/lib/media-items"
 import type { MediaStage } from "@/lib/media-stage"
 import type { MediaCell, MediaKind } from "@/lib/media-kind"
-import { useImageReady } from "@/lib/image"
 import { cn } from "@/lib/utils"
 
 // Every cell in the Gallery takes this box — a photo, and a clip's first frame — so nothing moves
@@ -33,6 +32,8 @@ export interface MediaItem {
   /** The URL the host signed for it, once its answer is in. */
   src?: string
   state: MediaItemState
+  /** What the host answered when it refused the file — its name and the cap it met. */
+  note?: string
 }
 
 /** How long the browser gets to give up a clip's first frame before its cell settles for less. */
@@ -150,23 +151,36 @@ function useFirstFrame(src: string | undefined, type: string) {
 
 /** A photo in its cell, holding the box with a skeleton until its bytes are drawn. */
 function Picture({ src, alt }: { src?: string; alt: string }) {
-  const { ready, onLoad, onError } = useImageReady(src ?? "")
+  // Three faces, not two: a photo the browser couldn't decode keeps its place and says so, rather
+  // than leaving a broken element in a cell that looks drawn.
+  const [face, setFace] = useState<"reading" | "ready" | "failed">("reading")
+  const [shown, setShown] = useState(src)
+  if (shown !== src) {
+    setShown(src)
+    setFace("reading")
+  }
   return (
     <>
       {/* The cell's own box, the border included: a placeholder that stopped inside it would be a
           couple of pixels short of the cell the image lands in. */}
-      {(!src || !ready) && <Skeleton className="absolute -inset-px rounded-xl" />}
-      {src && (
+      {(!src || face === "reading") && <Skeleton className="absolute -inset-px rounded-xl" />}
+      {src && face !== "failed" && (
         <img
           src={src}
           alt={alt}
           loading="lazy"
           decoding="async"
-          onLoad={onLoad}
-          onError={onError}
-          className={cn("h-full w-full object-cover", !ready && "invisible")}
+          onLoad={() => setFace("ready")}
+          onError={() => setFace("failed")}
+          className={cn("h-full w-full object-cover", face !== "ready" && "invisible")}
           draggable={false}
         />
+      )}
+      {face === "failed" && (
+        <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 text-xs text-muted-foreground">
+          <RotateCwIcon className="size-5" />
+          <span>Couldn't load</span>
+        </span>
       )}
     </>
   )
@@ -185,7 +199,7 @@ export function Cell({ item, onOpen }: { item: MediaItem; onOpen?: () => void })
       type="button"
       onClick={onOpen}
       aria-label={`Open ${item.name}`}
-      aria-busy={item.state !== "ready" || undefined}
+      aria-busy={item.state === "reading" || undefined}
       className={cn(CELL, "relative block cursor-pointer overflow-hidden bg-muted/40")}
     >
       {item.state === "failed" ? (
@@ -262,7 +276,7 @@ function AudioRow({ item, onOpen }: { item: MediaItem; onOpen: () => void }) {
       type="button"
       onClick={onOpen}
       aria-label={`Play ${item.name}`}
-      aria-busy={item.state !== "ready" || undefined}
+      aria-busy={item.state === "reading" || undefined}
       className="flex w-full max-w-[min(100%,42rem)] items-center gap-3 rounded-xl border bg-muted/40 px-3 py-2.5 text-left text-sm"
     >
       <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-foreground text-background">

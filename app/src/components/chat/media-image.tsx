@@ -33,10 +33,12 @@ function Tag({ path }: { path: string }) {
 }
 
 /** The media behind the `MEDIA:<path>` tags a reply's part carries, through the thread's own cells. */
+const tagKey = (path: string, at: number) => `${at}:${path}`
+
 export function MediaTag({ conversationId, paths }: { conversationId: string; paths: string[] }) {
   // The same path may be named twice, so a tag is keyed by where it was written; the URL behind it
   // is by path, shared across the thread.
-  const tagged = paths.map((path, at) => ({ key: `${at}:${path}`, path, name: fileNameOf(path) }))
+  const tagged = paths.map((path, at) => ({ key: tagKey(path, at), path, name: fileNameOf(path) }))
   const { states, retry } = useMediaSources(
     conversationId,
     tagged.map((tag) => ({ key: tag.key, path: tag.path })),

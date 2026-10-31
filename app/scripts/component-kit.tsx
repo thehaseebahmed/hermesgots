@@ -566,6 +566,7 @@ export function mediaHost({
   features = ["attachments", "media", "media_url"],
   fail = [],
   failure = 404,
+  refusal,
   type,
   asked = [],
 }: {
@@ -577,6 +578,8 @@ export function mediaHost({
   fail?: string[]
   /** The status a refused path is answered with. */
   failure?: number
+  /** What a refusal says, where the host's own sentence is the point of the test. */
+  refusal?: string
   /** What a path is served as, where it isn't the type its suffix names. */
   type?: (path: string) => string
   /** Requests recorded so far, so a second host keeps one count going. */
@@ -601,7 +604,7 @@ export function mediaHost({
       // into the app here — an <img> or a <video> draws from this URL itself.
       const path = String(JSON.parse(String(init?.body ?? "{}")).path ?? "")
       if (fail.some((suffix) => path.endsWith(suffix)))
-        return json({ error: { message: "No such file." } }, failure)
+        return json({ error: { message: refusal ?? "No such file." } }, failure)
       const served = type?.(path) ?? SERVED[path.slice(path.lastIndexOf(".")).toLowerCase()]
       const kind = served ?? "application/octet-stream"
       const media = `${url.origin}${url.pathname.replace(/\/url$/, "")}`

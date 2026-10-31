@@ -22,6 +22,8 @@ export interface PreviewItem {
   /** Where it is read from, once the host has answered; a staged file's own bytes before that. */
   src?: string
   state: MediaStage
+  /** What the host said when it refused the file, drawn beside the retry. */
+  note?: string
   /** A photo's own shape, where the record keeps it, so its box is right from the first frame. */
   width?: number
   height?: number
@@ -139,6 +141,7 @@ function Retry({ item, onRetry }: { item: PreviewItem; onRetry?: (item: PreviewI
     <div className="flex w-full max-w-md flex-col items-center gap-3 rounded-2xl bg-muted/50 px-4 py-10 text-center">
       <RotateCwIcon className="size-8 text-muted-foreground" />
       <span className="text-sm break-all text-muted-foreground">{item.name}</span>
+      {item.note && <span className="text-sm text-balance">{item.note}</span>}
       <Button variant="outline" className="min-h-11" onClick={() => onRetry?.(item)}>
         Try again
       </Button>

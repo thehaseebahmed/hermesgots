@@ -10,6 +10,7 @@ import {
 import { toast } from "sonner"
 
 import { ApprovalCard } from "@/components/chat/approval-card"
+import { attachmentUrl } from "@/lib/attachment-url"
 import { MediaItems, type MediaItem } from "@/components/chat/media-gallery"
 import { useCodeFace } from "@/components/chat/code-face"
 import { Markdown } from "@/components/chat/markdown"
@@ -279,6 +280,10 @@ function SentAttachments({
 }) {
   const { states, retry } = useMediaSources(conversationId, attachmentSources(attachments))
   const state = (attachment: Attachment) => states.get(attachment.id)
+  const note = (attachment: Attachment) => {
+    const one = state(attachment)
+    return one?.status === "failed" ? one.note : undefined
+  }
   const item = (attachment: Attachment, cell: MediaCell): MediaItem => ({
     key: attachment.id,
     kind: mediaKind(attachment.type, attachment.name),
@@ -286,12 +291,16 @@ function SentAttachments({
     name: attachment.name,
     type: attachment.type,
     size: attachment.size,
-    src: mediaRead(state(attachment))?.url,
+    src: mediaRead(state(attachment))?.url ?? (attachment.blob && attachmentUrl(attachment)),
     state: mediaStage(state(attachment)),
+    note: note(attachment),
   })
+  // A message the host answered nothing for is not drawn; one this device holds the bytes of is,
+  // from those bytes, so a file that never reached the host is still the reader's own.
   const drawn = attachments.filter(
     (attachment) =>
       mediaCell(attachment.type, attachment.name) === "file" ||
+      attachment.blob !== undefined ||
       state(attachment)?.status !== "gone",
   )
   const download = (one: MediaItem) => {

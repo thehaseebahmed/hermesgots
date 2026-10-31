@@ -20,7 +20,10 @@ export type MediaUrl = MediaUrlAnswer
  * answer differently the next time it is asked.
  */
 export type MediaAsk =
-  { state: "ready"; read: MediaUrl } | { state: "gone" } | { state: "unanswered" }
+  | { state: "ready"; read: MediaUrl }
+  | { state: "gone" }
+  | { state: "refused"; note: string }
+  | { state: "unanswered" }
 
 /**
  * The URLs this page holds, one per bot and path, kept for the page's life: a URL is a string, and
@@ -50,14 +53,14 @@ function ask(config: HermesConfig, path: string): Promise<MediaAsk> {
         return { state: "ready", read }
       })
       .catch((error: unknown): MediaAsk => {
-        // A 404 is the route saying it has no such file, and that settles the path. A refusal — a
-        // file over its kind's cap — is an answer about this file too, but the file is there: the
-        // cell keeps its place and the host's sentence, with the limit it met, goes to the log
-        // rather than the thread drawing the file as though it never existed.
+        // The route saying it has no such file settles the path; a refusal answers about a file it
+        // does have, so its sentence — the file's name and the limit it met — is kept for the retry.
         if (error instanceof HermesError && error.status === 404) {
           gone.add(key)
           return { state: "gone" }
         }
+        if (error instanceof HermesError && error.status === 413)
+          return { state: "refused", note: error.message }
         noteFailure(`asking for the URL of ${path}`, error)
         return { state: "unanswered" }
       })

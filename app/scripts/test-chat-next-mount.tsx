@@ -533,6 +533,12 @@ test("a reply's MEDIA tag draws as the file it names, read through the chat's ow
       false,
       "and no tag is left as text",
     )
+    // The same tap as every other screen's: the one Previewer this screen mounts, not a tab.
+    await click(find('[data-chat-next] [aria-label="Open chart.png"]'))
+    await until(
+      () => Boolean(document.querySelector('[role="dialog"] img[alt="chart.png"]')),
+      "a tap opens the app's own Previewer, on the screen behind the switch too",
+    )
   })
 })
 

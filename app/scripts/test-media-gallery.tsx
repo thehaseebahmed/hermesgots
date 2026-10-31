@@ -159,7 +159,10 @@ test("a photo whose read failed offers a retry that asks again and draws", async
   await seedChat({ id: "c1", profile, messages: [message([photo])] })
   const asked = mediaHost({ fail: ["cat.png"], failure: 503 })
   await mount(chatScreen("c1"), async () => {
-    await until(async () => !filled(cell("cat.png")), "the cell that couldn't read")
+    await until(
+      async () => filled(cell("cat.png")),
+      "the cell that couldn't read, kept where it was",
+    )
     assert.equal(download("cat.png"), null, "still not a file to save")
     // The host comes back: the retry in the Previewer asks it again, and the picture draws.
     mediaHost({ asked })
@@ -205,5 +208,84 @@ test("a photo the browser couldn't decode keeps its place and asks again", async
       2,
       "and the host was asked a second time",
     )
+  })
+})
+
+test("a photo whose bytes the host refuses is a cell that says why, not a row", async () => {
+  const profile = botProfile("media-refused")
+  await seedChat({ id: "c1", profile, messages: [message([photo])] })
+  // The route's refusal: the file is there, over the cap its kind is held to.
+  mediaHost({
+    host: "media-refused",
+    fail: ["cat.png"],
+    failure: 413,
+    refusal: "cat.png is larger than the 200 MB limit for media.",
+  })
+  await mount(chatScreen("c1"), async () => {
+    await until(async () => filled(cell("cat.png")), "the photo's cell, kept where it was")
+    assert.equal(download("cat.png"), null, "and never the row a file downloads in")
+    await click(cell("cat.png"))
+    await until(
+      () => (document.querySelector('[role="dialog"]')?.textContent ?? "").includes("200 MB limit"),
+      "the host's sentence, with the limit that applied, where the retry is",
+    )
+  })
+})
+
+test("Escape closes the Previewer, and the cell it was opened from is where the reader left it", async () => {
+  const profile = botProfile("media-escape")
+  await seedChat({ id: "c1", profile, messages: [message([photo, clip])] })
+  mediaHost({ host: "media-escape" })
+  await mount(chatScreen("c1"), async () => {
+    await until(async () => filled(cell("cat.png")), "the photo's cell")
+    await click(cell("cat.png"))
+    await until(() => Boolean(document.querySelector('[role="dialog"]')), "the Previewer")
+    await act(async () => {
+      document
+        .querySelector('[role="dialog"]')!
+        .dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))
+    })
+    await until(() => !document.querySelector('[role="dialog"]'), "the pop-up gone")
+    assert.ok(cell("cat.png"), "and the thread still drawn behind it")
+  })
+})
+
+test("a photo of any image type is drawn as the picture it is, SVG included", async () => {
+  const profile = botProfile("media-svg")
+  const diagram: Attachment = {
+    id: "diagram",
+    name: "diagram.svg",
+    type: "image/svg+xml",
+    size: 900,
+    image: true,
+    path: `${HOST}/diagram.svg`,
+  }
+  await seedChat({ id: "c1", profile, messages: [message([diagram])] })
+  mediaHost({ host: "media-svg" })
+  await mount(chatScreen("c1"), async () => {
+    await until(async () => filled(cell("diagram.svg")), "the SVG's cell")
+    await until(
+      () => Boolean(document.querySelector('img[alt="diagram.svg"]')),
+      "an SVG draws as the image it is, not as a file row",
+    )
+    assert.equal(download("diagram.svg"), null)
+  })
+})
+
+test("a cell whose picture the browser couldn't decode says so, and keeps its place", async () => {
+  const profile = botProfile("media-cell-broken")
+  await seedChat({ id: "c1", profile, messages: [message([photo])] })
+  mediaHost({ host: "media-cell-broken" })
+  await mount(chatScreen("c1"), async () => {
+    await until(async () => filled(cell("cat.png")), "the photo's cell")
+    const drawn = () => cell("cat.png")!.querySelector("img")!
+    await act(async () => {
+      drawn().dispatchEvent(new Event("error"))
+    })
+    await until(
+      () => (cell("cat.png")?.textContent ?? "").includes("Couldn't load"),
+      "the cell says the picture didn't come, rather than showing a broken one",
+    )
+    assert.ok(gallery()?.contains(cell("cat.png")), "and it never becomes a download row")
   })
 })

@@ -16,6 +16,7 @@ import hashlib
 import hmac
 import re
 import secrets
+import threading
 import time
 from pathlib import Path
 from typing import Dict, Optional, Tuple
@@ -100,8 +101,8 @@ SERVED_TYPES: Dict[str, str] = {
 
 # What the platform plays or paints as it arrives, and the wider set a browser shows in place
 # rather than saving: every other type arrives as a download.
-MEDIA_PREFIXES = ("image/", "video/", "audio/")
-SHOWN_INLINE_PREFIXES = (*MEDIA_PREFIXES, "text/")
+STREAMED_PREFIXES = ("image/", "video/", "audio/")
+SHOWN_INLINE_PREFIXES = (*STREAMED_PREFIXES, "text/")
 SHOWN_INLINE_TYPES = ("application/pdf", "application/json")
 
 _BAD_ASCII = re.compile(r"[^A-Za-z0-9._ ()-]")
@@ -135,7 +136,7 @@ def disposition(path: Path) -> str | None:
 
 def streams(path: Path) -> bool:
     """Whether the platform plays or paints this in a stream, rather than saving it to open."""
-    return content_type(path).startswith(MEDIA_PREFIXES)
+    return content_type(path).startswith(STREAMED_PREFIXES)
 
 
 def limit_for(path: Path) -> int:
@@ -179,6 +180,7 @@ def _validated_path(path_str: str, missing: str) -> Path:
 # The secret a profile signs with, read from its store once: a clip asks for a URL's check on every
 # range it reads, and opening the store each time is work for a value that never changes.
 _keys: Dict[Path, bytes] = {}
+_keys_made = threading.Lock()
 
 
 def signing_key(store: Path) -> bytes:
@@ -199,11 +201,14 @@ def signing_key(store: Path) -> bytes:
             return _keys[store]
         except ValueError:
             pass
-    fresh = secrets.token_bytes(32).hex()
-    put_setting(store, KEY_SETTING, fresh)
-    # Two asks at once can both have made one; the store's answer is the one both sides keep.
-    settled = get_setting(store, KEY_SETTING)
-    _keys[store] = bytes.fromhex(settled if isinstance(settled, str) and settled else fresh)
+    with _keys_made:
+        # Another ask may have made one while this one waited for the lock; theirs wins, since a
+        # URL already in a page was signed with it.
+        held = get_setting(store, KEY_SETTING)
+        fresh = held if isinstance(held, str) and held else secrets.token_bytes(32).hex()
+        if not held:
+            put_setting(store, KEY_SETTING, fresh)
+    _keys[store] = bytes.fromhex(fresh)
     return _keys[store]
 
 

@@ -21,6 +21,7 @@ export function previewItem(item: MediaItem, extra: Partial<PreviewItem> = {}): 
     kind: item.kind === "file" ? "image" : item.kind,
     src: item.src,
     state: item.state,
+    note: item.note,
     ...extra,
   }
 }
@@ -57,6 +58,7 @@ export function mediaItems(tags: MediaTagItem[], sources: MediaSources): TaggedM
       size: read?.size,
       src: read?.url,
       state: mediaStage(state),
+      note: state?.status === "failed" ? state.note : undefined,
     })
   }
   return { items, unread }
