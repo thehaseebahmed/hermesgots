@@ -706,7 +706,7 @@ export function afkHost({
   hostProvider?: string
   /** The account's usage windows as the host answers them; null is a provider with no windows. */
   windows?: { label: string; usedPercent: number }[] | null
-  /** The window the host judged deciding, or null where the account can still run. */
+  /** The window the host judged deciding, or null where none does — a balance with room is capacity. */
   deciding?: { label: string; usedPercent: number } | null
 } = {}) {
   const library: Record<string, unknown>[] = [
