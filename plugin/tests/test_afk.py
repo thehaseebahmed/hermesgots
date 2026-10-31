@@ -30,6 +30,7 @@ from plugin import (
     projects,
     prompt_builder,
     sessions,
+    usage,
     workflows,
 )
 from plugin.afk import (
@@ -43,6 +44,7 @@ from plugin.afk import (
     set_pick_budget,
     set_pick_count,
     set_prompt,
+    set_usage_threshold,
     set_workflow,
     sweep,
     sweep_all,
@@ -50,7 +52,14 @@ from plugin.afk import (
 )
 from plugin.store import connect, db_path, get_setting, put_setting
 from plugin.tasks import CLAIM_LABEL, READY_LABEL
-from plugin.tests._helpers import issue_row, placed, preset, staged as staged_record, stub_projects_db
+from plugin.tests._helpers import (
+    issue_row,
+    placed,
+    preset,
+    staged as staged_record,
+    stub_projects_db,
+    usage_window,
+)
 
 
 def folder(path: str) -> SimpleNamespace:
@@ -392,6 +401,7 @@ def afk_row(
     prompt_id: Optional[str] = None,
     pick_budget: int = 5,
     holds_held: int = 0,
+    usage_threshold: Optional[int] = None,
 ) -> Dict[str, Any]:
     """The answer `read` gives for a project holding nothing and having picked nothing.
 
@@ -409,6 +419,7 @@ def afk_row(
         "prompt": prompt_builder.DEFAULT_PROMPT if prompt is None else prompt,
         "pick_budget": pick_budget,
         "holds_held": holds_held,
+        "usage_threshold": usage_threshold,
         "stage": stage,
         "stage_name": stage_name,
     }
@@ -1321,7 +1332,10 @@ class PickBudgetSettingTests(unittest.TestCase):
 
     def test_a_bot_that_names_no_budget_works_five(self) -> None:
         self.assertEqual(afk.pick_budget(self.home), 5, "five is every bot's budget until it says")
-        self.assertEqual(afk.bot_read(self.home), {"pick_budget": 5, "holds_held": 0})
+        self.assertEqual(
+            afk.bot_read(self.home),
+            {"pick_budget": 5, "holds_held": 0, "usage_threshold": None},
+        )
 
     def test_the_budget_is_read_back_from_the_hosts_own_store(self) -> None:
         set_pick_budget(self.home, 3)
@@ -1716,6 +1730,320 @@ class PickBudgetTests(unittest.TestCase):
         )
         self.assertEqual(self.shown("p1")["refusal"], "GitHub answered 403.")
         self.assertEqual(self.shown("p1")["holds_held"], 1)
+
+
+def account(*windows: Dict[str, Any], provider: str = "anthropic") -> Dict[str, Any]:
+    """The answer ``usage.fetch`` gives for those windows, its deciding window included.
+
+    The deciding window is worked out by the rule itself rather than spelled here, so these tests
+    hold the pass to the plugin's own answer and not to a second copy of it.
+    """
+    return {
+        "provider": provider,
+        "plan": None,
+        "windows": list(windows),
+        "deciding": usage.deciding(windows),
+    }
+
+
+class UsageThresholdTests(PickBudgetTests):
+    """The bot's usage threshold over its projects: what a pass claims while the account is nearly out.
+
+    The account is the plugin's own stub, the way GitHub is: ``usage.fetch`` answers the windows a
+    provider would, and the profile's main model is named by ``host_model.read_main`` without a
+    ``config.yaml`` — which is the provider a pickup's first run would spend (ADR 0026).
+    """
+
+    OVER = dict(label="Weekly", used=92.0, resets="2026-10-20T00:00:00+00:00")
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.asks: List[str] = []
+        self.answer: Optional[Dict[str, Any]] = account(usage_window(**self.OVER))
+        self.raised: Optional[Exception] = None
+        self.main: Optional[Dict[str, str]] = {"provider": "anthropic", "model": "claude-sonnet"}
+        for one in (
+            patch.object(afk.host_model, "read_main", side_effect=lambda _path: self.main),
+            patch.object(afk.usage, "fetch", side_effect=self.fetch_usage),
+        ):
+            one.start()
+            self.addCleanup(one.stop)
+
+    def fetch_usage(self, provider: str) -> Optional[Dict[str, Any]]:
+        self.asks.append(provider)
+        if self.raised is not None:
+            raise self.raised
+        return self.answer
+
+    def ready(self) -> None:
+        self.issues["mock-user/one"] = [issue_row(265), issue_row(266, created="2026-10-02T00:00:00Z")]
+        self.issues["mock-user/two"] = [issue_row(267, created="2026-10-03T00:00:00Z")]
+
+    def over(self, threshold: int = 80) -> None:
+        set_usage_threshold(self.home, threshold)
+        self.answer = account(usage_window(**self.OVER))
+
+    def test_a_project_over_the_threshold_claims_nothing_and_names_the_window(self) -> None:
+        self.turn_on("p1", 1)
+        self.over(80)
+        self.ready()
+        self.assertEqual(self.pass_(), [], "a spent account is no reason to take another task")
+        self.assertEqual(self.writes, [], "and nothing is touched on GitHub")
+        shown = self.shown("p1")
+        self.assertEqual(
+            shown["refusal"],
+            afk.USAGE_HELD.format(window="Weekly", percent="92", threshold=80),
+            "the line names the window, its own percent and the number the user set",
+        )
+        self.assertTrue(shown["on"], "the switch stays on, so the sheet shows why it is holding")
+        self.assertIsNone(shown["task"])
+        self.assertEqual(self.reads, [], "a held-back project reads no frontier at all")
+
+    def test_a_project_under_the_threshold_claims_the_oldest_ready_task(self) -> None:
+        self.turn_on("p1", 1)
+        set_usage_threshold(self.home, 95)
+        self.ready()
+        claimed = self.pass_()
+        self.assertEqual(
+            [(project_id, task["number"]) for project_id, task in claimed],
+            [("p1", 265)],
+            "92% used is under a 95% threshold, so the oldest ready task is claimed as usual",
+        )
+        self.assertIsNone(self.shown("p1")["refusal"])
+
+    def test_the_threshold_is_at_or_above_the_window_it_names(self) -> None:
+        self.turn_on("p1", 1)
+        set_usage_threshold(self.home, 92)
+        self.ready()
+        self.assertEqual(self.pass_(), [], "at the threshold is over it, not beside it")
+        self.assertIn("92% used", self.shown("p1")["refusal"])
+
+    def test_a_bot_with_no_threshold_never_reads_the_account(self) -> None:
+        self.turn_on("p1", 1)
+        self.ready()
+        self.assertEqual(len(self.pass_()), 1)
+        self.assertEqual(self.asks, [], "off means off: a bot with no limit reads nothing")
+
+    def test_a_prompt_project_and_a_workflow_project_are_judged_the_same_way(self) -> None:
+        """The check sits in the pass's shared planning step, not in the branch that reads skills.
+
+        p2 works a workflow and p1 runs one prompt, which names no skill at all: a check written
+        inside the lost-skill branch would never run for p1 (ADR 0026).
+        """
+        entry = workflows.create(
+            self.home, {"name": "Mine", "stages": workflows.from_skills("plan", ["code-review"])}
+        )
+        set_workflow(self.home, "p2", entry["id"])
+        self.turn_on("p1", 1)
+        self.turn_on("p2", 1)
+        self.over(80)
+        self.ready()
+        self.assertEqual(self.pass_(), [])
+        self.assertEqual(
+            self.shown("p1")["refusal"],
+            afk.USAGE_HELD.format(window="Weekly", percent="92", threshold=80),
+            "the project that runs one prompt is judged too",
+        )
+        self.assertEqual(
+            self.shown("p2")["refusal"],
+            afk.USAGE_HELD.format(window="Weekly", percent="92", threshold=80),
+        )
+        self.assertEqual(self.asks, ["anthropic"], "one account, read once")
+
+    def test_a_full_budget_is_stated_ahead_of_the_account_without_reading_it(self) -> None:
+        set_pick_budget(self.home, 1)
+        held = {
+            "repo": "mock-user/two",
+            "number": 250,
+            "title": "Held",
+            "url": "https://github.com/mock-user/two/issues/250",
+            "created_at": "2026-09-01T00:00:00Z",
+        }
+        afk._hold(self.home, "p2", held)
+        self.turn_on("p1", 1)
+        self.over(80)
+        self.ready()
+        self.assertEqual(self.pass_(), [])
+        self.assertEqual(
+            self.shown("p1")["refusal"],
+            afk.PICK_BUDGET_FULL.format(held=1, budget=1),
+            "the bot's own number is the answer, and it needed no account read to know",
+        )
+        self.assertEqual(self.asks, [], "the account is not spent to say what the budget already says")
+
+    def test_a_skill_the_bot_has_lost_is_stated_ahead_of_the_account(self) -> None:
+        entry = workflows.create(
+            self.home, {"name": "Mine", "stages": workflows.from_skills(None, ["code-review"])}
+        )
+        set_workflow(self.home, "p1", entry["id"])
+        self.turn_on("p1", 1)
+        self.over(80)
+        self.ready()
+        self.assertEqual(sweep(self.home, "p1", self.folders("p1"), skills={"log-triage"}), [])
+        self.assertEqual(
+            self.shown("p1")["refusal"],
+            afk.MISSING_SKILL.format(name="code-review"),
+            "a broken pick is not hidden behind a temporary hold",
+        )
+        self.assertEqual(self.asks, [], "and the account read isn't spent to say it")
+
+    def test_one_pass_over_two_projects_asks_the_account_once(self) -> None:
+        self.turn_on("p1", 1)
+        self.turn_on("p2", 1)
+        self.over(80)
+        self.ready()
+        self.assertEqual(self.pass_(), [])
+        self.assertEqual(self.asks, ["anthropic"], "one bot, one account, one read")
+
+    def test_an_account_that_cannot_be_read_claims_as_usual(self) -> None:
+        self.turn_on("p1", 1)
+        self.over(80)
+        self.ready()
+        self.raised = RuntimeError("down")
+        self.assertEqual(
+            [(project_id, task["number"]) for project_id, task in self.pass_()],
+            [("p1", 265)],
+            "a host that can't read an account is not a reason to stop working",
+        )
+        self.assertIsNone(self.shown("p1")["refusal"], "and nothing is recorded about it")
+
+    def test_an_answer_with_no_windows_claims_as_usual(self) -> None:
+        self.turn_on("p1", 1)
+        self.over(80)
+        self.ready()
+        self.answer = account()
+        self.assertEqual(len(self.pass_()), 1)
+        self.assertIsNone(self.shown("p1")["refusal"])
+
+    def test_a_main_model_the_host_cannot_name_claims_as_usual(self) -> None:
+        self.turn_on("p1", 1)
+        self.over(80)
+        self.ready()
+        self.main = None
+        self.assertEqual(len(self.pass_()), 1)
+        self.assertEqual(self.asks, [], "with no provider there is nothing to ask")
+        self.assertIsNone(self.shown("p1")["refusal"])
+
+    def test_the_provider_is_the_profiles_main_model(self) -> None:
+        self.turn_on("p1", 1)
+        self.over(80)
+        self.ready()
+        self.main = {"provider": "openrouter", "model": "some/model"}
+        self.pass_()
+        self.assertEqual(self.asks, ["openrouter"], "the main model's provider, never a fallback")
+
+    def test_an_unreadable_account_is_no_hold_at_all(self) -> None:
+        self.turn_on("p1", 1)
+        self.over(80)
+        self.raised = RuntimeError("down")
+        self.assertIsNone(
+            afk._Account(self.home).refusal(),
+            "no key, a provider that is down: the pass claims, and writes no sentence about it",
+        )
+
+    def test_the_account_recovering_claims_again_without_touching_the_switch(self) -> None:
+        self.turn_on("p1", 1)
+        self.over(80)
+        self.ready()
+        self.assertEqual(self.pass_(), [])
+        self.answer = account(usage_window("Weekly", 40.0, resets="2026-10-20T00:00:00+00:00"))
+        claimed = self.pass_()
+        self.assertEqual(
+            [(project_id, task["number"]) for project_id, task in claimed],
+            [("p1", 265)],
+            "the next pass claims as soon as there is room, and the stop was a pause",
+        )
+        self.assertTrue(self.shown("p1")["on"])
+        self.assertIsNone(self.shown("p1")["refusal"], "and the claim clears the old line")
+
+
+class UsageThresholdSettingTests(unittest.TestCase):
+    """The threshold's own number: what an unset one reads as, what a write takes, one route for both."""
+
+    def setUp(self) -> None:
+        self.tmp = TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = Path(self.tmp.name)
+
+    def test_a_bot_that_names_no_threshold_is_off(self) -> None:
+        self.assertIsNone(afk.usage_threshold(self.home))
+        self.assertIsNone(afk.bot_read(self.home)["usage_threshold"])
+
+    def test_the_threshold_is_read_back_from_the_hosts_own_store(self) -> None:
+        set_usage_threshold(self.home, 80)
+        self.assertEqual(afk.usage_threshold(self.home), 80)
+        self.assertEqual(
+            get_setting(db_path(self.home), "afk_usage_threshold"),
+            80,
+            "the number is the bot's own settings row, beside the pick budget's",
+        )
+
+    def test_every_whole_number_from_fifty_to_a_hundred_is_a_threshold(self) -> None:
+        for value in range(50, 101):
+            with self.subTest(usage_threshold=value):
+                self.assertEqual(afk.threshold_from({"usage_threshold": value}), value)
+                set_usage_threshold(self.home, value)
+                self.assertEqual(afk.usage_threshold(self.home), value)
+
+    def test_a_value_outside_fifty_to_a_hundred_is_refused_naming_the_range(self) -> None:
+        for body in (49, 101, 0, -1, "80", 72.5, True, [80]):
+            with self.subTest(usage_threshold=body):
+                with self.assertRaises(ValueError) as raised:
+                    afk.bot_writes({"usage_threshold": body})
+                self.assertEqual(
+                    str(raised.exception),
+                    "usage_threshold must be a whole number from 50 to 100.",
+                )
+
+    def test_a_null_threshold_is_off(self) -> None:
+        set_usage_threshold(self.home, 80)
+        self.assertEqual(afk.bot_writes({"usage_threshold": None}), {"afk_usage_threshold": None})
+        afk.write_bot(self.home, afk.bot_writes({"usage_threshold": None}))
+        self.assertIsNone(afk.usage_threshold(self.home), "Off is a write of its own")
+
+    def test_a_write_takes_the_threshold_alone_or_beside_the_budget(self) -> None:
+        self.assertEqual(afk.bot_writes({"usage_threshold": 90}), {"afk_usage_threshold": 90})
+        self.assertEqual(
+            afk.bot_writes({"pick_budget": 3, "usage_threshold": 90}),
+            {"afk_pick_budget": 3, "afk_usage_threshold": 90},
+            "one route carries both of the bot's numbers",
+        )
+        afk.write_bot(self.home, afk.bot_writes({"pick_budget": 3, "usage_threshold": 90}))
+        self.assertEqual(
+            (afk.pick_budget(self.home), afk.usage_threshold(self.home)),
+            (3, 90),
+            "and each lands on its own row",
+        )
+
+    def test_a_body_with_one_bad_field_writes_neither(self) -> None:
+        with self.assertRaises(ValueError):
+            afk.bot_writes({"pick_budget": 3, "usage_threshold": 10})
+        self.assertEqual(
+            (afk.pick_budget(self.home), afk.usage_threshold(self.home)),
+            (5, None),
+            "everything named is checked before anything is written",
+        )
+
+    def test_a_write_that_names_neither_number_says_what_it_takes(self) -> None:
+        for body in ({}, {"on": True}, {"threshold": 90}, {"pick": 3}):
+            with self.subTest(body=body):
+                with self.assertRaises(ValueError) as raised:
+                    afk.bot_writes(body)
+                self.assertEqual(str(raised.exception), "pick_budget or usage_threshold is needed.")
+
+    def test_a_stored_threshold_nobody_could_have_set_reads_as_off(self) -> None:
+        for stored in (49, 101, "80", 72.5, True, {"usage_threshold": 80}):
+            with self.subTest(stored=stored):
+                put_setting(db_path(self.home), "afk_usage_threshold", stored)
+                self.assertIsNone(afk.usage_threshold(self.home))
+
+    def test_a_projects_read_carries_the_threshold_beside_the_budget(self) -> None:
+        set_usage_threshold(self.home, 70)
+        set_pick_budget(self.home, 4)
+        for project_id in ("p1", "p9"):
+            with self.subTest(project=project_id):
+                found = read(self.home, project_id, [])
+                self.assertEqual((found["pick_budget"], found["usage_threshold"]), (4, 70))
 
 
 class AfkSessionTests(ClaimStubTests):
@@ -3151,6 +3479,17 @@ class StageRunTests(unittest.TestCase):
         self.assertEqual(len(self.posted), 1, "one run per stage, not one per skill")
         return self.posted[0]["body"]
 
+    def test_its_run_posts_while_the_bots_account_is_over_its_threshold(self) -> None:
+        """The stop is the pickup's: a task already claimed carries on through its stages (ADR 0026)."""
+        set_usage_threshold(self.home, 50)
+        with patch.object(
+            afk.usage,
+            "fetch",
+            side_effect=AssertionError("a stage's run is no pickup: it never asks the account"),
+        ):
+            body = self.run_stage()
+        self.assertTrue(body["input"], "the stage's run is posted as it always was")
+
     def test_it_posts_the_stages_run_on_the_same_session(self) -> None:
         # The session was published with the model it started on, and a stage is the same session:
         # its run carries that pick, not whatever the profile's Default model is now.
@@ -3386,7 +3725,7 @@ class BotRouteTests(unittest.TestCase):
         self.assertIn('"object": "memento.afk.bot"', self.source)
 
     def test_it_reads_and_writes_the_bots_own_store(self) -> None:
-        for call in ("afk.bot_read", "afk.budget_from", "afk.set_pick_budget"):
+        for call in ("afk.bot_read", "afk.bot_writes", "afk.write_bot"):
             with self.subTest(call=call):
                 self.assertIn(call, self.source)
 

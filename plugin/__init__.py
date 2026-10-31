@@ -1375,12 +1375,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return web.json_response({"object": "memento.afk", "project_id": project_id, **found})
 
     async def bot_afk(request: "web.Request") -> "web.Response":
-        """The bot's own AFK numbers: the pick budget it works within, and how much of it is held.
+        """The bot's own AFK numbers: the pick budget, how much of it is held, and the usage threshold.
 
         Bot-level, so there is no project to resolve and no project id to answer: the budget is one
-        number on this bot's own store, and the holds it is counted against are every project's
-        (ADR 0042). A usage threshold has no field here yet — ADR 0026's is its own change — and the
-        shape leaves room for one beside these.
+        number on this bot's own store, the threshold beside it, and the holds it is counted against
+        are every project's (ADR 0042, ADR 0026).
         """
         denied = unauthorized(request)
         if denied is not None:
@@ -1388,16 +1387,16 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return await bot_afk_answer()
 
     async def post_bot_afk(request: "web.Request") -> "web.Response":
-        """Writes the bot's pick budget, answering the same dict the read does."""
+        """Writes what the body names of the bot's pick budget and usage threshold, answering the read."""
         denied = unauthorized(request)
         if denied is not None:
             return denied
         body = await json_body(request) or {}
         try:
-            budget = afk.budget_from(body)
+            writes = afk.bot_writes(body)
         except ValueError as why:
             return _error(web, str(why), 400)
-        await asyncio.to_thread(afk.set_pick_budget, hermes_home(), budget)
+        await asyncio.to_thread(afk.write_bot, hermes_home(), writes)
         return await bot_afk_answer()
 
     async def bot_afk_answer() -> "web.Response":

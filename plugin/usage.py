@@ -17,7 +17,7 @@ import inspect
 import logging
 from datetime import datetime, timezone
 from functools import lru_cache
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from . import usage_ollama
 
@@ -29,12 +29,46 @@ def _utc(value: datetime) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
+# The scope core marks a window that caps one model family: exhausting it never means the account
+# is out, which is why a pickup passes it over (ADR 0007, amended in part by ADR 0026).
+MODEL_SCOPE = "model"
+
+
+def deciding(windows: Iterable[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The window that answers whether the account can still run, or None where none decides.
+
+    ADR 0007's rule, moved off the app so the sweep can ask it with the app closed: a window with no
+    ``resets_at`` is a balance rather than a period, and a balance with room left is capacity, so a
+    spent allowance beside it is not the end of the road. Otherwise the tightest window decides — the
+    balance's own if there is one at all, since that is what the account has left to spend.
+
+    A window core marks ``model`` caps one model family and is passed over: a spent Opus week is not
+    the account being out on Sonnet (ADR 0026). No scope, or one this build doesn't know, is treated
+    as deciding, so a window nobody scoped is never silently skipped. A caller holding a threshold of
+    its own compares this window's percent against it — null here is capacity, never a window that is
+    merely under the caller's number.
+    """
+    eligible = [w for w in windows if w.get("scope") != MODEL_SCOPE]
+    balances = [w for w in eligible if not w.get("resets_at")]
+    if any(float(w["used_percent"]) < 100.0 for w in balances):
+        return None
+    tightest: Optional[Dict[str, Any]] = None
+    for w in balances or eligible:
+        if tightest is None or float(w["used_percent"]) > float(tightest["used_percent"]):
+            tightest = w
+    return tightest
+
+
 def serialize(snapshot: Any, now: Optional[datetime] = None) -> Optional[Dict[str, Any]]:
     """Turn an ``AccountUsageSnapshot`` into a JSON-ready dict, or None.
 
     Windows without a ``used_percent`` or whose ``reset_at`` has already passed
     are dropped; the rest keep their label, used percent, reset time (ISO or
-    null) and detail line. ``plan`` passes through when the fetcher reports one.
+    null), detail line and the ``scope`` core marked them with, so a reader can
+    pass a model-scoped window over from data rather than from a label's
+    wording. ``plan`` passes through when the fetcher reports one, and
+    ``deciding`` names the one window the pickup rule judged deciding, or null
+    where the account can still run — one rule, one owner (ADR 0026).
     """
     if snapshot is None:
         return None
@@ -52,12 +86,15 @@ def serialize(snapshot: Any, now: Optional[datetime] = None) -> Optional[Dict[st
                 "used_percent": float(w.used_percent),
                 "resets_at": _utc(reset).isoformat() if reset is not None else None,
                 "detail": w.detail,
+                # A core too old to scope a window answers none, which reads as deciding.
+                "scope": getattr(w, "scope", None),
             }
         )
     return {
         "provider": snapshot.provider,
         "plan": snapshot.plan if isinstance(snapshot.plan, str) and snapshot.plan else None,
         "windows": windows,
+        "deciding": deciding(windows),
     }
 
 
