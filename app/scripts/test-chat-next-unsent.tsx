@@ -334,3 +334,39 @@ test("a send the host never answers says what is known, not what a failed read s
     await device.close()
   }
 })
+
+test("a chat another surface owns is said in words, not as the host's code", async () => {
+  // Hermes refuses a run on a session another surface owns ("API sessions are their own sessions"),
+  // and names it with a code: `permission_denied`. The row keeps the message; the reader gets a
+  // sentence and the one way out.
+  const host = fakeHost("memento-unsent-elsewhere")
+  const device = await openDevice(host)
+  const said: string[] = []
+  const original = toast.error
+  toast.error = ((message: unknown) => {
+    said.push(String(message))
+  }) as typeof toast.error
+  const answer = globalThis.fetch
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
+    new URL(String(input)).pathname === "/v1/runs" && init?.method === "POST"
+      ? json({ error: { code: "permission_denied", message: "permission_denied" } }, 409)
+      : answer(input, init)) as typeof fetch
+  try {
+    await device.send("this one belongs to another surface")
+    await eventually(
+      () => assert.equal(device.unsent().length, 1),
+      "the message to be kept in the thread",
+    )
+    assert.deepEqual(
+      said,
+      [
+        "This chat's session belongs to another Hermes surface, so it can't be carried on here. Start a new chat.",
+      ],
+      "the code is turned into what it means and what to do",
+    )
+  } finally {
+    globalThis.fetch = answer
+    toast.error = original
+    await device.close()
+  }
+})

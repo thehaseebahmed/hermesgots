@@ -54,6 +54,11 @@ const within = (signal?: AbortSignal, timeoutMs = READ_TIMEOUT_MS) =>
 export class HostAway extends Error {}
 /** A 409 on a run start: whatever the host says of it, where it says anything. */
 export class HostRefused extends Error {}
+/** The code a host gives a run on a session another surface owns ("API sessions are their own sessions"). */
+const OTHER_SURFACE = "permission_denied"
+/** Said for that code, which is not a sentence, and names the one way out of it. */
+const ELSEWHERE =
+  "This chat's session belongs to another Hermes surface, so it can't be carried on here. Start a new chat."
 const answered = (response: Response) => `The host answered ${response.status}.`
 const ensure = (response: Response) => {
   if (!response.ok) throw new Error(answered(response))
@@ -68,10 +73,13 @@ export interface Posting {
   timeoutMs?: number
 }
 
-/** What a refused host says, where its body says anything. */
-const refusal = async (response: Response): Promise<string | undefined> => {
+/** What a refused host says, where its body says anything: its words, and its own code beside them. */
+const refusal = async (response: Response): Promise<{ message?: string; code?: string }> => {
   const body = await response.json().catch(() => null)
-  return typeof body?.error?.message === "string" ? body.error.message : undefined
+  return {
+    message: typeof body?.error?.message === "string" ? body.error.message : undefined,
+    code: typeof body?.error?.code === "string" ? body.error.code : undefined,
+  }
 }
 
 /**
@@ -187,8 +195,18 @@ export async function postRun(
     if (signal?.aborted) throw error
     throw new HostAway("Can't reach the host.", { cause: error })
   }
-  if (response.status === 409) throw new HostRefused(await refusal(response))
-  if (!response.ok) throw new Error((await refusal(response)) ?? answered(response))
+  // A session another surface owns — a CLI, the Desktop, a messaging chat — is one the API server
+  // refuses to bind ("API sessions are their own sessions"), and it says so with a code rather than
+  // a sentence a reader can act on. This app's chats are its own sessions, so the one way to reach
+  // it is a session of this chat's own: a new chat.
+  if (!response.ok) {
+    const { message, code } = await refusal(response)
+    if (response.status === 409) {
+      if (code === OTHER_SURFACE || message === OTHER_SURFACE) throw new HostRefused(ELSEWHERE)
+      throw new HostRefused(message)
+    }
+    throw new Error(message ?? answered(response))
+  }
   const { run_id } = (await response.json()) as { run_id?: unknown }
   if (typeof run_id !== "string") throw new Error("The host didn't start the run.")
   return run_id
