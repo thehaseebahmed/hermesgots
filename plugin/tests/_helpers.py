@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import re
 import sys
 import tempfile
 import unittest
@@ -271,6 +273,20 @@ def temp_hermes_home(case: unittest.TestCase) -> Path:
     patcher.start()
     case.addCleanup(patcher.stop)
     return home
+
+
+def js_constant(source: str, name: str) -> str:
+    """``name``'s value from a JavaScript or TypeScript source: its string literals, joined.
+
+    The mock and the app's fixtures repeat a plugin's own words verbatim and are held to them from
+    Python, so this is how one is read back. A constant may be one literal or several joined with
+    ``+``, and each is unescaped the way the engine would.
+    """
+    literal = r'"(?:[^"\\]|\\.)*"'
+    found = re.search(rf"const {re.escape(name)} =\s*((?:{literal}\s*\+\s*)*{literal})", source)
+    if found is None:
+        raise AssertionError(f"no string constant {name} in the source")
+    return "".join(json.loads(piece) for piece in re.findall(literal, found.group(1)))
 
 
 def usage_window(

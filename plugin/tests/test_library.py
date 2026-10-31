@@ -19,7 +19,7 @@ from unittest import mock
 
 from plugin import library, prompt_builder, sessions
 from plugin.store import db_path
-from plugin.tests._helpers import stub_projects_db
+from plugin.tests._helpers import js_constant, stub_projects_db
 
 
 def fake_project(primary: Path) -> SimpleNamespace:
@@ -356,7 +356,7 @@ class InstructionsTest(unittest.TestCase):
         # The Gots section is the same for every session, so its rules are told together and above
         # the section that names this one, which is what makes the opening shared (ADR 0028).
         text = prompt_builder.session_prompt(self.record)
-        self.assertIn("Keep the todo list current", text, "the guidelines are told together")
+        self.assertIn("Work in checkpoints", text, "the guidelines are told together")
         self.assertLess(text.index("## Do"), text.index("## Don't"))
         self.assertLess(text.index("## Don't"), text.index("## Tools"))
         self.assertLess(text.index("**library_add**"), text.index("**pull_request**"))
@@ -364,7 +364,10 @@ class InstructionsTest(unittest.TestCase):
 
     def test_the_block_names_the_rhythm_rules(self) -> None:
         text = prompt_builder.session_prompt(self.record)
-        self.assertIn("Keep the todo list current", text)
+        self.assertIn("Keep your todo list current", text)
+        block = text[text.index("## Do") : text.index("## Don't")]
+        self.assertIn("`todo_list`", block, "the rule names the tool every agent is handed")
+        self.assertIn("if work remains", block, "an update does not finish the work")
         self.assertIn("before you commit it", text, "the diff is read before it goes in")
         self.assertIn("Don't narrate each edit", text)
         # How often the bot says what it is doing is not the prompt's to ask for: the reminder is
@@ -390,17 +393,13 @@ class InstructionsTest(unittest.TestCase):
         # The same gate as the ship instructions: a record with no repos gets neither.
         no_repos = {**self.record, "repos": []}
         text = prompt_builder.session_prompt(no_repos)
-        self.assertNotIn("Keep the todo list current", text)
+        self.assertNotIn("Keep your todo list current", text)
         self.assertNotIn("**pull_request**", text)
 
     def test_the_mock_repeats_the_instructions_word_for_word(self) -> None:
         # The mock is a standalone Node process, so its copy can't be imported; the e2e flows read
-        # the text it serves, so a drift there tests a prompt no session gets. Compared the way
-        # test_push_kinds compares its lists to the app's. Only the blocks meant to be verbatim:
-        # the plan is a template, and the wording inside it is Hermes's own.
-        import json
-        import re
-
+        # the text it serves, so a drift there tests a prompt no session gets. Only the blocks meant
+        # to be verbatim: the plan is a template, and the wording inside it is Hermes's own.
         app = Path(__file__).resolve().parents[2] / "app"
         mock_js = (app / "scripts" / "mock-hermes.mjs").read_text()
         for name, block in (
@@ -412,10 +411,7 @@ class InstructionsTest(unittest.TestCase):
             ("MEDIA_RULES", prompt_builder._MEDIA_RULES),
         ):
             with self.subTest(block=name):
-                found = re.search(rf'^\s*const {name} = "(.*)"$', mock_js, re.M)
-                if found is None:
-                    self.fail(f"{name} is not in the mock")
-                self.assertEqual(json.loads(f'"{found.group(1)}"'), block)
+                self.assertEqual(js_constant(mock_js, name), block)
 
 
 if __name__ == "__main__":

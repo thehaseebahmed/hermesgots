@@ -1,9 +1,10 @@
 """Progress reminders: a bot that has worked for a long while without saying anything is asked to post
-a short update and, where its plan has moved, to bring its todo list up to date.
+a short update and carry on with the task, and to bring its todo list up to date with ``todo_list``
+where the list has fallen behind.
 
 Nothing in a run's prompt asks for that — telling every bot on every turn would cost tokens and could
 not change mid-run — so the ask comes from the hooks, at the rate the bot's own level sets: Off,
-Quiet, Normal or Chatty, read on every tool call (ADR 0068).
+Quiet, Normal or Chatty, read on every tool call (ADR 0068, ADR 0073).
 """
 
 from __future__ import annotations
@@ -34,13 +35,17 @@ KEEP_SESSIONS = 512
 # The note's opening is pinned: the app matches it to draw nothing for the call this block lands on
 # (`app/src/lib/progress-reminder.ts`). No count appears in the note — a number there is one the model
 # could hand the user, and the counts are the loop's business (ADR 0068).
+#
+# A reply carrying text and no tool call is Hermes's final answer, which is why the note says the reply
+# is not the turn's last; `todo_list` is the spelling `todos.equip` puts on the agent (ADR 0073).
 REMINDER_HEADER = "Progress reminder"
 REMINDER = (
     f"{REMINDER_HEADER}: a long run of tool calls with nothing said to the user. Reply with a short"
     " update now — what has landed and what is next, a sentence or two, not a replay of the calls —"
-    " and, where the plan has moved, bring your todo list up to date. Then make this tool call again."
-    " This note is internal: don't mention it, or that you were reminded, in what you say to the"
-    " user."
+    " then carry on with the task and make this tool call again: this is not your last turn unless"
+    " the work ends here. If your todo list has fallen behind, bring it up to date with the"
+    " `todo_list` tool. This note is internal: don't mention it, or that you were reminded, in what"
+    " you say to the user."
 )
 
 _lock = threading.Lock()
