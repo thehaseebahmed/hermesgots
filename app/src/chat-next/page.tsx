@@ -546,6 +546,8 @@ const AGENTS_COOLDOWN_MS = 60_000
 const HANDOFF_MS = 10_000
 /** A turn that has written nothing for this long is not waited on any more. */
 const STALL_MS = 5 * 60_000
+/** A run this quiet while holding no prompt on the page may be waiting on one it never heard. */
+const QUIET_RUN_MS = 1_500
 
 /** What a prompt drawn by the app is handed: the wait, and how to answer it. */
 export interface PromptProps {
@@ -947,7 +949,18 @@ export function ChatNextThread({
     return () => clearTimeout(timer)
   }, [handedOff])
   const hostBusy = useHostBusy(session ?? undefined)
-  const busy = following || working || owed || starting || inQueue > 0 || handedOff || hostBusy
+  // A run this page is following is in flight whatever the plugin's poll says: a run waiting on a
+  // prompt it has not been told about reports nothing running, and the page then slows to its idle
+  // pace — a chat that only catches up when it is opened again.
+  const [live, setLive] = useState(false)
+  const busy = live || following || working || owed || starting || inQueue > 0 || handedOff || hostBusy
+  // What the poll reads, held so a state object the reducer hands back new does not restart the
+  // timer before it ever fires.
+  const now = useRef({ busy, waiting: doing.waiting })
+  now.current = { busy, waiting: doing.waiting }
+  // When the run's stream last said anything, so a status read for a prompt it never carried costs
+  // nothing while the stream is busy.
+  const lastEvent = useRef(0)
   const progress = useRef({ shape: "", at: 0 })
   const shape = tip + agents.map((agent) => `${agent.id}${agent.status}`).join()
   useEffect(() => {
@@ -977,11 +990,15 @@ export function ChatNextThread({
       streaming.current = true
       followingRun.current = run
       lastRun.current = run
+      setLive(true)
       try {
         await followRun(
           { server, key },
           run,
-          (event) => dispatch({ type: "run", event, at: Date.now() }),
+          (event) => {
+            lastEvent.current = Date.now()
+            dispatch({ type: "run", event, at: Date.now() })
+          },
           alive.current.signal,
         )
       } catch (error) {
@@ -992,6 +1009,7 @@ export function ChatNextThread({
       } finally {
         streaming.current = false
         if (followingRun.current === run) followingRun.current = undefined
+        setLive(false)
         dispatch({ type: "ended" })
       }
       // Whatever the stream said, the host's transcript is what the turn was.
@@ -1073,6 +1091,15 @@ export function ChatNextThread({
             void readAgents({ server, key }, session, alive.current.signal).then(
               (listed) => listed && dispatch({ type: "agents", agents: listed }),
             )
+          // A quiet run holding no prompt on this page may be waiting on one it never heard: a host
+          // sends a prompt's request only to the subscribers it has at the time, so one raised while
+          // the stream was being rejoined reaches nobody, and the page would sit on Waiting until the
+          // chat was opened again. Ask the run's status; the reading set keeps a settled prompt off.
+          if (now.current.busy && !now.current.waiting && followingRun.current && server && key)
+            if (Date.now() - lastEvent.current > QUIET_RUN_MS)
+              void readRun({ server, key }, followingRun.current).then(
+                (prompt) => prompt && dispatch({ type: "waiting", waiting: prompt }),
+              )
           return
         }
         // Subagents the host still runs, wake turns it owes, and a run held on the user's answer are
@@ -1111,7 +1138,6 @@ export function ChatNextThread({
     following,
     busy,
     starting,
-    doing.waiting,
     catchUp,
     follow,
     dispatch,

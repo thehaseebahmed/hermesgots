@@ -30,6 +30,7 @@ const MOCKS = {
     port: MOCK_BASE + 7,
     env: { MOCK_WITHHOLD_PROMPT: "1", MOCK_DROP_EVENTS_MS: "1500" },
   },
+  muted: { port: MOCK_BASE + 8, env: { MOCK_MUTE_PROMPT: "1" } },
 }
 // How many ports a lane's mocks take, and so how far apart two lanes' sets start.
 const LANE_PORTS = Object.keys(MOCKS).length
@@ -92,7 +93,7 @@ export const FLOWS = {
   "question-card": {
     script: "e2e/question-card.mjs",
     about:
-      'On the new chat screen a question is the composer\'s alone — one waiting line in the thread, no card of it there — and reads answered once given, never "No answer"; and a question longer than the screen keeps its own Skip and Send on it, the card stopping at half the screen and scrolling the choices inside',
+      'On the new chat screen a question is the composer\'s alone — one waiting line in the thread, no card of it there — and reads answered once given, never "No answer"; a question longer than the screen keeps its own Skip and Send on it, the card stopping at half the screen and scrolling the choices inside; and one call\'s five questions are asked one prompt at a time, each as the question it names rather than the call\'s first again, every answer reaching the run with the chat left open',
   },
   "question-reload": {
     script: "e2e/question-reload.mjs",
@@ -105,6 +106,12 @@ export const FLOWS = {
     mock: "dropped",
     about:
       "A chat whose run waits on a question, on a host whose event stream keeps dying under it: the form stays in the composer and the thread keeps its waiting line, so the answer still lands",
+  },
+  "question-muted": {
+    script: "e2e/question-muted.mjs",
+    mock: "muted",
+    about:
+      "A call's second question is published on the run's status and never on its stream, the way a host that raises one with no subscriber attached leaves it: the form comes back from the status read while the chat stays open, and every answer still reaches the run",
   },
   "failed-send": {
     script: "e2e/failed-send.mjs",
