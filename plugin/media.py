@@ -38,7 +38,7 @@ DOWNLOAD_MAX_BYTES = 25 * 1024 * 1024
 # How long a minted URL is worth. Minutes, so a URL that leaks into a log or a screenshot is worth
 # one path until it expires rather than a key worth everything for ever.
 URL_LIFETIME_S = 10 * 60
-# The query the media route takes a signature in, in place of the Bearer header an element can't send.
+# The query a signature travels in, in place of the Bearer header an element can't send.
 URL_PARAM = "token"
 # Where this profile's signing secret is kept in `memento.db`'s `host_settings`.
 KEY_SETTING = "media_key"
@@ -98,8 +98,10 @@ SERVED_TYPES: Dict[str, str] = {
     ".cjs": "text/javascript",
 }
 
-# What a browser renders in place rather than saving; every other type arrives as a download.
-SHOWN_INLINE_PREFIXES = ("image/", "video/", "audio/", "text/")
+# What the platform plays or paints as it arrives, and the wider set a browser shows in place
+# rather than saving: every other type arrives as a download.
+MEDIA_PREFIXES = ("image/", "video/", "audio/")
+SHOWN_INLINE_PREFIXES = (*MEDIA_PREFIXES, "text/")
 SHOWN_INLINE_TYPES = ("application/pdf", "application/json")
 
 _BAD_ASCII = re.compile(r"[^A-Za-z0-9._ ()-]")
@@ -133,7 +135,7 @@ def disposition(path: Path) -> str | None:
 
 def streams(path: Path) -> bool:
     """Whether the platform plays or paints this in a stream, rather than saving it to open."""
-    return content_type(path).startswith(("image/", "video/", "audio/"))
+    return content_type(path).startswith(MEDIA_PREFIXES)
 
 
 def limit_for(path: Path) -> int:
@@ -176,6 +178,11 @@ def _validated_path(path_str: str, missing: str) -> Path:
     return path
 
 
+# The secret a profile signs with, read from its store once: a clip asks for a URL's check on every
+# range it reads, and opening the store each time is work for a value that never changes.
+_keys: Dict[Path, bytes] = {}
+
+
 def signing_key(store: Path) -> bytes:
     """This profile's media signing secret, made once and kept in its own store.
 
@@ -184,17 +191,22 @@ def signing_key(store: Path) -> bytes:
     """
     from .store import get_setting, put_setting
 
+    known = _keys.get(store)
+    if known:
+        return known
     held = get_setting(store, KEY_SETTING)
     if isinstance(held, str) and held:
         try:
-            return bytes.fromhex(held)
+            _keys[store] = bytes.fromhex(held)
+            return _keys[store]
         except ValueError:
             pass
     fresh = secrets.token_bytes(32).hex()
     put_setting(store, KEY_SETTING, fresh)
     # Two asks at once can both have made one; the store's answer is the one both sides keep.
     settled = get_setting(store, KEY_SETTING)
-    return bytes.fromhex(settled if isinstance(settled, str) and settled else fresh)
+    _keys[store] = bytes.fromhex(settled if isinstance(settled, str) and settled else fresh)
+    return _keys[store]
 
 
 def _signature(key: bytes, path: str, profile: str, expires: int) -> str:

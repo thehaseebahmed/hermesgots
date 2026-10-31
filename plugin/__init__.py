@@ -1975,20 +1975,16 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return web.json_response({"object": "memento.dictation_cleanup", **result})
 
     async def served_file(
-        request: "web.Request", resolve: Any, allowed: Any = None, authorized: bool = False
+        request: "web.Request", resolve: Any, allowed: Any = None
     ) -> "web.StreamResponse":
         """Serves the file a query's ``path`` names: ``resolve`` validates it, ``allowed`` may refuse
         it (a library file has to sit under a project's library folder). What the platform shows is
         served in place; anything else is handed over as a download named as the file. aiohttp's own
         file response answers a ``Range`` with the span asked for, which is what lets a player seek.
 
-        ``authorized`` is the caller's own answer: the media route takes a signed URL where an
-        element can't carry the key, and every other route takes the key itself.
+        It takes no view on who may ask: each route below says who it lets in, so no caller can
+        serve a file by handing this helper a flag.
         """
-        if not authorized:
-            denied = unauthorized(request)
-            if denied is not None:
-                return denied
         try:
             file = await asyncio.to_thread(resolve, request.query.get("path", ""))
         except media.MediaError as error:
@@ -2040,20 +2036,30 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         )
 
     async def serve_media(request: "web.Request") -> "web.StreamResponse":
+        """The media route: this bot's key, or — where an element can't carry one — a URL it signed."""
         path = request.query.get("path", "")
         signed = request.query.get(media.URL_PARAM, "")
-        permitted = False
+        # A request with no signature is the ordinary one, behind the key like every other route.
         if signed:
             key = await asyncio.to_thread(media.signing_key, store_path())
             permitted = await asyncio.to_thread(
                 media.covers, key, signed, path, _request_profile() or ""
             )
-        return await served_file(request, media.media_file, authorized=permitted)
+            if not permitted:
+                return _error(web, "Unauthorized", 401)
+        else:
+            denied = unauthorized(request)
+            if denied is not None:
+                return denied
+        return await served_file(request, media.media_file)
 
     app.router.add_get(f"{PREFIX}/media", serve_media)
     app.router.add_post(f"{PREFIX}/media/url", sign_media_url)
 
     async def serve_library_file(request: "web.Request") -> "web.StreamResponse":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
         return await served_file(
             request, media.media_file, lambda file: library.holds(hermes_home(), file)
         )
