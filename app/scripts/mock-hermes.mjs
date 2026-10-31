@@ -102,8 +102,9 @@
 // wake starting that the app must never read as the session at rest); POST /__mock/wake { delay }
 // holds that wake back so a flow can watch the window. …/sessions/{id}/queue holds what
 // the app queued and starts it when the session's run ends, like plugin/outbox.py. The agent asks the user questions
-// with Hermes's clarify tool, which the plugin serves on runs: say "ask" for one, or "ask five" for
-// five (plan mode asks before planning), the run carries
+// with Hermes's clarify tool, which the plugin serves on runs: say "ask" for one, "ask five" for
+// five (plan mode asks before planning), or "ask a lot" for one question with more choices than a
+// phone's screen holds, the run carries
 // `clarify.request` and waits, and POST /api/plugins/memento/runs/{id}/clarify answers it. The same
 // event carries the prompt Hermes 0.22.5's own route answers, one question at a time (a `prompt_id`,
 // with POST /v1/runs/{id}/clarify taking `{request_id, execution_generation, answer}`), so the new
@@ -2724,6 +2725,32 @@ async function playTurn(req, body, last, out) {
       `Got ${attached.length === 1 ? attached[0] : `${attached.length} attachments: ${attached.join(", ")}`}` +
         (images ? `, ${images === 1 ? "an image" : `${images} images`} I can see` : "") +
         ".",
+    )
+  } else if (/ask a lot/i.test(last)) {
+    // One question with more choices than a phone screen holds, which is what a card has to fit.
+    const { answers, outcome } = await ask([
+      {
+        question:
+          "Which logs should I count as old, across every service the account runs and every " +
+          "region it is deployed to?",
+        choices: [
+          "Older than 90 days, across every service and every region",
+          "Older than 90 days, only in the region this host answers from",
+          "Older than 30 days, across every service and every region",
+          "Older than 30 days, only where they are larger than 100 MB",
+          "Older than 7 days, but keep anything an incident was filed about",
+          "Older than 7 days, keeping nothing back",
+          "Everything before the last deploy",
+          "Leave them all where they are, and count nothing as old",
+          "Only the rotated files, leaving the live logs alone",
+          "Count by size instead of by age",
+        ],
+      },
+    ])
+    await say(
+      outcome === "submitted" && answers.q0
+        ? `Got it, I'll count "${answers.q0}" as old.`
+        : "No answer came, so I'll count anything older than 90 days.",
     )
   } else if (/ask five/i.test(last)) {
     const { answers, outcome } = await ask([

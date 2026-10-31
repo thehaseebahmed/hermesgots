@@ -1,5 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
-import { CheckIcon, MessageCircleQuestionIcon } from "lucide-react"
+import {
+  CheckIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  MessageCircleQuestionIcon,
+} from "lucide-react"
 import { toast } from "sonner"
 
 import { CARD } from "@/components/chat/session-cards"
@@ -157,13 +162,20 @@ function Question({
   )
 }
 
-const motion = () =>
-  prefersReducedMotion() ? "auto" : "smooth"
+const motion = () => (prefersReducedMotion() ? "auto" : "smooth")
+
+/**
+ * The most the card may take from a screen, whatever a question asks: half of it, so the thread it
+ * was asked over and the reader's own work stay in view, and a long question scrolls inside it
+ * rather than pushing its own buttons past the edge.
+ */
+const HALF_SCREEN = "max-h-[50dvh]"
 
 /**
  * The agent's questions, in place of the composer until answered; the answers then show as a card
  * in the thread (`ClarifyCard`). One question is a plain form. Two or more are pages of one card
- * (swipe, or Skip and Next), so five questions never outgrow the screen.
+ * (swipe, or the arrows beside its count), and any question may be skipped — so a question longer
+ * than the screen never takes the card's own buttons off it.
  */
 export function QuestionCard({
   message,
@@ -177,6 +189,9 @@ export function QuestionCard({
   const paged = questions.length > 1
   const [pending, setPending] = useState(false)
   const [page, setPage] = useState(0)
+  const card = useRef<HTMLDivElement>(null)
+  const head = useRef<HTMLDivElement>(null)
+  const foot = useRef<HTMLDivElement>(null)
   const row = useRef<HTMLDivElement>(null)
   const pages = useRef<(HTMLDivElement | null)[]>([])
   // The row is as tall as the page showing, so a short question leaves no gap above the buttons.
@@ -210,12 +225,32 @@ export function QuestionCard({
   }, [paged])
 
   useLayoutEffect(() => {
-    const el = pages.current[page]
-    if (!paged || !el) return
-    const measure = () => setHeight(el.offsetHeight)
+    if (!paged) return
+    const pageEl = pages.current[page]
+    const cardEl = card.current
+    if (!pageEl || !cardEl) return
+    const measure = () => {
+      // The page's own content height, which a capped page still reports as its scroll extent.
+      const wants = pageEl.scrollHeight
+      const style = getComputedStyle(cardEl)
+      // What the card has left for a page once its header, footer, padding and gaps are paid for.
+      // The cap is the card's own resolved max-height, never its current height: a row measured
+      // against a card that had already shrunk would clip the page it was sizing.
+      const cap = parseFloat(style.maxHeight) || window.innerHeight / 2
+      const room =
+        cap -
+        (head.current?.offsetHeight ?? 0) -
+        (foot.current?.offsetHeight ?? 0) -
+        (parseFloat(style.paddingTop) || 0) -
+        (parseFloat(style.paddingBottom) || 0) -
+        2 * (parseFloat(style.rowGap) || 0)
+      if (!wants || room <= 0) return
+      setHeight(Math.min(wants, Math.floor(room)))
+    }
     measure()
     const observer = new ResizeObserver(measure)
-    observer.observe(el)
+    observer.observe(pageEl)
+    observer.observe(cardEl)
     return () => observer.disconnect()
   }, [page, paged])
 
@@ -246,25 +281,48 @@ export function QuestionCard({
   const onChange = (id: string) => (next: Picked) => setPicked((all) => ({ ...all, [id]: next }))
 
   return (
-    <Card size="sm" className={CARD}>
-      <CardHeader>
+    <Card ref={card} size="sm" className={cn(CARD, HALF_SCREEN)}>
+      <CardHeader ref={head} className="shrink-0">
         <CardTitle className="flex items-center gap-2 text-base text-primary">
-          <MessageCircleQuestionIcon className="size-5" />
+          <MessageCircleQuestionIcon className="size-5 shrink-0" />
           {paged ? "Questions" : "Question"}
           {paged && (
-            <span
-              aria-live="polite"
-              className="ml-auto text-sm font-normal text-muted-foreground tabular-nums"
-            >
-              {page + 1} of {questions.length}
-            </span>
+            <div className="ml-auto flex items-center gap-1">
+              <span
+                aria-live="polite"
+                className="px-1 text-sm font-normal text-muted-foreground tabular-nums"
+              >
+                {page + 1} of {questions.length}
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Previous question"
+                disabled={pending || page === 0}
+                onClick={() => goTo(page - 1)}
+              >
+                <ChevronLeftIcon />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Next question"
+                disabled={pending || last}
+                onClick={() => goTo(page + 1)}
+              >
+                <ChevronRightIcon />
+              </Button>
+            </div>
           )}
         </CardTitle>
       </CardHeader>
       {paged ? (
-        <CardContent>
+        <CardContent className="min-h-0 overflow-hidden">
           <div
             ref={row}
+            data-question-pages
             style={{ height }}
             className="-m-1 flex snap-x snap-mandatory [scrollbar-width:none] items-start overflow-x-auto overscroll-x-contain transition-[height] motion-reduce:transition-none [&::-webkit-scrollbar]:hidden"
           >
@@ -274,11 +332,13 @@ export function QuestionCard({
                 ref={(el) => {
                   pages.current[i] = el
                 }}
+                data-question-page={i}
+                style={{ maxHeight: height }}
                 role="group"
                 aria-roledescription="slide"
                 aria-label={`Question ${i + 1} of ${questions.length}`}
                 inert={i !== page}
-                className="max-h-[60dvh] w-full shrink-0 snap-center snap-always overflow-y-auto p-1"
+                className="w-full shrink-0 snap-center snap-always overflow-y-auto overscroll-contain p-1"
               >
                 <Question
                   question={question}
@@ -291,7 +351,7 @@ export function QuestionCard({
           </div>
         </CardContent>
       ) : (
-        <CardContent>
+        <CardContent className="min-h-0 overflow-y-auto overscroll-contain">
           <Question
             question={questions[0]}
             picked={picked[questions[0].id]}
@@ -300,19 +360,17 @@ export function QuestionCard({
           />
         </CardContent>
       )}
-      <CardFooter className="gap-2">
-        {paged && (
-          <Button
-            type="button"
-            variant="outline"
-            size="lg"
-            className="h-11 flex-1 sm:min-w-28 sm:flex-none"
-            disabled={pending}
-            onClick={skip}
-          >
-            Skip
-          </Button>
-        )}
+      <CardFooter ref={foot} className="shrink-0 gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="lg"
+          className="h-11 flex-1 sm:min-w-28 sm:flex-none"
+          disabled={pending}
+          onClick={skip}
+        >
+          Skip
+        </Button>
         {paged && !last ? (
           <Button
             type="button"

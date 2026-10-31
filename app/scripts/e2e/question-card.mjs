@@ -58,6 +58,42 @@ for (const [width, dark] of [
       // A reload reads the same answer from the host's own transcript.
       await page.reload()
       await thread.getByText("Answered", { exact: true }).waitFor({ timeout: 20_000 })
+
+      // A question with more choices than a phone screen holds: the card stops at half the screen,
+      // so its own buttons stay on it and the choices scroll inside it.
+      await send("ask a lot")
+      await page
+        .getByRole("button", { name: /Older than 90 days, across every service/ })
+        .first()
+        .waitFor({ timeout: 30_000 })
+      await settled(page)
+
+      const slot = page.locator("[data-slot=composer-slot]")
+      const box = await slot.locator("[data-slot=card]").first().boundingBox()
+      const screen = page.viewportSize()
+      assert.ok(box, "the question is the composer's")
+      assert.ok(
+        box.height <= screen.height / 2 + 1,
+        `the card stops at half the screen: ${Math.round(box.height)} of ${screen.height}`,
+      )
+      const footer = await slot.locator("[data-slot=card-footer]").first().boundingBox()
+      assert.ok(
+        footer && footer.y + footer.height <= screen.height,
+        "its own buttons are still on the screen",
+      )
+      assert.ok(
+        await slot
+          .locator('[data-slot="card-content"]')
+          .first()
+          .evaluate((one) => one.scrollHeight > one.clientHeight + 1),
+        "the choices scroll inside the card",
+      )
+      assert.equal(
+        await page.getByRole("button", { name: "Skip", exact: true }).count(),
+        1,
+        "and a question that asked too much can be skipped",
+      )
+      await shot("long")
       pass(`a question is the composer's alone, and reads answered once given (${look})`)
     },
     { viewport: { width, height: width < 768 ? 844 : 900 }, dark },

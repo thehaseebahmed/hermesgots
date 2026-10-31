@@ -2470,3 +2470,33 @@ status the authority for a prompt can raise a wait and never settle one.
 ---
 
 Found by the code review's spec axis while verifying this branch; it does not block it.
+
+# Deferred: chat-next's reattach test fails about one run in four
+
+The component tier and the browser sweep were run over this change. One test in the tier is flaky, and
+it fails on main without any of this branch's commits: `scripts/test-chat-next-older.tsx`'s "a thread
+left unfinished picks up where it stopped, from the rows the device holds" — 1 failure in 4 runs at the
+base commit, 1 in 3 with this change in the tree, and it passes alone on the runs between. Nothing in
+this branch reaches it: the question card is not imported by the reattach path.
+
+## Careful
+
+### 1. The page written after the reader left is raced by a fixed 50ms wait
+
+The test holds the third page, closes the reader with it in flight, releases it and waits 50ms before
+asserting the page was written anyway (`app/scripts/test-chat-next-older.tsx:149-153`). Whether the
+abandoned read lands inside that window is wall clock: the write happens on the device's own promise
+chain, and under load — a full tier running in one process, the container at its memory ceiling — the
+50ms runs out first, so `database.sessionRows.count()` reads fewer rows than `2 * PAGE`.
+
+- Cost: a red in the tier that has nothing to do with the change being gated, which sends the reader
+  hunting in the wrong module — exactly the shape of the false red that costs a review its trust.
+- Suggested fix: replace the fixed `wait(50)` with the file's own `eventually(...)` waiting for
+  `sessionRows.count()` to reach `2 * PAGE`, then assert `partial` is set. The deadline is what the
+  rest of the file already uses for a write it does not control the moment of.
+- Why it is deferred: it belongs to the reattach suite's own task, and re-timing a test asserts nothing
+  new about this change; the fix touches a file this branch never reads.
+
+---
+
+Found by this branch's gate sweep; it does not block it.
