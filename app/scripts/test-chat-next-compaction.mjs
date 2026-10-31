@@ -6,7 +6,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { foldTurns, withArchive } from "../src/chat-next/fold.ts"
+import { foldTurns, withArchive, withCarriedSeams } from "../src/chat-next/fold.ts"
 import { recorded } from "./chat-next-fixtures.ts"
 
 const live = recorded("compaction.live.json").data
@@ -20,8 +20,142 @@ test("the host's read opens on the compaction's hidden row: a turn whose request
   const [first] = foldTurns(live)
   assert.equal(first.carried, true)
   assert.equal(first.user, "")
-  assert.deepEqual(kinds(first), ["compaction", "text", "tools", "text", "tools", "text"])
+  assert.deepEqual(
+    kinds(first),
+    ["text", "tools", "text", "tools", "text"],
+    "the work it carried, drawn as the reply it was",
+  )
   assert.equal(first.done, true, "its last row is a reply that says why it stopped")
+})
+
+test("the divider stands above the first row the host wrote after the compaction, not where the summary sits", () => {
+  const turns = foldTurns(live)
+  const at = turns.findIndex((turn) => turn.parts.some((part) => part.kind === "compaction"))
+  assert.equal(turns[at].user, "User message 2.", "the reply the host wrote before the boundary")
+  assert.equal(turns[at].parts.at(-1).kind, "compaction", "the divider closes it")
+  assert.equal(turns[at + 1].user, "User message 3.", "and the first message after it follows")
+})
+
+test("the work a compaction carried sits above its divider, and what the run did after it below", () => {
+  const [turn] = foldTurns([
+    row(1, "user", "", { display_kind: "hidden", timestamp: 500 }),
+    row(2, "assistant", "", {
+      finish_reason: "tool_calls",
+      timestamp: 100,
+      tool_calls: [{ id: "c1", function: { name: "terminal", arguments: "{}" } }],
+    }),
+    row(3, "tool", "first", { tool_call_id: "c1", timestamp: 101 }),
+    row(4, "assistant", "", {
+      finish_reason: "tool_calls",
+      timestamp: 600,
+      tool_calls: [{ id: "c2", function: { name: "terminal", arguments: "{}" } }],
+    }),
+    row(5, "tool", "second", { tool_call_id: "c2", timestamp: 601 }),
+    row(6, "assistant", "done", { finish_reason: "stop", timestamp: 700 }),
+  ])
+  assert.deepEqual(kinds(turn), ["tools", "compaction", "tools", "text"])
+})
+
+const call = (id) => ({ id, name: "terminal" })
+
+test("a reply that compacts while it streams keeps its divider where it fell", () => {
+  const copy = {
+    user: "go",
+    done: false,
+    delivered: [],
+    parts: [
+      { kind: "tools", calls: [call("c1")] },
+      { kind: "compaction", row: 9, at: 5 },
+      { kind: "tools", calls: [call("c2")] },
+    ],
+  }
+  const streamed = {
+    user: "go",
+    done: false,
+    delivered: [],
+    parts: [{ kind: "tools", calls: [call("c1"), call("c2")] }],
+  }
+  const kept = withCarriedSeams(streamed, copy)
+  assert.deepEqual(
+    kinds(kept),
+    ["tools", "compaction", "tools"],
+    "a group of calls is split at the seam",
+  )
+  assert.equal(kept.parts[0].calls.length, 1, "the call made before the boundary is above it")
+})
+
+test("two compactions with words between them keep both dividers, in the order they fell", () => {
+  const copy = {
+    user: "go",
+    done: false,
+    delivered: [],
+    parts: [
+      { kind: "tools", calls: [call("c1")] },
+      { kind: "compaction", row: 8, at: 5 },
+      { kind: "text", text: "Between." },
+      { kind: "compaction", row: 9, at: 6 },
+      { kind: "tools", calls: [call("c2")] },
+    ],
+  }
+  const streamed = {
+    user: "go",
+    done: false,
+    delivered: [],
+    parts: [
+      { kind: "tools", calls: [call("c1")] },
+      { kind: "text", text: "Between." },
+      { kind: "tools", calls: [call("c2")] },
+    ],
+  }
+  assert.deepEqual(kinds(withCarriedSeams(streamed, copy)), [
+    "tools",
+    "compaction",
+    "text",
+    "compaction",
+    "tools",
+  ])
+})
+
+test("a seam below the reply's words stays below them, and one above its first word stays there", () => {
+  const words = {
+    user: "go",
+    done: false,
+    delivered: [],
+    parts: [{ kind: "text", text: "Thinking aloud." }],
+  }
+  const spoken = {
+    ...words,
+    parts: [
+      { kind: "text", text: "Thinking aloud." },
+      { kind: "compaction", row: 9, at: 5 },
+      { kind: "tools", calls: [call("c1")] },
+    ],
+  }
+  assert.deepEqual(
+    kinds(withCarriedSeams(words, spoken)),
+    ["text", "compaction"],
+    "the words it fell after are drawn above the line",
+  )
+  const carried = {
+    user: "",
+    done: false,
+    delivered: [],
+    parts: [
+      { kind: "compaction", row: 9, at: 5 },
+      { kind: "text", text: "Carried work." },
+    ],
+  }
+  const live = {
+    user: "",
+    done: false,
+    delivered: [],
+    parts: [{ kind: "text", text: "Carried work." }],
+  }
+  assert.deepEqual(
+    kinds(withCarriedSeams(live, carried)),
+    ["compaction", "text"],
+    "nothing was drawn above it, so the line opens the reply",
+  )
 })
 
 test("the rows the host wrote for the host's own sake are never a message of the user's", () => {
@@ -53,7 +187,11 @@ test("the task snapshot and the pruned-skills notice Hermes writes at the seam a
     turns.map((turn) => turn.user),
     ["one", "two"],
   )
-  assert.equal(turns[0].parts.length, 2, "the reply after the notice stays on the turn it continues")
+  assert.equal(
+    turns[0].parts.length,
+    2,
+    "the reply after the notice stays on the turn it continues",
+  )
 })
 
 test("a compaction between two replies stands between them", () => {
@@ -134,8 +272,11 @@ test("with the archive, the turn the compaction cut in two is whole again, under
   const request = turns[1]
   assert.equal(request.user, "Request that was still being worked when the context was compacted.")
   assert.equal(request.carried, undefined, "it has its request again")
-  // Hermes's archive and its live rows both hold a hidden row for the compaction: one divider.
-  assert.deepEqual(kinds(request), ["compaction", "text", "tools", "text", "tools", "text"])
+  assert.deepEqual(
+    kinds(request),
+    ["compaction", "text", "tools", "text", "tools", "text"],
+    "the archive and the live rows hold one boundary here, and it draws one line",
+  )
   assert.equal(turns.filter((turn) => turn.carried).length, 0)
 })
 

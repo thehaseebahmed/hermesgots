@@ -917,7 +917,7 @@ export function fakeHost(
     const at = after[0] ? after[0].order - 0.5 : (live.at(-1)?.order ?? 0) + 0.5
     write("user", "", { display_kind: "hidden", order: at })
     const base = expected.length - count
-    compactions.push({ row: rows.at(-1)!, turn: base + cut, inside: carried })
+    compactions.push({ row: rows.at(-1)!, turn: base + count, inside: carried })
     for (let index = base; index < base + (open ? cut : cut); index++) gone.add(index)
     if (carried) lostRequest.add(base + cut)
   }
@@ -931,13 +931,9 @@ export function fakeHost(
     const marks = compactions.filter((mark) => full || !mark.row.archived)
     expected.forEach((turn, index) => {
       if (!full && gone.has(index)) return
-      const here = marks.filter((mark) =>
-        mark.inside ? mark.turn === index : mark.turn - 1 === index,
-      )
-      const lead = marks.filter((mark) => !mark.inside && mark.turn === index)
-      // A compaction ahead of the first turn the transcript holds is a divider on its own.
-      if (!full && out.length === 0 && lead.length)
-        out.push({ user: "", texts: [], tools: 0, asks: [], agents: [], seams: 1 })
+      // The divider stands above the first turn written after the compaction: the last turn the
+      // transcript holds until one is.
+      const here = marks.filter((mark) => mark.turn - 1 === index)
       out.push({
         ...turn,
         user: !full && lostRequest.has(index) ? "" : turn.user,

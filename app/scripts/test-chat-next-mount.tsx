@@ -684,6 +684,34 @@ test("the dividers the plugin's record places are drawn between the turns", asyn
   })
 })
 
+test("a compaction mid-run draws its divider between the calls it fell between", async () => {
+  const { host } = await onChatNext("c-mid-run")
+  await mount(chatScreen("c-mid-run"), async () => {
+    const run = await midReply(host, "go")
+    run.tool("terminal", "one", '{"exit_code": 0}')
+    host.compact()
+    run.tool("terminal", "two", '{"exit_code": 0}')
+    run.say("\n\nLanded")
+    run.finish("Landed")
+    await until(
+      () => findAll('[data-chat-next] [role="separator"]').length === 1,
+      "the compaction's one divider",
+    )
+    const marks = findAll(
+      '[data-chat-next] [data-slot="tool-group"], [data-chat-next] [role="separator"]',
+    ).map((one) => (one.getAttribute("role") === "separator" ? "divider" : "call"))
+    assert.deepEqual(
+      marks,
+      ["call", "divider", "call"],
+      "between the call before it and the one after",
+    )
+    assert.match(
+      findAll('[data-chat-next] [role="separator"]')[0]?.getAttribute("aria-label") ?? "",
+      /^Compaction/,
+    )
+  })
+})
+
 test("a long chat opens on its last rows and draws the rest a beat later", async () => {
   const { host } = await onChatNext("c-long")
   host.seed(Array.from({ length: 40 }, (_, at) => ({ user: `Ask ${at}`, reply: `Answer ${at}` })))

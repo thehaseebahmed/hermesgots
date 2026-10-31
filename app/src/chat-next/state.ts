@@ -10,6 +10,7 @@ import { overlay, prepend } from "./pages.ts"
 import {
   foldTurns,
   withArchive,
+  withCarriedSeams,
   withoutRepeatedFailures,
   type Part,
   type Row,
@@ -287,9 +288,8 @@ export function turnsOf(folded: Turn[], live?: LiveTurn, waiting?: Waiting): Tur
   // the thread would lose the one line it draws while the run waits.
   const copy = folded.at(-1)
   if (waiting && copyIsAhead(copy, live)) return folded
-  return withoutRepeatedFailures(
-    live.replaces ? [...folded.slice(0, -1), live.turn] : [...folded, live.turn],
-  )
+  if (!live.replaces || !copy) return withoutRepeatedFailures([...folded, live.turn])
+  return withoutRepeatedFailures([...folded.slice(0, -1), withCarriedSeams(live.turn, copy)])
 }
 
 /** One live event's change to the turn it belongs to; only the part it touches is a new object. */
