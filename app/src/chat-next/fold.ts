@@ -139,14 +139,34 @@ export function withArchive(live: Row[], archive: Row[]): Row[] {
   ]
 }
 
+const isScaffold = (row: Row) =>
+  row.display_kind === "hidden" ||
+  row.display_kind === "model_switch" ||
+  row.display_kind === "steer" ||
+  RESTATED.test(row.content ?? "") ||
+  isSeamScaffolding(row)
+
 const isRequest = (row: Row) =>
-  row.role === "user" &&
-  row.display_kind !== "hidden" &&
-  row.display_kind !== "steer" &&
-  row.display_kind !== "model_switch" &&
-  !DELIVERY.test(row.content ?? "") &&
-  !RESTATED.test(row.content ?? "") &&
-  !isSeamScaffolding(row)
+  row.role === "user" && !DELIVERY.test(row.content ?? "") && !isScaffold(row)
+
+function pushCall(parts: Part[], call: ToolCall) {
+  const last = parts.at(-1)
+  if (last?.kind === "tools") last.calls.push(call)
+  else parts.push({ kind: "tools", calls: [call] })
+}
+
+function pushSeam(parts: Part[], seam: Part) {
+  if (parts.at(-1)?.kind !== "compaction") parts.push(seam)
+}
+
+/** A turn whose request the host archived: what is drawn from the summary on is the work it carried. */
+const carriedTurn = (): Turn => ({
+  user: "",
+  parts: [],
+  done: true,
+  carried: true,
+  delivered: [],
+})
 
 /**
  * The line Hermes opens the active request's restatement with after a compaction. The request it
@@ -181,40 +201,44 @@ export function foldTurns(rows: Row[], partial = false, showReminders = false): 
   const noted = new Set<string>()
   /** The rows just read are a compaction, or the carried copy of work already drawn: the next reply may be the copy of one too. */
   let seamed = false
+  /**
+   * The divider a compaction left, waiting for the work it carried to be drawn above it. Hermes writes
+   * the summary where the boundary is and re-emits the work above it afterwards under the times it had,
+   * so the row after the summary is not the row written after the compaction.
+   */
+  let pending: Extract<Part, { kind: "compaction" }> | undefined
+  const openSeam = () => {
+    if (!pending) return
+    const seam = pending
+    pending = undefined
+    let last = turns.at(-1)
+    if (!last) turns.push((last = carriedTurn()))
+    pushSeam(last.parts, seam)
+  }
+  const writtenAfter = (row: Row) => {
+    if (pending?.at === undefined) return true
+    const at = msOf(row)
+    return at === undefined || at > pending.at
+  }
   for (const row of rows) {
+    // What the host wrote after the compaction closes the reply above it.
+    if (pending && !isScaffold(row) && writtenAfter(row)) openSeam()
     if (row.role === "user") {
-      // The host's own rows are the model's input, never the user's words. A compaction leaves one,
-      // empty, where the summary went; a model switch is a note to the model.
-      if (row.display_kind === "model_switch") continue
       // A steer is the user's, but it goes on the reply it steered rather than opening a turn.
       if (row.display_kind === "steer") {
         turns.at(-1)?.parts.push({ kind: "steer", text: steerWords(row.content ?? "") })
         continue
       }
-      if (RESTATED.test(row.content ?? "")) continue
-      // The task snapshot, the pruned-skills notice and a summary on its own are the host's
-      // bookkeeping, matched by their text because the host stores no flag for them.
-      if (isSeamScaffolding(row)) continue
       if (row.display_kind === "hidden") {
         seamed = true
-        const last = turns.at(-1)
         const at = msOf(row)
-        const seam = {
-          kind: "compaction" as const,
-          row: row.id,
-          ...(at !== undefined ? { at } : {}),
-        }
-        if (!last)
-          turns.push({
-            user: "",
-            parts: [seam],
-            done: true,
-            carried: true,
-            delivered: [],
-          })
-        else if (last.parts.at(-1)?.kind !== "compaction") last.parts.push(seam)
+        openSeam()
+        pending = { kind: "compaction", row: row.id, ...(at !== undefined ? { at } : {}) }
         continue
       }
+      // A model switch, a restatement, the task snapshot and the pruned-skills notice are the model's
+      // input: the host stores no flag for them, so they are matched by kind and by their words.
+      if (isScaffold(row)) continue
       const content = seamDrawnContent(row)
       if (DELIVERY.test(content)) {
         const last = turns.at(-1)
@@ -250,11 +274,18 @@ export function foldTurns(rows: Row[], partial = false, showReminders = false): 
       })
       continue
     }
-    // Rows read newest first can open on a reply whose request is older still: it is drawn alone.
+    // Rows read newest first can open on a reply whose request is older still: it is drawn alone. A
+    // reply the host carried across a compaction opens the turn its archived request left.
     const turn =
       turns.at(-1) ??
-      (partial && row.role === "assistant"
-        ? turns[turns.push({ user: "", parts: [], done: false, cut: true, delivered: [] }) - 1]
+      (row.role === "assistant" && (partial || pending)
+        ? turns[
+            turns.push(
+              pending
+                ? { user: "", parts: [], done: false, carried: true, delivered: [] }
+                : { user: "", parts: [], done: false, cut: true, delivered: [] },
+            ) - 1
+          ]
         : undefined)
     if (!turn) continue
     if (row.role === "tool") {
@@ -314,15 +345,78 @@ export function foldTurns(rows: Row[], partial = false, showReminders = false): 
       }
       thought = undefined
       callOf.set(call.id, call)
-      const last = turn.parts.at(-1)
-      if (last?.kind === "tools") last.calls.push(call)
-      else turn.parts.push({ kind: "tools", calls: [call] })
+      pushCall(turn.parts, call)
     }
   }
+  // A compaction the host has written nothing after yet closes the turn it fell in.
+  openSeam()
   // Only the last turn can still be running. A copy Hermes carried across a compaction has lost the
   // reason its reply stopped, so an earlier turn is finished by what follows it.
   for (const turn of turns.slice(0, -1)) turn.done = true
   return withoutRepeatedFailures(turns)
+}
+
+/** Where in a reply a seam stood: the calls drawn before it and the characters of its words. */
+interface SeamAnchor {
+  text: number
+  calls: number
+  part: Part
+}
+
+/**
+ * A live turn as the transcript's copy of it draws: the compactions that copy holds are the run's own
+ * history, and a stream carries no part for them.
+ */
+export function withCarriedSeams(live: Turn, copy: Turn): Turn {
+  const seams: SeamAnchor[] = []
+  let text = 0
+  let calls = 0
+  for (const part of copy.parts) {
+    if (part.kind === "compaction") seams.push({ text, calls, part })
+    else if (part.kind === "tools") calls += part.calls.length
+    else if (part.kind === "text") text += part.text.length
+  }
+  if (!seams.length) return live
+  const parts: Part[] = []
+  let next = 0
+  text = 0
+  calls = 0
+  const open = () => {
+    while (next < seams.length && seams[next].text <= text && seams[next].calls <= calls)
+      pushSeam(parts, seams[next++].part)
+  }
+  open()
+  for (const part of live.parts) {
+    if (part.kind === "text") {
+      parts.push(part)
+      text += part.text.length
+      open()
+      continue
+    }
+    if (part.kind !== "tools") {
+      parts.push(part)
+      continue
+    }
+    open()
+    const from = calls
+    const to = from + part.calls.length
+    const splits = seams
+      .slice(next)
+      .some((seam) => seam.calls > from && seam.calls < to && seam.text <= text)
+    if (!splits) {
+      parts.push(part)
+      calls = to
+      open()
+      continue
+    }
+    for (const call of part.calls) {
+      open()
+      pushCall(parts, call)
+      calls += 1
+    }
+  }
+  open()
+  return { ...live, parts }
 }
 
 const sameRequest = (a: Turn, b: Turn) =>
