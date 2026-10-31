@@ -8,6 +8,7 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
+import { act } from "react"
 
 import type { Attachment, Message } from "@/lib/db"
 
@@ -176,6 +177,33 @@ test("a photo whose read failed offers a retry that asks again and draws", async
       mediaReads(asked).filter((path) => path.endsWith("cat.png")).length,
       2,
       "the retry asked the host a second time",
+    )
+  })
+})
+
+test("a photo the browser couldn't decode keeps its place and asks again", async () => {
+  // jsdom decodes nothing, so a picture that fails is the browser's own error event arriving.
+  const profile = botProfile("media-broken-photo")
+  await seedChat({ id: "c1", profile, messages: [message([photo])] })
+  const asked = mediaHost({ host: "media-broken-photo" })
+  await mount(chatScreen("c1"), async () => {
+    await until(async () => filled(cell("cat.png")), "the photo's cell")
+    await click(cell("cat.png"))
+    const shown = () => document.querySelector('[role="dialog"] img[alt="cat.png"]')
+    await until(async () => shown() !== null, "the photo in the Previewer")
+    await act(async () => {
+      shown()!.dispatchEvent(new Event("error"))
+    })
+    await until(
+      async () => findAll("button").some((one) => one.textContent === "Try again"),
+      "Try again",
+    )
+    await click(findAll("button").find((one) => one.textContent === "Try again"))
+    await until(async () => shown() !== null, "the picture again, from the URL asked again")
+    assert.equal(
+      mediaReads(asked).filter((path) => path.endsWith("cat.png")).length,
+      2,
+      "and the host was asked a second time",
     )
   })
 })

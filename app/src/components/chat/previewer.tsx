@@ -90,9 +90,21 @@ export function usePreviewer(): PreviewerFace {
 /** A photo at its own shape, holding the box it lands in while its URL arrives. */
 function Picture({ item, onRetry }: { item: PreviewItem; onRetry?: (item: PreviewItem) => void }) {
   const { ready, onLoad, onError } = useImageReady(item.src ?? "")
-  // A photo the browser couldn't decode keeps its place and says so: one retry, not a loop.
+  // A photo the browser couldn't decode keeps its place and says so: one tap asks again, and the
+  // picture starts over — a new element, since a URL the host mints again may be the same string.
   const [broken, setBroken] = useState(false)
-  if (broken) return <Retry item={item} onRetry={onRetry} />
+  const [attempt, setAttempt] = useState(0)
+  if (broken)
+    return (
+      <Retry
+        item={item}
+        onRetry={() => {
+          setBroken(false)
+          setAttempt((count) => count + 1)
+          onRetry?.(item)
+        }}
+      />
+    )
   // As large as the viewer's room allows at the photo's own shape.
   const ratio = item.width && item.height ? item.width / item.height : undefined
   const style = ratio
@@ -106,6 +118,7 @@ function Picture({ item, onRetry }: { item: PreviewItem; onRetry?: (item: Previe
     >
       {!ready && <Skeleton className="absolute inset-0 rounded-2xl" />}
       <img
+        key={attempt}
         src={item.src}
         alt={item.name}
         onLoad={onLoad}
