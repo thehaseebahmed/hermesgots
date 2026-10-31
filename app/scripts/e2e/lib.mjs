@@ -275,11 +275,26 @@ export async function openChatNext({ page, seed }, { id, title }) {
   await page.locator("[data-chat-next]").first().waitFor({ timeout: 20_000 })
 }
 
+/** The button a question offers for `choice`. Anchored at the start of the label, which a
+ * recommended first choice carries the badge after, so one label's start never matches inside
+ * another's. */
+export const choiceButton = (scope, choice) =>
+  scope.getByRole("button", {
+    name: new RegExp(`^${choice.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+  })
+
+/** Answers the question in `scope` — by picking one of its choices, or by typing into it — and sends
+ * it, waiting on nothing further. */
+export async function answerWith(scope, { pick, type }) {
+  if (pick) await choiceButton(scope, pick).first().click()
+  else await scope.getByPlaceholder("Type your answer").fill(type)
+  await scope.getByRole("button", { name: "Send", exact: true }).click()
+}
+
 /** Answers the question the host asked with `choice`, and waits for the thread's card to read it. */
 export async function answerQuestion(page, choice) {
   const thread = page.locator("[aria-label=Messages]")
-  await page.getByRole("button", { name: new RegExp(choice) }).first().click()
-  await page.getByRole("button", { name: "Send", exact: true }).click()
+  await answerWith(page, { pick: choice })
   await thread.getByText("Answered", { exact: true }).waitFor({ timeout: 30_000 })
   await thread.getByText(choice, { exact: true }).waitFor({ timeout: 30_000 })
   assert.equal(await thread.getByText("No answer", { exact: true }).count(), 0, "not a miss")

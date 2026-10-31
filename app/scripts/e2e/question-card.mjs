@@ -5,10 +5,18 @@
 // it is given, rather than a beat later when the transcript lands, is the reducer's claim
 // (`scripts/test-chat-next-state.tsx`): here the mock's transcript answers too promptly to hold
 // the window open, so this flow proves the shape of the thread, not the instant.
-import { answerQuestion, assert, flow, openChatNext, pass, settled } from "./lib.mjs"
+import { answerQuestion, answerWith, assert, flow, openChatNext, pass, settled } from "./lib.mjs"
 
 const QUESTION = "Which logs should I count as old?"
 const ANSWER = "Older than 90 days"
+
+const SERIES = [
+  { ask: "Which environment should this run against?", pick: "staging" },
+  { ask: "Which services are in scope?", pick: "api" },
+  { ask: "What should the change be called?", type: "nightly-log-rotation" },
+  { ask: "How should existing data be handled?", pick: "Migrate it in place" },
+  { ask: "Who should review it?", pick: "Platform" },
+]
 
 for (const [width, dark] of [
   [1440, false],
@@ -94,7 +102,54 @@ for (const [width, dark] of [
         "and a question that asked too much can be skipped",
       )
       await shot("long")
-      pass(`a question is the composer's alone, and reads answered once given (${look})`)
+
+      // One call that asked five questions: the host serves them one prompt at a time, and each
+      // prompt names the question it asks while the call's whole list rides along. The form must ask
+      // that one — never the first question again — and the run must carry every answer with the
+      // chat left open.
+      await page.getByRole("button", { name: "Skip", exact: true }).click()
+      await thread
+        .getByText("No answer came, so I'll count anything older than 90 days.", { exact: false })
+        .waitFor({ timeout: 30_000 })
+      // The walk is the same at either width — a call's questions are asked one prompt at a time —
+      // so it runs on the wide case alone and the phone case keeps the checks the layout decides.
+      if (width >= 768) {
+        await send("ask five")
+        for (const [at, question] of SERIES.entries()) {
+          await slot.getByText(question.ask, { exact: false }).waitFor({ timeout: 30_000 })
+          await settled(page)
+          for (const earlier of SERIES.slice(0, at))
+            assert.equal(
+              await slot.getByText(earlier.ask, { exact: false }).count(),
+              0,
+              `question ${at + 1} asks itself, not "${earlier.ask}"`,
+            )
+          await answerWith(slot, question)
+          await slot
+            .getByText(question.ask, { exact: false })
+            .waitFor({ state: "detached", timeout: 30_000 })
+        }
+        await thread
+          .getByText("Got 5 of 5 answers.", { exact: false })
+          .waitFor({ timeout: 30_000 })
+        const card = thread.locator("[data-slot=card]").filter({ hasText: SERIES[0].ask })
+        for (const question of SERIES) {
+          assert.ok(
+            await card.getByText(question.ask, { exact: false }).count(),
+            `the call's card holds "${question.ask}"`,
+          )
+          assert.ok(
+            await card.getByText(question.pick ?? question.type, { exact: true }).count(),
+            `the call's card holds the answer to "${question.ask}"`,
+          )
+        }
+        await shot("series")
+      }
+      pass(
+        `a question is the composer's alone and reads answered once given (${look})${
+          width >= 768 ? ", and a call's five questions are asked and answered in turn" : ""
+        }`,
+      )
     },
     { viewport: { width, height: width < 768 ? 844 : 900 }, dark },
   )
