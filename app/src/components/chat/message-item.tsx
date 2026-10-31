@@ -280,6 +280,15 @@ function SentAttachments({
 }) {
   const { states, retry } = useMediaSources(conversationId, attachmentSources(attachments))
   const state = (attachment: Attachment) => states.get(attachment.id)
+  // The host's URL is what a file draws from; the bytes this device holds are the fallback for one
+  // the host has no copy of — a path it has never been given, or one it answered nothing for.
+  const srcOf = (attachment: Attachment) => {
+    const url = mediaRead(state(attachment))?.url
+    if (url) return url
+    const gone = state(attachment)?.status === "gone"
+    if (!gone && attachment.path) return undefined
+    return attachment.blob ? attachmentUrl(attachment) : undefined
+  }
   const note = (attachment: Attachment) => {
     const one = state(attachment)
     return one?.status === "failed" ? one.note : undefined
@@ -291,7 +300,7 @@ function SentAttachments({
     name: attachment.name,
     type: attachment.type,
     size: attachment.size,
-    src: mediaRead(state(attachment))?.url ?? (attachment.blob && attachmentUrl(attachment)),
+    src: srcOf(attachment),
     state: mediaStage(state(attachment)),
     note: note(attachment),
   })
