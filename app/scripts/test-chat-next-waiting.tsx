@@ -7,6 +7,7 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
+import { toast } from "sonner"
 
 import { fakeHost, type Ask } from "./chat-next-host.ts"
 import {
@@ -289,6 +290,11 @@ test("a refusal that is not a waiting bot keeps the host's own words", async () 
   const host = setUp("q-blocked")
   await withDevice(openDevice(host, SLOW), async (phone) => {
     const answer = globalThis.fetch
+    const said: string[] = []
+    const original = toast.error
+    toast.error = ((message: unknown) => {
+      said.push(String(message))
+    }) as typeof toast.error
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
       new URL(String(input)).pathname === "/v1/runs" && init?.method === "POST"
         ? new Response(
@@ -301,12 +307,15 @@ test("a refusal that is not a waiting bot keeps the host's own words", async () 
     try {
       await phone.send("never mind")
       await eventually(
-        () => assert.equal(phone.alert(), "This workspace is blocked."),
+        () => assert.deepEqual(said, ["This workspace is blocked."]),
         "the host's reason is what the screen says",
         200,
       )
+      assert.equal(phone.alert(), undefined, "said where the reader is, not above the thread")
+      assert.equal(phone.waiting().clarify, undefined, "and no form was put up for it")
     } finally {
       globalThis.fetch = answer
+      toast.error = original
     }
   })
 })

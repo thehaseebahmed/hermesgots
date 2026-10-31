@@ -1261,15 +1261,24 @@ export function ChatNextThread({
         dispatch({ type: "unsent", row: { id, text: words, at, attachments }, error: WAITING_ON_ANSWER })
         return
       }
-      // A send nothing answered keeps its words and files in the row, and the reads are what say the
-      // host is away. The files go as the host saved them where it already had them, so sending it
-      // again uploads nothing twice; a refusal the host words is the chat's own error instead.
-      if (error instanceof HostAway) {
-        dispatch({ type: "unsent", row: { id, text: words, at, attachments: prepared?.sent ?? attachments } })
-        return
-      }
-      const said = error instanceof Error ? error.message : String(error)
-      dispatch({ type: "unsent", row: { id, text: words, at, attachments: prepared?.sent ?? attachments }, error: said })
+      // Why it didn't go is said where the reader is. Every other request this screen makes that
+      // comes back with an error is a toast, while the thread's own line for one was the first child
+      // of a scroller pinned to the newest row — above the viewport on any chat long enough to
+      // scroll, which is the placement ADR 0071 took away. The row keeps the message and the "Not
+      // sent" mark, and the words go with it: the host's own where it gave them, and what is known
+      // where a send got no answer at all (the reads still land, so this is not "away"). The files go
+      // as the host saved them where it already had them, so sending it again uploads nothing twice.
+      const said =
+        error instanceof HostAway
+          ? "This host didn't take the message."
+          : error instanceof Error
+            ? error.message
+            : String(error)
+      toast.error(said)
+      dispatch({
+        type: "unsent",
+        row: { id, text: words, at, attachments: prepared?.sent ?? attachments },
+      })
       return
     }
     // The host has taken it: only now does the row leave, and the turn the thread follows draws the
