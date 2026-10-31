@@ -34,11 +34,12 @@ import { cn } from "@/lib/utils"
  * 100, because that is one tap and not a form, and because turning the limit off is a choice of the
  * same control. Its value is the host's own answer after every write, like the budget's.
  *
- * While the account is at or over that number the row says which window decides and what it is at —
- * the window the pickup judged, as the usage route answers it, never a second copy of the rule — so
- * a hold-back is a figure the user can see coming rather than a session that failed for no stated
- * reason. Nothing is drawn beside the control while AFK can still pick up: Off, a window under the
- * threshold, or an account the host can't read.
+ * Once a number is set the row also says which window decides and what it is at — the window the
+ * pickup judged, as the usage route answers it, never a second copy of the rule — and whether that is
+ * at or above the number or under it. Said both ways, the figure is what the user sees the account
+ * climbing toward, rather than a sentence that appears only once the work has already stopped.
+ * Nothing is drawn while there is nothing to judge it by: Off, an account the host can't read, or an
+ * answer whose deciding window is null because a balance still has room.
  */
 export function CodingTab({ profile }: { profile: Profile }) {
   // The profile is the host these numbers live on, so its own connection says which host answered:
@@ -57,9 +58,8 @@ export function CodingTab({ profile }: { profile: Profile }) {
   const [draft, setDraft] = useState<number | null>(null)
   const [thresholdDraft, setThresholdDraft] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
-  // The window the host judged deciding, once it has answered: drawn only while it holds the bot
-  // back, which is the fact the row exists for. The host's own window, kept whole, so a field it
-  // gains later is here too.
+  // The window the host judged deciding, once it has answered. The host's own window, kept whole, so
+  // a field it gains later is here too.
   const [deciding, setDeciding] = useState<UsageWindow | null>(null)
 
   // A host from before the route answers nothing, which is the reason the tab says it couldn't read
@@ -122,8 +122,16 @@ export function CodingTab({ profile }: { profile: Profile }) {
 
   const shown = draft ?? budget ?? PICK_BUDGET.unset
   const thresholdShown = thresholdDraft ?? threshold
-  const holdingBack =
-    deciding && thresholdShown !== null && deciding.usedPercent >= thresholdShown ? deciding : null
+  // The figure and what it says about the number: both drawn only where there is a number to judge by,
+  // which is also the only state where the tab reads the account at all.
+  const figure =
+    deciding && thresholdShown !== null
+      ? {
+          window: deciding,
+          holding: deciding.usedPercent >= thresholdShown,
+          threshold: thresholdShown,
+        }
+      : null
 
   const choose = async (next: number) => {
     // The count the tab already holds is no write, and neither is one past the host's own range: the
@@ -211,7 +219,7 @@ export function CodingTab({ profile }: { profile: Profile }) {
       <Group>
         <div className="flex flex-col gap-3 px-4 py-3" aria-busy={saving || undefined}>
           <div className="flex min-w-0 flex-col gap-0.5">
-            <span id="usage-threshold-label" className="text-base">
+            <span data-usage-threshold-title className="text-base">
               Usage threshold
             </span>
             <span className="text-sm text-muted-foreground">
@@ -225,21 +233,23 @@ export function CodingTab({ profile }: { profile: Profile }) {
               {thresholdShown === null ? "Off" : `${thresholdShown}% used`}
             </span>
           </div>
-          <Segmented
-            label="Usage threshold"
-            compact
-            options={USAGE_THRESHOLDS.map((each) => ({
-              id: each,
-              label: each === null ? "Off" : String(each),
-            }))}
-            value={thresholdShown}
-            onChange={(next) => void chooseThreshold(next)}
-            disabled={saving || failed}
-          />
-          {holdingBack && (
-            <p data-usage-window={holdingBack.label} className="text-sm text-muted-foreground">
-              {holdingBack.label || "Usage"} is at {holdingBack.usedPercent}% used, at or above this
-              bot's {thresholdShown}% threshold.
+          <div data-usage-control>
+            <Segmented
+              label="Usage threshold"
+              compact
+              options={USAGE_THRESHOLDS.map((each) => ({
+                id: each,
+                label: each === null ? "Off" : String(each),
+              }))}
+              value={thresholdShown}
+              onChange={(next) => void chooseThreshold(next)}
+              disabled={saving || failed}
+            />
+          </div>
+          {figure && (
+            <p data-usage-window={figure.window.label} className="text-sm text-muted-foreground">
+              {figure.window.label || "Usage"} is at {figure.window.usedPercent}% used,{" "}
+              {figure.holding ? "at or above" : "under"} this bot's {figure.threshold}% threshold.
             </p>
           )}
         </div>

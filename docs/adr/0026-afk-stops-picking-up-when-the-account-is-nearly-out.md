@@ -94,9 +94,13 @@ The rules:
   can name the deciding window at its percent instead of stating a bare threshold: a hold-back that
   the user can't see the cause of reads as a bug.
 - `/usage` answers the deciding window beside its windows, and each window keeps the `scope` core
-  marked it with. ADR 0007 is amended in part by that: its rule is the plugin's now. The app's composer
-  notice is free to adopt the same answer in a later change; until it does, the two agree about
-  everything except the model-scoped case, where the app is the noisier of the two.
+  marked it with. ADR 0007 is amended in part by that: its rule is the plugin's now, with one
+  difference the threshold makes affordable. The composer warns while a balance has more than 20%
+  left, because a warning must fire early; a pickup compares the window against a number the user
+  chose, so a balance with any room is capacity and the tightest period decides instead. The app's
+  composer notice is free to adopt the same answer in a later change; until it does, the two agree
+  about every period window and about the model-scoped case — where the app is the noisier of the
+  two — and disagree on where a balance stops being room.
 - A bot whose plugin is older keeps the tab it has: both this and the pick count are advertised as
   `afk_picks` (the name this ADR reserved as `afk_parallel` — amended, since the glossary bans
   *parallelism* for a pick count).

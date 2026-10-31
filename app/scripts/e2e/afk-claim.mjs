@@ -124,11 +124,11 @@ const run = async ({ page, profileId, shot, until }) => {
     90,
     "the tap wrote the threshold the host now holds",
   )
-  assert.match(
-    (await page.locator("[data-usage-window]").innerText()).trim(),
-    /^Session is at 94% used, at or above this bot's 90% threshold\.$/,
-    "the row says which window decides and what it is at",
-  )
+  // The join this tier is for: two routes and the bot's own read drawn as one sentence. Its exact
+  // wording is the component tier's; here the window's name and both numbers have to survive the wire.
+  const said = (await page.locator("[data-usage-window]").innerText()).trim()
+  assert.match(said, /Session is at 94% used/, "the row names the window the host judged deciding")
+  assert.match(said, /90% threshold/, "and the number that window is measured against")
   await shot("coding-threshold-held")
   await segments.filter({ hasText: "Off" }).click()
   await page.waitForFunction(

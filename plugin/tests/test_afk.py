@@ -19,7 +19,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import ModuleType, SimpleNamespace
 from typing import Any, Dict, List, Optional
-from unittest.mock import ANY, patch
+from unittest.mock import ANY, Mock, patch
 
 from plugin import (
     afk,
@@ -3482,13 +3482,19 @@ class StageRunTests(unittest.TestCase):
     def test_its_run_posts_while_the_bots_account_is_over_its_threshold(self) -> None:
         """The stop is the pickup's: a task already claimed carries on through its stages (ADR 0026)."""
         set_usage_threshold(self.home, 50)
-        with patch.object(
-            afk.usage,
-            "fetch",
-            side_effect=AssertionError("a stage's run is no pickup: it never asks the account"),
+        # A count, not a raise: the account read swallows every exception into "no answer", so a fetch
+        # that only raised would leave a stage path free to consult the account and still post. The
+        # main model is named too, or the read would stop before the fetch and prove nothing.
+        asked = Mock(side_effect=AssertionError("a stage's run is no pickup: it never asks the account"))
+        for one in (
+            patch.object(afk.host_model, "read_main", return_value={"provider": "anthropic"}),
+            patch.object(afk.usage, "fetch", asked),
         ):
-            body = self.run_stage()
+            one.start()
+            self.addCleanup(one.stop)
+        body = self.run_stage()
         self.assertTrue(body["input"], "the stage's run is posted as it always was")
+        self.assertEqual(asked.call_count, 0, "and the account is never asked on the way")
 
     def test_it_posts_the_stages_run_on_the_same_session(self) -> None:
         # The session was published with the model it started on, and a stage is the same session:

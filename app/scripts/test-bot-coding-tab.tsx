@@ -70,11 +70,7 @@ const rows = () => rowsOf(1)
 const thresholdValue = () => find("[data-usage-threshold]")
 const thresholdShown = () => thresholdValue()?.textContent
 /** The threshold's segments, in the order the row reads them. */
-const segments = () => [
-  ...(find('[role="radiogroup"][aria-label="Usage threshold"]')?.querySelectorAll(
-    '[role="radio"]',
-  ) ?? []),
-]
+const segments = () => [...(find("[data-usage-control]")?.querySelectorAll('[role="radio"]') ?? [])]
 const chosenSegment = () =>
   segments().find((one) => one.getAttribute("aria-checked") === "true") ?? null
 const segment = (label: string) => segments().find((one) => one.textContent === label) ?? null
@@ -238,9 +234,9 @@ test("the usage threshold reads as Off until it is set, and offers Off and the s
       "Off first, then the whole tens from 50 to 100",
     )
     assert.equal(
-      find('[role="radiogroup"][aria-label="Usage threshold"]')?.getAttribute("aria-label"),
-      "Usage threshold",
-      "the group announces what it sets",
+      find('[data-usage-control] [role="radiogroup"]')?.getAttribute("aria-label"),
+      find("[data-usage-threshold-title]")?.textContent?.trim(),
+      "the group is announced by the name the row shows",
     )
     assert.equal(chosenSegment()?.textContent, "Off", "and Off is the value chosen")
   })
@@ -327,7 +323,7 @@ test("the row names the deciding window once the account is at the bot's thresho
   })
 })
 
-test("nothing is drawn beside the control while the account can still pick up", async () => {
+test("under the threshold the row says the window is under the number, not that it is out", async () => {
   await seed("threshold-quiet", ["afk", "afk_picks"], {
     usageThreshold: 80,
     windows: [{ label: "Weekly", usedPercent: 40 }],
@@ -335,7 +331,11 @@ test("nothing is drawn beside the control while the account can still pick up", 
   })
   await mount(editor("/settings/bots/bot-1/coding"), async () => {
     assert.equal(thresholdShown(), "80% used", "the control is still there")
-    assert.equal(accountFigure(), null, "and no figure, since the window is under the threshold")
+    assert.match(
+      accountFigure()?.textContent ?? "",
+      /Weekly is at 40% used, under this bot's 80% threshold/,
+      "and the figure says the window is under the number rather than at it",
+    )
   })
 })
 
