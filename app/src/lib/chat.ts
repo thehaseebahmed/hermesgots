@@ -25,7 +25,6 @@ import {
   getQueue,
   hasPluginFeature,
   HermesError,
-  labelSession,
   queueAction,
   respondToApproval,
   respondToClarify,
@@ -1261,7 +1260,6 @@ export async function sendMessage(
   const turnNumber = history.filter((m) => m.role === "user" && m.status === "done").length + 1
   if (config.apiKey && turnNumber <= TITLED_TURNS) {
     void syncTitle(conversationId, config, conversation.hermesSessionId)
-    void labelSession(config, conversation.hermesSessionId)
   }
   // A stop or an error pauses the queue: the user probably wants to look before it carries on.
   await sendNextQueued(conversationId)

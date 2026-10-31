@@ -8,7 +8,9 @@
 // the chat list and the project list are the profile's own and the rest is shared), and an unknown
 // route's 404 carries no CORS headers.
 // The plugin also keeps the chat list (GET and POST /api/plugins/memento/chats, newer record wins) and
-// labels a chat as Gots's on POST /api/plugins/memento/sessions/{id}/label. Its
+// answers a chat's own source on POST /api/plugins/memento/sessions/{id}/label, writing nothing: the
+// host's session authority refuses an API turn onto a session row another surface owns, so a Gots
+// label there would make the chat un-runnable. Its
 // GET /api/plugins/memento/sessions/{id}/context reports a keyed session's latest model call, and
 // GET /api/plugins/memento/mcp serves the Bot's MCP servers the Bot's editor lists in its MCP tab
 // (name, state, source, and the Host's own reason on a failed one; MOCK_MCP=off is a Hermes whose
@@ -192,8 +194,6 @@ const chatTitles = new Map()
 /** How long after a chat's opener Hermes's background title lands (POST /__mock/title-delay). */
 const TITLE_DELAY_MS = 2000
 let titleDelayMs = TITLE_DELAY_MS
-/** Sessions the Gots plugin has labelled, which then report `source: "Gots"` (`"Gots Code"` for a project session). */
-const labelledSessions = new Map()
 /** The plugin's chat list: id -> { at, deleted?, value? }. */
 const pluginChats = new Map()
 const pluginChatLists = new Map()
@@ -5049,9 +5049,8 @@ http
     if (PLUGIN && !profile && req.method === "POST" && sessionLabel) {
       const id = decodeURIComponent(sessionLabel[1])
       if (!chatTitles.has(id)) return json(res, 404, { error: { message: "Session not found" } })
-      const source = projectSessions.has(id) ? "Gots Code" : "Gots"
-      labelledSessions.set(id, source)
-      return json(res, 200, { id, source })
+      // An older app still asks; the answer is the row's own source, and nothing is relabelled.
+      return json(res, 200, { id, source: "api_server" })
     }
     const sessionContext = /^\/api\/plugins\/memento\/sessions\/([^/]+)\/context$/.exec(
       url.pathname,
@@ -6260,7 +6259,7 @@ http
         object: "hermes.session",
         session: {
           id,
-          source: labelledSessions.get(id) ?? "api_server",
+          source: "api_server",
           title: chatTitles.get(id),
         },
       })

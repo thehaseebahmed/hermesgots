@@ -546,6 +546,14 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return web.json_response({"object": "cron_runs", "jobs": jobs})
 
     async def label_session(request: "web.Request") -> "web.Response":
+        """Answers a session's own source; it no longer relabels the row.
+
+        This route used to write ``Gots``/``Gots Code`` into ``sessions.source`` so the dashboard
+        showed it. Hermes's session authority reads that column as the surface that OWNS the
+        session, and refuses an API turn onto any other (409 ``permission_denied``), so a labelled
+        chat could not be continued from its next message on — ``sessions.heal_sources`` puts those
+        rows back. The route stays so an app that still calls it gets an answer.
+        """
         denied = unauthorized(request)
         if denied is not None:
             return denied
@@ -554,9 +562,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         db = await open_db() if callable(open_db) else None
         if db is None or not callable(getattr(db, "_execute_write", None)):
             return _error(web, "Session database unavailable", 503)
-        # On the loop thread, like store_path: the profile scope isn't visible inside to_thread.
-        code = sessions.is_code_session(session_id)
-        source = await asyncio.to_thread(sessions.label, db, session_id, code)
+        source = await asyncio.to_thread(sessions.source_of, db, session_id)
         if not source:
             return _error(web, "Session not found", 404)
         return web.json_response({"id": session_id, "source": source})
@@ -2888,7 +2894,6 @@ def register(ctx) -> None:
         register_hook("pre_tool_call", commands.before_tool)
         register_hook("pre_tool_call", research.before_tool)
         register_hook("pre_llm_call", sessions.before_llm)
-        register_hook("on_session_start", sessions.started)
         register_hook("post_llm_call", sessions.after_llm)
         register_hook("on_session_end", sessions.after_run)
         # After the hooks above, so a turn's plan is pending by the time its end is announced.
