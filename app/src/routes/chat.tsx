@@ -27,6 +27,8 @@ import type { ComposerControls } from "@/chat-next/page"
 import { opensOnChatNext } from "@/chat-next/route"
 import { prepareTurn, queueTurn, startTurn, steerTurn, triageTurn } from "@/chat-next/turn"
 import { quietly } from "@/lib/report"
+import { awayLine } from "@/lib/away"
+import { useOnline } from "@/lib/online"
 import { threadCount, threadsLine } from "@/lib/bot-chrome"
 import { repoCap, sessionSubtitle } from "@/lib/repo-line"
 import { useBreakReminderEligibility } from "@/components/break-reminder-context"
@@ -398,6 +400,8 @@ function NextChat({
     chosenOf(chat?.modelChoice),
   )
   const [usageOpen, setUsageOpen] = useState(false)
+  const [away, setAway] = useState(false)
+  const online = useOnline()
   const limit = useMemo(
     () => ({ usage: { notice, provider, noticeDismissed }, onView: () => setUsageOpen(true) }),
     [notice, provider, noticeDismissed],
@@ -434,7 +438,8 @@ function NextChat({
               title={unstarted ? "" : mainOn ? bot.name || chat.title : chat.title}
               // The header never follows the reply: what the thread is doing is drawn in the thread.
               subtitle={
-                mainOn && threadList
+                awayLine(away, online) ??
+                (mainOn && threadList
                   ? threadsLine(threadCount(threadList))
                   : session && !unstarted
                     ? sessionSubtitle({
@@ -442,7 +447,7 @@ function NextChat({
                         names: sessionRepos.map((repo) => repo.name),
                         cap: repoCap({ wide, xlarge: xl }),
                       })
-                    : undefined
+                    : undefined)
               }
               botId={bot.botId}
               muted={Boolean(chat.muted || bot.muted)}
@@ -497,6 +502,7 @@ function NextChat({
                     ? void readAfterTurn(id, { turn: thread.turns })
                     : refreshChatDetails(id)
                 }
+                onAway={setAway}
                 Composer={composer}
               />
             </Suspense>

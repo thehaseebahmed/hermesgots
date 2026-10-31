@@ -17,20 +17,20 @@ ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
 
-The registry in `app/scripts/e2e/cli.mjs` holds **83 keys**, and every one of them has a row
-below. `pnpm e2e list` prints the same 83 keys, and the rows here are grouped by the ticket that
+The registry in `app/scripts/e2e/cli.mjs` holds **84 keys**, and every one of them has a row
+below. `pnpm e2e list` prints the same 84 keys, and the rows here are grouped by the ticket that
 takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
 | --------- | ------ |
-| stay | 24 |
+| stay | 25 |
 | component | 55 |
 | plugin | 2 |
 | delete | 2 |
-| **total** | **83** |
+| **total** | **84** |
 
-Of those 83, 77 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
-reuses `todos.mjs`, so 76 distinct files) and 6 point at the older
+Of those 84, 78 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
+reuses `todos.mjs`, so 77 distinct files) and 6 point at the older
 `app/scripts/regression-*.mjs`.
 
 #297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**.
@@ -144,10 +144,25 @@ the app's own composer and thread (`AppChatNextThread`), nor the wall clock of a
 what the flow watches for twenty seconds of drops. So the registry holds 82 + 1 = **83** keys, the
 component verdicts unchanged at **55**, and the stays are 23 + 1: **24**.
 
+A twenty-fifth stay has arrived with away and the message the host never took (`away`, ADR 0071),
+because what it asserts is what no lower tier can: the chat's header wearing the away words in the
+place of the line it usually carries — the host's sentence, and the device's once the browser is off
+the network, which is the browser's own `navigator.onLine` and no faked boundary's — with the
+composer still drawn and taking typing and nothing of it in the thread; and then a send made while
+the host is away coming back inside a breath rather than a read's fifteen seconds, its message kept
+in the thread marked Not sent with Retry and Cancel, drawn again after a real reload, gone as the
+turn takes it on Retry, and gone again on Cancel with its words out of the field. The unit tier holds
+the two sentences and the short timeout's choice (`test-away.mjs`), and the component tier the row —
+where it stands, its order among several, its controls, its files across a reopen, a refusal's reason
+kept in the chat's own error (`test-chat-next-unsent.tsx`, `test-chat-next-gate.tsx`). Those draw the
+plain view: no header, no browser network stack, and no wall clock a timeout is measured on. So the
+registry holds 83 + 1 = **84** keys, the component verdicts unchanged at **55**, and the stays are
+24 + 1: **25**.
+
 `app/scripts/test-e2e-registry.mjs`, a unit test, holds the registry and this page to each other:
 a key with no row here, a row with no key, a verdict outside the four, a count in the table above
-that its rows don't add up to, or a stay beyond the twenty-four fails the app's gates. A new flow is then
-an argument this page has to carry, never a default (ADR 0019).
+that its rows don't add up to, or a stay beyond the twenty-five fails the app's gates. A new flow is
+then an argument this page has to carry, never a default (ADR 0019).
 
 Check any of it in one line:
 
@@ -363,6 +378,7 @@ them — they are what the end-to-end registry holds once the other 59 keys leav
 | `compressed-run` | stay | A chat another device started and Hermes compressed before this device loaded it lands its transcript and follows its run to its end — whether the rotation came before the run or mid-run. | A test host rotating the session id mid-run, the mechanism the plugin's run keying broke on. A faked HTTP boundary would answer the shape the code expects rather than the one the host sends. |
 | `chat-archive` | stay | A chat Hermes compacted in place, opened on a device that never held it: the pane draws the live window alone with nothing older on the device, and when the reader reaches the top the archived turns come back — each once, the cursor cleared at the chat's first row, the thread grown above the pane — with the compaction's divider still below the turns it carried and above the row written after it. | A reach and a prepend: the pane's scroll offset at its top edge deciding when the window grows, and the thread's height changing under a reader who has not been thrown. jsdom has no scroll offset and no height, so `test-archive-thread.tsx` proves the same rows draw right but would pass whether the archive arrived on a scroll, on a button, or not at all. | `test-archive-thread.tsx` holds the draw (each turn once, the divider's place) and `test-history-window.mjs` the walk's rule; this flow is the only place the reach is made. |
 | `chat-next-older` | stay | A chat of thirty turns opened on chat-next with the host holding its older pages back: the newest page is drawn and the pane stands on its end, the loader sits at the top of the pane and not among the thread's rows, then the older pages are put above — one after another, newest first — and the loader goes with the last: a reader at the end keeps the newest reply on the same line of the page, a reader up in the thread keeps the line they are reading, and the pane moved down the thread by what was added. | A prepend under a reader: the line a reply stands on after rows are added above it, and a loader that adds or takes away a row at the top of the flow. jsdom has no layout, so `test-chat-next-older.tsx` proves the pages arrive in order above the same rows under the same ids, but would pass had the thread jumped by a screen. | `test-chat-next-pages.mjs` holds the paging rule (which page is read next, when the chat is whole, how pages join) and `test-chat-next-older.tsx` the draw; this flow is the only place the reader's place is measured. |
+| `away` | stay | A chat on the new screen whose host is blocked: the header's subtitle says "This host isn't answering" where its own line would be, and "You're offline" once the browser is taken off the network, coming back to the host's words; the composer is still drawn and takes typing; nothing about the host is drawn in the thread; a send made while away is answered inside a breath rather than fifteen seconds, its message stays in the thread dimmed and marked Not sent with Retry and Cancel, outlives a reload, leaves the thread as the turn draws it on Retry, and is taken out by Cancel with its words left out of the field. | The browser's own network stack, the chat's real header, and a wall clock a timeout is measured on. `navigator.onLine` and a request that never answers are the browser's, the header is the route's and not the thread's (no plain view draws one), and "answers in a breath" is the difference between four seconds and fifteen — `test-away.mjs` holds the rule and `test-chat-next-unsent.tsx` the row, but each would pass had the send waited a read's fifteen and had the composer gone with the host. | `test-away.mjs` holds the two sentences and the short wait `test-chat-next-unsent.tsx` the row's place, order, controls and files across a reopen, and `test-chat-next-gate.tsx` that a host that isn't there keeps the composer and sends nothing behind the user's back; this flow is the only place the header wears the words and the wait is timed. |
 | `screens` | stay | Projects, a project, Code, Routines, a chat and a started project session load their data at 390 and 1024px, in light and dark, with no console error; the session's header has no bot picture, says `Test bot · memento +3` on a phone, `Test bot · memento, gots-app +2` at exactly 768px and `Test bot · memento, gots-app, docs +1` at a laptop's width, without the whole line truncating, leaves its branch out, and its title truncates and stays centred — in the room the controls leave, on the row's own centre, and with the actions ending on the row's right edge, all within 2px at 390 and at 1024 in light and dark — the line under the title centred on it and fitting whole. | Real layout at two widths: a DOM without layout has no sizes. The line is also the only place each width's cap is seen coming out of the real media queries, and the truncation is a rendered width, not a string. It is also where the sweep's visual snapshots live. |
 | `stream-writes` | stay | A streaming reply is written to IndexedDB in batches: at most 6 writes a second, where main wrote 7.5. | A write rate measured over a real stream's wall-clock. |
 | `file-message` | stay | A file and a photo picked through the composer's own `+` and sent together: the photo takes a cell of the Gallery and paints, the file a row naming it and its size with nothing beside it in a cell, and the mock's reply reads back both markers the model was given. Then the same message, opened by a chat that holds none of its bytes — the transcript read back from the host, as a chat synced from another device is — draws the same cells from the host's media route, and a tap on the file's row fetches it through that route and hands it to the browser, which saves it under the file's own name with bytes in it. | The browser's own download. `test-attachment-row.tsx` proves the row, the route's call and the name the anchor is given, but it stands in for `URL.createObjectURL` and `anchor.click`, so it passes whether or not a browser saves anything; only Chromium's download pipeline turns the click into a file, and `suggestedFilename` is the name the user finds in their downloads. The other-device leg is also the one place the read-back of a message carrying both a file and a photo is drawn: the host keeps the photo's `[screenshot]` line after the markers, which a hand-built fixture would have to guess at, and the line naming the copy it committed the photo to — so the leg also settles that the restored bubble holds the words that were typed and nothing the host added. |

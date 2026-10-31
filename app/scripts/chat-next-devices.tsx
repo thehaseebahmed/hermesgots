@@ -22,6 +22,11 @@ import { fakeHost, type ExpectedTurn } from "./chat-next-host.ts"
 
 export type Host = ReturnType<typeof fakeHost>
 
+const unsentRow = (container: HTMLElement, text: string) =>
+  [...container.querySelectorAll("[data-unsent]")].find(
+    (row) => row.querySelector("[data-held-text]")?.textContent === text,
+  )
+
 export const wait = (ms: number) =>
   act(async () => new Promise((resolve) => setTimeout(resolve, ms)))
 
@@ -88,12 +93,32 @@ export async function openDevice(
     composer: () => Boolean(one("[data-composer]")),
     /** What the page says went wrong, in the words the plain view draws it in. */
     alert: () => one("[role=alert]")?.textContent ?? undefined,
-    /** The words the composer holds, as a send that never landed hands them back. */
     draft: () => (one("[data-composer]") as HTMLTextAreaElement | null)?.value ?? undefined,
     /** Whether the thread says it is catching up, as the first read of it is still out. */
     catching: () => Boolean(one("[data-catching-up]")),
-    /** The line a host that can't be reached is given, over what the device holds. */
+    /** Whether the thread draws anything about a host it can't reach: it must not (ADR 0071). */
     away: () => Boolean(one("[data-away]")),
+    /**
+     * The messages that didn't go, in the place they were left: their words, the files that went
+     * with them, and whether the two controls are there.
+     */
+    unsent: () =>
+      [...container.querySelectorAll("[data-unsent]")].map((row) => ({
+        text: row.querySelector("[data-held-text]")?.textContent ?? "",
+        files: row.querySelector("[data-held-files]")?.textContent ?? "",
+        state: row.querySelector("[data-unsent-state]")?.textContent ?? "",
+        retry: Boolean(row.querySelector("[data-unsent-retry]")),
+        cancel: Boolean(row.querySelector("[data-unsent-cancel]")),
+        inTurn: Boolean(row.closest("section")),
+      })),
+    async retry(text: string) {
+      await click(unsentRow(container, text)?.querySelector("[data-unsent-retry]") ?? null)
+      await settle()
+    },
+    async cancel(text: string) {
+      await click(unsentRow(container, text)?.querySelector("[data-unsent-cancel]") ?? null)
+      await settle()
+    },
     turns: (): ExpectedTurn[] =>
       [...container.querySelectorAll("main > section")].map((section) => ({
         user: section.querySelector("[data-user]")?.textContent ?? "",

@@ -48,14 +48,24 @@ const root = ({ server }: Connection) => serverRoot(server)
 // A bot served at `/p/<profile>` reaches its plugin inside the plugin's own prefix.
 const plugin = ({ server }: Connection) => pluginRoot(server)
 const headers = ({ key }: Connection) => ({ Authorization: `Bearer ${key}` })
-const within = (signal?: AbortSignal) =>
-  AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(READ_TIMEOUT_MS)])
+const within = (signal?: AbortSignal, timeoutMs = READ_TIMEOUT_MS) =>
+  AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(timeoutMs)])
 /** A read that got no answer at all (no connection, or none in time): the host is away. */
 export class HostAway extends Error {}
 /** A 409 on a run start: whatever the host says of it, where it says anything. */
 export class HostRefused extends Error {}
+const answered = (response: Response) => `The host answered ${response.status}.`
 const ensure = (response: Response) => {
-  if (!response.ok) throw new Error(`The host answered ${response.status}.`)
+  if (!response.ok) throw new Error(answered(response))
+}
+
+/**
+ * What a post to the host is given: the page's own signal, which a page that goes takes with it, and
+ * how long it waits — the reads' own unless a send is made while the host is away.
+ */
+export interface Posting {
+  signal?: AbortSignal
+  timeoutMs?: number
 }
 
 /** What a refused host says, where its body says anything. */
@@ -144,29 +154,41 @@ export function startRun(
   connection: Connection,
   session: string,
   input: string,
-  signal?: AbortSignal,
+  key: string,
+  posting: Posting = {},
 ): Promise<string> {
-  return postRun(connection, { session_id: session, input }, crypto.randomUUID(), signal)
+  return postRun(connection, { session_id: session, input }, key, posting)
 }
 
 /**
  * Starts a turn from a whole `POST /v1/runs` body, as the app builds one. `key` is the request's
- * `Idempotency-Key`, so a retried post answers the run it already started.
+ * `Idempotency-Key`, so a retried post answers the run it already started — which is what makes a
+ * message sent again after a timeout that the host did answer safe to retry.
  */
 export async function postRun(
   connection: Connection,
   body: Record<string, unknown>,
   key: string,
-  signal?: AbortSignal,
+  { signal, timeoutMs }: Posting = {},
 ): Promise<string> {
-  const response = await fetch(`${root(connection)}/v1/runs`, {
-    method: "POST",
-    headers: { ...headers(connection), "Content-Type": "application/json", "Idempotency-Key": key },
-    body: JSON.stringify(body),
-    signal: within(signal),
-  })
+  let response: Response
+  try {
+    response = await fetch(`${root(connection)}/v1/runs`, {
+      method: "POST",
+      headers: {
+        ...headers(connection),
+        "Content-Type": "application/json",
+        "Idempotency-Key": key,
+      },
+      body: JSON.stringify(body),
+      signal: within(signal, timeoutMs),
+    })
+  } catch (error) {
+    if (signal?.aborted) throw error
+    throw new HostAway("Can't reach the host.", { cause: error })
+  }
   if (response.status === 409) throw new HostRefused(await refusal(response))
-  ensure(response)
+  if (!response.ok) throw new Error((await refusal(response)) ?? answered(response))
   const { run_id } = (await response.json()) as { run_id?: unknown }
   if (typeof run_id !== "string") throw new Error("The host didn't start the run.")
   return run_id

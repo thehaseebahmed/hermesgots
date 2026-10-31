@@ -20,10 +20,11 @@ async function keepSent(session: string, sent: Attachment[]) {
   if (files.length) await db.sentFiles.bulkPut(files).catch(quietly("Keeping a file that was sent"))
 }
 
-/** A turn ready to post: its run's body and key, and what to do once the post is settled. */
+/** A turn ready to post: its run's body, the files it carries, and what to do once the post is settled. */
 export interface PreparedTurn {
   body: Record<string, unknown>
-  key: string
+  /** The files as the host saved them, each with its path, or as they came where none was saved. */
+  sent: Attachment[]
   /** Called once with whether the host took the run: a pin belongs only to a turn that did. */
   settled: (reached: boolean) => void
 }
@@ -74,7 +75,7 @@ async function built(chatId: string, text: string, attachments: Attachment[]) {
     const ask = wantsPin(pinned)
     const turn: PreparedTurn = {
       body,
-      key: randomId(),
+      sent,
       settled: (reached) => {
         if (!reached) return void release?.()
         void keepSent(chat.hermesSessionId, sent)
@@ -101,7 +102,7 @@ async function built(chatId: string, text: string, attachments: Attachment[]) {
 export async function startTurn(chatId: string, text: string, attachments: Attachment[]) {
   const { turn, config } = await built(chatId, text, attachments)
   try {
-    await postRun({ server: config.baseUrl, key: config.apiKey }, turn.body, turn.key)
+    await postRun({ server: config.baseUrl, key: config.apiKey }, turn.body, randomId())
     turn.settled(true)
   } catch (error) {
     turn.settled(false)

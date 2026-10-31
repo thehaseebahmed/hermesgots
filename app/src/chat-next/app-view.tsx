@@ -56,7 +56,7 @@ import { cn } from "@/lib/utils"
 
 import { delegated } from "./agents"
 import { clearFailedTurn } from "./api"
-import { messagesOf, replyId, withHeldFiles } from "./messages"
+import { messagesOf, heldMessage, replyId, withHeldFiles } from "./messages"
 import { ChatNextThread, type PromptProps, type ThreadViewProps } from "./page"
 
 /** A bot's Main as chat-next draws it: whose threads are its cards, and which one is open. */
@@ -97,13 +97,13 @@ export function AppThreadView({
   turns,
   streaming,
   agents,
-  away,
   failure,
   catchingUp,
   older,
   origin,
   earlier,
   queue,
+  unsent,
   waiting,
   inFlight,
   composer,
@@ -138,6 +138,10 @@ export function AppThreadView({
           new Map(sentFiles.flatMap((file) => (file ? [[file.path, file.blob] as const] : []))),
       ),
     [chatId, turns, streaming, inFlight, stats, origin, sentFiles],
+  )
+  const held = useMemo(
+    () => (unsent?.items ?? []).map((row) => heldMessage(chatId, row)),
+    [unsent?.items, chatId],
   )
   // The send a card asks for is the latest one, behind an identity that never changes, so a streamed
   // flush never wakes the cards that hold it.
@@ -261,11 +265,6 @@ export function AppThreadView({
                 <MessageScrollerContent
                   className={cn("w-full gap-6 px-4 pt-32 pb-6", cut && "justify-end")}
                 >
-                  {away && (
-                    <div className={COLUMN_BOX} data-away role="status">
-                      <Banner tone="info">Can't reach this host right now.</Banner>
-                    </div>
-                  )}
                   {failure !== undefined && (
                     <div className={COLUMN_BOX} role="alert">
                       <Banner tone="error">{failure || "Something went wrong."}</Banner>
@@ -354,6 +353,17 @@ export function AppThreadView({
                       </StatusLine>
                     )}
                   </AgentsContext.Provider>
+                  {held.map((message) => (
+                    <MessageScrollerItem key={message.id} messageId={message.id}>
+                      <div data-unsent>
+                        <MessageItem
+                          message={message}
+                          showStats={false}
+                          actions={unsent}
+                        />
+                      </div>
+                    </MessageScrollerItem>
+                  ))}
                   {catchingUp && messages.length > 0 && (
                     <div className={COLUMN_BOX} data-catching-up>
                       <StatusLine text={CATCHING_ACTIVITY} seed={chatId} />

@@ -274,7 +274,12 @@ test.describe("a run already waiting when the chat opens", () => {
         200,
       )
       assert.equal(host.asked.runs, started, "no turn was started")
-      assert.equal(phone.draft(), "never mind", "the message comes back to the composer")
+      assert.equal(phone.draft(), "", "nothing is handed back to the field")
+      assert.deepEqual(
+        phone.unsent().map((row) => row.text),
+        ["never mind"],
+        "the message stays where it was sent, marked not sent",
+      )
       assert.deepEqual(questionOf(phone), asking, "the form is still there to answer")
     })
   })

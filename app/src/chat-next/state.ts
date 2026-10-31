@@ -1,5 +1,5 @@
 import { clarifyAnswered, type ClarifyResponse } from "@/lib/clarify"
-import type { LiveTurn, MessageStats } from "@/lib/db"
+import type { LiveTurn, MessageStats, Unsent } from "@/lib/db"
 import { progressReminderNote } from "@/lib/progress-reminder"
 import { measureReply } from "@/lib/reply-stats"
 import { promptFrom, type RunPrompt } from "@/lib/run-prompt"
@@ -40,6 +40,12 @@ export interface ThreadState {
   stats?: Record<string, MessageStats>
   /** What the plugin holds for the session, drawn after the thread; none before it has said. */
   queue?: { items: Queued[]; paused: boolean }
+  /**
+   * Messages a send could not get to the host, kept on this device and drawn at the end of the
+   * thread in the app's own not-sent shape until one is sent again or taken back (ADR 0071). It is
+   * this device's alone: never written to the host's transcript, and never synced.
+   */
+  unsent?: Unsent[]
   /** The turn this device is streaming, drawn over the transcript's until the host's replaces it. */
   live?: LiveTurn
   /** This device has a turn running; while it does, what the host's transcript says waits. */
@@ -84,9 +90,28 @@ export type ThreadEvent =
   /** An older page of the transcript, to go above the rows held; `last` is the start of the chat. */
   | { type: "older"; rows: Row[]; last: boolean }
   | { type: "earlier"; rows: Row[] }
-  | { type: "sent"; user: string; files?: SentFile[]; at?: number }
-  /** A send that never reached the host: the message goes back to the composer, not the thread. */
-  | { type: "unsent"; error: string }
+  | {
+      type: "sent"
+      user: string
+      files?: SentFile[]
+      at?: number
+      /** The not-sent row this send is: a retried message leaves the thread as the turn draws it. */
+      replaces?: string
+    }
+  /**
+   * A send that did not reach the host: the message stays in the thread, marked not sent, and the
+   * composer is left empty. `error` is the chat's own error where the host gave a reason for the
+   * refusal, and absent where nothing answered at all — the header says the host is away.
+   */
+  | {
+      type: "unsent"
+      row: Unsent
+      error?: string
+    }
+  /** A message that didn't go is taken back: it leaves the thread for good. */
+  | { type: "cancelled"; id: string }
+  /** A read the host answered with something other than the rows: said as a toast, drawn nowhere. */
+  | { type: "read-failed" }
   /** A message the host sent somewhere else (triage, ADR 0029): it leaves this thread, unfailed. */
   | { type: "moved" }
   /** `run` is the run being joined: a wait this page already read for it is that run's own. */
@@ -475,12 +500,16 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
     case "earlier":
       // Drawn by the next read of the transcript, which folds the archive in with the live rows.
       return { ...state, archived: event.rows }
-    case "sent":
+    case "sent": {
+      const kept = event.replaces
+        ? state.unsent?.filter((row) => row.id !== event.replaces)
+        : state.unsent
       return {
         ...state,
         status: "ready",
         running: true,
         error: undefined,
+        unsent: kept?.length === state.unsent?.length ? state.unsent : kept,
         live: {
           turn: {
             user: event.user,
@@ -493,8 +522,28 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
           replaces: false,
         },
       }
-    case "unsent":
-      return { ...state, live: undefined, running: false, status: "failed", error: event.error }
+    }
+    case "unsent": {
+      const unsent = [...(state.unsent ?? []).filter((one) => one.id !== event.row.id), event.row].sort(
+        (a, b) => a.at - b.at,
+      )
+      const failed = event.error !== undefined
+      return {
+        ...state,
+        live: undefined,
+        running: false,
+        unsent,
+        status: failed ? "failed" : state.status === "loading" ? "ready" : state.status,
+        error: event.error,
+      }
+    }
+    case "cancelled": {
+      const unsent = state.unsent?.filter((row) => row.id !== event.id)
+      if (!unsent || unsent.length === state.unsent?.length) return state
+      return { ...state, unsent: unsent.length ? unsent : undefined }
+    }
+    case "read-failed":
+      return state.status === "loading" ? { ...state, status: "ready" } : state
     case "moved":
       return { ...state, live: undefined, running: false }
     case "attach": {

@@ -53,10 +53,13 @@
 // Say "plan" and the agent keeps a todo list with its todo_list tool as it works, which the plugin's
 // GET /api/plugins/memento/sessions/{id}/todos reads back from a keyed session's transcript.
 // Turns also run on POST /v1/runs, whose events replay from GET /v1/runs/{id}/events?last_seq=N and
-// which keep going when the client drops, unlike a chat completion. Say "long" for a slow reply, and
-// "fail" for a tool call that fails, or "fail the turn" for a run that ends with an error instead of
-// an answer. Say "tool placement" to replay a real turn whose tool rows
-// rendered in the wrong place (add "report" for the longer work-log turn):
+// which keep going when the client drops, unlike a chat completion. Say "hold the start" and the
+// turn's start is answered eight seconds late, while the turn itself starts at once: a screen that
+// gives a send a breath rather than a read's fifteen seconds gives up before that answer, and one
+// that sends the same message again under its own idempotency key is given the run it already has.
+// Say "long" for a slow reply, and "fail" for a tool call that fails, or "fail the turn" for a run
+// that ends with an error instead of an answer. Say "tool placement" to replay a real turn whose
+// tool rows rendered in the wrong place (add "report" for the longer work-log turn):
 // scripts/fixtures/tool-placement.json holds both, with the placement each call really had. Say
 // "marathon" for a turn longer than a transcript page: 40 steps of text and a tool call, quick at
 // first and slow for the last 12, so a device can open the session while it runs ("sprint" and
@@ -200,6 +203,9 @@ const modelChanges = new Map()
 // When each chat was compacted (the plugin's `compactions`), keyed by every id of its lineage.
 const compactions = new Map()
 const transcripts = new Map()
+// Sessions whose turn's start was answered late once, by idempotency key, so the same message sent
+// again is taken at once (see "hold the start" at the top).
+const stalledStarts = new Set()
 let lastRowId = 0
 let lastWorkflowId = 0
 // Context compression rotates a chat to a child session (Hermes's sessions.parent_session_id): a
@@ -6168,7 +6174,12 @@ http
     const sessionMessages = /^\/api\/sessions\/([^/]+)\/messages$/.exec(url.pathname)
     if (sessionMessages) {
       const id = decodeURIComponent(sessionMessages[1])
-      if (!transcripts.has(id)) return json(res, 404, { error: { message: "Session not found" } })
+      // An unknown session is an empty chat, as Hermes answers it: the code is what a reader goes by,
+      // and a chat-next thread opened before its first message reads nothing rather than an error.
+      if (!transcripts.has(id))
+        return json(res, 404, {
+          error: { message: `Session not found: ${id}`, code: "session_not_found" },
+        })
       const data = pageRows(transcripts.get(id), url.searchParams)
       return json(res, 200, { object: "list", session_id: id, data })
     }
@@ -6189,7 +6200,16 @@ http
       })
     }
     if (RUNS && req.method === "POST" && url.pathname === "/v1/runs") {
-      const run = startRun(req, await readBody(req))
+      const body = await readBody(req)
+      const key = req.headers["idempotency-key"]
+      const asked = durable(Array.isArray(body.input) ? body.input.at(-1)?.content : body.input)
+      const late = /hold the start/i.test(asked) && Boolean(key) && !stalledStarts.has(key)
+      if (late) stalledStarts.add(key)
+      const run = startRun(req, body)
+      if (late) {
+        await new Promise((done) => setTimeout(done, 8_000))
+        if (res.destroyed || res.writableEnded) return
+      }
       return json(res, 202, { run_id: run.id, status: "started", replayed: false })
     }
     const runPath = /^\/v1\/runs\/([^/]+)(\/events|\/stop|\/steer)?$/.exec(url.pathname)

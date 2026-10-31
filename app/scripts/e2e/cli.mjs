@@ -160,6 +160,11 @@ export const FLOWS = {
     about:
       "A long chat on chat-next draws its newest page at once and reads the older pages after it, the loader over the pane while they are read: a reader at the end keeps the newest reply on the same line, a reader up in the thread keeps the line they are reading, and the loader is gone with the chat whole",
   },
+  away: {
+    script: "e2e/away.mjs",
+    about:
+      "A chat on chat-next whose host can't be reached says so in its header — the host's words, or the device's once the browser is off the network — keeps its composer, draws nothing of it in the thread, answers a send in a breath, and keeps a message the host never took in the thread marked Not sent, with Retry and Cancel, across a reload",
+  },
   "chat-archive": {
     script: "e2e/chat-archive.mjs",
     about:
