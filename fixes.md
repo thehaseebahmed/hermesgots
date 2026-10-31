@@ -2500,3 +2500,23 @@ chain, and under load — a full tier running in one process, the container at i
 ---
 
 Found by this branch's gate sweep; it does not block it.
+
+# Deferred: the e2e audit page was merged with its conflict markers
+
+`docs/e2e-flow-audit.md` carries an unresolved conflict block from the media branch's merge: the two
+sides of the sentence about what fails an app gate sit between `<<<<<<< HEAD` and `>>>>>>> f62ff015`
+(line 171-177 at `b717dd2f`), so the page renders the markers and one of its two wordings is never
+read as prose. `app/scripts/test-e2e-registry.mjs` parses the table's rows and counts only, so no gate
+reads the sentence or the markers.
+
+- Cost: the page that argues each flow is one place a reader checks, and a merge marker in it reads as
+a broken document beside a claim the same paragraph is making.
+- Suggested fix: take one side (they differ by a line break and the placement of "then"), delete the
+  markers, and count the keys the block sits next to against the registry.
+- Why it is deferred: the merge that landed it owns the resolution, and this change's row touches the
+  table far above it; a prose edit inside a conflict block in an unrelated PR is the wider diff the
+  repo's rule warns about.
+
+---
+
+Found by reading the audit page this change adds a clause to; it does not block it.
