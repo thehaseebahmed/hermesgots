@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from . import push
-from .store import connect, db_path
+from .store import connect, current_path
 
 logger = logging.getLogger(__name__)
 
@@ -83,10 +83,8 @@ def note(kind: str, session_id: Optional[str] = None, path: Optional[Path] = Non
             if len(_last_noted) > API_SESSIONS_MAX:
                 _last_noted.clear()
         if path is None:
-            # Hooks run inside the turn's profile scope, so this is that profile's home.
-            from hermes_constants import get_hermes_home
-
-            path = db_path(Path(get_hermes_home()))
+            # Hooks run inside the turn's profile scope, so this is that profile's store.
+            path = current_path()
         _write(path, kind, session_id)
     except Exception:
         logger.debug("memento: couldn't note a %s change", kind, exc_info=True)

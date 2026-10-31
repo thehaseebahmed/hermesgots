@@ -72,7 +72,7 @@ from . import (
     usage,
     workflows,
 )
-from .store import db_path
+from .store import current_path
 
 logger = logging.getLogger(__name__)
 
@@ -921,9 +921,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     def store_path() -> Path:
         # On the loop thread: the API server scopes get_hermes_home() to the request's profile, and
         # that scope isn't visible inside to_thread.
-        from hermes_constants import get_hermes_home
-
-        return db_path(Path(get_hermes_home()))
+        return current_path()
 
     async def list_chats(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1676,9 +1674,20 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         live, run_ids = await asyncio.to_thread(
             sessions.live_runs, adapter, owned=owned, home=home, roots=roots
         )
+        # A run held on a prompt is the host's own per-run projection: a question never lands on the
+        # run's status, and an approval only on one of the two paths a run takes. On the loop, like
+        # `home`: the projection resolves the profile's authority, which a thread doesn't see.
+        asked = sessions.prompts(adapter, run_ids)
+        held = sessions.held_runs(live, asked)
         try:
             waiting = await asyncio.to_thread(
-                sessions.waiting, adapter, store_path(), home, owned=owned, roots=roots
+                sessions.waiting,
+                adapter,
+                store_path(),
+                home,
+                owned=owned,
+                roots=roots,
+                asked=asked,
             )
         except Exception:
             logger.debug("memento: reading waiting sessions failed", exc_info=True)
@@ -1705,7 +1714,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return web.json_response(
             {
                 "object": "memento.runs",
-                "sessions": live,
+                "sessions": held,
                 "run_ids": run_ids,
                 "waiting": waiting,
                 "subagents": subagents,

@@ -42,7 +42,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from . import link
-from .store import connect, db_path
+from .store import connect, current_path
 
 logger = logging.getLogger(__name__)
 
@@ -453,10 +453,8 @@ def notify(
         if kind not in KINDS or not session_id:
             return
         if path is None:
-            # Hooks run inside the turn's profile scope, so this is that profile's home.
-            from hermes_constants import get_hermes_home
-
-            path = db_path(Path(get_hermes_home()))
+            # Hooks run inside the turn's profile scope, so this is that profile's store.
+            path = current_path()
         now = time.monotonic()
         key = (str(path), kind, session_id)
         with _lock:

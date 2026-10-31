@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .store import connect, db_path
+from .store import connect, current_path
 
 logger = logging.getLogger(__name__)
 
@@ -56,10 +56,8 @@ def _record(kwargs: Dict[str, Any]) -> None:
     model = _text(kwargs.get("model"))
     if not session_id or not model:
         return
-    from hermes_constants import get_hermes_home
-
     now = int(time.time() * 1000)
-    conn = connect(db_path(Path(get_hermes_home())))
+    conn = connect(current_path())
     try:
         last = conn.execute(
             "SELECT model FROM model_changes WHERE session_id = ? ORDER BY at DESC LIMIT 1",
