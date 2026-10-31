@@ -78,14 +78,20 @@ export function PreviewerProvider({ children }: { children: ReactNode }) {
   )
 }
 
+/** The face a part with no screen around it gets: a tap on media is inert, and nothing re-renders. */
+const INERT: PreviewerFace = { open: () => {}, update: () => {} }
+
 /** The screen's Previewer. */
 export function usePreviewer(): PreviewerFace {
-  return useContext(PreviewerContext) ?? { open: () => {}, update: () => {} }
+  return useContext(PreviewerContext) ?? INERT
 }
 
 /** A photo at its own shape, holding the box it lands in while its URL arrives. */
-function Picture({ item }: { item: PreviewItem }) {
+function Picture({ item, onRetry }: { item: PreviewItem; onRetry?: (item: PreviewItem) => void }) {
   const { ready, onLoad, onError } = useImageReady(item.src ?? "")
+  // A photo the browser couldn't decode keeps its place and says so: one retry, not a loop.
+  const [broken, setBroken] = useState(false)
+  if (broken) return <Retry item={item} onRetry={onRetry} />
   // As large as the viewer's room allows at the photo's own shape.
   const ratio = item.width && item.height ? item.width / item.height : undefined
   const style = ratio
@@ -102,7 +108,10 @@ function Picture({ item }: { item: PreviewItem }) {
         src={item.src}
         alt={item.name}
         onLoad={onLoad}
-        onError={onError}
+        onError={() => {
+          onError()
+          setBroken(true)
+        }}
         className={cn("h-full w-full rounded-2xl bg-muted object-contain", !ready && "invisible")}
         draggable={false}
       />
@@ -128,7 +137,7 @@ function Shown({ item, onRetry }: { item: PreviewItem; onRetry?: (item: PreviewI
   if (item.state === "failed" || (item.state === "ready" && !item.src))
     return <Retry item={item} onRetry={onRetry} />
   if (!item.src || item.state === "reading") return <Skeleton className="h-2/3 w-2/3 rounded-2xl" />
-  if (item.kind === "image") return <Picture item={item} />
+  if (item.kind === "image") return <Picture item={item} onRetry={onRetry} />
   // A player the platform draws: it starts paused because nothing here asks it to play, and it
   // streams, seeks and buffers by its own rules rather than by anything this app holds.
   if (item.kind === "video")

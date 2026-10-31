@@ -140,7 +140,8 @@ export function Composer({
   const recent = useRef(new Map<string, number>())
   // A file dragged over the composer, held until it is dropped or leaves.
   const [over, setOver] = useState(false)
-  const { open: previewer } = usePreviewer()
+  const { open: previewer, update: refresh } = usePreviewer()
+  const owner = useId()
   // The key whose draft the text is; until it has loaded nothing is saved over it.
   const [loaded, setLoaded] = useState<string>()
   const stored = useRef("")
@@ -361,6 +362,7 @@ export function Composer({
   const removeAttachment = (attachment: Attachment) =>
     setAttachments((current) => current.filter((a) => a.id !== attachment.id))
 
+
   // A staged file's bytes exist only on this device: the previewer draws them from their own URL,
   // which is the one place an object URL is still what a file is read from.
   const kindOf = (attachment: Attachment): PreviewItem["kind"] => {
@@ -388,12 +390,24 @@ export function Composer({
       void openAttachment(null, attachment)
       return
     }
-    previewer({
-      items: media.map(staged),
-      index: media.findIndex((one) => one.id === attachment.id),
-      onRemove: (shown) => setAttachments((current) => current.filter((a) => a.id !== shown.key)),
-    })
+    previewer(
+      {
+        items: media.map(staged),
+        index: media.findIndex((one) => one.id === attachment.id),
+        onRemove: (shown) => setAttachments((current) => current.filter((a) => a.id !== shown.key)),
+      },
+      owner,
+    )
   }
+
+  const stagedKeys = media.map((one) => one.id).join("\n")
+  const stagedNow = useRef(media)
+  useEffect(() => {
+    stagedNow.current = media
+  })
+  useEffect(() => {
+    refresh(owner, stagedNow.current.map(staged))
+  }, [owner, stagedKeys, refresh])
 
   const attach = (
     <AttachMenu

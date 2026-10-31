@@ -632,11 +632,17 @@ export function mediaHost({
 export const askedFor = (asked: HostAsk[], part: string) =>
   asked.filter((one) => `${one.path}${one.search}`.includes(part)).length
 
-/** The paths a faked host was asked to sign a URL for, in the order it was asked. */
-export const mediaReads = (asked: HostAsk[]) =>
+/** What a faked host was asked to sign a URL for, and the key it was asked with, in order. */
+export const mediaAsks = (asked: HostAsk[]) =>
   asked
     .filter((one) => one.path.endsWith("/plugins/memento/media/url"))
-    .map((one) => String(JSON.parse(one.body ?? "{}").path ?? ""))
+    .map((one) => ({
+      path: String(JSON.parse(one.body ?? "{}").path ?? ""),
+      authorization: one.authorization,
+    }))
+
+/** The paths a faked host was asked to sign a URL for, in the order it was asked. */
+export const mediaReads = (asked: HostAsk[]) => mediaAsks(asked).map((one) => one.path)
 
 /** One hold as a test gives it: number and title, and the stage its session is in. */
 export type HoldRow = {

@@ -15,6 +15,7 @@ import {
   chatScreen,
   click,
   findAll,
+  mediaAsks,
   mediaHost,
   mediaReads,
   mount,
@@ -23,7 +24,6 @@ import {
   text,
   until,
 } from "./component-kit.tsx"
-import type { HostAsk } from "./component-kit.tsx"
 
 const NAME = "field notes.pdf"
 const HOST_PATH = "/home/h/.hermes/memento/attachments/session-1/field notes.pdf"
@@ -46,15 +46,6 @@ const message = (attachments: Attachment[]): Message => ({
   createdAt: 2,
   attachments,
 })
-
-/** What the host was asked to sign a URL for, and the key it was asked with. */
-const asks = (asked: HostAsk[]) =>
-  asked
-    .filter((one) => one.path.endsWith("/media/url"))
-    .map((one) => ({
-      path: String(JSON.parse(one.body ?? "{}").path ?? ""),
-      authorization: one.authorization,
-    }))
 
 const row = () =>
   findAll("button").find(
@@ -105,7 +96,7 @@ test("a message's file draws as a row naming it, and a tap opens a tab at the ho
         "the URL the host signed for the file",
       )
       assert.deepEqual(
-        asks(asked),
+        mediaAsks(asked),
         [{ path: HOST_PATH, authorization: "Bearer test-key" }],
         "and it was signed behind the bot's key, which is the app's alone",
       )

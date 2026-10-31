@@ -9,6 +9,7 @@ import {
   type HermesConfig,
   type MediaUrlAnswer,
 } from "@/lib/hermes"
+import { noteFailure } from "@/lib/report"
 
 /** Where one file can be read from: a URL the host signed, and what it is. */
 export type MediaUrl = MediaUrlAnswer
@@ -49,12 +50,16 @@ function ask(config: HermesConfig, path: string): Promise<MediaAsk> {
         return { state: "ready", read }
       })
       .catch((error: unknown): MediaAsk => {
-        // A 404 is the route saying it has no such file; a refused size is an answer about this
-        // file too. Anything else said nothing about it.
-        const settled =
-          error instanceof HermesError && (error.status === 404 || error.status === 413)
-        if (settled) gone.add(key)
-        return settled ? { state: "gone" } : { state: "unanswered" }
+        // A 404 is the route saying it has no such file, and that settles the path. A refusal — a
+        // file over its kind's cap — is an answer about this file too, but the file is there: the
+        // cell keeps its place and the host's sentence, with the limit it met, goes to the log
+        // rather than the thread drawing the file as though it never existed.
+        if (error instanceof HermesError && error.status === 404) {
+          gone.add(key)
+          return { state: "gone" }
+        }
+        noteFailure(`asking for the URL of ${path}`, error)
+        return { state: "unanswered" }
       })
       .finally(() => {
         asking.delete(key)

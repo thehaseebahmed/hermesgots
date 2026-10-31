@@ -1914,7 +1914,11 @@ export async function getPluginMediaUrl(
     signal,
   })
   const body = await response.json()
-  return { url: String(body.url), type: String(body.type ?? ""), size: Number(body.size ?? 0) }
+  // A URL is what every cell draws from: a mint that answers without one is a failure here, where
+  // it can be said, rather than an `undefined` that reaches an `<img src>` a layer away.
+  if (typeof body?.url !== "string" || !body.url)
+    throw new HermesError("The bot's plugin answered without a URL for the file.", 502)
+  return { url: body.url, type: String(body.type ?? ""), size: Number(body.size ?? 0) }
 }
 
 /** The plugin pings its change stream every 20s, so one quiet for longer has died unnoticed. */

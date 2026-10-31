@@ -15,7 +15,7 @@ import { attachmentParts } from "@/lib/attachment-text"
 import type { Attachment } from "@/lib/db"
 import type { ContentPart } from "@/lib/hermes"
 import { loadMediaUrl } from "@/lib/media-url"
-import { openMediaViewer } from "@/lib/native"
+import { isNative, openMediaViewer } from "@/lib/native"
 import { noteFailure } from "@/lib/report"
 import { createSignal } from "@/lib/store"
 import { randomId } from "@/lib/utils"
@@ -188,9 +188,12 @@ export async function openAttachment(conversationId: string | null, file: Handov
     if (file.blob) {
       const url = URL.createObjectURL(file.blob)
       try {
-        await openMediaViewer(url, { type: file.type, name: file.name })
+        // A link names the file and keeps the tap's own gesture, so a browser that saves it writes
+        // it under the name the user picked rather than the blob's.
+        if (!isNative) window.open(url, "_blank", "noopener")
+        else await openMediaViewer(url, { type: file.type, name: file.name })
       } finally {
-        // The browser reads the bytes after the call returns, so the URL outlives it.
+        // The browser reads the bytes after the click returns, so the URL outlives it.
         window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
       }
       return

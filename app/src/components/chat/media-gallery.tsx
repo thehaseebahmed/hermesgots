@@ -159,6 +159,8 @@ function Picture({ src, alt }: { src?: string; alt: string }) {
         <img
           src={src}
           alt={alt}
+          loading="lazy"
+          decoding="async"
           onLoad={onLoad}
           onError={onError}
           className={cn("h-full w-full object-cover", !ready && "invisible")}

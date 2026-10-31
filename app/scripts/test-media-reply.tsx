@@ -172,7 +172,9 @@ test("a thread's sent media and a reply's tags draw through the same cells", asy
       // One URL per file, however many times the thread is drawn — the sent photo included, since
       // the thread reads every file from the host.
       assert.deepEqual(
-        mediaReads(asked).map((path) => path.split("/").pop()).sort(),
+        mediaReads(asked)
+          .map((path) => path.split("/").pop())
+          .sort(),
         [
           "cat.png",
           "chart.png",
@@ -253,25 +255,25 @@ test("a tag the host couldn't serve keeps its cell, and is asked again when the 
   })
   // The host is out for the first read, then answers: a 503 said nothing about the file.
   const asked = mediaHost({ fail: ["chart.png"], failure: 503 })
-  try {
-    await mount(chatScreen("c1"), async () => {
-      await until(async () => cell("chart.png") !== null, "the cell it keeps")
-      assert.equal(text().includes(`MEDIA:${LIBRARY}/chart.png`), false, "the tag is not left as text")
-      assert.equal(download("chart.png"), null, "and the file is never a download row")
-      mediaHost({ asked })
-      // The reply carries on and names another file, so its tags are read again.
-      await act(async () => {
-        await db.messages.update("m1", {
-          content: `Made this: MEDIA: ${LIBRARY}/chart.png MEDIA: ${LIBRARY}/second.png`,
-        })
+  await mount(chatScreen("c1"), async () => {
+    await until(async () => cell("chart.png") !== null, "the cell it keeps")
+    assert.equal(
+      text().includes(`MEDIA:${LIBRARY}/chart.png`),
+      false,
+      "the tag is not left as text",
+    )
+    assert.equal(download("chart.png"), null, "and the file is never a download row")
+    mediaHost({ asked })
+    // The reply carries on and names another file, so its tags are read again.
+    await act(async () => {
+      await db.messages.update("m1", {
+        content: `Made this: MEDIA: ${LIBRARY}/chart.png MEDIA: ${LIBRARY}/second.png`,
       })
-      await until(
-        async () => (cell("chart.png")?.querySelector("img")?.getAttribute("src") ?? "").length > 0,
-        "the cell drawn once the host answers",
-      )
-      assert.ok(cell("second.png"), "the file it named next draws too")
     })
-  } finally {
-    // Nothing here opens a tab.
-  }
+    await until(
+      async () => (cell("chart.png")?.querySelector("img")?.getAttribute("src") ?? "").length > 0,
+      "the cell drawn once the host answers",
+    )
+    assert.ok(cell("second.png"), "the file it named next draws too")
+  })
 })

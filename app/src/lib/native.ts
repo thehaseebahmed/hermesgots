@@ -95,7 +95,7 @@ export async function openMediaViewer(
     void Browser.open({ url })
     return
   }
-  window.open(url, "_blank")
+  window.open(url, "_blank", "noopener")
 }
 
 /** A URL opened outside the app: the platform's browser in the Android app, a new tab on the web. */

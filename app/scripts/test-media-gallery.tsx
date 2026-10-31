@@ -117,7 +117,9 @@ test("a message's photo and clip draw in one Gallery, its recording in a row, it
     assert.equal(document.querySelector("video"), null, "nothing is played in the thread")
     assert.equal(document.querySelector("audio"), null)
     assert.deepEqual(
-      mediaReads(asked).map((path) => path.replace(`${HOST}/`, "")).sort(),
+      mediaReads(asked)
+        .map((path) => path.replace(`${HOST}/`, ""))
+        .sort(),
       ["cat.png", "clip.mp4", "notes.pdf", "voice.mp3"],
       "every file the message carries, asked for once",
     )
@@ -156,7 +158,6 @@ test("a photo whose URL never answers keeps its cell, never a download row", asy
 test("a photo whose read failed offers a retry that asks again and draws", async () => {
   const profile = botProfile("media-retry-cell")
   await seedChat({ id: "c1", profile, messages: [message([photo])] })
-  mediaHost({ fail: ["cat.png"], failure: 503 })
   const asked = mediaHost({ fail: ["cat.png"], failure: 503 })
   await mount(chatScreen("c1"), async () => {
     await until(async () => !filled(cell("cat.png")), "the cell that couldn't read")
