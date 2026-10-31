@@ -3092,6 +3092,9 @@ async function streamCompletion(req, res, body) {
 // forgets its events once that (blocked) subscriber leaves, so only GET /v1/runs/{id} is left.
 // MOCK_STALL_EVENTS_MS detaches a stream's listener after that long: the run and its keepalives
 // carry on, but no further events reach the client, like a server whose event fan-out went quiet.
+// MOCK_MUTE_PROMPT=1 publishes every prompt after a call's first on the run's status and to nobody's
+// stream: a host that raises one while no subscriber is attached. Only a client that asks the run's
+// status can draw it, and answering still goes through the normal route.
 // MOCK_WITHHOLD_PROMPT=1 sends a prompt's request (`clarify.request`, `approval.request`) only to the
 // listeners there when it was made: a subscriber that arrives afterwards gets none of it on the
 // replay, so the run's status is the one place its wait can be read — what a phone comes back to.
@@ -3290,6 +3293,10 @@ const BLOCK_RUN_EVENTS = process.env.MOCK_BLOCK_RUN_EVENTS === "1"
 const STALL_EVENTS_MS = Number(process.env.MOCK_STALL_EVENTS_MS ?? 0)
 // A request that is only ever sent to the listeners there when it was made, never replayed.
 const WITHHOLD_PROMPT = process.env.MOCK_WITHHOLD_PROMPT === "1"
+// Every prompt after a call's first is published on the run's status and to nobody's stream, the way
+// a host that raises one while no subscriber is attached leaves it: only a client that asks the
+// run's status can draw it.
+const MUTE_PROMPT = process.env.MOCK_MUTE_PROMPT === "1"
 const PROMPT_EVENTS = new Set(["clarify.request", "approval.request"])
 // On by default: runs/live answers under the session a chat started as, mirroring the plugin's
 // `chat_session` walk, so a compressed chat's run stays findable on a device that only knows the id
@@ -3637,7 +3644,7 @@ function startRun(req, body, options = {}) {
           choices: question.choices ?? [],
           multi_select: Boolean(question.multi_select),
         }
-        push("clarify.request", run.clarify)
+        if (!MUTE_PROMPT || at === 0) push("clarify.request", run.clarify)
         const settled = await Promise.race([
           new Promise((resolve) => pendingPrompts.set(run.clarify.prompt_id, resolve)),
           whole,

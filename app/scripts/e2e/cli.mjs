@@ -30,6 +30,7 @@ const MOCKS = {
     port: MOCK_BASE + 7,
     env: { MOCK_WITHHOLD_PROMPT: "1", MOCK_DROP_EVENTS_MS: "1500" },
   },
+  muted: { port: MOCK_BASE + 8, env: { MOCK_MUTE_PROMPT: "1" } },
 }
 // How many ports a lane's mocks take, and so how far apart two lanes' sets start.
 const LANE_PORTS = Object.keys(MOCKS).length
@@ -105,6 +106,12 @@ export const FLOWS = {
     mock: "dropped",
     about:
       "A chat whose run waits on a question, on a host whose event stream keeps dying under it: the form stays in the composer and the thread keeps its waiting line, so the answer still lands",
+  },
+  "question-muted": {
+    script: "e2e/question-muted.mjs",
+    mock: "muted",
+    about:
+      "A call's second question is published on the run's status and never on its stream, the way a host that raises one with no subscriber attached leaves it: the form comes back from the status read while the chat stays open, and every answer still reaches the run",
   },
   "failed-send": {
     script: "e2e/failed-send.mjs",
