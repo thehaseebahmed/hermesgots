@@ -101,15 +101,9 @@ LIVE_STATUSES = {
     "waiting_for_approval": "waiting_for_approval",
 }
 
-# The labels this plugin used to write into ``sessions.source`` — ``Gots`` for a chat, ``Gots Code``
-# for a project session — so the Hermes dashboard would show them. Hermes's session authority reads
-# that column as the surface that OWNS the session and refuses an API turn onto any row whose source
-# is not the API server's own (409 ``permission_denied``, ``gateway/session_api_turn.py``), so a
-# labelled chat could not be continued after the turn that labelled it. Nothing reads the label for
-# behaviour — the app lists its own chats and the dashboard shows whatever the row says — so the
-# labels are repaired back to ``API_SOURCE`` instead (``heal_sources``).
 API_SOURCE = "api_server"
-LABELLED_SOURCES = ("Gots", "Gots Code", "memento", "Memento", "memento-code", "Memento Code")
+SOURCES_THIS_PLUGIN_WROTE = ("Gots", "Gots Code", "memento", "Memento", "memento-code", "Memento Code")
+_WRITTEN_SOURCE_MARKS = ", ".join("?" for _ in SOURCES_THIS_PLUGIN_WROTE)
 # How the app starts the session ids of its chats (`createConversation`).
 MEMENTO_ID_PREFIX = "memento-"
 
@@ -749,48 +743,58 @@ def remove(path: Path, session_id: str) -> Dict[str, Any]:
     return {"removed": True, "kept": []}
 
 
-def source_of(db: Any, session_id: str) -> Optional[str]:
-    """A session's own ``source``, read only: None when the store has no such row.
-
-    ``POST sessions/{id}/label`` used to WRITE Gots's name into this column (``LABELLED_SOURCES``),
-    which made the row un-runnable for the API edge. The route stays, so an app that still asks gets
-    an answer, and it writes nothing.
-    """
-
-    def read(conn):
-        row = conn.execute("SELECT source FROM sessions WHERE id = ?", (session_id,)).fetchone()
-        return row[0] if row else None
-
-    return db._execute_write(read)
-
-
-def heal_sources(home: Path) -> int:
+def heal_sources(home: Path) -> Optional[int]:
     """Puts every session this plugin relabelled back to the API server's own source.
 
-    Answers how many rows moved. One statement over the labels the plugin itself wrote, so no other
-    surface's session is touched: a row reading ``Gots``/``Gots Code``/``memento`` is one it
-    relabelled. Run once per process at gateway start (``link.run``), before any turn is admitted.
+    Answers how many rows moved, or None when the store could not be repaired — a store another
+    writer held at boot, which the caller retries. The gateway runs this before its port accepts a
+    turn (``daily_cleanup`` in ``__init__.py``): Hermes refuses a ``/v1/runs`` turn on a row whose
+    ``source`` is not the API server's own, and that refusal is decided before plugin code runs, so
+    no request path can undo it.
     """
-    state = home / "state.db"
-    if not state.exists():
+    if not _may_hold_labelled_rows(home):
         return 0
-    try:
-        conn = sqlite3.connect(state, timeout=5)
-    except sqlite3.Error:
-        logger.debug("memento: couldn't open %s to repair session labels", state, exc_info=True)
-        return 0
+    conn = _open_state_for_write(home)
+    if conn is None:
+        return None
     try:
         with closing(conn):
-            placeholders = ", ".join("?" for _ in LABELLED_SOURCES)
-            cursor = conn.execute(
-                f"UPDATE sessions SET source = ? WHERE source IN ({placeholders})",
-                (API_SOURCE, *LABELLED_SOURCES),
-            )
-            conn.commit()
-            return cursor.rowcount or 0
+            return conn.execute(
+                f"UPDATE sessions SET source = ? WHERE source IN ({_WRITTEN_SOURCE_MARKS})",
+                (API_SOURCE, *SOURCES_THIS_PLUGIN_WROTE),
+            ).rowcount or 0
     except sqlite3.Error:
-        logger.debug("memento: couldn't repair session labels in %s", state, exc_info=True)
-        return 0
+        logger.warning("memento: couldn't repair session labels in %s", home / "state.db", exc_info=True)
+        return None
+
+
+def _open_state_for_write(home: Path) -> Optional[sqlite3.Connection]:
+    """A writable view of the profile's ``state.db``, or None: never plants one, and autocommits
+    like the plugin's other ``state.db`` writes (``moves.take_from_transcript``)."""
+    state = home / "state.db"
+    try:
+        return sqlite3.connect(f"{state.as_uri()}?mode=rw", uri=True, timeout=2, isolation_level=None)
+    except sqlite3.Error:
+        logger.warning("memento: couldn't open %s to repair session labels", state, exc_info=True)
+        return None
+
+
+def _may_hold_labelled_rows(home: Path) -> bool:
+    """Whether a store may hold a row this plugin relabelled; an unreadable one answers True."""
+    conn = _open_state(home)
+    if conn is None:
+        return (home / "state.db").exists()
+    try:
+        with closing(conn):
+            row = conn.execute(
+                f"SELECT 1 FROM sessions WHERE source IN ({_WRITTEN_SOURCE_MARKS}) LIMIT 1",
+                SOURCES_THIS_PLUGIN_WROTE,
+            ).fetchone()
+            return row is not None
+    except sqlite3.OperationalError as exc:
+        return "no such table" not in str(exc)
+    except sqlite3.Error:
+        return True
 
 
 def chat_session(
