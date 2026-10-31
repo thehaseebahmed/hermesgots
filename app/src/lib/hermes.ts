@@ -3665,18 +3665,6 @@ export async function respondToClarify(
   })
 }
 
-/** Marks a session as Gots's, so the Hermes dashboard labels it. Needs the Gots plugin. */
-export async function labelSession(config: HermesConfig, sessionId: string) {
-  try {
-    await request(`${pluginRoot(config.baseUrl)}/sessions/${encodeURIComponent(sessionId)}/label`, {
-      method: "POST",
-      headers: headers(config),
-    })
-  } catch {
-    // Without the plugin the chat just keeps the API server's label.
-  }
-}
-
 const runFeatures = new Map<string, Promise<Record<string, unknown> | null>>()
 
 function features(config: HermesConfig) {

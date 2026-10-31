@@ -319,10 +319,32 @@ def served_homes(adapter: Any) -> List[Path]:
     return [home for home in homes if not (home.resolve() in seen or seen.add(home.resolve()))]
 
 
+def _heal_sources(home: Path) -> int:
+    """``sessions.heal_sources`` for one home, imported here so the two modules stay independent."""
+    from . import sessions
+
+    return sessions.heal_sources(home)
+
+
 async def run(adapter: Any) -> None:
-    """The gateway's check-in loop: at start, then every 10 minutes."""
+    """The gateway's check-in loop: at start, then every 10 minutes.
+
+    The first pass also puts back the ``source`` of every session an older plugin relabelled as
+    Gots's (``sessions.heal_sources``). Hermes's session authority refuses an API turn onto a row
+    whose source is not the API server's own, so the repair is what lets an existing chat continue
+    to run; it runs before any check-in traffic and once per process.
+    """
+    repaired = False
     while True:
         homes = served_homes(adapter)
+        if not repaired:
+            repaired = True
+            for home in homes:
+                moved = await asyncio.to_thread(_heal_sources, home)
+                if moved:
+                    logger.info(
+                        "memento: put %d relabelled session(s) back on the API source in %s", moved, home
+                    )
         first = homes[0] if homes else None
         for home in homes:
             try:

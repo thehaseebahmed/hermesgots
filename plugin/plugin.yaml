@@ -1,5 +1,5 @@
 name: memento
-version: "0.96.0"
+version: "0.96.1"
 # Hermes skips the plugin before importing it on anything older: the app's chat reads a run's events
 # and a compaction's rows the way 0.22.5 writes them. Kept equal to MIN_HERMES in app/src/chat-next/api.ts.
 requires_hermes: ">=0.22.5"

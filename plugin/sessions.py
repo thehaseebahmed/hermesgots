@@ -101,15 +101,15 @@ LIVE_STATUSES = {
     "waiting_for_approval": "waiting_for_approval",
 }
 
-# The dashboard shows a session's source as its label. /api/sessions only accepts a fixed set of
-# sources, so Gots's sessions start as the API server's and the plugin relabels them.
-SESSION_SOURCE = "Gots"
-CODE_SESSION_SOURCE = "Gots Code"
-RELABELLED_SOURCES = ("api_server", "unknown")
-# What earlier plugin versions wrote (as Memento, and before that under the lower-case id);
-# still ours to upgrade.
-CHAT_LEGACY_SOURCES = ("memento", "Memento")
-CODE_LEGACY_SOURCES = ("memento-code", "Memento Code")
+# The labels this plugin used to write into ``sessions.source`` — ``Gots`` for a chat, ``Gots Code``
+# for a project session — so the Hermes dashboard would show them. Hermes's session authority reads
+# that column as the surface that OWNS the session and refuses an API turn onto any row whose source
+# is not the API server's own (409 ``permission_denied``, ``gateway/session_api_turn.py``), so a
+# labelled chat could not be continued after the turn that labelled it. Nothing reads the label for
+# behaviour — the app lists its own chats and the dashboard shows whatever the row says — so the
+# labels are repaired back to ``API_SOURCE`` instead (``heal_sources``).
+API_SOURCE = "api_server"
+LABELLED_SOURCES = ("Gots", "Gots Code", "memento", "Memento", "memento-code", "Memento Code")
 # How the app starts the session ids of its chats (`createConversation`).
 MEMENTO_ID_PREFIX = "memento-"
 
@@ -749,36 +749,48 @@ def remove(path: Path, session_id: str) -> Dict[str, Any]:
     return {"removed": True, "kept": []}
 
 
-def label(db: Any, session_id: str, code: bool = False) -> Optional[str]:
-    """Marks a session as Gots's, so the Hermes dashboard labels it: ``Gots`` for a chat,
-    ``Gots Code`` for a project session. Answers the session's source, or None when it isn't
-    one the plugin may label."""
-    source = CODE_SESSION_SOURCE if code else SESSION_SOURCE
-    # A project session was a chat's source until its workspace existed; never the other way.
-    from_sources = RELABELLED_SOURCES + CHAT_LEGACY_SOURCES
-    if code:
-        from_sources += (SESSION_SOURCE,) + CODE_LEGACY_SOURCES
+def source_of(db: Any, session_id: str) -> Optional[str]:
+    """A session's own ``source``, read only: None when the store has no such row.
 
-    def write(conn):
-        placeholders = ", ".join("?" for _ in from_sources)
-        # Never takes a session from another surface (Telegram, the CLI, ...).
-        cursor = conn.execute(
-            f"UPDATE sessions SET source = ? WHERE id = ? AND source IN ({placeholders})",
-            (source, session_id, *from_sources),
-        )
-        if cursor.rowcount:
-            return source
+    ``POST sessions/{id}/label`` used to WRITE Gots's name into this column (``LABELLED_SOURCES``),
+    which made the row un-runnable for the API edge. The route stays, so an app that still asks gets
+    an answer, and it writes nothing.
+    """
+
+    def read(conn):
         row = conn.execute("SELECT source FROM sessions WHERE id = ?", (session_id,)).fetchone()
-        current = row[0] if row else None
-        return current if current in (source, CODE_SESSION_SOURCE if code else None) else None
+        return row[0] if row else None
 
-    return db._execute_write(write)
+    return db._execute_write(read)
 
 
-def is_code_session(session_id: str) -> bool:
-    """Whether the session has a project workspace record."""
-    path, _ = _paths()
-    return bool(path.exists() and read(path, session_id))
+def heal_sources(home: Path) -> int:
+    """Puts every session this plugin relabelled back to the API server's own source.
+
+    Answers how many rows moved. One statement over the labels the plugin itself wrote, so no other
+    surface's session is touched: a row reading ``Gots``/``Gots Code``/``memento`` is one it
+    relabelled. Run once per process at gateway start (``link.run``), before any turn is admitted.
+    """
+    state = home / "state.db"
+    if not state.exists():
+        return 0
+    try:
+        conn = sqlite3.connect(state, timeout=5)
+    except sqlite3.Error:
+        logger.debug("memento: couldn't open %s to repair session labels", state, exc_info=True)
+        return 0
+    try:
+        with closing(conn):
+            placeholders = ", ".join("?" for _ in LABELLED_SOURCES)
+            cursor = conn.execute(
+                f"UPDATE sessions SET source = ? WHERE source IN ({placeholders})",
+                (API_SOURCE, *LABELLED_SOURCES),
+            )
+            conn.commit()
+            return cursor.rowcount or 0
+    except sqlite3.Error:
+        logger.debug("memento: couldn't repair session labels in %s", state, exc_info=True)
+        return 0
 
 
 def chat_session(
@@ -1136,26 +1148,6 @@ def before_llm(**kwargs: Any) -> None:
             set_plan_pending(path, record["session_id"], False)
     except Exception:
         logger.debug("memento: pre_llm_call failed", exc_info=True)
-
-
-def started(**kwargs: Any) -> None:
-    """The ``on_session_start`` hook: labels a brand-new session as Gots's when it is one
-    (``Gots Code`` for a project session). Gots mints its chats' session ids (``memento-…``),
-    and a project session has its workspace before its first turn."""
-    try:
-        session_id = kwargs.get("session_id") or ""
-        # ``adapter._session_db`` is an explicit override (tests/manual wiring); in normal
-        # operation the adapter caches per-profile SessionDBs and exposes them here.
-        ensure = getattr(adapter, "_ensure_session_db", None)
-        db = ensure() if callable(ensure) else getattr(adapter, "_session_db", None)
-        if not session_id or db is None:
-            return
-        code = is_code_session(session_id)
-        if not code and not session_id.startswith(MEMENTO_ID_PREFIX):
-            return
-        label(db, session_id, code)
-    except Exception:
-        logger.debug("memento: on_session_start failed", exc_info=True)
 
 
 def after_llm(**kwargs: Any) -> None:
