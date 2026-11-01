@@ -61,7 +61,7 @@ import {
   type LocalCommand,
   type SlashItem,
 } from "@/lib/slash"
-import { isDoubleEscape, isInterrupt } from "@/lib/keys"
+import { enterSends, isDoubleEscape, isInterrupt, isSendChord } from "@/lib/keys"
 import { useSkills } from "@/lib/skills"
 import { midReply, steerAsked } from "@/lib/steer"
 import { runnableSkills } from "@/lib/skills-cache"
@@ -89,6 +89,7 @@ export function Composer({
   draftKey,
   onDraft,
   steerByDefault = false,
+  sendOnEnter = false,
   canSteer = false,
   onSteer,
   notice,
@@ -97,6 +98,11 @@ export function Composer({
   busy: boolean
   /** Whether a message sent while a reply runs steers it unless it starts with `/queue`. */
   steerByDefault?: boolean
+  /**
+   * Whether Enter sends. The device's own switch (Settings > Appearance), off by default: while it
+   * is off Enter starts a new line, and Ctrl+Enter sends (`enterSends` in `lib/keys.ts`).
+   */
+  sendOnEnter?: boolean
   /** Whether the running reply can be steered. */
   canSteer?: boolean
   /** Sends text to the running reply now (`/steer`), with what it carries. */
@@ -127,7 +133,7 @@ export function Composer({
   disabled?: boolean
   main?: boolean
   onSend: (text: string, attachments: Attachment[]) => Promise<void> | void
-  /** Called instead of `onSend` while a reply is streaming: Enter queues the message. */
+  /** Called instead of `onSend` while a reply is streaming: a send queues the message. */
   onQueue: (text: string, attachments: Attachment[]) => Promise<void> | void
   onStop: () => void
   /** How many subagents the session has at work: with the turn over, Stop is still the session's. */
@@ -226,7 +232,6 @@ export function Composer({
 
   const canSend =
     (value.trim().length > 0 || attachments.length > 0) && !disabled && preparing.length === 0
-  // What Enter does now, so the button says so.
   const steering = steersNow(value, attachments)
   // One press stops everything the session has going, so Send's place is Stop while either works.
   const working = busy || subagentsRunning > 0
@@ -524,7 +529,10 @@ export function Composer({
         setActive((activeIndex + (event.key === "ArrowDown" ? 1 : count - 1)) % count)
         return
       }
-      if ((event.key === "Enter" && !event.shiftKey) || event.key === "Tab") {
+      if (
+        (event.key === "Enter" && !event.shiftKey && !isSendChord(event.nativeEvent)) ||
+        event.key === "Tab"
+      ) {
         event.preventDefault()
         pick(items[activeIndex])
         return
@@ -556,7 +564,7 @@ export function Composer({
     } else if (event.key !== "Shift" && event.key !== "Control" && event.key !== "Alt") {
       lastEscape.current = null
     }
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (event.key === "Enter" && enterSends(event.nativeEvent, sendOnEnter)) {
       event.preventDefault()
       submit()
     }
@@ -667,7 +675,7 @@ export function Composer({
           onSelect={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}
           onPaste={pasted}
           onKeyDown={onKeyDown}
-          enterKeyHint="send"
+          enterKeyHint={sendOnEnter ? "send" : "enter"}
           role={menuOpen ? "combobox" : undefined}
           aria-expanded={menuOpen ? true : undefined}
           aria-controls={menuOpen ? listId : undefined}

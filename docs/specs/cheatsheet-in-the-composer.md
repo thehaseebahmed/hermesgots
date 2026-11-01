@@ -9,9 +9,9 @@ and works the graph in order.
 ## Goal
 
 `/cheatsheet` joins the composer's slash menu and opens the Cheatsheet: every key a hardware
-keyboard can send in Gots, and what each does, in one sheet. Today the app answers a dozen bindings
-— Enter sends, double Escape clears, Ctrl+C stops a reply, Alt+1…9 switches bots — and names none of
-them anywhere; the slash menu teaches what can be typed, never what can be pressed. The sheet lists
+keyboard can send in Gots, and what each does, in one sheet. When this was written the app answered
+a dozen bindings — Enter sent, double Escape cleared, Ctrl+C stopped a reply, Alt+1…9 switched bots
+— and named none of them anywhere; the slash menu teaches what can be typed, never what can be pressed. The sheet lists
 keys only, and only keys that are switched on.
 
 ## What this is not
@@ -35,13 +35,14 @@ keys only, and only keys that are switched on.
 1. **`/cheatsheet` is a Command.** A row in the slash menu, intercepted before send like every
    command; picking it clears the composer and nothing reaches the agent (the glossary's Command,
    and ADR 0037's transport: no slash parsing exists on the run route).
-2. **Keys only, in five groups.** Composer — Enter sends, Shift+Enter new line, double Escape
-   clears the message keeping attachments. Slash menu — up/down move, Enter or Tab pick, Escape
-   closes it. Chat — Ctrl+C stops a running reply. Navigation — Alt+1…9. While something's open —
-   left/right arrows step the attachment viewer, Escape cancels a recording. Browser-standard
-   Enters in forms are deliberately out.
-3. **The list is hand-written and import-free** — one module taking the navigation-shortcuts flag
-   as an argument, with its own unit tier. No registry, no drift-guard string test; drift with a
+2. **Keys only, in five groups.** Composer — Enter or the chord send and the other key starts a new
+   line (ADR 0078, which made Enter the line and Ctrl+Enter the send by default, behind the **Send
+   on Enter** switch), double Escape clears the message keeping attachments. Slash menu — up/down
+   move, Enter or Tab pick, Escape closes it. Chat — Ctrl+C stops a running reply. Navigation —
+   Alt+1…9. While something's open — left/right arrows step the attachment viewer, Escape cancels a
+   recording. Browser-standard Enters in forms are deliberately out.
+3. **The list is hand-written and import-free** — one module taking the switches that gate it as one
+   object, with its own unit tier. No registry, no drift-guard string test; drift with a
    handler is fixed where it is found (ADR 0042).
 4. **The Alt+1…9 row obeys its switch.** The switch defaults off, so the Navigation group is
    absent rather than lying; the sheet reads the setting once on open and writes nothing.

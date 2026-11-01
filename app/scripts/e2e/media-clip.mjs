@@ -7,7 +7,7 @@
 // None of that has a lower tier: a `<video>` that decodes and plays is the browser's own pipeline,
 // a canvas has no frames to paint in a DOM without one, and the bytes are what the mock host was
 // actually handed rather than a stand-in it serves.
-import { app, assert, flow, pass, runId, settled } from "./lib.mjs"
+import { app, assert, flow, pass, runId, settled, SEND_CHORD } from "./lib.mjs"
 
 const CLIP = "take.webm"
 
@@ -89,7 +89,7 @@ await flow("media-clip", async ({ page, seed, until, shot }) => {
 
   const composer = page.getByLabel("Message", { exact: true })
   await composer.fill("look at this")
-  await composer.press("Enter")
+  await composer.press(SEND_CHORD)
 
   // The thread: one cell, and it paints the clip's own first frame rather than a file card.
   const cells = await until(

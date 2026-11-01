@@ -10,6 +10,8 @@ export const app = process.env.APP_URL ?? "http://127.0.0.1:15173"
 export const mock = process.env.MOCK_URL ?? "http://127.0.0.1:18642"
 /** The Gots plugin's change stream, as the app opens it. */
 export const eventsUrl = /\/events(?:\?|$)/
+/** The press that sends in either state of the device's Send on Enter switch (ADR 0078). */
+export const SEND_CHORD = "Control+Enter"
 const shots = process.env.SHOTS_DIR
 const headed = process.env.E2E_HEADED === "1"
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? "playwright")
@@ -511,7 +513,7 @@ function helpers(page) {
     /** Types into the composer and sends. */
     async send(text) {
       await composer.fill(text)
-      await composer.press("Enter")
+      await composer.press(SEND_CHORD)
     },
     lastReply(chatId) {
       return page.evaluate(async (id) => {

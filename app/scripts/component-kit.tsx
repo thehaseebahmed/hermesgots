@@ -488,14 +488,32 @@ export const composerField = () =>
 export const slashOptions = () => findAll('[role="option"]').map((row) => row.textContent ?? "")
 export const offersCommand = (name: string) => slashOptions().some((row) => row.startsWith(name))
 
-export async function pressEnter() {
+/** One Enter in the composer, answered with its event so a case can read `defaultPrevented`. */
+export async function pressEnter(init: KeyboardEventInit = {}) {
+  const event = new KeyboardEvent("keydown", {
+    key: "Enter",
+    bubbles: true,
+    cancelable: true,
+    ...init,
+  })
   await act(async () => {
-    composerField()?.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
-    )
+    composerField()?.dispatchEvent(event)
   })
   await settle()
+  return event
 }
+
+/**
+ * A pick: the bare Enter, which the slash menu takes and which the composer otherwise leaves to the
+ * field. A case that means "send" presses `sendPress`; `pickPress` means the menu's key.
+ */
+export const pickPress = () => pressEnter()
+
+/**
+ * The send: Ctrl+Enter, which sends whichever way the device's Send on Enter switch is set. A bare
+ * Enter only sends while that switch is on, so a case about sending must not rely on it.
+ */
+export const sendPress = () => pressEnter({ ctrlKey: true })
 
 /** The address on screen, drawn beside the router so a test can read it without asking one. */
 export const Path = () => <p data-path>{useLocation().pathname}</p>

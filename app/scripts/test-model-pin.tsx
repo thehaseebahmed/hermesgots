@@ -21,7 +21,7 @@ import {
   findAll,
   json,
   mount,
-  pressEnter,
+  sendPress,
   seedSettings,
   settle,
   type,
@@ -414,7 +414,7 @@ test("a thread started from Main doesn't inherit the Default row, but pins", asy
   await mount(chatScreen(MAIN), async () => {
     await until(async () => Boolean(composerField()), "Main's composer")
     await type(composerField(), "/thread hello")
-    await pressEnter()
+    await sendPress()
     await until(async () => (await started()).length > 0, "the thread")
     const [thread] = await started()
     await until(async () => Boolean(await choiceOf(thread.id)), "its pin")

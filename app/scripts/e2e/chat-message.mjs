@@ -3,6 +3,12 @@ import { assert, app, flow, pass } from "./lib.mjs"
 
 await flow("chat-message", async ({ page, send, lastReply, until, shot }) => {
   await page.goto(app)
+  const composer = page.getByLabel("Message", { exact: true })
+  await composer.fill("a first line")
+  await composer.press("Enter")
+  assert.equal(await composer.inputValue(), "a first line\n", "Enter inserted a line, not a send")
+  assert.ok(!/\/c\//.test(page.url()), "and no chat was started")
+  await composer.fill("")
   await send("hello there")
   await page.waitForURL("**/c/**", { timeout: 15_000 })
   const chatId = new URL(page.url()).pathname.split("/").at(-1)

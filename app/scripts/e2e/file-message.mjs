@@ -11,7 +11,7 @@
 // browser's own download pipeline saves the file under a name the user can find.
 import { statSync } from "node:fs"
 
-import { app, assert, flow, pass, runId } from "./lib.mjs"
+import { app, assert, flow, pass, runId, SEND_CHORD } from "./lib.mjs"
 
 const NOTE = "cleanup-notes.md"
 const NOTES = "# Cleanup notes\n\nNothing renamed, nothing lost.\n"
@@ -96,7 +96,7 @@ await flow("file-message", async ({ page, seed, until, shot }) => {
 
   const composer = page.getByLabel("Message", { exact: true })
   await composer.fill(SAID)
-  await composer.press("Enter")
+  await composer.press(SEND_CHORD)
 
   const note = page.getByRole("button", { name: `Download ${NOTE}` })
   const archive = page.getByRole("button", { name: `Download ${ARCHIVE}` })

@@ -5,6 +5,7 @@
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   CheckIcon,
+  CornerDownLeftIcon,
   CornerDownRightIcon,
   KeyboardIcon,
   LayoutGridIcon,
@@ -18,7 +19,7 @@ import { useTheme } from "next-themes"
 import { toast } from "sonner"
 
 import { Group, RowText, SwitchRow, rowClass } from "@/components/settings-chrome"
-import { DEFAULT_SETTINGS, db, getActiveProfile, saveAppearance } from "@/lib/db"
+import { DEFAULT_SETTINGS, db, getActiveProfile, saveAppearance, saveSettings } from "@/lib/db"
 import { usePluginFeature, type PluginServer } from "@/lib/features"
 import { useHostRecord } from "@/lib/host-record"
 import { OPENUI_SWITCH, UNANSWERED_IS_ON } from "@/lib/openui-switch"
@@ -100,6 +101,18 @@ export function AppearanceSettings() {
           subtitle="Messages sent mid-reply go straight to it"
           checked={chatSettings?.steerByDefault ?? DEFAULT_SETTINGS.steerByDefault}
           onCheckedChange={(checked) => saveAppearance({ steerByDefault: checked })}
+        />
+        {/*
+          The one switch here that stays on this device: a keyboard is not the same on a phone and a
+          laptop, so `saveSettings` writes it without touching the appearance clock (ADR 0078).
+        */}
+        <SwitchRow
+          id="send-on-enter"
+          icon={CornerDownLeftIcon}
+          title="Send on Enter"
+          subtitle="Enter sends the message instead of starting a new line"
+          checked={chatSettings?.sendOnEnter ?? DEFAULT_SETTINGS.sendOnEnter}
+          onCheckedChange={(checked) => saveSettings({ sendOnEnter: checked })}
         />
         <SwitchRow
           id="break-reminders"

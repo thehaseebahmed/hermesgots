@@ -30,6 +30,12 @@ export interface Settings {
   breakReminders?: boolean
   /** Alt+1 to Alt+9 start a new chat with the bot added in that place. Off by default. */
   navShortcuts?: boolean
+  /**
+   * Enter sends the message instead of starting a new line; off by default, and then Ctrl+Enter
+   * sends. Local, and never in `APPEARANCE_FIELDS`: it describes this device's keyboard, so a phone
+   * and a laptop answer it separately (ADR 0078).
+   */
+  sendOnEnter?: boolean
   /** The clock on this device's copy of the appearance record: a change made here, or one pulled. */
   appearanceAt?: number
   /**
@@ -728,12 +734,17 @@ export interface CachedSkills {
   skills: Skill[]
 }
 
-/** Carries a default for every appearance switch, so reading one never needs a fallback. */
-export const DEFAULT_SETTINGS: Settings & Appearance = {
+/**
+ * A default for every switch that has one, so reading one never needs a fallback. `APPEARANCE_FIELDS`
+ * is what says which of them the account carries; this record is only what a device starts from —
+ * which is why the one switch that stays on the device is named here beside them and absent there.
+ */
+export const DEFAULT_SETTINGS: Settings & Appearance & Required<Pick<Settings, "sendOnEnter">> = {
   id: "settings",
   steerByDefault: false,
   breakReminders: true,
   navShortcuts: false,
+  sendOnEnter: false,
 }
 
 export const DEFAULT_PROFILE = {
