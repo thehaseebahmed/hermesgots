@@ -1901,12 +1901,15 @@ export interface MediaUrlAnswer {
   url: string
   type: string
   size: number
+  /** When the signature runs out, in unix seconds; `null` where the host named no life at all. */
+  expires: number | null
 }
 
 /**
  * A URL the plugin signs for one file (`POST /media/url`): an `<img>` or a `<video>` can't carry the
- * bot's key, so the host signs the path, the profile and a few minutes of expiry instead. The app
- * asks once per file and keeps the answer for the page's life — nothing is fetched into it.
+ * bot's key, so the host signs the path, the profile and a few minutes of expiry instead. The mint
+ * says when that is, and the app keeps it beside the URL: one drawn from past its expiry is a cell
+ * that broke, so another is asked for before that (ADR 0075).
  */
 export async function getPluginMediaUrl(
   config: HermesConfig,
@@ -1924,7 +1927,13 @@ export async function getPluginMediaUrl(
   // it can be said, rather than an `undefined` that reaches an `<img src>` a layer away.
   if (typeof body?.url !== "string" || !body.url)
     throw new HermesError("The bot's plugin answered without a URL for the file.", 502)
-  return { url: body.url, type: String(body.type ?? ""), size: Number(body.size ?? 0) }
+  return {
+    url: body.url,
+    type: String(body.type ?? ""),
+    size: Number(body.size ?? 0),
+    // An older plugin's mint names no life for the URL it hands over.
+    expires: Number(body.expires) > 0 ? Number(body.expires) : null,
+  }
 }
 
 /** The plugin pings its change stream every 20s, so one quiet for longer has died unnoticed. */

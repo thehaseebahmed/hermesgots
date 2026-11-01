@@ -39,7 +39,7 @@ export function MediaTag({ conversationId, paths }: { conversationId: string; pa
   // The same path may be named twice, so a tag is keyed by where it was written; the URL behind it
   // is by path, shared across the thread.
   const tagged = paths.map((path, at) => ({ key: tagKey(path, at), path, name: fileNameOf(path) }))
-  const { states, retry } = useMediaSources(
+  const { states, retry, renew, server } = useMediaSources(
     conversationId,
     tagged.map((tag) => ({ key: tag.key, path: tag.path })),
   )
@@ -59,9 +59,11 @@ export function MediaTag({ conversationId, paths }: { conversationId: string; pa
     <div className="flex w-full max-w-[min(100%,42rem)] flex-col items-start gap-2">
       <MediaItems
         items={items}
+        server={server}
         align="start"
         onDownload={download}
         onRetry={(one) => retry(one.key)}
+        onRefresh={(one) => renew(one.key)}
       />
       {unread.map((one) => (
         <Tag key={one.key} path={one.path} />

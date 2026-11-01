@@ -450,8 +450,12 @@ The app's own full-screen look at one piece of media, holding the name, the size
 _Avoid_: lightbox, image viewer, gallery popup, media sheet
 
 **Signed URL**:
-The address a bot's host mints for one file — a signature over its path, the profile and a few minutes of expiry — which the app draws every photo, clip and recording from, and a file's row opens. It stands in for the bot's key, which an `<img>` or a `<video>` can't send, and it is asked for once per file and kept for the page.
+The address a bot's host mints for one file — a signature over its path, the profile and a few minutes of expiry — which the app draws every photo, clip and recording from, and a file's row opens. It stands in for the bot's key, which an `<img>` or a `<video>` can't send. It is asked for once per file and kept only while the expiry it names is worth drawing from: a page outlives the minutes a signature lives for, so another is minted when one runs out.
 _Avoid_: media link, token URL, blob URL, download link
+
+**Media cache**:
+What this device keeps of the media it has drawn — a photo's bytes, and the first frame of a clip, since a clip is never played in the thread — so a photo drawn once draws again with no **Signed URL** and with the host away, and a clip's cell takes its frame without touching the clip. Bounded, oldest first, and read before the host is asked anything at all.
+_Avoid_: thumbnail cache, offline cache, image store, prefetch
 
 ## Speech-to-text
 

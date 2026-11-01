@@ -5,9 +5,11 @@ import { FileRow, MediaName } from "@/components/chat/attachments"
 import { usePreviewer } from "@/components/chat/previewer"
 import { Skeleton } from "@/components/ui/skeleton"
 import { boundedStore } from "@/lib/bounded-cache"
+import { cachedFrame, rememberFrame, rememberMedia } from "@/lib/media-cache"
 import { previewItem } from "@/lib/media-items"
 import type { MediaStage } from "@/lib/media-stage"
 import type { MediaCell, MediaKind } from "@/lib/media-kind"
+import { quietly } from "@/lib/report"
 import { cn } from "@/lib/utils"
 
 // Every cell in the Gallery takes this box — a photo, and a clip's first frame — so nothing moves
@@ -29,6 +31,8 @@ export interface MediaItem {
   type: string
   /** Its size, where the message kept one. */
   size?: number
+  /** Where the file lies on the host, which is what the frame this device keeps for a clip is keyed by. */
+  path?: string
   /** The URL the host signed for it, once its answer is in. */
   src?: string
   state: MediaItemState
@@ -39,13 +43,9 @@ export interface MediaItem {
 /** How long the browser gets to give up a clip's first frame before its cell settles for less. */
 const FRAME_TIMEOUT_MS = 4000
 
-/** How many frames a page keeps: a few kilobytes each, and a clip's cell scrolls past and back. */
-const FRAME_LIMIT = 64
-
-/** What reading a clip's frame answered: the frame, or the browser's own that it has none. */
-type Frame = { frame: string } | { frame: null }
-
-const frames = boundedStore<Frame>({ limit: FRAME_LIMIT })
+/** Clips whose bytes the browser couldn't read, by the URL that was tried: a new URL is a new try. */
+const UNREADABLE_LIMIT = 64
+const unreadable = boundedStore<true>({ limit: UNREADABLE_LIMIT })
 
 /**
  * Waits for the clip to give up a frame of its own: a recorded clip reports no size until one is
@@ -63,14 +63,13 @@ const nextFrame = (video: HTMLVideoElement) =>
   })
 
 /**
- * A clip's first frame, read once a page: an element that is never put on the page seeks a moment in
- * and paints it to a canvas. A clip is never played in the thread, so this is the one look at it.
+ * A clip's first frame, painted by an element that is never put on the page: it loads the clip,
+ * seeks a moment in and draws that to a canvas. A clip is never played in the thread, so painting is
+ * the only look at it, and what it paints is the caller's to keep.
  */
-async function firstFrame(src: string, type: string): Promise<string | null> {
-  const known = frames.get(src)
-  if (known) return known.frame
+async function paintFrame(src: string, type: string): Promise<Blob | null> {
   const video = document.createElement("video")
-  let frame: string | null = null
+  let frame: Blob | null = null
   // A type this browser can't play has no first frame to give, and asking would only wait.
   if (video.canPlayType(type)) {
     video.muted = true
@@ -113,7 +112,9 @@ async function firstFrame(src: string, type: string): Promise<string | null> {
       const context = canvas.getContext("2d")
       if (context && canvas.width && canvas.height) {
         context.drawImage(video, 0, 0)
-        frame = canvas.toDataURL("image/jpeg", 0.8)
+        frame = await new Promise<Blob | null>((resolve) =>
+          canvas.toBlob(resolve, "image/jpeg", 0.8),
+        )
       }
     } catch {
       frame = null
@@ -123,21 +124,41 @@ async function firstFrame(src: string, type: string): Promise<string | null> {
       video.load()
     }
   }
-  frames.set(src, { frame })
   return frame
 }
 
 /**
- * A clip's cell: the frame, and whether the attempt is over. A clip the browser cannot read settles
- * with no frame rather than pulsing a skeleton forever.
+ * The frame a clip's cell draws: the one this device kept of it — no clip, no URL, and the same
+ * frame with the host away — or a look at the clip itself, painted once and then kept. A paint that
+ * comes to nothing is remembered against the URL that failed, so a URL that has run out is not
+ * tried again and one minted after it is: for a clip that is the whole repair path, since its cell
+ * has no picture of its own to fail.
  */
-function useFirstFrame(src: string | undefined, type: string) {
+async function frameOf(server: string, path: string, src: string | undefined, type: string) {
+  const kept = await cachedFrame(server, path)
+  if (kept) return kept.url
+  if (!src || unreadable.has(src)) return null
+  const painted = await paintFrame(src, type)
+  if (!painted) {
+    unreadable.set(src, true)
+    return null
+  }
+  return rememberFrame(server, path, painted)
+}
+
+/**
+ * A clip's cell: the frame, and whether the attempt is over. A clip the browser cannot read settles
+ * with no frame rather than pulsing a skeleton forever, and only a clip asks at all.
+ */
+function useFirstFrame(item: MediaItem, server: string | undefined) {
+  const wants = item.kind === "video"
+  const { path, src, type } = item
   const [frame, setFrame] = useState<string | null>(null)
   const [settled, setSettled] = useState(false)
   useEffect(() => {
-    if (!src) return
+    if (!wants || !server || !path) return
     let stale = false
-    void firstFrame(src, type).then((taken) => {
+    void frameOf(server, path, src, type).then((taken) => {
       if (stale) return
       setFrame(taken)
       setSettled(true)
@@ -145,12 +166,24 @@ function useFirstFrame(src: string | undefined, type: string) {
     return () => {
       stale = true
     }
-  }, [src, type])
+  }, [wants, server, path, src, type])
   return { frame, settled }
 }
 
 /** A photo in its cell, holding the box with a skeleton until its bytes are drawn. */
-function Picture({ src, alt }: { src?: string; alt: string }) {
+function Picture({
+  src,
+  alt,
+  onStale,
+  onPainted,
+}: {
+  src?: string
+  alt: string
+  /** Says the load didn't come, which may only be that the URL in it has run out. */
+  onStale?: () => void
+  /** Says the picture is on screen, which is the one moment it is worth keeping. */
+  onPainted?: () => void
+}) {
   // Three faces, not two: a photo the browser couldn't decode keeps its place and says so, rather
   // than leaving a broken element in a cell that looks drawn.
   const [face, setFace] = useState<"reading" | "ready" | "failed">("reading")
@@ -170,8 +203,14 @@ function Picture({ src, alt }: { src?: string; alt: string }) {
           alt={alt}
           loading="lazy"
           decoding="async"
-          onLoad={() => setFace("ready")}
-          onError={() => setFace("failed")}
+          onLoad={() => {
+            setFace("ready")
+            onPainted?.()
+          }}
+          onError={() => {
+            setFace("failed")
+            onStale?.()
+          }}
           className={cn("h-full w-full object-cover", face !== "ready" && "invisible")}
           draggable={false}
         />
@@ -191,9 +230,37 @@ function Picture({ src, alt }: { src?: string; alt: string }) {
  * whatever its bytes are doing — a skeleton while its URL is out, a plain face with a retry when the
  * read failed — and a tap opens the app's Previewer, never leaves for another app.
  */
-export function Cell({ item, onOpen }: { item: MediaItem; onOpen?: () => void }) {
+export function Cell({
+  item,
+  server,
+  onOpen,
+  onRefresh,
+  onPainted,
+}: {
+  item: MediaItem
+  /** The bot's own address, which is what a copy this device keeps of its files is keyed by. */
+  server?: string
+  onOpen?: () => void
+  /** Asks for another URL, when the one this cell drew from has run out. */
+  onRefresh?: () => void
+  /** Says a picture has been drawn here, which is when it is worth keeping. */
+  onPainted?: () => void
+}) {
   const clip = item.kind === "video"
-  const { frame, settled } = useFirstFrame(clip ? item.src : undefined, item.type ?? "")
+  const { frame, settled } = useFirstFrame(item, server)
+  // A clip has no `<img>` to fail on: a frame that came to nothing is its version of one.
+  useEffect(() => {
+    if (!clip || !settled || frame || !item.src) return
+    onRefresh?.()
+  }, [clip, settled, frame, item.src, onRefresh])
+  const failed = item.state === "failed"
+  const badge = (
+    <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
+      <span className="flex size-9 items-center justify-center rounded-full bg-foreground/55 text-background">
+        <PlayIcon className="size-4" />
+      </span>
+    </span>
+  )
   return (
     <button
       type="button"
@@ -202,12 +269,10 @@ export function Cell({ item, onOpen }: { item: MediaItem; onOpen?: () => void })
       aria-busy={item.state === "reading" || undefined}
       className={cn(CELL, "relative block cursor-pointer overflow-hidden bg-muted/40")}
     >
-      {item.state === "failed" ? (
-        <span className="absolute inset-0 flex items-center justify-center">
-          <RotateCwIcon className="size-6 text-muted-foreground" />
-        </span>
-      ) : clip ? (
+      {clip ? (
         <>
+          {/* A frame this device kept outlives the URL it was painted for: it is drawn even where
+              the clip's own URL never came, which is a cell with a picture and no player. */}
           {frame ? (
             <img
               src={frame}
@@ -215,17 +280,21 @@ export function Cell({ item, onOpen }: { item: MediaItem; onOpen?: () => void })
               className="h-full w-full object-cover"
               draggable={false}
             />
+          ) : failed ? (
+            <span className="absolute inset-0 flex items-center justify-center">
+              <RotateCwIcon className="size-6 text-muted-foreground" />
+            </span>
           ) : settled ? null : (
             <Skeleton className="absolute -inset-px rounded-xl" />
           )}
-          <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <span className="flex size-9 items-center justify-center rounded-full bg-foreground/55 text-background">
-              <PlayIcon className="size-4" />
-            </span>
-          </span>
+          {badge}
         </>
+      ) : failed ? (
+        <span className="absolute inset-0 flex items-center justify-center">
+          <RotateCwIcon className="size-6 text-muted-foreground" />
+        </span>
       ) : (
-        <Picture src={item.src} alt={item.name} />
+        <Picture src={item.src} alt={item.name} onStale={onRefresh} onPainted={onPainted} />
       )}
     </button>
   )
@@ -234,14 +303,23 @@ export function Cell({ item, onOpen }: { item: MediaItem; onOpen?: () => void })
 /** A message's images and clips side by side, one cell each: a cell is a picture and a tap. */
 function MediaGallery({
   items,
+  server,
   align = "start",
   onOpen,
+  onRefresh,
+  onPainted,
 }: {
   items: MediaItem[]
+  /** The bot this thread's files belong to, as `Cell` takes it. */
+  server?: string
   /** Which edge the cells hug: a reply's start, a message the user sent the end, beside its bubble. */
   align?: "start" | "end"
   /** Opens the Previewer on one of them. */
   onOpen: (item: MediaItem) => void
+  /** Asks for another URL for one whose own has run out. */
+  onRefresh?: (item: MediaItem) => void
+  /** Says a picture was drawn, for the one that is worth keeping. */
+  onPainted?: (item: MediaItem) => void
 }) {
   if (!items.length) return null
   const columns = items.length >= 5 ? 3 : 2
@@ -259,7 +337,13 @@ function MediaGallery({
     >
       {items.map((item) => (
         <div key={item.key} className={width}>
-          <Cell item={item} onOpen={() => onOpen(item)} />
+          <Cell
+            item={item}
+            server={server}
+            onOpen={() => onOpen(item)}
+            onRefresh={onRefresh ? () => onRefresh(item) : undefined}
+            onPainted={onPainted ? () => onPainted(item) : undefined}
+          />
         </div>
       ))}
     </div>
@@ -298,20 +382,36 @@ function AudioRow({ item, onOpen }: { item: MediaItem; onOpen: () => void }) {
  */
 export function MediaItems({
   items,
+  server,
   align = "start",
   onDownload,
   onRetry,
+  onRefresh,
 }: {
   items: MediaItem[]
+  /** The bot's own address, which is what a copy this device keeps of its files is keyed by. */
+  server?: string
   /** Which edge the cells and rows hug, as the Gallery takes it. */
   align?: "start" | "end"
   /** Hands a file that a tap can't show to the platform, which shows or saves it. */
   onDownload: (item: MediaItem) => void
   /** Asks a file whose read failed again. */
   onRetry?: (item: MediaItem) => void
+  /** Asks for another URL for a cell drawing from one that has run out. */
+  onRefresh?: (item: MediaItem) => void
 }) {
   const { open: preview, update } = usePreviewer()
   const owner = useId()
+  // A photo this device has just drawn is worth keeping: the next look at it needs no URL and no
+  // host (ADR 0075). A clip is kept by its frame instead, where the frame is painted.
+  const painted = (item: MediaItem) => {
+    if (!server || !item.path || !item.src) return
+    void rememberMedia(server, item.path, {
+      url: item.src,
+      type: item.type,
+      size: item.size ?? 0,
+    }).catch(quietly("keeping a copy of a drawn photo"))
+  }
   const cells = items.filter((item) => item.cell === "gallery")
   const recordings = items.filter((item) => item.cell === "audio")
   const files = items.filter((item) => item.cell === "file")
@@ -345,7 +445,14 @@ export function MediaItems({
     )
   return (
     <>
-      <MediaGallery items={cells} align={align} onOpen={open} />
+      <MediaGallery
+        items={cells}
+        server={server}
+        align={align}
+        onOpen={open}
+        onRefresh={onRefresh}
+        onPainted={painted}
+      />
       {recordings.map((item) => (
         <AudioRow key={item.key} item={item} onOpen={() => open(item)} />
       ))}

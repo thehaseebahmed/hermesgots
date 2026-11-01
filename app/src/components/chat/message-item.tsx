@@ -281,7 +281,10 @@ function SentAttachments({
   attachments: Attachment[]
   dim: boolean
 }) {
-  const { states, retry } = useMediaSources(conversationId, attachmentSources(attachments))
+  const { states, retry, renew, server } = useMediaSources(
+    conversationId,
+    attachmentSources(attachments),
+  )
   const state = (attachment: Attachment) => states.get(attachment.id)
   // The host's URL is what a file draws from; the bytes this device holds are the fallback for one
   // the host has no copy of — a path it has never been given, or one it answered nothing for.
@@ -303,6 +306,7 @@ function SentAttachments({
     name: attachment.name,
     type: attachment.type,
     size: attachment.size,
+    path: attachment.path,
     src: srcOf(attachment),
     state: mediaStage(state(attachment)),
     note: note(attachment),
@@ -325,9 +329,11 @@ function SentAttachments({
         items={drawn.map((attachment) =>
           item(attachment, mediaCell(attachment.type, attachment.name)),
         )}
+        server={server}
         align="end"
         onDownload={download}
         onRetry={(one) => retry(one.key)}
+        onRefresh={(one) => renew(one.key)}
       />
     </div>
   )

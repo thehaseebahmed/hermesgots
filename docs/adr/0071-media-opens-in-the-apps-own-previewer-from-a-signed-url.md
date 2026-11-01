@@ -1,5 +1,7 @@
 # Media opens in the app's own previewer, from a signed URL
 
+**Superseded in its page-life sentence and in its rejected "fetch bytes" option by [ADR 0075](0075-a-drawn-file-stays-drawn-and-a-url-is-never-drawn-from-spent.md)**: a URL is kept only while the expiry the mint names is worth drawing from, and another is minted when it isn't; and what a cell has drawn is kept on the device — a photo's bytes, a clip's first frame — and drawn from there first. Everything else here stands: one Previewer for every tap, a signed URL rather than bytes fetched into the app as the way a clip plays, the cap answering by kind, and a cell that keeps its place.
+
 Every tap on a photo, a clip or a recording now opens the app's Previewer, wherever the tap happened:
 a composer's staged tile, a Gallery cell in the thread, a recording's row, an agent's `MEDIA:` image.
 A file the app can't show goes to the platform instead — a new tab on the web, the phone's own app
