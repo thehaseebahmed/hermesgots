@@ -22,7 +22,7 @@ The row moves first and does not wait. Delete removes the chat at once (and its 
 sets `discardedAt` at once, and the close runs on beside them. That is not a licence to read the
 session as working: ADR 0053 holds that Closed is for sessions nothing runs for, and the host shutting
 down work the user already ended is not the session doing something. So a closing session keeps the
-`discarded` state and the Closed group it had, and the owed close is a fact about the host's cleanup
+`discarded` state and the Closed group it had, and the owed close is a fact about the host finishing it
 rather than a fourth value for Session state.
 
 ## Considered options
