@@ -537,9 +537,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "profile_routes",
                     "pr_tool",
                     "close",
-                    # A session's close as a record the app reads back: the ask answers at once and
-                    # the worktrees, pull requests and branches are seen to on the host (closes.py,
-                    # ADR 0075). Advertised beside `close`, which an app from before it keeps using.
+                    # A session's close as a record the app reads back (closes.py, ADR 0075). `close`
+                    # stays for an app from before it.
                     "closes",
                     "merge_resolve",
                     "events",
@@ -1710,6 +1709,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         )
 
     async def close_session(request: "web.Request") -> "web.Response":
+        """The close an app from before `closes` asks for: it holds the request until all of it is
+        done (ADR 0075)."""
         denied = unauthorized(request)
         if denied is not None:
             return denied
@@ -1718,39 +1719,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         record = await asyncio.to_thread(sessions.record_for, path, home, session_id)
         if not record:
             return web.json_response({"object": "memento.closed", "removed": True, "kept": [], "results": []})
-        try:
-            if await asyncio.to_thread(afk.release_session, home, record):
-                afk.wake()
-        except Exception:
-            logger.warning("memento: couldn't release a closed session's task", exc_info=True)
-        # Before the branches go: a tree whose commits are only on its remote branch can still go.
-        try:
-            removed = await asyncio.to_thread(sessions.remove, path, record["session_id"])
-        except sessions.WorkspaceError as error:
-            removed = {"removed": False, "kept": [], "error": str(error)}
-        if removed.get("removed"):
-            sessions._clear_cwd(session_id)
-        results = await asyncio.to_thread(ship.close, home, record)
-        return web.json_response({"object": "memento.closed", **removed, "results": results})
-
-    def close_body(row: Dict[str, Any]) -> Dict[str, Any]:
-        return {
-            "object": "memento.closing",
-            "session_id": row["session_id"],
-            "state": row["state"],
-            "started_at": row["started_at"],
-            "ended_at": row["ended_at"],
-            # The repositories as names: what the app prefixes a per-repo refusal with.
-            "repos": [
-                repo.get("name")
-                for repo in row["repos"]
-                if isinstance(repo, dict) and repo.get("name")
-            ],
-            "removed": row["removed"],
-            "kept": row["kept"],
-            "results": row["results"],
-            "error": row["error"],
-        }
+        # The same sequence the recorded close runs, so the two paths cannot drift.
+        report = await asyncio.to_thread(closes.work, path, home, record)
+        return web.json_response({"object": "memento.closed", **report})
 
     async def start_close(request: "web.Request") -> "web.Response":
         """Records a session's close and answers before any of it runs (closes.py, ADR 0075)."""
@@ -1760,7 +1731,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         session_id = request.match_info["session_id"]
         path, home = store_path(), hermes_home()
         row = await asyncio.to_thread(closes.start, path, home, session_id)
-        return web.json_response(close_body(row), status=202)
+        return web.json_response(closes.public(row), status=202)
 
     async def read_close(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1774,7 +1745,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return web.json_response(
                 {"object": "memento.closing", "session_id": session_id, "state": "none"}
             )
-        return web.json_response(close_body(row))
+        return web.json_response(closes.public(row))
 
     async def read_closes(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1782,7 +1753,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return denied
         rows = await asyncio.to_thread(closes.recent, store_path())
         return web.json_response(
-            {"object": "memento.closes", "closes": [close_body(row) for row in rows]}
+            {"object": "memento.closes", "closes": [closes.public(row) for row in rows]}
         )
 
     async def live_runs(request: "web.Request") -> "web.Response":

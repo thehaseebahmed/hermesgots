@@ -5,7 +5,7 @@ sessions/{id}/close`, and that one request released the AFK claim, removed the w
 those with uncommitted or unpushed work) and then closed each repository's open pull request and
 deleted its pushed branch on GitHub, one repository after another. Four GitHub calls at 15 s each
 per repository, two or three git subprocesses at 60 s each, all behind a dialog whose button kept
-spinning, and the request carried no timeout at all — the only write in `hermes.ts` without one.
+spinning, and the request carried no timeout at all.
 What the close ended with — the trees it kept, the per-repository errors, the removal's own failure
 the app never even read — was told once, as a toast, and then forgotten: the app that closed, or
 that was killed mid-close, left the user with no report and no way to ask again.
@@ -14,8 +14,8 @@ A close now leaves the request. `POST sessions/{id}/closes` records what the clo
 session's repositories, snapshotted, because a successful removal deletes the session record — and
 answers `202` before any of it runs; a daemon thread does the release, the removal and the GitHub
 work, and writes what it ended with onto that same row. `GET sessions/{id}/closes` reads one, and
-`GET closes` reads the recent ones, which is how a device learns the report of a session it has
-already deleted. A row still `closing` when the process starts is run again at boot, so a close is
+`GET closes` reads the most recent ones, which is how a device learns the report of a session it
+has already deleted. A row still `closing` when the process starts is run again at boot, so a close is
 owed until it ends, not until the response was written (the shape ADR 0052 settled for a wake).
 
 The row moves first and does not wait. Delete removes the chat at once (and its tombstone), Discard

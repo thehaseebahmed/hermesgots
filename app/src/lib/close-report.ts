@@ -1,11 +1,7 @@
 /**
- * What a session's close ended with, and whether this device has already said it — the pure half of
- * telling a close (ADR 0075). Import-free, so `scripts/test-close-report.mjs` runs it as a rule.
- *
- * A close is the host's work: Delete and Discard ask for one and the row moves at the tap, so the
- * report is read afterwards — by the device that pressed the button if it is still there, and by the
- * device that next opens Code if it is not. Each device keeps a mark of the reports it has told, the
- * same shape as a read mark, so a report is told once and never again.
+ * What a session's close ended with, and whether this device has already said it — the rule half of
+ * telling a close, import-free so `scripts/test-close-report.mjs` runs it (ADR 0075). The wire shape
+ * is `SessionClose` in hermes.ts; this copy exists so the rule can be tested without a host.
  */
 
 export interface KeptTree {
@@ -16,7 +12,6 @@ export interface KeptTree {
 /** One repository the close touched, and what it managed there. */
 export interface ClosedRepo {
   name: string
-  /** The pull request it closed. */
   closed: number | null
   branchDeleted: boolean
   error: string | null
@@ -25,11 +20,9 @@ export interface ClosedRepo {
 /** A session's close as the host keeps it. */
 export interface CloseReport {
   sessionId: string
-  /** `none` is a host that was never asked to close this session. */
   state: "none" | "closing" | "done"
   startedAt: number
   endedAt: number | null
-  /** The session's repositories, by name, as they stood when the close was asked for. */
   repos: string[]
   removed: boolean
   kept: KeptTree[]

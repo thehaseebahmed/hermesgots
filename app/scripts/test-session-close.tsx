@@ -119,7 +119,7 @@ test("Delete removes the session while the host is still closing it, and tells t
 
       // The row is gone and the screen moved on, with the host's close held open.
       await until(async () => (await db.conversations.get(CHAT)) === undefined, "the session gone")
-      assert.equal(path(), "/code", "the app left the session it deleted")
+      await until(async () => path() === "/code", "the app left the session it deleted")
       await until(async () => host.asked.length === 1, "the host asked to close it")
       assert.deepEqual(said, [], "nothing is told before the close ends")
 
@@ -151,8 +151,7 @@ test("Discard moves the session to Discarded at once, with the close still runni
       await until(async () => host.asked.length === 1, "the host asked to close it")
       assert.deepEqual(said, [], "a close still running has nothing to tell")
 
-      // A later close of the same session is news again: its start is past the mark this device
-      // already holds for the one before it.
+      // Past the close an earlier case told: the marks outlive localStorage.clear() in one process.
       host.release(json(close({ started_at: 50 })))
       await until(async () => said.length > 0, "the close's report told")
     })

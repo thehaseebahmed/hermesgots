@@ -1,6 +1,8 @@
+import { toast } from "sonner"
+
 import { LIBRARY_MS, PR_MS, PR_PENDING_MS, READ_TIMEOUT_MS } from "@/lib/freshness"
 import { noteFailure } from "@/lib/report"
-import { connectionKey } from "@/lib/connection"
+import { connectionKey, hasServer } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
 import {
   db,
@@ -27,7 +29,6 @@ import {
   startSessionClose,
   type HermesProject,
   type HermesProjectFolder,
-  type KeptWorktree,
   type SessionClose,
   type SessionWorkspace,
 } from "@/lib/hermes"
@@ -304,61 +305,56 @@ async function pushSessionMode(conversation: Conversation, mode: SessionMode) {
  * a device that leaves is told by Code's own screen instead. A plugin from before the route gets
  * the synchronous call, which holds the request and answers with what it couldn't do.
  */
-export async function closeSessionWork(
-  conversation: Conversation,
-  profile: Profile,
-): Promise<CloseAsk> {
+export async function closeSessionWork(conversation: Conversation, profile: Profile): Promise<void> {
   const session = conversation.hermesSessionId
-  if (!session || !profile.apiKey || profile.disabled) return { state: "closed", kept: [], errors: [] }
+  if (!session || !hasServer(profile) || profile.disabled) return
   if (await hasPluginFeature(profile, "closes")) {
     try {
       const asked = await startSessionClose(profile, session)
       if (asked.state === "closing") void followClose(conversation.id, profile, asked)
       else void markClosed(conversation.id, asked.results)
-      tellClose(profile, asked, conversation.worktree ? conversation.worktree.repos.length > 1 : undefined)
-      return { state: asked.state === "closing" ? "closing" : "closed", kept: [], errors: [] }
+      tellClose(profile, asked)
+      return
     } catch (error) {
-      // An older plugin answers the route with nothing, or the ask never left: the synchronous
-      // close below is what it does have.
+      // An older plugin answers the route with nothing: the synchronous close below is what it has.
       noteFailure("Asking the host to close a session", error)
     }
   }
-  if (!conversation.worktree) return { state: "closed", kept: [], errors: [] }
-  const named = conversation.worktree.repos.length > 1
+  if (!conversation.worktree) return
   try {
     const { kept, results } = await closeSession(profile, session)
     await markClosed(conversation.id, results)
-    return {
-      state: "closed",
+    // A host without the recorded close answers with its report here, and this is the only chance
+    // to tell it: the same words, told the same once.
+    tellClose(profile, {
+      sessionId: session,
+      state: "done",
+      startedAt: Date.now(),
+      endedAt: Date.now(),
+      repos: conversation.worktree.repos.map((repo) => repo.name),
+      removed: !kept.length,
       kept,
-      errors: results
-        .filter((result) => result.error)
-        .map((result) => (named ? `${result.name}: ${result.error}` : result.error!)),
-    }
-  } catch {
+      results,
+      error: null,
+    })
+    return
+  } catch (error) {
     // A plugin from before 0.20 can only remove the worktrees.
+    noteFailure("Closing a session", error)
   }
   try {
     const { kept } = await removeWorkspace(profile, session)
-    return { state: "closed", kept, errors: [] }
+    for (const tree of kept)
+      toast.info(
+        `Kept ${tree.name}: it has ${tree.reason === "dirty" ? "uncommitted" : "unpushed"} changes.`,
+      )
   } catch (error) {
-    return {
-      state: "closed",
-      kept: [],
-      errors: [error instanceof Error ? error.message : "Couldn't reach the plugin."],
-    }
+    toast.error(error instanceof Error ? error.message : "Couldn't reach the plugin.")
   }
 }
 
-/** What asking for a close came back as: `closing` is a host doing it, `closed` one already done. */
-export interface CloseAsk {
-  state: "closing" | "closed"
-  kept: KeptWorktree[]
-  errors: string[]
-}
-
 /** How long after asking this device keeps reading a close, and how often. */
-const CLOSE_READ_MS = 2_000
+const CLOSE_READ_MS = 5_000
 const CLOSE_WAIT_MS = 30_000
 
 /**
