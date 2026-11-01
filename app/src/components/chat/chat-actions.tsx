@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react"
-import { toast } from "sonner"
 import {
   ArchiveXIcon,
   BellIcon,
@@ -186,16 +185,11 @@ export function ChatActions({
   const [discarding, setDiscarding] = useState(false)
   const [title, setTitle] = useState("")
 
-  /** Before a session is deleted or discarded: its run, worktrees, pull requests and branches. */
-  const closeSession = async () => {
-    if (!session) return
+  /** Asks the host to close the session, and moves on: the close runs there (ADR 0075). */
+  const closeSession = () => {
+    if (!session || !profile) return
     stopMessage(session.id)
-    const { kept, errors } = await closeSessionWork(session.id)
-    for (const tree of kept)
-      toast.info(
-        `Kept ${tree.name}: it has ${tree.reason === "dirty" ? "uncommitted" : "unpushed"} changes.`,
-      )
-    for (const error of errors) toast.error(error)
+    void closeSessionWork(session, profile).catch(quietly("Closing a session"))
   }
 
   return (
@@ -342,7 +336,7 @@ export function ChatActions({
             </AlertDialogTitle>
             <AlertDialogDescription>
               {session
-                ? "Its pull request is closed and its branch deleted on GitHub, and it's removed from the app. Hermes keeps its own copy of the session."
+                ? "Its run stops and the host closes the session's work now: its worktrees are removed, unless one has uncommitted or unpushed changes, and its pull request is closed and its branch deleted on GitHub. It's removed from the app; Hermes keeps its own copy of the session."
                 : "It's removed from this device. Hermes keeps its own copy of the session."}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -351,10 +345,12 @@ export function ChatActions({
             <AlertDialogAction
               variant="destructive"
               onClick={async () => {
-                if (session) await closeSession()
+                if (session) closeSession()
                 else stopMessage(chat.id)
-                await deleteConversation(chat.id)
+                // The row goes now, not when the host has finished: it is already closed, and the
+                // close reports a kept worktree or a refusal when it ends (ADR 0075).
                 setDeleting(false)
+                await deleteConversation(chat.id)
                 onDeleted()
               }}
             >
@@ -369,8 +365,9 @@ export function ChatActions({
           <AlertDialogHeader>
             <AlertDialogTitle>Discard this session?</AlertDialogTitle>
             <AlertDialogDescription>
-              Its pull request is closed and its branch deleted on GitHub. The session moves to
-              Discarded.
+              Its run stops and the host closes the session's work now: its worktrees are removed,
+              unless one has uncommitted or unpushed changes, and its pull request is closed and
+              its branch deleted on GitHub. The session moves to Discarded meanwhile.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -378,11 +375,11 @@ export function ChatActions({
             <AlertDialogAction
               variant="destructive"
               onClick={async () => {
+                setDiscarding(false)
                 if (session) {
-                  await closeSession()
+                  closeSession()
                   await updateConversation(session.id, { discardedAt: Date.now() })
                 }
-                setDiscarding(false)
               }}
             >
               Discard

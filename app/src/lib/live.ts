@@ -25,7 +25,7 @@ const RETRY_MS = [1000, 2000, 5000, 10_000, 30_000]
 /** A `runs` event often comes with a status the server sets a moment later. */
 const RUNS_SETTLE_MS = 300
 
-export type Kind = "cron" | "runs" | "projects" | "research" | "meetings"
+export type Kind = "cron" | "runs" | "projects" | "research" | "meetings" | "closes"
 type Connection = Pick<HermesConfig, "baseUrl" | "apiKey">
 
 export { connectionKey }
@@ -197,7 +197,8 @@ function catchUpAll(key: string) {
     })
   }
   sessionListeners.forEach((listener) => listener(key))
-  for (const kind of ["cron", "runs", "projects", "research", "meetings"] as const) bump(key, kind)
+  for (const kind of ["cron", "runs", "projects", "research", "meetings", "closes"] as const)
+    bump(key, kind)
 }
 
 async function applyTitle(key: string, sessionId: unknown) {
@@ -254,6 +255,7 @@ function onEvent(key: string, event: string, data: Record<string, unknown>) {
     case "projects":
     case "research":
     case "meetings":
+    case "closes":
       bump(key, event)
       break
   }

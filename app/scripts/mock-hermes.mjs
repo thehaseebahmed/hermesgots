@@ -96,7 +96,10 @@
 // then): "merge" or "close" in a turn sets the live one's state, a merge resolves the session in the
 // chat list, and "break" fails their
 // checks while "pending" runs them for a while before they pass. POST …/close (delete or discard)
-// closes them and removes the trees like …/workspace/remove. MOCK_PRS_FAIL=1 (or
+// closes them and removes the trees like …/workspace/remove. Since ADR 0075 the close leaves the
+// request: POST …/closes records it and answers 202 at once, GET …/closes reads the report, and
+// GET /api/plugins/memento/closes lists them all — MOCK_CLOSE_MS holds one open that long.
+// MOCK_PRS_FAIL=1 (or
 // POST /__mock/prs { fail }) is a host that can't reach GitHub: …/prs answers an error rather than
 // a list, so the app keeps the pull requests it already knows. GET /api/plugins/memento/runs/live lists the sessions with
 // a run in flight, why each one waiting on the user waits, and which are still owed the wake turn of
@@ -1142,6 +1145,47 @@ const PENDING_CHECK_S = 12
 
 /** Project sessions as the plugin's memento.db holds them, by Hermes session id. */
 const projectSessions = new Map()
+/** A session's close, as closes.py keeps it: asked for, then ended with a report. */
+const sessionCloses = new Map()
+/** MOCK_CLOSE_MS holds a close open that long, so a flow can watch the row move before it ends. */
+const CLOSE_MS = Number(process.env.MOCK_CLOSE_MS ?? 0)
+
+/** What one close did, the way `sessions.remove` and `ship.close` answer together. */
+function closeOutcome(id) {
+  const workspace = projectSessions.get(id)
+  if (!workspace) return { removed: true, kept: [], results: [] }
+  const live = (workspace.prs ?? []).filter((pr) => !pr.state)
+  const open =
+    live.length > 0 &&
+    !workspace.closed &&
+    !userTurns(id).some((r) => /merge|close/i.test(r.content))
+  const results = live.map((pr) => ({
+    name: pr.repo,
+    closed: open ? pr.number : null,
+    branch_deleted: true,
+  }))
+  workspace.closed = true
+  // The first repo keeps its tree after a turn that said "commit" (unpushed work).
+  if (userTurns(id).some((r) => /commit/i.test(r.content)))
+    return { removed: false, kept: [{ name: workspace.repos[0].name, reason: "unpushed" }], results }
+  projectSessions.delete(id)
+  return { removed: true, kept: [], results }
+}
+
+function closeBody(row) {
+  return {
+    object: "memento.closing",
+    session_id: row.session_id,
+    state: row.state,
+    started_at: row.started_at,
+    ended_at: row.ended_at,
+    repos: row.repos,
+    removed: row.removed,
+    kept: row.kept,
+    results: row.results,
+    error: row.error,
+  }
+}
 // The plugin's pull request rule (prompt_builder._PR_RULES), word for word.
 // test_library.py matches this line word for word, so it stays one line.
 // prettier-ignore
@@ -5024,6 +5068,13 @@ http
         projects: pluginProfile ? [] : mockProjects(),
       })
     }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/closes") {
+      // Every close this host keeps, newest first: how a device hears about a session it deleted.
+      return json(res, 200, {
+        object: "memento.closes",
+        closes: [...sessionCloses.values()].map((row) => closeBody(row)),
+      })
+    }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/chats") {
       const key = pluginProfile ?? ""
       if (!pluginChatLists.has(key)) pluginChatLists.set(key, key ? new Map() : pluginChats)
@@ -6048,7 +6099,7 @@ http
       return json(res, 200, { ok: true, session, child })
     }
     const sessionRoute =
-      /^\/api\/plugins\/memento\/sessions\/([^/]+)\/(workspace|workspace\/remove|mode|prs|library|close)$/.exec(
+      /^\/api\/plugins\/memento\/sessions\/([^/]+)\/(workspace|workspace\/remove|mode|prs|library|close|closes)$/.exec(
         url.pathname,
       )
     if (PLUGIN && !profile && sessionRoute) {
@@ -6165,27 +6216,42 @@ http
       if (route === "close" && req.method === "POST") {
         if (!workspace)
           return json(res, 200, { object: "memento.closed", removed: true, kept: [], results: [] })
-        const live = (workspace.prs ?? []).filter((pr) => !pr.state)
-        const open =
-          live.length > 0 &&
-          !workspace.closed &&
-          !userTurns(id).some((r) => /merge|close/i.test(r.content))
-        const results = live.map((pr) => ({
-          name: pr.repo,
-          closed: open ? pr.number : null,
-          branch_deleted: true,
-        }))
-        workspace.closed = true
-        // The first repo keeps its tree after a turn that said "commit" (unpushed work).
-        if (userTurns(id).some((r) => /commit/i.test(r.content)))
-          return json(res, 200, {
-            object: "memento.closed",
-            removed: false,
-            kept: [{ name: workspace.repos[0].name, reason: "unpushed" }],
-            results,
-          })
-        projectSessions.delete(id)
-        return json(res, 200, { object: "memento.closed", removed: true, kept: [], results })
+        return json(res, 200, { object: "memento.closed", ...closeOutcome(id) })
+      }
+      if (route === "closes") {
+        // The close leaves the request (ADR 0075): asked for, then read back as a report.
+        if (req.method === "POST") {
+          const existing = sessionCloses.get(id)
+          if (existing?.state === "closing") return json(res, 202, closeBody(existing))
+          const row = {
+            session_id: id,
+            state: workspace ? "closing" : "done",
+            started_at: Date.now(),
+            ended_at: workspace ? null : Date.now(),
+            repos: (workspace?.repos ?? []).map((repo) => repo.name),
+            removed: !workspace,
+            kept: [],
+            results: [],
+            error: null,
+          }
+          sessionCloses.set(id, row)
+          if (workspace)
+            setTimeout(() => {
+              sessionCloses.set(id, {
+                ...row,
+                state: "done",
+                ended_at: Date.now(),
+                ...closeOutcome(id),
+              })
+            }, CLOSE_MS)
+          return json(res, 202, closeBody(row))
+        }
+        const row = sessionCloses.get(id)
+        return json(
+          res,
+          200,
+          row ? closeBody(row) : { object: "memento.closing", session_id: id, state: "none" },
+        )
       }
       if (route === "library" && req.method === "GET") {
         // One worktree's filed files; an unknown session answers an empty tree, never a 404.
