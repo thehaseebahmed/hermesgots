@@ -19,8 +19,8 @@ device never read, and the two dialogs' own copy change as little as they can.
 ## What this is not
 
 - **Not a new session state.** A close still running does not make a session working: ADR 0053
-  holds that Closed is for sessions nothing runs for, and the host's cleanup of an ended session is
-  not the session doing something. The row keeps the state it closed with, and the Code list's
+  holds that Closed is for sessions nothing runs for, and the host finishing an ended session's close
+  is not the session doing something. The row keeps the state it closed with, and the Code list's
   groups are untouched.
 - **Not a notification.** The sixteen push kinds stay sixteen; the report is a toast, on the
   devices that read it.
@@ -120,8 +120,7 @@ Cheapest tier that would fail for the reason the change can fail (ADR 0019):
   failed removal.
 - **Component** — `app/scripts/test-session-close.tsx`: Delete from the header's menu removes the
   conversation while the host's close is still running (the request held open), the dialog is gone,
-  and the report lands as a toast once the host answers; Discard sets `discardedAt` the same way;
-  Main still has neither.
+  and the report lands as a toast once the host answers; Discard sets `discardedAt` the same way.
 - A mock switch for a slow close (`MOCK_CLOSE_MS`), so a browser flow can watch a row move before
   its close ends; the component test holds the ask itself with a request it controls.
 - No browser flow: the behaviour is "the row moved before the host answered", which a component
