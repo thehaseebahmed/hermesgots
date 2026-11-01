@@ -1,6 +1,8 @@
+import { toast } from "sonner"
+
 import { LIBRARY_MS, PR_MS, PR_PENDING_MS, READ_TIMEOUT_MS } from "@/lib/freshness"
 import { noteFailure } from "@/lib/report"
-import { connectionKey } from "@/lib/connection"
+import { connectionKey, hasServer } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
 import {
   db,
@@ -9,23 +11,28 @@ import {
   sessionMode,
   updateConversation,
   type Conversation,
+  type Profile,
   type PullRequestRef,
   type SessionMode,
 } from "@/lib/db"
 import {
   ensureWorkspace,
+  getSessionClose,
   getSessionLibrary,
   getSessionPrs,
   getWorkspace,
+  hasPluginFeature,
   HermesError,
   closeSession,
   removeWorkspace,
   setWorkspaceMode,
+  startSessionClose,
   type HermesProject,
   type HermesProjectFolder,
-  type KeptWorktree,
+  type SessionClose,
   type SessionWorkspace,
 } from "@/lib/hermes"
+import { tellClose } from "@/lib/close-reports"
 import { syncNow } from "@/lib/sync"
 import { sessionState, type SessionState } from "@/lib/session-work"
 
@@ -289,47 +296,115 @@ async function pushSessionMode(conversation: Conversation, mode: SessionMode) {
 }
 
 /**
- * Ends a session being deleted or discarded on the plugin: its worktrees go (the plugin keeps those
- * with uncommitted or unpushed work), and its pull requests and pushed branches are closed and
- * deleted on GitHub. What it couldn't do comes back as `errors`.
+ * Asks the host to close a session on Delete or Discard (ADR 0075): its worktrees go, except those
+ * with uncommitted or unpushed work, and each repository's open pull request is closed and its
+ * pushed branch deleted on GitHub.
+ *
+ * A host that advertises `closes` records the close and answers at once, so the row can move at the
+ * tap; this then follows that close while the device is still here, telling what it ended with —
+ * a device that leaves is told by Code's own screen instead. A plugin from before the route gets
+ * the synchronous call, which holds the request and answers with what it couldn't do.
  */
-export async function closeSessionWork(
-  conversationId: string,
-): Promise<{ kept: KeptWorktree[]; errors: string[] }> {
-  const found = await tracked(conversationId)
-  if (!found?.conversation.worktree) return { kept: [], errors: [] }
-  const { profile, conversation } = found
-  const named = conversation.worktree!.repos.length > 1
+export async function closeSessionWork(conversation: Conversation, profile: Profile): Promise<void> {
+  const session = conversation.hermesSessionId
+  if (!session || !hasServer(profile) || profile.disabled) return
+  if (await hasPluginFeature(profile, "closes")) {
+    try {
+      const asked = await startSessionClose(profile, session)
+      if (asked.state === "closing") void followClose(conversation.id, profile, asked)
+      else void markClosed(conversation.id, asked.results)
+      tellClose(profile, asked)
+    } catch (error) {
+      // The ask may have landed with only its answer lost — the network going as the dialog closes,
+      // which is exactly when this runs. Asking again would be a second removal of the same trees,
+      // so this reports and stops; the host's own record answers the next read.
+      noteFailure("Asking the host to close a session", error)
+    }
+    return
+  }
+  if (!conversation.worktree) return
   try {
-    const { kept, results } = await closeSession(profile, conversation.hermesSessionId)
-    // A close names one pull request ("name#number"): a session that shipped more than once keeps
-    // the ones already finished, so only the live one changes state here.
-    const closed = new Set(
-      results.filter((r) => r.closed !== null).map((r) => `${r.name}#${r.closed}`),
-    )
-    if (closed.size && conversation.prs)
-      await db.conversations.update(conversationId, {
-        prs: conversation.prs.map((pr) =>
-          closed.has(prKey(pr)) ? { ...pr, state: "closed" } : pr,
-        ),
-      })
-    return {
+    const { kept, results, error } = await closeSession(profile, session)
+    await markClosed(conversation.id, results)
+    // A host without the recorded close answers with its report here, and this is the only chance
+    // to tell it: the same words, told the same once.
+    tellClose(profile, {
+      sessionId: session,
+      state: "done",
+      startedAt: Date.now(),
+      endedAt: Date.now(),
+      repos: conversation.worktree.repos.map((repo) => repo.name),
+      removed: !kept.length,
       kept,
-      errors: results
-        .filter((result) => result.error)
-        .map((result) => (named ? `${result.name}: ${result.error}` : result.error!)),
+      results,
+      error,
+    })
+    return
+  } catch (error) {
+    // Only a plugin that has no sync close at all falls through to the worktrees alone: a timeout or
+    // a lost answer leaves a host that is already working, and removing the trees again would race.
+    if (!(await lacksRoute(profile, error, "close"))) {
+      noteFailure("Closing a session", error)
+      return
     }
-  } catch {
-    // A plugin from before 0.20 can only remove the worktrees.
   }
   try {
-    return { kept: (await removeWorkspace(profile, conversation.hermesSessionId)).kept, errors: [] }
+    const { kept } = await removeWorkspace(profile, session)
+    for (const tree of kept)
+      toast.info(
+        `Kept ${tree.name}: it has ${tree.reason === "dirty" ? "uncommitted" : "unpushed"} changes.`,
+      )
   } catch (error) {
-    return {
-      kept: [],
-      errors: [error instanceof Error ? error.message : "Couldn't reach the plugin."],
+    toast.error(error instanceof Error ? error.message : "Couldn't reach the plugin.")
+  }
+}
+
+/** How long after asking this device keeps reading a close, and how often. */
+const CLOSE_READ_MS = 5_000
+const CLOSE_WAIT_MS = 30_000
+
+/**
+ * Reads the close asked for until it ends, then tells it: the report the button's own device gets
+ * while it is still here. Give up quietly after a while — Code reads the report later anyway.
+ */
+async function followClose(
+  conversationId: string,
+  profile: Profile,
+  started: SessionClose,
+) {
+  const until = Date.now() + CLOSE_WAIT_MS
+  let close = started
+  while (close.state === "closing" && Date.now() < until) {
+    await new Promise((resolve) => setTimeout(resolve, CLOSE_READ_MS))
+    try {
+      close = await getSessionClose(profile, started.sessionId)
+    } catch (error) {
+      // One lost read is not a lost close: the next look may answer, and Code reads it either way.
+      noteFailure("Reading a session's close", error)
+      continue
     }
   }
+  if (close.state !== "done") return
+  await markClosed(conversationId, close.results)
+  tellClose(profile, close)
+}
+
+/** A close's own results onto the row: the pull requests it closed, where the session is still here. */
+async function markClosed(
+  conversationId: string,
+  results: { name: string; closed: number | null }[],
+) {
+  const conversation = await db.conversations.get(conversationId)
+  if (!conversation?.prs) return
+  // A close names one pull request ("name#number"): a session that shipped more than once keeps the
+  // ones already finished, so only the live one changes state here.
+  const closed = new Set(
+    results.filter((r) => r.closed !== null).map((r) => `${r.name}#${r.closed}`),
+  )
+  if (!closed.size) return
+  await db.conversations.update(conversationId, {
+    prs: conversation.prs.map((pr) => (closed.has(prKey(pr)) ? { ...pr, state: "closed" } : pr)),
+  })
 }
 
 const PLAN_GO_AHEAD = "Go ahead with the plan"

@@ -1,11 +1,13 @@
-import { useEffect, useRef } from "react"
+import { useCallback, useEffect, useRef } from "react"
 import Dexie from "dexie"
 import { useLiveQuery } from "dexie-react-hooks"
 
-import { connectionKey } from "@/lib/connection"
+import { connectionKey, hasServer } from "@/lib/connection"
 import { db, type Conversation, type Profile } from "@/lib/db"
+import { tellCloseReports } from "@/lib/close-reports"
 import type { HermesProject } from "@/lib/hermes"
-import { PR_PENDING_MS, SESSION_REREAD_MS } from "@/lib/freshness"
+import { CLOSE_REPORT_GAP_MS, CLOSE_REPORT_MS, PR_PENDING_MS, SESSION_REREAD_MS } from "@/lib/freshness"
+import { useAnyChange } from "@/lib/live"
 import { usePoll } from "@/lib/poll"
 import { prChecksPending, refreshPrs, refreshWorkspace } from "@/lib/workspace"
 
@@ -108,4 +110,27 @@ export function startBlocked(project: HermesProject) {
   // A session spans every repo of the project; without one there's nowhere for it to work.
   if (!project.folders.some((folder) => folder.git)) return "No repositories"
   return undefined
+}
+
+/**
+ * Tells the close reports a bot has ended that this device holds no mark for (ADR 0075). A close is
+ * the host's work, so the device that asked may never have heard the end — it was put away, or the
+ * close outlived the dialog — and the device that asked may not be this one at all. Read as Code
+ * opens, when the stream says a close ended, and on a slow timer, since no other screen asks.
+ */
+export function useCloseReports() {
+  const changed = useAnyChange("closes")
+  const last = useRef(0)
+  const read = useCallback(async () => {
+    const now = Date.now()
+    if (now - last.current < CLOSE_REPORT_GAP_MS) return
+    last.current = now
+    const bots = (await db.profiles.toArray()).filter((bot) => !bot.disabled && hasServer(bot))
+    await Promise.all(bots.map((bot) => tellCloseReports(bot)))
+  }, [])
+  usePoll(read, CLOSE_REPORT_MS)
+  useEffect(() => {
+    // The poll above ran once on mount; this is the stream's own word, not a second read of it.
+    if (changed) void read()
+  }, [changed, read])
 }

@@ -30,6 +30,7 @@ from . import (
     clarify,
     cleanup,
     clones,
+    closes,
     commands,
     community,
     compactions,
@@ -358,6 +359,13 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             await asyncio.to_thread(repos.resume, home)
         except Exception:
             logger.debug("memento: couldn't resume project clones", exc_info=True)
+        # And a session the user closed with its close still owed (closes.py, ADR 0075), on every
+        # home this process serves: a `/p/<profile>` bot's row is as owed as the launch profile's.
+        try:
+            for served in link.served_homes(adapter):
+                await asyncio.to_thread(closes.resume, served)
+        except Exception:
+            logger.debug("memento: couldn't resume the session closes", exc_info=True)
         # A chat an older plugin relabelled is un-runnable until these rows are repaired; see
         # sessions.heal_sources.
         failed = await repair_labelled_sources(link.served_homes(adapter))
@@ -517,6 +525,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "profile_routes",
                     "pr_tool",
                     "close",
+                    # A session's close as a record the app reads back (closes.py, ADR 0075). `close`
+                    # stays for an app from before it.
+                    "closes",
                     "merge_resolve",
                     "events",
                     "push",
@@ -1685,6 +1696,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         )
 
     async def close_session(request: "web.Request") -> "web.Response":
+        """The close an app from before `closes` asks for: it holds the request until all of it is
+        done (ADR 0075)."""
         denied = unauthorized(request)
         if denied is not None:
             return denied
@@ -1693,20 +1706,42 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         record = await asyncio.to_thread(sessions.record_for, path, home, session_id)
         if not record:
             return web.json_response({"object": "memento.closed", "removed": True, "kept": [], "results": []})
-        try:
-            if await asyncio.to_thread(afk.release_session, home, record):
-                afk.wake()
-        except Exception:
-            logger.warning("memento: couldn't release a closed session's task", exc_info=True)
-        # Before the branches go: a tree whose commits are only on its remote branch can still go.
-        try:
-            removed = await asyncio.to_thread(sessions.remove, path, record["session_id"])
-        except sessions.WorkspaceError as error:
-            removed = {"removed": False, "kept": [], "error": str(error)}
-        if removed.get("removed"):
-            sessions._clear_cwd(session_id)
-        results = await asyncio.to_thread(ship.close, home, record)
-        return web.json_response({"object": "memento.closed", **removed, "results": results})
+        # The same sequence the recorded close runs, so the two paths cannot drift.
+        report = await asyncio.to_thread(closes.work, path, home, record)
+        return web.json_response({"object": "memento.closed", **report})
+
+    async def start_close(request: "web.Request") -> "web.Response":
+        """Records a session's close and answers before any of it runs (closes.py, ADR 0075)."""
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        session_id = request.match_info["session_id"]
+        path, home = store_path(), hermes_home()
+        row = await asyncio.to_thread(closes.start, path, home, session_id)
+        return web.json_response(closes.public(row), status=202)
+
+    async def read_close(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        session_id = request.match_info["session_id"]
+        row = await asyncio.to_thread(closes.read, store_path(), session_id)
+        if not row:
+            # Never a 404: the app reads one as a plugin without the route, and a session this host
+            # was never asked about has no close to fail over.
+            return web.json_response(
+                {"object": "memento.closing", "session_id": session_id, "state": "none"}
+            )
+        return web.json_response(closes.public(row))
+
+    async def read_closes(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        rows = await asyncio.to_thread(closes.recent, store_path())
+        return web.json_response(
+            {"object": "memento.closes", "closes": [closes.public(row) for row in rows]}
+        )
 
     async def live_runs(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1900,6 +1935,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/prs", session_pr)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/library", session_library)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/close", close_session)
+    app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/closes", start_close)
+    app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/closes", read_close)
+    app.router.add_get(f"{PREFIX}/closes", read_closes)
     async def answer_clarify(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:

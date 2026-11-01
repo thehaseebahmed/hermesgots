@@ -21,7 +21,7 @@ import { SortMenu } from "@/components/sort-menu"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { projectKey, startBlocked, useProjectSessions, useSessionFollowUps } from "@/lib/code"
+import { projectKey, startBlocked, useCloseReports, useProjectSessions, useSessionFollowUps } from "@/lib/code"
 import { connectionKey } from "@/lib/connection"
 import {
   createConversation,
@@ -150,6 +150,8 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
   const sessions = listed?.sessions
   const profiles = listed?.profiles
   useSessionFollowUps(sessions, pane?.selected)
+  // A close asked for on any device is told here when it ends, whether or not this screen asked.
+  useCloseReports()
 
   // Each server once, by the first bot on it, which keeps its projects as the Projects list does.
   const servers = useMemo(() => {

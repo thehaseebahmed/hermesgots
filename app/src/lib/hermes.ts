@@ -2932,32 +2932,126 @@ export interface ClosedRepo {
 /**
  * Ends a deleted or discarded session on the server: removes its worktrees (keeping those with
  * uncommitted or unpushed work), closes its open pull requests and deletes its branches on GitHub.
- * Needs plugin 0.20.
+ * Needs plugin 0.20, and holds the request until all of it is done — `startSessionClose` is the path
+ * a host that advertises `closes` takes instead (ADR 0075).
  */
 export async function closeSession(
   config: HermesConfig,
   sessionId: string,
-): Promise<{ removed: boolean; kept: KeptWorktree[]; results: ClosedRepo[] }> {
+): Promise<{ removed: boolean; kept: KeptWorktree[]; results: ClosedRepo[]; error: string | null }> {
   const response = await request(pluginSession(config, sessionId, "/close"), {
     method: "POST",
     headers: headers(config),
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
   })
   const body = await response.json()
-  const results: unknown = body?.results
   return {
     removed: Boolean(body?.removed),
     kept: parseKept(body?.kept),
-    results: Array.isArray(results)
-      ? results
-          .filter((r) => typeof r?.name === "string")
-          .map((r) => ({
-            name: r.name,
-            closed: typeof r.closed === "number" ? r.closed : null,
-            branchDeleted: Boolean(r.branch_deleted),
-            error: typeof r.error === "string" && r.error ? r.error : null,
-          }))
-      : [],
+    results: parseClosedRepos(body?.results),
+    // The removal's own failure — a worktree git wouldn't remove — which the per-repo results don't
+    // carry and this route answers on its own.
+    error: typeof body?.error === "string" && body.error ? body.error : null,
   }
+}
+
+/** A session's close as the host keeps it: what it was asked to do, and what it ended with. */
+export interface SessionClose {
+  sessionId: string
+  /** `none` is a host that was never asked to close this session. */
+  state: "none" | "closing" | "done"
+  startedAt: number
+  endedAt: number | null
+  /** The session's repositories, by name, as they stood when the close was asked for. */
+  repos: string[]
+  removed: boolean
+  kept: KeptWorktree[]
+  results: ClosedRepo[]
+  error: string | null
+}
+
+function sessionClose(config: HermesConfig, sessionId: string) {
+  return pluginSession(config, sessionId, "/closes")
+}
+
+/** The per-repository results both the synchronous close and a recorded one answer with. */
+function parseClosedRepos(results: unknown): ClosedRepo[] {
+  return Array.isArray(results)
+    ? results
+        .filter((r) => typeof r?.name === "string")
+        .map((r) => ({
+          name: r.name,
+          closed: typeof r.closed === "number" ? r.closed : null,
+          branchDeleted: Boolean(r.branch_deleted),
+          error: typeof r.error === "string" && r.error ? r.error : null,
+        }))
+    : []
+}
+
+function closeOf(body: Record<string, unknown>): SessionClose {
+  return {
+    sessionId: typeof body?.session_id === "string" ? body.session_id : "",
+    state:
+      body?.state === "closing" || body?.state === "done" || body?.state === "none"
+        ? body.state
+        : "none",
+    startedAt: Number(body?.started_at) || 0,
+    endedAt: typeof body?.ended_at === "number" ? body.ended_at : null,
+    repos: Array.isArray(body?.repos)
+      ? (body.repos as unknown[]).filter((name): name is string => typeof name === "string")
+      : [],
+    removed: Boolean(body?.removed),
+    kept: parseKept(body?.kept),
+    results: parseClosedRepos(body?.results),
+    error: typeof body?.error === "string" && body.error ? body.error : null,
+  }
+}
+
+/**
+ * Asks the host to close a session and answers at once, with the close as it stands: `closing`, or
+ * `done` for a session the host holds nothing of. The work — worktrees, pull requests, branches —
+ * runs on the host afterwards, and `getSessionClose` reads what it ended with (ADR 0075).
+ */
+export async function startSessionClose(
+  config: HermesConfig,
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<SessionClose> {
+  const response = await request(sessionClose(config, sessionId), {
+    method: "POST",
+    headers: headers(config),
+    signal: signal ?? AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+  return closeOf(await response.json())
+}
+
+/** What the host's close of this session has ended with. */
+export async function getSessionClose(
+  config: HermesConfig,
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<SessionClose> {
+  const response = await request(sessionClose(config, sessionId), {
+    headers: headers(config),
+    signal: signal ?? AbortSignal.timeout(READ_TIMEOUT_MS),
+  })
+  return closeOf(await response.json())
+}
+
+/** Every close this host still keeps, newest first: the reports a device can be told after the fact. */
+export async function getSessionCloses(
+  config: HermesConfig,
+  signal?: AbortSignal,
+): Promise<SessionClose[]> {
+  const response = await request(`${pluginRoot(config.baseUrl)}/closes`, {
+    headers: headers(config),
+    signal: signal ?? AbortSignal.timeout(READ_TIMEOUT_MS),
+  })
+  const body = await response.json()
+  const rows: unknown = body?.closes
+  return Array.isArray(rows)
+    ? rows.filter((row) => row && typeof row === "object").map((row) => closeOf(row))
+    : []
 }
 
 function parseKept(kept: unknown): KeptWorktree[] {
@@ -2976,6 +3070,7 @@ export async function removeWorkspace(
   const response = await request(pluginSession(config, sessionId, "/workspace/remove"), {
     method: "POST",
     headers: headers(config),
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
   })
   const body = await response.json()
   return { removed: Boolean(body?.removed), kept: parseKept(body?.kept) }

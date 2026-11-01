@@ -73,6 +73,14 @@ export const PR_PENDING_MS = 10_000
 /** The project screen reads a session's worktree and pull requests again, at most this often. */
 export const SESSION_REREAD_MS = 60_000
 
+/**
+ * The Code screen reads the close reports a bot holds, on the stream's word and this often: a close
+ * ends minutes after the row moved, and no other screen asks for its report.
+ */
+export const CLOSE_REPORT_MS = 30_000
+/** Two report reads this close together are one: the stream and the timer often ask at once. */
+export const CLOSE_REPORT_GAP_MS = 5_000
+
 /** How long a known library count is trusted before it's read again. */
 export const LIBRARY_MS = 60_000
 
