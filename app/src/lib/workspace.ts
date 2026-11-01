@@ -9,23 +9,29 @@ import {
   sessionMode,
   updateConversation,
   type Conversation,
+  type Profile,
   type PullRequestRef,
   type SessionMode,
 } from "@/lib/db"
 import {
   ensureWorkspace,
+  getSessionClose,
   getSessionLibrary,
   getSessionPrs,
   getWorkspace,
+  hasPluginFeature,
   HermesError,
   closeSession,
   removeWorkspace,
   setWorkspaceMode,
+  startSessionClose,
   type HermesProject,
   type HermesProjectFolder,
   type KeptWorktree,
+  type SessionClose,
   type SessionWorkspace,
 } from "@/lib/hermes"
+import { tellClose } from "@/lib/close-reports"
 import { syncNow } from "@/lib/sync"
 import { sessionState, type SessionState } from "@/lib/session-work"
 
@@ -289,31 +295,41 @@ async function pushSessionMode(conversation: Conversation, mode: SessionMode) {
 }
 
 /**
- * Ends a session being deleted or discarded on the plugin: its worktrees go (the plugin keeps those
- * with uncommitted or unpushed work), and its pull requests and pushed branches are closed and
- * deleted on GitHub. What it couldn't do comes back as `errors`.
+ * Asks the host to close a session on Delete or Discard (ADR 0075): its worktrees go, except those
+ * with uncommitted or unpushed work, and each repository's open pull request is closed and its
+ * pushed branch deleted on GitHub.
+ *
+ * A host that advertises `closes` records the close and answers at once, so the row can move at the
+ * tap; this then follows that close while the device is still here, telling what it ended with —
+ * a device that leaves is told by Code's own screen instead. A plugin from before the route gets
+ * the synchronous call, which holds the request and answers with what it couldn't do.
  */
 export async function closeSessionWork(
-  conversationId: string,
-): Promise<{ kept: KeptWorktree[]; errors: string[] }> {
-  const found = await tracked(conversationId)
-  if (!found?.conversation.worktree) return { kept: [], errors: [] }
-  const { profile, conversation } = found
-  const named = conversation.worktree!.repos.length > 1
+  conversation: Conversation,
+  profile: Profile,
+): Promise<CloseAsk> {
+  const session = conversation.hermesSessionId
+  if (!session || !profile.apiKey || profile.disabled) return { state: "closed", kept: [], errors: [] }
+  if (await hasPluginFeature(profile, "closes")) {
+    try {
+      const asked = await startSessionClose(profile, session)
+      if (asked.state === "closing") void followClose(conversation.id, profile, asked)
+      else void markClosed(conversation.id, asked.results)
+      tellClose(profile, asked, conversation.worktree ? conversation.worktree.repos.length > 1 : undefined)
+      return { state: asked.state === "closing" ? "closing" : "closed", kept: [], errors: [] }
+    } catch (error) {
+      // An older plugin answers the route with nothing, or the ask never left: the synchronous
+      // close below is what it does have.
+      noteFailure("Asking the host to close a session", error)
+    }
+  }
+  if (!conversation.worktree) return { state: "closed", kept: [], errors: [] }
+  const named = conversation.worktree.repos.length > 1
   try {
-    const { kept, results } = await closeSession(profile, conversation.hermesSessionId)
-    // A close names one pull request ("name#number"): a session that shipped more than once keeps
-    // the ones already finished, so only the live one changes state here.
-    const closed = new Set(
-      results.filter((r) => r.closed !== null).map((r) => `${r.name}#${r.closed}`),
-    )
-    if (closed.size && conversation.prs)
-      await db.conversations.update(conversationId, {
-        prs: conversation.prs.map((pr) =>
-          closed.has(prKey(pr)) ? { ...pr, state: "closed" } : pr,
-        ),
-      })
+    const { kept, results } = await closeSession(profile, session)
+    await markClosed(conversation.id, results)
     return {
+      state: "closed",
       kept,
       errors: results
         .filter((result) => result.error)
@@ -323,13 +339,69 @@ export async function closeSessionWork(
     // A plugin from before 0.20 can only remove the worktrees.
   }
   try {
-    return { kept: (await removeWorkspace(profile, conversation.hermesSessionId)).kept, errors: [] }
+    const { kept } = await removeWorkspace(profile, session)
+    return { state: "closed", kept, errors: [] }
   } catch (error) {
     return {
+      state: "closed",
       kept: [],
       errors: [error instanceof Error ? error.message : "Couldn't reach the plugin."],
     }
   }
+}
+
+/** What asking for a close came back as: `closing` is a host doing it, `closed` one already done. */
+export interface CloseAsk {
+  state: "closing" | "closed"
+  kept: KeptWorktree[]
+  errors: string[]
+}
+
+/** How long after asking this device keeps reading a close, and how often. */
+const CLOSE_READ_MS = 2_000
+const CLOSE_WAIT_MS = 30_000
+
+/**
+ * Reads the close asked for until it ends, then tells it: the report the button's own device gets
+ * while it is still here. Give up quietly after a while — Code reads the report later anyway.
+ */
+async function followClose(
+  conversationId: string,
+  profile: Profile,
+  started: SessionClose,
+) {
+  const until = Date.now() + CLOSE_WAIT_MS
+  let close = started
+  while (close.state === "closing" && Date.now() < until) {
+    await new Promise((resolve) => setTimeout(resolve, CLOSE_READ_MS))
+    try {
+      close = await getSessionClose(profile, started.sessionId)
+    } catch (error) {
+      noteFailure("Reading a session's close", error)
+      return
+    }
+  }
+  if (close.state !== "done") return
+  await markClosed(conversationId, close.results)
+  tellClose(profile, close)
+}
+
+/** A close's own results onto the row: the pull requests it closed, where the session is still here. */
+async function markClosed(
+  conversationId: string,
+  results: { name: string; closed: number | null }[],
+) {
+  const conversation = await db.conversations.get(conversationId)
+  if (!conversation?.prs) return
+  // A close names one pull request ("name#number"): a session that shipped more than once keeps the
+  // ones already finished, so only the live one changes state here.
+  const closed = new Set(
+    results.filter((r) => r.closed !== null).map((r) => `${r.name}#${r.closed}`),
+  )
+  if (!closed.size) return
+  await db.conversations.update(conversationId, {
+    prs: conversation.prs.map((pr) => (closed.has(prKey(pr)) ? { ...pr, state: "closed" } : pr)),
+  })
 }
 
 const PLAN_GO_AHEAD = "Go ahead with the plan"

@@ -1,11 +1,13 @@
-import { useEffect, useRef } from "react"
+import { useCallback, useEffect, useRef } from "react"
 import Dexie from "dexie"
 import { useLiveQuery } from "dexie-react-hooks"
 
 import { connectionKey } from "@/lib/connection"
 import { db, type Conversation, type Profile } from "@/lib/db"
+import { tellCloseReports } from "@/lib/close-reports"
 import type { HermesProject } from "@/lib/hermes"
 import { PR_PENDING_MS, SESSION_REREAD_MS } from "@/lib/freshness"
+import { useAnyChange } from "@/lib/live"
 import { usePoll } from "@/lib/poll"
 import { prChecksPending, refreshPrs, refreshWorkspace } from "@/lib/workspace"
 
@@ -108,4 +110,33 @@ export function startBlocked(project: HermesProject) {
   // A session spans every repo of the project; without one there's nowhere for it to work.
   if (!project.folders.some((folder) => folder.git)) return "No repositories"
   return undefined
+}
+
+/** How often Code reads a bot's close reports while it is open, beside the stream's own word. */
+const CLOSE_REPORT_MS = 30_000
+/** Two reads this close together are one: the stream and the timer often ask at the same moment. */
+const CLOSE_REPORT_GAP_MS = 5_000
+
+/**
+ * Tells the close reports a bot has ended that this device holds no mark for (ADR 0075). A close is
+ * the host's work, so the device that asked may never have heard the end — it was put away, or the
+ * close outlived the dialog — and the device that asked may not be this one at all. Read as Code
+ * opens, when the stream says a close ended, and on a slow timer, since no other screen asks.
+ */
+export function useCloseReports() {
+  const changed = useAnyChange("closes")
+  const last = useRef(0)
+  const read = useCallback(async () => {
+    const now = Date.now()
+    if (now - last.current < CLOSE_REPORT_GAP_MS) return
+    last.current = now
+    const bots = (await db.profiles.toArray()).filter(
+      (bot) => !bot.disabled && bot.apiKey && bot.baseUrl.trim(),
+    )
+    await Promise.all(bots.map((bot) => tellCloseReports(bot)))
+  }, [])
+  usePoll(read, CLOSE_REPORT_MS)
+  useEffect(() => {
+    void read()
+  }, [changed, read])
 }
