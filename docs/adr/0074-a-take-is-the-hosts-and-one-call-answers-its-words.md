@@ -16,9 +16,10 @@ was said before that point in silence: the next Piece started a fresh hold, the 
 and half a dictation read as a short one.
 
 **The app uploads audio and nothing else.** A Piece is still cut at a pause or at its length cap,
-because that is a recording decision and only the device holds the microphone — but from there it is
-audio: it carries the Take id the app minted when the recording started, its index within the take, the
-bot's Vocabulary and the hint, and the host answers it with nothing at all. No words come back, and the
+because a Piece is the unit the wire can re-send — its own container, addressed by its index — and not
+because a host could not plan a cut of its own — but from there it is audio: it carries the Take id
+the app minted when the recording started, its index within the take, the bot's Vocabulary and the
+hint, and the host answers it with nothing at all. No words come back, and the
 `first`/`last` framing goes with them.
 
 **The take is the host's, under the app's id.** One registry entry per profile and Take id, holding
