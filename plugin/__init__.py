@@ -357,10 +357,15 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             # A restart can leave projects mid-clone.
             await asyncio.to_thread(clones.resume, home)
             await asyncio.to_thread(repos.resume, home)
-            # And a session the user closed with its close still owed (closes.py, ADR 0075).
-            await asyncio.to_thread(closes.resume, home)
         except Exception:
             logger.debug("memento: couldn't resume project clones", exc_info=True)
+        # And a session the user closed with its close still owed (closes.py, ADR 0075), on every
+        # home this process serves: a `/p/<profile>` bot's row is as owed as the launch profile's.
+        try:
+            for served in link.served_homes(adapter):
+                await asyncio.to_thread(closes.resume, served)
+        except Exception:
+            logger.debug("memento: couldn't resume the session closes", exc_info=True)
         # A chat an older plugin relabelled is un-runnable until these rows are repaired; see
         # sessions.heal_sources.
         failed = await repair_labelled_sources(link.served_homes(adapter))

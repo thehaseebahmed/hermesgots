@@ -52,8 +52,10 @@ rather than a fourth value for Session state.
 - The plugin grows a feature name, `closes`, beside `close`; the synchronous route stays for an app
   that predates this, and an app that meets a plugin without `closes` keeps the synchronous close —
   now bounded at `WRITE_TIMEOUT_MS`, as every other write is.
-- `memento.db` reaches schema 49 with `session_closes`: one row per close, carrying the snapshot of
-  its repositories, so `sessions.remove` deleting the session row cannot take the report with it.
+- `memento.db` reaches schema 49 with `session_closes`: one row per session, carrying its latest
+  close — the snapshot of its repositories and the report — so `sessions.remove` deleting the session
+  row cannot take the report with it. A second close of the same session is a new row value with a
+  newer start, which is what tells each device it is news.
 - The app keeps a device-local mark of the reports it has told (like the read mark), so a device
   tells each close once, and a close learned on one device is still told on another — the same
   "marks, not watermarks" rule as ADR 0052.

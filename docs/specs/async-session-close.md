@@ -43,7 +43,8 @@ device never read, and the two dialogs' own copy change as little as they can.
 2. **The close is recorded before it runs, with its own snapshot of the repositories.** A
    successful removal deletes the session record, so the close row keeps the project and each
    repository's name, root and branch; the close is resumable and reportable after the session row
-   is gone.
+   is gone. One row per session: a second close replaces it with a newer start, and the start is
+   what a device marks a report told by.
 3. **A close is owed until it ends.** A row still `closing` when the process starts is run again at
    boot, once, the way a clone and a wake are resumed. Asking for a close of a session whose close
    is already running answers that close rather than starting a second one.
@@ -73,7 +74,7 @@ device never read, and the two dialogs' own copy change as little as they can.
 | Path | What it is |
 | --- | --- |
 | `plugin/closes.py` | The close: `start` (snapshot, record, spawn), `run` (release, remove, cwd, pull requests), `read`, `recent`, `resume`, and the report it writes |
-| `plugin/store.py` | Schema 49: `session_closes`, one row per close, with the snapshot and the report |
+| `plugin/store.py` | Schema 49: `session_closes`, one row per session carrying its latest close, with the snapshot and the report |
 | `plugin/__init__.py` | `POST`/`GET sessions/{id}/closes`, `GET closes`, `closes` advertised, `closes.resume` at boot; the synchronous route kept for older apps |
 | `plugin/events.py` | The close's end noted on the change stream, so an open app re-reads |
 | `app/src/lib/hermes.ts` | `startSessionClose`, `getSessionClose`, `getSessionCloses`; a bound on the synchronous `closeSession` and `removeWorkspace` |

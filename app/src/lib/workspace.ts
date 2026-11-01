@@ -314,15 +314,17 @@ export async function closeSessionWork(conversation: Conversation, profile: Prof
       if (asked.state === "closing") void followClose(conversation.id, profile, asked)
       else void markClosed(conversation.id, asked.results)
       tellClose(profile, asked)
-      return
     } catch (error) {
-      // An older plugin answers the route with nothing: the synchronous close below is what it has.
+      // The ask may have landed with only its answer lost — the network going as the dialog closes,
+      // which is exactly when this runs. Asking again would be a second removal of the same trees,
+      // so this reports and stops; the host's own record answers the next read.
       noteFailure("Asking the host to close a session", error)
     }
+    return
   }
   if (!conversation.worktree) return
   try {
-    const { kept, results } = await closeSession(profile, session)
+    const { kept, results, error } = await closeSession(profile, session)
     await markClosed(conversation.id, results)
     // A host without the recorded close answers with its report here, and this is the only chance
     // to tell it: the same words, told the same once.
@@ -335,12 +337,16 @@ export async function closeSessionWork(conversation: Conversation, profile: Prof
       removed: !kept.length,
       kept,
       results,
-      error: null,
+      error,
     })
     return
   } catch (error) {
-    // A plugin from before 0.20 can only remove the worktrees.
-    noteFailure("Closing a session", error)
+    // Only a plugin that has no sync close at all falls through to the worktrees alone: a timeout or
+    // a lost answer leaves a host that is already working, and removing the trees again would race.
+    if (!(await lacksRoute(profile, error, "close"))) {
+      noteFailure("Closing a session", error)
+      return
+    }
   }
   try {
     const { kept } = await removeWorkspace(profile, session)
@@ -373,8 +379,9 @@ async function followClose(
     try {
       close = await getSessionClose(profile, started.sessionId)
     } catch (error) {
+      // One lost read is not a lost close: the next look may answer, and Code reads it either way.
       noteFailure("Reading a session's close", error)
-      return
+      continue
     }
   }
   if (close.state !== "done") return
