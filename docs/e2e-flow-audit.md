@@ -23,8 +23,8 @@ takes them rather than by the registry's order, so the count is the thing to che
 
 | Verdict | Keys |
 | --------- | ------ |
-| stay | 27 |
-| component | 55 |
+| stay | 28 |
+| component | 54 |
 | plugin | 2 |
 | delete | 2 |
 | **total** | **86** |
@@ -203,7 +203,7 @@ a turn that fails leaves behind.
 
 | Key | Verdict | What it asserts today | Why it moves | What replaces it |
 | ----------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `chat-message` | component | A new chat sends `hello there`, gets a reply with text, and the chat is listed under Recents. | A send, a streamed reply written into Dexie and a list row: the app's own wiring over an HTTP boundary a handler fakes. | A component test sends from the composer over a handler that streams a reply, then asserts the reply settles `done` and Recents holds the chat. |
+| `chat-message` | stay | A bare Enter in the composer inserts a line and starts no run, the chord then sends `hello there`, and the chat gets a reply with text and a row under Recents. | The send, the streamed reply and the Recents row are the app's own wiring over a faked boundary — but a browser's own default action on Enter is not something a DOM without layout performs, so that first step can only be shown here. | A component test still carries the send, the streamed reply and the Recents row; nothing replaces the browser's Enter. |
 | `plain-error` | component | A turn that fails before it says anything reads as a marked error line on the page with no bubble or picture — the way every reply is drawn now — while the reply above it is on the page too. | Which row a failure takes is a render over the host's own error. | A component test asserts a reply, a chat's and a session's alike, is on the page with no bubble and no picture (`test-thread-rendering.tsx`); the flow keeps the landed reply drawn on the page without one, and the failed turn's own mark. |
 | `failed-send` | component | A send nothing reached stays dimmed like a queued message, wears a mark, says only that it didn't go, can be sent again with what it held or taken back, outlives a reload, and sends are refused meanwhile. | The failed row's state and its two actions are device state; the reload is Dexie's persistence, which a remount reaches. | A component test asserts the row's state and its two actions, and that it shares the queued row's own class tokens rather than a computed colour. |
 | `submission` | component | Two sends racing in one chat start one run and get one reply. | A guard in the send path: the same call twice without awaiting is the whole condition. | A component test calls the send path twice without awaiting and asserts one request and one reply row. |

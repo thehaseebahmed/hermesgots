@@ -120,7 +120,7 @@ The list over the composer that a slash opens: the commands and the bot's skills
 _Avoid_: autocomplete, command palette, picker
 
 **Cheatsheet**:
-The sheet `/cheatsheet` opens from the composer: the keys a hardware keyboard can send in Gots and what each does, by group — and only the shortcuts whose switch is on.
+The sheet `/cheatsheet` opens from the composer: the keys a hardware keyboard can send in Gots and what each does, by group — the shortcuts whose switch is on, and a key whose meaning a switch picks drawn the way that switch leaves it.
 _Avoid_: hotkey list, keyboard help, command palette, cheat sheet
 
 **Built-in skill**:

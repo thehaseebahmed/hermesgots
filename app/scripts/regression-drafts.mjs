@@ -1,7 +1,7 @@
 // Run with Vite on APP_URL and an isolated mock on MOCK_URL. Requires Playwright.
 import assert from "node:assert/strict"
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? "playwright")
-import { launch, settleNav } from "./e2e/lib.mjs"
+import { launch, SEND_CHORD, settleNav } from "./e2e/lib.mjs"
 
 const app = process.env.APP_URL ?? "http://localhost:15173"
 const mock = process.env.MOCK_URL ?? "http://localhost:18642"
@@ -105,7 +105,7 @@ try {
   // Sending clears it.
   await page.goto(`${app}/c/one`)
   await shows("draft for one")
-  await composer.press("Enter")
+  await composer.press(SEND_CHORD)
   await saved("c:one", undefined)
   console.log("PASS: composer drafts are kept per chat and cleared on send")
 } finally {

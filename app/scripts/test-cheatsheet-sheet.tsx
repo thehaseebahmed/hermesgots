@@ -3,7 +3,6 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { act } from "react"
 
-import { cheatsheetGroups } from "@/lib/cheatsheet"
 import { db, getSettings, saveAppearance, type Settings } from "@/lib/db"
 import {
   botProfile,
@@ -13,7 +12,7 @@ import {
   json,
   mount,
   offersCommand,
-  pressEnter,
+  pickPress,
   seedChat,
   shutSheet,
   slashOptions,
@@ -61,9 +60,11 @@ const drawn = () =>
 async function openSheet() {
   await type(composerField(), "/cheatsheet")
   await until(async () => offersCommand("/cheatsheet"), "the command in the menu")
-  await pressEnter()
+  await pickPress()
   await until(async () => Boolean(sheet()), "the sheet")
 }
+
+const composerRows = () => drawn().find((one) => one.name === "Composer")?.rows ?? []
 
 const storedSwitch = async () => (await getSettings()).navShortcuts
 
@@ -93,7 +94,17 @@ test("picking /cheatsheet opens the sheet with its groups and rows, and sends no
     await openSheet()
     assert.match(sheet()?.textContent ?? "", /Cheatsheet/, "titled")
     assert.deepEqual(groups(), OFF, "its groups, in order, with no gated one by default")
-    assert.deepEqual(drawn(), cheatsheetGroups(false), "every row as the list writes it")
+    // Literal rows, never a comparison against `cheatsheetGroups`: a case that asks the function it
+    // is testing what to expect stays green when that function changes.
+    assert.deepEqual(
+      composerRows().map((row) => [row.keys.join("+"), row.description]),
+      [
+        ["Enter", "Start a new line"],
+        ["Ctrl+Enter", "Send the message"],
+        ["Escape+Escape", "Clear the message, keeping attachments"],
+      ],
+      "Enter is the line, the chord sends, and Shift's row would only repeat Enter's",
+    )
     assert.equal(composerField()?.value, "", "the pick cleared the composer")
     assert.ok(
       composerField(),
@@ -128,8 +139,36 @@ test("with navigation shortcuts on, the sheet opened afterwards names Alt+1…9"
     await openSheet()
     assert.ok(groups().includes("Navigation"), "the gated group, the switch being on")
     assert.deepEqual(groups(), ON)
-    assert.deepEqual(drawn(), cheatsheetGroups(true))
+    assert.deepEqual(
+      composerRows().map((row) => row.keys.join("+")),
+      ["Enter", "Ctrl+Enter", "Escape+Escape"],
+      "the composer's rows are the switch's, not the navigation one's",
+    )
     assert.ok((sheet()?.textContent ?? "").includes("Alt+1…9"), "the keys it takes")
+  })
+})
+
+test("with Send on Enter on, the sheet gives Enter back to the send", async () => {
+  await seed({ sendOnEnter: true })
+  host()
+  await mount(chatScreen(CHAT), async () => {
+    await until(async () => Boolean(composerField()), "the composer")
+    await openSheet()
+    assert.equal(
+      await getSettings().then((one) => one.sendOnEnter),
+      true,
+      "the switch the sheet read",
+    )
+    assert.deepEqual(
+      composerRows().map((row) => [row.keys.join("+"), row.description]),
+      [
+        ["Enter", "Send the message"],
+        ["Shift+Enter", "Start a new line"],
+        ["Ctrl+Enter", "Send the message"],
+        ["Escape+Escape", "Clear the message, keeping attachments"],
+      ],
+      "Enter sends, Shift is the line, and the chord keeps its row, which sends either way",
+    )
   })
 })
 

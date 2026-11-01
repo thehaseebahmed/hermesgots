@@ -1,22 +1,67 @@
 /**
- * The Navigation shortcuts switch under Appearance: the row with its title and its line, off until
- * it is turned on, the write it makes to the settings row the other appearance switches share, and
- * the same switch seeded on reading on — and the retired Fold thinking switch staying gone from
- * the section.
+ * The switches under Appearance: each row with its title and its line, the state it ships in, the
+ * write it makes, and the one difference between them — the three that follow the account through
+ * `saveAppearance` move its clock, while Send on Enter stays on this device and moves nothing
+ * (ADR 0078). Plus the retired Fold thinking switch staying gone from the section.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
 
 import { AppearanceSettings } from "@/components/settings/appearance"
 import { db, type Settings } from "@/lib/db"
-import { click, find, json, mount, seedSettings, settle, text, until } from "./component-kit.tsx"
 
-const TITLE = "Navigation shortcuts"
-const SUBTITLE = "Alt\\+1 to Alt\\+9 start a new chat with that bot"
+import { click, find, json, mount, seedSettings, text, until } from "./component-kit.tsx"
 
-const rowOf = () => find("label[for='nav-shortcuts']")
-const switchOf = () => find("label[for='nav-shortcuts'] [data-slot='switch']")
+interface Switch {
+  id: string
+  title: string
+  subtitle: string
+  /** The field in the settings row, which is also what a seed writes. */
+  field: keyof Settings
+  shipped: boolean
+  /** True when the switch is this device's own, so a change moves no appearance clock. */
+  local?: boolean
+}
+
+const SWITCHES: Switch[] = [
+  {
+    id: "steer-by-default",
+    title: "Steer by default",
+    subtitle: "Messages sent mid-reply go straight to it",
+    field: "steerByDefault",
+    shipped: false,
+  },
+  {
+    id: "send-on-enter",
+    title: "Send on Enter",
+    subtitle: "Enter sends the message instead of starting a new line",
+    field: "sendOnEnter",
+    shipped: false,
+    local: true,
+  },
+  {
+    id: "break-reminders",
+    title: "Take-a-break reminders",
+    subtitle: "Remind me to put the phone away while a task runs",
+    field: "breakReminders",
+    shipped: true,
+  },
+  {
+    id: "nav-shortcuts",
+    title: "Navigation shortcuts",
+    subtitle: "Alt+1 to Alt+9 start a new chat with that bot",
+    field: "navShortcuts",
+    shipped: false,
+  },
+]
+
+const rowOf = (one: Switch) => find(`label[for='${one.id}']`)
+const switchOf = (one: Switch) => find(`label[for='${one.id}'] [data-slot='switch']`)
 const checked = (element: Element | null) => element?.getAttribute("aria-checked") === "true"
+const stored = async (one: Switch) => {
+  const saved = (await db.settings.get("settings")) as Record<string, unknown> | undefined
+  return saved?.[one.field]
+}
 
 /** The section on its own, over a seeded device, on a bot with no host to ask anything of. */
 async function appearance(settings: Partial<Omit<Settings, "id">>, body: () => Promise<void>) {
@@ -27,49 +72,56 @@ async function appearance(settings: Partial<Omit<Settings, "id">>, body: () => P
   await mount(<AppearanceSettings />, body)
 }
 
-test("the switch sits under Appearance, off until it is turned on", async () => {
+test("every switch draws its title, its line and the state it ships in", async () => {
   await appearance({}, async () => {
-    const row = rowOf()
-    assert.ok(row, "the row is on the screen")
-    assert.match(row.textContent ?? "", new RegExp(TITLE), "titled for what it does")
-    assert.match(row.textContent ?? "", new RegExp(SUBTITLE), "with the line under it")
-    assert.equal(checked(switchOf()), false, "and off by default")
-
-    // It is one of the Appearance switches, in the group that holds the others by the account.
-    const group = row.parentElement
-    assert.ok(group, "the row belongs to a group")
-    for (const id of ["steer-by-default", "break-reminders"])
-      assert.ok(
-        group.querySelector(`label[for='${id}']`),
-        `it sits with the ${id} switch, which follows the account too`,
-      )
+    for (const one of SWITCHES) {
+      const row = rowOf(one)
+      assert.ok(row, `${one.title} is on the screen`)
+      assert.match(row.textContent ?? "", new RegExp(one.title), `${one.title} is titled`)
+      assert.ok(row.textContent?.includes(one.subtitle), `${one.title} carries its line`)
+      assert.equal(checked(switchOf(one)), one.shipped, `${one.title} ships as it says`)
+    }
   })
 })
 
-test("turning it on writes the appearance record the account carries", async () => {
+test("they are one group of rows, in the section's order", async () => {
   await appearance({}, async () => {
-    assert.equal(checked(switchOf()), false, "off to start")
-    await click(switchOf())
-    await until(
-      async () => (await db.settings.get("settings"))?.navShortcuts === true,
-      "the setting",
-    )
-    const saved = await db.settings.get("settings")
-    assert.equal(saved?.navShortcuts, true, "the device holds the choice")
-    assert.equal(
-      typeof saved?.appearanceAt,
-      "number",
-      "stamped as an appearance change, as the others are",
-    )
-    assert.equal(checked(switchOf()), true, "and the switch reads back what it wrote")
-    await settle()
-    assert.match(text(), new RegExp(SUBTITLE), "the row keeps its line")
+    const group = rowOf(SWITCHES[0])?.parentElement
+    assert.ok(group, "the switches sit in a group")
+    for (const one of SWITCHES)
+      assert.ok(group.querySelector(`label[for='${one.id}']`), `${one.title} is in it`)
   })
 })
 
-test("seeded on, the switch reads on", async () => {
-  await appearance({ navShortcuts: true }, async () => {
-    assert.equal(checked(switchOf()), true, "the choice made on this device, or carried to it")
+test("flipping one writes this device's row, and only the local one leaves the clock alone", async () => {
+  // Seeded a moment out of the past, so "the clock moved" is a fact about the write and not about two
+  // clicks landing in the same millisecond.
+  const THEN = 1
+  await appearance({ appearanceAt: THEN }, async () => {
+    for (const one of SWITCHES) {
+      const before = (await db.settings.get("settings"))?.appearanceAt ?? THEN
+      await click(switchOf(one))
+      const wanted = !one.shipped
+      await until(async () => (await stored(one)) === wanted, `${one.title}'s setting`)
+      assert.equal(await stored(one), wanted, `${one.title} is held on the device`)
+      assert.equal(checked(switchOf(one)), wanted, `${one.title} reads back what it wrote`)
+
+      const after = (await db.settings.get("settings"))?.appearanceAt ?? THEN
+      if (one.local)
+        assert.equal(after, before, `${one.title} moves no clock, so the account never carries it`)
+      else
+        assert.ok(
+          after > before,
+          `${one.title} moved the clock its neighbours share, so the account carries it`,
+        )
+    }
+  })
+})
+
+test("seeded on, each switch reads on", async () => {
+  const on = Object.fromEntries(SWITCHES.map((one) => [one.field, true]))
+  await appearance(on as Partial<Omit<Settings, "id">>, async () => {
+    for (const one of SWITCHES) assert.equal(checked(switchOf(one)), true, `${one.title} is on`)
   })
 })
 
@@ -77,6 +129,6 @@ test("the retired Fold thinking switch draws no row", async () => {
   await appearance({}, async () => {
     assert.equal(find("label[for='fold-thinking']"), null, "its row is gone from the section")
     assert.doesNotMatch(text(), /Fold thinking/, "and nothing on the screen names the switch")
-    assert.ok(rowOf(), "the switches that follow the account are still drawn")
+    assert.ok(rowOf(SWITCHES[0]), "the switches that follow the account are still drawn")
   })
 })

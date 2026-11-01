@@ -21,7 +21,7 @@ import {
   mount,
   Path,
   path,
-  pressEnter,
+  sendPress,
   seedChats,
   settle,
   type,
@@ -126,7 +126,7 @@ test("/thread from Main starts a thread with the message as its first turn", asy
   await mount(screen(main), async () => {
     await until(() => Boolean(composerField()), "the app's composer is drawn")
     await type(composerField(), "/thread Plan the itinerary")
-    await pressEnter()
+    await sendPress()
     await until(() => host.asked.runs === 1, "the thread's first turn was posted")
     const made = (await db.conversations.toArray()).find(
       (one) => !one.main && one.id !== "main-slash-t1",
@@ -156,7 +156,7 @@ test("mid-reply too, a Main message the host sends to a thread is neither queued
     host.triage.decision = "thread"
     host.triage.thread = thread
     await type(composerField(), "Also book the flights")
-    await pressEnter()
+    await sendPress()
     await until(() => host.triage.asked.length === 2, "the host was asked about it as well")
     assert.equal(host.triage.asked[1].text, "Also book the flights")
     await act(async () => new Promise((resolve) => setTimeout(resolve, 300)))

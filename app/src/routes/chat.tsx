@@ -47,7 +47,7 @@ import { DayHeading } from "@/components/chat/day-heading"
 import { PreviewerProvider } from "@/components/chat/previewer"
 import { ThreadCard } from "@/components/chat/thread-card"
 import { prLabel } from "@/components/chat/pr-look"
-import { Cheatsheet } from "@/components/chat/cheatsheet"
+import { Cheatsheet, useCheatsheet } from "@/components/chat/cheatsheet"
 import { PipelinePill, PipelineSheet } from "@/components/chat/pipeline"
 import { PrPill } from "@/components/chat/pr-pill"
 import { LibraryPill } from "@/components/chat/library-pill"
@@ -704,9 +704,9 @@ function NextComposerBody({
     }
   }
   const filesFeature = usePluginFeature(bot, "attachments")
-  const [cheatsheetOpen, setCheatsheetOpen] = useState(false)
-  const [navShortcuts, setNavShortcuts] = useState(DEFAULT_SETTINGS.navShortcuts)
+  const sheet = useCheatsheet()
   const steerByDefault = useLiveQuery(async () => (await getSettings()).steerByDefault, [])
+  const sendOnEnter = useLiveQuery(async () => (await getSettings()).sendOnEnter, [])
   if (!bot || !chat) return null
   // Without a key nothing on the host answers for Auto, so the session runs as Accept edits.
   const tracked = Boolean(bot.apiKey && !bot.disabled)
@@ -764,6 +764,7 @@ function NextComposerBody({
         canSteer={controls.canSteer}
         model={modelPill({ disabled: controls.busy })}
         steerByDefault={Boolean(steerByDefault)}
+        sendOnEnter={sendOnEnter ?? DEFAULT_SETTINGS.sendOnEnter}
         subagentsRunning={controls.subagents}
         onStop={controls.stop}
         session={
@@ -789,18 +790,10 @@ function NextComposerBody({
             return startThread(message?.text ?? "", message?.attachments ?? [])
           if (command === "new") return root(home ?? "/")
           if (command === "settings") return root("/settings")
-          if (command === "cheatsheet") {
-            const settings = await getSettings().catch(quietly("Reading the cheatsheet's switch"))
-            setNavShortcuts(settings?.navShortcuts ?? DEFAULT_SETTINGS.navShortcuts)
-            setCheatsheetOpen(true)
-          }
+          if (command === "cheatsheet") return void sheet.show()
         }}
       />
-      <Cheatsheet
-        open={cheatsheetOpen}
-        onOpenChange={setCheatsheetOpen}
-        navShortcuts={navShortcuts}
-      />
+      <Cheatsheet open={sheet.open} onOpenChange={sheet.setOpen} switches={sheet.switches} />
     </>
   )
 }
@@ -847,10 +840,7 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   // A new chat's pick, held until its first message makes the chat; it follows the chosen bot.
   const [pendingModel, setPendingModel] = useState<{ profileId?: string; choice?: ModelChoice }>()
   const [todosOpen, setTodosOpen] = useState(false)
-  const [cheatsheetOpen, setCheatsheetOpen] = useState(false)
-  const [cheatsheetNavShortcuts, setCheatsheetNavShortcuts] = useState(
-    DEFAULT_SETTINGS.navShortcuts,
-  )
+  const sheet = useCheatsheet()
   const [pipelineOpen, setPipelineOpen] = useState(false)
   const [outputsOpen, setOutputsOpen] = useState(false)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
@@ -1265,14 +1255,6 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
     }
   }
 
-  const openCheatsheet = async () => {
-    const navShortcuts = await getSettings()
-      .then((settings) => settings.navShortcuts)
-      .catch(quietly("Reading the cheatsheet's navigation switch"))
-    setCheatsheetNavShortcuts(navShortcuts ?? DEFAULT_SETTINGS.navShortcuts)
-    setCheatsheetOpen(true)
-  }
-
   const mainChrome = Boolean(botThreads && isMain && profile)
   const actions = conversation && (
     <ChatActions
@@ -1531,6 +1513,7 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
               void queueMessage(id, text, attachments)
             }}
             steerByDefault={resolved.steerByDefault}
+            sendOnEnter={resolved.sendOnEnter}
             canSteer={steerable}
             onSteer={(text, attachments) =>
               id
@@ -1553,7 +1536,7 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
                 case "settings":
                   return root("/settings")
                 case "cheatsheet":
-                  return openCheatsheet()
+                  return void sheet.show()
                 default: {
                   const unhandled: never = command
                   return unhandled
@@ -1615,11 +1598,7 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
         open={agentView !== undefined}
         onOpenChange={(next) => !next && setAgentView(undefined)}
       />
-      <Cheatsheet
-        open={cheatsheetOpen}
-        onOpenChange={setCheatsheetOpen}
-        navShortcuts={cheatsheetNavShortcuts}
-      />
+      <Cheatsheet open={sheet.open} onOpenChange={sheet.setOpen} switches={sheet.switches} />
       {session && (
         <OutputsDrawer
           open={outputsOpen}

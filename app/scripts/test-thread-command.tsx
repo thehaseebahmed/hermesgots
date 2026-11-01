@@ -12,7 +12,8 @@ import {
   json,
   mount,
   offersCommand,
-  pressEnter,
+  pickPress,
+  sendPress,
   seedSettings,
   settle,
   slashOptions,
@@ -140,7 +141,7 @@ test("/thread alone starts an empty thread and opens it", async () => {
     await until(async () => Boolean(composerField()), "Main's composer")
     await type(composerField(), "/thread")
     await until(async () => offersCommand("/thread"), "the command in the menu")
-    await pressEnter()
+    await pickPress()
     await until(async () => where() !== `/c/${MAIN}`, "the thread to open")
     const [thread] = await started()
     assert.equal(where(), `/c/${thread.id}`, "the new thread is what's on screen")
@@ -158,7 +159,7 @@ test("/thread with text starts the thread with that message, on the composer's m
   await mount(screen(MAIN), async () => {
     await until(async () => Boolean(composerField()), "Main's composer")
     await type(composerField(), "/thread plan my move")
-    await pressEnter()
+    await sendPress()
     await until(async () => where() !== `/c/${MAIN}`, "the thread to open")
     const [thread] = await started()
     assert.equal(where(), `/c/${thread.id}`, "the new thread is what's on screen")
@@ -188,7 +189,7 @@ test("/thread with a file carries the attachment with the message", async () => 
     })
     await settle()
     await type(composerField(), "/thread read this")
-    await pressEnter()
+    await sendPress()
     await until(async () => where() !== `/c/${MAIN}`, "the thread to open")
     const [thread] = await started()
     const first = async () =>
@@ -230,7 +231,7 @@ test("with the switch off the command is /new, as it was, and /thread is absent"
     assert.ok(offersCommand("/new"), "the name threads off wear")
     assert.ok(!offersCommand("/thread"), "and never the other")
     await type(composerField(), "/new")
-    await pressEnter()
+    await pickPress()
     await until(async () => where() === "/", "the new chat's screen")
     assert.equal((await started()).length, 0, "a new chat, not a thread")
   })
@@ -242,7 +243,7 @@ test("with the switch off a message typed with /thread goes to the bot as text",
   await mount(screen(MAIN), async () => {
     await until(async () => Boolean(composerField()), "Main's composer")
     await type(composerField(), "/thread plan my move")
-    await pressEnter()
+    await sendPress()
     await until(async () => triaged(seen).length > 0, "the host to be asked")
     assert.equal(
       triaged(seen)[0].body.text,

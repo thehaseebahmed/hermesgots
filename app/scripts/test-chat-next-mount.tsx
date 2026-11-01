@@ -24,7 +24,7 @@ import {
   find,
   findAll,
   mount,
-  pressEnter,
+  sendPress,
   seedChats,
   settle,
   text,
@@ -235,7 +235,7 @@ test("a message sent mid-reply goes to the plugin's queue and runs once the repl
   await mount(chatScreen("c-queue"), async () => {
     const first = await midReply(host, "First question")
     await type(composerField(), "And then this")
-    await pressEnter()
+    await sendPress()
     await until(() => host.queue.length === 1, "the plugin holds the message")
     assert.equal(
       host.queue[0].body.input instanceof Array,
@@ -264,7 +264,7 @@ test("Remove takes a queued message back off the plugin", async () => {
   await mount(chatScreen("c-unqueue"), async () => {
     await midReply(host, "Long job")
     await type(composerField(), "Never mind")
-    await pressEnter()
+    await sendPress()
     await until(() => Boolean(find("[data-remove-queued]")), "the queued message offers Remove")
     await click(find("[data-remove-queued]"))
     await until(() => host.queue.length === 0, "the plugin no longer holds it")
@@ -281,7 +281,7 @@ test("with Steer by default, a message sent mid-reply steers it and is drawn in 
   await mount(chatScreen("c-steer"), async () => {
     const run = await midReply(host, "Write a poem")
     await type(composerField(), "Make it rhyme")
-    await pressEnter()
+    await sendPress()
     await until(
       () => host.rows.some((row) => row.display_kind === "steer"),
       "the plugin steered the running reply",
@@ -304,7 +304,7 @@ test("a bot whose plugin can't queue hands a mid-reply message back", async () =
   await mount(chatScreen("c-noqueue"), async () => {
     await midReply(host, "Busy now")
     await type(composerField(), "Hold this")
-    await pressEnter()
+    await sendPress()
     await until(() => composerField()?.value === "Hold this", "the words are back in the field")
     assert.equal(host.asked.runs, 1, "and no second run was started")
   })

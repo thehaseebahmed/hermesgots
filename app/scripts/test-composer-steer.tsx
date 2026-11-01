@@ -20,6 +20,7 @@ import {
   json,
   mount,
   seedChat,
+  sendPress,
   settle,
   text,
   type,
@@ -78,15 +79,6 @@ async function paste(name: string, type: string) {
   await settle()
 }
 
-async function enter() {
-  await act(async () => {
-    field()?.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
-    )
-  })
-  await settle()
-}
-
 const tiles = () => findAll("[aria-label^='Remove ']").map((one) => one.getAttribute("aria-label"))
 
 test("a message carrying a file steers the reply, and the field says so", async () => {
@@ -96,7 +88,7 @@ test("a message carrying a file steers the reply, and the field says so", async 
     assert.deepEqual(tiles(), ["Remove notes.txt"])
     assert.equal(placeholder(), "Steer the response…", "a file can ride in a steer")
     await type(field(), "read this")
-    await enter()
+    await sendPress()
     assert.equal(sent.queue.length, 0)
     assert.equal(sent.steer.length, 1, "Enter hands it to the reply that runs")
     assert.equal(sent.steer[0].text, "read this")
@@ -116,7 +108,7 @@ test("a message carrying a photo waits in the queue, and the field says so", asy
     assert.equal(placeholder(), "Queue a message…")
     await type(field(), "look at this")
     assert.equal(placeholder(), "Queue a message…", "and still says it once there are words")
-    await enter()
+    await sendPress()
     assert.deepEqual(sent.steer, [], "a steer can't carry a photo")
     assert.deepEqual(sent.queue, ["look at this"])
   })
@@ -128,7 +120,7 @@ test("a file waits in the queue when the reply won't take a steer", async () => 
     await paste("notes.txt", "text/plain")
     assert.equal(placeholder(), "Queue a message…")
     await type(field(), "read this")
-    await enter()
+    await sendPress()
     assert.deepEqual(sent.steer, [])
     assert.deepEqual(sent.queue, ["read this"])
   })

@@ -37,3 +37,23 @@ export function botShortcut(press: Press): number | null {
   const match = /^(?:Digit|Numpad)([1-9])$/.exec(press.code)
   return match ? Number(match[1]) - 1 : null
 }
+
+/**
+ * Whether a press carries the send chord: Ctrl on a PC, Cmd on a Mac. Every product that keeps Enter
+ * for a line break binds this pair, and a slash menu open under the field must never swallow it, so
+ * the one definition serves both the rule below and the composer's pick branch (ADR 0078).
+ */
+export function isSendChord(press: Press) {
+  return press.ctrlKey || press.metaKey
+}
+
+/**
+ * Whether one Enter in the composer sends the message. The switch is this device's own
+ * (`sendOnEnter`, Settings > Appearance, off by default), so out of the box Enter is a line break —
+ * what a multiline field does everywhere — and the chord sends. Shift never sends, so a line is
+ * always one key away.
+ */
+export function enterSends(press: Press, sendOnEnter: boolean) {
+  if (press.shiftKey) return false
+  return isSendChord(press) || sendOnEnter
+}
