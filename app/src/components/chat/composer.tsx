@@ -46,6 +46,7 @@ import {
   useDictationInfo,
   type DictationAvailability,
 } from "@/lib/dictation"
+import { waitInserted } from "@/lib/dictation-wait"
 import { writeDictation } from "@/lib/dictations"
 import {
   SEND_COMMANDS,
@@ -445,6 +446,8 @@ export function Composer({
       const middle = joinText(landed)
       return `${before}${before && !/\s$/.test(before) ? " " : ""}${middle}${after && !/^\s/.test(after) ? " " : ""}${after}`
     })
+    // The words took the composer: the end of the wait the take's Stop opened (ADR 0075).
+    waitInserted()
     setTimeout(() => textarea.current?.focus())
   }
 

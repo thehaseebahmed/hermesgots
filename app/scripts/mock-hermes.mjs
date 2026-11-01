@@ -3112,7 +3112,10 @@ const PLUGIN_VERSION = process.env.MOCK_PLUGIN_VERSION || "0.29.1"
 const HERMES_VERSION = "0.25.0"
 const DICTATION = process.env.MOCK_DICTATION ?? "on"
 let DICTATION_TIDY = process.env.MOCK_DICTATION_TIDY ?? "ok"
-const TIDY_MS = 400
+// How long a Confirm takes before it answers: the take's drain and its Cleanup, as a constant, since
+// no decoder runs here. A flow raises it (POST /__mock/dictation-confirm-ms) to show what the app
+// itself waits on moving — the host's Confirm span, inside the app's Stop to text (ADR 0075).
+let dictationConfirmMs = Math.max(0, Number(process.env.MOCK_DICTATION_CONFIRM_MS ?? 400) || 0)
 function tidyWhole(text) {
   const out = String(text)
     .replace(/\s+/g, " ")
@@ -5367,7 +5370,7 @@ http
           error: { message: "Local transcription failed: the model ran out of memory." },
         })
       if (DICTATION_TIDY === "hang") return new Promise(() => {})
-      await new Promise((resolve) => setTimeout(resolve, TIDY_MS))
+      await new Promise((resolve) => setTimeout(resolve, dictationConfirmMs))
       // A cleanup that fails or finds nothing to change lands the words as they were heard; the
       // level is still named, and `cleaned` says which of the two happened (ADR 0074).
       const cleaned = DICTATION_TIDY === "ok" && level !== "none" && Boolean(heard)
@@ -5873,11 +5876,17 @@ http
         clips: dictationClips,
         confirms: dictationConfirms,
         refusals: dictationMissing,
+        confirm_ms: dictationConfirmMs,
         takes: [...dictationTakes.values()].map((held) => ({
           take: held.take,
           order: held.order,
         })),
       })
+    }
+    if (url.pathname === "/__mock/dictation-confirm-ms" && req.method === "POST") {
+      const { ms = 0 } = await readBody(req)
+      dictationConfirmMs = Math.max(0, Number(ms) || 0)
+      return json(res, 200, { ok: true, confirm_ms: dictationConfirmMs })
     }
     if (url.pathname === "/__mock/dictation-refuse" && req.method === "POST") {
       const { count = 0 } = await readBody(req)

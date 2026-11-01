@@ -445,7 +445,7 @@ export const FLOWS = {
     script: "regression-dictation.mjs",
     extra: { OFF_MOCK_URL: "no-dictation" },
     about:
-      "Dictation pieces, retries, the kept recording, the bot's words on the clip and the end cleanup, and no mic where the host can't",
+      "Dictation pieces, retries, the kept recording, the bot's words on the clip and the end cleanup, no mic where the host can't, and the take's Stop to text printed as the app's own share beside a Confirm raised for it",
   },
   drafts: {
     script: "regression-drafts.mjs",
