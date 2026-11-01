@@ -27,8 +27,9 @@ logger = logging.getLogger(__name__)
 # log keyed per profile, and 46 adds the clock its reads order on, so both of those are PRAGMA-guarded
 # or `IF NOT EXISTS`: a store already carrying them has to reach 47 without re-running either. 47
 # replaces the log's index with the one every read asks for. 48 adds `heard`, the words as the host
-# heard them beside the words that landed (ADR 0062).
-SCHEMA_VERSION = 48
+# heard them beside the words that landed (ADR 0062). 49 adds a session's close and the report it
+# ends with (`closes.py`, ADR 0075): one new table, so nothing already written has to move.
+SCHEMA_VERSION = 49
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -763,4 +764,32 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute(CREATE_DICTATION_READ)
         if "heard" not in dictation_columns:
             conn.execute("ALTER TABLE dictations ADD COLUMN heard TEXT")
+        # v49: a close — the host work that shuts a session down after the user ended it — and the
+        # report it ended with (closes.py, ADR 0075). `repos` is the session's own snapshot, because
+        # a successful removal deletes the session row this could otherwise be read from; the rest
+        # is what the app is told, `closing` until it ends and `done` after.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS session_closes (
+                   session_id TEXT PRIMARY KEY,
+                   project_id TEXT,
+                   state TEXT NOT NULL,
+                   started_at INTEGER NOT NULL,
+                   ended_at INTEGER,
+                   repos TEXT NOT NULL,
+                   removed INTEGER,
+                   kept TEXT,
+                   results TEXT,
+                   error TEXT
+               )"""
+        )
+        # The close owed after a restart is read once at boot; the finished ones a device reads are
+        # found by their time.
+        conn.execute(
+            """CREATE INDEX IF NOT EXISTS close_open
+                   ON session_closes (started_at) WHERE state = 'closing'"""
+        )
+        conn.execute(
+            """CREATE INDEX IF NOT EXISTS close_ended
+                   ON session_closes (ended_at) WHERE ended_at IS NOT NULL"""
+        )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
