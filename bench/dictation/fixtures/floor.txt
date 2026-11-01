@@ -1,0 +1,1 @@
+Add a retry to the upload queue and log the failure beside the take.

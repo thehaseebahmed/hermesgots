@@ -1,0 +1,6 @@
+# What the bench hears with, and the one pin that matters: `av` below 14 because `faster-whisper`
+# 1.2.1 calls `av.open(..., metadata_errors=...)`, which av 14 dropped — a bare install of the decoder
+# fetches a library that cannot open a file. `cryptography` is what `plugin/__init__.py` pulls in.
+faster-whisper==1.2.1
+av==13.1.0
+cryptography

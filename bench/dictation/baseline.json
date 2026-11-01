@@ -1,0 +1,255 @@
+{
+  "object": "memento.bench.dictation.baseline",
+  "note": "What the same fixture bytes and the same model must keep saying. No timing lives here: a millisecond belongs to the machine that measured it, and the run's own record carries those beside the machine, the model, the level and the cut policy.",
+  "fixtures": {
+    "sha256": "46862ea23bbd4072f3c935967d4df1be6d647b9e179c18715e8c54bd1c84183e",
+    "count": 9,
+    "files": [
+      {
+        "name": "cloud",
+        "file": "cloud.wav",
+        "sha256": "ece10066fd6891f8ce8518dff9cc44051330f0e2e3539e9a4348158debd29146"
+      },
+      {
+        "name": "floor",
+        "file": "floor.wav",
+        "sha256": "011f761e25363e3ccbd6c03ef7ff3526b36e9dde4a416e26ff052d4f96574273"
+      },
+      {
+        "name": "long",
+        "file": "long.wav",
+        "sha256": "f69dfd102c1bbf35e2b8645596024b7b755fa0bf7f2c50f5abe88bd139cddf55"
+      },
+      {
+        "name": "names",
+        "file": "names.wav",
+        "sha256": "c9748d3008fdc572399177596e4a0f8eb7642c237c06fb18741ebd965b12afed"
+      },
+      {
+        "name": "one-piece",
+        "file": "one-piece.wav",
+        "sha256": "157068a5c157fc31b3260951e80eeabec120bb1283fd8b37fb765e592a975c7e"
+      },
+      {
+        "name": "opus",
+        "file": "opus.webm",
+        "sha256": "7e4fd5bac49616539480636c69e42a991c64e82f01c00213d435589797e2dacb"
+      },
+      {
+        "name": "silence",
+        "file": "silence.wav",
+        "sha256": "154908ac8c1223c0b1d547d677bc78ac46d909e5610ac8628c2e42d62c3cd8ef"
+      },
+      {
+        "name": "sixty",
+        "file": "sixty.wav",
+        "sha256": "f901e8bc0e2f8f7af8ccc3311f1a85e9c7b478992cc0a95c8187334d5f1a494b"
+      },
+      {
+        "name": "straddle",
+        "file": "straddle.wav",
+        "sha256": "efb4c18400186cc2f915dc938e9e2a3e55007a64096d21aafc8c94666283959f"
+      }
+    ],
+    "heard": [
+      "one-piece",
+      "straddle",
+      "long",
+      "silence",
+      "names",
+      "floor",
+      "cloud",
+      "sixty",
+      "opus"
+    ]
+  },
+  "decoder": {
+    "backend": "faster-whisper 1.2.1, av 13.1.0",
+    "model": "base",
+    "compute_type": "int8",
+    "language": "en",
+    "beam_size": 5,
+    "cpu_threads": 4,
+    "temperature": 0.0,
+    "vad": false
+  },
+  "host": {
+    "machine": "x86_64",
+    "system": "Linux",
+    "cpus": 16
+  },
+  "level": "none",
+  "cut": {
+    "name": "device",
+    "floor_ms": 6000,
+    "pause_ms": 700,
+    "cap_ms": 25000,
+    "cap_pause_ms": 350,
+    "quiet_min": 0.012,
+    "quiet_max": 0.05,
+    "window_ms": 50,
+    "creep": 0.002
+  },
+  "hearing": true,
+  "vocabulary": true,
+  "hallucinations": "none",
+  "takes": [
+    {
+      "fixture": "one-piece",
+      "path": "local",
+      "spoken_ms": 2976,
+      "pieces_ms": [
+        2976
+      ],
+      "heard": "Remind me to call the dentist on Thursday morning.",
+      "reference": "Remind me to call the dentist on Thursday morning.",
+      "wer": 0.0,
+      "vocabulary": {
+        "words": [],
+        "spelled": true,
+        "missed": []
+      }
+    },
+    {
+      "fixture": "straddle",
+      "path": "local",
+      "spoken_ms": 5889,
+      "pieces_ms": [
+        5889
+      ],
+      "heard": "The pull request touches the plugin. So run the plugin tests before you merge it.",
+      "reference": "The pull request touches the plugin, so run the plugin tests before you merge it.",
+      "wer": 0.0,
+      "vocabulary": {
+        "words": [],
+        "spelled": true,
+        "missed": []
+      }
+    },
+    {
+      "fixture": "long",
+      "path": "local",
+      "spoken_ms": 11688,
+      "pieces_ms": [
+        11688
+      ],
+      "heard": "I want to get this down before I forget it so here is the whole of it in one go and the take is measured at two ends and only one of them ever sees a decoder while the other end belongs to the phone that heard the words arrive.",
+      "reference": "I want to get this down before I forget it so here is the whole of it in one go and the take is measured at two ends and only one of them ever sees a decoder while the other end belongs to the phone that heard the words arrive.",
+      "wer": 0.0,
+      "vocabulary": {
+        "words": [],
+        "spelled": true,
+        "missed": []
+      }
+    },
+    {
+      "fixture": "silence",
+      "path": "local",
+      "spoken_ms": 4000,
+      "pieces_ms": [
+        4000
+      ],
+      "heard": "",
+      "reference": "",
+      "wer": 0.0,
+      "vocabulary": {
+        "words": [],
+        "spelled": true,
+        "missed": []
+      }
+    },
+    {
+      "fixture": "names",
+      "path": "local",
+      "spoken_ms": 4354,
+      "pieces_ms": [
+        4354
+      ],
+      "heard": "I pushed the Gots plugin to the Memento branch for Haseeb at News Research.",
+      "reference": "I pushed the Gots plugin to the Memento branch for Haseeb at Nous Research.",
+      "wer": 0.071,
+      "vocabulary": {
+        "words": [
+          "Gots",
+          "Memento",
+          "Haseeb",
+          "Nous Research"
+        ],
+        "spelled": false,
+        "missed": [
+          "Nous Research"
+        ]
+      }
+    },
+    {
+      "fixture": "floor",
+      "path": "local",
+      "spoken_ms": 5792,
+      "pieces_ms": [
+        5792
+      ],
+      "heard": "Add a retry to the upload queue and log the failure beside the take.",
+      "reference": "Add a retry to the upload queue and log the failure beside the take.",
+      "wer": 0.0,
+      "vocabulary": {
+        "words": [],
+        "spelled": true,
+        "missed": []
+      }
+    },
+    {
+      "fixture": "cloud",
+      "path": "cloud",
+      "spoken_ms": 4011,
+      "pieces_ms": [
+        4011
+      ],
+      "heard": "Move the meeting to Friday. Send the notes to Haseeb afterwards.",
+      "reference": "Move the meeting to Friday. Send the notes to Haseeb afterwards.",
+      "wer": 0.0,
+      "vocabulary": {
+        "words": [],
+        "spelled": true,
+        "missed": []
+      }
+    },
+    {
+      "fixture": "sixty",
+      "path": "local",
+      "spoken_ms": 58730,
+      "pieces_ms": [
+        8700,
+        6000,
+        9950,
+        9650,
+        9400,
+        9750,
+        5280
+      ],
+      "heard": "I want to write the whole thing down while it is still fresh in my head. The take is uploaded piece by piece and hurt on the host as it lands. Nothing comes back until the confirm, so the bar holds one number the host states. The words land whole are not at all, and a retriments a fresh take ID. Names and product words ride along with every piece as a vocabulary. The host holds the take under the ID the app minted when the recording started. A local host drops a piece's audio the moment its words exist. A cloud host keeps the take and uploads the whole of it at the confirm. The cleanup runs at the level the bot picked after the words are all in. The weight at stop is one piece's decode plus a cleanup, and no more than that. Everything the user feels is measured at one of the two ends of a take. So a change to dictation carries a number before it and a number after it.",
+      "reference": "I want to write the whole thing down while it is still fresh in my head. The take is uploaded piece by piece and heard on the host as it lands. Nothing comes back until the confirm, so the bar holds one number the host states. The words land whole or not at all, and a retry mints a fresh take id. Names and product words ride along with every piece as a vocabulary. The host holds the take under the id the app minted when the recording started. A local host drops a piece's audio the moment its words exist. A cloud host keeps the take and uploads the whole of it at the confirm. The cleanup runs at the level the bot picked, after the words are all in. The wait at stop is one piece's decode plus a cleanup, and no more than that. Everything the user feels is measured at one of the two ends of a take. So a change to dictation carries a number before it and a number after it.",
+      "wer": 0.028,
+      "vocabulary": {
+        "words": [],
+        "spelled": true,
+        "missed": []
+      }
+    },
+    {
+      "fixture": "opus",
+      "path": "local",
+      "spoken_ms": 2637,
+      "pieces_ms": [
+        2637
+      ],
+      "heard": "The deploy finished and the side is up again.",
+      "reference": "The deploy finished and the site is up again.",
+      "wer": 0.111,
+      "vocabulary": {
+        "words": [],
+        "spelled": true,
+        "missed": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,76 @@
+{
+  "object": "memento.bench.dictation.fixtures",
+  "note": "One voice, synthesised once and committed: the bytes are the fixture, so a regenerated voice cannot be mistaken for the one a baseline was taken on.",
+  "takes": [
+    {
+      "name": "one-piece",
+      "file": "one-piece.wav",
+      "type": "audio/wav",
+      "reference": "one-piece.txt",
+      "why": "a one-Piece take"
+    },
+    {
+      "name": "straddle",
+      "file": "straddle.wav",
+      "type": "audio/wav",
+      "reference": "straddle.txt",
+      "why": "a sentence that straddles a pause"
+    },
+    {
+      "name": "long",
+      "file": "long.wav",
+      "type": "audio/wav",
+      "reference": "long.txt",
+      "why": "a long unbroken take"
+    },
+    {
+      "name": "silence",
+      "file": "silence.wav",
+      "type": "audio/wav",
+      "reference": "silence.txt",
+      "why": "room tone: no words at all"
+    },
+    {
+      "name": "names",
+      "file": "names.wav",
+      "type": "audio/wav",
+      "reference": "names.txt",
+      "vocabulary": [
+        "Gots",
+        "Memento",
+        "Haseeb",
+        "Nous Research"
+      ],
+      "why": "names said against a Vocabulary"
+    },
+    {
+      "name": "floor",
+      "file": "floor.wav",
+      "type": "audio/wav",
+      "reference": "floor.txt",
+      "why": "speech over a floor above the app's quiet threshold"
+    },
+    {
+      "name": "cloud",
+      "file": "cloud.wav",
+      "type": "audio/wav",
+      "reference": "cloud.txt",
+      "path": "cloud",
+      "why": "a take for the cloud path"
+    },
+    {
+      "name": "sixty",
+      "file": "sixty.wav",
+      "type": "audio/wav",
+      "reference": "sixty.txt",
+      "why": "a sixty-second take in several Pieces"
+    },
+    {
+      "name": "opus",
+      "file": "opus.webm",
+      "type": "audio/webm",
+      "reference": "opus.txt",
+      "why": "the app's own container, Opus in WebM, sent whole"
+    }
+  ]
+}
