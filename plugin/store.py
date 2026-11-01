@@ -764,10 +764,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute(CREATE_DICTATION_READ)
         if "heard" not in dictation_columns:
             conn.execute("ALTER TABLE dictations ADD COLUMN heard TEXT")
-        # v49: a close — the host work that shuts a session down after the user ended it — and the
-        # report it ended with (closes.py, ADR 0075). `repos` is the session's own snapshot, because
-        # a successful removal deletes the session row this could otherwise be read from; the rest
-        # is what the app is told, `closing` until it ends and `done` after.
+        # v49: a close, and the report it ended with (closes.py, ADR 0075). `repos` is the session's own
+        # snapshot, because a successful removal deletes the session row this could otherwise be read
+        # from.
         conn.execute(
             """CREATE TABLE IF NOT EXISTS session_closes (
                    session_id TEXT PRIMARY KEY,

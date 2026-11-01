@@ -8,11 +8,10 @@ closes each repository's open pull request and deletes its pushed branch on GitH
 session held comes off first, the way closing it always did (ADR 0015).
 
 The record is the report. ``sessions.remove`` deletes the session's own row when every tree went, so
-the row here keeps its own snapshot of the repos — name, root, branch — taken before any of it runs.
-That is what lets the close be resumed after a restart (a row still ``closing`` is run again at boot)
-and read back after the session is gone from the app (``GET closes``), which is the whole point of
-keeping it: a kept worktree or a refused branch delete is the user's business, and a toast that only
-lands in a request the app was holding is a toast the app can lose.
+this row keeps its own snapshot of the repos — name, root, branch — taken before any of it runs. That
+is what lets a close resume after a restart and be read back by a device that never saw the session: a
+kept worktree or a refused branch delete is the user's business, and a toast held only in a request
+the app was waiting on is a toast the app can lose.
 """
 
 from __future__ import annotations
@@ -20,7 +19,6 @@ from __future__ import annotations
 import json
 import logging
 import threading
-import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -32,15 +30,12 @@ logger = logging.getLogger(__name__)
 # ended has to find the report, and one that never comes back must not grow the table forever.
 KEEP_ROWS = 200
 KEEP_MS = 30 * 86_400_000
+# How many a device is handed at once: the newest reports, which is what an app that was away needs.
+READ_ROWS = 20
 
 _lock = threading.Lock()
 _resumed: set = set()
-# The closes this process is running, so a second ask for one answers the one already under way.
 _running: set = set()
-
-
-def _connect(path: Path):
-    return store.connect(path)
 
 
 def _row(row: Any) -> Dict[str, Any]:
@@ -64,11 +59,29 @@ SELECT = (
 )
 
 
+def public(row: Dict[str, Any]) -> Dict[str, Any]:
+    """A close as the routes and the app read it: the wire shape, with the repositories as names."""
+    return {
+        "object": "memento.closing",
+        "session_id": row["session_id"],
+        "state": row["state"],
+        "started_at": row["started_at"],
+        "ended_at": row["ended_at"],
+        "repos": [
+            repo.get("name") for repo in row["repos"] if isinstance(repo, dict) and repo.get("name")
+        ],
+        "removed": row["removed"],
+        "kept": row["kept"],
+        "results": row["results"],
+        "error": row["error"],
+    }
+
+
 def read(path: Path, session_id: str) -> Optional[Dict[str, Any]]:
     """The session's close, or None when the host has never been asked to close it."""
     if not path.exists():
         return None
-    conn = _connect(path)
+    conn = store.connect(path)
     try:
         row = conn.execute(f"{SELECT} WHERE session_id = ?", (session_id,)).fetchone()
     finally:
@@ -76,67 +89,77 @@ def read(path: Path, session_id: str) -> Optional[Dict[str, Any]]:
     return _row(row) if row else None
 
 
-def recent(path: Path) -> List[Dict[str, Any]]:
-    """Every close this host still keeps, newest first: the reports a device it wasn't asked on can read."""
+def recent(path: Path, limit: int = READ_ROWS) -> List[Dict[str, Any]]:
+    """The closes a device may still be owed, newest first: a session it has already deleted can
+    still answer with its report."""
     if not path.exists():
         return []
-    conn = _connect(path)
+    conn = store.connect(path)
     try:
-        rows = conn.execute(f"{SELECT} ORDER BY started_at DESC LIMIT ?", (KEEP_ROWS,)).fetchall()
+        rows = conn.execute(
+            f"{SELECT} WHERE state = 'done' ORDER BY ended_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+    finally:
+        conn.close()
+    return [_row(row) for row in rows]
+
+
+def owed(path: Path) -> List[Dict[str, Any]]:
+    """Every close a restart left running, oldest first, so the ones nothing resumed go next."""
+    if not path.exists():
+        return []
+    conn = store.connect(path)
+    try:
+        rows = conn.execute(f"{SELECT} WHERE state = 'closing' ORDER BY started_at ASC").fetchall()
     finally:
         conn.close()
     return [_row(row) for row in rows]
 
 
 def start(path: Path, home: Path, session_id: str) -> Dict[str, Any]:
-    """Records the close and starts it, answering what it is now: ``closing``, or ``done`` at once
-    for a session the host holds nothing of. Called off the loop; the work runs on its own thread.
-
-    A second ask for a close already running answers that one — one close per session, however many
-    devices press the button.
-    """
+    """Records the close and starts it: ``closing``, or ``done`` at once for a session the host holds
+    nothing of. A second ask for one already running answers that one."""
     existing = read(path, session_id)
     if existing and existing["state"] == "closing":
-        # The close already asked for is the answer, so two devices pressing the button start one
-        # close. Nothing running it — a process that died between the record and the thread, or a
-        # boot that couldn't read the store — is asked to start again from its own snapshot.
+        # Nothing running it — a process that died between the record and the thread, or a boot that
+        # couldn't read the store — is asked to start again from its own snapshot.
         if (str(path), session_id) not in _running:
             spawn(path, home, session_id, _snapshot(path, home, existing))
-        return read(path, session_id)  # type: ignore[return-value]
+        return read(path, session_id) or existing
     record = sessions.record_for(path, home, session_id)
     now = store.now_ms()
     if not record:
         # Nothing on the host to close: a session that only ever lived in the app ends here, and a
         # second delete of one already closed reads the same way.
-        _write(
-            path,
-            session_id,
-            project_id=(existing or {}).get("project_id"),
-            state="done",
-            started_at=now,
-            ended_at=now,
-            repos=(existing or {}).get("repos") or [],
-            removed=True,
-            kept=[],
-            results=[],
-            error=None,
-        )
-        return read(path, session_id)  # type: ignore[return-value]
-    _write(
-        path,
-        session_id,
-        project_id=record.get("project_id"),
-        state="closing",
-        started_at=now,
-        ended_at=None,
-        repos=list(record.get("repos") or []),
-        removed=False,
-        kept=[],
-        results=[],
-        error=None,
-    )
+        row = {
+            "session_id": session_id,
+            "project_id": (existing or {}).get("project_id"),
+            "state": "done",
+            "started_at": now,
+            "ended_at": now,
+            "repos": (existing or {}).get("repos") or [],
+            "removed": True,
+            "kept": [],
+            "results": [],
+            "error": None,
+        }
+        _write(path, row)
+        return row
+    row = {
+        "session_id": session_id,
+        "project_id": record.get("project_id"),
+        "state": "closing",
+        "started_at": now,
+        "ended_at": None,
+        "repos": list(record.get("repos") or []),
+        "removed": False,
+        "kept": [],
+        "results": [],
+        "error": None,
+    }
+    _write(path, row)
     spawn(path, home, session_id, record)
-    return read(path, session_id)  # type: ignore[return-value]
+    return row
 
 
 def spawn(path: Path, home: Path, session_id: str, record: Dict[str, Any]) -> None:
@@ -147,28 +170,26 @@ def spawn(path: Path, home: Path, session_id: str, record: Dict[str, Any]) -> No
             return
         _running.add(key)
 
-    def work() -> None:
+    def thread() -> None:
         try:
             run(path, home, session_id, record)
         finally:
             with _lock:
                 _running.discard(key)
 
-    threading.Thread(
-        target=work, name=f"memento-close-{session_id[:8]}", daemon=True
-    ).start()
+    threading.Thread(target=thread, name=f"memento-close-{session_id[:8]}", daemon=True).start()
 
 
-def run(path: Path, home: Path, session_id: str, record: Dict[str, Any]) -> None:
-    """Does one close and writes what it ended with. Never raises: the record is the only place a
-    failure can be told, and a close that throws without one is a close nobody hears about."""
+def work(path: Path, home: Path, record: Dict[str, Any]) -> Dict[str, Any]:
+    """Does the close's work and answers what it ended with: the one sequence of release, removal and
+    pull-request closing that both the thread and an older app's synchronous route run, so the two
+    cannot drift."""
     removed = False
     kept: List[Dict[str, Any]] = []
     results: List[Dict[str, Any]] = []
     error: Optional[str] = None
     try:
-        # The claim comes off as soon as the user closed the session, which the chat list already
-        # says (ADR 0015); this is the same release, done where the work is.
+        # The claim comes off first, the way closing a session always did (ADR 0015).
         try:
             if afk.release_session(home, record):
                 afk.wake()
@@ -183,42 +204,44 @@ def run(path: Path, home: Path, session_id: str, record: Dict[str, Any]) -> None
         except sessions.WorkspaceError as failure:
             error = str(failure) or "Couldn't remove the session's worktrees."
         if removed:
-            sessions._clear_cwd(session_id)
+            sessions._clear_cwd(record["session_id"])
         results = ship.close(home, record)
     except Exception as failure:
         logger.warning("memento: a session's close failed", exc_info=True)
         error = error or str(failure) or "Couldn't finish closing the session."
-    finish(path, session_id, removed=removed, kept=kept, results=results, error=error)
+    return {"removed": removed, "kept": kept, "results": results, "error": error}
 
 
-def finish(
-    path: Path,
-    session_id: str,
-    *,
-    removed: bool,
-    kept: List[Dict[str, Any]],
-    results: List[Dict[str, Any]],
-    error: Optional[str],
-) -> None:
+def run(path: Path, home: Path, session_id: str, record: Dict[str, Any]) -> None:
+    """Does one close and writes what it ended with. Never raises: the record is the only place a
+    failure can be told, and a close that throws without one is a close nobody hears about."""
+    finish(path, session_id, work(path, home, record))
+
+
+def finish(path: Path, session_id: str, report: Dict[str, Any]) -> None:
     """Writes the report and wakes the app: the row is what a device reads, the note is how an open
     one knows to read it now."""
     try:
-        row = read(path, session_id)
-        if row is None:
-            return
-        _write(
-            path,
-            session_id,
-            project_id=row["project_id"],
-            state="done",
-            started_at=row["started_at"],
-            ended_at=store.now_ms(),
-            repos=row["repos"],
-            removed=removed,
-            kept=kept,
-            results=results,
-            error=error,
-        )
+        conn = store.connect(path)
+        try:
+            cursor = conn.execute(
+                """UPDATE session_closes
+                       SET state = 'done', ended_at = ?, removed = ?, kept = ?, results = ?, error = ?
+                       WHERE session_id = ?""",
+                (
+                    store.now_ms(),
+                    int(bool(report.get("removed"))),
+                    json.dumps(report.get("kept") or []),
+                    json.dumps(report.get("results") or []),
+                    report.get("error") or None,
+                    session_id,
+                ),
+            )
+            if not cursor.rowcount:
+                return
+            _prune(conn)
+        finally:
+            conn.close()
     except Exception:
         logger.warning("memento: couldn't write a session's close report", exc_info=True)
         return
@@ -242,18 +265,15 @@ def _snapshot(path: Path, home: Path, row: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def resume(home: Path) -> None:
-    """Runs again every close a restart left running. Once per home, like a clone's resume.
-
-    A store another writer holds answers nothing rather than raising: the next boot tries again,
-    and the row is still there to be found.
-    """
+    """Runs again every close a restart left running. Once per home, like a clone's resume; a store
+    another writer holds answers nothing rather than raising, and the next boot tries again."""
     path = store.db_path(home)
     with _lock:
         if str(home) in _resumed:
             return
         _resumed.add(str(home))
     try:
-        rows = [row for row in recent(path) if row["state"] == "closing"]
+        rows = owed(path)
     except Exception:
         logger.debug("memento: couldn't read the session closes to resume", exc_info=True)
         return
@@ -261,21 +281,8 @@ def resume(home: Path) -> None:
         spawn(path, home, row["session_id"], _snapshot(path, home, row))
 
 
-def _write(
-    path: Path,
-    session_id: str,
-    *,
-    project_id: Optional[str],
-    state: str,
-    started_at: int,
-    ended_at: Optional[int],
-    repos: List[Dict[str, Any]],
-    removed: bool,
-    kept: List[Dict[str, Any]],
-    results: List[Dict[str, Any]],
-    error: Optional[str],
-) -> None:
-    conn = _connect(path)
+def _write(path: Path, row: Dict[str, Any]) -> None:
+    conn = store.connect(path)
     try:
         conn.execute(
             """INSERT INTO session_closes
@@ -292,30 +299,34 @@ def _write(
                    results = excluded.results,
                    error = excluded.error""",
             (
-                session_id,
-                project_id,
-                state,
-                started_at,
-                ended_at,
-                json.dumps(repos),
-                int(removed),
-                json.dumps(kept),
-                json.dumps(results),
-                error,
+                row["session_id"],
+                row["project_id"],
+                row["state"],
+                row["started_at"],
+                row["ended_at"],
+                json.dumps(row["repos"]),
+                int(bool(row["removed"])),
+                json.dumps(row["kept"]),
+                json.dumps(row["results"]),
+                row["error"],
             ),
         )
-        if state == "done":
-            # A report is small and a store is read for years; the same two bounds the change
-            # stream keeps, so a device that comes back finds its close and an old one goes.
-            conn.execute(
-                "DELETE FROM session_closes WHERE ended_at IS NOT NULL AND ended_at < ?",
-                (int(time.time() * 1000) - KEEP_MS,),
-            )
-            conn.execute(
-                """DELETE FROM session_closes WHERE session_id IN (
-                       SELECT session_id FROM session_closes
-                       ORDER BY started_at DESC LIMIT -1 OFFSET ?)""",
-                (KEEP_ROWS,),
-            )
+        if row["state"] == "done":
+            _prune(conn)
     finally:
         conn.close()
+
+
+def _prune(conn: Any) -> None:
+    """A report is small and a store is read for years: a count and an age, so a device that comes
+    back finds its close and an old one goes."""
+    conn.execute(
+        "DELETE FROM session_closes WHERE ended_at IS NOT NULL AND ended_at < ?",
+        (store.now_ms() - KEEP_MS,),
+    )
+    conn.execute(
+        """DELETE FROM session_closes WHERE session_id IN (
+               SELECT session_id FROM session_closes
+               ORDER BY started_at DESC LIMIT -1 OFFSET ?)""",
+        (KEEP_ROWS,),
+    )

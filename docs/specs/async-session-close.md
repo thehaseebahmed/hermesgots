@@ -1,7 +1,7 @@
 # A session closes at the tap, and the host finishes the close
 
 Status: grilled 2026-10-31 against the code, the glossary and the ADRs it touches; every decision
-below is settled and recorded in ADR 0075. Nothing here is built yet.
+below is settled and recorded in ADR 0075.
 
 ## Goal
 
@@ -38,8 +38,8 @@ device never read, and the two dialogs' own copy change as little as they can.
 1. **The close leaves the request.** `POST sessions/{id}/closes` writes the close row and answers
    `202` with its state; a daemon thread runs `afk.release_session`, `sessions.remove`,
    `sessions._clear_cwd` and `ship.close`, then writes what it ended with onto the row. `GET
-   sessions/{id}/closes` reads one close; `GET closes` reads the recent ones, which is how a device
-   hears about a session it has already deleted.
+   sessions/{id}/closes` reads one close; `GET closes` reads the most recent ones, which is how a
+   device hears about a session it has already deleted.
 2. **The close is recorded before it runs, with its own snapshot of the repositories.** A
    successful removal deletes the session record, so the close row keeps the project and each
    repository's name, root and branch; the close is resumable and reportable after the session row
@@ -78,7 +78,7 @@ device never read, and the two dialogs' own copy change as little as they can.
 | `plugin/events.py` | The close's end noted on the change stream, so an open app re-reads |
 | `app/src/lib/hermes.ts` | `startSessionClose`, `getSessionClose`, `getSessionCloses`; a bound on the synchronous `closeSession` and `removeWorkspace` |
 | `app/src/lib/workspace.ts` | `closeSessionWork` asks the host and returns at once, or takes the synchronous path on a plugin without the feature |
-| `app/src/lib/close-reports.ts` | Which reports this device has told, the words they are told in, and the bounded wait after asking |
+| `app/src/lib/close-reports.ts` | Which reports this device has told, and the words they are told in |
 | `app/src/lib/code.ts` | `useCloseReports`, read as Code opens for each bot it lists |
 | `app/src/components/chat/chat-actions.tsx` | Delete and Discard at the tap; the dialogs' words |
 | `app/scripts/mock-hermes.mjs` | The close routes, a kept tree, and a slow close to watch |
@@ -115,7 +115,7 @@ Cheapest tier that would fail for the reason the change can fail (ADR 0019):
   the work (the thread's collaborator recorded, not run); the close writes its report when it ends,
   kept trees and per-repository errors included; a `closing` row is resumed at boot and a `done` one
   is not; a second ask does not start a second close; a session the host never had answers `done`.
-- **Unit (app)** — `app/scripts/test-close-reports.mjs`: a report is told only when it has ended and
+- **Unit (app)** — `app/scripts/test-close-report.mjs`: a report is told only when it has ended and
   this device holds no mark at or past its start; the words of a kept tree, a refused branch and a
   failed removal.
 - **Component** — `app/scripts/test-session-close.tsx`: Delete from the header's menu removes the

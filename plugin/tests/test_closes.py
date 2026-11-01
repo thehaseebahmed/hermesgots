@@ -148,3 +148,18 @@ class CloseReadTests(unittest.TestCase):
             closes.start(self.path, self.home, "b")
         found = {row["session_id"] for row in closes.recent(self.path)}
         self.assertEqual(found, {"a", "b"})
+
+    def test_a_close_still_owed_is_read_past_the_reports_a_device_is_handed(self):
+        # More finished closes than a device is handed at once, then one still running: the owed
+        # read finds it anyway, which is what a restart resumes from.
+        with patch.object(sessions, "record_for", return_value=None):
+            for index in range(closes.READ_ROWS + 5):
+                closes.start(self.path, self.home, f"done-{index}")
+        with (
+            patch.object(sessions, "record_for", return_value=RECORD),
+            patch.object(closes, "spawn"),
+        ):
+            closes.start(self.path, self.home, "s-1")
+        self.assertEqual([row["session_id"] for row in closes.owed(self.path)], ["s-1"])
+        self.assertEqual(len(closes.recent(self.path)), closes.READ_ROWS)
+        self.assertNotIn("s-1", {row["session_id"] for row in closes.recent(self.path)})

@@ -96,10 +96,9 @@
 // then): "merge" or "close" in a turn sets the live one's state, a merge resolves the session in the
 // chat list, and "break" fails their
 // checks while "pending" runs them for a while before they pass. POST …/close (delete or discard)
-// closes them and removes the trees like …/workspace/remove. Since ADR 0075 the close leaves the
-// request: POST …/closes records it and answers 202 at once, GET …/closes reads the report, and
-// GET /api/plugins/memento/closes lists them all — MOCK_CLOSE_MS holds one open that long.
-// MOCK_PRS_FAIL=1 (or
+// closes them and removes the trees like …/workspace/remove. POST …/closes records one and answers
+// 202 at once, GET …/closes reads the report, and GET /api/plugins/memento/closes lists the recent
+// ones — MOCK_CLOSE_MS holds one open that long. MOCK_PRS_FAIL=1 (or
 // POST /__mock/prs { fail }) is a host that can't reach GitHub: …/prs answers an error rather than
 // a list, so the app keeps the pull requests it already knows. GET /api/plugins/memento/runs/live lists the sessions with
 // a run in flight, why each one waiting on the user waits, and which are still owed the wake turn of
@@ -6219,7 +6218,6 @@ http
         return json(res, 200, { object: "memento.closed", ...closeOutcome(id) })
       }
       if (route === "closes") {
-        // The close leaves the request (ADR 0075): asked for, then read back as a report.
         if (req.method === "POST") {
           const existing = sessionCloses.get(id)
           if (existing?.state === "closing") return json(res, 202, closeBody(existing))

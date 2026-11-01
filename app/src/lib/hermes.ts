@@ -2945,20 +2945,10 @@ export async function closeSession(
     signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
   })
   const body = await response.json()
-  const results: unknown = body?.results
   return {
     removed: Boolean(body?.removed),
     kept: parseKept(body?.kept),
-    results: Array.isArray(results)
-      ? results
-          .filter((r) => typeof r?.name === "string")
-          .map((r) => ({
-            name: r.name,
-            closed: typeof r.closed === "number" ? r.closed : null,
-            branchDeleted: Boolean(r.branch_deleted),
-            error: typeof r.error === "string" && r.error ? r.error : null,
-          }))
-      : [],
+    results: parseClosedRepos(body?.results),
   }
 }
 
@@ -2978,11 +2968,24 @@ export interface SessionClose {
 }
 
 function sessionClose(config: HermesConfig, sessionId: string) {
-  return `${pluginRoot(config.baseUrl)}/sessions/${encodeURIComponent(sessionId)}/closes`
+  return pluginSession(config, sessionId, "/closes")
+}
+
+/** The per-repository results both the synchronous close and a recorded one answer with. */
+function parseClosedRepos(results: unknown): ClosedRepo[] {
+  return Array.isArray(results)
+    ? results
+        .filter((r) => typeof r?.name === "string")
+        .map((r) => ({
+          name: r.name,
+          closed: typeof r.closed === "number" ? r.closed : null,
+          branchDeleted: Boolean(r.branch_deleted),
+          error: typeof r.error === "string" && r.error ? r.error : null,
+        }))
+    : []
 }
 
 function closeOf(body: Record<string, unknown>): SessionClose {
-  const results: unknown = body?.results
   return {
     sessionId: typeof body?.session_id === "string" ? body.session_id : "",
     state:
@@ -2996,16 +2999,7 @@ function closeOf(body: Record<string, unknown>): SessionClose {
       : [],
     removed: Boolean(body?.removed),
     kept: parseKept(body?.kept),
-    results: Array.isArray(results)
-      ? results
-          .filter((r) => typeof r?.name === "string")
-          .map((r) => ({
-            name: r.name,
-            closed: typeof r.closed === "number" ? r.closed : null,
-            branchDeleted: Boolean(r.branch_deleted),
-            error: typeof r.error === "string" && r.error ? r.error : null,
-          }))
-      : [],
+    results: parseClosedRepos(body?.results),
     error: typeof body?.error === "string" && body.error ? body.error : null,
   }
 }

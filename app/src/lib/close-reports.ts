@@ -66,13 +66,12 @@ function markTold(profileId: string, close: CloseReport) {
 }
 
 /**
- * Says what a close ended with, once per device. `named` is whether the session worked in more than
- * one repository, which is when a refusal has to say which repo refused.
+ * Says what a close ended with, once per device.
  */
-export function tellClose(profile: Pick<Profile, "id">, close: CloseReport, named?: boolean) {
+export function tellClose(profile: Pick<Profile, "id">, close: CloseReport) {
   if (!closeUntold(marks.get(), profile.id, close)) return false
   markTold(profile.id, close)
-  for (const line of closeLines(close, named ?? close.repos.length > 1)) {
+  for (const line of closeLines(close, close.repos.length > 1)) {
     if (line.tone === "error") toast.error(line.text)
     else toast.info(line.text)
   }
