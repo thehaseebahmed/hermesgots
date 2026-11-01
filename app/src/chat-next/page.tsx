@@ -582,8 +582,11 @@ interface ThreadOptions {
   prepareTurn?: (text: string, attachments: Attachment[]) => Promise<PreparedTurn>
   /** Queues a message on the plugin, as the app builds one; without it, nothing can be queued. */
   queueTurn?: (text: string, attachments: Attachment[]) => Promise<void>
-  /** Steers the running reply through the plugin's queue; without it, nothing can be steered. */
-  steerTurn?: (text: string, attachments: Attachment[]) => Promise<void>
+  /**
+   * Steers the running reply through the plugin's queue; without it, nothing can be steered. Answers
+   * whether the reply took it, which is when the thread may draw it.
+   */
+  steerTurn?: (text: string, attachments: Attachment[]) => Promise<boolean>
   /**
    * Asks the host where a message belongs before it is sent here (a bot's Main, ADR 0029): answers
    * the attachments to send it with where it stays, or nothing where the host sent it elsewhere.
@@ -1358,7 +1361,9 @@ export function ChatNextThread({
     if (!steerTurn) throw new Error("This reply can't be steered.")
     const kept = triageTurn ? await triageTurn(text, attachments, { steer: true }) : attachments
     if (!kept) return
-    await steerTurn(text, kept)
+    // A steer the host took stands in the reply at once: its transcript row lands only when the run
+    // reads it. One it refused stays queued, and the queue row is what draws it.
+    if (await steerTurn(text, kept)) dispatch({ type: "steered", text })
     void catchUp()
   }
 

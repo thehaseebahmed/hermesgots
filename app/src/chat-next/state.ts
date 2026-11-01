@@ -10,7 +10,8 @@ import { overlay, prepend } from "./pages.ts"
 import {
   foldTurns,
   withArchive,
-  withCarriedSeams,
+  withCarried,
+  withSteer,
   withoutRepeatedFailures,
   type Part,
   type Row,
@@ -111,6 +112,11 @@ export type ThreadEvent =
     }
   /** A message that didn't go is taken back: it leaves the thread for good. */
   | { type: "cancelled"; id: string }
+  /**
+   * A steer the host took: it stands in the reply at once, rather than waiting for the transcript's
+   * row, which the host writes only when the run reads the steer.
+   */
+  | { type: "steered"; text: string }
   /** A read the host answered with something other than the rows: said as a toast, drawn nowhere. */
   | { type: "read-failed" }
   /** A message the host sent somewhere else (triage, ADR 0029): it leaves this thread, unfailed. */
@@ -289,7 +295,7 @@ export function turnsOf(folded: Turn[], live?: LiveTurn, waiting?: Waiting): Tur
   const copy = folded.at(-1)
   if (waiting && copyIsAhead(copy, live)) return folded
   if (!live.replaces || !copy) return withoutRepeatedFailures([...folded, live.turn])
-  return withoutRepeatedFailures([...folded.slice(0, -1), withCarriedSeams(live.turn, copy)])
+  return withoutRepeatedFailures([...folded.slice(0, -1), withCarried(live.turn, copy)])
 }
 
 /** One live event's change to the turn it belongs to; only the part it touches is a new object. */
@@ -541,6 +547,13 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       const unsent = state.unsent?.filter((row) => row.id !== event.id)
       if (!unsent || unsent.length === state.unsent?.length) return state
       return { ...state, unsent: unsent.length ? unsent : undefined }
+    }
+    case "steered": {
+      // Only a reply this page draws can be steered: with none, the transcript's row for the steer is
+      // what draws it, and `withCarried` puts it where the run read it.
+      if (!state.live) return state
+      const turn = withSteer(state.live.turn, event.text)
+      return turn === state.live.turn ? state : { ...state, live: { ...state.live, turn } }
     }
     case "read-failed":
       return state.status === "loading" ? { ...state, status: "ready" } : state

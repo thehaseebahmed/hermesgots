@@ -356,34 +356,56 @@ export function foldTurns(rows: Row[], partial = false, showReminders = false): 
   return withoutRepeatedFailures(turns)
 }
 
-/** Where in a reply a seam stood: the calls drawn before it and the characters of its words. */
-interface SeamAnchor {
+/** Where in a reply a part the stream never carries stood: the calls drawn above it and its words. */
+interface Anchor {
   text: number
   calls: number
   part: Part
 }
 
 /**
- * A live turn as the transcript's copy of it draws: the compactions that copy holds are the run's own
- * history, and a stream carries no part for them.
+ * What the transcript's copy of a turn holds that its stream cannot: the compactions it folded, and
+ * the steers the user sent it (a stream carries an event for neither).
  */
-export function withCarriedSeams(live: Turn, copy: Turn): Turn {
-  const seams: SeamAnchor[] = []
+function carriedOf(copy: Turn, live: Turn): Anchor[] {
+  // A steer this device sent is already drawn at the point it was sent, and the copy's row for it is
+  // the same fact: the two pair off, so a steer lands once whichever of them the thread is drawing.
+  const own = live.parts.flatMap((part) => (part.kind === "steer" ? [part.text] : []))
+  const anchors: Anchor[] = []
   let text = 0
   let calls = 0
   for (const part of copy.parts) {
-    if (part.kind === "compaction") seams.push({ text, calls, part })
-    else if (part.kind === "tools") calls += part.calls.length
+    if (part.kind === "compaction") anchors.push({ text, calls, part })
+    else if (part.kind === "steer") {
+      const at = own.indexOf(part.text)
+      if (at >= 0) own.splice(at, 1)
+      else anchors.push({ text, calls, part })
+    } else if (part.kind === "tools") calls += part.calls.length
     else if (part.kind === "text") text += part.text.length
   }
-  if (!seams.length) return live
+  return anchors
+}
+
+/**
+ * A live turn as the transcript's copy of it draws: what the run wrote and no stream event carries —
+ * the compactions it folded, the steers the user sent it — comes in at the point the copy says it
+ * stood. A steer's row is written when the run read it, which can be well before the read that
+ * brings it here, so one whose anchor the reply has already written past goes at the foot of the
+ * reply instead of being dropped: the reader sees the steer as soon as the host has it, however far
+ * the reply has run on.
+ */
+export function withCarried(live: Turn, copy: Turn): Turn {
+  const carried = carriedOf(copy, live)
+  if (!carried.length) return live
   const parts: Part[] = []
   let next = 0
-  text = 0
-  calls = 0
+  let text = 0
+  let calls = 0
+  const put = (part: Part) =>
+    part.kind === "compaction" ? pushSeam(parts, part) : parts.push(part)
   const open = () => {
-    while (next < seams.length && seams[next].text <= text && seams[next].calls <= calls)
-      pushSeam(parts, seams[next++].part)
+    while (next < carried.length && carried[next].text <= text && carried[next].calls <= calls)
+      put(carried[next++].part)
   }
   open()
   for (const part of live.parts) {
@@ -400,9 +422,9 @@ export function withCarriedSeams(live: Turn, copy: Turn): Turn {
     open()
     const from = calls
     const to = from + part.calls.length
-    const splits = seams
+    const splits = carried
       .slice(next)
-      .some((seam) => seam.calls > from && seam.calls < to && seam.text <= text)
+      .some((one) => one.calls > from && one.calls < to && one.text <= text)
     if (!splits) {
       parts.push(part)
       calls = to
@@ -416,7 +438,22 @@ export function withCarriedSeams(live: Turn, copy: Turn): Turn {
     }
   }
   open()
+  while (next < carried.length) {
+    if (carried[next].part.kind === "steer") parts.push(carried[next].part)
+    next += 1
+  }
   return { ...live, parts }
+}
+
+/**
+ * A steer the user just sent, standing in the reply where they sent it. It is drawn at once rather
+ * than waiting for the transcript's row, which the host writes when the run reads the steer — after
+ * its next tool result, or at the turn's end. `withCarried` pairs the row off against this part, so
+ * the two never draw twice.
+ */
+export function withSteer(live: Turn, text: string): Turn {
+  const said = text.trim()
+  return said ? { ...live, parts: [...live.parts, { kind: "steer", text: said }] } : live
 }
 
 const sameRequest = (a: Turn, b: Turn) =>

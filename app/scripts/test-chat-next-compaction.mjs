@@ -6,7 +6,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { foldTurns, withArchive, withCarriedSeams } from "../src/chat-next/fold.ts"
+import { foldTurns, withArchive, withCarried } from "../src/chat-next/fold.ts"
 import { recorded } from "./chat-next-fixtures.ts"
 
 const live = recorded("compaction.live.json").data
@@ -75,7 +75,7 @@ test("a reply that compacts while it streams keeps its divider where it fell", (
     delivered: [],
     parts: [{ kind: "tools", calls: [call("c1"), call("c2")] }],
   }
-  const kept = withCarriedSeams(streamed, copy)
+  const kept = withCarried(streamed, copy)
   assert.deepEqual(
     kinds(kept),
     ["tools", "compaction", "tools"],
@@ -107,7 +107,7 @@ test("two compactions with words between them keep both dividers, in the order t
       { kind: "tools", calls: [call("c2")] },
     ],
   }
-  assert.deepEqual(kinds(withCarriedSeams(streamed, copy)), [
+  assert.deepEqual(kinds(withCarried(streamed, copy)), [
     "tools",
     "compaction",
     "text",
@@ -132,7 +132,7 @@ test("a seam below the reply's words stays below them, and one above its first w
     ],
   }
   assert.deepEqual(
-    kinds(withCarriedSeams(words, spoken)),
+    kinds(withCarried(words, spoken)),
     ["text", "compaction"],
     "the words it fell after are drawn above the line",
   )
@@ -152,7 +152,7 @@ test("a seam below the reply's words stays below them, and one above its first w
     parts: [{ kind: "text", text: "Carried work." }],
   }
   assert.deepEqual(
-    kinds(withCarriedSeams(live, carried)),
+    kinds(withCarried(live, carried)),
     ["compaction", "text"],
     "nothing was drawn above it, so the line opens the reply",
   )
