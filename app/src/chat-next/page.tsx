@@ -737,22 +737,30 @@ export function ChatNextThread({
     async (fresh = false) => {
       if (!server || !key || !session || olderOn.current) return
       if (!fresh && olderFailed.current) return
+      // One answer for "this run is over": the mount's cleanup aborts this signal. A poll that was
+      // still out when the device closed would otherwise start a run of its own — it bumps the
+      // counter itself, so the counter cannot say no — and write its pages for a screen nobody
+      // shows. The signal is read again where each page is applied, for the same reason.
+      const signal = alive.current.signal
+      if (signal.aborted) return
       const mine = ++olderRun.current
       olderOn.current = true
-      const signal = alive.current.signal
       setOlder("reading")
       try {
-        while (mine === olderRun.current && store.get().partial) {
+        while (mine === olderRun.current && store.get().partial && !signal.aborted) {
           const page = await readPage(
             { server, key },
             session,
             nextOffset(store.get().rows),
             signal,
           )
-          if (mine !== olderRun.current) return
+          if (mine !== olderRun.current || signal.aborted) return
           const held = store.get().rows.length
           await store
-            .apply({ type: "older", rows: page, last: isLast(page) })
+            .apply(
+              { type: "older", rows: page, last: isLast(page) },
+              () => mine === olderRun.current && !signal.aborted,
+            )
             .catch(() => undefined)
           // Rows written meanwhile can leave a page of rows already held: the offset is stale, and
           // asking again at once would ask for the same page, so it waits for the reader's retry.

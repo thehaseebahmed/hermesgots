@@ -2347,33 +2347,6 @@ the speech settings, so it cannot read the level it is racing against.
 - Suggested fix: let the host state its own bound — a `cleanup.deadline_ms` on the speech record, or
   on the cleanup's answer — and derive both waits from it.
 
-# Deferred: one chat-next test flakes, and the invariant behind it is unenforced
-
-`app/scripts/test-chat-next-older.tsx`'s "a thread left unfinished picks up where it stopped, from the
-rows the device holds" fails about one run in four or five, on `assert.equal(await
-database.sessionRows.count(), 2 * PAGE, "it was not written for nobody")`: 180 rows land where the page
-already written is 100. It is not this branch's: with `app/src/chat-next/fold.ts` and
-`app/src/chat-next/state.ts` checked back out from the merge-base it still failed, 1 run in 5, and
-neither that test file nor `chat-next/page.tsx` is touched here. It reds the app's gates on whichever PR
-runs first, and a re-run clears it.
-
-## Risky
-
-### 1. Nothing decides whether a page that lands as the device closes is written
-
-- What is known: the walk is `page.tsx`'s `readOlder` loop, which stops when `olderRun.current` moves —
-  `stopOlder` bumps it, and the device's unmount calls it beside `alive.current.abort()`. Yet a run
-  sometimes writes every remaining page after the close. Which side wins is timing: the abort's rejection
-  and the page's own resolution race, and the assertion says the wrong one sometimes gets there first.
-- Cost: the invariant the assertion guards — a closed device is not written for nobody — is only checked
-  by a test that fails on its own now and then, so nobody trusts the red; and a flaky gate costs every
-  PR a re-run.
-- Suggested fix: one answer for "this run is over", checked where the page is applied rather than after
-  it is awaited, and a test that waits on that answer instead of `wait(50)`. It needs its own probe: which
-  of the abort and the resolution is observed first, at the sizes `LONG` uses.
-- Why it is not applied here: it is a paging race in code this branch never touches, and a fix needs the
-  timing proven before it is written — not guessed inside a progress-reminders review.
-
 # Deferred: both screens read liveness off a row, so a run the host lists can read as no run
 
 The steer offer is now honest on chat-next: `canSteer` is the screen's capability and `busy` is the
@@ -2471,33 +2444,6 @@ status the authority for a prompt can raise a wait and never settle one.
 
 Found by the code review's spec axis while verifying this branch; it does not block it.
 
-# Deferred: chat-next's reattach test fails about one run in four
-
-The component tier and the browser sweep were run over this change. One test in the tier is flaky, and
-it fails on main without any of this branch's commits: `scripts/test-chat-next-older.tsx`'s "a thread
-left unfinished picks up where it stopped, from the rows the device holds" — 1 failure in 4 runs at the
-base commit, 1 in 3 with this change in the tree, and it passes alone on the runs between. Nothing in
-this branch reaches it: the question card is not imported by the reattach path.
-
-## Careful
-
-### 1. The page written after the reader left is raced by a fixed 50ms wait
-
-The test holds the third page, closes the reader with it in flight, releases it and waits 50ms before
-asserting the page was written anyway (`app/scripts/test-chat-next-older.tsx:149-153`). Whether the
-abandoned read lands inside that window is wall clock: the write happens on the device's own promise
-chain, and under load — a full tier running in one process, the container at its memory ceiling — the
-50ms runs out first, so `database.sessionRows.count()` reads fewer rows than `2 * PAGE`.
-
-- Cost: a red in the tier that has nothing to do with the change being gated, which sends the reader
-  hunting in the wrong module — exactly the shape of the false red that costs a review its trust.
-- Suggested fix: replace the fixed `wait(50)` with the file's own `eventually(...)` waiting for
-  `sessionRows.count()` to reach `2 * PAGE`, then assert `partial` is set. The deadline is what the
-  rest of the file already uses for a write it does not control the moment of.
-- Why it is deferred: it belongs to the reattach suite's own task, and re-timing a test asserts nothing
-  new about this change; the fix touches a file this branch never reads.
-
----
 
 Found by this branch's gate sweep; it does not block it.
 
@@ -2520,3 +2466,28 @@ a broken document beside a claim the same paragraph is making.
 ---
 
 Found by reading the audit page this change adds a clause to; it does not block it.
+
+# Deferred: a page that comes straight back can resume a store it should have left
+
+`app/src/chat-next/store.ts` keeps one store per database and session, and the last unsubscribe only
+*schedules* the drop — the store leaves its map once its own last writes have landed
+(`void enqueue(async () => { if (listeners.size) return; await flush(); drop() })`). A page that
+unmounts and mounts again inside that window is handed the same store back, with its rows still in
+memory and its status already `ready`, so the page neither asks for the newest page (it asks for what
+comes after the rows) nor says it is catching up.
+
+This is not the red the App gates job was showing: that one was the test reading the catch-up line by
+a wrapper only one of its two homes has, which this branch corrects in the test itself. But a slowed
+`flush()` makes the reuse deterministic and that test fail again, so the race is real and still open.
+
+- Cost: a remount that beats the drop resumes another page's state, and the read it then makes is not
+  the read the screen thinks it is making.
+- Suggested fix: make the drop deterministic at the last unsubscribe — take the store out of its map
+  at once and let the flush finish on the object it already holds — and have the store made next for
+  that session wait on that write before it reads, so a page still starts from the device's copy. Then
+  check the ordering the reuse protects: `test-chat-next-older.tsx`'s "costs the one page" and the
+  reload cases in `test-chat-next-matrix.tsx`.
+- Why it is not applied here: it moves the lifetime of the one writer every chat screen reads
+  through, and a draft built on it is not what this branch is for.
+
+---
