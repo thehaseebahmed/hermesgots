@@ -12,7 +12,7 @@ import types
 import unittest
 from unittest import mock
 
-from plugin import dictation
+from plugin import dictation, dictation_cleanup
 
 
 def hermes(**overrides):
@@ -58,6 +58,7 @@ class InfoTest(unittest.TestCase):
                     "model": "small",
                     "language": "en",
                     "provider": {"name": "local", "backend": "local", "cloud": False},
+                    "wait_ms": 38_000,
                 },
             )
 
@@ -169,186 +170,377 @@ class HearingPromptTest(unittest.TestCase):
         )
 
 
-class TranscribeTest(unittest.TestCase):
-    def test_sends_the_clip_to_the_local_model_and_deletes_it(self) -> None:
-        tt, patch = hermes()
-        with patch:
-            result = dictation.transcribe(
-                b"opus", "audio/webm;codecs=opus", "Gots Hermes", hearing=True
-            )
-        self.assertEqual(result["text"], "Hello there.")
-        call = tt.calls[0]
-        self.assertEqual((call["model"], call["prompt"], call["data"]), ("small", "Gots Hermes", b"opus"))
-        self.assertTrue(call["path"].endswith(".webm"))
-        self.assertFalse(os.path.exists(call["path"]))
+class TakeTest(unittest.TestCase):
+    """A take is held on the host under the app's id, and heard as its Pieces land (ADR 0074)."""
 
-    def test_keeps_the_hosts_own_prompt_first(self) -> None:
-        cfg = {"local": {"model": "base", "initial_prompt": "Haseeb"}}
-        tt, patch = hermes(_load_stt_config=lambda: cfg)
-        with patch:
-            dictation.transcribe(b"x", "audio/mp4", "Gots", hearing=True)
-        self.assertEqual(tt.calls[0]["prompt"], "Haseeb Gots")
-        self.assertTrue(tt.calls[0]["path"].endswith(".mp4"))
-
-    def test_a_take_without_a_hearing_prompt_sends_the_model_none(self) -> None:
-        cfg = {"local": {"model": "base", "initial_prompt": "Haseeb"}}
-        tt, patch = hermes(_load_stt_config=lambda: cfg)
-        with patch:
-            dictation.transcribe(
-                b"x", "audio/mp4", "Gots", "We should ship it", ["DeepSeek"], hearing=False
-            )
-        self.assertIsNone(tt.calls[0]["prompt"])
-
-    def test_the_text_before_the_clip_goes_last(self) -> None:
-        cfg = {"local": {"model": "base", "initial_prompt": "Haseeb"}}
-        tt, patch = hermes(_load_stt_config=lambda: cfg)
-        with patch:
-            dictation.transcribe(b"x", "audio/webm", "Gots", "We should ship it", hearing=True)
-        self.assertEqual(tt.calls[0]["prompt"], "Haseeb Gots We should ship it")
-
-    def test_the_bot_s_words_ride_between_the_hint_and_the_text_before(self) -> None:
-        cfg = {"local": {"model": "base", "initial_prompt": "Haseeb"}}
-        tt, patch = hermes(_load_stt_config=lambda: cfg)
-        with patch:
-            dictation.transcribe(
-                b"x",
-                "audio/webm",
-                "Gots",
-                "We should ship it",
-                vocabulary=["DeepSeek", "Hermes"],
-                hearing=True,
-            )
-        self.assertEqual(
-            tt.calls[0]["prompt"], "Haseeb Gots DeepSeek Hermes We should ship it"
-        )
-
-    def test_a_clip_with_no_words_asks_with_only_its_hint(self) -> None:
-        tt, patch = hermes()
-        with patch:
-            dictation.transcribe(b"x", "audio/webm", "Gots", vocabulary=None, hearing=True)
-        self.assertEqual(tt.calls[0]["prompt"], "Gots")
-
-    def test_no_speech_is_empty_text(self) -> None:
-        empty = lambda path, model, prompt=None: {"success": False, "error": "Empty transcript"}
-        _, patch = hermes(_transcribe_local=empty)
-        with patch:
-            self.assertEqual(dictation.transcribe(b"x", "audio/webm", hearing=True)["text"], "")
-
-    def test_a_failure_is_an_error_with_hermes_reason(self) -> None:
-        broken = lambda path, model, prompt=None: {"success": False, "error": "CUDA out of memory"}
-        _, patch = hermes(_transcribe_local=broken)
-        with patch, self.assertRaises(dictation.DictationError) as caught:
-            dictation.transcribe(b"x", "audio/webm", hearing=True)
-        self.assertEqual((str(caught.exception), caught.exception.status), ("CUDA out of memory", 502))
-
-    def test_refuses_when_not_ready(self) -> None:
-        _, patch = hermes(_load_stt_config=lambda: {"enabled": False})
-        with patch, self.assertRaises(dictation.DictationError) as caught:
-            dictation.transcribe(b"x", "audio/webm", hearing=True)
-        self.assertEqual(caught.exception.status, 409)
-
-
-class VendorTakeTest(unittest.TestCase):
     def setUp(self) -> None:
-        dictation._buffers.clear()
+        self.forget()
 
     def tearDown(self) -> None:
-        dictation._buffers.clear()
+        self.forget()
 
-    def take(self, tt, *pieces, last=False, profile="/tmp/profile"):
-        return dictation.transcribe(
-            pieces[0] if pieces else b"",
+    def forget(self) -> None:
+        for profile, take in list(dictation._takes):
+            dictation.cancel(profile, take)
+
+    def upload(self, take="take-1", index=0, data=b"one", profile="p", ms=2500, **options):
+        return dictation.upload(
+            profile,
+            take,
+            index,
+            data,
             "audio/webm;codecs=opus",
             hearing=True,
-            last=last,
-            profile=profile,
+            ms=ms,
+            **options,
         )
 
-    def test_a_piece_before_the_last_answers_nothing_and_uploads_nothing(self) -> None:
-        tt, patch = hermes(_get_provider=lambda cfg: "groq")
-        with patch:
-            result = self.take(tt, b"one")
-        self.assertEqual(result, {"text": "", "ms": 0})
-        self.assertEqual(tt.audio, [])
-        self.assertEqual(tt.calls, [], "a vendor take never reaches the local model")
+    def held(self, profile="p", take="take-1"):
+        return dictation._takes[(profile, take)]
 
-    def test_the_last_piece_uploads_the_whole_take_once(self) -> None:
-        tt, patch = hermes(_get_provider=lambda cfg: "groq")
-        with patch:
-            dictation.transcribe(b"one", "audio/webm", hearing=True, profile="p")
-            dictation.transcribe(b"two", "audio/webm", hearing=True, profile="p")
-            result = dictation.transcribe(b"three", "audio/webm", hearing=True, last=True, profile="p")
-        self.assertEqual(result["text"], "Uploaded take.")
-        self.assertEqual(len(tt.audio), 1)
-        self.assertEqual(tt.audio[0]["data"], b"onetwothree")
-        self.assertEqual(tt.audio[0]["source"], "dictation")
-        self.assertTrue(tt.audio[0]["path"].endswith(".webm"))
-        self.assertFalse(os.path.exists(tt.audio[0]["path"]))
-
-    def test_a_single_piece_take_that_is_its_own_last_uploads_at_once(self) -> None:
-        tt, patch = hermes(_get_provider=lambda cfg: "groq")
-        with patch:
-            self.take(tt, b"only", last=True)
-        self.assertEqual([call["data"] for call in tt.audio], [b"only"])
-
-    def test_a_vendor_take_sends_no_prompt(self) -> None:
-        tt, patch = hermes(_get_provider=lambda cfg: "groq")
-        with patch:
-            dictation.transcribe(
-                b"x", "audio/webm", "Gots", "so far", ["DeepSeek"], hearing=True, last=True, profile="p"
+    def heard(self, profile="p", take="take-1"):
+        self.wait(
+            lambda: all(
+                piece["text"] is not None
+                for piece in dictation._takes[(profile, take)].pieces.values()
             )
-        self.assertEqual(tt.calls, [])
-        self.assertEqual(len(tt.audio), 1)
+        )
 
-    def test_a_take_past_the_cap_is_refused_and_dropped(self) -> None:
+    def wait(self, ready):
+        deadline = dictation.time.monotonic() + 5
+        while dictation.time.monotonic() < deadline:
+            if ready():
+                return
+            dictation.time.sleep(0.01)
+        raise AssertionError("the take's worker never finished")
+
+    def test_a_piece_is_answered_with_its_take_and_index_and_no_words(self) -> None:
+        _, patch = hermes()
+        with patch:
+            answer = self.upload(index=3)
+            self.heard()
+        self.assertEqual(answer, {"take": "take-1", "index": 3})
+        self.assertNotIn("text", answer, "an Upload never carries words")
+
+    def test_the_audio_of_a_piece_heard_here_is_dropped_once_its_words_exist(self) -> None:
+        tt, patch = hermes()
+        with patch:
+            self.upload()
+            self.wait(lambda: self.held().pieces[0]["text"] is not None)
+        self.assertEqual(self.held().pieces[0]["text"], "Hello there.")
+        self.assertIsNone(self.held().pieces[0]["data"], "a local take holds no audio")
+        self.assertEqual(len(tt.calls), 1)
+
+    def test_pieces_are_heard_in_the_order_they_arrived(self) -> None:
+        heard = {b"a": "second", b"b": "first"}
+
+        def local(path, model, prompt=None):
+            with open(path, "rb") as clip:
+                return {"success": True, "transcript": heard[clip.read()]}
+        _, patch = hermes(_transcribe_local=local)
+        with patch:
+            self.upload(index=1, data=b"a")
+            self.upload(index=0, data=b"b")
+            words = dictation.confirm("p", "take-1", 2, level="none")
+        self.assertEqual(words["heard"], "second first")
+
+    def test_a_slow_piece_does_not_delay_the_next_upload(self) -> None:
+        releasing = types.SimpleNamespace(set=False)
+        started = dictation.time.monotonic()
+
+        def local(path, model, prompt=None):
+            while not releasing.set and dictation.time.monotonic() - started < 5:
+                dictation.time.sleep(0.01)
+            return {"success": True, "transcript": "word"}
+
+        _, patch = hermes(_transcribe_local=local)
+        with patch:
+            self.upload(index=0)
+            answered = dictation.time.monotonic()
+            self.upload(index=1)
+            self.assertLess(
+                dictation.time.monotonic() - answered,
+                1.0,
+                "the answer to a Piece waits for no decode",
+            )
+            releasing.set = True
+            dictation.confirm("p", "take-1", 2, level="none")
+
+    def test_a_take_is_keyed_by_profile_and_id(self) -> None:
+        _, patch = hermes()
+        with patch:
+            self.upload(profile="one", take="a", index=0, data=b"one")
+            self.upload(profile="two", take="a", index=0, data=b"two")
+            for profile in ("one", "two"):
+                self.heard(profile, "a")
+            self.assertEqual(self.held("one", "a").order, [0])
+            self.assertEqual(self.held("two", "a").order, [0])
+            self.assertIsNot(self.held("one", "a"), self.held("two", "a"), "one id, two bots, two takes")
+
+    def test_a_take_left_alone_expires_after_its_window(self) -> None:
+        _, patch = hermes()
+        with patch:
+            self.upload()
+            self.heard()
+            later = dictation.time.monotonic() + dictation.TAKE_SECONDS + 1
+            with mock.patch.object(dictation.time, "monotonic", return_value=later):
+                self.upload(take="take-2")
+            self.heard(take="take-2")
+        self.assertNotIn(("p", "take-1"), dictation._takes, "an expired take holds nothing")
+
+    def test_a_cancelled_take_holds_nothing_and_a_late_piece_starts_none(self) -> None:
+        _, patch = hermes()
+        with patch:
+            self.upload(index=0, data=b"one")
+            self.assertTrue(dictation.cancel("p", "take-1"))
+            self.assertNotIn(("p", "take-1"), dictation._takes)
+            self.assertFalse(dictation.cancel("p", "take-1"), "cancelling twice is not an error")
+            self.upload(index=1, data=b"two")
+            self.heard()
+        self.assertEqual(self.held().order, [1], "a late Piece starts a take of its own")
+
+    def test_a_second_take_on_one_bot_is_refused_while_the_first_is_live(self) -> None:
+        _, patch = hermes()
+        with patch:
+            self.upload(index=0, data=b"one")
+            with self.assertRaises(dictation.DictationError) as caught:
+                dictation.upload("p", "take-2", 0, b"two", None, hearing=False)
+        self.assertEqual(caught.exception.status, 409, "the bot is already hearing a take")
+        self.assertEqual(sorted(dictation._takes), [("p", "take-1")], "and the live take is untouched")
+
+    def test_cancelling_the_take_lets_the_bot_hear_another(self) -> None:
+        _, patch = hermes()
+        with patch:
+            self.upload(index=0, data=b"one")
+            dictation.cancel("p", "take-1")
+            self.upload(index=0, data=b"two", take="take-2")
+        self.assertEqual(self.held(take="take-2").order, [0], "the next take opens once the first is gone")
+
+    def test_a_cloud_take_holds_its_audio_and_sends_nothing_yet(self) -> None:
         tt, patch = hermes(_get_provider=lambda cfg: "groq")
+        with patch:
+            self.upload(index=0, data=b"one")
+            self.upload(index=1, data=b"two")
+            self.assertEqual(self.held().pieces[0]["data"], b"one")
+            self.assertEqual(tt.audio, [], "a cloud take sends nothing before its Confirm")
+            self.assertEqual(tt.calls, [], "and never reaches the local model")
+
+    def test_a_cloud_take_past_the_cap_is_refused_at_its_confirm(self) -> None:
+        _, patch = hermes(_get_provider=lambda cfg: "groq")
         big = b"x" * (dictation.MAX_BYTES - 1)
         with patch:
-            dictation.transcribe(big, "audio/webm", hearing=True, profile="p")
+            self.upload(index=0, data=big)
+            self.upload(index=1, data=b"xx")
             with self.assertRaises(dictation.DictationError) as caught:
-                dictation.transcribe(b"xx", "audio/webm", hearing=True, profile="p")
-        self.assertEqual(caught.exception.status, 413)
-        self.assertEqual(dictation._buffers, {}, "the dropped take holds nothing after the refusal")
+                dictation.confirm("p", "take-1", 2, level="none")
+        self.assertEqual(caught.exception.status, 413, "the take is refused where it is uploaded whole")
+        self.assertEqual(dictation._takes, {}, "and holds nothing after the refusal")
 
-    def test_a_take_left_alone_is_dropped_after_its_wait(self) -> None:
-        tt, patch = hermes(_get_provider=lambda cfg: "groq")
+    def test_a_piece_the_host_could_not_hear_fails_the_confirm(self) -> None:
+        broken = lambda path, model, prompt=None: {"success": False, "error": "CUDA out of memory"}
+        _, patch = hermes(_transcribe_local=broken)
         with patch:
-            dictation.transcribe(b"old", "audio/webm", hearing=True, profile="p")
-            later = dictation.time.monotonic() + dictation.BUFFER_SECONDS + 1
-            with mock.patch.object(dictation.time, "monotonic", return_value=later):
-                dictation.transcribe(b"tail", "audio/webm", hearing=True, last=True, profile="p")
-        self.assertEqual([call["data"] for call in tt.audio], [b"tail"])
+            self.upload()
+            with self.assertRaises(dictation.DictationError) as caught:
+                dictation.confirm("p", "take-1", 1, level="none")
+        self.assertEqual(str(caught.exception), "CUDA out of memory")
 
-    def test_a_new_take_drops_what_a_cancelled_one_left_held(self) -> None:
-        tt, patch = hermes(_get_provider=lambda cfg: "groq")
+    def test_the_takes_worker_stops_when_the_take_is_answered(self) -> None:
+        _, patch = hermes()
         with patch:
-            dictation.transcribe(b"cancelled", "audio/webm", hearing=True, profile="p")
-            dictation.transcribe(b"new", "audio/webm", hearing=True, first=True, last=True, profile="p")
-        self.assertEqual([call["data"] for call in tt.audio], [b"new"])
+            self.upload()
+            self.heard()
+            worker = self.held().worker
+            dictation.confirm("p", "take-1", 1, level="none")
+            worker.join(5)
+        self.assertFalse(worker.is_alive(), "a take's worker ends with the take it heard")
 
-    def test_two_profiles_hold_their_own_takes(self) -> None:
-        tt, patch = hermes(_get_provider=lambda cfg: "groq")
+    def test_the_takes_worker_stops_when_the_take_is_cancelled(self) -> None:
+        _, patch = hermes()
         with patch:
-            dictation.transcribe(b"a", "audio/webm", hearing=True, profile="one")
-            dictation.transcribe(b"b", "audio/webm", hearing=True, profile="two")
-            dictation.transcribe(b"c", "audio/webm", hearing=True, last=True, profile="one")
-            dictation.transcribe(b"d", "audio/webm", hearing=True, last=True, profile="two")
-        self.assertEqual([call["data"] for call in tt.audio], [b"ac", b"bd"])
+            self.upload()
+            self.heard()
+            worker = self.held().worker
+            dictation.cancel("p", "take-1")
+            worker.join(5)
+        self.assertFalse(worker.is_alive(), "a cancelled take's worker ends too")
 
-    def test_a_failure_is_hermes_reason_and_ends_the_take(self) -> None:
-        broken = lambda path, source=None: {"success": False, "error": "GROQ_API_KEY not set"}
-        tt, patch = hermes(_get_provider=lambda cfg: "groq", transcribe_audio=broken)
+    def test_the_hosts_route_is_read_when_the_take_opens_and_not_per_piece(self) -> None:
+        asked = []
+
+        def provider(cfg):
+            asked.append(1)
+            return "local"
+
+        _, patch = hermes(_get_provider=provider)
+        with patch:
+            self.upload(index=0, data=b"one")
+            self.upload(index=1, data=b"two")
+            self.heard()
+        self.assertEqual(len(asked), 1, "every Piece after the first reads nothing")
+
+    def test_a_piece_index_past_what_a_take_can_hold_is_refused(self) -> None:
+        _, patch = hermes()
         with patch, self.assertRaises(dictation.DictationError) as caught:
-            dictation.transcribe(b"x", "audio/webm", hearing=True, last=True, profile="p")
+            self.upload(index=dictation.MAX_PIECES)
+        self.assertEqual(caught.exception.status, 400)
+
+    def test_an_empty_piece_is_refused(self) -> None:
+        _, patch = hermes()
+        with patch, self.assertRaises(dictation.DictationError) as caught:
+            self.upload(data=b"")
+        self.assertEqual(caught.exception.status, 400)
+
+
+class ConfirmTest(unittest.TestCase):
+    """The one call that answers a take's words (ADR 0074)."""
+
+    def setUp(self) -> None:
+        for profile, take in list(dictation._takes):
+            dictation.cancel(profile, take)
+
+    def tearDown(self) -> None:
+        for profile, take in list(dictation._takes):
+            dictation.cancel(profile, take)
+
+    def upload(self, index=0, data=b"one", profile="p", take="take-1", ms=2500, **options):
+        return dictation.upload(
+            profile, take, index, data, "audio/webm", hearing=True, ms=ms, **options
+        )
+
+    def test_the_confirm_answers_the_whole_take_in_one_payload(self) -> None:
+        _, patch = hermes()
+        with patch:
+            self.upload(index=0, data=b"one", ms=2000)
+            self.upload(index=1, data=b"two", ms=1500)
+            answer = dictation.confirm("p", "take-1", 2, level="none")
+        self.assertEqual(
+            answer,
+            {
+                "text": "Hello there. Hello there.",
+                "heard": "Hello there. Hello there.",
+                "ms": 3500,
+                "level": "none",
+                "cleaned": False,
+                "provider": "local",
+                "model": "small",
+            },
+        )
+
+    def test_the_take_ends_when_it_is_answered(self) -> None:
+        _, patch = hermes()
+        with patch:
+            self.upload()
+            dictation.confirm("p", "take-1", 1, level="none")
+        self.assertNotIn(("p", "take-1"), dictation._takes)
+
+    def test_a_confirm_naming_more_pieces_than_held_names_exactly_the_missing(self) -> None:
+        tt, patch = hermes()
+        with patch:
+            self.upload(index=0)
+            self.upload(index=2)
+            with self.assertRaises(dictation.MissingPieces) as caught:
+                dictation.confirm("p", "take-1", 3, level="none")
+            self.assertEqual(caught.exception.missing, [1])
+            self.assertEqual(caught.exception.status, 409)
+            self.upload(index=1, data=b"two")
+            answer = dictation.confirm("p", "take-1", 3, level="none")
+        self.assertEqual(answer["heard"], "Hello there. Hello there. Hello there.")
+
+    def test_a_take_the_host_no_longer_holds_is_missing_all_its_pieces(self) -> None:
+        _, patch = hermes()
+        with patch, self.assertRaises(dictation.MissingPieces) as caught:
+            dictation.confirm("p", "gone", 2, level="none")
+        self.assertEqual(caught.exception.missing, [0, 1])
+
+    def test_a_confirm_with_no_pieces_is_refused(self) -> None:
+        _, patch = hermes()
+        with patch, self.assertRaises(dictation.DictationError) as caught:
+            dictation.confirm("p", "take-1", 0, level="none")
+        self.assertEqual(caught.exception.status, 400)
+
+    def test_no_level_makes_no_model_call_and_lands_the_heard_words(self) -> None:
+        asked = []
+        _, patch = hermes()
+        with patch, mock.patch.object(
+            dictation_cleanup, "finish", side_effect=lambda *a, **k: asked.append(k) or {
+                "text": a[0],
+                "cleaned": False,
+                "ms": 0,
+                "level": "none",
+            }
+        ):
+            self.upload()
+            answer = dictation.confirm("p", "take-1", 1, level="none")
+        self.assertEqual(answer["text"], "Hello there.")
+        self.assertEqual(asked[0]["prompt"].level, "none")
+        self.assertFalse(asked[0]["prompt"].cleaning)
+
+    def test_a_cloud_take_is_uploaded_whole_once_at_the_confirm(self) -> None:
+        tt, patch = hermes(_get_provider=lambda cfg: "groq")
+        with patch:
+            self.upload(index=0, data=b"one")
+            self.upload(index=1, data=b"two")
+            self.assertEqual(tt.audio, [])
+            answer = dictation.confirm("p", "take-1", 2, level="none")
+        self.assertEqual([call["data"] for call in tt.audio], [b"onetwo"])
+        self.assertEqual(tt.audio[0]["source"], "dictation")
+        self.assertFalse(os.path.exists(tt.audio[0]["path"]))
+        self.assertEqual(answer["heard"], "Uploaded take.")
+        self.assertEqual(answer["provider"], "groq")
+        self.assertEqual(answer["model"], "small", "the model the bot picked, cloud or not")
+        self.assertEqual(dictation._takes.get(("p", "take-1")), None, "its audio is gone with it")
+
+    def test_a_cloud_take_sends_no_hearing_prompt_and_never_reaches_the_local_model(self) -> None:
+        tt, patch = hermes(_get_provider=lambda cfg: "groq")
+        with patch:
+            self.upload()
+            dictation.confirm("p", "take-1", 1, level="none")
+        self.assertEqual(tt.calls, [])
+
+    def test_a_vendor_failure_is_hermes_reason_and_ends_the_take(self) -> None:
+        broken = lambda path, source=None: {"success": False, "error": "GROQ_API_KEY not set"}
+        _, patch = hermes(_get_provider=lambda cfg: "groq", transcribe_audio=broken)
+        with patch, self.assertRaises(dictation.DictationError) as caught:
+            self.upload()
+            dictation.confirm("p", "take-1", 1, level="none")
         self.assertEqual((str(caught.exception), caught.exception.status), ("GROQ_API_KEY not set", 502))
-        self.assertEqual(dictation._buffers, {}, "a failed take is not kept for the next piece")
+        self.assertIsNone(dictation._takes.get(("p", "take-1")), "a failed take is not kept")
 
     def test_a_dispatcher_that_takes_no_source_label_still_decodes(self) -> None:
         tt, patch = hermes(_get_provider=lambda cfg: "groq")
         tt.transcribe_audio = lambda path: {"success": True, "transcript": " Done. "}
         with patch:
-            result = dictation.transcribe(b"x", "audio/webm", hearing=True, last=True, profile="p")
-        self.assertEqual(result["text"], "Done.")
+            self.upload()
+            answer = dictation.confirm("p", "take-1", 1, level="none")
+        self.assertEqual(answer["text"], "Done.")
+
+    def test_a_cloud_takes_bound_carries_the_upload_its_confirm_makes(self) -> None:
+        _, patch = hermes(_get_provider=lambda cfg: "groq")
+        with patch:
+            state = dictation.info("light")
+        self.assertGreaterEqual(
+            state["wait_ms"],
+            (dictation.QUEUE_SECONDS + dictation.CLOUD_SECONDS) * 1000,
+            "a cloud take's Confirm uploads the whole of it, and the bar is told so",
+        )
+
+    def test_a_confirm_naming_more_pieces_than_a_take_can_hold_is_refused(self) -> None:
+        _, patch = hermes()
+        with patch, self.assertRaises(dictation.DictationError) as caught:
+            dictation.confirm("p", "take-1", dictation.MAX_PIECES + 1, level="none")
+        self.assertEqual(caught.exception.status, 400)
+
+    def test_the_bound_a_confirm_is_held_to_covers_the_queue_and_the_level(self) -> None:
+        _, patch = hermes()
+        with patch:
+            for level in dictation_cleanup.LEVELS:
+                state = dictation.info(level)
+                self.assertGreaterEqual(
+                    state["wait_ms"],
+                    (dictation.QUEUE_SECONDS + dictation_cleanup.deadline_of(level)) * 1000,
+                    f"the {level} level's bound covers its own Cleanup",
+                )
 
 
 class WarmTest(unittest.TestCase):
@@ -398,12 +590,11 @@ class HintTest(unittest.TestCase):
 
 class ContextTest(unittest.TestCase):
     def test_keeps_the_end_from_a_whole_word(self) -> None:
-        self.assertEqual(dictation.clean_context(" so\n  far "), "so far")
-        said = " ".join(f"word{n}" for n in range(200))
+        said = ("word " * 200).strip()
         kept = dictation.clean_context(said)
         self.assertLessEqual(len(kept), dictation.MAX_CONTEXT)
         self.assertTrue(said.endswith(kept))
-        self.assertTrue(kept.startswith("word"))
+        self.assertFalse(kept.startswith("ord"), "the cut lands on a whole word")
 
 
 class CleanVocabularyTest(unittest.TestCase):

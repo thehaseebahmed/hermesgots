@@ -24,7 +24,7 @@ from .store import now_ms, open_rows
 
 logger = logging.getLogger(__name__)
 
-FIELDS = ("id", "text", "heard", "words", "ms", "at", "seen_at")
+FIELDS = ("id", "text", "heard", "level", "cleaned", "provider", "model", "words", "ms", "at", "seen_at")
 # One take's words are a handful of sentences; this is a bound on a body, not a shape a person writes.
 MAX_TEXT = 20000
 MAX_LIMIT = 200
@@ -84,8 +84,10 @@ def _whole(value: Any, field: str, default: Optional[int] = None) -> int:
 def _row(row: sqlite3.Row) -> Dict[str, Any]:
     """One row as the app reads it: `at` when the words were said, `seenAt` when the host heard them."""
     entry = {field: row[field] for field in FIELDS if field != "seen_at"}
-    if entry["heard"] is None:
-        del entry["heard"]
+    entry["cleaned"] = bool(entry.get("cleaned"))
+    for empty in ("heard", "level", "provider", "model"):
+        if not entry.get(empty):
+            entry.pop(empty, None)
     entry["seenAt"] = row["seen_at"]
     return entry
 
@@ -105,6 +107,14 @@ def _heard(value: Any) -> Optional[str]:
     return heard
 
 
+def _named(value: Any, bound: int = 60) -> Optional[str]:
+    """A name the host answered — a level, a provider, a model — or None where it named none."""
+    if not isinstance(value, str):
+        return None
+    named = " ".join(value.split())
+    return named[:bound] if named else None
+
+
 def record(path: Path, profile: Optional[str], body: Dict[str, Any]) -> Dict[str, Any]:
     """Writes one dictation: the entry the app posted when a take's words landed."""
     entry_id = body.get("id")
@@ -119,6 +129,10 @@ def record(path: Path, profile: Optional[str], body: Dict[str, Any]) -> Dict[str
         "id": entry_id.strip(),
         "text": text,
         "heard": _heard(body.get("heard")),
+        "level": _named(body.get("level")),
+        "cleaned": 1 if body.get("cleaned") is True else 0,
+        "provider": _named(body.get("provider")),
+        "model": _named(body.get("model")),
         "words": _whole(body.get("words"), "words", count_words(text)),
         "ms": _whole(body.get("ms"), "ms", 0),
         "at": _whole(body.get("at"), "at", now_ms()),
@@ -133,13 +147,18 @@ def record(path: Path, profile: Optional[str], body: Dict[str, Any]) -> Dict[str
             if row["at"] > seen_at:
                 row["at"] = seen_at
             conn.execute(
-                "INSERT OR IGNORE INTO dictations (id, profile, text, heard, words, ms, at, seen_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT OR IGNORE INTO dictations "
+                "(id, profile, text, heard, level, cleaned, provider, model, words, ms, at, seen_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     row["id"],
                     name,
                     row["text"],
                     row["heard"],
+                    row["level"],
+                    row["cleaned"],
+                    row["provider"],
+                    row["model"],
                     row["words"],
                     row["ms"],
                     row["at"],

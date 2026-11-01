@@ -3240,10 +3240,33 @@ const TRIAGE = process.env.MOCK_TRIAGE ?? "stay"
 // answers an error instead of a list, so the app must keep the pull requests it already knows.
 let PRS_FAIL = process.env.MOCK_PRS_FAIL === "1"
 const dictationClips = []
-const dictationCleanups = []
-// The host's dictation log, seeded with two takes so the Dictation screen has a history to draw: what
-// a real host counts for itself is the words and the spoken span of each, and the fingerprint beside
-// them (ADR 0060).
+// The host's take registry (ADR 0074), keyed by the app's Take id as `plugin/dictation.py` keys it by
+// profile and id: the Pieces a take holds and the order they arrived in.
+const dictationTakes = new Map()
+const dictationConfirms = []
+const dictationMissing = []
+// The longest a Confirm may take, as `info.dictation.wait_ms` states it: the queue's allowance plus
+// the widest Cleanup. A flow can shorten it to watch a take miss its bound.
+const DICTATION_WAIT_MS = Number(process.env.MOCK_DICTATION_WAIT_MS ?? 38_000)
+// How many takes have their first Confirm refused for a missing Piece, so the re-send is exercised.
+let dictationRefusals = Number(process.env.MOCK_DICTATION_REFUSE ?? 0)
+const DICTATION_TAKE_MS = 120_000
+const DICTATION_HEARD = "um Let's ship the dictation feature today."
+function dictationTake(take) {
+  const now = Date.now()
+  for (const [id, held] of dictationTakes)
+    if (now - held.at > DICTATION_TAKE_MS) dictationTakes.delete(id)
+  let held = dictationTakes.get(take)
+  if (!held) {
+    held = { take, pieces: new Map(), order: [], refused: false, at: now }
+    dictationTakes.set(take, held)
+  }
+  held.at = now
+  return held
+}
+function dictationWords(held) {
+  return held.order.map(() => DICTATION_HEARD).join(" ")
+}
 const DICTATION_CLEARED_AT = { at: 0 }
 // One take's words, as the plugin bounds them (dictations.py's `MAX_TEXT`): a body past it is refused,
 // and the words set beside them are dropped rather than costing the row (ADR 0062).
@@ -3955,8 +3978,15 @@ http
                   "No speech provider on this host can hear a take. Install faster-whisper, or set a provider's key.",
                 model: "base",
                 provider: { name: "none", backend: null, cloud: false },
+                wait_ms: DICTATION_WAIT_MS,
               }
-            : { ready: true, model: "base", language: "en", provider: heardBy() },
+            : {
+                ready: true,
+                model: "base",
+                language: "en",
+                provider: heardBy(),
+                wait_ms: DICTATION_WAIT_MS,
+              },
       })
     }
     if (
@@ -5274,142 +5304,92 @@ http
         ms: 0,
       })
     }
-    if (
-      PLUGIN &&
-      !profile &&
-      req.method === "POST" &&
-      url.pathname === "/api/plugins/memento/dictation/cleanup"
-    ) {
-      const body = await readBody(req).catch(() => ({}))
-      const text = typeof body?.text === "string" ? body.text : ""
-      const vocabulary = Array.isArray(body?.vocabulary)
-        ? body.vocabulary.filter((word) => typeof word === "string" && word.trim())
-        : []
-      dictationCleanups.push({ text, vocabulary })
-      if (!text) return json(res, 400, { error: { message: "Body needs the dictation's text." } })
-      if (DICTATION_TIDY === "fail")
-        return json(res, 502, { error: { message: "Couldn't tidy the dictation." } })
-      if (DICTATION_TIDY === "hang") return new Promise(() => {})
-      await new Promise((resolve) => setTimeout(resolve, TIDY_MS))
-      return json(res, 200, {
-        object: "memento.dictation_cleanup",
-        text: tidyWhole(text),
-        cleaned: true,
-        ms: TIDY_MS,
-      })
-    }
-    // The dictation log a bot's host keeps (plugin/dictations.py): a write at commit, the totals and
-    // fingerprint a device reconciles against, a page of the log, and the two ways of taking it away.
-    if (PLUGIN && !profile && DICTATIONS && url.pathname === "/api/plugins/memento/dictations/stats") {
-      if (req.method !== "GET") return json(res, 405, { error: { message: "GET only." } })
-      return json(res, 200, { object: "memento.dictations.stats", stats: dictationStats() })
-    }
-    if (PLUGIN && !profile && DICTATIONS && url.pathname === "/api/plugins/memento/dictations") {
-      if (req.method === "GET") {
-        const before = Number(url.searchParams.get("before") ?? 0)
-        const beforeId = url.searchParams.get("before_id") ?? ""
-        const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit") ?? 20)))
-        const dictations = [...dictationLog]
-          .sort(dictationOrder)
-          .filter(
-            (row) =>
-              !before ||
-              row.seenAt < before ||
-              (row.seenAt === before && row.id < beforeId),
-          )
-          .slice(0, limit)
-        return json(res, 200, { object: "memento.dictations", dictations })
-      }
-      if (req.method === "DELETE") {
-        dictationLog.length = 0
-        DICTATION_CLEARED_AT.at = Date.now()
-        return json(res, 200, {
-          object: "memento.dictations.cleared",
-          removed: true,
-          stats: dictationStats(),
-        })
-      }
-      if (req.method === "POST") {
-        const body = await readBody(req).catch(() => ({}))
-        const id = typeof body.id === "string" ? body.id.trim() : ""
-        if (!id) return json(res, 400, { error: { message: "A dictation needs an id." } })
-        const text = typeof body.text === "string" ? body.text : ""
-        if (!text.trim())
-          return json(res, 400, { error: { message: "A dictation needs its words." } })
-        if (text.length > MAX_DICTATION_TEXT)
-          return json(res, 413, { error: { message: "That dictation is too long to keep." } })
-        // Two clocks: this host's, stamped as the take lands and what the log is ordered by, and the
-        // device's, kept unless it claims a time after the host heard it.
-        const seenAt = Date.now()
-        const asked = Number(body.at) || seenAt
-        const asHeard = typeof body.heard === "string" ? body.heard.trim() : ""
-        const heard = asHeard && asHeard.length <= MAX_DICTATION_TEXT ? asHeard : undefined
-        const row = {
-          id,
-          text,
-          ...(heard ? { heard } : {}),
-          words: Number(body.words) || text.trim().split(/\s+/).length,
-          ms: Number(body.ms) || 0,
-          at: Math.min(asked, seenAt),
-          seenAt,
-        }
-        const held = dictationLog.find((one) => one.id === id)
-        if (held) return json(res, 201, { object: "memento.dictation", dictation: held })
-        dictationLog.push(row)
-        return json(res, 201, { object: "memento.dictation", dictation: row })
-      }
-    }
-    if (
-      PLUGIN &&
-      !profile &&
-      DICTATIONS &&
-      req.method === "DELETE" &&
-      url.pathname.startsWith("/api/plugins/memento/dictations/")
-    ) {
-      const id = decodeURIComponent(url.pathname.slice("/api/plugins/memento/dictations/".length))
-      const at = dictationLog.findIndex((row) => row.id === id)
-      if (at >= 0) dictationLog.splice(at, 1)
-      return json(res, 200, {
-        object: "memento.dictation.removed",
-        removed: at >= 0,
-        stats: dictationStats(),
-      })
-    }
-    if (
-      PLUGIN &&
-      !profile &&
-      req.method === "POST" &&
-      url.pathname === "/api/plugins/memento/dictation"
-    ) {
+    const dictationPiece = /^\/api\/plugins\/memento\/dictation\/([^/]+)\/piece$/.exec(url.pathname)
+    if (PLUGIN && !profile && req.method === "POST" && dictationPiece) {
+      const take = decodeURIComponent(dictationPiece[1])
+      const index = Number(url.searchParams.get("index") ?? -1)
+      if (!Number.isInteger(index) || index < 0)
+        return json(res, 400, { error: { message: "A Piece needs its index in the take." } })
       const data = await readRaw(req)
       if (!data.length) return json(res, 400, { error: { message: "The recording is empty." } })
-      // The last piece of a take, which a cloud host answers with the whole recording's text
-      // (ADR 0069); every piece before it lands nothing.
-      const last = url.searchParams.get("last") === "1"
-      dictationClips.push({
-        bytes: data.length,
-        type: req.headers["content-type"],
-        hint: url.searchParams.get("hint"),
-        context: url.searchParams.get("context"),
-        vocabulary: url.searchParams.getAll("vocabulary"),
-        last,
-      })
       if (DICTATION === "off")
         return json(res, 409, {
           error: { message: "No speech provider on this host can hear a take." },
         })
-      if (heardBy().cloud && !last)
-        return json(res, 200, { object: "memento.dictation", text: "", ms: 0 })
-      await new Promise((resolve) => setTimeout(resolve, 700))
+      if (dictationTakes.size && !dictationTakes.has(take))
+        return json(res, 409, { error: { message: "This bot is already hearing a take." } })
+      const held = dictationTake(take)
+      if (!held.pieces.has(index)) {
+        held.pieces.set(index, { bytes: data.length, ms: Number(url.searchParams.get("ms") ?? 0) || 0 })
+        held.order.push(index)
+      }
+      dictationClips.push({
+        take,
+        index,
+        bytes: data.length,
+        type: req.headers["content-type"],
+        hint: url.searchParams.get("hint"),
+        vocabulary: url.searchParams.getAll("vocabulary"),
+      })
+      return json(res, 202, { object: "memento.dictation_piece", take, index })
+    }
+    const dictationConfirm = /^\/api\/plugins\/memento\/dictation\/([^/]+)\/confirm$/.exec(url.pathname)
+    if (PLUGIN && !profile && req.method === "POST" && dictationConfirm) {
+      const take = decodeURIComponent(dictationConfirm[1])
+      const body = await readBody(req).catch(() => ({}))
+      const count = Number(body?.pieces)
+      if (!Number.isInteger(count) || count < 1)
+        return json(res, 400, {
+          error: { message: "A Confirm needs the number of Pieces the take has." },
+        })
+      const held = dictationTakes.get(take)
+      const missing = [...Array(count).keys()].filter((index) => !held?.pieces.has(index))
+      if (missing.length)
+        return json(res, 409, {
+          error: { message: "The host is missing Pieces." },
+          missing,
+        })
+      if (held && !held.refused && dictationRefusals > 0) {
+        // A dropped upload, as the refusal names it: the app sends exactly this Piece again.
+        held.refused = true
+        dictationRefusals -= 1
+        dictationMissing.push({ take, missing: [count - 1] })
+        return json(res, 409, {
+          error: { message: "The host is missing Pieces." },
+          missing: [count - 1],
+        })
+      }
+      const ms = held.order.reduce((total, index) => total + (held.pieces.get(index)?.ms ?? 0), 0)
+      const heard = dictationWords(held)
+      const level = speech.level
       if (DICTATION === "fail")
         return json(res, 502, {
           error: { message: "Local transcription failed: the model ran out of memory." },
         })
-      return json(res, 200, {
+      if (DICTATION_TIDY === "hang") return new Promise(() => {})
+      await new Promise((resolve) => setTimeout(resolve, TIDY_MS))
+      // A cleanup that fails or finds nothing to change lands the words as they were heard; the
+      // level is still named, and `cleaned` says which of the two happened (ADR 0074).
+      const cleaned = DICTATION_TIDY === "ok" && level !== "none" && Boolean(heard)
+      const text = cleaned ? tidyWhole(heard) : heard
+      dictationTakes.delete(take)
+      const answer = {
         object: "memento.dictation",
-        text: "um Let's ship the dictation feature today.",
-        ms: 700,
-      })
+        text,
+        heard,
+        ms,
+        level,
+        cleaned,
+        provider: heardBy().name,
+        model: heardBy().cloud ? "" : "base",
+      }
+      dictationConfirms.push({ take, pieces: count, level, cleaned })
+      return json(res, 200, answer)
+    }
+    const dictationCancel = /^\/api\/plugins\/memento\/dictation\/([^/]+)$/.exec(url.pathname)
+    if (PLUGIN && !profile && req.method === "DELETE" && dictationCancel) {
+      const removed = dictationTakes.delete(decodeURIComponent(dictationCancel[1]))
+      return json(res, 200, { object: "memento.dictation_cancelled", removed })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/stt") {
       if (req.method === "POST") {
@@ -5889,7 +5869,20 @@ http
       return json(res, 200, { object: { servers: mcpRows() } })
     }
     if (url.pathname === "/__mock/dictation" && req.method === "GET") {
-      return json(res, 200, { clips: dictationClips, cleanups: dictationCleanups })
+      return json(res, 200, {
+        clips: dictationClips,
+        confirms: dictationConfirms,
+        refusals: dictationMissing,
+        takes: [...dictationTakes.values()].map((held) => ({
+          take: held.take,
+          order: held.order,
+        })),
+      })
+    }
+    if (url.pathname === "/__mock/dictation-refuse" && req.method === "POST") {
+      const { count = 0 } = await readBody(req)
+      dictationRefusals = Math.max(0, Number(count) || 0)
+      return json(res, 200, { ok: true, refusals: dictationRefusals })
     }
     if (url.pathname === "/__mock/dictation-tidy" && req.method === "POST") {
       const { mode = "ok" } = await readBody(req)

@@ -26,8 +26,6 @@ const ADVICE: Record<DictationFailureKind, string> = {
   clip: "Try again, or type it instead.",
 }
 
-const TOO_LONG_CLIP = "The bot took too long to transcribe."
-
 /** A failure of `kind`, with the sentence the bar shows for it. */
 export function failure(
   kind: DictationFailureKind,
@@ -42,11 +40,23 @@ export function failure(
   }
 }
 
-/** A recorded clip the batch route couldn't turn into text, with the wait's own reason when it ran out. */
-export function clipFailure(error: unknown): DictationFailure {
+/**
+ * A take the host couldn't finish: the bound it stated and then missed, a host that couldn't be
+ * reached, or the host's own refusal. The audio stays, so closing the failure discards it.
+ */
+export function clipFailure(error: unknown, bound?: number): DictationFailure {
   if (error instanceof DOMException && error.name === "AbortError")
-    return failure("clip", TOO_LONG_CLIP, { discard: true })
-  return failure("clip", messageOf(error, "Couldn't transcribe the recording."), { discard: true })
+    return failure("clip", tookTooLong(bound), { discard: true })
+  if (error instanceof TypeError)
+    return failure("clip", "Couldn't reach the bot's host to finish the take.", { discard: true })
+  return failure("clip", messageOf(error, "Couldn't finish the take."), { discard: true })
+}
+
+/** What the bar says when the host never answered its Confirm inside the bound it stated. */
+export function tookTooLong(bound?: number): string {
+  if (!bound) return "The bot didn't answer the take."
+  const wait = bound < 1000 ? `${bound} ms` : `${Math.round(bound / 1000)} s`
+  return `The bot didn't answer the take in ${wait}.`
 }
 
 /**

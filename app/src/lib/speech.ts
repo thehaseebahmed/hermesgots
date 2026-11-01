@@ -134,6 +134,11 @@ export interface SpeechSettings {
   provider?: HeardBy
 }
 
+/** A stored level as one of the four, or nothing where it names none of them (ADR 0066). */
+export function namedLevel(raw: unknown): CleanupLevel | undefined {
+  return CLEANUP_LEVELS.find((level) => level === raw)
+}
+
 /** A host's level as one of the four, reading the default where it names none (ADR 0066). */
 export function cleanupLevel(raw: unknown): CleanupLevel {
   return CLEANUP_LEVELS.includes(raw as CleanupLevel) ? (raw as CleanupLevel) : "light"

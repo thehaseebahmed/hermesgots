@@ -46,6 +46,48 @@ class DictationsTest(unittest.TestCase):
         self.assertEqual(found["words"], 2, "the count stays the landed words")
         self.assertEqual(dictations.rows(self.path, "bot-a")[0]["heard"], "um clean words")
 
+    def test_what_tidied_a_take_is_kept_beside_its_two_texts(self) -> None:
+        found = self.add(
+            text="Clean words.",
+            heard="um clean words",
+            level="high",
+            cleaned=True,
+            provider="local",
+            model="small",
+        )
+        self.assertEqual(
+            {key: found[key] for key in ("level", "cleaned", "provider", "model")},
+            {"level": "high", "cleaned": True, "provider": "local", "model": "small"},
+        )
+        self.assertEqual(
+            dictations.rows(self.path, "bot-a")[0]["level"], "high", "a page reads it back too"
+        )
+
+    def test_a_row_whose_cleanup_was_not_recorded_answers_without_the_four_fields(self) -> None:
+        found = self.add(text="from an older app")
+        self.assertFalse(found["cleaned"], "nothing recorded is nothing changed")
+        for empty in ("level", "provider", "model"):
+            self.assertNotIn(empty, found)
+
+    def test_a_store_from_before_the_cleanup_fields_gains_them_and_keeps_its_rows(self) -> None:
+        conn = connect(self.path)
+        conn.execute("ALTER TABLE dictations DROP COLUMN level")
+        conn.execute("ALTER TABLE dictations DROP COLUMN cleaned")
+        conn.execute("ALTER TABLE dictations DROP COLUMN provider")
+        conn.execute("ALTER TABLE dictations DROP COLUMN model")
+        conn.execute("PRAGMA user_version = 48")
+        conn.execute(
+            "INSERT INTO dictations (id, profile, text, heard, words, ms, at, seen_at) "
+            "VALUES ('old', 'bot-a', 'kept', NULL, 1, 10, 7, 7)"
+        )
+        conn.commit()
+        conn.close()
+
+        rows = dictations.rows(self.path, "bot-a")
+        self.assertEqual([(row["id"], row["cleaned"]) for row in rows], [("old", False)])
+        self.add(text="new", level="light", cleaned=True, model="base")
+        self.assertEqual(dictations.stats(self.path, "bot-a")["count"], 2)
+
     def test_a_take_kept_without_heard_answers_without_the_key(self) -> None:
         found = self.add(text="only the landed words")
         self.assertNotIn("heard", found, "a row from before the field reads as one that has none")

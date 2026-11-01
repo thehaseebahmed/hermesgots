@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 # or `IF NOT EXISTS`: a store already carrying them has to reach 47 without re-running either. 47
 # replaces the log's index with the one every read asks for. 48 adds `heard`, the words as the host
 # heard them beside the words that landed (ADR 0062).
-SCHEMA_VERSION = 48
+SCHEMA_VERSION = 49
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -180,6 +180,10 @@ CREATE_DICTATIONS = """CREATE TABLE IF NOT EXISTS dictations (
                    profile TEXT NOT NULL DEFAULT '',
                    text TEXT NOT NULL,
                    heard TEXT,
+                   level TEXT,
+                   cleaned INTEGER NOT NULL DEFAULT 0,
+                   provider TEXT,
+                   model TEXT,
                    words INTEGER NOT NULL DEFAULT 0,
                    ms INTEGER NOT NULL DEFAULT 0,
                    at INTEGER NOT NULL,
@@ -763,4 +767,15 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute(CREATE_DICTATION_READ)
         if "heard" not in dictation_columns:
             conn.execute("ALTER TABLE dictations ADD COLUMN heard TEXT")
+        # v49: what tidied a take, kept beside its two texts (dictations.py, ADR 0074). A row written
+        # before this reads as one whose cleanup was not recorded: no level, nothing changed, and no
+        # provider or model named.
+        if "level" not in dictation_columns:
+            conn.execute("ALTER TABLE dictations ADD COLUMN level TEXT")
+        if "cleaned" not in dictation_columns:
+            conn.execute("ALTER TABLE dictations ADD COLUMN cleaned INTEGER NOT NULL DEFAULT 0")
+        if "provider" not in dictation_columns:
+            conn.execute("ALTER TABLE dictations ADD COLUMN provider TEXT")
+        if "model" not in dictation_columns:
+            conn.execute("ALTER TABLE dictations ADD COLUMN model TEXT")
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

@@ -180,6 +180,11 @@ def level_of(value: Any) -> str:
         return DEFAULT_LEVEL
 
 
+def deadline_of(level: Any = None) -> float:
+    """The longest the Cleanup at ``level`` may take: one term of the bound a Confirm is held to."""
+    return LEVEL_FACTS[level_of(level)].deadline_s
+
+
 class DictationCleanupPrompt:
     """The prompt a cleanup is asked with, one builder per level (ADR 0066).
 
@@ -323,7 +328,7 @@ def finish(
     model: Optional[Dict[str, str]] = None,
     ask: Optional[Ask] = None,
 ) -> Dict[str, Any]:
-    """A finished dictation tidied at its bot's level: the answer ``POST dictation/cleanup`` gives.
+    """A finished dictation tidied at its bot's level: what a Confirm's answer carries.
 
     The level's own rules are asked in one call over the whole text, framed as the finished dictation
     it is, with the names the take may mention and the bot's vocabulary in front of it and the answer

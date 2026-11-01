@@ -6,7 +6,7 @@ import type { Row, Turn } from "@/chat-next/fold"
 import { BOTS, LEGACY_BOT_IDS } from "@/components/bots"
 import { connectionKey } from "@/lib/connection"
 import { forgetRead } from "@/lib/read-marks"
-import type { Compaction, ModelChange, Move, ProviderUsage, Skill } from "@/lib/hermes"
+import type { Compaction, ModelChange, Move, ProviderUsage, Skill, Tidied } from "@/lib/hermes"
 import type { SessionPipeline } from "@/lib/pipeline"
 import type { PromptEntry } from "@/lib/prompt-library"
 import type { ReasoningRun } from "@/lib/thinking"
@@ -609,11 +609,9 @@ export interface Draft {
   at: number
 }
 
-/** A piece of a recording, cut at a pause; `text` is null until the host has transcribed it. */
+/** A Piece of a recording, cut at a pause: its audio, and how long it ran (ADR 0060). */
 export interface DictationPiece {
   blob: Blob
-  text: string | null
-  /** How long this piece ran, so a take's spoken span survives a reload (ADR 0060). */
   ms?: number
 }
 
@@ -639,7 +637,7 @@ export interface SavedDictation {
  * them. The bot's host is the durable copy (`plugin/dictations.py`); this row is what the Dictation
  * screen reads, so opening it never waits on a host (ADR 0060).
  */
-export interface DictationRecord {
+export interface DictationRecord extends Tidied {
   id: string
   /** The `connectionKey` of the bot that heard it. */
   connection: string
