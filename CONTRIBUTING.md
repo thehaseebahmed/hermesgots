@@ -60,6 +60,16 @@ To run plugin unit tests:
 python3 -m unittest discover -s plugin/tests -t .
 ```
 
+To measure a take on this host (the dictation bench — needs `faster-whisper`, and never part of the
+plugin's tests; ADR 0075):
+
+```bash
+python3 -m bench.dictation          # hear the committed fixtures and read them against the baseline
+python3 -m bench.dictation --self-check   # the bench's own rules, with no decoder installed
+```
+
+`bench/dictation/README.md` has the flags, the fixtures and what a record carries.
+
 ### Sync with Netlify Identity
 
 Sync requires Netlify Identity and the Netlify functions runtime (`netlify/functions/sync.mts`). To run with Netlify Identity and Blobs:

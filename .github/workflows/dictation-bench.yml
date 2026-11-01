@@ -1,0 +1,112 @@
+name: Dictation bench
+
+# What a take costs the host that hears it (ADR 0075): the bench in `bench/dictation/`, over the
+# audio committed beside it. It is a job of its own and never a case in the plugin's tests — a
+# decoder is not installed on every runner, and a required check that fails on a busy machine is
+# turned off within a week.
+#
+# Nothing here may depend on a timing number. The bench's own check refuses a run as incomparable
+# when the model, the Cleanup level, the cut policy, the Hearing prompt, the Vocabulary or the
+# fixtures' hash differ from the committed baseline, and fails it only when the words moved; the
+# milliseconds are printed and uploaded to be read.
+on:
+  schedule:
+    # The nightly sweep's own bench, the same night the browser registry runs. A night whose main is
+    # the commit the last green bench already passed is skipped.
+    - cron: "40 2 * * *"
+  pull_request:
+    paths:
+      # The plugin is what is measured; the bench is the instrument; the app's own cut rule is where
+      # the bench's `device` policy is copied from, so a change to it has to run the comparison.
+      - "plugin/**"
+      - "bench/**"
+      - "app/src/lib/dictation.ts"
+      - ".github/workflows/dictation-bench.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: dictation-bench-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  bench:
+    name: Dictation bench
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # The model every run hears with: the cache key and the command both read it, so a change of
+      # model fetches its own copy rather than reusing the one before it.
+      BENCH_MODEL: base
+    steps:
+      # Before the skip, because skipping is decided by a script in the checkout: a few seconds of
+      # clone against the minutes the skip is there to save.
+      - uses: actions/checkout@v4
+
+      - name: Skip an unchanged main
+        id: moved
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash "$GITHUB_WORKSPACE/.github/scripts/last-green.sh" dictation-bench.yml >> "$GITHUB_OUTPUT"
+
+      - if: steps.moved.outputs.run == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      # The speech model is the expensive part of a run; the fixtures are the same bytes every time,
+      # so the model that hears them is too. The key carries the model, and the model is the job's own
+      # `BENCH_MODEL`, so a run heard by another one fetches its own copy rather than reusing this.
+      - if: steps.moved.outputs.run == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: dictation-bench-model-${{ runner.os }}-${{ env.BENCH_MODEL }}
+
+      # What the decoder is pinned to lives in `bench/dictation/requirements.txt`, beside the command
+      # that needs it. The install is not allowed to fail quietly: a runner with no decoder can only
+      # skip, so a broken pin would read as a green run that measured nothing.
+      - name: Install the decoder
+        if: steps.moved.outputs.run == 'true'
+        run: python3 -m pip install -r bench/dictation/requirements.txt
+
+      - name: Prove the decoder is here
+        if: steps.moved.outputs.run == 'true'
+        run: python3 -c "import faster_whisper, av; print('decoder ready:', faster_whisper.__name__, av.__name__)"
+
+      - name: The bench's own rules, with no decoder in the way
+        if: steps.moved.outputs.run == 'true'
+        run: python3 -m bench.dictation --self-check
+
+      # The committed baseline belongs to the machine that took it — ADR 0075 names the machine
+      # beside the numbers for exactly this — and a runner is not that machine: the same bytes and
+      # the same model can land one word differently on another CPU. So the job proves the property
+      # that has to hold anywhere, that this runner lands the same words twice in a row, and keeps
+      # both records. `--no-pace` because this job is about the words, not the wait.
+      - name: Hear the fixtures, and keep what they said
+        if: steps.moved.outputs.run == 'true'
+        run: |
+          python3 -m bench.dictation --model "$BENCH_MODEL" --no-pace \
+            --no-check --write-baseline --baseline "$RUNNER_TEMP/bench-baseline.json" \
+            --out dictation-bench.json
+
+      - name: Hear them again, against what the first run said
+        if: steps.moved.outputs.run == 'true'
+        run: |
+          python3 -m bench.dictation --model "$BENCH_MODEL" --no-pace \
+            --baseline "$RUNNER_TEMP/bench-baseline.json" --out dictation-bench-again.json
+
+      # The record is written before the comparison, so a run whose words moved still uploads the
+      # numbers that say so — which is the run a reviewer most needs.
+      - name: Keep the record
+        if: always() && steps.moved.outputs.run == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: dictation-bench
+          path: |
+            dictation-bench.json
+            dictation-bench-again.json
+          if-no-files-found: warn
