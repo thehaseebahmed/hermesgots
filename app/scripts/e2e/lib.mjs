@@ -665,6 +665,13 @@ export const mockAuth = {
 export const mockPost = (path, body = {}) =>
   fetch(`${mock}${path}`, { method: "POST", headers: mockAuth, body: JSON.stringify(body) })
 
+/** `mockPost`, answering the body: a route the mock turned down says so by name, not as HTML. */
+export const mockJson = async (path, body = {}) => {
+  const answer = await mockPost(path, body)
+  if (!answer.ok) throw new Error(`the mock refused ${path}: ${answer.status}`)
+  return answer.json()
+}
+
 /**
  * Compresses a chat on the mock: Hermes rotates `session` onto `child`, as it does mid-run, and
  * keys what comes after on the child. Answers the mock's response, so a flow can assert it took.

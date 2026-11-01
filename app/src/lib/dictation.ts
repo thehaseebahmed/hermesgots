@@ -22,6 +22,7 @@ import {
 } from "@/lib/dictation-failure"
 import { RESTORED, SAVE_MS } from "@/lib/dictation-kept"
 import { holdTake, releaseTake } from "@/lib/dictation-lock"
+import { waitDrops, waitReaches, waitStarts, type TakeId } from "@/lib/dictation-wait"
 import { prefersReducedMotion } from "@/lib/media"
 import {
   MissingPieces,
@@ -165,8 +166,8 @@ export function micError(error: unknown, otherwise: string) {
 
 export type DictationStatus = "idle" | "listening" | "transcribing" | "failed"
 
-/** The take, once it is final: what landed, how long it took to say, and what tidied it. */
-export type Committed = (take: ConfirmedTake) => void
+/** The take, once it is final: what landed, how long it took to say, what tidied it, and its Take id. */
+export type Committed = (take: ConfirmedTake, takeId: TakeId) => void
 
 interface Segment {
   recorder: MediaRecorder
@@ -637,7 +638,8 @@ export function useChunkedDictation(
       session.current = null
       showIdle()
       const text = answer.text.trim()
-      if (text) latest.current.onCommitted?.(answer)
+      if (text) latest.current.onCommitted?.(answer, current.take)
+      else waitDrops(current.take)
       return text
     },
     [showIdle],
@@ -651,6 +653,7 @@ export function useChunkedDictation(
     (current: Session, failed: DictationFailure) => {
       if (session.current !== current) return null
       stopInflight(current)
+      waitDrops(current.take)
       current.error = null
       current.sent.clear()
       save(current, true)
@@ -695,6 +698,7 @@ export function useChunkedDictation(
         if (session.current !== current) return null
         if (uploaded === undefined) return ranOut()
         if (!uploaded) return giveUp(current, clipFailure(current.error, bound))
+        waitReaches(current.take, "uploaded")
         for (let attempt = 0; ; attempt++) {
           try {
             const answered = await bounded(
@@ -708,6 +712,7 @@ export function useChunkedDictation(
             )
             if (answered === TIMED_OUT) return ranOut()
             if (session.current !== current) return null
+            waitReaches(current.take, "answered")
             return land(current, answered)
           } catch (error) {
             if (attempt > 0 || !(error instanceof MissingPieces) || !error.missing.length)
@@ -734,6 +739,7 @@ export function useChunkedDictation(
     const current = session.current
     session.current = null
     if (current) {
+      waitDrops(current.take)
       forget(current)
       stopInflight(current)
       if (current.recording) void end(current.recording)
@@ -746,45 +752,54 @@ export function useChunkedDictation(
 
   /**
    * Ends the recording and returns its words: `""` for a recording too short to hold speech, null
-   * when the take could not be finished (it's kept for `retry`).
+   * when the take could not be finished (it's kept for `retry`). `"send"` is the bar's Send, whose
+   * words go to the chat rather than the composer, so it opens no wait.
    */
-  const finish = useCallback(() => {
-    const current = session.current
-    if (!current || (!current.recording && !current.failure)) {
-      cancel()
-      return Promise.resolve("")
-    }
-    if (current.finishing) return current.finishing
-    const run = (async () => {
-      if (current.recording) {
-        const recording = current.recording
-        const last = recording.segments.at(-1)
-        if (last && current.pieces.length && Date.now() - last.startedAt < MIN_MS) last.skip = true
-        const stopping = end(recording)
-        current.stopping = stopping
-        await stopping
-        if (session.current !== current) return null
-        current.recording = null
-        const length = (recording.stoppedAt ?? Date.now()) - recording.startedAt
-        if (length < MIN_MS || !current.pieces.length) {
-          cancel()
-          return ""
-        }
+  const finish = useCallback(
+    (mode: "stop" | "send" = "stop") => {
+      const current = session.current
+      if (!current || (!current.recording && !current.failure)) {
+        cancel()
+        return Promise.resolve("")
       }
-      return settle(current)
-    })()
-    current.finishing = run
-    const done = () => {
-      if (current.finishing === run) current.finishing = null
-    }
-    void run.then(done, done)
-    return run
-  }, [cancel, settle])
+      if (current.finishing) return current.finishing
+      const run = (async () => {
+        // The Stop, and in front of the close: the recorders' ending is inside the wait (ADR 0075).
+        if (mode === "stop") waitStarts(current.take)
+        if (current.recording) {
+          const recording = current.recording
+          const last = recording.segments.at(-1)
+          if (last && current.pieces.length && Date.now() - last.startedAt < MIN_MS)
+            last.skip = true
+          const stopping = end(recording)
+          current.stopping = stopping
+          await stopping
+          if (session.current !== current) return null
+          waitReaches(current.take, "closed")
+          current.recording = null
+          const length = (recording.stoppedAt ?? Date.now()) - recording.startedAt
+          if (length < MIN_MS || !current.pieces.length) {
+            cancel()
+            return ""
+          }
+        }
+        return settle(current)
+      })()
+      current.finishing = run
+      const done = () => {
+        if (current.finishing === run) current.finishing = null
+      }
+      void run.then(done, done)
+      return run
+    },
+    [cancel, settle],
+  )
 
   /** Sends the take again, under a fresh Take id, so no late Piece of the dead one can join it. */
   const retry = useCallback(async () => {
     const current = session.current
     if (!current) return null
+    waitDrops(current.take)
     if (!current.pieces.length) {
       cancel()
       return ""
@@ -815,6 +830,7 @@ export function useChunkedDictation(
       const current = session.current
       session.current = null
       if (!current) return
+      waitDrops(current.take)
       stopInflight(current)
       releaseTake(current.profile, current.lock)
       current.lock = null

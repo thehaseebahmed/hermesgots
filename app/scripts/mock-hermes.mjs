@@ -3112,7 +3112,6 @@ const PLUGIN_VERSION = process.env.MOCK_PLUGIN_VERSION || "0.29.1"
 const HERMES_VERSION = "0.25.0"
 const DICTATION = process.env.MOCK_DICTATION ?? "on"
 let DICTATION_TIDY = process.env.MOCK_DICTATION_TIDY ?? "ok"
-const TIDY_MS = 400
 function tidyWhole(text) {
   const out = String(text)
     .replace(/\s+/g, " ")
@@ -3248,6 +3247,15 @@ const dictationMissing = []
 // The longest a Confirm may take, as `info.dictation.wait_ms` states it: the queue's allowance plus
 // the widest Cleanup. A flow can shorten it to watch a take miss its bound.
 const DICTATION_WAIT_MS = Number(process.env.MOCK_DICTATION_WAIT_MS ?? 38_000)
+// How long a Confirm actually takes before it answers — the take's drain and its Cleanup, as a constant,
+// since no decoder runs here. It is the bound above at its most, and the one clock a flow turns to show
+// the app's Stop to text following it (ADR 0075): `POST /__mock/dictation-confirm-ms`, or this at start.
+// A body that is not a number holds the delay rather than silently reading as zero.
+const confirmDelay = (value, held) => {
+  const ms = Number(value)
+  return Number.isFinite(ms) ? Math.min(DICTATION_WAIT_MS, Math.max(0, ms)) : held
+}
+let dictationConfirmMs = confirmDelay(process.env.MOCK_DICTATION_CONFIRM_MS ?? 400, 400)
 // How many takes have their first Confirm refused for a missing Piece, so the re-send is exercised.
 let dictationRefusals = Number(process.env.MOCK_DICTATION_REFUSE ?? 0)
 const DICTATION_TAKE_MS = 120_000
@@ -5367,7 +5375,7 @@ http
           error: { message: "Local transcription failed: the model ran out of memory." },
         })
       if (DICTATION_TIDY === "hang") return new Promise(() => {})
-      await new Promise((resolve) => setTimeout(resolve, TIDY_MS))
+      await new Promise((resolve) => setTimeout(resolve, dictationConfirmMs))
       // A cleanup that fails or finds nothing to change lands the words as they were heard; the
       // level is still named, and `cleaned` says which of the two happened (ADR 0074).
       const cleaned = DICTATION_TIDY === "ok" && level !== "none" && Boolean(heard)
@@ -5873,11 +5881,17 @@ http
         clips: dictationClips,
         confirms: dictationConfirms,
         refusals: dictationMissing,
+        confirm_ms: dictationConfirmMs,
         takes: [...dictationTakes.values()].map((held) => ({
           take: held.take,
           order: held.order,
         })),
       })
+    }
+    if (url.pathname === "/__mock/dictation-confirm-ms" && req.method === "POST") {
+      const { ms } = await readBody(req)
+      dictationConfirmMs = confirmDelay(ms, dictationConfirmMs)
+      return json(res, 200, { ok: true, confirm_ms: dictationConfirmMs })
     }
     if (url.pathname === "/__mock/dictation-refuse" && req.method === "POST") {
       const { count = 0 } = await readBody(req)

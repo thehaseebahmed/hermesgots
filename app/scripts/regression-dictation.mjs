@@ -1,14 +1,13 @@
 // Chromium's fake microphone stands in for a real one; the long recording plays a made-up voice
-// that stops for a moment twice, so the cut at a pause is what those blocks test.
+// that stops for a moment twice, so the cut at a pause is what those blocks test — and that block
+// also prints the take's Stop to text, the app's own share of its wait (ADR 0075).
 import assert from "node:assert/strict"
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? "playwright")
-import { launch, settleNav } from "./e2e/lib.mjs"
+import { app, launch, mock, mockJson, settleNav } from "./e2e/lib.mjs"
 
-const app = process.env.APP_URL ?? "http://localhost:15173"
-const mock = process.env.MOCK_URL ?? "http://localhost:18642"
 const offMock = process.env.OFF_MOCK_URL
 const shots = process.env.SHOTS_DIR
 const SENTENCE = "Let's ship the dictation feature today."
@@ -65,20 +64,78 @@ function speech() {
 
 /** What the mock's take registry holds: every Piece it was sent, and every Confirm it answered. */
 async function mockDictation() {
-  const { clips, confirms, refusals } = await (await fetch(`${mock}/__mock/dictation`)).json()
-  return { clips, confirms, refusals }
+  const { clips, confirms, refusals, confirm_ms } = await (await fetch(`${mock}/__mock/dictation`)).json()
+  return { clips, confirms, refusals, confirm_ms }
+}
+
+/** How long the fake host's Confirm takes; a flow raises it to move what the app waits on. */
+const setConfirmDelay = async (ms) =>
+  (await mockJson("/__mock/dictation-confirm-ms", { ms })).confirm_ms
+
+/**
+ * The take's wait as the app itself recorded it, with the words each part is printed as — read from
+ * the module, so a part cannot go unnamed here (ADR 0075).
+ */
+const takeWait = (page) =>
+  page.evaluate(async () => {
+    const { WAIT_PART_LABELS, lastWait, waitSpans, waitTotal } = await import(
+      "/src/lib/dictation-wait.ts"
+    )
+    const wait = lastWait()
+    return (
+      wait && {
+        ...wait,
+        labels: WAIT_PART_LABELS,
+        spans: waitSpans(wait),
+        total: waitTotal(wait),
+      }
+    )
+  })
+
+/** Prints a take's Stop to text — the app's own share, never the host's (ADR 0075) — and asserts nothing. */
+function printWait(wait, confirm) {
+  if (!wait || wait.total === null) {
+    console.log("dictation: Stop to text — no take closed since its Stop, so nothing was measured")
+    return null
+  }
+  console.log(
+    `dictation: Stop to text ${Math.round(wait.total)} ms on the mock's ${confirm} ms Confirm — the app's own share, not the host's (ADR 0075)`,
+  )
+  for (const span of wait.spans) console.log(`  ${wait.labels[span.part]}: ${Math.round(span.ms)} ms`)
+  return Math.round(wait.total)
 }
 
 /** Arms the next Confirm to be refused for a missing Piece, so the take's one recovery runs. */
-async function refuseNextConfirm(count = 1) {
-  await fetch(`${mock}/__mock/dictation-refuse`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ count }),
-  })
+const refuseNextConfirm = (count = 1) => mockJson("/__mock/dictation-refuse", { count })
+
+/**
+ * One take, dictated the way this flow dictates: press Voice, let `pieces` Pieces be cut at the pauses,
+ * hold on a moment, then Stop and wait for the words. The take the flow reads and the one it takes
+ * against a raised Confirm are recorded this way alike, since a number is comparable only with one
+ * taken the same (ADR 0075). Answers the Pieces the mock held before Stop, and all of them after it; a
+ * take that cut fewer Pieces than asked still Stops and still measures, and the caller says what it
+ * expected.
+ */
+async function dictate(page, pieces = 2) {
+  const before = (await mockDictation()).clips.length
+  await page.getByRole("button", { name: "Voice", exact: true }).click()
+  await page.getByRole("button", { name: "Stop" }).waitFor()
+  for (let end = Date.now() + 30_000; (await mockDictation()).clips.length - before < pieces;) {
+    if (Date.now() >= end) break
+    await page.waitForTimeout(100)
+  }
+  const sent = (await mockDictation()).clips.slice(before)
+  await page.waitForTimeout(1500)
+  await page.getByRole("button", { name: "Stop" }).click()
+  await page.getByRole("button", { name: "Voice", exact: true }).waitFor({ timeout: 15_000 })
+  return { sent, all: (await mockDictation()).clips.slice(before) }
 }
 
 const PHONE = { width: 390, height: 844 }
+// How much the Confirm is raised to show the app's own number follows it, and the tolerance its move
+// is printed against: the parts that are not the Confirm are the machine's own noise (ADR 0075).
+const RAISE_MS = 1000
+const TOLERANCE_MS = 500
 
 /** The bot this device's one profile is, so a flow can open its editor's own screen. */
 const botId = (page) =>
@@ -227,32 +284,45 @@ try {
   {
     const talker = await launch(chromium, true, [...fakeMic.slice(1), `--use-file-for-fake-audio-capture=${speech()}`])
     const page = await open(mock, PHONE, "light", talker)
-    const before = (await mockDictation()).clips.length
-    await page.getByRole("button", { name: "Voice", exact: true }).click()
-    await page.getByRole("button", { name: "Stop" }).waitFor()
-    for (let end = Date.now() + 30_000; (await mockDictation()).clips.length - before < 2;) {
-      assert.ok(Date.now() < end, "two pieces were cut at the pauses before Stop")
-      await page.waitForTimeout(100)
-    }
-    const sent = (await mockDictation()).clips.slice(before)
-    assert.equal(sent.length, 2, "two pieces sent before Stop")
+    const { confirm_ms: base } = await mockDictation()
+    const first = await dictate(page)
+    assert.equal(first.sent.length, 2, "two pieces sent before Stop")
     assert.deepEqual(
-      sent.map((clip) => clip.index),
+      first.sent.map((clip) => clip.index),
       [0, 1],
       "each Piece names its index in the take",
     )
-    assert.equal(sent[0].take, sent[1].take, "and the take the app minted when it started")
-    assert.ok(sent[0].take, "a Take id, not a pair of flags")
-    await page.waitForTimeout(1500)
-    await page.getByRole("button", { name: "Stop" }).click()
-    await page.getByRole("button", { name: "Voice", exact: true }).waitFor()
-    const all = (await mockDictation()).clips.slice(before)
-    assert.equal(all.length, 3, "the last Piece went up at Stop, and no more")
+    assert.equal(first.sent[0].take, first.sent[1].take, "and the take the app minted when it started")
+    assert.ok(first.sent[0].take, "a Take id, not a pair of flags")
+    assert.equal(first.all.length, 3, "the last Piece went up at Stop, and no more")
     // The Confirm tidies the whole take, so only the first "um" goes and the rest is as heard.
     assert.equal(
       await page.getByRole("textbox").last().inputValue(),
       [SENTENCE, HEARD, HEARD].join(" "),
     )
+
+    const plain = printWait(await takeWait(page), base)
+
+    // The one thing this flow can move is the host's Confirm, so it is raised and the same take taken
+    // again: the number the app printed has to follow the thing it measures, by the same amount, and a
+    // number is comparable only with one taken the same way (ADR 0075).
+    try {
+      const raised = await setConfirmDelay(base + RAISE_MS)
+      await dictate(page)
+      const slow = printWait(await takeWait(page), raised)
+      if (plain !== null && slow !== null) {
+        const moved = slow - plain
+        const off = moved - RAISE_MS
+        const sign = (ms) => `${ms >= 0 ? "+" : ""}${ms}`
+        console.log(
+          `dictation: a Confirm of +${RAISE_MS} ms moved Stop to text by ${sign(moved)} ms — ${sign(off)} ms off the raise, ${Math.abs(off) <= TOLERANCE_MS ? "inside" : "outside"} the stated ±${TOLERANCE_MS} ms tolerance (reported, not asserted)`,
+        )
+      } else console.log("dictation: a take missed its Stop to text, so the raise was not measured")
+    } finally {
+      // The knob is the mock's own state, shared with every block after this one: it is handed back
+      // whether the take measured or threw.
+      await setConfirmDelay(base)
+    }
     await talker.close()
   }
 

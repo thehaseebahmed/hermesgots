@@ -46,6 +46,7 @@ import {
   useDictationInfo,
   type DictationAvailability,
 } from "@/lib/dictation"
+import { waitInserted, type TakeId } from "@/lib/dictation-wait"
 import { writeDictation } from "@/lib/dictations"
 import {
   SEND_COMMANDS,
@@ -205,14 +206,14 @@ export function Composer({
   const lastEscape = useRef<number | null>(null)
   const listId = useId()
   const dictationInfo = useDictationInfo(connection)
-  const placeLanded = useRef<(landed: string) => void>(() => {})
+  const placeLanded = useRef<(landed: string, takeId: TakeId) => void>(() => {})
   const dictation = useChunkedDictation(
     connection,
     joinText(botName, dictationHint ?? ""),
     draftKey,
     dictationWords,
-    (take) => {
-      placeLanded.current(take.text)
+    (take, takeId) => {
+      placeLanded.current(take.text, takeId)
       void writeDictation(connection, take)
     },
   )
@@ -436,7 +437,7 @@ export function Composer({
     textarea.current?.focus()
   }
 
-  const placeDictation = (landed: string) => {
+  const placeDictation = (landed: string, takeId: TakeId) => {
     if (dictationSends.current) {
       const text = joinText(value, landed)
       if (disabled) setValue(text)
@@ -450,13 +451,14 @@ export function Composer({
       const middle = joinText(landed)
       return `${before}${before && !/\s$/.test(before) ? " " : ""}${middle}${after && !/^\s/.test(after) ? " " : ""}${after}`
     })
+    waitInserted(takeId)
     setTimeout(() => textarea.current?.focus())
   }
 
   // Send and Stop hold the bar for the same bound: the one the bot's host states (ADR 0074).
   const endDictation = async (send: boolean) => {
     dictationSends.current = send
-    await dictation.finish()
+    await dictation.finish(send ? "send" : "stop")
   }
 
   placeLanded.current = placeDictation
