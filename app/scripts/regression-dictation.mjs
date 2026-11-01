@@ -1,5 +1,6 @@
 // Chromium's fake microphone stands in for a real one; the long recording plays a made-up voice
-// that stops for a moment twice, so the cut at a pause is what those blocks test.
+// that stops for a moment twice, so the cut at a pause is what those blocks test — and that block
+// also prints the take's Stop to text, the app's own share of its wait (ADR 0075).
 import assert from "node:assert/strict"
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -65,8 +66,54 @@ function speech() {
 
 /** What the mock's take registry holds: every Piece it was sent, and every Confirm it answered. */
 async function mockDictation() {
-  const { clips, confirms, refusals } = await (await fetch(`${mock}/__mock/dictation`)).json()
-  return { clips, confirms, refusals }
+  const { clips, confirms, refusals, confirm_ms } = await (await fetch(`${mock}/__mock/dictation`)).json()
+  return { clips, confirms, refusals, confirm_ms }
+}
+
+/** How long the fake host's Confirm takes; a flow raises it to move what the app waits on. */
+async function setConfirmDelay(ms) {
+  const answer = await fetch(`${mock}/__mock/dictation-confirm-ms`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ms }),
+  })
+  return (await answer.json()).confirm_ms
+}
+
+/**
+ * The take's wait as the app itself recorded it: the Stop the user pressed, its recorders closing,
+ * its last Upload, the Confirm's round trip and the insert, with the spans between them (ADR 0075).
+ */
+const takeWait = (page) =>
+  page.evaluate(async () => {
+    const { lastWait, waitSpans, waitTotal } = await import("/src/lib/dictation-wait.ts")
+    const wait = lastWait()
+    return wait && { ...wait, spans: waitSpans(wait), total: waitTotal(wait) }
+  })
+
+/** The parts of a take's wait, in the words this flow prints them, and nothing else. */
+const WAIT_PARTS = {
+  closed: "recorders closing",
+  uploaded: "last Upload",
+  answered: "Confirm's round trip",
+  inserted: "insert",
+}
+
+/**
+ * Prints a take's Stop to text, naming it as the app's own share: the mock host answers in a constant
+ * time and no decoder sits behind it, so this is never the host's Confirm span (ADR 0075). Nothing in
+ * the run fails on the figure — it is reported, not asserted.
+ */
+function printWait(wait, confirm) {
+  if (!wait || wait.total === null) {
+    console.log("dictation: Stop to text — no take reached the composer, so nothing was measured")
+    return null
+  }
+  console.log(
+    `dictation: Stop to text ${wait.total} ms on the mock's ${confirm} ms Confirm — the app's own share, not the host's (ADR 0075)`,
+  )
+  for (const span of wait.spans) console.log(`  ${WAIT_PARTS[span.part]}: ${span.ms} ms`)
+  return wait.total
 }
 
 /** Arms the next Confirm to be refused for a missing Piece, so the take's one recovery runs. */
@@ -79,6 +126,12 @@ async function refuseNextConfirm(count = 1) {
 }
 
 const PHONE = { width: 390, height: 844 }
+// The fake host's Confirm delay, as raised to show the app's own number follows it, and how far off
+// the raise that number may land before the line printed says so. The parts of the wait that aren't
+// the Confirm are the app's own and move with the machine that ran it, which is why the tolerance is
+// stated rather than tight — and why nothing fails on it (ADR 0075).
+const RAISE_MS = 1000
+const TOLERANCE_MS = 500
 
 /** The bot this device's one profile is, so a flow can open its editor's own screen. */
 const botId = (page) =>
@@ -227,7 +280,8 @@ try {
   {
     const talker = await launch(chromium, true, [...fakeMic.slice(1), `--use-file-for-fake-audio-capture=${speech()}`])
     const page = await open(mock, PHONE, "light", talker)
-    const before = (await mockDictation()).clips.length
+    const { clips, confirm_ms: base } = await mockDictation()
+    const before = clips.length
     await page.getByRole("button", { name: "Voice", exact: true }).click()
     await page.getByRole("button", { name: "Stop" }).waitFor()
     for (let end = Date.now() + 30_000; (await mockDictation()).clips.length - before < 2;) {
@@ -253,6 +307,39 @@ try {
       await page.getByRole("textbox").last().inputValue(),
       [SENTENCE, HEARD, HEARD].join(" "),
     )
+
+    // The app's own share of the take's wait (ADR 0075): this Stop, just pressed, to the words
+    // standing in the composer — the mock's constant answer and nothing of a decoder in it.
+    const plain = printWait(await takeWait(page), base)
+
+    // The one thing this flow can move is the host's Confirm, so it is raised and the take run again:
+    // the number the app printed has to follow the thing it measures, by the same amount. The second
+    // take is recorded the same way — two Pieces waited for at the pauses, a pause, then Stop — so
+    // the difference between the two numbers is the Confirm and not the shape of the recording.
+    const raised = await setConfirmDelay(base + RAISE_MS)
+    const again = (await mockDictation()).clips.length
+    await page.getByRole("button", { name: "Voice", exact: true }).click()
+    await page.getByRole("button", { name: "Stop" }).waitFor()
+    // No assertion: a second take that cut only one Piece still measures the wait. It just waits.
+    for (let end = Date.now() + 25_000; (await mockDictation()).clips.length - again < 2;) {
+      if (Date.now() >= end) break
+      await page.waitForTimeout(100)
+    }
+    await page.waitForTimeout(1500)
+    await page.getByRole("button", { name: "Stop" }).click()
+    await page.getByRole("button", { name: "Voice", exact: true }).waitFor({ timeout: 15_000 })
+    const slow = printWait(await takeWait(page), raised)
+    await setConfirmDelay(base)
+    if (plain !== null && slow !== null) {
+      // Reported against the raise, inside a tolerance stated here and asserted nowhere: the parts
+      // that are not the Confirm are the app's own and move with the machine that ran it.
+      const moved = slow - plain
+      const off = moved - RAISE_MS
+      const sign = (ms) => `${ms >= 0 ? "+" : ""}${ms}`
+      console.log(
+        `dictation: a Confirm of +${RAISE_MS} ms moved Stop to text by ${sign(moved)} ms — ${sign(off)} ms off the raise, ${Math.abs(off) <= TOLERANCE_MS ? "inside" : "outside"} the stated ±${TOLERANCE_MS} ms tolerance (reported, not asserted)`,
+      )
+    }
     await talker.close()
   }
 

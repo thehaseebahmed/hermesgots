@@ -22,6 +22,7 @@ import {
 } from "@/lib/dictation-failure"
 import { RESTORED, SAVE_MS } from "@/lib/dictation-kept"
 import { holdTake, releaseTake } from "@/lib/dictation-lock"
+import { waitDrops, waitReaches, waitStarts } from "@/lib/dictation-wait"
 import { prefersReducedMotion } from "@/lib/media"
 import {
   MissingPieces,
@@ -695,6 +696,7 @@ export function useChunkedDictation(
         if (session.current !== current) return null
         if (uploaded === undefined) return ranOut()
         if (!uploaded) return giveUp(current, clipFailure(current.error, bound))
+        waitReaches(current.take, "uploaded")
         for (let attempt = 0; ; attempt++) {
           try {
             const answered = await bounded(
@@ -708,6 +710,7 @@ export function useChunkedDictation(
             )
             if (answered === TIMED_OUT) return ranOut()
             if (session.current !== current) return null
+            waitReaches(current.take, "answered")
             return land(current, answered)
           } catch (error) {
             if (attempt > 0 || !(error instanceof MissingPieces) || !error.missing.length)
@@ -733,6 +736,8 @@ export function useChunkedDictation(
   const cancel = useCallback(() => {
     const current = session.current
     session.current = null
+    // Nothing of this take's words will stand in the composer, so its wait has no end to reach.
+    waitDrops()
     if (current) {
       forget(current)
       stopInflight(current)
@@ -756,6 +761,8 @@ export function useChunkedDictation(
     }
     if (current.finishing) return current.finishing
     const run = (async () => {
+      // The Stop the user pressed, as the app feels it: the wait is measured from here (ADR 0075).
+      waitStarts(current.take)
       if (current.recording) {
         const recording = current.recording
         const last = recording.segments.at(-1)
@@ -764,6 +771,7 @@ export function useChunkedDictation(
         current.stopping = stopping
         await stopping
         if (session.current !== current) return null
+        waitReaches(current.take, "closed")
         current.recording = null
         const length = (recording.stoppedAt ?? Date.now()) - recording.startedAt
         if (length < MIN_MS || !current.pieces.length) {
@@ -785,6 +793,9 @@ export function useChunkedDictation(
   const retry = useCallback(async () => {
     const current = session.current
     if (!current) return null
+    // A retry presses no Stop: the wait its first Stop opened ended without words, and this one is a
+    // sending, not a wait the flow prints (ADR 0075).
+    waitDrops()
     if (!current.pieces.length) {
       cancel()
       return ""
