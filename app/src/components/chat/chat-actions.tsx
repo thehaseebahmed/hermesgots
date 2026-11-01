@@ -155,8 +155,12 @@ export function LimitNotice({
       // The tone is the only mark it has, so the line itself wears it.
       icon={false}
       // Inset from a shell whose corners are 28px, so the two radii stay concentric, and enough room
-      // on the right for both controls.
-      className="mx-2 mt-2 rounded-[1.25rem] px-3 py-2.5 has-data-[slot=alert-action]:pr-32"
+      // on the right for both controls. The width is the composer's to give rather than `Banner`'s
+      // `w-full`: that 100% is measured on the shell's content box, and in the column the composer
+      // draws (a centred one) a child that wide swallows its own horizontal margins — the notice
+      // then sits flush against the shell while only its top gap survives. Stretching to the column
+      // minus the margins is what makes the inset real, and lands its text on the placeholder's 20px.
+      className="mx-2 mt-2 w-auto self-stretch rounded-[1.25rem] px-3 py-2.5 has-data-[slot=alert-action]:pr-32"
       action={
         <div className="flex items-center gap-1">
           <Button variant="outline" size="sm" type="button" onClick={onView}>

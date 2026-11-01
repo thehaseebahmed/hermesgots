@@ -1,9 +1,9 @@
-// The limit notice inside the composer's box, above its text: a window's percentage is not the
-// account running out. A spent allowance beside credits in hand shows nothing, a spent account with
-// nothing behind it says so, a dismissal doesn't outlive the state it dismissed, the reset line
-// counts down ("Resets in 3d 4h", never a clock time), and the notice carries no icon — its tone on
-// the line and its words are what say it. The Usage sheet names the model in a row of its own, above
-// the meter.
+// The limit notice inside the composer's box, inset on both sides above its text, its text on the
+// placeholder's own edge: a window's percentage is not the account running out. A spent allowance
+// beside credits in hand shows nothing, a spent account with nothing behind it says so, a dismissal
+// doesn't outlive the state it dismissed, the reset line counts down ("Resets in 3d 4h", never a
+// clock time), and the notice carries no icon — its tone on the line and its words are what say it.
+// The Usage sheet names the model in a row of its own, above the meter.
 import { app, assert, flow, mock, pass, settled } from "./lib.mjs"
 
 /** Moves the mock's account to `percent` for every later read; "" puts it back to the env's figure. */
@@ -91,6 +91,30 @@ await flow("usage-limit", async ({ page, profileId, seed, until, shot }) => {
     await page.locator("[data-slot=alert] > svg").count(),
     0,
     "no icon leads the notice: its tone and its words say what it is",
+  )
+  // Its geometry, which no DOM assertion can hold: an inset of 8px inside the shell's border on
+  // both sides, and its text on the placeholder's own left edge. A notice that measures itself on
+  // the shell (`w-full`) sits flush there with only its top gap surviving, and its text lands 8px
+  // left of the text it is the composer's word about.
+  const group = await page.locator("[data-slot=input-group]").first().boundingBox()
+  const alert = await page.locator("[data-slot=alert]").first().boundingBox()
+  const field = await page.locator("[data-slot=input-group] textarea").first()
+  const fieldBox = await field.boundingBox()
+  const padLeft = await field.evaluate((el) => parseFloat(getComputedStyle(el).paddingLeft))
+  const fieldText = fieldBox.x + padLeft
+  const insetLeft = alert.x - group.x
+  const insetRight = group.x + group.width - (alert.x + alert.width)
+  assert.ok(
+    insetLeft >= 8 && insetLeft <= 11 && Math.abs(insetLeft - insetRight) <= 1,
+    `the notice is inset the same 8px on both sides: left ${insetLeft}, right ${insetRight}`,
+  )
+  const titleText = await page
+    .locator("[data-slot=alert] span")
+    .first()
+    .evaluate((el) => el.getBoundingClientRect().x)
+  assert.ok(
+    Math.abs(titleText - fieldText) <= 1,
+    `its text starts on the placeholder's own edge: notice ${titleText}, field ${fieldText}`,
   )
   await shot("approaching")
 
