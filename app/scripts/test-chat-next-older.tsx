@@ -7,7 +7,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { PAGE } from "@/chat-next/pages"
-import { botProfile, chatScreen, findAll, mount, seedChats } from "./component-kit.tsx"
+import { botProfile, chatScreen, findAll, mount, seedChats, settle } from "./component-kit.tsx"
 import { eventually, openDevice, showsEverything, wait, withDevice } from "./chat-next-devices.tsx"
 import { fakeHost } from "./chat-next-host.ts"
 
@@ -146,10 +146,12 @@ test("a thread left unfinished picks up where it stopped, from the rows the devi
     "the third page is in flight",
   )
   assert.equal(first.older(), "reading")
-  // The reader leaves with the page still on its way, and it lands after the page is gone.
+  // The reader leaves with the page still on its way, and it lands after the page is gone: a device
+  // that closed reads no more, and the page it was waiting on is dropped rather than written. The
+  // wait is the page's own queue draining, not a clock the answer has to beat.
   await first.close()
   third.release()
-  await wait(50)
+  await settle()
   assert.equal(await database.sessionRows.count(), 2 * PAGE, "it was not written for nobody")
   assert.equal((await database.sessionStates.get(host.session))?.partial, true)
 

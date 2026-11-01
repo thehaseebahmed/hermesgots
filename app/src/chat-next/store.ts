@@ -19,7 +19,11 @@ export interface ThreadStore {
   /** What the page is doing, as an object that changes only when one of its fields does. */
   doing: () => Doing
   subscribe: (listener: () => void) => () => void
-  apply: (event: ThreadEvent) => Promise<void>
+  /**
+   * `keep`, where given, is the caller's answer to "is this still wanted": it is read inside the
+   * queue, where the event is applied, so a run that ended while the event waited writes nothing.
+   */
+  apply: (event: ThreadEvent, keep?: () => boolean) => Promise<void>
 }
 
 export type Doing = Pick<ThreadState, "status" | "running" | "waiting" | "error">
@@ -233,8 +237,9 @@ function createStore(database: SessionDb, session: string, drop: () => void): Th
           })
       }
     },
-    apply: (event) =>
+    apply: (event, keep) =>
       enqueue(async () => {
+        if (keep && !keep()) return
         const next = reduce(state, event)
         if (next === state) return
         state = next
