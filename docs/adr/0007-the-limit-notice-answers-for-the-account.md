@@ -1,5 +1,10 @@
 # The limit notice answers for the account, not for one window
 
+**Superseded in its placement and its icon by [ADR 0077](0077-a-limit-notice-stands-inside-the-composer.md)**:
+the notice is drawn inside the composer's box above its text rather than above the composer, and it
+carries no icon — the tone on its first line and the words carry it. Everything else here stands, and
+the amendment below still holds.
+
 **Amended in part by ADR 0026**: the rule below is the plugin's now, because AFK needs it with the app
 closed — a bot's usage threshold stops its projects picking tasks up. `usage.serialize` also keeps
 core's `scope` on the wire, so a window core marks `model` can be passed over where the account's own

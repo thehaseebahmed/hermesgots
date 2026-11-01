@@ -10,10 +10,11 @@ import {
   RotateCcwIcon,
   SettingsIcon,
   Trash2Icon,
+  XIcon,
 } from "lucide-react"
 
+import { Banner } from "@/components/banner"
 import {
-  LimitBanner,
   ContextIcon,
   ContextPercent,
   ContextRing,
@@ -39,7 +40,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
-import { COLUMN_BOX } from "@/lib/layout"
+import { useWide } from "@/lib/media"
+import { useNow } from "@/lib/threads"
 import { stopMessage } from "@/lib/chat"
 import { contextWindow } from "@/lib/context"
 import {
@@ -57,6 +59,7 @@ import {
   limitNotice,
   limitNoticeKey,
   refreshProviderUsage,
+  resetsInText,
 } from "@/lib/provider-usage"
 import { setBotMuted, setThreadMuted } from "@/lib/push"
 import { quietly } from "@/lib/report"
@@ -115,9 +118,12 @@ export function useChatUsage(
 }
 
 /**
- * The warning above the composer when the provider's account is out or nearly (ADR 0007): a claim
- * about the account, which a dismiss silences until it becomes a different claim. Nothing when
- * there is none or it was dismissed.
+ * The warning the composer carries above its text when the provider's account is out or nearly
+ * (ADR 0007, its placement ADR 0077): a claim about the account, which a dismiss silences until it
+ * becomes a different claim. Nothing when there is none or it was dismissed.
+ *
+ * It stands on the box's own top edge, inside its corner rather than above the box, and carries no
+ * icon: the tone and the line itself say what it is, and the room is the composer's.
  */
 export function LimitNotice({
   usage,
@@ -129,20 +135,60 @@ export function LimitNotice({
   onView: () => void
 }) {
   const { notice, provider, noticeDismissed } = usage
+  const wide = useWide()
+  // The line counts down while the notice is up: an "in 3d 4h" that never moves is wrong by then.
+  const now = useNow()
   if (!notice || !provider || noticeDismissed) return null
+  const exhausted = notice.remaining <= 0
+  // A phone's notice leaves out the window's name: "Approaching Limit" is enough to send the reader
+  // to the sheet, which names every window.
+  const text = exhausted
+    ? wide
+      ? `${notice.label} Limit Reached`
+      : "Limit Reached"
+    : wide
+      ? `Approaching ${notice.label} Limit`
+      : "Approaching Limit"
   return (
-    <div className={`${COLUMN_BOX} pb-2`} data-toast-above>
-      <LimitBanner
-        notice={notice}
-        onDismiss={() =>
-          profileId &&
-          void db.profiles
-            .update(profileId, { limitDismissed: limitNoticeKey(provider, notice) })
-            .catch(() => undefined)
-        }
-        onView={onView}
-      />
-    </div>
+    <Banner
+      tone={exhausted ? "error" : "warning"}
+      // The tone is the only mark it has, so the line itself wears it.
+      icon={false}
+      // Inset from a shell whose corners are 28px, so the two radii stay concentric, and enough room
+      // on the right for both controls.
+      className="mx-2 mt-2 rounded-[1.25rem] px-3 py-2.5 has-data-[slot=alert-action]:pr-32"
+      action={
+        <div className="flex items-center gap-1">
+          <Button variant="outline" size="sm" type="button" onClick={onView}>
+            View usage
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            type="button"
+            className="size-8 shrink-0"
+            onClick={() =>
+              profileId &&
+              void db.profiles
+                .update(profileId, { limitDismissed: limitNoticeKey(provider, notice) })
+                .catch(() => undefined)
+            }
+            aria-label="Dismiss"
+          >
+            <XIcon />
+          </Button>
+        </div>
+      }
+    >
+      <div className="flex flex-col">
+        <span className={exhausted ? "text-destructive-ink" : "text-warning-ink"}>{text}</span>
+        {notice.resetsAt && (
+          <span className="text-muted-foreground tabular-nums">
+            Resets in {resetsInText(notice.resetsAt, now)}
+          </span>
+        )}
+      </div>
+    </Banner>
   )
 }
 

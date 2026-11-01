@@ -18,7 +18,7 @@ What the current chat screen (`CurrentChatPage` in `app/src/routes/chat.tsx`, ov
 | Model and compaction dividers | Drawn from the chat record the plugin fills (`modelChanges`, `compactions`) |
 | Interfaces (OpenUI) | `useDraws` hands each row its `blocks` |
 | Stats | A turn this device watched from its start keeps its tokens, speed and time with the row that opened it (`stats.ts`); a turn followed from its middle has none |
-| The limit banner | `LimitNotice` above the composer, opening the usage sheet |
+| The limit banner | `LimitNotice` inside the composer, above its text, opening the usage sheet |
 | Long chats | `useFirstRows` opens on the newest rows and draws the rest a beat later; turns are compared without building a string each (`equal.ts`) |
 | Following the reader | `FollowOnSend` and `FollowAfterApproval` |
 | Interim words | `message.interim` joins the reply where the deltas did not carry it |

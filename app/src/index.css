@@ -39,6 +39,9 @@
 
   /* App-specific: the approval accent, the routine run bars and a merged pull request. */
   --warning: oklch(0.7 0.17 55);
+  /* The tone as a line of text on its own tint: 5.25:1 on the plate, where `--warning` is 2.55. */
+  --warning-ink: oklch(0.52 0.15 55);
+  --destructive-ink: oklch(0.52 0.22 27);
   --success: oklch(0.65 0.17 152);
   --info: oklch(0.55 0.17 255);
   --merged: oklch(0.55 0.2 300);
@@ -95,6 +98,9 @@
   --sidebar-ring: oklch(0.556 0 0);
 
   --warning: oklch(0.76 0.16 60);
+  /* In the dark the tone is already a line that reads: 6.95:1 on its plate, 5.59:1 for the error. */
+  --warning-ink: var(--warning);
+  --destructive-ink: var(--destructive);
   --success: oklch(0.72 0.17 152);
   --info: oklch(0.72 0.12 255);
   --merged: oklch(0.74 0.17 300);
@@ -150,6 +156,8 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-warning: var(--warning);
+  --color-warning-ink: var(--warning-ink);
+  --color-destructive-ink: var(--destructive-ink);
   --color-success: var(--success);
   --color-info: var(--info);
   --color-merged: var(--merged);
