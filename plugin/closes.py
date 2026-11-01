@@ -34,6 +34,9 @@ KEEP_MS = 30 * 86_400_000
 READ_ROWS = 20
 
 _lock = threading.Lock()
+# One ask at a time, apart from `_lock`: `start` writes a row and then starts a thread, which takes
+# `_lock`, and a plain Lock taken twice in one thread would deadlock it.
+_start_lock = threading.Lock()
 _resumed: set = set()
 _running: set = set()
 
@@ -119,47 +122,48 @@ def owed(path: Path) -> List[Dict[str, Any]]:
 def start(path: Path, home: Path, session_id: str) -> Dict[str, Any]:
     """Records the close and starts it: ``closing``, or ``done`` at once for a session the host holds
     nothing of. A second ask for one already running answers that one."""
-    existing = read(path, session_id)
-    if existing and existing["state"] == "closing":
-        # Nothing running it — a process that died between the record and the thread, or a boot that
-        # couldn't read the store — is asked to start again from its own snapshot.
-        if (str(path), session_id) not in _running:
-            spawn(path, home, session_id, _snapshot(path, home, existing))
-        return read(path, session_id) or existing
-    record = sessions.record_for(path, home, session_id)
-    now = store.now_ms()
-    if not record:
-        # Nothing on the host to close: a session that only ever lived in the app ends here, and a
-        # second delete of one already closed reads the same way.
+    # One ask at a time: two devices pressing the button together must not each write a row with
+    # their own start, or the device that lost the race would be told the same close twice.
+    with _start_lock:
+        existing = read(path, session_id)
+        if existing and existing["state"] == "closing":
+            if (str(path), session_id) not in _running:
+                spawn(path, home, session_id, _snapshot(path, home, existing))
+            return existing
+        record = sessions.record_for(path, home, session_id)
+        now = store.now_ms()
+        if not record:
+            # Nothing on the host to close: a session that only ever lived in the app ends here, and
+            # a second delete of one already closed reads the same way.
+            row = {
+                "session_id": session_id,
+                "project_id": (existing or {}).get("project_id"),
+                "state": "done",
+                "started_at": now,
+                "ended_at": now,
+                "repos": (existing or {}).get("repos") or [],
+                "removed": True,
+                "kept": [],
+                "results": [],
+                "error": None,
+            }
+            _write(path, row)
+            return row
         row = {
             "session_id": session_id,
-            "project_id": (existing or {}).get("project_id"),
-            "state": "done",
+            "project_id": record.get("project_id"),
+            "state": "closing",
             "started_at": now,
-            "ended_at": now,
-            "repos": (existing or {}).get("repos") or [],
-            "removed": True,
+            "ended_at": None,
+            "repos": list(record.get("repos") or []),
+            "removed": False,
             "kept": [],
             "results": [],
             "error": None,
         }
         _write(path, row)
+        spawn(path, home, session_id, record)
         return row
-    row = {
-        "session_id": session_id,
-        "project_id": record.get("project_id"),
-        "state": "closing",
-        "started_at": now,
-        "ended_at": None,
-        "repos": list(record.get("repos") or []),
-        "removed": False,
-        "kept": [],
-        "results": [],
-        "error": None,
-    }
-    _write(path, row)
-    spawn(path, home, session_id, record)
-    return row
 
 
 def spawn(path: Path, home: Path, session_id: str, record: Dict[str, Any]) -> None:
