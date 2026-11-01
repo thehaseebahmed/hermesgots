@@ -16,6 +16,16 @@ export function formatTokens(tokens: number) {
   return String(tokens)
 }
 
+/**
+ * A count with its thousands grouped, and nothing shortened: 950, 20,000, 1,234,567. A reply's
+ * stats are a record rather than a meter, so a number there is read as itself, and `1.2M` would
+ * cost the reader the one thing the row is for.
+ */
+export function formatCount(value: number) {
+  if (!Number.isFinite(value)) return "0"
+  return String(Math.round(value)).replace(/\B(?=(\d{3})+(?!\d))/g, ",")
+}
+
 const relative = new Intl.RelativeTimeFormat(undefined, { numeric: "auto", style: "short" })
 
 /** "in 5 min", "3 hr. ago", "yesterday". */

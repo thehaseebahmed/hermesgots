@@ -279,6 +279,77 @@ export const drawsFootLine = (status?: string) => status !== "error" && status !
 export const carriesCount = (message: { role?: string; status?: string }) =>
   message.role === "assistant" && drawsFootLine(message.status)
 
+/** What a reply's line is decided from, read off the reply's own row. */
+export type ReplyFacts = {
+  status?: string
+  /** An approval or a question waits on the reader: the turn waits, it does not work. */
+  waiting?: boolean
+  /** A call of this reply runs, and its own row says so. */
+  runningCall?: boolean
+  /** A thought row above already says the turn is thinking. */
+  thinks?: boolean
+  /** What the turn is doing, as the app words it, while it is still working. */
+  activity?: string
+}
+
+/**
+ * A reply's own facts, as the app reads them off its row: whether a prompt holds it, whether a call
+ * still runs, whether a thought row above says thinking, and the activity its words come from. The
+ * activity is handed in because `format.ts` owns it and this rule reaches nothing.
+ */
+export function replyFacts(
+  message: {
+    status?: string
+    approval?: { resolved?: unknown }
+    clarify?: { resolved?: unknown }
+    tools?: { status?: string; contentOffset?: number; toolCallId: string }[]
+    reasoningRuns?: ReasoningRun[]
+    reasoning?: string
+    content: string
+    statusText?: string
+  },
+  activity: string,
+): ReplyFacts {
+  return {
+    status: message.status,
+    waiting:
+      Boolean(message.approval && !message.approval.resolved) ||
+      Boolean(message.clarify && !message.clarify.resolved),
+    runningCall: Boolean(message.tools?.some((tool) => tool.status === "running")),
+    thinks: thinkingRows(message).some((run) => run.thinking),
+    activity,
+  }
+}
+
+/**
+ * The thread's one live row, and what it says (ADR 0076): the catch-up line while the thread's
+ * first read is out — it stands where a reply's line would (ADR 0066), so the count of subagents at
+ * work is its only words, its loader turning in the blue — and otherwise the last reply's own line,
+ * decided by the same rule a screen with no catch-up line uses (`statusLineOf`). Where the thread
+ * has no reply to speak for, the count stands alone without a loader, its own row as it always was.
+ *
+ * One rule for the row means one row: a thread never says the same moment twice, once as its own
+ * line and once as the catch-up's.
+ */
+export function threadLineOf(input: {
+  /** Whether the catch-up line stands: the first read is out and the device holds rows. */
+  catching: boolean
+  /** The catch-up line's words, which `StatusLine` dresses from the catching pool. */
+  catchingText: string
+  /** How many subagents the session has at work. */
+  running: number
+  /** The last reply's facts, where the thread has a reply that draws a line at all. */
+  reply?: ReplyFacts
+}): FootLine | undefined {
+  if (input.catching)
+    return input.running > 0
+      ? { count: "alone", countLoader: true }
+      : { text: input.catchingText, count: "none", countLoader: false }
+  if (input.reply)
+    return statusLineOf({ ...input.reply, count: input.running, countShown: input.running > 0 })
+  return input.running > 0 ? { count: "alone", countLoader: false } : undefined
+}
+
 /** Where the count of subagents at work sits, once it is the status line's own (ADR 0070). */
 export type FootCount = "suffix" | "alone" | "none"
 

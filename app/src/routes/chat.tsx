@@ -1035,8 +1035,10 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   const agents = useSessionAgents(conversation ?? undefined, profile, spawning, busy)
   const subagentsRunning = useMemo(() => runningAgents(agents).length, [agents])
   const lastId = thread?.at(-1)?.id
-  // The count is drawn once: on the last reply's own line, or at the thread's foot where it draws none.
-  const drawsInline = subagentsRunning > 0 && Boolean(thread?.at(-1) && carriesCount(thread.at(-1)!))
+  // The count is drawn once: on the last reply's own line, or at the thread's foot where it draws
+  // none. This screen draws no catch-up line, so it has no second row to keep it off.
+  const drawsInline =
+    subagentsRunning > 0 && Boolean(thread?.at(-1) && carriesCount(thread.at(-1)!))
   const [agentView, setAgentView] = useState<DelegatedAgent>()
   const [agentsOpen, setAgentsOpen] = useState(false)
   const showSubagents = useCallback(() => setAgentsOpen(true), [setAgentsOpen])

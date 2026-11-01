@@ -15,11 +15,10 @@ import { MediaItems, type MediaItem } from "@/components/chat/media-gallery"
 import { useCodeFace } from "@/components/chat/code-face"
 import { Markdown } from "@/components/chat/markdown"
 import { AgentCards } from "@/components/chat/agent-card"
-import { SubagentCount } from "@/components/chat/subagent-count"
 import { MediaTag } from "@/components/chat/media-image"
 import { Compacted } from "@/components/chat/model-change"
 import { ClarifyCard, PlanApprovedCard } from "@/components/chat/session-cards"
-import { StatusLine } from "@/components/chat/status-line"
+import { LineRow } from "@/components/chat/status-line"
 import { ThinkingLine } from "@/components/chat/thinking-line"
 import { ToolGroup } from "@/components/chat/tool-group"
 import { ReminderRow } from "@/components/chat/reminder-row"
@@ -34,7 +33,8 @@ import { removeQueued, sendQueued } from "@/lib/chat"
 import type { Attachment, Message, ProgressReminder, ToolEvent } from "@/lib/db"
 import { compactionOf } from "@/lib/compactions"
 import type { Compaction } from "@/lib/hermes"
-import { describeActivity, formatDuration, WAITING_FOR_APPROVAL } from "@/lib/format"
+import type { FootLine } from "@/lib/thinking"
+import { describeActivity, formatCount, formatDuration, WAITING_FOR_APPROVAL } from "@/lib/format"
 import { NOT_SENT } from "@/lib/words"
 import { COLUMN, REPLY_INSET } from "@/lib/layout"
 import { mediaCell, mediaKind, type MediaCell } from "@/lib/media-kind"
@@ -254,11 +254,14 @@ function Stats({ message }: { message: Message }) {
   const stats = message.stats
   if (!stats) return null
   return (
-    <div className={cn(REPLY_INSET, "text-xs text-muted-foreground/80 tabular-nums")}>
+    <div
+      data-slot="stats"
+      className={cn(REPLY_INSET, "text-xs text-muted-foreground/80 tabular-nums")}
+    >
       {stats.estimated ? "~" : ""}
-      {stats.tokens} tokens
-      {stats.tokensPerSecond !== undefined && ` · ${stats.tokensPerSecond} tok/s`} ·{" "}
-      {formatDuration(stats.durationMs)}
+      {formatCount(stats.tokens)} tokens
+      {stats.tokensPerSecond !== undefined &&
+        ` · ${formatCount(stats.tokensPerSecond)} tok/s`} · {formatDuration(stats.durationMs)}
     </div>
   )
 }
@@ -466,6 +469,11 @@ interface MessageItemProps {
   onShowSubagents?: () => void
   /** Whether this row draws the count beside its activity words, rather than leaving it to the foot. */
   subagentsInline?: boolean
+  /**
+   * What the thread decided this reply's line says, where the thread decides it (chat-next, ADR
+   * 0076). Absent, the reply decides for itself from its own row; `null`, it is told to draw none.
+   */
+  line?: FootLine | null
   /** The host's record of this chat's compactions, which says how full the context was at each. */
   compactions?: Compaction[]
   /**
@@ -489,6 +497,7 @@ export const MessageItem = memo(function MessageItem({
   subagents,
   onShowSubagents,
   subagentsInline,
+  line,
   compactions,
   actions,
 }: MessageItemProps) {
@@ -712,7 +721,7 @@ export const MessageItem = memo(function MessageItem({
   const shown = subagentCount > 0 && Boolean(subagentsInline) && Boolean(onShowSubagents)
   // What the line says, and whether it stands at all, is the one rule's to decide; what the turn is
   // doing is only the rule's to read while the turn still works.
-  const foot = statusLineOf({
+  const own = statusLineOf({
     status: message.status,
     waiting,
     runningCall: runningTool,
@@ -726,30 +735,16 @@ export const MessageItem = memo(function MessageItem({
     count: subagentCount,
     countShown: shown,
   })
-  const suffixed = foot?.count === "suffix"
-  const place = suffixed ? "suffix" : foot?.countLoader ? "alone-loading" : "alone"
+  const foot = line === undefined ? own : (line ?? undefined)
   // Empty, the row would still add two of the message's gaps around itself, so it is drawn only
   // once the line shows.
+  //
+  // The line stands last, after everything the reply settled into (ADR 0075): an error or "Stopped"
+  // is drawn *instead* of it, and a reply's stats only once it is done — so the only two that can
+  // meet are the stats and the count of subagents still at work, and there the live row belongs
+  // under the settled one. Nothing of the reply's follows its line, which is what lets a thread one
+  // day draw that line in the thread's own place, once, for the count and the catch-up alike.
   const footerLines = [
-    foot && (
-      <StatusLine key="status" text={foot.text} seed={message.id}>
-        {foot.count !== "none" && onShowSubagents && (
-          <>
-            {suffixed && (
-              <span aria-hidden data-slot="status-separator" className="text-info">
-                ·
-              </span>
-            )}
-            <SubagentCount
-              count={subagentCount}
-              onOpen={onShowSubagents}
-              place={place}
-              className={suffixed ? "-my-2.5" : undefined}
-            />
-          </>
-        )}
-      </StatusLine>
-    ),
     // An error on a reply that streamed says so plainly: it isn't the bot's answer.
     failed && (
       <div
@@ -765,6 +760,15 @@ export const MessageItem = memo(function MessageItem({
       </div>
     ),
     statsShown && <Stats key="stats" message={message} />,
+    foot && (
+      <LineRow
+        key="status"
+        line={foot}
+        count={subagentCount}
+        onOpen={onShowSubagents}
+        seed={message.id}
+      />
+    ),
   ].filter(Boolean)
   const footerShown = footerLines.length > 0
   const footer = footerShown && (
@@ -804,6 +808,10 @@ function sameMessage(a: MessageItemProps, b: MessageItemProps) {
   }
   if (a.message !== b.message && JSON.stringify(a.message) !== JSON.stringify(b.message))
     return false
+  // What the thread decided the line says is rebuilt by the thread on every render; two decisions
+  // that read the same are the same row, and comparing them by reference would redraw a streaming
+  // reply on every token.
+  if (JSON.stringify(a.line) !== JSON.stringify(b.line)) return false
   return a.blocks === b.blocks || JSON.stringify(a.blocks) === JSON.stringify(b.blocks)
 }
 

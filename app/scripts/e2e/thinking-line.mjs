@@ -980,6 +980,17 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
     assert.equal(alone.countColour, tone.info, "the count reads in the info blue")
     assert.equal(alone.loaderColour, tone.info, "and its loader turns in that same blue")
     assert.equal(alone.colour, tone.muted, "the line it stands on still muted")
+    // What settles into a reply is drawn above its line, never under it (ADR 0075): the reply ends
+    // on the row that can still change, so a thread could one day draw that row as its own.
+    assert.equal(
+      await page.evaluate((item) => {
+        const box = [...document.querySelectorAll(item)].at(-1)
+        const line = box?.querySelector("[data-slot=status-line]")
+        return line?.parentElement?.lastElementChild?.dataset.slot ?? null
+      }, ITEM),
+      "status-line",
+      "nothing of the reply's follows its line",
+    )
     assert.deepEqual(
       await countRows(),
       { drawn: 1, onLine: 1 },

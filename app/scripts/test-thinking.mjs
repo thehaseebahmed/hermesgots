@@ -11,8 +11,10 @@ import {
   mergeThoughtRows,
   noteRunThinking,
   placeThinking,
+  replyFacts,
   runsOf,
   statusLineOf,
+  threadLineOf,
   thinkingLabel,
   thinkingRows,
 } from "../src/lib/thinking.ts"
@@ -511,6 +513,86 @@ test("the foot of a reply says one thing: its line, its count, or nothing", () =
     statusLineOf({ status: "stopped", activity: "Writing…" }),
     undefined,
     'and a stopped one wears "Stopped" there',
+  )
+})
+
+test("the thread draws one live row, and the count rides it", () => {
+  const working = { status: "streaming", activity: "Writing…" }
+
+  assert.deepEqual(
+    threadLineOf({ catching: true, catchingText: "Catching up…", running: 1 }),
+    { count: "alone", countLoader: true },
+    "while the thread catches up its one line is the catch-up line, and the count is its only words",
+  )
+  assert.deepEqual(
+    threadLineOf({ catching: true, catchingText: "Catching up…", running: 0 }),
+    { text: "Catching up…", count: "none", countLoader: false },
+    "with no subagent at work that line says the thread is reading, in its own word",
+  )
+  assert.deepEqual(
+    threadLineOf({ catching: false, catchingText: "Catching up…", running: 1, reply: working }),
+    { text: "Writing…", count: "suffix", countLoader: false },
+    "with no catch-up line the reply's own line holds the count, riding its words",
+  )
+  assert.deepEqual(
+    threadLineOf({
+      catching: false,
+      catchingText: "Catching up…",
+      running: 1,
+      reply: { status: "done" },
+    }),
+    { count: "alone", countLoader: true },
+    "a finished reply's line is the count alone, its loader turning in the blue",
+  )
+  assert.equal(
+    threadLineOf({
+      catching: false,
+      catchingText: "Catching up…",
+      running: 1,
+      reply: { status: "error" },
+    }),
+    undefined,
+    "a reply that failed draws no line for the count to ride, so none is drawn",
+  )
+  assert.deepEqual(
+    threadLineOf({ catching: false, catchingText: "Catching up…", running: 1 }),
+    { count: "alone", countLoader: false },
+    "with no reply to speak for, the count stands on the thread's own row, turning no loader",
+  )
+  assert.equal(
+    threadLineOf({ catching: false, catchingText: "Catching up…", running: 0 }),
+    undefined,
+    "and with nothing to say the thread draws no row at all",
+  )
+})
+
+test("a reply's facts are read off its own row", () => {
+  const facts = replyFacts(
+    {
+      status: "streaming",
+      content: "",
+      approval: { resolved: undefined },
+      tools: [{ toolCallId: "t-1", status: "running", contentOffset: 0 }],
+      reasoningRuns: [{ text: "Weighing it." }],
+    },
+    "Thinking…",
+  )
+  assert.equal(facts.waiting, true, "an unresolved approval is a reply waiting on the reader")
+  assert.equal(facts.runningCall, true, "and a call with no result is still running")
+  assert.equal(facts.thinks, true, "a turn with nothing said yet is still thinking")
+  assert.equal(facts.activity, "Thinking…")
+  assert.deepEqual(
+    replyFacts(
+      {
+        status: "done",
+        content: "It is done.",
+        approval: { resolved: "once" },
+        clarify: { resolved: "timed_out" },
+      },
+      "Writing…",
+    ),
+    { status: "done", waiting: false, runningCall: false, thinks: false, activity: "Writing…" },
+    "an answered prompt is not a wait, and a finished reply is not thinking",
   )
 })
 
