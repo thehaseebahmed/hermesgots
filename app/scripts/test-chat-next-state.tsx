@@ -638,3 +638,58 @@ test("a question asked on this device's own turn still draws that turn", () => {
   }
   assert.equal(threadTurns(state).at(-1)?.user, "go again", "the turn just sent is drawn")
 })
+
+/** The steer rows a turn is drawn with. */
+const steers = (state: ThreadState) =>
+  threadTurns(state)
+    .at(-1)!
+    .parts.flatMap((part) => (part.kind === "steer" ? [part.text] : []))
+
+const STEER_ROW = (id: number): Row =>
+  ({
+    id,
+    timestamp: id,
+    role: "user",
+    display_kind: "steer",
+    content: "[OUT-OF-BAND USER MESSAGE — a direct message]\nplease slow down\n[/OUT-OF-BAND USER MESSAGE]",
+  }) as Row
+
+test("a steer the host took stands in the reply at once, and its own row does not draw it twice", () => {
+  let state = play([{ event: "message.delta", delta: "Working.", seq: 1 } as RunEvent])
+  assert.deepEqual(steers(state), [], "nothing steered yet")
+  state = reduce(state, { type: "steered", text: "please slow down" })
+  assert.deepEqual(
+    steers(state),
+    ["please slow down"],
+    "the words stand in the reply the moment the host takes them",
+  )
+  // The host writes its row when the run reads the steer; the read that brings it here comes later.
+  state = reduce(state, {
+    type: "transcript",
+    rows: [
+      { id: 1, role: "user", content: "go" },
+      { id: 2, role: "assistant", content: "Working." },
+      STEER_ROW(3),
+    ],
+  })
+  assert.deepEqual(steers(state), ["please slow down"], "the row is that same steer, not a second one")
+})
+
+test("a steer is drawn from the transcript alone when this page draws no reply", () => {
+  const held = reduce(initial, {
+    type: "transcript",
+    rows: [
+      { id: 1, role: "user", content: "go" },
+      { id: 2, role: "assistant", content: "Working." },
+      STEER_ROW(3),
+    ],
+  })
+  const before = threadTurns(held).at(-1)!.parts
+  const after = threadTurns(reduce(held, { type: "steered", text: "please slow down" })).at(-1)!.parts
+  assert.deepEqual(after, before, "with no live turn there is nothing to draw it on")
+  assert.deepEqual(
+    after.flatMap((part) => (part.kind === "steer" ? [part.text] : [])),
+    ["please slow down"],
+    "the transcript's own row is the one that draws it",
+  )
+})

@@ -128,14 +128,21 @@ export async function queueTurn(chatId: string, text: string, attachments: Attac
 
 /**
  * Steers the running reply the way the current screen does: queued first, then steered by the
- * plugin, so a steer Hermes refuses or hands back unread stays queued rather than lost.
+ * plugin, so a steer Hermes refuses or hands back unread stays queued rather than lost. Answers
+ * whether the reply took it, which is when the thread may draw it.
  */
-export async function steerTurn(chatId: string, text: string, attachments: Attachment[]) {
+export async function steerTurn(
+  chatId: string,
+  text: string,
+  attachments: Attachment[],
+): Promise<boolean> {
   const { item, config, session } = await queueTurn(chatId, text, attachments)
   try {
     await queueAction(config, session, item.id, "steer")
+    return true
   } catch {
     toast.error("Couldn't steer this reply, so it's queued.")
+    return false
   }
 }
 
