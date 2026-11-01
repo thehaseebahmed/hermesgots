@@ -49,8 +49,16 @@ A derived fact worked out in the app from what a bot's host holds. Gots doesn't 
 _Avoid_: client-side computation
 
 **Session state**:
-What a project session is doing — idle, working, waiting on the user, or closed by the user as resolved or discarded. A run in flight is read first: while the session's own run runs, it is working, and no wait mark from a moment before it starts counts (it is what puts the row in the Code list's Working). Waiting is the user's move: an answer, an approval, a plan review, a stall, or a live pull request's checks to watch. A session whose subagents are still at work is working, whether or not a turn is live, and so is one whose finished subagents still owe it a wake turn — the window between the last subagent ending and that turn starting, when nothing runs and nothing streams and the bot is about to carry on. Composed from the host's run status, its subagents, its owed wakes and this device's own marks, not derived from one source.
+What a project session is doing — idle, working, waiting on the user, or closed by the user as resolved or discarded. A run in flight is read first: while the session's own run runs, it is working, and no wait mark from a moment before it starts counts (it is what puts the row in the Code list's Working). Waiting is the user's move: an answer, an approval, a plan review, a stall, or a live pull request's checks to watch. A session whose subagents are still at work is working, whether or not a turn is live, and so is one whose finished subagents still owe it a wake turn — the window between the last subagent ending and that turn starting, when nothing runs and nothing streams and the bot is about to carry on. A **session close** still running is none of these: the user already ended the session, and what the host does afterwards is its cleanup. Composed from the host's run status, its subagents, its owed wakes and this device's own marks, not derived from one source.
 _Avoid_: status, state machine
+
+**Session close**:
+The host's work of shutting a session down after the user ends it: its worktrees removed except those whose work is uncommitted or unpushed, its open pull requests closed and their pushed branches deleted on GitHub. Delete and Discard ask for it, and it runs on the host beside the row rather than behind the button.
+_Avoid_: cleanup, teardown, close job, close task, discard run
+
+**Close report**:
+What a session close ended with — the worktrees it kept and why, each repository's closed pull request and deleted branch, and anything it could not do — kept on the host until a device reads it, and told once per device.
+_Avoid_: result, outcome, close status, close error
 
 **Run finished**:
 A run that has ended and has no active subagents — the one answer to whether the work it started is over, read by whatever draws or tells it: a turn's end ends its own stream, and a delegation that turn set to work carries the run on past it, so neither is read alone.
