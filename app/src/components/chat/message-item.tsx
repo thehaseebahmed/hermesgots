@@ -254,7 +254,10 @@ function Stats({ message }: { message: Message }) {
   const stats = message.stats
   if (!stats) return null
   return (
-    <div className={cn(REPLY_INSET, "text-xs text-muted-foreground/80 tabular-nums")}>
+    <div
+      data-slot="stats"
+      className={cn(REPLY_INSET, "text-xs text-muted-foreground/80 tabular-nums")}
+    >
       {stats.estimated ? "~" : ""}
       {stats.tokens} tokens
       {stats.tokensPerSecond !== undefined && ` · ${stats.tokensPerSecond} tok/s`} ·{" "}
@@ -730,7 +733,28 @@ export const MessageItem = memo(function MessageItem({
   const place = suffixed ? "suffix" : foot?.countLoader ? "alone-loading" : "alone"
   // Empty, the row would still add two of the message's gaps around itself, so it is drawn only
   // once the line shows.
+  //
+  // The line stands last, after everything the reply settled into (ADR 0075): an error or "Stopped"
+  // is drawn *instead* of it, and a reply's stats only once it is done — so the only two that can
+  // meet are the stats and the count of subagents still at work, and there the live row belongs
+  // under the settled one. Nothing of the reply's follows its line, which is what lets a thread one
+  // day draw that line in the thread's own place, once, for the count and the catch-up alike.
   const footerLines = [
+    // An error on a reply that streamed says so plainly: it isn't the bot's answer.
+    failed && (
+      <div
+        key="failed"
+        className={cn(REPLY_INSET, "flex items-start gap-2 text-[15px] text-destructive")}
+      >
+        {error}
+      </div>
+    ),
+    message.status === "stopped" && (
+      <div key="stopped" className={cn(REPLY_INSET, "text-xs text-muted-foreground")}>
+        Stopped
+      </div>
+    ),
+    statsShown && <Stats key="stats" message={message} />,
     foot && (
       <StatusLine key="status" text={foot.text} seed={message.id}>
         {foot.count !== "none" && onShowSubagents && (
@@ -750,21 +774,6 @@ export const MessageItem = memo(function MessageItem({
         )}
       </StatusLine>
     ),
-    // An error on a reply that streamed says so plainly: it isn't the bot's answer.
-    failed && (
-      <div
-        key="failed"
-        className={cn(REPLY_INSET, "flex items-start gap-2 text-[15px] text-destructive")}
-      >
-        {error}
-      </div>
-    ),
-    message.status === "stopped" && (
-      <div key="stopped" className={cn(REPLY_INSET, "text-xs text-muted-foreground")}>
-        Stopped
-      </div>
-    ),
-    statsShown && <Stats key="stats" message={message} />,
   ].filter(Boolean)
   const footerShown = footerLines.length > 0
   const footer = footerShown && (

@@ -132,6 +132,38 @@ test("with a call running the count is the line's only words, and turns no loade
   assert.match(row!.getAttribute("class") ?? "", /min-h-\[29px\]/, "in the work rows' shape")
 })
 
+test("a settled reply draws its stats above its line and ends on the line", async () => {
+  const done: Message = {
+    ...reply,
+    status: "done",
+    stats: { tokens: 1234, estimated: false, tokensPerSecond: 56, durationMs: 12_000 },
+  }
+  let stats: Element | null = null
+  let line: Element | null = null
+  let last: string | undefined
+  await mount(
+    <MessageItem
+      message={done}
+      showStats
+      onShowSubagents={() => {}}
+      subagents={2}
+      subagentsInline
+    />,
+    async () => {
+      stats = document.querySelector('[data-slot="stats"]')
+      line = document.querySelector('[data-slot="status-line"]')
+      last = line?.parentElement?.lastElementChild?.getAttribute("data-slot") ?? undefined
+    },
+  )
+  assert.ok(stats, "the reply's stats are drawn")
+  assert.ok(line, "and so is the count of subagents still at work")
+  assert.ok(
+    stats!.compareDocumentPosition(line!) & Node.DOCUMENT_POSITION_FOLLOWING,
+    "the live row stands under the settled one, never above it",
+  )
+  assert.equal(last, "status-line", "so nothing of the reply's follows its line")
+})
+
 test("a finished turn's count is the line's only words, its loader turning in the blue", async () => {
   const done: Message = { ...reply, status: "done" }
   let line: Element | null = null
