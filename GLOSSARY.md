@@ -487,6 +487,14 @@ _Avoid_: finish, finalize, commit, stop call
 The longest a **Take**'s **Confirm** may take before the bar gives up: one number the host states, the same for **Send** and for **Stop**, covering the Pieces it still owes and its **Cleanup** at the bot's level. A Confirm past it fails the take, which keeps its audio for a **Retry**.
 _Avoid_: timeout, deadline, budget, client wait
 
+**Confirm span**:
+What a host does for a take between a **Confirm** arriving and its answer leaving: the **Pieces** it still owes decoded, and the **Cleanup** at the bot's level. It is what **Take wait** bounds and what the bench measures; it is not how long the take took to say, and on a host resolving a cloud **Speech provider** it also holds the whole take's upload and decode.
+_Avoid_: latency, response time, round trip, take latency
+
+**Stop to text**:
+What a device waits after the last word of a take: the recorder closing, the last **Upload**, the **Confirm**'s round trip and the words being put in the composer. Measured on the device and nowhere else — a fake host cannot feel a decoder — and it is not a **Take wait**.
+_Avoid_: stop latency, felt latency, perceived speed, delay
+
 **Dictation**:
 One finished take as the log keeps it: the bot that heard it, when, how many words and how long they took to say, two texts — **Heard**, the words the host's speech model wrote down, and **Cleaned up**, the words as they landed in the composer after Cleanup — and what tidied them: the **Cleanup level**, whether the Cleanup changed anything, and the **Speech provider** and model behind it. It is kept on that bot's host and mirrored on the device, which is what the Dictation screen's History lists by month and its Stats count.
 _Avoid_: recording, transcript, entry, voice note
@@ -516,7 +524,7 @@ The words a bot's speech-to-text leans towards: names, product words, jargon. A 
 _Avoid_: dictionary, custom words, hint, keyterms
 
 **Hearing prompt**:
-What a take's host speech model is given before it listens: the host's own initial prompt, a hint naming the bot, the chat and its repos, the bot's **Vocabulary**, and the text of the take so far. Sent, it steers spelling and carries a sentence across the pauses a take is cut at; not sent, the model hears the audio alone and the cleanup repairs the names instead. The bot's, kept on its host and read for every **Piece**, and offered on its Speech-to-text page only while Developer is on.
+What a take's host speech model is given before it listens: the host's own initial prompt, a hint naming the bot, the chat and its repos, and the bot's **Vocabulary**. Sent, it steers spelling; not sent, the model hears the audio alone and the cleanup repairs the names instead. It never carries the take's text: every **Piece** is heard on its own, so a sentence cut at a pause is not carried across it. The bot's, kept on its host and fixed for a take when its first Piece lands, and offered on its Speech-to-text page only while Developer is on.
 _Avoid_: whisper prompt, initial prompt, decoder prompt, context, hint
 
 **Host speech model**:
