@@ -2466,3 +2466,28 @@ a broken document beside a claim the same paragraph is making.
 ---
 
 Found by reading the audit page this change adds a clause to; it does not block it.
+
+# Deferred: a page that comes straight back can resume a store it should have left
+
+`app/src/chat-next/store.ts` keeps one store per database and session, and the last unsubscribe only
+*schedules* the drop — the store leaves its map once its own last writes have landed
+(`void enqueue(async () => { if (listeners.size) return; await flush(); drop() })`). A page that
+unmounts and mounts again inside that window is handed the same store back, with its rows still in
+memory and its status already `ready`, so the page neither asks for the newest page (it asks for what
+comes after the rows) nor says it is catching up.
+
+This is not the red the App gates job was showing: that one was the test reading the catch-up line by
+a wrapper only one of its two homes has, which this branch corrects in the test itself. But a slowed
+`flush()` makes the reuse deterministic and that test fail again, so the race is real and still open.
+
+- Cost: a remount that beats the drop resumes another page's state, and the read it then makes is not
+  the read the screen thinks it is making.
+- Suggested fix: make the drop deterministic at the last unsubscribe — take the store out of its map
+  at once and let the flush finish on the object it already holds — and have the store made next for
+  that session wait on that write before it reads, so a page still starts from the device's copy. Then
+  check the ordering the reuse protects: `test-chat-next-older.tsx`'s "costs the one page" and the
+  reload cases in `test-chat-next-matrix.tsx`.
+- Why it is not applied here: it moves the lifetime of the one writer every chat screen reads
+  through, and a draft built on it is not what this branch is for.
+
+---

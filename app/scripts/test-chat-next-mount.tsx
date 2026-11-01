@@ -451,11 +451,18 @@ test("a chat this device already holds is caught up in the status line's words, 
   })
   const second = host.hold(0)
   await mount(chatScreen("c-held"), async () => {
-    await until(() => Boolean(find("[data-catching-up]")), "the held thread says it is catching up")
-    const words = find("[data-catching-up] [data-slot=status-words]")?.textContent ?? ""
+    // The thread's one live row is drawn either as a row of its own or in the foot of the last reply
+    // that carries it (ADR 0076), so it is read where both of those draw it: the status line's own
+    // slot, whose words come from the catching pool. A wrapper only one of the two homes has would
+    // pass or fail on which of them drew it rather than on what the thread says.
+    const catchingWords = () =>
+      findAll('[data-slot="status-line"] [data-slot=status-words]')
+        .map((one) => one.textContent ?? "")
+        .find((text) => BUSY_WORDS.catching.some((word) => text === `${word}…`)) ?? ""
+    await until(() => catchingWords() !== "", "the held thread says it is catching up")
     assert.ok(
-      BUSY_WORDS.catching.some((word) => words === `${word}…`),
-      `in one of the catching words, not a fixed phrase: ${words}`,
+      catchingWords(),
+      `in one of the catching words, not a fixed phrase: ${catchingWords()}`,
     )
     assert.equal(find("[data-loading-fresh]"), null, "and no loader mid-screen")
     assert.ok(replies().length > 0, "over the rows it already holds")
