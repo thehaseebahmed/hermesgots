@@ -1,4 +1,4 @@
-Status: ready for any agent to work from once its gate merges. Design: [ADR 0075](../adr/0075-a-dictation-is-measured-at-two-ends.md), which records the two ends a take is measured at and declines ADR 0019's tier rule for a bench. Its tickets are #769, #770, #771 and #772. ADR 0074's clause on why a Piece is cut on the device is amended in the same change, and the Glossary's **Hearing prompt** entry is corrected with it — the prompt has never carried the take's text.
+Status: ready for any agent to work from once its gate merges. Design: [ADR 0075](../adr/0075-a-dictation-is-measured-at-two-ends.md), which records the two ends a take is measured at and declines ADR 0019's tier rule for a bench. Its tickets are #769, #770, #771 and #772. These docs land in pull request #773, which closes the gate issue #774 — and #774 blocks the spec until that pull request merges. ADR 0074's clause on why a Piece is cut on the device is amended in the same change, and the Glossary's **Hearing prompt** entry is corrected with it — the prompt has never carried the take's text.
 
 ## Problem Statement
 
