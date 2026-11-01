@@ -91,6 +91,7 @@ export function Composer({
   steerByDefault = false,
   canSteer = false,
   onSteer,
+  notice,
   main = false,
 }: {
   busy: boolean
@@ -118,6 +119,11 @@ export function Composer({
   filesFeature: PluginFeatureAnswer
   /** False when the model doesn't take images. */
   imagesAvailable: boolean
+  /**
+   * What the account behind this chat has to say about sending: the limit notice, on the box's own
+   * top edge above the text. Absent where a card holds the composer's place.
+   */
+  notice?: ReactNode
   disabled?: boolean
   main?: boolean
   onSend: (text: string, attachments: Attachment[]) => Promise<void> | void
@@ -644,6 +650,7 @@ export function Composer({
           over && "ring-2 ring-ring/40",
         )}
       >
+        {notice}
         <InputGroupTextarea
           ref={textarea}
           value={value}

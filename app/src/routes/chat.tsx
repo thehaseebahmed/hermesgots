@@ -9,6 +9,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { matchPath, useLocation, useNavigate, useParams } from "react-router"
@@ -547,9 +548,15 @@ function NextComposer(props: {
   const limit = useContext(LimitContext)
   return (
     <>
-      {limit && <LimitNotice usage={limit.usage} profileId={props.botId} onView={limit.onView} />}
       <NextPills chatId={props.chatId} botId={props.botId} busy={props.controls.busy} />
-      <NextComposerBody {...props} />
+      <NextComposerBody
+        {...props}
+        notice={
+          limit ? (
+            <LimitNotice usage={limit.usage} profileId={props.botId} onView={limit.onView} />
+          ) : null
+        }
+      />
     </>
   )
 }
@@ -656,6 +663,7 @@ function NextComposerBody({
   botId,
   main,
   home,
+  notice,
 }: {
   controls: ComposerControls
   chatId: string
@@ -664,6 +672,8 @@ function NextComposerBody({
   main: boolean
   /** Where `/new` goes: a thread's Main, else home. */
   home?: string
+  /** The account's warning, which the composer draws above its text while it holds. */
+  notice?: ReactNode
 }) {
   const { root } = useNav()
   const navigate = useNavigate()
@@ -740,6 +750,7 @@ function NextComposerBody({
     <>
       <Composer
         busy={controls.busy}
+        notice={notice}
         connection={serverConfig(bot)}
         botName={bot.name}
         dictationWords={bot.vocabulary}
@@ -1477,11 +1488,6 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
             <BotPicker profile={profile} />
           </div>
         )}
-        <LimitNotice
-          usage={{ notice, provider, noticeDismissed }}
-          profileId={profileId}
-          onView={() => setUsageOpen(true)}
-        />
         {session?.discardedAt ? (
           <DiscardedCard />
         ) : session?.resolvedAt ? (
@@ -1509,6 +1515,13 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
             // Sessions are swapped in place beside Code's list; each keeps its own text.
             key={session?.id}
             busy={busy}
+            notice={
+              <LimitNotice
+                usage={{ notice, provider, noticeDismissed }}
+                profileId={profileId}
+                onView={() => setUsageOpen(true)}
+              />
+            }
             disabled={!configured}
             draftKey={draftKey(id)}
             onSend={send}

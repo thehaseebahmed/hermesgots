@@ -1,7 +1,9 @@
-// The limit notice above the composer: a window's percentage is not the account running out. A
-// spent allowance beside credits in hand shows nothing, a spent account with nothing behind it says
-// so, a dismissal doesn't outlive the state it dismissed, and the reset line counts down ("Resets in
-// 3d 4h", never a clock time). The Usage sheet names the model in a row of its own, above the meter.
+// The limit notice inside the composer's box, above its text: a window's percentage is not the
+// account running out. A spent allowance beside credits in hand shows nothing, a spent account with
+// nothing behind it says so, a dismissal doesn't outlive the state it dismissed, the reset line
+// counts down ("Resets in 3d 4h", never a clock time), and the notice carries no icon — its tone on
+// the line and its words are what say it. The Usage sheet names the model in a row of its own, above
+// the meter.
 import { app, assert, flow, mock, pass, settled } from "./lib.mjs"
 
 /** Moves the mock's account to `percent` for every later read; "" puts it back to the env's figure. */
@@ -78,6 +80,18 @@ await flow("usage-limit", async ({ page, profileId, seed, until, shot }) => {
   assert.match(approaching, /^Approaching \S+ Limit/, "the banner names the window it is about")
   assert.match(approaching, /Resets in \d/, "its reset line counts down rather than naming a clock")
   assert.doesNotMatch(approaching, /Resets at/, "a clock time is never the line under the banner")
+  // Where it stands: inside the composer's rounded box, above the text the message is written in.
+  assert.equal(
+    await page.locator("[data-slot=input-group] [data-slot=alert]").count(),
+    1,
+    "the notice stands inside the composer's box, not above it",
+  )
+  // And what it is made of: the tone on its line and the words, with no icon leading it.
+  assert.equal(
+    await page.locator("[data-slot=alert] > svg").count(),
+    0,
+    "no icon leads the notice: its tone and its words say what it is",
+  )
   await shot("approaching")
 
   // The sheet's Context half: the model in a row of its own, the meter under it, and the token line

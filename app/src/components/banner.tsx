@@ -15,18 +15,21 @@ export function Banner({
   tone = "warning",
   className,
   action,
+  icon = true,
   children,
 }: {
   tone?: keyof typeof TONES
   className?: string
   /** A button at the end, such as a dismiss. */
   action?: ReactNode
+  /** False for a notice whose colour and words already say what it is, and whose room is tight. */
+  icon?: boolean
   children: ReactNode
 }) {
   const { Icon, className: toneClass } = TONES[tone]
   return (
     <Alert className={cn("rounded-2xl border-0 px-4 py-3", toneClass, className)}>
-      <Icon aria-hidden />
+      {icon && <Icon aria-hidden />}
       <AlertDescription className="text-foreground">{children}</AlertDescription>
       {action && <AlertAction className="top-1/2 right-1 -translate-y-1/2">{action}</AlertAction>}
     </Alert>

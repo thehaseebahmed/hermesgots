@@ -152,7 +152,7 @@ One thing a provider account can run out of, as that provider measures it: a per
 _Avoid_: quota, plan limit, usage bar
 
 **Limit notice**:
-The warning above a chat's composer that a provider account is nearly out of usage, or out of it.
+The warning a chat's composer carries above its text that a provider account is nearly out of usage, or out of it.
 _Avoid_: alert, limit banner, usage warning
 
 **Bot**:

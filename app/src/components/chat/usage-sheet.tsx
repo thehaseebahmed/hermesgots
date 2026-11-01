@@ -1,11 +1,9 @@
-import { XIcon } from "lucide-react"
 import { Meter } from "@base-ui/react/meter"
 
 import { Banner } from "@/components/banner"
 import { Button } from "@/components/ui/button"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { formatTokens } from "@/lib/format"
-import { useWide } from "@/lib/media"
 import { useModelsDevUnreachable } from "@/lib/models"
 import { useNow } from "@/lib/threads"
 import {
@@ -155,61 +153,6 @@ function WindowRow({ window, now }: { window: UsageWindowView; now: number }) {
       )}
       {window.detail && <span className="text-sm text-muted-foreground">{window.detail}</span>}
     </Meter.Root>
-  )
-}
-
-/** The warning shown above the composer when the provider's plan is near its limit. */
-export function LimitBanner({
-  notice,
-  onDismiss,
-  onView,
-}: {
-  notice: UsageWindowView
-  onDismiss: () => void
-  onView: () => void
-}) {
-  const exhausted = notice.remaining <= 0
-  // A phone's banner leaves out the window's name: "Approaching Limit" is enough to send the
-  // reader to the sheet, which names every window.
-  const wide = useWide()
-  // The line counts down while the banner is up: an "in 3d 4h" that never moves is wrong by then.
-  const now = useNow()
-  const text = exhausted
-    ? wide
-      ? `${notice.label} Limit Reached`
-      : "Limit Reached"
-    : wide
-      ? `Approaching ${notice.label} Limit`
-      : "Approaching Limit"
-  return (
-    <Banner
-      tone={exhausted ? "error" : "warning"}
-      action={
-        <div className="flex items-center gap-1">
-          <Button variant="outline" size="sm" onClick={onView}>
-            View usage
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="size-8 shrink-0"
-            onClick={onDismiss}
-            aria-label="Dismiss"
-          >
-            <XIcon />
-          </Button>
-        </div>
-      }
-    >
-      <div className="flex flex-col">
-        <span>{text}</span>
-        {notice.resetsAt && (
-          <span className="text-muted-foreground tabular-nums">
-            Resets in {resetsInText(notice.resetsAt, now)}
-          </span>
-        )}
-      </div>
-    </Banner>
   )
 }
 
