@@ -132,11 +132,47 @@ test("with a call running the count is the line's only words, and turns no loade
   assert.match(row!.getAttribute("class") ?? "", /min-h-\[29px\]/, "in the work rows' shape")
 })
 
+test("a reply told what its line says draws that, and none of its own words", async () => {
+  let line: Element | null = null
+  let words = 0
+  await mount(
+    <MessageItem
+      message={reply}
+      showStats
+      onShowSubagents={() => {}}
+      subagents={1}
+      line={{ count: "alone", countLoader: true }}
+    />,
+    async () => {
+      line = document.querySelector('[data-slot="status-line"]')
+      words = document.querySelectorAll('[data-slot="status-words"]').length
+    },
+  )
+  assert.ok(line, "the reply draws the row the thread decided on")
+  assert.equal(words, 0, "with no words of its own: a streaming reply would have said Writing…")
+  assert.match(line!.textContent ?? "", /1 subagent running/, "holding the count")
+  assert.ok(line!.querySelector('[role="status"]'), "and the loader that count turns")
+})
+
+test("a reply told to draw no line draws none, whatever its own row says", async () => {
+  let line: Element | null = null
+  let body = ""
+  await mount(
+    <MessageItem message={reply} showStats onShowSubagents={() => {}} subagents={1} line={null} />,
+    async () => {
+      line = document.querySelector('[data-slot="status-line"]')
+      body = text()
+    },
+  )
+  assert.equal(line, null, "no line at all")
+  assert.doesNotMatch(body, /subagents? running/, "and no count under it either")
+})
+
 test("a settled reply draws its stats above its line and ends on the line", async () => {
   const done: Message = {
     ...reply,
     status: "done",
-    stats: { tokens: 1234, estimated: false, tokensPerSecond: 56, durationMs: 12_000 },
+    stats: { tokens: 20_000, estimated: false, tokensPerSecond: 56, durationMs: 12_000 },
   }
   let stats: Element | null = null
   let line: Element | null = null
@@ -156,6 +192,11 @@ test("a settled reply draws its stats above its line and ends on the line", asyn
     },
   )
   assert.ok(stats, "the reply's stats are drawn")
+  assert.match(
+    stats!.textContent ?? "",
+    /20,000 tokens/,
+    "and its count is read as itself, with its thousands grouped",
+  )
   assert.ok(line, "and so is the count of subagents still at work")
   assert.ok(
     stats!.compareDocumentPosition(line!) & Node.DOCUMENT_POSITION_FOLLOWING,

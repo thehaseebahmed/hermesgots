@@ -25,8 +25,7 @@ import { useFirstRows } from "@/components/chat/first-rows"
 import { Compacted, ModelChange } from "@/components/chat/model-change"
 import { QuestionCard } from "@/components/chat/question-card"
 import { AskAgainContext } from "@/components/chat/session-cards"
-import { StatusLine } from "@/components/chat/status-line"
-import { SubagentCount } from "@/components/chat/subagent-count"
+import { LineRow } from "@/components/chat/status-line"
 import { SubagentsSheet } from "@/components/chat/subagents"
 import { ThreadCard } from "@/components/chat/thread-card"
 import { Button } from "@/components/ui/button"
@@ -46,12 +45,12 @@ import { compactionMarks } from "@/lib/compactions"
 import { db, type ApprovalChoice, type Message } from "@/lib/db"
 import type { DelegatedAgent } from "@/lib/hermes"
 import { usePluginFeatureOn } from "@/lib/features"
-import { CATCHING_ACTIVITY } from "@/lib/format"
+import { CATCHING_ACTIVITY, describeActivity } from "@/lib/format"
 import { COLUMN_BOX, REPLY_INSET } from "@/lib/layout"
 import { modelChanges } from "@/lib/model-changes"
 import { useDraws } from "@/lib/openui-draws"
 import type { RepoRef } from "@/lib/workspace"
-import { carriesCount, countHome } from "@/lib/thinking"
+import { carriesCount, replyFacts, threadLineOf } from "@/lib/thinking"
 import { cn } from "@/lib/utils"
 
 import { delegated } from "./agents"
@@ -217,17 +216,24 @@ export function AppThreadView({
   // is one loader in the middle of the pane, and only a thread already held says it in words.
   const loadingFresh = catchingUp && !messages.length && !streaming && !unstarted
   const running = runningAgents(source.agents).length
-  const lastId = messages.at(-1)?.id
+  const last = messages.at(-1)
+  const lastId = last?.id
   // The thread's one line while its first read is out: the catch-up line stands where a reply's
-  // line would, so the count of subagents at work is drawn there and nowhere else (ADR 0070).
+  // line would, so it takes the count of subagents at work rather than joining it (ADR 0066).
   const catching = catchingUp && messages.length > 0
-  // The count is drawn once: on the catching-up line, on the last reply's own line, or at the
-  // thread's foot where it draws none.
-  const home = countHome({
-    running,
-    catching,
-    drawsLine: Boolean(messages.at(-1) && carriesCount(messages.at(-1)!)),
-  })
+  // The thread decides its one live row (ADR 0076): the last reply draws it in its own foot where
+  // that reply draws a line at all, and everywhere else the thread draws it, once.
+  const holds = Boolean(last && carriesCount(last))
+  const line = useMemo(
+    () =>
+      threadLineOf({
+        catching,
+        catchingText: CATCHING_ACTIVITY,
+        running,
+        ...(holds && last ? { reply: replyFacts(last, describeActivity(last)) } : {}),
+      }),
+    [catching, running, holds, last],
+  )
   // Stable, so a reply's own memo holds: a fresh callback would redraw every row on every token.
   const showSubagents = useCallback(() => setSheet(true), [])
 
@@ -310,7 +316,7 @@ export function AppThreadView({
                             busy={streaming}
                             subagents={message.id === lastId ? running : undefined}
                             onShowSubagents={showSubagents}
-                            subagentsInline={message.id === lastId && home === "reply"}
+                            line={message.id === lastId && holds ? line : undefined}
                           />
                           {message.id === retryId && (
                             <div className={cn(COLUMN_BOX, REPLY_INSET)}>
@@ -331,10 +337,10 @@ export function AppThreadView({
                     })}
                     {compacted.trailing && <Compacted compaction={compacted.trailing} />}
                     {moved.trailing.map(marker)}
-                    {home === "foot" && (
-                      <StatusLine>
-                        <SubagentCount count={running} onOpen={showSubagents} place="alone" />
-                      </StatusLine>
+                    {!holds && line && (
+                      <div className={COLUMN_BOX} {...(catching ? { "data-catching-up": "" } : {})}>
+                        <LineRow line={line} count={running} onOpen={showSubagents} seed={chatId} />
+                      </div>
                     )}
                   </AgentsContext.Provider>
                   {held.map((message) => (
@@ -348,24 +354,6 @@ export function AppThreadView({
                       </div>
                     </MessageScrollerItem>
                   ))}
-                  {catching && (
-                    <div className={COLUMN_BOX} data-catching-up>
-                      {/* One line, one loader: the count of subagents at work takes the line's words
-                          where there are any, and turns the line's loader in its own blue. */}
-                      <StatusLine
-                        text={home === "catching" ? undefined : CATCHING_ACTIVITY}
-                        seed={chatId}
-                      >
-                        {home === "catching" && (
-                          <SubagentCount
-                            count={running}
-                            onOpen={showSubagents}
-                            place="alone-loading"
-                          />
-                        )}
-                      </StatusLine>
-                    </div>
-                  )}
                   {queue?.items.map((item) => (
                     <div
                       key={item.id}

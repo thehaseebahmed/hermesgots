@@ -149,7 +149,7 @@ import { dictationHint } from "@/lib/dictation-hint"
 import { draftKey } from "@/lib/drafts"
 import { AgentsContext, runningAgents, stopSubagents, useSessionAgents } from "@/lib/agents"
 import { spawnInFlight } from "@/lib/spawn"
-import { carriesCount, countHome } from "@/lib/thinking"
+import { carriesCount } from "@/lib/thinking"
 import { usePluginFeature, usePluginFeatureOn } from "@/lib/features"
 import { AgentPopup } from "@/components/chat/agent-card"
 import { StatusLine } from "@/components/chat/status-line"
@@ -1036,13 +1036,9 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   const subagentsRunning = useMemo(() => runningAgents(agents).length, [agents])
   const lastId = thread?.at(-1)?.id
   // The count is drawn once: on the last reply's own line, or at the thread's foot where it draws
-  // none. This screen draws no catch-up line, so the count never lands there.
+  // none. This screen draws no catch-up line, so it has no second row to keep it off.
   const drawsInline =
-    countHome({
-      running: subagentsRunning,
-      catching: false,
-      drawsLine: Boolean(thread?.at(-1) && carriesCount(thread.at(-1)!)),
-    }) === "reply"
+    subagentsRunning > 0 && Boolean(thread?.at(-1) && carriesCount(thread.at(-1)!))
   const [agentView, setAgentView] = useState<DelegatedAgent>()
   const [agentsOpen, setAgentsOpen] = useState(false)
   const showSubagents = useCallback(() => setAgentsOpen(true), [setAgentsOpen])
