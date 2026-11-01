@@ -1,4 +1,4 @@
-Status: ready for any agent to work from once its gate merges. Design: [ADR 0075](../adr/0075-a-dictation-is-measured-at-two-ends.md), which records the two ends a take is measured at and declines ADR 0019's tier rule for a bench. Its tickets are #769, #770, #771 and #772. These docs land in pull request #773, which closes the gate issue #774 — and #774 blocks the spec until that pull request merges. ADR 0074's clause on why a Piece is cut on the device is amended in the same change, and the Glossary's **Hearing prompt** entry is corrected with it — the prompt has never carried the take's text.
+Status: its tickets carry `ready-for-agent`, and none starts before its own blockers close — every one of them waits on #774, the docs gate that pull request #773 closes on merge. Design: [ADR 0075](../adr/0075-a-dictation-is-measured-at-two-ends.md), which records the two ends a take is measured at and declines ADR 0019's tier rule for a bench. Its tickets are #769, #770, #771 and #772; #771 and #772 also wait on #769. ADR 0074's clause on why a Piece is cut on the device is amended in the same change, and the Glossary's **Hearing prompt** entry is corrected with it — the prompt has never carried the take's text.
 
 ## Problem Statement
 
@@ -78,10 +78,10 @@ With the ruler in place, the first change it justifies: a Piece closes on the fi
 
 ## Build order
 
-1. #769 — the bench, its fixtures, its baseline and its job in CI. Edge: none.
-2. #770 — the lane's Stop to text, printed by the flow that already dictates. Edge: none; it may land in parallel with #769.
-3. #771 — the cut rule, the counts it moves, and the bench record showing the words did not. Edge: #769.
-4. #772 — the host's own measurement on the picker's rows. Edge: #769.
+1. #769 — the bench, its fixtures, its baseline and its job in CI. Edge: #774, the docs gate.
+2. #770 — the lane's Stop to text, printed by the flow that already dictates. Edge: #774; it may land in parallel with #769.
+3. #771 — the cut rule, the counts it moves, and the bench record showing the words did not. Edge: #774, #769.
+4. #772 — the host's own measurement on the picker's rows. Edge: #774, #769.
 
 ## Risks
 
