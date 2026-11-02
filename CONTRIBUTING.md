@@ -150,6 +150,19 @@ cd android && ./gradlew assembleDebug
 
 ---
 
+## Error reporting
+
+Crashes and unread threads are reported to [Sentry](https://sentry.io) only where a build is given a
+DSN, so a clone, `pnpm dev` and the test tiers send nothing.
+
+| Variable | Where | What it does |
+| --- | --- | --- |
+| `VITE_SENTRY_DSN` | build (`pnpm build`, Netlify, the Android workflows' `SENTRY_DSN` variable) | the app's DSN for `tha-org/gots-app`; unset, the app reports nothing |
+| `SENTRY_AUTH_TOKEN` | build | a token with `project:releases`; set, the build uploads source maps for `gots-app` and deletes them from `dist` |
+| `GOTS_SENTRY_DSN` | a Hermes host | the plugin's DSN for `tha-org/gots-plugin`; unset, the plugin reports nothing. Needs `pip install sentry-sdk` |
+
+---
+
 ## Git & Pull Request Guidelines
 
 ### Conventional Commits
