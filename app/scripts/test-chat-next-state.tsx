@@ -24,6 +24,14 @@ const calls = (state: ThreadState) =>
     .at(-1)!
     .parts.flatMap((part) => (part.kind === "tools" ? part.calls : []))
 
+/** What the drawn cards read, question by question: the answers a call's result lists. */
+const answers = (state: ThreadState) =>
+  calls(state).flatMap((call) => {
+    if (!call.result) return []
+    const responses: { user_response?: string }[] = JSON.parse(call.result).responses ?? []
+    return responses.map((one) => one.user_response)
+  })
+
 /** The question a run waits on, as the run's status and its `clarify.request` both carry it. */
 const PROMPT: Waiting = {
   kind: "question",
@@ -317,6 +325,165 @@ test("the answer the app gave is the call's result, since the served turn's comp
     ],
     "one call's answers are all of them",
   )
+})
+
+test("an answer this page wrote outlives the run being joined again", () => {
+  // The stream a phone follows dies and the page joins the same run again: the host replays its
+  // events from the start, and its clarify completion carries no result — so the call is rebuilt
+  // with nothing on it and the thread's card went back to "No answer" until the transcript's own row
+  // landed, which a chat left open never reads. The answer this page gave is the page's own fact.
+  const answered = reduce(
+    play([
+      { event: "tool.started", tool: "clarify", tool_call_id: "c1" } as RunEvent,
+      {
+        event: "clarify.request",
+        run_id: "r",
+        prompt_id: "p1",
+        execution_generation: 1,
+        question: "Tea?",
+        choices: ["yes", "no"],
+      } as RunEvent,
+      { event: "tool.completed", tool: "clarify", tool_call_id: "c1", preview: "" } as RunEvent,
+    ]),
+    {
+      type: "answered",
+      answer: { question: "Tea?", choicesOffered: ["yes", "no"], value: "yes" },
+    },
+  )
+  assert.deepEqual(answers(answered), ["yes"], "the card reads the answer the moment it is given")
+
+  let rejoined = reduce(answered, { type: "attach", run: "r" })
+  rejoined = reduce(rejoined, {
+    type: "run",
+    event: { event: "tool.started", tool: "clarify", tool_call_id: "c1" } as RunEvent,
+  })
+  rejoined = reduce(rejoined, {
+    type: "run",
+    event: {
+      event: "tool.completed",
+      tool: "clarify",
+      tool_call_id: "c1",
+      preview: "",
+    } as RunEvent,
+  })
+  assert.deepEqual(
+    answers(rejoined),
+    ["yes"],
+    "and it is still the answer once the replay has rebuilt the call",
+  )
+
+  // The transcript's copy is drawn while the call's next question waits: the host writes the call's
+  // result row only when the whole call returns, so that copy holds the call and no answer either.
+  let joined = reduce(initial, { type: "transcript", rows: PROMPT_ROWS })
+  joined = reduce(joined, { type: "attach", run: "r" })
+  joined = reduce(joined, {
+    type: "run",
+    event: { event: "tool.started", tool: "clarify", tool_call_id: "c1" } as RunEvent,
+  })
+  joined = reduce(joined, {
+    type: "answered",
+    answer: { question: "Tea?", choicesOffered: ["yes", "no"], value: "yes" },
+  })
+  const asked = reduce(joined, {
+    type: "waiting",
+    waiting: { ...PROMPT, promptId: "p2", question: "Sugar?" },
+  })
+  assert.deepEqual(answers(asked), ["yes"], "the copy drawn while a run waits reads it too")
+})
+
+test("an answer given before the replay has rebuilt the call is kept and drawn", () => {
+  // A join reads the run's status before it replays the call: the transcript's copy of the turn is
+  // what the card is on when the answer is given, and this page's own turn holds no call yet.
+  let joined = reduce(initial, { type: "transcript", rows: PROMPT_ROWS })
+  joined = reduce(joined, { type: "attach", run: "r" })
+  joined = reduce(joined, { type: "waiting", waiting: PROMPT })
+  assert.equal(calls(joined)[0]?.result, undefined, "the copy on screen holds the call and no answer")
+
+  const answered = reduce(joined, {
+    type: "answered",
+    answer: { question: "Tea?", choicesOffered: ["yes", "no"], value: "yes" },
+  })
+  assert.deepEqual(answers(answered), ["yes"], "the answer is drawn at once")
+  const reopened = reduce(
+    reduce(answered, { type: "attach", run: "r" }),
+    { type: "transcript", rows: PROMPT_ROWS, final: true },
+  )
+  assert.deepEqual(answers(reopened), ["yes"], "and the thread keeps it when it is read again")
+})
+
+test("the answers already given stand through a rejoin, before the next one", () => {
+  // One call asks several questions, one prompt at a time, and the stream dies between two of them:
+  // the replay rebuilds the call with an empty preview, so the next answer has to merge into what
+  // this page already recorded rather than into nothing.
+  let state = reduce(
+    play([
+      { event: "tool.started", tool: "clarify", tool_call_id: "c1" } as RunEvent,
+      {
+        event: "clarify.request",
+        run_id: "r",
+        prompt_id: "p1",
+        execution_generation: 1,
+        question: "Tea?",
+        choices: ["yes", "no"],
+      } as RunEvent,
+      { event: "tool.completed", tool: "clarify", tool_call_id: "c1", preview: "" } as RunEvent,
+    ]),
+    { type: "answered", answer: { question: "Tea?", choicesOffered: ["yes", "no"], value: "yes" } },
+  )
+  state = reduce(state, { type: "attach", run: "r" })
+  state = reduce(state, {
+    type: "run",
+    event: { event: "tool.started", tool: "clarify", tool_call_id: "c1" } as RunEvent,
+  })
+  state = reduce(state, {
+    type: "run",
+    event: { event: "tool.completed", tool: "clarify", tool_call_id: "c1", preview: "" } as RunEvent,
+  })
+  assert.deepEqual(answers(state), ["yes"], "the first answer is still drawn after the rebuild")
+
+  state = reduce(state, {
+    type: "run",
+    event: {
+      event: "clarify.request",
+      run_id: "r",
+      prompt_id: "p2",
+      execution_generation: 2,
+      question: "Sugar?",
+      choices: ["yes", "no"],
+    } as RunEvent,
+  })
+  const second = reduce(state, {
+    type: "answered",
+    answer: { question: "Sugar?", choicesOffered: ["yes", "no"], value: "no" },
+  })
+  assert.deepEqual(answers(second), ["yes", "no"], "the card lists both answers of the one call")
+})
+
+test("a call the host filled itself keeps the host's result", () => {
+  // The transcript's own row for the call carries the answer the host recorded; what this page
+  // wrote is only ever a stand-in for the time before that row lands.
+  const host: Row[] = [
+    ...PROMPT_ROWS,
+    {
+      id: 3,
+      role: "tool",
+      tool_call_id: "c1",
+      content: JSON.stringify({
+        responses: [
+          { question: "Tea?", choices_offered: ["yes", "no"], status: "answered", user_response: "no" },
+        ],
+      }),
+    },
+  ]
+  const answered = reduce(
+    play([
+      { event: "tool.started", tool: "clarify", tool_call_id: "c1" } as RunEvent,
+      { event: "tool.completed", tool: "clarify", tool_call_id: "c1", preview: "" } as RunEvent,
+    ]),
+    { type: "answered", answer: { question: "Tea?", choicesOffered: ["yes", "no"], value: "yes" } },
+  )
+  const whole = reduce(answered, { type: "transcript", rows: host, final: true })
+  assert.deepEqual(answers(whole), ["no"], "the host's own result stands over the page's")
 })
 
 test("a block of thinking waits for the word or call it led to, and leads it", () => {

@@ -21,9 +21,9 @@ import {
 } from "./fold"
 
 /**
- * A thread as the page knows it. The rows, the archive, the subagents and the streamed turn are what
- * the chat says, and are kept on the device; the rest is what this page is doing, and is not
- * (ADR 0065).
+ * A thread as the page knows it. The rows, the archive, the subagents, the streamed turn and the
+ * answers this page wrote are what the chat says, and are kept on the device; the rest is what this
+ * page is doing, and is not (ADR 0065).
  */
 export interface ThreadState {
   status: "loading" | "ready" | "failed"
@@ -62,6 +62,12 @@ export interface ThreadState {
   run?: string
   /** What the run is held up on, until the user's answer or someone else's takes it away. */
   waiting?: Waiting
+  /**
+   * The results this page wrote onto calls the host's stream carries none for: a clarify's answer,
+   * which Hermes serves with an empty preview and writes whole only into the transcript. Keyed by
+   * the call, so an answer stands wherever that call is drawn from.
+   */
+  answers?: Record<string, string>
   /**
    * The prompt that has settled since this page opened, whether this screen answered it or another
    * one did: a status read still carrying it arrived too late to be drawn.
@@ -206,19 +212,28 @@ function patchCall(
   pick: (call: ToolCall) => boolean,
   patch: (call: ToolCall) => Partial<ToolCall>,
   which: "first" | "last" = "first",
-): Turn {
+): { turn: Turn; call?: ToolCall } {
   const seen: { part: number; call: number }[] = []
   turn.parts.forEach((part, at) => {
     if (part.kind !== "tools") return
     part.calls.forEach((call, callAt) => pick(call) && seen.push({ part: at, call: callAt }))
   })
   const at = seen.at(which === "last" ? -1 : 0)
-  if (!at) return turn
+  if (!at) return { turn }
   const part = turn.parts[at.part]
-  if (part.kind !== "tools") return turn
-  const calls = part.calls.with(at.call, { ...part.calls[at.call], ...patch(part.calls[at.call]) })
-  return { ...turn, parts: turn.parts.with(at.part, { ...part, calls }) }
+  if (part.kind !== "tools") return { turn }
+  const call = { ...part.calls[at.call], ...patch(part.calls[at.call]) }
+  return {
+    turn: {
+      ...turn,
+      parts: turn.parts.with(at.part, { ...part, calls: part.calls.with(at.call, call) }),
+    },
+    call,
+  }
 }
+
+/** One question, answered: the shape the app gives the reducer when a card is sent. */
+type Answer = { question: string; choicesOffered: string[] | null; value: string }
 
 /**
  * The answer the app just gave, written onto the call the question was asked by. Hermes's served
@@ -232,26 +247,36 @@ function patchCall(
  */
 function withClarifyAnswer(
   turn: Turn,
-  answer: { question: string; choicesOffered: string[] | null; value: string },
-): Turn {
+  answer: Answer,
+  known?: Record<string, string>,
+): { turn: Turn; call?: ToolCall } {
   // The served turn's completion sets an empty preview rather than leaving it out, so a call that
   // carries nothing is one still waiting for its answer; a call past its first question carries
   // the answers given so far and is read for the rest.
   const unanswered = (call: ToolCall) => call.name === "clarify" && !call.result
   const clarify = (call: ToolCall) => call.name === "clarify"
   const open = turn.parts.some((part) => part.kind === "tools" && part.calls.some(unanswered))
-  const written: ClarifyResponse = {
-    question: answer.question,
-    choicesOffered: answer.choicesOffered,
-    answer: answer.value || null,
-  }
   return patchCall(
     turn,
     open ? unanswered : clarify,
-    (call) => ({ result: clarifyAnswered(call.result, written, "submitted") }),
+    (call) => ({
+      // A call rebuilt from a replayed run carries an empty preview again: the answers this page
+      // already recorded for it are what the next question's answer merges into.
+      result: clarifyAnswered(
+        call.result || known?.[call.id],
+        givenAnswer(answer),
+        "submitted",
+      ),
+    }),
     "last",
   )
 }
+
+const givenAnswer = (answer: Answer): ClarifyResponse => ({
+  question: answer.question,
+  choicesOffered: answer.choicesOffered,
+  answer: answer.value || null,
+})
 
 /** The transcript's turns, the archive folded in where the reader has asked for it. */
 export const foldedOf = (rows: Row[], archived?: Row[], partial?: boolean, showReminders = false) =>
@@ -286,7 +311,16 @@ const copyIsAhead = (copy: Turn | undefined, live: LiveTurn) =>
  * joined from its start is replaying, so the transcript's copy of the turn stays drawn until the
  * replay has caught up with it (`LiveTurn.replay`), and the reply never shrinks as it joins.
  */
-export function turnsOf(folded: Turn[], live?: LiveTurn, waiting?: Waiting): Turn[] {
+export function turnsOf(
+  folded: Turn[],
+  live?: LiveTurn,
+  waiting?: Waiting,
+  answers?: Record<string, string>,
+): Turn[] {
+  return withAnswers(drawn(folded, live, waiting), answers)
+}
+
+function drawn(folded: Turn[], live?: LiveTurn, waiting?: Waiting): Turn[] {
   if (!live || live.replay) return folded
   // A run held on a prompt writes nothing more, so the turn it holds is drawn from the transcript —
   // the copy that carries the call the question was asked by. A host sends a prompt's request only
@@ -296,6 +330,62 @@ export function turnsOf(folded: Turn[], live?: LiveTurn, waiting?: Waiting): Tur
   if (waiting && copyIsAhead(copy, live)) return folded
   if (!live.replaces || !copy) return withoutRepeatedFailures([...folded, live.turn])
   return withoutRepeatedFailures([...folded.slice(0, -1), withCarried(live.turn, copy)])
+}
+
+/**
+ * The turns with the results this page wrote put back on the calls drawn without one: a clarify's
+ * answer is served on the run's own stream as a completion carrying nothing, so a call rebuilt from
+ * a replayed run — or drawn from the transcript's copy of it, which holds the call and no result
+ * until the whole call returns — would otherwise read "No answer" over an answer already given here.
+ * A call the host did fill is left as the host wrote it, and a turn nothing touches stays itself.
+ */
+function withAnswers(turns: Turn[], answers?: Record<string, string>): Turn[] {
+  if (!answers) return turns
+  let changed = false
+  const filled = turns.map((turn) => {
+    let touched = false
+    const parts = turn.parts.map((part) => {
+      if (part.kind !== "tools") return part
+      let written = false
+      const calls = part.calls.map((call) => {
+        // Only a clarify's answer is kept this way, and only for the call it was given on.
+        const answer = call.result || call.name !== "clarify" ? undefined : answers[call.id]
+        if (!answer) return call
+        written = true
+        return { ...call, result: answer }
+      })
+      if (!written) return part
+      touched = true
+      return { ...part, calls }
+    })
+    if (!touched) return turn
+    changed = true
+    return { ...turn, parts }
+  })
+  return changed ? filled : turns
+}
+
+/**
+ * The call a question is on where this page's own turn does not hold it yet: a join asks the wait
+ * before it replays the call, and a wait draws the transcript's copy — the one on screen when the
+ * answer is given.
+ */
+function answeredOnScreen(state: ThreadState, answer: Answer): ToolCall | undefined {
+  const call = drawn(
+    foldedOf(state.rows, state.archived, state.partial, state.showReminders),
+    state.live,
+    state.waiting,
+  )
+    .flatMap((turn) => turn.parts)
+    .flatMap((part) => (part.kind === "tools" ? part.calls : []))
+    .filter((one) => one.name === "clarify" && !one.result)
+    .at(-1)
+  return (
+    call && {
+      ...call,
+      result: clarifyAnswered(state.answers?.[call.id], givenAnswer(answer), "submitted"),
+    }
+  )
 }
 
 /** One live event's change to the turn it belongs to; only the part it touches is a new object. */
@@ -367,7 +457,7 @@ function live(turn: Turn, event: RunEvent, now?: number, showReminders = false):
         result: event.preview || one.result || "",
         ...(at !== undefined ? { endedAt: at } : {}),
       }),
-    )
+    ).turn
   }
   // The end of a run this device watched from its start says what the reply cost.
   if (event.event === "run.completed" && turn.timing && now !== undefined) {
@@ -604,17 +694,25 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       return { ...state, waiting: undefined, settled: settledWith(state) }
     case "answered": {
       // The card goes at once; the host's `*.settled` event confirms it. A question's call reads
-      // the answer from here until the transcript's own result reaches it.
+      // the answer from here until the transcript's own result reaches it — and the answer is kept
+      // on the state, as the page's own, because the stream that carries that call says nothing of
+      // it: a run joined again rebuilds the call from its replayed events (`answers`).
+      const answer = event.answer
       const held = state.live
-      const answered = held && event.answer ? withClarifyAnswer(held.turn, event.answer) : undefined
-      const live = held && answered && answered !== held.turn ? { ...held, turn: answered } : held
-      // An answer that changed nothing on screen is no state at all, as every arm above says.
-      if (state.waiting === undefined && live === held) return state
+      const wrote = held && answer ? withClarifyAnswer(held.turn, answer, state.answers) : undefined
+      const live = held && wrote && wrote.turn !== held.turn ? { ...held, turn: wrote.turn } : held
+      // A join asks the wait before it replays the call, so the call on screen may be a copy this
+      // page's own turn does not hold yet; the answer goes onto that one, and onto the record.
+      const call = wrote?.call ?? (answer ? answeredOnScreen(state, answer) : undefined)
+      const answers = call?.result ? { ...state.answers, [call.id]: call.result } : state.answers
+      // An answer that changed nothing on screen and nothing in the record is no state at all.
+      if (state.waiting === undefined && live === held && answers === state.answers) return state
       return {
         ...state,
         waiting: undefined,
         ...(state.waiting ? { settled: settledWith(state) } : {}),
         ...(live ? { live } : {}),
+        ...(answers ? { answers } : {}),
       }
     }
     case "run": {
@@ -655,10 +753,11 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
   }
 }
 
-/** The turns a state draws. */
+/** The turns a state draws, with the answers the page wrote itself read back on their calls. */
 export const threadTurns = (state: ThreadState) =>
   turnsOf(
     foldedOf(state.rows, state.archived, state.partial, state.showReminders),
     state.live,
     state.waiting,
+    state.answers,
   )

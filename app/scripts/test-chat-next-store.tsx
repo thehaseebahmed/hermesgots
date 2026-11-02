@@ -9,6 +9,7 @@ import test from "node:test"
 import type { RunEvent } from "@/chat-next/api"
 import type { Row } from "@/chat-next/fold"
 import { readRows, storeFor } from "@/chat-next/store"
+import { threadTurns } from "@/chat-next/state"
 import { db, deleteConversation, type SessionDb } from "@/lib/db"
 import { FLUSH_INTERVAL_MS } from "@/lib/freshness"
 import { deviceDatabase } from "./chat-next-devices.tsx"
@@ -136,6 +137,55 @@ test("a thread opened again starts from the device's copy, running and waiting o
     again.store.get().live?.turn.parts,
     [{ kind: "text", text: "Hm" }],
     "what was streamed is still drawn until the host's transcript replaces it",
+  )
+  again.leave()
+})
+
+test("an answer given here is on the device, so a thread reopened mid-call still reads it", async () => {
+  const database = deviceDatabase()
+  const first = opened(database, "s-answer")
+  await first.store.apply({ type: "sent", user: "go" })
+  await first.store.apply({ type: "attach", run: "run_1" })
+  const played = (store = first.store) => async (event: RunEvent) =>
+    store.apply({ type: "run", event })
+  const play = played()
+  await play(run({ event: "tool.started", tool: "clarify", tool_call_id: "c1" }))
+  await play(
+    run(
+      {
+        event: "clarify.request",
+        run_id: "run_1",
+        prompt_id: "p1",
+        execution_generation: 1,
+        question: "Tea?",
+        choices: ["yes", "no"],
+      },
+      2,
+    ),
+  )
+  await play(run({ event: "tool.completed", tool: "clarify", tool_call_id: "c1", preview: "" }, 3))
+  await first.store.apply({
+    type: "answered",
+    answer: { question: "Tea?", choicesOffered: ["yes", "no"], value: "yes" },
+  })
+  // The page closes with the call still running: the host has written no result row for it.
+  first.leave()
+  await sleep(FLUSH_INTERVAL_MS * 2)
+
+  const again = opened(database, "s-answer")
+  assert.notEqual(again.store, first.store, "nobody held the thread, so it is read from the device")
+  const replay = played(again.store)
+  await again.store.apply({ type: "attach", run: "run_1" })
+  await replay(run({ event: "tool.started", tool: "clarify", tool_call_id: "c1" }))
+  await replay(run({ event: "tool.completed", tool: "clarify", tool_call_id: "c1", preview: "" }, 2))
+  const answers = threadTurns(again.store.get())
+    .flatMap((turn) => turn.parts)
+    .flatMap((part) => (part.kind === "tools" ? part.calls : []))
+    .flatMap((call) => (call.result ? (JSON.parse(call.result).responses ?? []) : []))
+  assert.deepEqual(
+    answers.map((one: { user_response: string }) => one.user_response),
+    ["yes"],
+    "the answer the page gave is drawn on the call its replay rebuilt",
   )
   again.leave()
 })

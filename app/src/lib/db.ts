@@ -796,6 +796,12 @@ export interface SessionState {
   queue?: { items: Queued[]; paused: boolean }
   /** Messages a send could not get to the host, kept until one is sent again or taken back. */
   unsent?: Unsent[]
+  /**
+   * The results the page wrote onto calls the host's stream carries none for — a clarify's answer —
+   * by the id of the call. Kept on the device so a thread reopened on this one still reads the
+   * answer while the transcript has no row for it yet.
+   */
+  answers?: Record<string, string>
 }
 
 /**

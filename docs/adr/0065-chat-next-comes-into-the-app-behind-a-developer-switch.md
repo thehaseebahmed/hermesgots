@@ -1,5 +1,14 @@
 # chat-next comes into the app behind a Developer switch
 
+**Amended 2026-11-02**: the session record also keeps the results the page wrote onto calls the
+host's own stream carries none for — a clarify's answer, by the id of the call. That is not what the
+page is *doing*: it is what the page already told the host, drawn only on a call the stream left
+empty, and kept with the rest of the device's copy of the thread so a chat reopened beside a run
+still reads the answer it gave instead of "No answer". The rule below, that what the page is doing
+lives in memory, is unchanged. What follows reads as amended. A call draws the answers given so far
+while its next question still waits, which is intended: the question itself is the composer's, not
+the thread's.
+
 chat-next (`app/src/chat-next/`, #666–#668) is a second chat screen. It reads a session straight
 from Hermes's transcript, fixes the turn the host has written, and shares none of the logic in
 `lib/chat.ts` or `lib/history.ts`. It has only run at the dev-only `/next` route, opened by query
@@ -28,8 +37,9 @@ every other screen does:
   A read writes only the rows that are new, moved or changed and deletes only the ones that have
   gone. A poll that finds nothing new writes nothing, and wakes no query.
 - `sessionStates` holds one record per session: the subagents the plugin last listed, whether the
-  archive has been read, and the turn this device is streaming (`live`), until the host's transcript
-  replaces it. While a reply streams, its words are written at most every `FLUSH_INTERVAL_MS`,
+  archive has been read, the answers the page wrote onto calls the host's stream left empty, and the
+  turn this device is streaming (`live`), until the host's transcript replaces it. While a reply
+  streams, its words are written at most every `FLUSH_INTERVAL_MS`,
   which is `chat.ts`'s pace and now lives in `freshness.ts` for both. A tool call and a turn's end
   are written at once.
 

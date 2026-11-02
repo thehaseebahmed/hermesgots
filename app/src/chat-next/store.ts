@@ -29,7 +29,10 @@ export interface ThreadStore {
 export type Doing = Pick<ThreadState, "status" | "running" | "waiting" | "error">
 
 const sameDoing = (a: Doing, b: ThreadState) =>
-  a.status === b.status && a.running === b.running && a.waiting === b.waiting && a.error === b.error
+  a.status === b.status &&
+  a.running === b.running &&
+  a.waiting === b.waiting &&
+  a.error === b.error
 
 const doingOf = ({ status, running, waiting, error }: ThreadState): Doing => ({
   status,
@@ -126,6 +129,7 @@ const recordOf = (session: string, state: ThreadState): SessionState => ({
   queue: state.queue,
   stats: state.stats,
   unsent: state.unsent,
+  answers: state.answers,
 })
 
 const sameRecord = (a: SessionState | undefined, b: SessionState) =>
@@ -136,7 +140,8 @@ const sameRecord = (a: SessionState | undefined, b: SessionState) =>
   a.live === b.live &&
   a.queue === b.queue &&
   a.stats === b.stats &&
-  a.unsent === b.unsent
+  a.unsent === b.unsent &&
+  a.answers === b.answers
 
 function createStore(database: SessionDb, session: string, drop: () => void): ThreadStore {
   let state = initial
@@ -169,6 +174,7 @@ function createStore(database: SessionDb, session: string, drop: () => void): Th
       queue: record?.queue,
       stats: record?.stats,
       unsent: record?.unsent,
+      answers: record?.answers,
     }
     written = {
       rows,
