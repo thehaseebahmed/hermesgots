@@ -23,6 +23,7 @@ import {
   SAFETY_MS,
   SEND_CAUGHT_UP_MS,
 } from "@/lib/freshness"
+import { mayHoldArchive } from "@/lib/history-window"
 import { COLUMN_BOX } from "@/lib/layout"
 import type { ComposerControls } from "@/chat-next/page"
 import { opensOnChatNext } from "@/chat-next/route"
@@ -478,6 +479,7 @@ function NextChat({
                 key={chat.hermesSessionId}
                 chatId={id}
                 code={Boolean(chat.projectId)}
+                compacted={mayHoldArchive(chat.compactions)}
                 blank={unstarted ? { botId: bot.botId, repos: sessionRepos } : undefined}
                 main={
                   mainOn

@@ -55,14 +55,27 @@ export class HostAway extends Error {}
 /** A 409 on a run start: whatever the host says of it, where it says anything. */
 export class HostRefused extends Error {}
 /**
- * A run the host no longer has: its events are asked for and the host answers 404. The listing that
- * named it outlived it — a run that ended as this screen opened the chat, or one the gateway dropped
- * while the plugin still swept it — and there is nothing to watch, only the transcript to read.
+ * A run the host no longer has: a route of it is asked for and the host answers 404 `run_not_found`.
+ * The listing that named it outlived it — a run that ended as this screen opened the chat, or one the
+ * gateway dropped while the plugin still swept it — and there is nothing to watch, only the transcript
+ * to read. The current chat screen meets the same answer by dropping to its own polling (`chat.ts`),
+ * which this screen has no need of: the read that follows is the account of the turn.
  */
 export class RunGone extends Error {}
 const answered = (response: Response) => `The host answered ${response.status}.`
 const ensure = (response: Response) => {
   if (!response.ok) throw new Error(answered(response))
+}
+/**
+ * A run route's answer, once the status is known: the host's own code for a run it no longer has is
+ * read as `RunGone`, and every other 404 — a route this Hermes has not got (an older host, a base URL
+ * on the wrong prefix, which carries no CORS headers either) — is left to `ensure`, which says so.
+ * The gateway words the first `{"error": {"code": "run_not_found"}}` (`api_server_runs.py`).
+ */
+const goneRun = async (response: Response, runId: string) => {
+  if (response.status !== 404) return
+  const code = (await response.json().catch(() => null))?.error?.code
+  if (code === "run_not_found") throw new RunGone(`The host has no run ${runId}.`)
 }
 
 /**
@@ -207,6 +220,7 @@ export async function stopRun(connection: Connection, runId: string) {
     headers: headers(connection),
     signal: within(),
   })
+  await goneRun(response, runId)
   ensure(response)
 }
 
@@ -393,6 +407,7 @@ export async function respond(connection: Connection, waiting: Waiting, value: s
       signal: within(),
     },
   )
+  await goneRun(response, waiting.run)
   ensure(response)
 }
 
@@ -407,7 +422,7 @@ export async function followRun(
     headers: headers(connection),
     signal,
   })
-  if (response.status === 404) throw new RunGone(`The host has no run ${runId}.`)
+  await goneRun(response, runId)
   ensure(response)
   if (!response.body) throw new Error("The host sent no stream.")
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()

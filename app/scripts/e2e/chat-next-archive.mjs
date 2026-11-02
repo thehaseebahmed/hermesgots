@@ -7,9 +7,7 @@
 // could never be read back above its window. The flow says the offer is there, that asking puts
 // every archived turn back once and in the host's order above the window, and that the divider
 // comes to rest where the compaction ran rather than at the top of a truncated thread (ADR 0058).
-import { app, assert, flow, mock, pass, runId, runStatus, startRun } from "./lib.mjs"
-
-const auth = { Authorization: "Bearer mock-key", "Content-Type": "application/json" }
+import { app, assert, flow, mockPost, pass, runId, runStatus, startRun } from "./lib.mjs"
 
 /** The words this device holds in one set of its transcript, oldest first. */
 const held = (page, chatId, set = "live") =>
@@ -65,10 +63,10 @@ await flow(
     }
     // The host compacts in place and leaves nothing at the seam: the rows it keeps live come back
     // under the same request, the rest are archived, and no row of either says a compaction ran.
-    const compacted = await fetch(`${mock}/__mock/compact`, {
-      method: "POST",
-      headers: auth,
-      body: JSON.stringify({ session_id: sessionId, rows: 2, hidden: false }),
+    const compacted = await mockPost("/__mock/compact", {
+      session_id: sessionId,
+      rows: 2,
+      hidden: false,
     })
     assert.equal(compacted.status, 200, "the host compacts the chat")
     const after = await startRun(sessionId, "zulu: the turn after the compaction")
@@ -129,8 +127,12 @@ await flow(
 
     // The reader reaches the top of the thread and the oldest turn is there, above the ones it was
     // separated from: the rows the host archived come back where they belong.
-    await page.mouse.move(195, 350)
-    for (let step = 0; step < 40; step += 1) await page.mouse.wheel(0, -3000)
+    // Walked up the pane as a reader's own finger does it: chat-next draws what is near the
+    // viewport, so the reach is a run of steps rather than one jump.
+    for (let step = 0; step < 40; step += 1)
+      await page.evaluate(() =>
+        document.querySelector('[aria-label="Messages"]').scrollBy({ top: -3000 }),
+      )
     await until(async () => (await drawn(page)).includes("alpha:"), 20_000, "the top of the thread")
     const head = await drawn(page)
     assert.ok(

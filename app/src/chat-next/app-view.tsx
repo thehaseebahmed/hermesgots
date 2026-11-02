@@ -43,7 +43,6 @@ import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { attachmentsText } from "@/lib/attachment-text"
 import { compactionMarks } from "@/lib/compactions"
 import { db, type ApprovalChoice, type Message } from "@/lib/db"
-import { mayHoldArchive } from "@/lib/history-window"
 import type { DelegatedAgent } from "@/lib/hermes"
 import { usePluginFeatureOn } from "@/lib/features"
 import { CATCHING_ACTIVITY, describeActivity } from "@/lib/format"
@@ -538,13 +537,6 @@ export function AppChatNextThread({
   // Held by its fields, so a parent's render that changes nothing about Main draws nothing again.
   const mainKey = main ? JSON.stringify(main) : ""
   const blankKey = blank ? JSON.stringify(blank) : ""
-  // The host's own word that a compaction took rows out of this chat's transcript, which is the
-  // only word on whether the archive read holds anything (ADR 0058): a host that leaves no hidden
-  // row at the seam draws the divider from this record alone, and the live rows say nothing of it.
-  const compacted = useLiveQuery(
-    async () => mayHoldArchive((await db.conversations.get(chatId))?.compactions),
-    [chatId],
-  )
   const chat = useMemo(
     () => ({
       chatId,
@@ -556,7 +548,7 @@ export function AppChatNextThread({
   return (
     <CodeFaceProvider value={code ? CHAT_FACE : undefined}>
       <ChatOf.Provider value={chat}>
-        <ChatNextThread {...props} compacted={compacted} View={AppThreadView} Prompt={AppPrompt} />
+        <ChatNextThread {...props} View={AppThreadView} Prompt={AppPrompt} />
       </ChatOf.Provider>
     </CodeFaceProvider>
   )

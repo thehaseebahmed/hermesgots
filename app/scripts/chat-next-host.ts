@@ -182,8 +182,8 @@ export function fakeHost(
   const rows: Row[] = []
   const expected: ExpectedTurn[] = []
   const runs = new Map<string, RunState>()
-  /** Runs the plugin's listing still names after the gateway dropped them. */
-  const ghosts = new Set<string>()
+  /** The run the plugin's listing still names after the gateway dropped it. */
+  let ghost: string | undefined
   const answers: { run: string; prompt_id: string; generation: number; answer: string }[] = []
   const approvals: { run: string; choice: string }[] = []
   const asked = {
@@ -247,7 +247,7 @@ export function fakeHost(
   }
   const agents: AgentRecord[] = []
   const children = new Map<string, Row[]>()
-  const compactions: { row: Row; turn: number; inside: boolean }[] = []
+  const compactions: { row?: Row; turn: number; inside: boolean }[] = []
   const gone = new Set<number>()
   const lostRequest = new Set<number>()
   let nextId = 1000
@@ -553,7 +553,6 @@ export function fakeHost(
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(encoder.encode(": open\n\n"))
-        asked.subscriptions++
         for (const sent of state.events)
           if (sent.seq > after && !(withhold && PROMPT_EVENTS.has(sent.event)))
             controller.enqueue(encoder.encode(frame(sent)))
@@ -767,7 +766,7 @@ export function fakeHost(
       dispatch()
       const live = [...runs].filter(([, state]) => !state.done).at(-1)
       // A run the gateway dropped is still listed: the plugin's own sweep is what forgets it.
-      const named = live?.[0] ?? [...ghosts].at(-1)
+      const named = live?.[0] ?? ghost
       return reply({
         object: "memento.runs",
         sessions: named ? { [session]: "running" } : {},
@@ -852,11 +851,18 @@ export function fakeHost(
         outcome === "invalid" ? 400 : 409,
       )
     }
+    // A run's two routes answer the host's own word for a run it no longer has, rather than the bare
+    // no-route 404 below: the id the plugin's listing still names is a run the gateway dropped, and a
+    // screen reads the two answers differently (`api.ts`).
     const stream = /^\/v1\/runs\/([^/]+)\/events$/.exec(path)
-    if (stream && runs.has(stream[1]))
+    if (stream) {
+      asked.subscriptions++
+      if (!runs.has(stream[1])) return reply({ error: { code: "run_not_found" } }, 404)
       return events(stream[1], Number(url.searchParams.get("last_seq") ?? -1))
+    }
     const status = /^\/v1\/runs\/([^/]+)$/.exec(path)
-    if (status && runs.has(status[1])) {
+    if (status && !runs.has(status[1])) return reply({ error: { code: "run_not_found" } }, 404)
+    if (status) {
       const state = runs.get(status[1])!
       return reply({
         object: "hermes.run",
@@ -922,11 +928,15 @@ export function fakeHost(
     doomed.forEach((row) => (row.archived = true))
     const after = live.filter((row) => !row.archived)
     const at = after[0] ? after[0].order - 0.5 : (live.at(-1)?.order ?? 0) + 0.5
-    // A Hermes that leaves nothing at the seam still archived the rows: the divider is the chat's
-    // own record of the compaction, so no row of the transcript says where it ran.
+    // A Hermes that leaves nothing at the seam still archived the rows, and still records the
+    // compaction: only the row it writes a mark against is missing.
     if (hidden) write("user", "", { display_kind: "hidden", order: at })
     const base = expected.length - count
-    if (hidden) compactions.push({ row: rows.at(-1)!, turn: base + count, inside: carried })
+    compactions.push({
+      row: hidden ? rows.at(-1)! : undefined,
+      turn: base + count,
+      inside: carried,
+    })
     for (let index = base; index < base + (open ? cut : cut); index++) gone.add(index)
     if (carried) lostRequest.add(base + cut)
   }
@@ -937,7 +947,7 @@ export function fakeHost(
    */
   function view(full = false): ExpectedTurn[] {
     const out: ExpectedTurn[] = []
-    const marks = compactions.filter((mark) => full || !mark.row.archived)
+    const marks = compactions.filter((mark) => full || !mark.row?.archived)
     expected.forEach((turn, index) => {
       if (!full && gone.has(index)) return
       // The divider stands above the first turn written after the compaction: the last turn the
@@ -984,11 +994,11 @@ export function fakeHost(
    * and is answered 404. The transcript is the only account of the turn.
    */
   function retire() {
-    const ghost = [...runs.keys()].at(-1)
-    if (!ghost) throw new Error("No run to retire.")
-    runs.delete(ghost)
-    ghosts.add(ghost)
-    return ghost
+    const retired = [...runs.keys()].at(-1)
+    if (!retired) throw new Error("No run to retire.")
+    runs.delete(retired)
+    ghost = retired
+    return retired
   }
 
   /**

@@ -691,6 +691,30 @@ test("the dividers the plugin's record places are drawn between the turns", asyn
   })
 })
 
+test("a chat the host compacted with nothing at the seam still offers its archive", async () => {
+  const { host } = await onChatNext("c-rowless")
+  host.seed([
+    { user: "First", reply: "One." },
+    { user: "Second", reply: "Two." },
+    { user: "Third", reply: "Three." },
+  ])
+  // Hermes archived the older turns and wrote nothing where the summary went: no row of the
+  // transcript says where the archive begins, and the chat's own record of the compaction is the
+  // only word on it — the read this screen must make for itself, as the report of the chat that
+  // opened on a divider with no way back above it did.
+  host.compact({ keep: 1, hidden: false })
+  await db.conversations.update("c-rowless", {
+    compactions: [{ at: Date.now(), tokens: 168_000, window: 200_000 }],
+  })
+  await mount(chatScreen("c-rowless"), async () => {
+    await until(() => replies().length === 1, "the window the compaction left")
+    const offer = find("[data-earlier]")
+    assert.ok(offer, "the archive is offered over it")
+    await click(offer)
+    await until(() => replies().length === 3, "every turn the compaction archived")
+  })
+})
+
 test("a compaction mid-run draws its divider between the calls it fell between", async () => {
   const { host } = await onChatNext("c-mid-run")
   await mount(chatScreen("c-mid-run"), async () => {

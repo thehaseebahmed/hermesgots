@@ -5976,28 +5976,33 @@ http
           ? { ...row, archived: true, superseded: true }
           : { ...row, archived: true, timestamp: floor },
       )
+      // One clock for the whole compaction, and the row ids the transcript carries are the only ones
+      // spent: a host that writes nothing at the seam writes no summary either.
+      const ran = Date.now() / 1000
       // The summary opens the live context, stamped with the moment the compaction ran; Hermes
       // flags it `_compressed_summary`, which the API strips, so the plugin's mark names its row.
-      const summary = {
-        id: ++lastRowId,
-        session_id: sessionId,
-        timestamp: Date.now() / 1000,
-        role: "user",
-        content: [
-          "[CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were compacted into the summary below.",
-          "The mock's summary of what came before.",
-          "",
-          "--- END OF CONTEXT SUMMARY — respond to the message below, not the summary above ---",
-        ].join("\n"),
-      }
+      const summary = hidden
+        ? {
+            id: ++lastRowId,
+            session_id: sessionId,
+            timestamp: ran,
+            role: "user",
+            content: [
+              "[CONTEXT COMPACTION — REFERENCE ONLY] Earlier turns were compacted into the summary below.",
+              "The mock's summary of what came before.",
+              "",
+              "--- END OF CONTEXT SUMMARY — respond to the message below, not the summary above ---",
+            ].join("\n"),
+          }
+        : undefined
       const copies = tail.map((row) => ({ ...row, id: ++lastRowId }))
-      const seam = hidden
+      const seam = summary
         ? [
             summary,
             {
               id: ++lastRowId,
               session_id: sessionId,
-              timestamp: Date.now() / 1000,
+              timestamp: ran,
               role: "user",
               // The host ships this row as a plain `user` row: its synthetic flag never reaches the
               // store, so no `display_kind` marks it and the app must read the seam off the text.
@@ -6013,13 +6018,11 @@ http
           ]
         : []
       transcripts.set(sessionId, [...archived, ...seam, ...copies])
+      // A host that wrote nothing at the seam names no row: the compaction is in its record alone,
+      // dated to the moment it ran — after every row it carried, before the next turn.
       compactions.set(sessionId, [
         ...(compactions.get(sessionId) ?? []),
-        hidden
-          ? { at: Math.round(summary.timestamp * 1000), row: summary.id }
-          : // A host that wrote nothing at the seam names no row: the compaction is in its record
-            // alone, dated to the moment it ran — after every row it carried, before the next turn.
-            { at: Date.now() },
+        { at: Math.round(ran * 1000), row: summary?.id },
       ])
       return json(res, 200, { ok: true, rows: copies.length, archived: archived.length })
     }

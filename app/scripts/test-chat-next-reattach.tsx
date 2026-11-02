@@ -191,16 +191,28 @@ test("a run that takes over as the last one ends is joined without leaving the c
  * has already dropped it, so the join's read of its events is answered 404 — and the page treated
  * that as a failure of the page, drawing the host's words in the thread's error slot, over a chat
  * whose transcript it had. A run the host no longer has is a run there is nothing to watch: the
- * transcript is the account of the turn, and the join ends quietly like a stream that died.
+ * transcript is the account of the turn, and the join ends quietly like a stream that died. The run
+ * died mid-turn here, so its request stands with no reply and the page keeps believing a run is
+ * going — which is the state that had it join the ghost again on every poll.
  */
 test("a run the host has dropped is not drawn as a failure over the thread", async () => {
   const host = fakeHost("memento-reattach-ghost", { plugin: true })
   host.seed([{ user: "earlier", reply: "Earlier.", tools: 1 }])
-  host.startElsewhere("in flight").finish("In flight.")
+  host.startElsewhere("in flight")
   host.retire()
   await withDevice(openDevice(host), async (phone) => {
-    await showsEverything(phone, host, "the transcript, the only account of the turn")
-    await wait(200)
+    await eventually(
+      () => assert.equal(lastTurn(phone)?.user, "in flight"),
+      "the request the run wrote before it was dropped",
+    )
+    const asked = host.asked.subscriptions
+    await wait(300)
     assert.equal(phone.alert(), undefined, "no error is drawn for a run the host no longer has")
+    // A poll that honoured the listing again would ask for the gone run's events on every tick.
+    assert.equal(
+      host.asked.subscriptions,
+      asked,
+      "the events of a run the host no longer has are not asked for again",
+    )
   })
 })
