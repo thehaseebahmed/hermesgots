@@ -23,9 +23,7 @@ export function ReadyLine({ botId, id }: { botId?: string; id?: string }) {
 export const SETUP_COPY = "Point Gots at your Hermes Agent API server to start chatting."
 
 export const THREAD_MISSING = "The thread didn't load."
-export const THREAD_MISSING_WHY = "This device couldn't read it from the host."
 
-/** The shell every pane in a chat that has nothing to scroll shares: centred, clear of the header. */
 const PANE = "flex flex-1 flex-col items-center justify-center px-4 pt-24 pb-8 text-center"
 
 export function EmptyState({
@@ -69,8 +67,7 @@ export function MissingThread({ onRetry }: { onRetry: () => void }) {
   return (
     <div className={`${PANE} gap-3`}>
       <p className="text-sm font-medium">{THREAD_MISSING}</p>
-      <p className="max-w-sm text-sm text-muted-foreground">{THREAD_MISSING_WHY}</p>
-      <Button variant="outline" onClick={onRetry}>
+      <Button variant="outline" className="min-h-11" onClick={onRetry}>
         Try again
       </Button>
     </div>
