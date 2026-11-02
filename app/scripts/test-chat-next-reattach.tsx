@@ -187,13 +187,8 @@ test("a run that takes over as the last one ends is joined without leaving the c
 })
 
 /**
- * A listing that outlived the run it names. The plugin's `runs/live` says a run is going; the gateway
- * has already dropped it, so the join's read of its events is answered 404 — and the page treated
- * that as a failure of the page, drawing the host's words in the thread's error slot, over a chat
- * whose transcript it had. A run the host no longer has is a run there is nothing to watch: the
- * transcript is the account of the turn, and the join ends quietly like a stream that died. The run
- * died mid-turn here, so its request stands with no reply and the page keeps believing a run is
- * going — which is the state that had it join the ghost again on every poll.
+ * A listing that outlived the run it names. The run died mid-turn here, so its request stands with
+ * no reply and the page keeps believing one is going.
  */
 test("a run the host has dropped is not drawn as a failure over the thread", async () => {
   const host = fakeHost("memento-reattach-ghost", { plugin: true })

@@ -5976,8 +5976,6 @@ http
           ? { ...row, archived: true, superseded: true }
           : { ...row, archived: true, timestamp: floor },
       )
-      // One clock for the whole compaction, and the row ids the transcript carries are the only ones
-      // spent: a host that writes nothing at the seam writes no summary either.
       const ran = Date.now() / 1000
       // The summary opens the live context, stamped with the moment the compaction ran; Hermes
       // flags it `_compressed_summary`, which the API strips, so the plugin's mark names its row.
@@ -6018,8 +6016,6 @@ http
           ]
         : []
       transcripts.set(sessionId, [...archived, ...seam, ...copies])
-      // A host that wrote nothing at the seam names no row: the compaction is in its record alone,
-      // dated to the moment it ran — after every row it carried, before the next turn.
       compactions.set(sessionId, [
         ...(compactions.get(sessionId) ?? []),
         { at: Math.round(ran * 1000), row: summary?.id },

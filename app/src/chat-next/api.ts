@@ -55,11 +55,8 @@ export class HostAway extends Error {}
 /** A 409 on a run start: whatever the host says of it, where it says anything. */
 export class HostRefused extends Error {}
 /**
- * A run the host no longer has: a route of it is asked for and the host answers 404 `run_not_found`.
- * The listing that named it outlived it — a run that ended as this screen opened the chat, or one the
- * gateway dropped while the plugin still swept it — and there is nothing to watch, only the transcript
- * to read. The current chat screen meets the same answer by dropping to its own polling (`chat.ts`),
- * which this screen has no need of: the read that follows is the account of the turn.
+ * A run the host no longer has (404 `run_not_found`). Nothing to watch, only the transcript to read.
+ * The current chat screen answers the same 404 by polling instead (`chat.ts`).
  */
 export class RunGone extends Error {}
 const answered = (response: Response) => `The host answered ${response.status}.`
@@ -67,10 +64,7 @@ const ensure = (response: Response) => {
   if (!response.ok) throw new Error(answered(response))
 }
 /**
- * A run route's answer, once the status is known: the host's own code for a run it no longer has is
- * read as `RunGone`, and every other 404 — a route this Hermes has not got (an older host, a base URL
- * on the wrong prefix, which carries no CORS headers either) — is left to `ensure`, which says so.
- * The gateway words the first `{"error": {"code": "run_not_found"}}` (`api_server_runs.py`).
+ * Only the host's own `run_not_found` is a run that ended; a bare 404 is a route that isn't there.
  */
 const goneRun = async (response: Response, runId: string) => {
   if (response.status !== 404) return

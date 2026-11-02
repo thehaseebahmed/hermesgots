@@ -698,10 +698,7 @@ test("a chat the host compacted with nothing at the seam still offers its archiv
     { user: "Second", reply: "Two." },
     { user: "Third", reply: "Three." },
   ])
-  // Hermes archived the older turns and wrote nothing where the summary went: no row of the
-  // transcript says where the archive begins, and the chat's own record of the compaction is the
-  // only word on it — the read this screen must make for itself, as the report of the chat that
-  // opened on a divider with no way back above it did.
+  // Hermes archived the older turns and wrote nothing where the summary went.
   host.compact({ keep: 1, hidden: false })
   await db.conversations.update("c-rowless", {
     compactions: [{ at: Date.now(), tokens: 168_000, window: 200_000 }],

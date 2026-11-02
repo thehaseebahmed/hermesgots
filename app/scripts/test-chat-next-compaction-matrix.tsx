@@ -288,4 +288,3 @@ test.describe("finished while away: the reply ended with no device watching", ()
     })
   })
 })
-

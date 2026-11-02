@@ -928,8 +928,7 @@ export function fakeHost(
     doomed.forEach((row) => (row.archived = true))
     const after = live.filter((row) => !row.archived)
     const at = after[0] ? after[0].order - 0.5 : (live.at(-1)?.order ?? 0) + 0.5
-    // A Hermes that leaves nothing at the seam still archived the rows, and still records the
-    // compaction: only the row it writes a mark against is missing.
+    // A host that leaves nothing at the seam still records the compaction, without a row to mark it.
     if (hidden) write("user", "", { display_kind: "hidden", order: at })
     const base = expected.length - count
     compactions.push({
@@ -988,11 +987,7 @@ export function fakeHost(
     return run
   }
 
-  /**
-   * The plugin's `runs/live` names a run the gateway has already dropped: a listing that outlived
-   * the run it points at, so a device that joins it asks for events of an id the host no longer has
-   * and is answered 404. The transcript is the only account of the turn.
-   */
+  /** Drops a run the plugin's `runs/live` still names, as the gateway does before its sweep does. */
   function retire() {
     const retired = [...runs.keys()].at(-1)
     if (!retired) throw new Error("No run to retire.")

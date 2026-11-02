@@ -1,12 +1,9 @@
 // A chat the host compacted in place, read on a device that holds none of it, where the host left
-// nothing at the seam: no hidden row, no summary the app can date the boundary by — only the chat's
-// own record of the compaction. The thread opens on its live window with the compaction's divider
-// over it, which is the shape a reader reports as "there is a marker at the top and my messages are
-// gone", and what the host archived is still its to give. Before the record was read the screen
-// offered nothing — the control was gated on a row this host does not write, so a compacted chat
-// could never be read back above its window. The flow says the offer is there, that asking puts
-// every archived turn back once and in the host's order above the window, and that the divider
-// comes to rest where the compaction ran rather than at the top of a truncated thread (ADR 0058).
+// nothing at the seam: no hidden row, no summary to date the boundary by — only the chat's own
+// record of the compaction. The thread opens on its live window under the compaction's divider, and
+// the flow says the archive is offered, that asking puts every archived turn back once and in the
+// host's order above the window, and that the divider comes to rest where the compaction ran
+// (ADR 0058).
 import { app, assert, flow, mockPost, pass, runId, runStatus, startRun } from "./lib.mjs"
 
 /** The words this device holds in one set of its transcript, oldest first. */
@@ -81,26 +78,23 @@ await flow(
       "the live window to land",
     )
     const window = await drawn(page)
+    const live = await held(page, chatId)
     for (const name of archived) {
       assert.ok(!window.includes(`${name}:`), `"${name}" is above the window, not in it`)
       assert.ok(
-        !(await held(page, chatId)).some((text) => text.includes(`${name}:`)),
+        !live.some((text) => text.includes(`${name}:`)),
         `"${name}" is not held by this device at all`,
       )
     }
     await page.getByText("Compaction").first().waitFor({ timeout: 10_000 })
     await shot("window")
 
-    // The offer. The host's record says a compaction ran, and the rows it archived are the host's to
-    // give, so the screen can ask for them even though no row of the transcript says where.
     assert.equal(await offers(page), 1, "the screen offers the messages the host archived")
     pass("a compaction with no seam still offers the rows it archived")
 
     await page.locator("[data-earlier]").click()
     await until(async () => whole(page, chatId), 30_000, "the archive to load")
 
-    // The reading is whole: every archived turn on the device once, in the order the host archived
-    // them, with the turns the compaction carried still live under the same request.
     const archive = await held(page, chatId, "archive")
     for (const name of archived)
       assert.equal(
@@ -125,8 +119,6 @@ await flow(
     )
     assert.equal(count(foot, "Compaction"), 1, "one compaction, one divider")
 
-    // The reader reaches the top of the thread and the oldest turn is there, above the ones it was
-    // separated from: the rows the host archived come back where they belong.
     // Walked up the pane as a reader's own finger does it: chat-next draws what is near the
     // viewport, so the reach is a run of steps rather than one jump.
     for (let step = 0; step < 40; step += 1)
@@ -146,8 +138,9 @@ await flow(
     // The rows stay on the device with the chat, and the offer does not come back with them.
     await page.reload()
     await until(async () => (await held(page, chatId, "archive")).length > 0, 20_000, "the chat")
+    const kept = await held(page, chatId, "archive")
     assert.equal(
-      (await held(page, chatId, "archive")).filter((text) => text.includes("alpha:")).length,
+      kept.filter((text) => text.includes("alpha:")).length,
       1,
       "the archived turns are still the device's after a reload",
     )

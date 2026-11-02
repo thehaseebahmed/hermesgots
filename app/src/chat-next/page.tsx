@@ -89,6 +89,12 @@ function shared(held: Turn[], read: Turn[]): Turn[] {
   })
 }
 
+/**
+ * Whether a plugin that keeps no compaction record left the summary row in the transcript, which is
+ * where the archived rows begin.
+ */
+const seamIn = (turns: Turn[]) =>
+  turns.some((turn) => turn.parts.some((part) => part.kind === "compaction"))
 const sameCards = (a: Card[], b: Card[]) =>
   a.length === b.length &&
   a.every(
@@ -615,11 +621,7 @@ interface ThreadOptions {
   stallMs?: number
   /** The device's database; a test gives each device its own (ADR 0065). */
   database?: SessionDb
-  /**
-   * The host says a compaction took rows out of this chat's transcript. It is the only word on
-   * whether anything was archived (ADR 0058): a host that leaves no hidden row at the seam draws
-   * its divider from this record alone, so nothing in the live rows says the archive exists.
-   */
+  /** The host says a compaction took rows out of this chat: the only word on the archive (ADR 0058). */
   compacted?: boolean
 }
 
@@ -700,11 +702,7 @@ export function ChatNextThread({
     )
     return (drawn.current = { turns: next, origin: originOf(drawn.current, next) })
   }, [folded, held?.live, doing.waiting, held?.answers])
-  // The offer to read back above the window, while the device holds none of the archive: the chat's
-  // own record of a compaction says the host took rows out of it, and an older plugin, which keeps no
-  // such record, leaves the summary row in the transcript to say the same.
-  const offersEarlier =
-    compacted || turns.some((turn) => turn.parts.some((part) => part.kind === "compaction"))
+  const offersEarlier = compacted || seamIn(turns)
   const [draft, setDraft] = useState("")
   const [earlier, setEarlier] = useState<"idle" | "reading" | "failed">("idle")
   // The older pages of the transcript, read one after another once the newest is drawn. A token is
@@ -998,9 +996,7 @@ export function ChatNextThread({
   const followingRun = useRef<string>(undefined)
   // The run last followed, so one the host still lists after its stream ended is not joined again.
   const lastRun = useRef<string>(undefined)
-  // Runs the host proved it no longer has. Its listing outlives them — the plugin's sweep is what
-  // forgets one — so every read of it names a run there is nothing to watch, and a poll that joined
-  // that name again would ask for its events on every tick.
+  // Runs the host proved gone: its listing names them until the plugin's sweep forgets them.
   const goneRuns = useRef(new Set<string>())
   // A run the host named while another was being followed, joined when that one's follow ends.
   const pendingRun = useRef<string>(undefined)
@@ -1034,10 +1030,7 @@ export function ChatNextThread({
         )
       } catch (error) {
         if (alive.current.signal.aborted) return
-        // A stream that died mid-read is not a page that failed: the run carries on without us and the
-        // next poll rejoins it. Nor is a run the host no longer has: the listing that named it
-        // outlived it, and the transcript read below is the account of the turn. Anything else the
-        // host answered with — a refused key, a stream it would not open — is.
+        // A stream that died mid-read is not a page that failed, nor is a run the host has dropped.
         if (error instanceof RunGone) goneRuns.current.add(run)
         else if (!(error instanceof TypeError)) dispatch(failure(error))
       } finally {
@@ -1415,8 +1408,6 @@ export function ChatNextThread({
   function stop() {
     if (!server || !key) return
     const run = followingRun.current
-    // A run the host no longer has is already stopped, and the read that follows the join is the
-    // account of its turn: nothing to say over the thread.
     if (run)
       stopRun({ server, key }, run).catch((error) => {
         if (!(error instanceof RunGone)) dispatch(failure(error))
@@ -1448,7 +1439,6 @@ export function ChatNextThread({
           : {}),
       })
     } catch (error) {
-      // A question whose run the host has dropped is stale, not refused: reading again says so.
       if (error instanceof RunGone) void catchUp(true)
       else dispatch(failure(error))
     }
