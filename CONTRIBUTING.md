@@ -157,8 +157,8 @@ DSN, so a clone, `pnpm dev` and the test tiers send nothing.
 
 | Variable | Where | What it does |
 | --- | --- | --- |
-| `VITE_SENTRY_DSN` | build (`pnpm build`, Netlify, the Android workflows' `SENTRY_DSN` variable) | the app's DSN for `tha-org/gots-app`; unset, the app reports nothing |
-| `SENTRY_AUTH_TOKEN` | build | a token with `project:releases`; set, the build uploads source maps for `gots-app` and deletes them from `dist` |
+| `VITE_SENTRY_DSN` | the app's build — the `SENTRY_DSN` repository variable, read by the `App gates` job in `.github/workflows/tests.yml` (whose build is the artifact `Deploy` publishes) and by the Android workflows | the app's DSN for `tha-org/gots-app`; unset, the app reports nothing |
+| `SENTRY_AUTH_TOKEN` | the same build | a token with `project:releases`; set, the build uploads source maps for `gots-app` and deletes them from `dist` |
 | `GOTS_SENTRY_DSN` | a Hermes host | the plugin's DSN for `tha-org/gots-plugin`; unset, the plugin reports nothing. Needs `pip install sentry-sdk` |
 
 ---

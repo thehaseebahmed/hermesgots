@@ -103,8 +103,16 @@ jobs:
           cache-dependency-path: app/pnpm-lock.yaml
       # The gates live in `.github/scripts/checks.sh`, which the development image's verification
       # runs too: one list, so a gate added for the runner reaches the image as well.
+      # This step's build is the one Deploy publishes, so the DSN belongs here rather than on the
+      # deploy: Deploy only uploads the artifact this job made.
       - name: App gates
         run: bash .github/scripts/checks.sh app
+        env:
+          # Crash reports land in tha-org/gots-app. Unset, the app reports nothing.
+          VITE_SENTRY_DSN: ${{ vars.SENTRY_DSN }}
+          # Set, the build uploads the source maps a stack needs and drops them from dist. Unset,
+          # the build is what it was before Sentry.
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
 
       # Deploy publishes this exact build, so it is uploaded for anything but a pull request: a push's
       # candidate deploy and a hand-run promotion both download it, and a release's publish runs as a
