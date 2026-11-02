@@ -2601,3 +2601,31 @@ same session id, so a notification naming it can resolve to the closed chat — 
   (the ADR 0053 family), and the lookup's shape predates this branch.
 
 Found by the `/code-review` spec axis on this branch; the pull request does not wait on it.
+
+
+# Deferred by the cleanup pass on the away pace
+
+## Risky
+
+### 1. The same "busy, else a stream's net, else idle" shape is written by hand at six other sites
+
+`readPace` (`src/lib/away.ts`) is now the one place that shape is named, but six screens still choose
+their own interval inline: `routes/chat.tsx:1162` (`streamOpen ? SAFETY_MS : CATCH_UP_MS`),
+`lib/research.ts:527` and `:570`, `lib/meetings.ts:371` and `:418`, `routes/projects.tsx:144`,
+`routes/project.tsx:109` and `routes/routines.tsx:181`. Five of the six give a *working* page
+precedence over its stream (`working && !live ? HOST_WORK_MS : live ? SAFETY_MS : LIST_MS`), which is
+the opposite order to `readPace`'s, so folding them in is a behaviour change per site.
+
+- Cost: the rule that decides how often a page reads has seven homes, and the next change to it leaves
+  six behind — the failure shape the away pace was fixed for. `freshness.ts` even claims to be "how
+  fresh the app keeps what it shows, in one place", which is true of its constants and not of the
+  rule that consumes them.
+- Suggested fix: move `readPace` beside the intervals it reads in `freshness.ts` (the chat page's two
+  paces are already there — `CHAT_POLL_MS` and `CHAT_IDLE_MS` — and the rule has no imports, so the unit
+  tier still reaches it by relative path), give it the precedence each site actually wants rather than
+  assuming one, and convert the six call sites one screen per commit with its own flow.
+- Why it is deferred: every one of those screens is outside this branch's diff, and the precedence
+  question above makes it a decision rather than a rename.
+
+Found by the reuse, quality and altitude angles of this branch's cleanup pass; the pull request does
+not wait on it.

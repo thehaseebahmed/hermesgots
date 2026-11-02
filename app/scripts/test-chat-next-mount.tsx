@@ -181,33 +181,114 @@ test("a send the host refuses keeps the message in the thread, marked, and pins 
   })
 })
 
-test("a host that isn't answering is the header's word, and the composer stays", async () => {
-  await onChatNext("c-away")
+/** The header's own line, as the app draws it. */
+const headerLine = () => find('[data-slot="header-line"]')?.textContent ?? ""
+
+/** Every request fails, as a host that cannot be reached does, until the returned call puts it back. */
+function hostDown() {
   const answer = globalThis.fetch
   globalThis.fetch = (async () => {
     throw new TypeError("Failed to fetch")
   }) as typeof fetch
+  return () => {
+    globalThis.fetch = answer
+  }
+}
+
+test("a host that isn't answering is the header's word, and the composer stays", async () => {
+  await onChatNext("c-away")
+  const up = hostDown()
   try {
     await mount(chatScreen("c-away"), async () => {
-      await until(
-        () => find('[data-slot="header-line"]')?.textContent === "This host isn't answering",
-        "the header to name the host",
-      )
+      await until(() => headerLine() === "This host isn't answering", "the header to name the host")
       assert.ok(find('textarea[aria-label="Message"]'), "the composer is still drawn")
       assert.equal(find('[data-chat-next] [data-away]'), null, "and no notice in the thread")
       assert.equal(find('[data-chat-next] [role="alert"]'), null, "nor a banner about the host")
 
       Object.defineProperty(window.navigator, "onLine", { configurable: true, get: () => false })
       await act(async () => void window.dispatchEvent(new Event("offline")))
+      await until(() => headerLine() === "You're offline", "the header to name the device")
+    })
+  } finally {
+    up()
+    Object.defineProperty(window.navigator, "onLine", { configurable: true, get: () => true })
+  }
+})
+
+test("the away words go on their own once the host answers, with no reopen to force the read", async () => {
+  await onChatNext("c-back")
+  const up = hostDown()
+  try {
+    await mount(chatScreen("c-back"), async () => {
+      await until(() => headerLine() === "This host isn't answering", "the header to name the host")
+      up()
+      // No nudge here: the page's own next read takes the words back. This harness has no stream
+      // open, so `test-away.mjs` is what pins the five-minute branch behind one.
       await until(
-        () => find('[data-slot="header-line"]')?.textContent === "You're offline",
-        "the header to name the device",
+        () => headerLine() !== "This host isn't answering",
+        "the header to stop naming a host that has answered",
       )
     })
   } finally {
-    globalThis.fetch = answer
-    Object.defineProperty(window.navigator, "onLine", { configurable: true, get: () => true })
+    up()
   }
+})
+
+/** Fails the transcript read alone, as a host answering everything but `/messages` does. */
+function transcriptDown() {
+  const answer = globalThis.fetch
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (/\/messages(\?|$)/.test(String(input))) throw new TypeError("Failed to fetch")
+    return answer(input, init)
+  }) as typeof fetch
+  return () => {
+    globalThis.fetch = answer
+  }
+}
+
+/**
+ * A chat following a run whose transcript read has just missed, which is the state the away words
+ * have to leave from. `run` gets the host and the call that puts the transcript read back.
+ */
+async function whileAwayFollowing(
+  id: string,
+  run: (host: ReturnType<typeof fakeHost>, restore: () => void) => Promise<void>,
+) {
+  const { host } = await onChatNext(id)
+  await mount(chatScreen(id), async () => {
+    await sendFromComposer("Count to a million")
+    await until(() => host.asked.runs === 1, "the run started")
+    const up = transcriptDown()
+    try {
+      // The run keeps streaming; a read the page makes anyway is the one that goes away.
+      await act(async () => void document.dispatchEvent(new Event("visibilitychange")))
+      await until(() => headerLine() === "This host isn't answering", "the header to name the host")
+      await run(host, up)
+    } finally {
+      up()
+    }
+  })
+}
+
+test("a run's own events take the away words back while the transcript read still misses", async () => {
+  await whileAwayFollowing("c-run-events", async (host) => {
+    host.latest.run!.say("Here.")
+    await until(
+      () => headerLine() !== "This host isn't answering",
+      "the run's own event to take the words back, with the transcript read still failing",
+    )
+  })
+})
+
+test("an away page still reads the transcript while it follows a run that says nothing", async () => {
+  await whileAwayFollowing("c-run-quiet", async (_host, restore) => {
+    // The host answers again and the run stays silent, so only a read can say the host is back.
+    restore()
+    await until(
+      () => headerLine() !== "This host isn't answering",
+      "the page to read the transcript while it follows a silent run",
+    )
+  })
 })
 
 test("Stop stops the run the thread is following", async () => {

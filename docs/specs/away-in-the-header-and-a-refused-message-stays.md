@@ -8,6 +8,12 @@ implementation starts. #701 is blocked by the gate issue (#707) that the docs pu
 file (#706) closes — work starts on that merge. The spec carries `ready-for-agent` and the tickets stay
 bare, so the agent claims the spec and works the graph in order.
 
+Amended by [ADR 0082](adr/0082-a-host-the-header-is-calling-away-is-read-at-the-busy-pace.md): the
+periodic read no longer keeps its idle intervals while away. A host the header is calling away is read
+at the fast pace, slowing as it keeps not answering, because that read is the only thing that takes the
+words back. That is the change this spec's Out of Scope ruled out under "any change to the periodic
+read's intervals"; nothing else there moves.
+
 ## Problem Statement
 
 A chat whose host cannot be reached takes its composer away and says so in the wrong place.

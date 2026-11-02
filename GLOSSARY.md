@@ -93,7 +93,7 @@ A conversation's messages in the order they happened, as the screen draws them �
 _Avoid_: transcript, message log, feed, timeline
 
 **Away**:
-A host this device could not reach — a read got no answer, or none in time — so what the thread shows is what this device holds. It is said in two wordings, because the app can tell the two causes apart only by whether this device has a network at all: "You're offline" where it does not, and "This host isn't answering" where it does.
+A host this device could not reach — a read got no answer, or none in time — so what the thread shows is what this device holds. It is said in two wordings, because the app can tell the two causes apart only by whether this device has a network at all: "You're offline" where it does not, and "This host isn't answering" where it does. The words last only as long as the host is away: the page reads at its fast pace while they are up, slower the longer the host stays away, and any answer from the host takes them back — a read that lands, an error it answers, a run's own events (ADR 0082).
 _Avoid_: offline (for the host), disconnected, down, unreachable
 
 **Catching up**:
