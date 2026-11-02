@@ -1,9 +1,6 @@
 /**
- * A session with a past this device holds no rows of: its transcript is read from the host when it
- * opens, and a read that comes back empty is what draws the thread as one nobody started. That was
- * the report — a session opened on a phone with its header and composer standing and nothing between
- * them, saying nothing about why. The pane now says the read failed and offers Try again, and the
- * retry reads the thread again. A session nothing was sent in is still drawn as the new one it is.
+ * A session with a past this device holds no rows of reads its transcript from the host when it
+ * opens; a read that came back empty used to be drawn as a session nobody started, saying nothing.
  */
 import assert from "node:assert/strict"
 import test from "node:test"

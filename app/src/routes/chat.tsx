@@ -855,12 +855,6 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
       .finally(() => setLoadingEarlier(false))
   }, [id])
   const [historyMissing, setHistoryMissing] = useState<string>()
-  // Try again runs the read once more: nothing about the chat moved, so the effect needs a nudge.
-  const [historyAttempt, setHistoryAttempt] = useState(0)
-  const retryHistory = useCallback(() => {
-    setHistoryMissing(undefined)
-    setHistoryAttempt((attempt) => attempt + 1)
-  }, [])
   const readyRef = useRef<{ id?: string }>(undefined)
 
   const resolved = { ...DEFAULT_SETTINGS, ...settings }
@@ -1020,22 +1014,28 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
     Boolean(conversation && conversation.updatedAt > conversation.createdAt) &&
     messages?.length === 0
   const loadingHistory = needsHistory && historyMissing !== id
-  useEffect(() => {
-    if (!id || !needsHistory) return
+  // The pane says the read failed and offers Try again; a toast on top of it says it twice.
+  const readHistory = useCallback(() => {
+    if (!id) return
     reconcileHistory(id)
       .then((count) => count || setHistoryMissing(id))
-      // The thread says the read failed and offers Try again; a toast on top of it says it twice.
       .catch(() => setHistoryMissing(id))
-  }, [id, needsHistory, historyAttempt])
+  }, [id])
+  useEffect(() => {
+    if (needsHistory) readHistory()
+  }, [needsHistory, readHistory])
+  const retryHistory = useCallback(() => {
+    setHistoryMissing(undefined)
+    readHistory()
+  }, [readHistory])
 
   // Other devices add turns on Hermes. Catch up when the chat opens, when sync brings news of it,
   // when this tab comes back, and now and then while it's on screen.
   const updatedAt = conversation?.updatedAt
   const hasMessages = (messages?.length ?? 0) > 0
   const hasCards = Boolean(cards && (cards.before.size || cards.trailing.length))
-  // A chat with a past this device holds no rows of had its transcript read, and it came back
-  // empty: the pane says so and offers Try again rather than drawing a session nobody started.
   const missingHistory = needsHistory && historyMissing === id
+  // A session with a past is never drawn as one nobody started: it has a thread, unread.
   const unstarted =
     !gone && configured && !hasMessages && !hasCards && !loadingHistory && !needsHistory
   // The agents this chat's agent delegated to, for their cards in the thread. Only a call that set a
