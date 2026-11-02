@@ -1265,8 +1265,8 @@ export async function setReminderLevel(
 
 /**
  * The host's speech settings (`speech.py`): its speech model, the models a pick can be made from
- * with their size and speed, the last pick that didn't load, and the model a phrase's cleanup runs
- * on. The app reads the fields it draws; `speech.ts` is the shape.
+ * with their size and the host's own measurement of each, the last pick that didn't load, and the
+ * model a phrase's cleanup runs on. The app reads the fields it draws; `speech.ts` is the shape.
  */
 export async function getSpeechSettings(config: HermesConfig, signal?: AbortSignal) {
   const response = await request(`${pluginRoot(config.baseUrl)}/speech`, {
@@ -1286,6 +1286,21 @@ export async function setSpeechSettings(
     method: "POST",
     headers: headers(config),
     body: JSON.stringify(patch),
+    signal,
+  })
+  return ((await response.json())?.speech ?? null) as Record<string, unknown> | null
+}
+
+/**
+ * Asks the host to time its own hearing on the models it has (`speech_probe.py`, ADR 0075), and
+ * answers the speech record as it then stands — the same shape the read gives, with the rows
+ * carrying their measurement and the one row it recommends. A host already hearing a take answers
+ * 409 with its own sentence rather than timing models under it.
+ */
+export async function probeSpeechSettings(config: HermesConfig, signal?: AbortSignal) {
+  const response = await request(`${pluginRoot(config.baseUrl)}/speech/probe`, {
+    method: "POST",
+    headers: headers(config),
     signal,
   })
   return ((await response.json())?.speech ?? null) as Record<string, unknown> | null

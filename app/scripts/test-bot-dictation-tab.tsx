@@ -19,6 +19,7 @@ import {
   speechInPlay,
   speechOption,
   openSpeech,
+  unmeasured,
   modelRow,
   openCleanup,
   vocabulary,
@@ -210,16 +211,120 @@ test("the Speech model row names the model in play, and opens the host's models 
     assert.match(speechOption("base")?.textContent ?? "", /145 MB/, "the download is named")
     assert.match(
       speechOption("base")?.textContent ?? "",
-      /16× realtime/,
-      "and the speed it is weighed on",
+      /9\.4× realtime/,
+      "and the factor this host timed, which is the only one there is (ADR 0075)",
     )
     assert.match(speechOption("small")?.textContent ?? "", /In use/)
-    assert.match(speechOption("large-v3")?.textContent ?? "", /Too slow on a CPU/)
-    assert.match(speechOption("large-v3")?.textContent ?? "", /Not on this host/)
+    assert.match(speechOption("small")?.textContent ?? "", /Recommended/, "the row it recommends is named")
+    assert.equal(
+      speechOptions().filter((option) => /Recommended/.test(option.textContent ?? "")).length,
+      1,
+      "and only one row is",
+    )
+    assert.match(
+      speechOption("large-v3")?.textContent ?? "",
+      /Not measured/,
+      "a row nobody timed says so rather than quoting a factor",
+    )
+    assert.match(
+      find("[data-speech-probe]")?.textContent ?? "",
+      /Measured on this host/,
+      "and the sheet says the numbers are this machine's",
+    )
     const clearing = speechOptions().find((option) =>
       /\b(default|none|clear)\b/i.test(option.textContent ?? ""),
     )
     assert.equal(clearing, undefined, "no default or clearing pick: a take always has a model")
+  })
+})
+
+test("a host that owes a measurement is asked for one as the models open, and its rows state it", async () => {
+  const calls = await seed(
+    "speech-probe-owed",
+    ["dictation", "speech_model", "speech_probe"],
+    {},
+    { speech: unmeasured(), probed: speech() },
+  )
+  await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    assert.equal(
+      calls.filter((call) => call.path.endsWith("/speech/probe")).length,
+      0,
+      "a page nobody opened the models on asks for no measurement",
+    )
+    await openSpeech()
+    await until(
+      () => calls.filter((call) => call.path.endsWith("/speech/probe")).length === 1,
+      "the host is asked to time its own hearing",
+    )
+    await until(
+      () => /9\.4× realtime/.test(speechOption("base")?.textContent ?? ""),
+      "and the rows are redrawn from what it measured",
+    )
+    assert.match(speechOption("small")?.textContent ?? "", /Recommended/)
+  })
+})
+
+test("a measurement taken on another machine is named, and never drawn as this host's", async () => {
+  const foreign = unmeasured({
+    probe: {
+      owed: true,
+      measured: 0,
+      recommended: null,
+      elsewhere: { name: "somebody-elses-laptop", at: "2026-11-01T09:00:00Z" },
+      reason: null,
+      at: null,
+    },
+  })
+  await seed("speech-probe-foreign", ["dictation", "speech_model", "speech_probe"], {}, { speech: foreign })
+  await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    await openSpeech()
+    await until(
+      () => /not this host/.test(find("[data-speech-probe]")?.textContent ?? ""),
+      "the sheet names the machine the measurement came from",
+    )
+    assert.match(find("[data-speech-probe]")?.textContent ?? "", /somebody-elses-laptop/)
+    assert.match(speechOption("base")?.textContent ?? "", /Not measured/)
+    assert.equal(
+      speechOptions().filter((option) => /Recommended/.test(option.textContent ?? "")).length,
+      0,
+      "and no row is recommended from a number this machine never took",
+    )
+  })
+})
+
+test("a probe that never reached the host leaves the rows alone and puts no words under them", async () => {
+  const calls = await seed("speech-probe-offline", ["dictation", "speech_model", "speech_probe"], {}, {
+    speech: unmeasured(),
+    failProbe: true,
+  })
+  await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    await openSpeech()
+    await until(
+      () => calls.some((call) => call.path.endsWith("/speech/probe")),
+      "the probe was asked for",
+    )
+    // A tick for the rejected request to land: nothing about the models may be drawn from it.
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    assert.equal(
+      find("[data-speech-probe]")?.textContent ?? "",
+      "This host hasn't measured its models yet.",
+      "a request that never landed says nothing about the models, so the host's own state is drawn",
+    )
+  })
+})
+
+test("a probe the host refuses says why under the rows, and the pick still stands", async () => {
+  await seed("speech-probe-refused", ["dictation", "speech_model", "speech_probe"], {}, {
+    speech: unmeasured(),
+    refuseProbe: "This host is hearing a take right now, so it can't time a model without getting in its way.",
+  })
+  await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    await openSpeech()
+    await until(
+      () => /hearing a take right now/.test(find("[data-speech-probe]")?.textContent ?? ""),
+      "the host's own sentence is what the sheet says",
+    )
+    assert.equal(speechOptions().length, 3, "and every model is still there to pick")
   })
 })
 
@@ -304,8 +409,9 @@ test("a pick the host does not have says it is downloading", async () => {
           {
             name: "base",
             size_mb: 145,
-            speed: 16,
-            slow_on_cpu: false,
+            measured: { realtime: 9.4, at: "2026-11-02T09:00:00Z" },
+            keeps_up: true,
+            recommended: false,
             downloaded: true,
             in_use: false,
             downloading: false,
@@ -313,8 +419,9 @@ test("a pick the host does not have says it is downloading", async () => {
           {
             name: "small",
             size_mb: 484,
-            speed: 6,
-            slow_on_cpu: false,
+            measured: { realtime: 3.2, at: "2026-11-02T09:00:00Z" },
+            keeps_up: true,
+            recommended: false,
             downloaded: true,
             in_use: false,
             downloading: false,
@@ -322,8 +429,9 @@ test("a pick the host does not have says it is downloading", async () => {
           {
             name: "large-v3",
             size_mb: 3090,
-            speed: 0.6,
-            slow_on_cpu: true,
+            measured: null,
+            keeps_up: null,
+            recommended: false,
             downloaded: false,
             in_use: true,
             downloading: true,

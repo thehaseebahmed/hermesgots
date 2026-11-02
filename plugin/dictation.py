@@ -513,6 +513,33 @@ def _expire(now: Optional[float] = None) -> None:
         logger.debug("memento: dropped %d dictation take(s) left alone", len(stale))
 
 
+def local_decoder() -> Optional[Callable[..., Any]]:
+    """Hermes's own local decode — the call a Piece makes — or None where this host can't hear one.
+
+    Answered only where the package is really installed: Hermes's decode lazily installs
+    faster-whisper when it is missing, so a caller that must not download anything asks this first
+    rather than calling in and finding out.
+    """
+    try:
+        tt = _tools()
+    except ImportError:
+        return None
+    decode = getattr(tt, "_transcribe_local", None)
+    if not callable(decode) or not _installed(tt):
+        return None
+    return decode
+
+
+def holds_a_take() -> bool:
+    """Whether the host is hearing a take right now, which a measurement of its models stands aside for.
+
+    Loading a model to time it can evict the one a live take is being heard on, so the probe asks this
+    before it starts rather than slowing a take down to answer a question about speed.
+    """
+    with _takes_lock:
+        return bool(_takes)
+
+
 def _sweep() -> None:
     """Ages the registry on a clock of its own: a take left alone holds audio and a worker until it goes.
 

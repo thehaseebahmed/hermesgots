@@ -24,6 +24,13 @@ export const PROMPT_RETRY_MS = 600
 export const WRITE_TIMEOUT_MS = 15_000
 
 /**
+ * How long a host is given to time its own hearing (ADR 0075). It decodes a three-second recording
+ * once per model on disk, after loading each one, so this is the budget of a probe and not of a
+ * request: a screen that asked for it waits under `Measuring…` rather than losing the answer.
+ */
+export const PROBE_TIMEOUT_MS = 120_000
+
+/**
  * A Server access start: the Host discovers the provider, registers a client and waits for the
  * authorization URL, which Hermes gives up to 30 s to produce before it answers.
  */

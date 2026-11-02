@@ -1,7 +1,8 @@
 """Tests for the host's speech model and the model a dictation's cleanup runs on (``plugin/speech.py``).
 
 The host's config and the model load are scripted, so these assert the promises a pick rests on: the
-list says each model's size and speed, which the host already has and which is in play; a pick
+list says each model's size, which the host already has and which is in play, and the speed on it is
+the host's own measurement where there is one and nothing where there isn't (ADR 0075); a pick
 writes the one key and a refusal leaves the old model in place; a model that won't load falls back
 to the model that last did, with a warning, and never becomes the model in play itself; and the
 cleanup model is gated on the host's model-override permission, read per request, and kept
@@ -18,8 +19,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from plugin import speech
+from plugin import speech, speech_probe
 from plugin.store import put_setting
+from plugin.tests._helpers import probe_record
 
 # Hermes's own ``DEFAULT_CONFIG["stt"]``, as the read is answered from: every key the page draws.
 DEFAULTS = {
@@ -112,18 +114,15 @@ class TempStore(unittest.TestCase):
 
 
 class CatalogueTest(unittest.TestCase):
-    def test_every_model_carries_a_size_and_a_speed(self) -> None:
+    def test_every_model_carries_a_size(self) -> None:
         for entry in speech.catalogue():
             self.assertIsInstance(entry["size_mb"], int, entry["name"])
             self.assertGreater(entry["size_mb"], 0)
-            self.assertIsInstance(entry["speed"], float, entry["name"])
-            self.assertGreater(entry["speed"], 0)
 
-    def test_a_model_too_large_to_keep_up_on_a_cpu_is_marked(self) -> None:
-        rows = {entry["name"]: entry for entry in speech.catalogue()}
-        self.assertTrue(rows["large-v3"]["slow_on_cpu"])
-        self.assertTrue(rows["medium"]["slow_on_cpu"])
-        self.assertFalse(rows["small"]["slow_on_cpu"])
+    def test_the_catalogue_carries_no_speed_nobody_timed(self) -> None:
+        for entry in speech.catalogue():
+            self.assertNotIn("speed", entry, entry["name"])
+            self.assertNotIn("slow_on_cpu", entry, entry["name"])
 
     def test_a_name_hermes_resolves_is_saved_as_the_model_it_means(self) -> None:
         self.assertEqual(speech.clean_model(" large "), "large-v3")
@@ -146,7 +145,10 @@ class ReadTest(TempStore):
         rows = {row["name"]: row for row in payload["models"]}
         self.assertTrue(rows["small"]["in_use"])
         self.assertFalse(rows["base"]["in_use"])
-        self.assertEqual((rows["base"]["size_mb"], rows["base"]["speed"]), (145, 16.0))
+        self.assertEqual(rows["base"]["size_mb"], 145)
+        self.assertIsNone(rows["base"]["measured"], "no measurement is no number, never a guess")
+        self.assertIsNone(rows["base"]["keeps_up"])
+        self.assertFalse(rows["base"]["recommended"])
         self.assertEqual(len(rows), len(speech.names()))
 
     def test_the_host_s_own_cache_says_which_models_it_has(self) -> None:
@@ -188,6 +190,81 @@ class ReadTest(TempStore):
             payload = speech.read(self.config, self.path, {})
         self.assertEqual(payload["model"], speech.DEFAULT_MODEL)
         self.assertTrue({row["name"] for row in payload["models"] if row["in_use"]})
+
+
+class MeasurementTest(TempStore):
+    """What a row draws of this host's own measurement (``speech_probe.py``, ADR 0075)."""
+
+    def read_with(self, record=None):
+        """The tab's read, over a cache holding two models and whatever measurement ``record`` is."""
+        if record is not None:
+            put_setting(self.path, speech_probe.KEY, record)
+        root = Path(self.tmp.name) / "hub"
+        (root / "models--Systran--faster-whisper-base").mkdir(parents=True)
+        (root / "models--Systran--faster-whisper-small").mkdir(parents=True)
+        with Host(stt("base")), mock.patch.object(speech, "cache_roots", lambda section: [root]):
+            payload = speech.read(self.config, self.path, {})
+        return payload, {row["name"]: row for row in payload["models"]}
+
+    def test_a_measured_row_states_its_factor_and_an_unmeasured_row_states_nothing(self) -> None:
+        payload, rows = self.read_with(probe_record({"base": 9.0, "small": 3.1}))
+        self.assertEqual(rows["base"]["measured"]["realtime"], 9.0)
+        self.assertTrue(rows["base"]["keeps_up"])
+        self.assertEqual(rows["small"]["measured"]["realtime"], 3.1)
+        self.assertIsNone(rows["tiny"]["measured"], "a row nobody measured carries no number")
+        self.assertIsNone(rows["tiny"]["keeps_up"], "and none is inferred from the catalogue")
+        self.assertEqual(payload["probe"]["measured"], 2)
+        self.assertFalse(payload["probe"]["owed"])
+
+    def test_exactly_one_row_is_named_as_recommended(self) -> None:
+        _, rows = self.read_with(probe_record({"base": 9.0, "small": 3.1}))
+        recommended = [name for name, row in rows.items() if row["recommended"]]
+        self.assertEqual(recommended, ["small"], "the heaviest measured row that keeps up")
+
+    def test_a_model_that_cannot_keep_up_is_said_to_be_too_slow_for_this_host(self) -> None:
+        _, rows = self.read_with(probe_record({"base": 0.6, "small": 0.4}))
+        self.assertFalse(rows["base"]["keeps_up"])
+        self.assertEqual(
+            [name for name, row in rows.items() if row["recommended"]],
+            ["base"],
+            "where none keeps up the fastest is the best this host can do",
+        )
+
+    def test_a_measurement_from_another_machine_is_drawn_as_nobody_s(self) -> None:
+        elsewhere = {**speech_probe.machine(), "name": "somebody-elses-laptop"}
+        payload, rows = self.read_with(probe_record({"base": 40.0}, host=elsewhere))
+        self.assertTrue(all(row["measured"] is None for row in rows.values()), "not this host's number")
+        self.assertFalse(any(row["recommended"] for row in rows.values()))
+        self.assertTrue(payload["probe"]["owed"], "the host is owed one of its own")
+        self.assertEqual(payload["probe"]["elsewhere"]["name"], "somebody-elses-laptop")
+
+    def test_a_host_that_never_measured_says_one_is_owed(self) -> None:
+        payload, rows = self.read_with()
+        self.assertTrue(payload["probe"]["owed"])
+        self.assertEqual(payload["probe"]["measured"], 0)
+        self.assertTrue(all(row["measured"] is None for row in rows.values()))
+
+    def test_a_probe_hears_only_the_models_this_host_has_not_measured(self) -> None:
+        put_setting(self.path, speech_probe.KEY, probe_record({"base": 9.4}))
+        root = Path(self.tmp.name) / "hub"
+        (root / "models--Systran--faster-whisper-base").mkdir(parents=True)
+        (root / "models--Systran--faster-whisper-small").mkdir(parents=True)
+        with Host(stt("base")), mock.patch.object(speech, "cache_roots", lambda section: [root]), \
+                mock.patch.object(speech_probe, "measure") as heard:
+            speech.probe(self.config, self.path, {})
+        self.assertEqual(heard.call_args.args[1], ["small"], "only what the record does not speak for")
+        self.assertEqual(heard.call_args.kwargs["keep"]["base"]["realtime"], 9.4)
+
+    def test_a_probe_with_nothing_new_to_hear_measures_nothing(self) -> None:
+        put_setting(self.path, speech_probe.KEY, probe_record({"base": 9.4, "small": 3.2}))
+        root = Path(self.tmp.name) / "hub"
+        (root / "models--Systran--faster-whisper-base").mkdir(parents=True)
+        (root / "models--Systran--faster-whisper-small").mkdir(parents=True)
+        with Host(stt("base")), mock.patch.object(speech, "cache_roots", lambda section: [root]), \
+                mock.patch.object(speech_probe, "measure") as heard:
+            payload = speech.probe(self.config, self.path, {})
+        heard.assert_not_called()
+        self.assertFalse(payload["probe"]["owed"])
 
 
 class SetModelTest(TempStore):

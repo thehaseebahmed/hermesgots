@@ -63,6 +63,7 @@ from . import (
     repos,
     research,
     speech,
+    speech_probe,
     triage,
     sessions,
     skill_catalog,
@@ -557,6 +558,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # totals its Dictation screen counts (dictations.py, ADR 0060).
                     "dictations",
                     "speech_model",
+                    # Advertised apart from `speech_model`: a host that never measured itself
+                    # still lists its models, and each row says plainly that nobody timed it.
+                    "speech_probe",
                     # The level a take is cleaned up at (speech.py, ADR 0066) and whether its
                     # decode is given a Hearing prompt (ADR 0067), each advertised on its own: the
                     # level outlives the prompt, which is a comparison that may be taken back, and
@@ -2256,6 +2260,39 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
 
     app.router.add_get(f"{PREFIX}/speech", get_speech)
     app.router.add_post(f"{PREFIX}/speech", set_speech)
+
+    async def probe_speech(request: "web.Request") -> "web.Response":
+        """Times this host's own hearing on the models it has, and answers the page it draws.
+
+        A measurement is the host's and is taken once: this route is how a page asks for it, and
+        the answer is the same ``speech`` block, with the rows carrying their factor and the one
+        row the measurement recommends. A host already hearing a take is asked again later rather
+        than timed under it.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        config_path = host_config_path()
+        path = store_path()
+        scope = profile_scope()
+        gate = await asyncio.to_thread(research.llm_gate)
+
+        def run() -> Dict[str, Any]:
+            with scope():
+                return speech.probe(config_path, path, gate)
+
+        try:
+            payload = await asyncio.to_thread(run)
+        except speech_probe.Busy as error:
+            return _error(web, str(error), 409)
+        except speech_probe.Unavailable as error:
+            return _error(web, str(error), 501)
+        except Exception as error:
+            logger.warning("memento: couldn't measure this host's speech models", exc_info=True)
+            return _error(web, f"The host couldn't measure its speech models: {error}", 502)
+        return web.json_response({"object": "memento.speech", "speech": payload})
+
+    app.router.add_post(f"{PREFIX}/speech/probe", probe_speech)
 
     async def set_stt(request: "web.Request") -> "web.Response":
         """Writes one speech setting in the bot's own ``config.yaml``, and answers the fresh block."""

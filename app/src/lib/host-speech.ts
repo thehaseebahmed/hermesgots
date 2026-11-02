@@ -2,8 +2,14 @@ import { useCallback, useEffect, useState } from "react"
 
 import { connectionKey } from "@/lib/connection"
 import { db } from "@/lib/db"
-import { READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
-import { getSpeechSettings, setSpeechSettings, setSttSetting } from "@/lib/hermes"
+import { PROBE_TIMEOUT_MS, READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
+import {
+  getSpeechSettings,
+  HermesError,
+  probeSpeechSettings,
+  setSpeechSettings,
+  setSttSetting,
+} from "@/lib/hermes"
 import { usePluginFeatureAnswers } from "@/lib/features"
 import { noteFailure } from "@/lib/report"
 import {
@@ -11,6 +17,7 @@ import {
   HEARING_PROMPT_FEATURE,
   readSpeech,
   SPEECH_MODEL,
+  SPEECH_PROBE_FEATURE,
   type CleanupLevel,
   type SpeechPick,
   type SpeechPatch,
@@ -22,6 +29,11 @@ type Server = { baseUrl: string; apiKey: string }
 
 export async function getSpeech(config: Server, signal?: AbortSignal): Promise<SpeechSettings> {
   return readSpeech(await getSpeechSettings(config, signal))
+}
+
+/** Asks the host to time its own hearing, and answers the record the picker's rows are drawn from. */
+export async function probeSpeech(config: Server, signal?: AbortSignal): Promise<SpeechSettings> {
+  return readSpeech(await probeSpeechSettings(config, signal))
 }
 
 /**
@@ -68,6 +80,7 @@ export function useSpeech(profile?: (Server & { id?: string; speechModel?: strin
       stt: STT_SETTINGS,
       levels: CLEANUP_LEVELS_FEATURE,
       hearing: HEARING_PROMPT_FEATURE,
+      probe: SPEECH_PROBE_FEATURE,
     },
   )
   const supported = features.speech === "yes"
@@ -75,8 +88,13 @@ export function useSpeech(profile?: (Server & { id?: string; speechModel?: strin
   // A plugin older than the four levels refuses both writes, so the page doesn't offer them at all.
   const levelsSupport = features.levels === "yes"
   const hearingSupport = features.hearing === "yes"
+  // No probe is ever asked of a host that doesn't take one (ADR 0075).
+  const probeSupport = features.probe === "yes"
   const [saving, setSaving] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
+  // Kept with the connection they belong to, as `failed` is: another bot's probe is not this bot's.
+  const [measuring, setMeasuring] = useState("")
+  const [measureProblem, setMeasureProblem] = useState<{ key: string; message: string }>()
 
   useEffect(() => {
     if (!baseUrl || !supported) return
@@ -116,6 +134,9 @@ export function useSpeech(profile?: (Server & { id?: string; speechModel?: strin
       )
       if (!settings) return false
       setState({ key, settings })
+      // A fresh block is the host's word on its own measurement, so a probe that failed before it
+      // has nothing left to say.
+      setMeasureProblem(undefined)
       void rememberSpeech(id, settings.model)
       return true
     },
@@ -137,6 +158,37 @@ export function useSpeech(profile?: (Server & { id?: string; speechModel?: strin
     [save, key, baseUrl, apiKey],
   )
 
+  /**
+   * Asks the host to time its own hearing, once, where it still owes an answer: the picker's rows
+   * are read from what comes back, and a host that has already measured is never asked again
+   * (ADR 0075). A refusal is the host's own sentence, drawn under the rows rather than as a failure
+   * of the page — a probe is an aid to a pick, never the pick itself.
+   */
+  const measure = useCallback(async () => {
+    if (!probeSupport || measuring === key) return
+    const held = state?.key === key ? state.settings : undefined
+    // Nothing on disk is a host with nothing to time, and it already says so in `reason`.
+    if (!held?.probe?.owed || held.probe.reason) return
+    setMeasuring(key)
+    setMeasureProblem(undefined)
+    try {
+      const settings = await probeSpeech(
+        { baseUrl, apiKey },
+        AbortSignal.timeout(PROBE_TIMEOUT_MS),
+      )
+      setState({ key, settings })
+    } catch (error) {
+      // Only an answer that came back is the host's to say: a status means it refused, and its own
+      // sentence is drawn under the rows. A request that never landed is noted and left out of them,
+      // since it says nothing about the models.
+      if (error instanceof HermesError && error.status)
+        setMeasureProblem({ key, message: error.message })
+      else noteFailure("Measuring this host's speech models", error)
+    } finally {
+      setMeasuring((running) => (running === key ? "" : running))
+    }
+  }, [probeSupport, measuring, state, key, baseUrl, apiKey])
+
   const settled = state?.key === key
   // A bot's remembered model stands before the read comes back, so its row says what that host last
   // reported rather than "Checking…" on every mount.
@@ -155,8 +207,15 @@ export function useSpeech(profile?: (Server & { id?: string; speechModel?: strin
     levels: supported && levelsSupport,
     /** Whether the host takes a Hearing prompt for a take's decode (ADR 0067). */
     hearing: supported && hearingSupport,
+    /** Whether the host times its own hearing and states it on the rows (ADR 0075). */
+    probe: supported && probeSupport,
+    /** Whether this bot's probe is out right now, so the picker says what it is waiting on. */
+    measuring: measuring === key,
+    /** This bot's own sentence for a probe it refused, drawn under the rows rather than as a page failure. */
+    measureProblem: measureProblem?.key === key ? measureProblem.message : null,
     saving,
     problem,
+    measure,
     choose: (model: string) => write({ model }),
     chooseCleanup: (model: SpeechPick | null) => write({ cleanup_model: model }),
     chooseLevel: (level: CleanupLevel) => write({ cleanup_level: level }),

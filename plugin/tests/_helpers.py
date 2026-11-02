@@ -275,6 +275,37 @@ def temp_hermes_home(case: unittest.TestCase) -> Path:
     return home
 
 
+def probe_record(
+    models: Dict[str, float],
+    *,
+    host: Optional[Dict[str, Any]] = None,
+    sha: Optional[str] = None,
+    decode_ms: int = 700,
+) -> Dict[str, Any]:
+    """A stored speech measurement as ``speech_probe.measure`` writes one.
+
+    ``models`` is what a test means — ``{model: realtime}``; the rest is the record around it, with
+    this machine's own identity and the committed recording's digest unless the test names others.
+    One builder, so a field the record gains lands once rather than in every suite that plants one.
+    """
+    from plugin import speech_probe
+
+    return {
+        "object": speech_probe.OBJECT,
+        "at": "2026-11-02T10:00:00Z",
+        "host": speech_probe.machine() if host is None else host,
+        "fixture": {
+            "bytes": 95300,
+            "sha256": speech_probe.digest() if sha is None else sha,
+            "ms": speech_probe.spoken_ms(),
+        },
+        "models": {
+            name: {"realtime": realtime, "decode_ms": decode_ms, "load_ms": 900, "at": "2026-11-02T10:00:00Z"}
+            for name, realtime in models.items()
+        },
+    }
+
+
 def js_constant(source: str, name: str) -> str:
     """``name``'s value from a JavaScript or TypeScript source: its string literals, joined.
 
@@ -287,6 +318,18 @@ def js_constant(source: str, name: str) -> str:
     if found is None:
         raise AssertionError(f"no string constant {name} in the source")
     return "".join(json.loads(piece) for piece in re.findall(literal, found.group(1)))
+
+
+def js_number(source: str, name: str) -> float:
+    """``name``'s value from a JavaScript or TypeScript source: a number literal, as a float.
+
+    ``js_constant`` reads a string; a figure a fake restates — a threshold, a budget — is a number,
+    and the copy is worth holding to the producer the same way.
+    """
+    found = re.search(rf"const {re.escape(name)} = (-?[0-9]+(?:\.[0-9]+)?)\b", source)
+    if found is None:
+        raise AssertionError(f"no number constant {name} in the source")
+    return float(found.group(1))
 
 
 def usage_window(

@@ -536,8 +536,12 @@ What a take's host speech model is given before it listens: the host's own initi
 _Avoid_: whisper prompt, initial prompt, decoder prompt, context, hint
 
 **Host speech model**:
-The model on a bot's host that hears its speech-to-text. Its size is the trade between waiting and being right.
+The model on a bot's host that hears its speech-to-text. Its size is the trade between waiting and being right, and the host times that trade itself: a **Hearing measurement** says how many seconds of speech each model it has hears in a second on that machine.
 _Avoid_: whisper model, fast-whisper, STT model, engine, ASR
+
+**Hearing measurement**:
+What a host timed of itself, once — its own speech models each decoding one short recording, with the load allowed for — kept per model and per machine: the realtime factor, how many seconds of speech a model hears in a second here, and the row it recommends. The model picker's rows state it and name the one recommended; a row nobody measured says so rather than quoting a figure, and a measurement taken on another machine is never drawn as this host's.
+_Avoid_: benchmark, speed score, realtime estimate, perf number, probe result
 
 **Speech provider**:
 The one backend a bot's Hermes sends audio to. Until it is picked it is **Automatic**, and the host decides — its own model first, then whichever cloud provider it holds a key for.

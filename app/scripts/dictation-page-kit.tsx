@@ -29,8 +29,9 @@ export const speech = (patch: Record<string, unknown> = {}) => ({
     {
       name: "base",
       size_mb: 145,
-      speed: 16,
-      slow_on_cpu: false,
+      measured: { realtime: 9.4, at: "2026-11-02T09:00:00Z" },
+      keeps_up: true,
+      recommended: false,
       downloaded: true,
       in_use: false,
       downloading: false,
@@ -38,8 +39,9 @@ export const speech = (patch: Record<string, unknown> = {}) => ({
     {
       name: "small",
       size_mb: 484,
-      speed: 6,
-      slow_on_cpu: false,
+      measured: { realtime: 3.2, at: "2026-11-02T09:00:00Z" },
+      keeps_up: true,
+      recommended: true,
       downloaded: true,
       in_use: true,
       downloading: false,
@@ -47,19 +49,44 @@ export const speech = (patch: Record<string, unknown> = {}) => ({
     {
       name: "large-v3",
       size_mb: 3090,
-      speed: 0.6,
-      slow_on_cpu: true,
+      measured: null,
+      keeps_up: null,
+      recommended: false,
       downloaded: false,
       in_use: false,
       downloading: false,
     },
   ],
+  probe: {
+    owed: false,
+    measured: 2,
+    recommended: "small",
+    elsewhere: null,
+    reason: null,
+    at: "2026-11-02T09:00:00Z",
+  },
   cleanup: { model: null, allowed: true, reason: null, level: "light" },
   hearing: { sent: false },
   ...patch,
 })
 
 type Speech = ReturnType<typeof speech>
+
+/**
+ * The same host with nobody having measured it yet: every row carries no factor, and a measurement
+ * is owed — what the page draws before a probe answers, and what a probe is asked for (ADR 0075).
+ */
+export const unmeasured = (patch: Record<string, unknown> = {}) =>
+  speech({
+    probe: { owed: true, measured: 0, recommended: null, elsewhere: null, reason: null, at: null },
+    models: speech().models.map((row) => ({
+      ...row,
+      measured: null,
+      keeps_up: null,
+      recommended: false,
+    })),
+    ...patch,
+  })
 
 /**
  * The host's speech settings beyond the model, as `GET speech` answers them (ADR 0063): Hermes's
@@ -138,6 +165,12 @@ export function host(
   options: {
     speech?: Speech
     next?: Speech
+    /** The record a probe answers with: the host's own measurement, drawn on the picker's rows. */
+    probed?: Speech
+    /** The host's own sentence for a probe it refused, as a take being heard answers one. */
+    refuseProbe?: string
+    /** The probe never reached the host at all: a request a phone's dead connection drops. */
+    failProbe?: boolean
     refuse?: string
     writers?: { model: boolean; provider: boolean }
     /** The bot's models, as the cleanup pick's own picker reads them. */
@@ -165,6 +198,12 @@ export function host(
       calls.push({ path, method, body })
       if (options.refuseStt) return json({ error: { message: options.refuseStt } }, 400)
       return json({ stt: options.nextStt ?? options.speech?.stt })
+    }
+    if (path.endsWith("/api/plugins/memento/speech/probe")) {
+      calls.push({ path, method, body: undefined })
+      if (options.failProbe) throw new TypeError("Failed to fetch")
+      if (options.refuseProbe) return json({ error: { message: options.refuseProbe } }, 409)
+      return json({ speech: options.probed ?? options.speech })
     }
     if (path.endsWith("/api/plugins/memento/speech")) {
       if (method === "POST") {

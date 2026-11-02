@@ -27,10 +27,12 @@ import {
   heardLine,
   levelName,
   marked,
+  measuredLine,
   modelSize,
-  modelSpeed,
+  probeNote,
   type CleanupLevel,
   type SpeechModel,
+  type SpeechProbe,
   type SpeechSettings,
 } from "@/lib/speech"
 import {
@@ -77,6 +79,11 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
   const models = settings ? modelsFor(settings, block) : []
   const otherProviders = block ? providerRows(block) : []
   const heard = settings ? heardLine(settings.provider) : null
+  // The picker is where a measurement is asked for (ADR 0075).
+  const openSpeech = () => {
+    setPick("speech")
+    void speech.measure()
+  }
   // The Hearing prompt's value is the bot's, on the host, however many devices write it.
   const developer = useLiveQuery(async () => Boolean((await getSettings()).developer), [])
 
@@ -110,7 +117,7 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
           <SpeechModelRow
             model={settings?.model ?? ""}
             disabled={!settings || !models.length}
-            onClick={() => setPick("speech")}
+            onClick={openSpeech}
           />
           <VocabularyRow profile={profile} words={words} />
         </Group>
@@ -125,7 +132,7 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
           saving={speech.saving}
           onWrite={speech.writeStt}
           onOpen={setOpen}
-          onPick={setPick}
+          onPick={(pick) => (pick === "speech" ? openSpeech() : setPick(pick))}
           profile={profile}
           words={words}
         />
@@ -208,6 +215,11 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
               if (name !== settings.model) void speech.choose(name)
               setPick(undefined)
             }}
+          />
+          <ProbeNote
+            probe={settings.probe}
+            measuring={speech.measuring}
+            problem={speech.measureProblem}
           />
         </PickSurface>
       )}
@@ -919,10 +931,30 @@ function VocabularyPage({ profile, words }: { profile: Profile; words: string[] 
   )
 }
 
-/** A model's one muted line: what it weighs, how fast it hears, and whether it is already at work. */
+function ProbeNote({
+  probe,
+  measuring,
+  problem,
+}: {
+  probe: SpeechProbe | undefined
+  measuring: boolean
+  problem: string | null
+}) {
+  // A host that owes nothing has answered for itself: a failure latched before that is spent.
+  const note = probe?.owed === false ? probeNote(probe) : (problem ?? probeNote(probe, measuring))
+  if (!note) return null
+  return (
+    <p className="px-1 py-2 text-sm text-muted-foreground" data-speech-probe>
+      {note}
+    </p>
+  )
+}
+
+/** A model's one muted line: what it weighs, how it hears here, and whether it is already at work. */
 function modelNotes(row: SpeechModel): string {
   const download = row.downloaded || row.inUse ? "" : "Not on this host"
-  return [modelSize(row.sizeMb), modelSpeed(row.speed), marked(row), download]
+  const recommended = row.recommended ? "Recommended" : ""
+  return [modelSize(row.sizeMb), measuredLine(row), recommended, marked(row), download]
     .filter(Boolean)
     .join(" · ")
 }

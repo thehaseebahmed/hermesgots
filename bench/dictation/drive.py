@@ -15,9 +15,6 @@ from __future__ import annotations
 
 import importlib
 import json
-import os
-import platform
-import socket
 import sys
 import threading
 import time
@@ -26,6 +23,8 @@ import urllib.request
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any, Dict, List, Optional, Sequence
+
+from plugin import speech_probe
 
 from . import cut as cutting
 from . import fixtures as fixtures_module
@@ -141,14 +140,13 @@ class Decoder:
 
 
 def machine() -> Dict[str, Any]:
-    """The machine a run was taken on: named, so two runs are compared or refused as incomparable."""
-    return {
-        "name": socket.gethostname(),
-        "machine": platform.machine(),
-        "system": platform.system(),
-        "cpus": os.cpu_count() or 0,
-        "python": platform.python_version(),
-    }
+    """The machine a run was taken on: named, so two runs are compared or refused as incomparable.
+
+    The identity is the plugin's own (`speech_probe.machine`), and deliberately so: the picker's
+    measurement and a bench run name a host the same way, which is what lets the two be read beside
+    each other — and what refuses a record either of them took elsewhere (ADR 0075).
+    """
+    return speech_probe.machine()
 
 
 class StandIn:

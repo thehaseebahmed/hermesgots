@@ -1,10 +1,11 @@
 /**
  * A bot's speech settings — the model its dictation is heard on, the model and level a finished
- * dictation's cleanup runs at, and whether a take is heard with a Hearing prompt (ADR 0066,
- * ADR 0067) — are one record on the host, so one read and one write carry them: `GET speech` and
- * `POST speech` with only the fields that moved. `host-speech.ts` makes those calls; this file is
- * the shape, the four levels' cards and the words a row is read with, so the unit tier can pin them
- * without a host.
+ * dictation's cleanup runs at, whether a take is heard with a Hearing prompt (ADR 0066, ADR 0067),
+ * and the host's own measurement of how fast its models hear (ADR 0075) — are one record on the
+ * host, so one read and one write carry them: `GET speech` and `POST speech` with only the fields
+ * that moved, and `POST speech/probe` for the measurement. `host-speech.ts` makes those calls; this
+ * file is the shape, the four levels' cards and the words a row is read with, so the unit tier can
+ * pin them without a host.
  */
 
 import { readStt, type SttSettings } from "./stt-settings.ts"
@@ -18,6 +19,9 @@ export const CLEANUP_LEVELS_FEATURE = "cleanup_level"
 /** The feature a host advertises when a take's decode may be given a Hearing prompt (ADR 0067). */
 export const HEARING_PROMPT_FEATURE = "hearing_prompt"
 
+/** The feature a host advertises when it times its own hearing and states that on the picker's rows. */
+export const SPEECH_PROBE_FEATURE = "speech_probe"
+
 /** The speech fields a page may write: each is the bot's, and none is the host's own config. */
 export type SpeechPatch = {
   model?: string
@@ -26,20 +30,45 @@ export type SpeechPatch = {
   hearing_prompt?: boolean
 }
 
+/** One model's measurement on this host: the factor it heard at, and when the host took it. */
+export interface SpeechMeasurement {
+  /** How many seconds of speech the model hears in a second, timed here. */
+  realtime: number
+  at: string | null
+}
+
 export interface SpeechModel {
   name: string
   /** The download, in MB; null for a hand-written model the plugin's catalogue doesn't list. */
   sizeMb: number | null
-  /** Roughly how many seconds of speech it hears in a second on a laptop CPU. */
-  speed: number | null
-  /** Too large to keep up with someone talking on a CPU. */
-  slowOnCpu: boolean
+  /** This host's own measurement, or null where it has taken none on this model (ADR 0075). */
+  measured: SpeechMeasurement | null
+  /** Whether that measurement hears speech faster than it is said; null where there is none. */
+  keepsUp: boolean | null
+  /** The one row this host's measurement recommends: the model it moves a pick towards. */
+  recommended: boolean
   /** Already on the host, so a take on it doesn't wait for a download. */
   downloaded: boolean
   /** The model in play: what the next clip is heard on. */
   inUse: boolean
   /** In play but not on disk: the next clip downloads it before it is heard. */
   downloading: boolean
+}
+
+/** What a host measured of itself, and the one row that measurement recommends (ADR 0075). */
+export interface SpeechProbe {
+  /** Whether this host still owes a measurement of its own. */
+  owed: boolean
+  /** How many rows carry one. */
+  measured: number
+  /** The row the measurement recommends, or null where it recommends none. */
+  recommended: string | null
+  /** Another machine's measurement, named where the stored one isn't this host's own. */
+  elsewhere: { name: string; at: string } | null
+  /** Why this host has nothing to measure, where it says so. */
+  reason: string | null
+  /** When this host took the measurement it draws. */
+  at: string | null
 }
 
 export interface SpeechCleanup {
@@ -132,6 +161,8 @@ export interface SpeechSettings {
   stt?: SttSettings
   /** Who hears this bot's takes, where the host answers it (ADR 0069). */
   provider?: HeardBy
+  /** This host's own measurement of its hearing, where the plugin takes one (ADR 0075). */
+  probe?: SpeechProbe
 }
 
 /** A stored level as one of the four, or nothing where it names none of them (ADR 0066). */
@@ -151,17 +182,44 @@ function choice(raw: unknown): SpeechPick | null {
   return { provider: pick.provider, model: pick.model }
 }
 
+function measurementOf(raw: unknown): SpeechMeasurement | null {
+  const measured = (raw ?? {}) as Record<string, unknown>
+  if (typeof measured.realtime !== "number") return null
+  return {
+    realtime: measured.realtime,
+    at: typeof measured.at === "string" ? measured.at : null,
+  }
+}
+
 function modelOf(raw: unknown): SpeechModel | null {
   const row = (raw ?? {}) as Record<string, unknown>
   if (typeof row.name !== "string" || !row.name) return null
   return {
     name: row.name,
     sizeMb: typeof row.size_mb === "number" ? row.size_mb : null,
-    speed: typeof row.speed === "number" ? row.speed : null,
-    slowOnCpu: Boolean(row.slow_on_cpu),
+    measured: measurementOf(row.measured),
+    keepsUp: typeof row.keeps_up === "boolean" ? row.keeps_up : null,
+    recommended: row.recommended === true,
     downloaded: Boolean(row.downloaded),
     inUse: Boolean(row.in_use),
     downloading: Boolean(row.downloading),
+  }
+}
+
+function probeOf(raw: unknown): SpeechProbe | undefined {
+  const probe = (raw ?? {}) as Record<string, unknown>
+  if (typeof probe.owed !== "boolean") return undefined
+  const elsewhere = (probe.elsewhere ?? {}) as Record<string, unknown>
+  return {
+    owed: probe.owed,
+    measured: typeof probe.measured === "number" ? probe.measured : 0,
+    recommended: typeof probe.recommended === "string" ? probe.recommended : null,
+    elsewhere:
+      typeof elsewhere.name === "string" && elsewhere.name
+        ? { name: elsewhere.name, at: typeof elsewhere.at === "string" ? elsewhere.at : "" }
+        : null,
+    reason: typeof probe.reason === "string" ? probe.reason : null,
+    at: typeof probe.at === "string" ? probe.at : null,
   }
 }
 
@@ -174,11 +232,19 @@ export function readSpeech(raw: unknown): SpeechSettings {
   // leaves the field out rather than promising settings it never described (ADR 0063).
   const stt = readStt(speech.stt)
   const provider = readHeardBy(speech.provider)
+  const probe = probeOf(speech.probe)
+  // One row is ever named as recommended: a payload claiming two is read as naming the first.
+  const models = Array.isArray(speech.models)
+    ? speech.models.map(modelOf).filter((row): row is SpeechModel => row !== null)
+    : []
+  let named = false
+  for (const row of models) {
+    row.recommended = row.recommended && !named
+    named = named || row.recommended
+  }
   return {
     model: typeof speech.model === "string" ? speech.model : "",
-    models: Array.isArray(speech.models)
-      ? speech.models.map(modelOf).filter((row): row is SpeechModel => row !== null)
-      : [],
+    models,
     cleanup: {
       model: choice(cleanup.model),
       allowed: Boolean(cleanup.allowed),
@@ -188,6 +254,7 @@ export function readSpeech(raw: unknown): SpeechSettings {
     hearing: { sent: hearing.sent === true },
     ...(stt ? { stt } : {}),
     ...(provider ? { provider } : {}),
+    ...(probe ? { probe } : {}),
   }
 }
 
@@ -219,16 +286,41 @@ export function modelSize(sizeMb: number | null): string {
 }
 
 /** How fast a model hears speech: `16× realtime`, which is what a pick is really between. */
-export function modelSpeed(speed: number | null): string {
-  if (speed === null) return ""
-  const shown = speed >= 10 ? Math.round(speed) : speed.toFixed(1).replace(/\.0$/, "")
+export function modelSpeed(realtime: number | null): string {
+  if (realtime === null) return ""
+  const shown = realtime >= 10 ? Math.round(realtime) : realtime.toFixed(1).replace(/\.0$/, "")
   return `${shown}× realtime`
+}
+
+/**
+ * What a row's own line says about speed: the host's measurement where it has one, and plainly
+ * that it has none where it doesn't — never a factor nobody timed (ADR 0075). The sheet's own note
+ * says whose measurement the numbers are, so a row needn't repeat "on this host".
+ */
+export function measuredLine(row: SpeechModel): string {
+  return row.measured ? modelSpeed(row.measured.realtime) : "Not measured"
 }
 
 /** Whether a row is the one in play, and should read as chosen rather than offered. */
 export function marked(row: SpeechModel): string | null {
   if (row.inUse && row.downloading) return "In use · downloads on the next take"
-  if (row.inUse) return row.slowOnCpu ? "In use · too slow on a CPU" : "In use"
-  if (row.slowOnCpu) return "Too slow on a CPU"
+  if (row.inUse) return row.keepsUp === false ? "In use · too slow on this host" : "In use"
+  if (row.keepsUp === false) return "Too slow on this host"
   return null
+}
+
+/**
+ * The line under the picker's rows: what this host measured, what it is doing about having none,
+ * or another machine's measurement named rather than drawn as this one's.
+ */
+export function probeNote(probe: SpeechProbe | undefined, measuring = false): string | null {
+  if (!probe) return null
+  if (measuring) return "Measuring this host's hearing…"
+  if (!probe.owed) return probe.measured > 0 ? "Measured on this host" : null
+  if (probe.elsewhere?.name) return `Measured on ${probe.elsewhere.name}, not this host.`
+  if (probe.reason) return probe.reason
+  // A host can owe a measurement while holding others — a model downloaded since the last probe.
+  return probe.measured > 0
+    ? "A model here isn't measured yet"
+    : "This host hasn't measured its models yet."
 }

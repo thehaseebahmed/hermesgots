@@ -3165,15 +3165,20 @@ function tidyWhole(text) {
   return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`
 }
 // plugin/speech.py: the host's own speech model (`stt.local.model`) beside the models a pick is made
-// from, with the size and speed a pick is weighed on and whether the host already has each one. A pick
-// is written here and described back whole, so the Dictation tab reads the model it holds after a
-// reload. The cleanup pick is only taken where the host grants the override permission.
+// from, with the download each costs and whether the host already has it, and the measurement the
+// host took of itself (plugin/speech_probe.py, ADR 0075). A pick is written here and described back
+// whole, so the Dictation tab reads the model it holds after a reload. The cleanup pick is only
+// taken where the host grants the override permission.
 const SPEECH_MODELS = [
-  { name: "tiny", size_mb: 75, speed: 32.0, slow_on_cpu: false },
-  { name: "base", size_mb: 145, speed: 16.0, slow_on_cpu: false },
-  { name: "small", size_mb: 484, speed: 6.0, slow_on_cpu: false },
-  { name: "medium", size_mb: 1530, speed: 1.4, slow_on_cpu: true },
+  { name: "tiny", size_mb: 75 },
+  { name: "base", size_mb: 145 },
+  { name: "small", size_mb: 484 },
+  { name: "medium", size_mb: 1530 },
 ]
+// The measurement a probe answers with; `tiny` sits under the threshold, so one row goes unrecommended.
+const SPEECH_MEASURED = { tiny: 1.4, base: 9.4, small: 3.2 }
+// plugin/speech_probe.py's KEEP_UP, held to it by `test_speech_probe.py` — the app is never told it.
+const KEEP_UP = 2.0
 const SPEECH_DENIED =
   "This host doesn't let Gots pick the model. Allow it with `hermes plugins enable memento`."
 const speech = {
@@ -3184,6 +3189,7 @@ const speech = {
   level: "light",
   hearing: false,
   downloaded: new Set(["tiny", "base", "small"]),
+  probe: null,
 }
 // plugin/speech.py's whole `stt` section (ADR 0063): Hermes's own defaults, one key at a time. The
 // values start empty, so the page draws every default as the host's own, and a write lands in the
@@ -3246,6 +3252,15 @@ function sttReading() {
   }
 }
 function speechReading() {
+  // plugin/speech_probe.py's `recommend`, restated: a mock is a stand-in, not an import.
+  const keepsUp = (name) => (speech.probe?.[name] ?? 0) >= KEEP_UP
+  const measuredNames = speech.probe ? Object.keys(speech.probe) : []
+  const keeping = SPEECH_MODELS.filter((entry) => keepsUp(entry.name))
+  const recommended = keeping.length
+    ? [...keeping].sort((a, b) => b.size_mb - a.size_mb)[0].name
+    : measuredNames.length
+      ? measuredNames.sort((a, b) => speech.probe[b] - speech.probe[a])[0]
+      : null
   return {
     model: speech.model,
     models: SPEECH_MODELS.map((entry) => ({
@@ -3253,7 +3268,21 @@ function speechReading() {
       downloaded: speech.downloaded.has(entry.name),
       in_use: entry.name === speech.model,
       downloading: entry.name === speech.model && !speech.downloaded.has(entry.name),
+      measured:
+        speech.probe && entry.name in speech.probe
+          ? { realtime: speech.probe[entry.name], at: "2026-11-02T09:00:00Z" }
+          : null,
+      keeps_up: speech.probe && entry.name in speech.probe ? keepsUp(entry.name) : null,
+      recommended: entry.name === recommended,
     })),
+    probe: {
+      owed: !speech.probe,
+      measured: speech.probe ? Object.keys(speech.probe).length : 0,
+      recommended,
+      elsewhere: null,
+      reason: null,
+      at: speech.probe ? "2026-11-02T09:00:00Z" : null,
+    },
     cleanup: {
       model: speech.cleanup,
       allowed: RESEARCH_WRITERS,
@@ -3985,6 +4014,7 @@ http
           "dictation",
           ...(DICTATIONS ? ["dictations"] : []),
           "speech_model",
+          "speech_probe",
           "cleanup_level",
           "hearing_prompt",
           "stt_settings",
@@ -5484,6 +5514,13 @@ http
         // The model is the one key the rest of the mock reads: the pick's own rows follow it.
         if (key === "stt.local.model") speech.model = stt.values[key] ?? STT_DEFAULTS[key]
         return json(res, 200, { object: "memento.stt", stt: sttReading() })
+      }
+    }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/speech/probe") {
+      if (req.method === "POST") {
+        await readBody(req).catch(() => ({}))
+        speech.probe = { ...SPEECH_MEASURED }
+        return json(res, 200, { object: "memento.speech", speech: speechReading() })
       }
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/speech") {

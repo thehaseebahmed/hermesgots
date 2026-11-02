@@ -28,9 +28,11 @@ Four things are kept beside it in the host's settings store, per bot:
   the failure is kept, once, for the app to show. A model that failed is never remembered as the one
   in play, so the fallback can't poison itself.
 
-The catalogue is Hermes's local faster-whisper family with the size and the speed a pick is weighed
-on. Nothing here loads a model: ``dictation.warm`` does, and this module decides what a failure
-means.
+The catalogue is Hermes's local faster-whisper family with the download each model costs. Nothing
+here says how fast a model hears: `speech_probe` times this host's own hearing on a short recording
+and keeps the result with the model it was taken on (ADR 0075), and a row without a measurement says
+so rather than quoting a figure nobody timed. Nothing here loads a model either: `dictation.warm`
+does, and this module decides what a failure means.
 """
 
 from __future__ import annotations
@@ -40,7 +42,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
-from . import dictation, dictation_cleanup
+from . import dictation, dictation_cleanup, speech_probe
 from .store import get_setting, put_setting
 
 logger = logging.getLogger(__name__)
@@ -52,20 +54,19 @@ LEVEL_KEY = "speech_cleanup_level"
 HEARING_KEY = "speech_hearing_prompt"
 STT_KEY = "stt"
 
-# What a pick is weighed on. ``speed`` is roughly how many seconds of speech the model hears in a
-# second on a modern laptop CPU, so a model under 2 can't keep up with someone talking; ``size_mb``
-# is the download. ``repo`` is the faster-whisper repository the name resolves to, which is how a
-# downloaded model is found in the Hugging Face cache.
+# The catalogue is Hermes's local faster-whisper family, with the download a pick is weighed on and
+# the repository the name resolves to — which is how a downloaded model is found in the Hugging Face
+# cache, whose layout is not ours.
 MODELS: Sequence[Dict[str, Any]] = (
-    {"name": "tiny", "size_mb": 75, "speed": 32.0, "slow_on_cpu": False, "repo": "Systran/faster-whisper-tiny"},
-    {"name": "base", "size_mb": 145, "speed": 16.0, "slow_on_cpu": False, "repo": "Systran/faster-whisper-base"},
-    {"name": "small", "size_mb": 484, "speed": 6.0, "slow_on_cpu": False, "repo": "Systran/faster-whisper-small"},
-    {"name": "distil-small.en", "size_mb": 332, "speed": 20.0, "slow_on_cpu": False, "repo": "Systran/faster-distil-whisper-small.en"},
-    {"name": "distil-medium.en", "size_mb": 789, "speed": 8.0, "slow_on_cpu": False, "repo": "Systran/faster-distil-whisper-medium.en"},
-    {"name": "distil-large-v3", "size_mb": 1510, "speed": 3.0, "slow_on_cpu": False, "repo": "Systran/faster-distil-whisper-large-v3"},
-    {"name": "large-v3-turbo", "size_mb": 1620, "speed": 2.0, "slow_on_cpu": False, "repo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo"},
-    {"name": "medium", "size_mb": 1530, "speed": 1.4, "slow_on_cpu": True, "repo": "Systran/faster-whisper-medium"},
-    {"name": "large-v3", "size_mb": 3090, "speed": 0.6, "slow_on_cpu": True, "repo": "Systran/faster-whisper-large-v3"},
+    {"name": "tiny", "size_mb": 75, "repo": "Systran/faster-whisper-tiny"},
+    {"name": "base", "size_mb": 145, "repo": "Systran/faster-whisper-base"},
+    {"name": "small", "size_mb": 484, "repo": "Systran/faster-whisper-small"},
+    {"name": "distil-small.en", "size_mb": 332, "repo": "Systran/faster-distil-whisper-small.en"},
+    {"name": "distil-medium.en", "size_mb": 789, "repo": "Systran/faster-distil-whisper-medium.en"},
+    {"name": "distil-large-v3", "size_mb": 1510, "repo": "Systran/faster-distil-whisper-large-v3"},
+    {"name": "large-v3-turbo", "size_mb": 1620, "repo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo"},
+    {"name": "medium", "size_mb": 1530, "repo": "Systran/faster-whisper-medium"},
+    {"name": "large-v3", "size_mb": 3090, "repo": "Systran/faster-whisper-large-v3"},
 )
 
 # Hermes resolves these two spellings of a model it knows.
@@ -167,32 +168,43 @@ def downloaded(entry: Dict[str, Any], roots: Sequence[Path]) -> bool:
 
 
 def read(
-    config_path: Path, path: Path, gate: Dict[str, bool], with_stt: bool = False
+    config_path: Path,
+    path: Path,
+    gate: Dict[str, bool],
+    with_stt: bool = False,
+    stt: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """The host's speech settings as the Dictation tab draws them: the pick, the list.
+    """The host's speech settings as the Dictation tab draws them: the pick, the list, the measurement.
 
     ``with_stt`` adds the whole ``stt`` block the Speech-to-text page draws, built from the read
     this function already did, so one request parses ``config.yaml`` once. A host that declares no
-    ``stt`` defaults answers without it — the feature absent, not a read that failed.
+    ``stt`` defaults answers without it — the feature absent, not a read that failed. ``stt`` is the
+    section a caller already read, so a route that measured before answering parses the file once.
     """
-    stt = _stt(config_path)
+    if stt is None:
+        stt = _stt(config_path)
     model = _model_of(stt)
     roots = cache_roots(stt)
+    present = _present(roots)
+    probe = speech_probe.state(path, sizes(), present)
+    measured = probe.pop("models")
     rows: List[Dict[str, Any]] = []
     seen = False
     for entry in MODELS:
         here = entry["name"] == model
         seen = seen or here
-        have = downloaded(entry, roots)
+        have = entry["name"] in present
+        taken = measured.get(entry["name"])
         rows.append(
             {
                 "name": entry["name"],
                 "size_mb": entry["size_mb"],
-                "speed": entry["speed"],
-                "slow_on_cpu": entry["slow_on_cpu"],
                 "downloaded": have,
                 "in_use": here,
                 "downloading": here and not have,
+                "measured": _measurement(taken),
+                "keeps_up": None if taken is None else speech_probe.keeps_up(taken),
+                "recommended": entry["name"] == probe["recommended"],
             }
         )
     if not seen:
@@ -201,16 +213,18 @@ def read(
             {
                 "name": model,
                 "size_mb": None,
-                "speed": None,
-                "slow_on_cpu": False,
                 "downloaded": False,
                 "in_use": True,
                 "downloading": False,
+                "measured": None,
+                "keeps_up": None,
+                "recommended": False,
             },
         )
     payload = {
         "model": model,
         "models": rows,
+        "probe": {"measured": len(measured), **probe},
         "cleanup": cleanup_state(path, gate),
         "hearing": {"sent": read_hearing(path)},
         "provider": dictation.heard_by_config(stt),
@@ -221,6 +235,43 @@ def read(
         except ImportError:
             logger.debug("memento: this host declares no speech settings", exc_info=True)
     return payload
+
+
+def sizes() -> Dict[str, int]:
+    """The catalogue's download figure per model, which a measurement's recommendation weighs by."""
+    return {str(entry["name"]): int(entry["size_mb"]) for entry in MODELS}
+
+
+def _present(roots: Sequence[Path]) -> List[str]:
+    """The catalogue's models this host already has on disk, in the catalogue's own order."""
+    return [str(entry["name"]) for entry in MODELS if downloaded(entry, roots)]
+
+
+def _measurement(taken: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """One row's measurement as the page draws it: the factor it heard at, and when it was taken."""
+    if not isinstance(taken, dict) or not isinstance(taken.get("realtime"), (int, float)):
+        return None
+    return {"realtime": taken["realtime"], "at": taken.get("at")}
+
+
+def probe(config_path: Path, path: Path, gate: Dict[str, bool]) -> Dict[str, Any]:
+    """Times this host's own hearing on the models it has, and answers the page as it then stands.
+
+    Only the models this machine has no measurement for are heard: a probe is once per model, kept
+    here rather than in a client's hands, and a model downloaded after the last one is measured on
+    the next ask without costing the others a second decode.
+
+    ``speech_probe.Busy`` is a take being heard and ``speech_probe.Unavailable`` is a host with
+    nothing to time; both are the route's to turn into its own answer, and neither writes a record.
+    """
+    stt = _stt(config_path)
+    model = _model_of(stt)
+    held = speech_probe.here(path)
+    missing = [name for name in speech_probe.models_present(_present(cache_roots(stt)), model)
+               if name not in held]
+    if missing:
+        speech_probe.measure(path, missing, keep=held)
+    return read(config_path, path, gate, stt=stt)
 
 
 def set_model(config_path: Path, value: Any) -> str:
