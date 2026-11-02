@@ -12,6 +12,9 @@ export function openedThread(move: Move): string | undefined {
   return move.new && !move.undone ? move.threadId : undefined
 }
 
+/** When a marker is drawn: the host's own clock for the move. */
+export const moveAt = (move: Move) => move.at
+
 /** The millisecond past a move a later turn is stamped, since `place` draws above the first message after it. */
 const MOVE_GAP = 1
 
@@ -36,5 +39,5 @@ export function moveMarks(
     const opened = openedThread(move)
     return !move.undone && !(opened && threadsDrawnAsCards.has(opened))
   })
-  return place(messages, marked, (move) => move.at)
+  return place(messages, marked, moveAt)
 }

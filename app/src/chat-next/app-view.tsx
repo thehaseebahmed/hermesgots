@@ -200,17 +200,18 @@ export function AppThreadView({
     () => compactionMarks(messages, record.compactions),
     [messages, record.compactions],
   )
-  const { flow, moved, moveThatOpenedThread, undo, marker } = useMainFlow({
+  const { flow, markersAbove, moveThatOpenedThread, undo, marker, tailRow } = useMainFlow({
     chatId,
     profileId: main?.profileId ?? "",
     thread: messages,
     moves,
+    compaction: compacted.trailing,
     on: Boolean(main),
     routeChat: main?.routeChat,
   })
   const { drawn, cut } = useFirstRows(chatId, flow, flow.length > 0)
   // A Main still being read is not an empty one: its greeting would say there is nothing here.
-  const empty = Boolean(main) && !flow.length && !moved.trailing.length && !streaming && !catchingUp
+  const empty = Boolean(main) && !flow.length && !streaming && !catchingUp
   const unstarted = Boolean(blank) && !messages.length && !streaming && !queue?.items.length
   // A thread this device holds nothing of has nothing to say "catching up" under: its first read
   // is one loader in the middle of the pane, and only a thread already held says it in words.
@@ -297,11 +298,12 @@ export function AppThreadView({
                             onUndo={undo}
                           />
                         )
+                      if (entry.kind !== "message") return tailRow(entry)
                       const message = entry.message
                       const change = changes.get(message.id)
                       return (
                         <MessageScrollerItem key={message.id} messageId={message.id}>
-                          {moved.before.get(message.id)?.map(marker)}
+                          {markersAbove.get(message.id)?.map(marker)}
                           {compacted.before.has(message.id) && (
                             <Compacted compaction={compacted.before.get(message.id)!} />
                           )}
@@ -335,8 +337,6 @@ export function AppThreadView({
                         </MessageScrollerItem>
                       )
                     })}
-                    {compacted.trailing && <Compacted compaction={compacted.trailing} />}
-                    {moved.trailing.map(marker)}
                     {!holds && line && (
                       <div className={COLUMN_BOX} {...(catching ? { "data-catching-up": "" } : {})}>
                         <LineRow line={line} count={running} onOpen={showSubagents} seed={chatId} />
@@ -346,11 +346,7 @@ export function AppThreadView({
                   {held.map((message) => (
                     <MessageScrollerItem key={message.id} messageId={message.id}>
                       <div data-unsent>
-                        <MessageItem
-                          message={message}
-                          showStats={false}
-                          actions={unsent}
-                        />
+                        <MessageItem message={message} showStats={false} actions={unsent} />
                       </div>
                     </MessageScrollerItem>
                   ))}

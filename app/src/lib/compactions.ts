@@ -13,6 +13,9 @@ export interface CompactionMarks {
   trailing?: Compaction
 }
 
+/** When a divider is drawn: the host's own time for the compaction. */
+export const compactionAt = (compaction: Compaction) => compaction.at
+
 /**
  * Each compaction sits above the first message written after it, on the host's clock. That is exact
  * for one made between turns, and for one made as a turn opens it lands between the user's message and
@@ -21,11 +24,13 @@ export interface CompactionMarks {
  * the first of them: Hermes keeps the rows it took away off the transcript, so the top of what a device
  * can load is where its compaction happened. Several in one gap are one divider, the first's. One a
  * reply already draws inside itself, at its seam, draws nothing here — the placement is this one
- * function's to make, wherever the divider ends up.
+ * function's to make, wherever the divider ends up. A chat holding no message at all keeps the one
+ * that made it: a Main whose turns were all triaged away has nothing above the divider, and it is
+ * still where the host compacted the context the markers below are missing.
  */
 export function compactionMarks(messages: Message[], compactions?: Compaction[]): CompactionMarks {
   const marks: CompactionMarks = { before: new Map() }
-  if (!messages.length || !compactions?.length) return marks
+  if (!compactions?.length) return marks
   const inside = new Set(
     messages.flatMap((message) =>
       (message.seams ?? []).map((seam) => compactionOf(seam, compactions)),
@@ -36,7 +41,7 @@ export function compactionMarks(messages: Message[], compactions?: Compaction[])
   const at = (message: Message) => message.hermesAt ?? message.createdAt
   for (const compaction of compactions) {
     if (inside.has(compaction)) continue
-    const next = messages.find((message) => at(message) > compaction.at)
+    const next = messages.find((message) => at(message) > compactionAt(compaction))
     if (!next) marks.trailing ??= compaction
     else if (!marks.before.has(next.id)) marks.before.set(next.id, compaction)
   }

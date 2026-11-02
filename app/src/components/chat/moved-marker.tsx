@@ -29,7 +29,7 @@ export function MovedMarker({
 }) {
   const face = useCodeFace()
   return (
-    <div className={cn("flex flex-col gap-1", COLUMN)}>
+    <div data-slot="moved-marker" data-move={move.id} className={cn("flex flex-col gap-1", COLUMN)}>
       <Bubble variant="default" align="end" className="self-end">
         <BubbleContent className={cn("px-4 py-2.5 text-[15px] whitespace-pre-wrap", face)}>
           {move.text}

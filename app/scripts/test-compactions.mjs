@@ -69,7 +69,12 @@ test("several before every loaded message are one divider", () => {
 test("no compactions, or none known, mark nothing", () => {
   assert.deepEqual(marked(turn(1, 100), []), { before: [], trailing: false })
   assert.deepEqual(marked(turn(1, 100), undefined), { before: [], trailing: false })
-  assert.deepEqual(marked([], [{ at: 1 }]), { before: [], trailing: false })
+})
+
+test("a chat holding no message keeps the compaction that made it, which closes its flow", () => {
+  // A Main whose every turn was triaged away: nothing in it to sit above, so the divider is what the
+  // foot of its flow holds, exactly as it is for a message-less thread waiting on its first page.
+  assert.deepEqual(marked([], [{ at: 1 }]), { before: [], trailing: true })
 })
 
 test("each divider carries the compaction it marks, the first of a gap", () => {

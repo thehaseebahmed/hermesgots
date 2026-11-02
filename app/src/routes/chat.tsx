@@ -878,19 +878,27 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
       ],
     [messages],
   )
+  // Where the host compacted this chat's context: the first message after each carries a divider above
+  // it. One that fell inside a reply is drawn in the reply, where it happened, and not by this; one
+  // made after everything here closes the flow, which is Main's to place.
+  const compacted = useMemo(
+    () => compactionMarks(thread ?? [], conversation?.compactions),
+    [thread, conversation?.compactions],
+  )
   const {
     threadList,
-    cards,
     flow,
-    moved,
+    markersAbove,
     moveThatOpenedThread,
     undo: undoMoveOutMain,
     marker: moveMarker,
+    tailRow,
   } = useMainFlow({
     chatId: id,
     profileId: conversation?.profileId ?? "",
     thread,
     moves: conversation?.moves,
+    compaction: compacted.trailing,
     on: Boolean(botThreads && conversation?.main),
     listFor: gone ? profile?.id : undefined,
     afterUndo: refreshQueue,
@@ -913,12 +921,6 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   const changes = useMemo(
     () => modelChanges(thread ?? [], conversation?.modelChanges),
     [thread, conversation?.modelChanges],
-  )
-  // Where the host compacted this chat's context: the first message after each carries a divider above
-  // it. One that fell inside a reply is drawn in the reply, where it happened, and not by this.
-  const compacted = useMemo(
-    () => compactionMarks(thread ?? [], conversation?.compactions),
-    [thread, conversation?.compactions],
   )
   const draws = useDraws(thread ?? NO_ROWS, profile)
   // Only a run can be steered, and only on a Hermes that has the route.
@@ -1066,9 +1068,10 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   // when this tab comes back, and now and then while it's on screen.
   const updatedAt = conversation?.updatedAt
   const hasMessages = (messages?.length ?? 0) > 0
-  const hasCards = Boolean(cards && (cards.before.size || cards.trailing.length))
-  // A session with a past is never drawn as one nobody started: it has a thread, unread.
-  const unstarted = !gone && configured && !hasMessages && !hasCards && !needsHistory
+  // A session with a past is never drawn as one nobody started: it has a thread, unread. What Main
+  // draws is its flow — messages, cards and the markers and dividers no message follows — so that
+  // one list answers "is there anything here", not the messages or the cards on their own.
+  const unstarted = !gone && configured && !flow.length && !needsHistory
   // The agents this chat's agent delegated to, for their cards in the thread. Only a call that set a
   // subagent to work turns the poll on: a list, steer or stop runs no agent to wait for (ADR 0053).
   const spawning = useMemo(() => spawnInFlight(messages), [messages])
@@ -1372,7 +1375,7 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
         }
       />
 
-      {hasMessages || hasCards || (thread && moved.trailing.length) ? (
+      {flow.length > 0 ? (
         <MessageScrollerProvider key={id ?? "new"} autoScroll defaultScrollPosition="end">
           <MessageScroller className="flex-1">
             <MessageScrollerViewport aria-label="Messages">
@@ -1405,11 +1408,12 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
                           onUndo={undoMoveOutMain}
                         />
                       )
+                    if (entry.kind !== "message") return tailRow(entry)
                     const message = entry.message
                     const change = changes.get(message.id)
                     return (
                       <MessageScrollerItem key={message.id} messageId={message.id}>
-                        {moved.before.get(message.id)?.map(moveMarker)}
+                        {markersAbove.get(message.id)?.map(moveMarker)}
                         {compacted.before.has(message.id) && (
                           <Compacted compaction={compacted.before.get(message.id)!} />
                         )}
@@ -1431,8 +1435,6 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
                       </MessageScrollerItem>
                     )
                   })}
-                  {compacted.trailing && <Compacted compaction={compacted.trailing} />}
-                  {moved.trailing.map(moveMarker)}
                   {subagentsRunning > 0 && !drawsInline && (
                     <StatusLine>
                       <SubagentCount

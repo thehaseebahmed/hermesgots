@@ -26,3 +26,17 @@ export function place<T>(
   }
   return placed
 }
+
+/**
+ * Two items at one moment keep a total order by the id each is known by, so a list never swaps
+ * places between renders.
+ */
+export function byTimeThenId<T>(at: (item: T) => number, id: (item: T) => string) {
+  return (a: T, b: T) => {
+    const apart = at(a) - at(b)
+    if (apart) return apart
+    const one = id(a)
+    const other = id(b)
+    return one < other ? -1 : one > other ? 1 : 0
+  }
+}
