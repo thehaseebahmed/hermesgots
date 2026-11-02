@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 # a session's close and the report it ends with (`closes.py`, ADR 0080): one new table, so nothing
 # already written has to move. 51 adds the routine messages a chat holds and the one that is still
 # waiting for its chat to be free (`platform_gots.py`, ADR 0081): two indexes beside one new table.
-SCHEMA_VERSION = 51
+SCHEMA_VERSION = 52
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -835,4 +835,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
             """CREATE INDEX IF NOT EXISTS routine_chat
                    ON routine_messages (session_id, at)"""
         )
+        routine_columns = {row[1] for row in conn.execute("PRAGMA table_info(routine_messages)")}
+        for column, kind in (("model", "TEXT"), ("seconds", "REAL")):
+            if column not in routine_columns:
+                conn.execute(f"ALTER TABLE routine_messages ADD COLUMN {column} {kind}")
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

@@ -252,6 +252,45 @@ class RoutineMessage(unittest.TestCase):
         self.assertEqual(routine["run_session"], "cron_job-1_99")
         self.assertEqual(routine["title"], "Morning watch")
 
+    def test_the_card_is_told_what_ran_and_how_long_it_took(self):
+        # The card says "Ran for 12s · claude-sonnet-4-5", and both come from the run's own session
+        # row — the same row the session id does, so nothing extra is read.
+        self.db.runs = [
+            {
+                "id": "cron_job-1_99",
+                "cron_job_id": "job-1",
+                "model": "claude-sonnet-4-5",
+                "started_at": 1_760_000_000.0,
+                "ended_at": 1_760_000_012.0,
+            }
+        ]
+        self._deliver()
+        routine = self._runs()[0]
+        self.assertEqual(routine["model"], "claude-sonnet-4-5")
+        self.assertEqual(routine["seconds"], 12.0)
+
+    def test_a_run_that_names_no_model_is_read_from_its_config(self):
+        self.db.runs = [
+            {
+                "id": "cron_job-1_99",
+                "cron_job_id": "job-1",
+                "model_config": '{"model": "gpt-5-mini"}',
+                "started_at": 1_760_000_000.0,
+                "ended_at": 1_760_000_090.0,
+            }
+        ]
+        self._deliver()
+        routine = self._runs()[0]
+        self.assertEqual(routine["model"], "gpt-5-mini")
+        self.assertEqual(routine["seconds"], 90.0)
+
+    def test_a_run_with_no_end_says_nothing_about_its_length(self):
+        self.db.runs = [{"id": "cron_job-1_99", "cron_job_id": "job-1", "started_at": 1_760_000_000.0}]
+        self._deliver()
+        routine = self._runs()[0]
+        self.assertIsNone(routine["seconds"])
+        self.assertIsNone(routine["model"])
+
     def test_the_scheduler_lane_attributes_from_the_wrapper(self):
         self.db.runs = [{"id": "cron_job-1_99", "cron_job_id": "job-1"}]
         platform_gots.deliver("main", WRAPPED, {}, [])

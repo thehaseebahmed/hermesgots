@@ -3,7 +3,7 @@
 // delivers the routine's message into the same chat, which is what a real host does when a job fires.
 import { assert, flow, pass } from "./lib.mjs"
 
-const CHIP = "[data-slot=routine-chip]"
+const CHIP = "[data-slot=routine-card]"
 const SHEET = "[data-slot=routine-run]"
 const SAID = "the tide turns at 06:40"
 const RAN = "The tide turns at 06:40"
@@ -30,6 +30,8 @@ async function drive({ page, send, lastReply, until, shot }) {
   assert.ok(thread.includes(SAID), "the routine's words are in the thread")
   // The chat was active moments ago, so the message opens as an aside rather than as an answer.
   assert.match(thread, /On a side note, |As a quick aside, /, "the aside opener is there")
+  // The card says what the routine is, what it ran on and how long it took (ADR 0081).
+  assert.match(thread, /Ran for \d/, "the card says how long the run took")
   await shot("message")
 
   await page.locator(CHIP).click()

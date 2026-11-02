@@ -31,7 +31,7 @@ import sqlite3
 import time
 from contextlib import closing
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 from . import attachments, chats, events, push, sessions, ticker
 from .store import connect, current_path
@@ -237,19 +237,65 @@ def _tip(db: Any, session_id: str) -> str:
     return session_id
 
 
-def _run_session(db: Any, job_id: Optional[str]) -> Optional[str]:
-    """The newest run session of ``job_id``, which is what the chip opens."""
+class Run(NamedTuple):
+    """What a delivery knows about the run that produced it: the session it wrote, and its facts.
+
+    The card says what ran and how long it took, and both come from the same row the session id
+    does — Hermes's run listing hands back the whole session, and this is the part worth keeping.
+    """
+
+    session: Optional[str] = None
+    model: Optional[str] = None
+    seconds: Optional[float] = None
+
+
+def _run(db: Any, job_id: Optional[str]) -> Run:
+    """The newest run of ``job_id``: the session the chip opens, and how it went."""
     lister = getattr(db, "list_cron_job_runs", None)
     if not job_id or not callable(lister):
-        return None
+        return Run()
     try:
         rows = lister(job_id, limit=1) or []
     except Exception:
         logger.debug("memento: couldn't read the runs of %s", job_id, exc_info=True)
-        return None
+        return Run()
     first = rows[0] if rows else None
-    found = first.get("id") if isinstance(first, dict) else None
-    return str(found) if found else None
+    if not isinstance(first, dict):
+        return Run()
+    found = first.get("id")
+    return Run(
+        str(found) if found else None,
+        _model_of(first),
+        _seconds_of(first),
+    )
+
+
+def _model_of(row: Dict[str, Any]) -> Optional[str]:
+    """The model the run used: the session's own, or the one its config names."""
+    model = row.get("model")
+    if isinstance(model, str) and model:
+        return model
+    config = row.get("model_config")
+    if isinstance(config, str) and config:
+        try:
+            config = json.loads(config)
+        except (TypeError, ValueError):
+            return None
+    if isinstance(config, dict):
+        named = config.get("model")
+        if isinstance(named, str) and named:
+            return named
+    return None
+
+
+def _seconds_of(row: Dict[str, Any]) -> Optional[float]:
+    """How long the run took, to a tenth of a second: a routine is often over inside one."""
+    started, ended = row.get("started_at"), row.get("ended_at")
+    if not isinstance(started, (int, float)) or not isinstance(ended, (int, float)):
+        return None
+    if ended < started:
+        return None
+    return round(float(ended) - float(started), 1)
 
 
 def _execution(job_id: Optional[str], run_session: Optional[str]) -> str:
@@ -347,7 +393,8 @@ def queued(path: Path) -> List[Dict[str, Any]]:
     conn = connect(path)
     try:
         rows = conn.execute(
-            """SELECT execution, session_id, chat_id, job_id, title, run_session, text, at, notify
+            """SELECT execution, session_id, chat_id, job_id, title, run_session, model, seconds,
+                      text, at, notify
                FROM routine_messages WHERE row IS NULL ORDER BY at"""
         ).fetchall()
     finally:
@@ -360,11 +407,13 @@ def queued(path: Path) -> List[Dict[str, Any]]:
             "job_id": job_id,
             "title": title,
             "run_session": run_session,
+            "model": model,
+            "seconds": seconds,
             "text": text,
             "at": at,
             "notify": bool(notify),
         }
-        for execution, session_id, chat_id, job_id, title, run_session, text, at, notify in rows
+        for execution, session_id, chat_id, job_id, title, run_session, model, seconds, text, at, notify in rows
     ]
 
 
@@ -387,7 +436,7 @@ def _remember(
     chat: Dict[str, Any],
     job_id: Optional[str],
     title: Optional[str],
-    run_session: Optional[str],
+    run: Run,
     text: str,
     row: Optional[int],
     notify: bool,
@@ -396,8 +445,9 @@ def _remember(
     try:
         conn.execute(
             """INSERT INTO routine_messages
-                   (execution, session_id, chat_id, job_id, title, run_session, text, at, row, notify)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   (execution, session_id, chat_id, job_id, title, run_session, model, seconds,
+                    text, at, row, notify)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(execution) DO UPDATE SET
                    row = COALESCE(excluded.row, routine_messages.row),
                    text = excluded.text""",
@@ -407,7 +457,9 @@ def _remember(
                 chat["id"],
                 job_id,
                 title,
-                run_session,
+                run.session,
+                run.model,
+                run.seconds,
                 text[:MAX_TEXT],
                 int(time.time() * 1000),
                 row,
@@ -472,15 +524,13 @@ def deliver(
                     "message into. Open it in Gots and send one message first."
                 )
             }
-        run_session = _run_session(db, job_id)
-        execution = _execution(job_id, run_session)
+        run = _run(db, job_id)
+        execution = _execution(job_id, run.session)
         already = written(path, execution)
         if already is not None:
             # The same execution delivered twice writes one message (a retry, or a mirrored replay).
             return {"success": True, "message_id": str(already), "chat_id": chat["id"], "execution": execution}
-        return _deliver_now(
-            path, home, db, chat, tip, text, files, execution, job_id, title, run_session, notify
-        )
+        return _deliver_now(path, home, db, chat, tip, text, files, execution, job_id, title, run, notify)
     except Exception as error:
         logger.warning("memento: a routine's message couldn't be delivered", exc_info=True)
         return {"error": f"Couldn't write the routine's message: {error}"}
@@ -504,7 +554,7 @@ def _deliver_now(
     execution: str,
     job_id: Optional[str],
     title: Optional[str],
-    run_session: Optional[str],
+    run: Run,
     notify: bool,
 ) -> Dict[str, Any]:
     staged, dropped = _staged(home, chat["session"], files)
@@ -523,7 +573,7 @@ def _deliver_now(
     if not taken:
         # The chat is busy: the message waits, and is written once its turn lets the lease go.
         _remember(
-            path, execution=execution, chat=chat, job_id=job_id, title=title, run_session=run_session,
+            path, execution=execution, chat=chat, job_id=job_id, title=title, run=run,
             text=body, row=None, notify=notify,
         )
         wake()
@@ -540,7 +590,7 @@ def _deliver_now(
     finally:
         _release(db, tip, holder)
     _remember(
-        path, execution=execution, chat=chat, job_id=job_id, title=title, run_session=run_session,
+        path, execution=execution, chat=chat, job_id=job_id, title=title, run=run,
         text=body, row=row, notify=notify,
     )
     events.note("runs", chat["session"], path)
@@ -607,7 +657,8 @@ def write_queued(home: Path, path: Path) -> int:
                 _release(db, tip, holder)
             _remember(
                 path, execution=item["execution"], chat=chat, job_id=item["job_id"], title=item["title"],
-                run_session=item["run_session"], text=item["text"], row=row, notify=item["notify"],
+                run=Run(item["run_session"], item["model"], item["seconds"]),
+                text=item["text"], row=row, notify=item["notify"],
             )
             events.note("runs", item["session_id"], path)
             if item["notify"]:
@@ -655,7 +706,8 @@ def routines(path: Path, home: Path, session_id: str) -> List[Dict[str, Any]]:
     conn = connect(path)
     try:
         rows = conn.execute(
-            f"""SELECT execution, job_id, title, run_session, at FROM routine_messages
+            f"""SELECT execution, job_id, title, run_session, model, seconds, at
+                FROM routine_messages
                 WHERE session_id IN ({marks}) AND row IS NOT NULL ORDER BY at""",
             tuple(ids),
         ).fetchall()
@@ -665,11 +717,21 @@ def routines(path: Path, home: Path, session_id: str) -> List[Dict[str, Any]]:
         return []
     current = _current_rows(home, session_id)
     found = []
-    for execution, job_id, title, run_session, at in rows:
+    for execution, job_id, title, run_session, model, seconds, at in rows:
         row = current.get(execution)
         if row is None:
             continue
-        found.append({"row": row, "at": at, "job_id": job_id, "title": title, "run_session": run_session})
+        found.append(
+            {
+                "row": row,
+                "at": at,
+                "job_id": job_id,
+                "title": title,
+                "run_session": run_session,
+                "model": model,
+                "seconds": seconds,
+            }
+        )
     return found
 
 

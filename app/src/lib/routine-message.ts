@@ -12,3 +12,21 @@ export const ROUTINE_KIND = "routine_message"
 /** Whether this transcript row is a routine's own message rather than part of a reply. */
 export const isRoutineRow = (row: { display_kind?: string | null }) =>
   row.display_kind === ROUTINE_KIND
+
+/**
+ * How long a routine ran, in the shortest words that keep it whole: "12s", "2m 14s", "1h 3m". A
+ * routine is usually over inside a minute, so the seconds are the part worth showing; past an hour
+ * they stop mattering.
+ */
+export function ranFor(seconds: number) {
+  const whole = Math.max(0, Math.round(seconds))
+  if (whole < 60) return `${whole}s`
+  if (whole < 3600) {
+    const minutes = Math.floor(whole / 60)
+    const rest = whole % 60
+    return rest ? `${minutes}m ${rest}s` : `${minutes}m`
+  }
+  const hours = Math.floor(whole / 3600)
+  const minutes = Math.round((whole % 3600) / 60)
+  return minutes ? `${hours}h ${minutes}m` : `${hours}h`
+}

@@ -1838,6 +1838,8 @@ function recordRoutine(req, body) {
     title: "Morning watch",
     run_session: runSession,
     execution: `job_mock:${runSession}`,
+    model: "claude-sonnet-4-5",
+    seconds: 12,
   }
   const row = ++lastRowId
   transcripts.get(session).push({

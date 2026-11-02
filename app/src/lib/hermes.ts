@@ -2592,6 +2592,10 @@ export interface RoutineMessage {
   title: string | null
   /** The Hermes session the run wrote, whose transcript the sheet reads. */
   runSession: string | null
+  /** The model the run used, where the host named one. */
+  model: string | null
+  /** How long the run took, in seconds: a routine is often over inside one. */
+  seconds: number | null
   /** The delivery's own stamp, milliseconds since the epoch. */
   at: number
 }
@@ -2626,6 +2630,8 @@ export function parseRoutineMessages(raw: unknown): RoutineMessage[] {
         jobId: nameOf(entry.job_id),
         title: nameOf(entry.title),
         runSession: nameOf(entry.run_session),
+        model: nameOf(entry.model),
+        seconds: typeof entry.seconds === "number" ? entry.seconds : null,
         at: typeof entry.at === "number" ? entry.at : 0,
       },
     ]

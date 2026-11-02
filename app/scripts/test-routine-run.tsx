@@ -39,7 +39,15 @@ const ANSWER = "Checked the feeds: nothing new."
 const GONE = "This run is no longer on the host."
 
 /** What the route names for a routine's message: the row it is drawn at, and the run behind it. */
-const RUN_ROW = { row: ROW, at: AT, job_id: JOB, title: TITLE, run_session: RUN }
+const RUN_ROW = {
+  row: ROW,
+  at: AT,
+  job_id: JOB,
+  title: TITLE,
+  run_session: RUN,
+  model: "claude-sonnet-4-5",
+  seconds: 12,
+}
 
 /** The run's own transcript, as the host serves a session's rows. */
 const RUN_ROWS: SessionMessage[] = [
@@ -132,27 +140,31 @@ const askedFor = (asked: Call[], part: string) =>
 
 const rows = () => findAll("[data-slot=message]")
 const rowWith = (needle: string) => rows().find((row) => row.textContent?.includes(needle))
-const chip = () => findAll("[data-slot=routine-chip]").at(-1)
+/** The pressable card: the plate is what a reader sees, its button is what they press. */
+const chip = () => findAll("[data-slot=routine-card]").at(-1)?.querySelector("button") ?? null
 const sheet = () => findAll('[role="dialog"]').at(-1) ?? null
 const sheetText = () => sheet()?.textContent ?? ""
 
-test("a routine's message draws a chip naming its routine, and the reply above it carries none", async () => {
+test("a routine's message draws the thread card, naming its routine and the run", async () => {
   await screen({ chat: "routine-chat", bot: botProfile("routine-chip") }, async (asked) => {
     await until(async () => Boolean(chip()), "the routine's chip")
     const routine = rowWith(SAID)
     const ordinary = rowWith(ORDINARY)
     assert.ok(routine && ordinary, "both replies are rows of the thread")
-    const drawn = routine.querySelector("[data-slot=routine-chip]")
-    assert.ok(drawn, "the routine's message wears a chip")
-    assert.equal(drawn.tagName, "BUTTON", "a real button, so the run is reachable")
-    assert.equal(drawn.textContent?.trim(), TITLE, "naming the routine")
+    const plate = routine.querySelector("[data-slot=routine-card]")
+    const drawn = plate?.querySelector("button")
+    assert.ok(plate && drawn, "the routine's message wears the thread's own card")
+    assert.match(plate.className, /rounded-3xl/, "on the plate a subagent's card has")
+    assert.equal(drawn.tagName, "BUTTON", "the whole plate, so the run is reachable")
+    assert.equal(drawn.textContent?.trim(), `${TITLE}Ran for 12s · claude-sonnet-4-5`)
     assert.equal(drawn.getAttribute("aria-label"), `Routine: ${TITLE}`, "and saying what it opens")
     assert.equal(
-      ordinary.querySelector("[data-slot=routine-chip]"),
+      plate.querySelector("[data-slot=routine-card] [data-slot=routine-card]"),
       null,
-      "the reply above it carries none",
+      "one card, not a card in a card",
     )
-    assert.equal(findAll("[data-slot=routine-chip]").length, 1, "one chip in the whole thread")
+    assert.equal(ordinary.querySelector("[data-slot=routine-card]"), null, "the reply above it carries none")
+    assert.equal(findAll("[data-slot=routine-card]").length, 1, "one card in the whole thread")
     assert.equal(askedFor(asked, "/routines"), 1, "the chat's runs were read once")
   })
 })
@@ -195,7 +207,7 @@ test("a host that doesn't advertise the feature is asked for nothing and draws n
       await until(async () => askedFor(asked, "/plugins/memento/info") > 0, "the feature read")
       await settle()
       assert.equal(askedFor(asked, "/routines"), 0, "nothing was asked of the chat")
-      assert.equal(findAll("[data-slot=routine-chip]").length, 0, "and no chip is drawn")
+      assert.equal(findAll("[data-slot=routine-card]").length, 0, "and no chip is drawn")
       assert.ok(rowWith(SAID), "the bot's message still draws, as any reply does")
     },
   )
@@ -215,7 +227,7 @@ test("a chat with no routine message is asked nothing, and draws nothing extra",
       await until(async () => askedFor(asked, "/plugins/memento/info") > 0, "the feature read")
       await settle()
       assert.equal(askedFor(asked, "/routines"), 0, "nothing was asked of the chat")
-      assert.equal(findAll("[data-slot=routine-chip]").length, 0, "and nothing is drawn")
+      assert.equal(findAll("[data-slot=routine-card]").length, 0, "and nothing is drawn")
       assert.ok(rowWith(ORDINARY), "while the bot's reply still draws, as any reply does")
     },
   )

@@ -1,15 +1,18 @@
 /**
- * The chip a routine's message wears (ADR 0081): which routine spoke, and the run behind it. The
- * sheet the chip opens lives in `routine-sheet.tsx`, which draws `MessageItem`s — the module this one
- * is drawn by — so the two never import each other.
+ * The card a routine's message wears (ADR 0081): which routine spoke, what it ran on, and how long it
+ * took — the shape the thread's own subagent card has, so a receipt of work done reads the same
+ * whether an agent or a routine did it. The sheet it opens lives in `routine-sheet.tsx`, which draws
+ * `MessageItem`s — the module this one is drawn by — so the two never import each other.
  */
 import { useEffect, useState } from "react"
-import { BotIcon, ChevronRightIcon } from "lucide-react"
+import { CheckIcon, TimerIcon } from "lucide-react"
 
 import { RoutineRunSheet } from "@/components/chat/routine-sheet"
+import { FLAT_CARD } from "@/components/chat/session-cards"
 import type { Message } from "@/lib/db"
 import { usePluginFeatureOn } from "@/lib/features"
-import { COLUMN, REPLY_INSET } from "@/lib/layout"
+import { shortModel } from "@/lib/model-info"
+import { ranFor } from "@/lib/routine-message"
 import {
   askRoutineRuns,
   ROUTINE_MESSAGE_FEATURE,
@@ -32,23 +35,46 @@ function namesRun(run: RoutineRun | undefined): run is RoutineRun {
 const UNNAMED = "Routine"
 
 /**
- * The chip that stands on a routine's message: which routine spoke, on the reply's own column and in
- * the app's muted tone — a receipt of the bot's own work rather than an action the reader must take.
- * It is a button so that the run is reachable, and it says what it opens.
+ * What the card says about the run under its name: how long it took, and what it ran on. The timer is
+ * the Routines screen's own mark, so the card is recognisably a routine's; the model is the long part
+ * and drops out of the line only when there is no room for it.
+ */
+function RunLine({ run }: { run: RoutineRun }) {
+  const length = run.seconds === null ? undefined : `Ran for ${ranFor(run.seconds)}`
+  const model = run.model ? shortModel(run.model) : undefined
+  const line = [length, model].filter(Boolean).join(" · ")
+  // A delivery the host couldn't time names nothing rather than an empty "Ran": the card still says
+  // which routine spoke, and the sheet it opens is where the run's own record is.
+  if (!line) return null
+  return (
+    <span className="flex items-center gap-1.5 text-xs text-muted-foreground tabular-nums">
+      <CheckIcon className="size-3 shrink-0" aria-hidden />
+      <span className="min-w-0 truncate">{line}</span>
+    </span>
+  )
+}
+
+/**
+ * The card that stands on a routine's message: the plate a subagent's card has, the Routines screen's
+ * timer beside the name, and the run's own numbers under it. The whole plate opens the run — there is
+ * no chevron and nothing else to press, exactly like the thread card it sits beside.
  */
 export function RoutineChip({ run, onOpen }: { run: RoutineRun; onOpen: () => void }) {
   return (
-    <div className={cn(COLUMN, REPLY_INSET)}>
+    <div data-slot="routine-card" className={cn(FLAT_CARD, "flex items-center gap-3 px-4 py-3")}>
       <button
         type="button"
-        data-slot="routine-chip"
         aria-label={`Routine: ${run.title ?? UNNAMED}`}
         onClick={onOpen}
-        className="flex min-h-11 w-fit max-w-full items-center gap-2 rounded-full border border-border/70 px-3 text-xs text-muted-foreground outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/50"
+        className="flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-2xl text-left outline-none hover:bg-muted/70 focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <BotIcon className="size-3.5 shrink-0" aria-hidden />
-        <span className="min-w-0 truncate">{run.title ?? UNNAMED}</span>
-        <ChevronRightIcon className="size-3.5 shrink-0" aria-hidden />
+        <span className="flex min-w-0 flex-1 flex-col gap-1">
+          <span className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+            <TimerIcon className="size-4 shrink-0" aria-hidden />
+            <span className="min-w-0 flex-1 truncate">{run.title ?? UNNAMED}</span>
+          </span>
+          <RunLine run={run} />
+        </span>
       </button>
     </div>
   )
