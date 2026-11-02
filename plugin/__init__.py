@@ -369,7 +369,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             await asyncio.to_thread(repos.resume, home)
         except Exception:
             logger.debug("memento: couldn't resume project clones", exc_info=True)
-        # And a session the user closed with its close still owed (closes.py, ADR 0075), on every
+        # And a session the user closed with its close still owed (closes.py, ADR 0080), on every
         # home this process serves: a `/p/<profile>` bot's row is as owed as the launch profile's.
         try:
             for served in link.served_homes(adapter):
@@ -542,7 +542,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "profile_routes",
                     "pr_tool",
                     "close",
-                    # A session's close as a record the app reads back (closes.py, ADR 0075). `close`
+                    # A session's close as a record the app reads back (closes.py, ADR 0080). `close`
                     # stays for an app from before it.
                     "closes",
                     "merge_resolve",
@@ -1715,7 +1715,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
 
     async def close_session(request: "web.Request") -> "web.Response":
         """The close an app from before `closes` asks for: it holds the request until all of it is
-        done (ADR 0075)."""
+        done (ADR 0080)."""
         denied = unauthorized(request)
         if denied is not None:
             return denied
@@ -1729,7 +1729,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return web.json_response({"object": "memento.closed", **report})
 
     async def start_close(request: "web.Request") -> "web.Response":
-        """Records a session's close and answers before any of it runs (closes.py, ADR 0075)."""
+        """Records a session's close and answers before any of it runs (closes.py, ADR 0080)."""
         denied = unauthorized(request)
         if denied is not None:
             return denied

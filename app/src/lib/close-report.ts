@@ -1,6 +1,6 @@
 /**
  * What a session's close ended with, and whether this device has already said it — the rule half of
- * telling a close, import-free so `scripts/test-close-report.mjs` runs it (ADR 0075). The wire shape
+ * telling a close, import-free so `scripts/test-close-report.mjs` runs it (ADR 0080). The wire shape
  * is `SessionClose` in hermes.ts; this copy exists so the rule can be tested without a host.
  */
 

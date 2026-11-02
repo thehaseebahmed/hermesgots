@@ -235,7 +235,7 @@ export function ChatActions({
   const [discarding, setDiscarding] = useState(false)
   const [title, setTitle] = useState("")
 
-  /** Asks the host to close the session, and moves on: the close runs there (ADR 0075). */
+  /** Asks the host to close the session, and moves on: the close runs there (ADR 0080). */
   const closeSession = () => {
     if (!session || !profile) return
     stopMessage(session.id)
@@ -398,7 +398,7 @@ export function ChatActions({
                 if (session) closeSession()
                 else stopMessage(chat.id)
                 // The row goes now, not when the host has finished: it is already closed, and the
-                // close reports a kept worktree or a refusal when it ends (ADR 0075).
+                // close reports a kept worktree or a refusal when it ends (ADR 0080).
                 setDeleting(false)
                 await deleteConversation(chat.id)
                 onDeleted()

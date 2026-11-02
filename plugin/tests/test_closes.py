@@ -1,5 +1,5 @@
 """Tests for a session's close: recorded before any of it runs, run off the request, read back as a
-report that outlives the session row (closes.py, ADR 0075)."""
+report that outlives the session row (closes.py, ADR 0080)."""
 
 import unittest
 from unittest.mock import patch

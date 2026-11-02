@@ -113,7 +113,7 @@ export function startBlocked(project: HermesProject) {
 }
 
 /**
- * Tells the close reports a bot has ended that this device holds no mark for (ADR 0075). A close is
+ * Tells the close reports a bot has ended that this device holds no mark for (ADR 0080). A close is
  * the host's work, so the device that asked may never have heard the end — it was put away, or the
  * close outlived the dialog — and the device that asked may not be this one at all. Read as Code
  * opens, when the stream says a close ended, and on a slow timer, since no other screen asks.

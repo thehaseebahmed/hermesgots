@@ -1,7 +1,7 @@
 """A session's close: the host work that shuts a session down once its user has ended it.
 
 Delete and Discard ask for one — ``POST sessions/{id}/closes`` — and it leaves the request there: the
-ask records what the close is for, answers at once, and a thread of its own does the rest (ADR 0075,
+ask records what the close is for, answers at once, and a thread of its own does the rest (ADR 0080,
 in the shape ``clones.spawn`` settled for a clone). The work is ``sessions.remove``, which removes the
 session's worktrees and keeps those whose work is uncommitted or unpushed, and ``ship.close``, which
 closes each repository's open pull request and deletes its pushed branch on GitHub; the AFK claim the

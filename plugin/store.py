@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 # or `IF NOT EXISTS`: a store already carrying them has to reach 47 without re-running either. 47
 # replaces the log's index with the one every read asks for. 48 adds `heard`, the words as the host
 # heard them beside the words that landed (ADR 0062). 49 adds what tidied a take (ADR 0074). 50 adds
-# a session's close and the report it ends with (`closes.py`, ADR 0075): one new table, so nothing
+# a session's close and the report it ends with (`closes.py`, ADR 0080): one new table, so nothing
 # already written has to move.
 SCHEMA_VERSION = 50
 
@@ -780,7 +780,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute("ALTER TABLE dictations ADD COLUMN provider TEXT")
         if "model" not in dictation_columns:
             conn.execute("ALTER TABLE dictations ADD COLUMN model TEXT")
-        # v50: a close, and the report it ended with (closes.py, ADR 0075). `repos` is the session's
+        # v50: a close, and the report it ended with (closes.py, ADR 0080). `repos` is the session's
         # own snapshot, because a successful removal deletes the session row this could otherwise be
         # read from.
         conn.execute(

@@ -1,5 +1,5 @@
 /**
- * A close's report as the app tells it (ADR 0075): what still has to be told, and in what words.
+ * A close's report as the app tells it (ADR 0080): what still has to be told, and in what words.
  */
 import assert from "node:assert/strict"
 import test from "node:test"

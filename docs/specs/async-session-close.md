@@ -1,7 +1,7 @@
 # A session closes at the tap, and the host finishes the close
 
 Status: grilled 2026-10-31 against the code, the glossary and the ADRs it touches; every decision
-below is settled and recorded in ADR 0075.
+below is settled and recorded in ADR 0080.
 
 ## Goal
 
@@ -83,7 +83,7 @@ device never read, and the two dialogs' own copy change as little as they can.
 | `app/src/lib/code.ts` | `useCloseReports`, read as Code opens for each bot it lists |
 | `app/src/components/chat/chat-actions.tsx` | Delete and Discard at the tap; the dialogs' words |
 | `app/scripts/mock-hermes.mjs` | The close routes, a kept tree, and a slow close to watch |
-| `docs/adr/0075-a-close-is-the-hosts-work-and-the-row-closes-before-it-ends.md` | The decision |
+| `docs/adr/0080-a-close-is-the-hosts-work-and-the-row-closes-before-it-ends.md` | The decision |
 | `GLOSSARY.md` | **Session close**, **Close report**; **Session state** amended |
 | `AGENTS.md` | The close paragraph and the layout rows it names |
 

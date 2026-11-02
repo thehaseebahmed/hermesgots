@@ -1,7 +1,7 @@
 /**
  * Telling a session's close: the reports this device has already said, and what a report says.
  *
- * The close is the host's work (ADR 0075), so its report arrives after the row has moved — while the
+ * The close is the host's work (ADR 0080), so its report arrives after the row has moved — while the
  * device that asked is still there, or when the next device opens Code. Either way each device tells
  * a report once, against a mark of its own kept in local storage, the same shape as a read mark.
  */

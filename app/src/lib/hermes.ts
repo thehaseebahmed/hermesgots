@@ -3002,7 +3002,7 @@ export interface ClosedRepo {
  * Ends a deleted or discarded session on the server: removes its worktrees (keeping those with
  * uncommitted or unpushed work), closes its open pull requests and deletes its branches on GitHub.
  * Needs plugin 0.20, and holds the request until all of it is done — `startSessionClose` is the path
- * a host that advertises `closes` takes instead (ADR 0075).
+ * a host that advertises `closes` takes instead (ADR 0080).
  */
 export async function closeSession(
   config: HermesConfig,
@@ -3079,7 +3079,7 @@ function closeOf(body: Record<string, unknown>): SessionClose {
 /**
  * Asks the host to close a session and answers at once, with the close as it stands: `closing`, or
  * `done` for a session the host holds nothing of. The work — worktrees, pull requests, branches —
- * runs on the host afterwards, and `getSessionClose` reads what it ended with (ADR 0075).
+ * runs on the host afterwards, and `getSessionClose` reads what it ended with (ADR 0080).
  */
 export async function startSessionClose(
   config: HermesConfig,

@@ -1,6 +1,6 @@
 /**
  * Delete and Discard end a session at the tap: the row moves while the host is still closing it, and
- * the close's report is told when it ends (ADR 0075).
+ * the close's report is told when it ends (ADR 0080).
  */
 import assert from "node:assert/strict"
 import test from "node:test"

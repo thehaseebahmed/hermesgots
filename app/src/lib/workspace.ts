@@ -296,7 +296,7 @@ async function pushSessionMode(conversation: Conversation, mode: SessionMode) {
 }
 
 /**
- * Asks the host to close a session on Delete or Discard (ADR 0075): its worktrees go, except those
+ * Asks the host to close a session on Delete or Discard (ADR 0080): its worktrees go, except those
  * with uncommitted or unpushed work, and each repository's open pull request is closed and its
  * pushed branch deleted on GitHub.
  *
