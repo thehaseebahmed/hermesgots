@@ -2581,3 +2581,23 @@ in full and then answers 504 "The take is still being heard." — a take whose a
 
 Found by the efficiency angle of this branch's cleanup pass; it does not block.
 
+
+# Deferred by the review passes on the Code list's tails
+
+## Careful
+
+### 1. A notification for a session continued into a new chat can open the discarded row
+
+`chatIdForSession` (`src/lib/db.ts`) takes the first row the `hermesSessionId` index answers, with no
+preference for a live one. A session continued into a new chat leaves the old chat discarded under the
+same session id, so a notification naming it can resolve to the closed chat — and the tap's fast path
+(`openPush` → `pushTarget`) reaches that row a step earlier than the syncing route did.
+
+- Cost: the notification opens a chat the reader has already left. Narrow — it needs a continued session
+  and a notification still in the tray — and it was already the route's behaviour before this branch.
+- Suggested fix: order the lookup by `discardedAt`/`resolvedAt` and prefer a live row: one clause in the
+  helper both paths share.
+- Why it is not applied here: which chat a notification should open is a decision about session identity
+  (the ADR 0053 family), and the lookup's shape predates this branch.
+
+Found by the `/code-review` spec axis on this branch; the pull request does not wait on it.

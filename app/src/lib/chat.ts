@@ -68,6 +68,7 @@ import { appendThinking, closeRun, forgetRuns, noteRunThinking } from "@/lib/thi
 import { clarifyResult } from "@/lib/clarify"
 import { quietly } from "@/lib/report"
 import { canSteer, midReply } from "@/lib/steer"
+import { forgetTail } from "@/lib/session-tail"
 import { actionOfPreview } from "@/lib/tools"
 import { needsTranscriptWords } from "@/lib/tool-preview"
 import { randomId } from "@/lib/utils"
@@ -1339,6 +1340,9 @@ async function adoptRun(conversation: Conversation, profile: Profile) {
     runSeq: undefined,
   }
   await db.messages.put(adopted)
+  // The row draws this reply from the tail the list keeps, and putting it back in flight moves no
+  // conversation row — the one change a tail read cannot notice on its own.
+  forgetTail(id)
   // The reply's runs are rebuilt from the replay, so whatever this device measured for the old ones
   // goes with them.
   forgetRuns(adopted.id)

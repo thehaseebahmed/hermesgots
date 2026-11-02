@@ -1,47 +1,66 @@
 import { useEffect } from "react"
+import { useLiveQuery } from "dexie-react-hooks"
 import { Navigate, useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
 
 import { Spinner } from "@/components/ui/spinner"
-import { db } from "@/lib/db"
+import { chatIdForSession, listReachableProfiles } from "@/lib/db"
 import { onOpenPush } from "@/lib/push"
-import { syncNow } from "@/lib/sync"
+import { quietly } from "@/lib/report"
+import { syncChatsOf } from "@/lib/sync"
 
-const FIND_TRIES = 5
-const SYNC_WAIT_MS = 5000
-const RETRY_MS = 1000
-
-const wait = (ms: number) => new Promise((done) => setTimeout(done, ms))
+/** Passes at the chat lists before the screen gives up on the chat arriving. */
+const PASSES = 2
 
 /**
- * Where a push notification lands: the chat of the Hermes session that needs the user. A chat
- * started on another device may not have reached this one yet, so it syncs until it has.
+ * Where a push notification lands: the chat of the Hermes session that needs the user. A chat this
+ * device already holds opens on its own row, with no read of the network at all; one started on
+ * another device is looked for in the chat lists of the bots that could hold it — those alone, not
+ * the account documents or a whole sync — in at most two passes.
+ *
+ * The row is followed rather than polled for: a live query answers on the write that merges it, so
+ * the chat opens at its row rather than at the end of the pass looking for it.
  */
 export function OpenSessionPage() {
   const { sessionId } = useParams()
+  const session = sessionId ?? ""
   const navigate = useNavigate()
+  const answer = useLiveQuery(
+    async () => ({ session, chat: (await chatIdForSession(session)) ?? null }),
+    [session],
+  )
+  // `undefined` until the query answers for this session; `null` once it says this device has none.
+  const chat = answer?.session === session ? answer.chat : undefined
+
   useEffect(() => {
+    if (chat) navigate(`/c/${chat}`, { replace: true })
+  }, [chat, navigate])
+
+  useEffect(() => {
+    // Nothing to look for until the device has answered that it holds no such chat.
+    if (!session || chat !== null) return
     let cancelled = false
-    const find = () =>
-      db.conversations
-        .where("hermesSessionId")
-        .equals(sessionId ?? "")
-        .first()
     void (async () => {
-      let chat = await find()
-      for (let tries = 0; !chat && !cancelled && tries < FIND_TRIES; tries++) {
-        await Promise.race([syncNow().catch(() => undefined), wait(SYNC_WAIT_MS)])
-        chat = await find()
-        if (!chat) await wait(RETRY_MS)
+      // A session is minted by the bot that ran it, so only a bot's own chat list can hold the chat:
+      // a turned-off bot's can't, and the account documents speak of no session at all.
+      const bots = (await listReachableProfiles()).map((bot) => bot.id)
+      for (let pass = 0; pass < PASSES && !cancelled; pass++) {
+        // Each pass is bounded where it runs (`CHATS_MERGE_WAIT_MS` inside the chat lane), so the
+        // next is asked for only once this one is out: asking while one runs queues another merge.
+        await syncChatsOf(bots).catch(quietly("Reading the chat lists"))
+        if (cancelled) return
+        if ((await chatIdForSession(session)) === undefined) continue
+        return
       }
       if (cancelled) return
-      if (!chat) toast.error("Couldn't find that chat on this device.")
-      navigate(chat ? `/c/${chat.id}` : "/", { replace: true })
+      toast.error("Couldn't find that chat on this device.")
+      navigate("/", { replace: true })
     })()
     return () => {
       cancelled = true
     }
-  }, [sessionId, navigate])
+  }, [session, chat, navigate])
+
   if (!sessionId) return <Navigate to="/" replace />
   return (
     <div className="flex flex-1 items-center justify-center">

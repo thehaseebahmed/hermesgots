@@ -4,7 +4,7 @@ import type { Agent } from "@/chat-next/agents"
 import type { Queued } from "@/chat-next/api"
 import type { Row, Turn } from "@/chat-next/fold"
 import { BOTS, LEGACY_BOT_IDS } from "@/components/bots"
-import { connectionKey } from "@/lib/connection"
+import { connectionKey, hasServer } from "@/lib/connection"
 import { mediaKeyPrefix } from "@/lib/media-key"
 import { forgetRead } from "@/lib/read-marks"
 import type { Compaction, ModelChange, Move, ProviderUsage, Skill, Tidied } from "@/lib/hermes"
@@ -1173,6 +1173,17 @@ db.version(30).stores({ mediaCache: "key, at" })
 
 db.on("populate", (tx) => seedProfile(tx))
 
+/**
+ * The chat this device holds for a Hermes session, if it has one. A tapped notification names the
+ * session; the row it opens is this device's own, so the answer is an index probe and nothing else.
+ * The id alone, so a screen watching it for changes answers the same string until the row really
+ * moves, rather than a fresh copy of the whole conversation on every write to it.
+ */
+export async function chatIdForSession(sessionId: string) {
+  const [id] = await db.conversations.where("hermesSessionId").equals(sessionId).primaryKeys()
+  return id
+}
+
 export async function getSettings(): Promise<Settings> {
   return { ...DEFAULT_SETTINGS, ...(await db.settings.get("settings")) }
 }
@@ -1224,6 +1235,11 @@ export async function listProfiles() {
 /** The bots the app shows and checks on: every one not turned off. */
 export async function listEnabledProfiles() {
   return (await listProfiles()).filter((profile) => !profile.disabled)
+}
+
+/** The bots it can actually ask: turned on, and with a server to ask. */
+export async function listReachableProfiles() {
+  return (await listEnabledProfiles()).filter(hasServer)
 }
 
 /** The selected profile, falling back to the oldest one that's turned on. */

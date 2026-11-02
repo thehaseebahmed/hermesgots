@@ -74,6 +74,13 @@ export const PR_PENDING_MS = 10_000
 export const SESSION_REREAD_MS = 60_000
 
 /**
+ * How long a session's own turn state — a reply streaming, one waiting on the user — is trusted
+ * before the Code list reads its transcript again. A turn that ends moves the conversation row, so
+ * this is only the net under a turn that settles some other way.
+ */
+export const TAIL_MS = 60_000
+
+/**
  * The Code screen reads the close reports a bot holds, on the stream's word and this often: a close
  * ends minutes after the row moved, and no other screen asks for its report.
  */

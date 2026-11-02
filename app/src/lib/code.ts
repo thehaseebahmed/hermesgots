@@ -2,67 +2,109 @@ import { useCallback, useEffect, useRef } from "react"
 import Dexie from "dexie"
 import { useLiveQuery } from "dexie-react-hooks"
 
-import { connectionKey, hasServer } from "@/lib/connection"
-import { db, type Conversation, type Profile } from "@/lib/db"
+import { connectionKey } from "@/lib/connection"
+import { db, listReachableProfiles, type Conversation, type Profile } from "@/lib/db"
 import { tellCloseReports } from "@/lib/close-reports"
 import type { HermesProject } from "@/lib/hermes"
-import { CLOSE_REPORT_GAP_MS, CLOSE_REPORT_MS, PR_PENDING_MS, SESSION_REREAD_MS } from "@/lib/freshness"
+import {
+  CLOSE_REPORT_GAP_MS,
+  CLOSE_REPORT_MS,
+  PR_PENDING_MS,
+  SESSION_REREAD_MS,
+  TAIL_MS,
+} from "@/lib/freshness"
 import { useAnyChange } from "@/lib/live"
 import { usePoll } from "@/lib/poll"
 import { prChecksPending, refreshPrs, refreshWorkspace } from "@/lib/workspace"
+import { cachedTail, needsTailRead, rememberTail } from "@/lib/session-tail"
+import type { LocalTurn } from "@/lib/session-work"
 
 /** A project by its server and id: bots on one server share its projects. */
 export const projectKey = (server: { baseUrl: string; apiKey: string }, projectId: string) =>
   `${connectionKey(server)}\n${projectId}`
 
-/** What this device sees of a session's own turns: any at all, a reply streaming, one waiting. */
-export interface LocalTurns {
-  any?: boolean
-  streaming?: boolean
-  waiting?: boolean
+/**
+ * One read of every listed session's row, and the bots those rows belong to. The rows and their
+ * tails are two queries rather than one: a streaming reply writes a message row every flush and
+ * touches no conversation, so a shared read would re-scan every conversation on each of those.
+ */
+interface Listed {
+  rows: Conversation[]
+  profiles: Map<string, Profile>
+  now: number
+}
+
+/** The newest assistant row of a session: whether one is streaming, and whether one is waiting. */
+async function readTail(id: string): Promise<LocalTurn | undefined> {
+  const tail = await db.messages
+    .where("[conversationId+createdAt]")
+    .between([id, Dexie.minKey], [id, Dexie.maxKey])
+    .reverse()
+    .until((m) => m.role === "assistant", true)
+    .toArray()
+  if (!tail.length) return undefined
+  return {
+    streaming: tail.some((m) => m.status === "streaming"),
+    waiting: tail.some(
+      (m) => (m.approval && !m.approval.resolved) || (m.clarify && !m.clarify.resolved),
+    ),
+  }
 }
 
 /**
  * Project sessions across every bot that isn't turned off (or one project's, by its key), newest
  * first, with what this device sees of their turns. Only a reply in flight can carry an approval or
  * question (a finished turn expires them), and it's the newest reply, so each session's messages are
- * read back only as far as that, past any queued after it.
+ * read back only as far as that, past any queued after it — and only while its tail can still move
+ * (`needsTailRead`).
+ *
+ * `tails` is off for a screen that wants the rows alone: the pane deciding which session to open
+ * reads no transcripts, since the list beside it reads those for the rows it draws.
  */
-export function useProjectSessions(only?: string) {
-  return useLiveQuery(async () => {
-    const profiles = new Map(
-      (await db.profiles.toArray()).filter((p) => !p.disabled).map((p) => [p.id, p]),
-    )
-    const rows = (await db.conversations.where("projectId").above("").toArray())
+export function useProjectSessions(only?: string, { tails: readTails = true } = {}) {
+  const listed = useLiveQuery(async (): Promise<Listed> => {
+    // Neither read needs the other, and both stand between the screen and its first row.
+    const [profiles, conversations] = await Promise.all([
+      db.profiles.toArray(),
+      db.conversations.where("projectId").above("").toArray(),
+    ])
+    const enabled = new Map(profiles.filter((p) => !p.disabled).map((p) => [p.id, p]))
+    const rows = conversations
       .filter((c) => {
-        const profile = profiles.get(c.profileId)
+        const profile = enabled.get(c.profileId)
         return profile && (!only || projectKey(profile, c.projectId!) === only)
       })
       .sort((a, b) => b.updatedAt - a.updatedAt)
-    const local: Record<string, LocalTurns> = {}
-    await Promise.all(
-      rows.map(async (c) => {
-        const tail = await db.messages
-          .where("[conversationId+createdAt]")
-          .between([c.id, Dexie.minKey], [c.id, Dexie.maxKey])
-          .reverse()
-          .until((m) => m.role === "assistant", true)
-          .toArray()
-        if (!tail.length) return
-        local[c.id] = {
-          any: true,
-          streaming: tail.some((m) => m.status === "streaming"),
-          waiting: tail.some(
-            (m) => (m.approval && !m.approval.resolved) || (m.clarify && !m.clarify.resolved),
-          ),
-        }
-      }),
-    )
-    // A session nothing was sent in (or typed for) isn't one yet. Synced ones carry their activity
-    // in `updatedAt`, since their messages load only when opened.
-    const sessions = rows.filter((c) => c.draftAt || c.updatedAt > c.createdAt || local[c.id]?.any)
-    return { sessions, local, profiles: profiles as Map<string, Profile>, now: Date.now() }
+    return { rows, profiles: enabled, now: Date.now() }
   }, [only])
+
+  const local = useLiveQuery(async () => {
+    if (!listed || !readTails) return undefined
+    const now = Date.now()
+    const moved = listed.rows.filter((c) =>
+      needsTailRead(cachedTail(c.id), c.updatedAt, now, TAIL_MS),
+    )
+    await Promise.all(
+      moved.map(async (c) =>
+        rememberTail(c.id, { rowAt: c.updatedAt, readAt: now, turn: await readTail(c.id) }),
+      ),
+    )
+    const turns: Record<string, LocalTurn> = {}
+    for (const c of listed.rows) {
+      const turn = cachedTail(c.id)?.turn
+      if (turn) turns[c.id] = turn
+    }
+    return turns
+  }, [listed, readTails])
+
+  if (!listed || (readTails && !local)) return undefined
+  const turns = local ?? {}
+  // A session nothing was sent in (or typed for) isn't one yet. Synced ones carry their activity in
+  // `updatedAt`, since their messages load only when opened.
+  const sessions = listed.rows.filter(
+    (c) => c.draftAt || c.updatedAt > c.createdAt || Boolean(turns[c.id]),
+  )
+  return { rows: listed.rows, sessions, local: turns, profiles: listed.profiles, now: listed.now }
 }
 
 /**
@@ -125,7 +167,7 @@ export function useCloseReports() {
     const now = Date.now()
     if (now - last.current < CLOSE_REPORT_GAP_MS) return
     last.current = now
-    const bots = (await db.profiles.toArray()).filter((bot) => !bot.disabled && hasServer(bot))
+    const bots = await listReachableProfiles()
     await Promise.all(bots.map((bot) => tellCloseReports(bot)))
   }, [])
   usePoll(read, CLOSE_REPORT_MS)

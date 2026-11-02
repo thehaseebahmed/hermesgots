@@ -5,6 +5,7 @@ import { liveQuery } from "dexie"
 import { useLiveQuery } from "dexie-react-hooks"
 
 import {
+  chatIdForSession,
   db,
   getSettings,
   listEnabledProfiles,
@@ -17,6 +18,7 @@ import {
 import { registerPush, setPushMuted, unregisterPush } from "@/lib/hermes"
 import { connectionKey, reconnectLive } from "@/lib/live"
 import { isNative } from "@/lib/native"
+import { quietly } from "@/lib/report"
 import { callFunction, failure, functionUrl } from "@/lib/account"
 import {
   PUSH_CATEGORIES,
@@ -26,6 +28,8 @@ import {
   channelPlan,
   categoryOn,
   pushPath,
+  pushTarget,
+  pushedSession,
   reachableCategories,
   wantedCategories,
   type PhoneChannel,
@@ -382,6 +386,21 @@ export function onOpenPush(callback: (path: string) => void) {
   }
 }
 
+/**
+ * Opens a tapped notification. A session's chat is read from this device first, so a tap on one it
+ * already holds lands on that chat at once; only a chat the device doesn't have falls through to the
+ * session route, which is the one that syncs for it.
+ */
+async function openPush(path: string) {
+  const session = pushedSession(path)
+  const chat = session
+    ? await chatIdForSession(session).catch(quietly("Reading a tapped session's chat"))
+    : undefined
+  const target = pushTarget(session, chat) ?? path
+  if (openers.size) openers.forEach((open) => open(target))
+  else pendingOpen = target
+}
+
 async function listen(push: Push) {
   if (nativeListening) return
   nativeListening = true
@@ -397,9 +416,7 @@ async function listen(push: Push) {
   })
   await push.addListener("pushNotificationActionPerformed", ({ notification }) => {
     const path = pushPath(notification.data?.kind, notification.data?.session_id)
-    if (!path) return
-    if (openers.size) openers.forEach((open) => open(path))
-    else pendingOpen = path
+    if (path) void openPush(path)
   })
 }
 

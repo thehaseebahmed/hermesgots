@@ -217,3 +217,23 @@ export function pushPath(kind: unknown, id: unknown) {
     return typeof id === "string" && id ? `/research/${encodeURIComponent(id)}` : "/research"
   return typeof id === "string" && id ? `/s/${encodeURIComponent(id)}` : null
 }
+
+/** The Hermes session a tapped notification names, when it names one. */
+export function pushedSession(path: string) {
+  const match = /^\/s\/([^/?#]+)$/.exec(path)
+  if (!match) return undefined
+  try {
+    return decodeURIComponent(match[1])
+  } catch {
+    return match[1]
+  }
+}
+
+/**
+ * Where a tap lands once the caller has looked the session up on this device: this device's chat for
+ * it (`/c/<id>`), else nothing — the caller keeps the path it had, which is the session route that
+ * syncs for a chat this device doesn't hold.
+ */
+export function pushTarget(session: string | undefined, chatId: string | undefined) {
+  return session && chatId ? `/c/${encodeURIComponent(chatId)}` : undefined
+}

@@ -44,5 +44,9 @@ export function boundedStore<T>({
     has(key: string) {
       return entries.has(key)
     },
+    /** Drops a key now, for a caller that knows what it holds is stale. */
+    forget(key: string) {
+      drop(key)
+    },
   }
 }

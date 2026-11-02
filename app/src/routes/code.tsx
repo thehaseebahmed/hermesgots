@@ -21,11 +21,16 @@ import { SortMenu } from "@/components/sort-menu"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { projectKey, startBlocked, useCloseReports, useProjectSessions, useSessionFollowUps } from "@/lib/code"
+import {
+  projectKey,
+  startBlocked,
+  useCloseReports,
+  useProjectSessions,
+  useSessionFollowUps,
+} from "@/lib/code"
 import { connectionKey } from "@/lib/connection"
 import {
   createConversation,
-  db,
   getSettings,
   prIsLive,
   saveSettings,
@@ -74,25 +79,29 @@ const newSessionAsked = createSignal()
  */
 export function CodePage() {
   const pane = useCodePane()
+  if (!pane) return <CodeList />
+  return <OpenLastSession />
+}
+
+/**
+ * Opens the session the pane should show, from the conversation rows alone: the list beside it reads
+ * the transcripts for the rows it draws, so this read asks for none of them.
+ */
+function OpenLastSession() {
+  const listed = useProjectSessions(undefined, { tails: false })
+  if (!listed) return null
   // Open sessions newest first, then closed ones, so a resolved session opens only when it's all
   // there is.
-  const ids = useLiveQuery(async () => {
-    if (!pane) return []
-    const enabled = new Set(
-      (await db.profiles.toArray()).filter((p) => !p.disabled).map((p) => p.id),
-    )
-    const rows = (await db.conversations.where("projectId").above("").toArray())
-      .filter((c) => enabled.has(c.profileId) && (c.draftAt || c.updatedAt > c.createdAt))
+  const open = itemToOpen(
+    "code",
+    [...listed.sessions]
       .sort(
         (a, b) =>
           Number(Boolean(a.resolvedAt || a.discardedAt)) -
             Number(Boolean(b.resolvedAt || b.discardedAt)) || b.updatedAt - a.updatedAt,
       )
-    return rows.map((c) => c.id)
-  }, [Boolean(pane)])
-  if (!pane) return <CodeList />
-  if (!ids) return null
-  const open = itemToOpen("code", ids)
+      .map((c) => c.id),
+  )
   if (open) return <Navigate to={`/c/${open}`} replace state={{ code: true }} />
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
@@ -127,7 +136,10 @@ const CODE_SORTS: Record<CodeSort, string> = {
 /** The Code list's order over each group, kept on this device (unset: created). */
 function useCodeSort(): [CodeSort, (sort: CodeSort) => void] {
   const sort = useLiveQuery(async () => (await getSettings()).codeSort, []) ?? "created"
-  return [sort, (codeSort) => void saveSettings({ codeSort }).catch(quietly("Saving the sort order"))]
+  return [
+    sort,
+    (codeSort) => void saveSettings({ codeSort }).catch(quietly("Saving the sort order")),
+  ]
 }
 
 function CodeList({ pane }: { pane?: FeaturePane }) {
