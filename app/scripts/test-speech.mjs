@@ -208,9 +208,13 @@ test("a row says in use before it says slow, and a download before either", () =
   assert.equal(marked(base), null)
 })
 
-test("the line under the rows says whose measurement it is, or why there is none", () => {
+test("a settled host says nothing under the rows, and an unsettled one says why", () => {
   const probe = readSpeech(settings).probe
-  assert.equal(probeNote(probe), "Measured on this host")
+  assert.equal(
+    probeNote(probe),
+    null,
+    "a host that owes nothing captions nothing: each row carries its own measurement",
+  )
   assert.equal(probeNote(probe, true), "Measuring this host's hearing…")
   assert.equal(
     probeNote({ ...probe, owed: true, measured: 0, elsewhere: { name: "a-laptop", at: "" } }),

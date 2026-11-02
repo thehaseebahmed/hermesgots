@@ -215,9 +215,18 @@ test("the Speech model row names the model in play, and opens the host's models 
       "and the factor this host timed, which is the only one there is (ADR 0075)",
     )
     assert.match(speechOption("small")?.textContent ?? "", /In use/)
-    assert.match(speechOption("small")?.textContent ?? "", /Recommended/, "the row it recommends is named")
     assert.equal(
-      speechOptions().filter((option) => /Recommended/.test(option.textContent ?? "")).length,
+      speechOption("small")?.querySelector("[data-pick-badge]")?.textContent,
+      "Recommended",
+      "the row it recommends wears it as a badge beside the name",
+    )
+    assert.doesNotMatch(
+      speechOption("small")?.querySelector(".truncate")?.textContent ?? "",
+      /Recommended/,
+      "and not again in its line",
+    )
+    assert.equal(
+      findAll("[data-pick-badge]").length,
       1,
       "and only one row is",
     )
@@ -226,10 +235,10 @@ test("the Speech model row names the model in play, and opens the host's models 
       /Not measured/,
       "a row nobody timed says so rather than quoting a factor",
     )
-    assert.match(
-      find("[data-speech-probe]")?.textContent ?? "",
-      /Measured on this host/,
-      "and the sheet says the numbers are this machine's",
+    assert.equal(
+      find("[data-speech-probe]"),
+      null,
+      "and a host that owes nothing captions nothing: each row carries its own measurement",
     )
     const clearing = speechOptions().find((option) =>
       /\b(default|none|clear)\b/i.test(option.textContent ?? ""),

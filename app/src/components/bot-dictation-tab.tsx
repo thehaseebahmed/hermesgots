@@ -209,6 +209,7 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
             options={modelsFor(settings, block).map((row) => ({
               id: row.name,
               label: row.name,
+              badge: row.recommended ? "Recommended" : undefined,
               detail: modelNotes(row),
             }))}
             onPick={(name) => {
@@ -953,8 +954,5 @@ function ProbeNote({
 /** A model's one muted line: what it weighs, how it hears here, and whether it is already at work. */
 function modelNotes(row: SpeechModel): string {
   const download = row.downloaded || row.inUse ? "" : "Not on this host"
-  const recommended = row.recommended ? "Recommended" : ""
-  return [modelSize(row.sizeMb), measuredLine(row), recommended, marked(row), download]
-    .filter(Boolean)
-    .join(" · ")
+  return [modelSize(row.sizeMb), measuredLine(row), marked(row), download].filter(Boolean).join(" · ")
 }

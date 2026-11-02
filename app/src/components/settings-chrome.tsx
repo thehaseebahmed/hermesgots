@@ -605,6 +605,8 @@ export type PickOption = {
   id: string
   label: string
   detail?: string
+  /** A muted word beside the label, for one row of a list that stands out from its neighbours. */
+  badge?: string
   /** What the row shows before its label, a bot's avatar for one. */
   leading?: ReactNode
 }
@@ -663,7 +665,18 @@ export function PickList({
             >
               {option.leading}
               <span className="flex min-w-0 flex-1 flex-col">
-                <span className="text-base break-all">{option.label}</span>
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="text-base break-all">{option.label}</span>
+                  {option.badge && (
+                    // Muted, and outlined rather than filled: a chosen row is already `bg-muted`.
+                    <span
+                      className="shrink-0 rounded-full border px-2 py-0.5 text-xs text-muted-foreground"
+                      data-pick-badge
+                    >
+                      {option.badge}
+                    </span>
+                  )}
+                </span>
                 {option.detail && (
                   <span className="truncate text-sm text-muted-foreground">{option.detail}</span>
                 )}

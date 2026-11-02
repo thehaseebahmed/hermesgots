@@ -316,7 +316,9 @@ export function marked(row: SpeechModel): string | null {
 export function probeNote(probe: SpeechProbe | undefined, measuring = false): string | null {
   if (!probe) return null
   if (measuring) return "Measuring this host's hearing…"
-  if (!probe.owed) return probe.measured > 0 ? "Measured on this host" : null
+  // A host that owes nothing has already said it: every row carries its own measurement, so the
+  // sheet says nothing under them rather than captioning numbers as this host's.
+  if (!probe.owed) return null
   if (probe.elsewhere)
     return probe.elsewhere.name
       ? `Measured on ${probe.elsewhere.name}, not this host.`
