@@ -269,6 +269,20 @@ class RoutineMessage(unittest.TestCase):
         self.assertEqual(routine["model"], "claude-sonnet-4-5")
         self.assertEqual(routine["seconds"], 12.0)
 
+    def test_the_model_is_named_with_the_provider_that_billed_it(self):
+        self.db.runs = [
+            {
+                "id": "cron_job-1_99",
+                "cron_job_id": "job-1",
+                "model": "claude-sonnet-4-5",
+                "billing_provider": "anthropic",
+                "started_at": 1_760_000_000.0,
+                "ended_at": 1_760_000_012.0,
+            }
+        ]
+        self._deliver()
+        self.assertEqual(self._runs()[0]["model"], "anthropic/claude-sonnet-4-5")
+
     def test_a_run_that_names_no_model_is_read_from_its_config(self):
         self.db.runs = [
             {

@@ -791,15 +791,17 @@ export const MessageItem = memo(function MessageItem({
           <Fragment key={breaks[i - 1]?.key ?? "start"}>
             {i > 0 && breaks[i - 1].node}
             {(parts.length > 0 || (last && footerShown)) && (
-              <AssistantRow conversationId={message.conversationId} busy={busy} parts={parts}>
-                {last && (
-                  <>
-                    {/* A routine's message wears its run's chip under its words (ADR 0081); every
-                        other reply draws nothing and asks the host nothing. */}
-                    {message.routine && <RoutineReceipt message={message} />}
-                    {footer}
-                  </>
-                )}
+              <AssistantRow
+                conversationId={message.conversationId}
+                busy={busy}
+                parts={parts}
+                // A routine's message says which run wrote it, above its words (ADR 0081); every
+                // other reply draws nothing and asks the host nothing.
+                header={
+                  i === 0 && message.routine ? <RoutineReceipt message={message} /> : undefined
+                }
+              >
+                {last && footer}
               </AssistantRow>
             )}
           </Fragment>
@@ -841,85 +843,93 @@ function AssistantRow({
   conversationId,
   busy,
   parts,
+  header,
   children,
 }: {
   conversationId: string
   /** A reply is streaming in this chat, so a card that sends (a missed question) waits. */
   busy?: boolean
   parts: Part[]
+  /** Above the reply's own words: where a routine says which run wrote them (ADR 0081). */
+  header?: ReactNode
   children?: ReactNode
 }) {
   // Every part but a card stands on the reply's edge; a card fills its own gutters (ADR 0047).
   const edge = cn(REPLY_INSET, COLUMN)
   return (
     <MessageRow align="start">
-      <MessageContent className={PARTS}>
-        {parts.map((part, index) => {
-          const hug = huggingWork(part, parts[index + 1])
-          if (part.kind === "clarify")
-            return (
-              <ClarifyCard
-                key={part.tool.toolCallId}
-                tool={part.tool}
-                conversationId={conversationId}
-                busy={busy}
-              />
-            )
-          if (part.kind === "agent")
-            return <AgentCards key={part.tool.toolCallId} tool={part.tool} />
-          if (part.kind === "tools")
-            return (
-              <div key={part.tools[0].toolCallId} className={cn(edge, hug)}>
-                <div className="w-full max-w-xl">
-                  <ToolGroup tools={part.tools} />
+      {/* Above the reply's own flow, not in it: a routine's line belongs to the words under it, so
+          the two are one column rather than the row's two cells. */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        {header}
+        <MessageContent className={PARTS}>
+          {parts.map((part, index) => {
+            const hug = huggingWork(part, parts[index + 1])
+            if (part.kind === "clarify")
+              return (
+                <ClarifyCard
+                  key={part.tool.toolCallId}
+                  tool={part.tool}
+                  conversationId={conversationId}
+                  busy={busy}
+                />
+              )
+            if (part.kind === "agent")
+              return <AgentCards key={part.tool.toolCallId} tool={part.tool} />
+            if (part.kind === "tools")
+              return (
+                <div key={part.tools[0].toolCallId} className={cn(edge, hug)}>
+                  <div className="w-full max-w-xl">
+                    <ToolGroup tools={part.tools} />
+                  </div>
                 </div>
-              </div>
-            )
-          if (part.kind === "reminder")
-            return (
-              <div key={`reminder-${index}`} className={cn(edge, hug)}>
-                <div className="w-full max-w-xl">
-                  <ReminderRow reminder={part.reminder} />
+              )
+            if (part.kind === "reminder")
+              return (
+                <div key={`reminder-${index}`} className={cn(edge, hug)}>
+                  <div className="w-full max-w-xl">
+                    <ReminderRow reminder={part.reminder} />
+                  </div>
                 </div>
-              </div>
-            )
-          if (part.kind === "thinking")
+              )
+            if (part.kind === "thinking")
+              return (
+                <ThinkingLine
+                  key={part.key}
+                  reasoning={part.text}
+                  thinking={part.thinking}
+                  spanMs={part.spanMs}
+                  className={cn(REPLY_INSET, hug)}
+                />
+              )
+            if (part.kind === "media")
+              return (
+                <div key={part.at} className={edge}>
+                  <MediaTag conversationId={conversationId} paths={part.paths} />
+                </div>
+              )
+            if (part.kind === "openui")
+              return (
+                <div key={part.at} className={edge}>
+                  <Suspense fallback={null}>
+                    <OpenUIBlock
+                      source={part.block.source}
+                      open={part.block.open}
+                      streaming={part.block.streaming}
+                      draw={part.block.draw}
+                    />
+                  </Suspense>
+                </div>
+              )
             return (
-              <ThinkingLine
-                key={part.key}
-                reasoning={part.text}
-                thinking={part.thinking}
-                spanMs={part.spanMs}
-                className={cn(REPLY_INSET, hug)}
-              />
+              <Markdown key={part.at} className={cn(edge, "text-[15px] leading-relaxed")}>
+                {part.text}
+              </Markdown>
             )
-          if (part.kind === "media")
-            return (
-              <div key={part.at} className={edge}>
-                <MediaTag conversationId={conversationId} paths={part.paths} />
-              </div>
-            )
-          if (part.kind === "openui")
-            return (
-              <div key={part.at} className={edge}>
-                <Suspense fallback={null}>
-                  <OpenUIBlock
-                    source={part.block.source}
-                    open={part.block.open}
-                    streaming={part.block.streaming}
-                    draw={part.block.draw}
-                  />
-                </Suspense>
-              </div>
-            )
-          return (
-            <Markdown key={part.at} className={cn(edge, "text-[15px] leading-relaxed")}>
-              {part.text}
-            </Markdown>
-          )
-        })}
-        {children}
-      </MessageContent>
+          })}
+          {children}
+        </MessageContent>
+      </div>
     </MessageRow>
   )
 }

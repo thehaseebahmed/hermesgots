@@ -140,31 +140,39 @@ const askedFor = (asked: Call[], part: string) =>
 
 const rows = () => findAll("[data-slot=message]")
 const rowWith = (needle: string) => rows().find((row) => row.textContent?.includes(needle))
-/** The pressable card: the plate is what a reader sees, its button is what they press. */
-const chip = () => findAll("[data-slot=routine-card]").at(-1)?.querySelector("button") ?? null
+/** The pressable line: the receipt is what a reader sees, its button is what they press. */
+const chip = () => findAll("[data-slot=routine-receipt]").at(-1)?.querySelector("button") ?? null
 const sheet = () => findAll('[role="dialog"]').at(-1) ?? null
 const sheetText = () => sheet()?.textContent ?? ""
 
-test("a routine's message draws the thread card, naming its routine and the run", async () => {
+test("a routine's message says which run wrote it, above its words", async () => {
   await screen({ chat: "routine-chat", bot: botProfile("routine-chip") }, async (asked) => {
     await until(async () => Boolean(chip()), "the routine's chip")
     const routine = rowWith(SAID)
     const ordinary = rowWith(ORDINARY)
     assert.ok(routine && ordinary, "both replies are rows of the thread")
-    const plate = routine.querySelector("[data-slot=routine-card]")
-    const drawn = plate?.querySelector("button")
-    assert.ok(plate && drawn, "the routine's message wears the thread's own card")
-    assert.match(plate.className, /rounded-3xl/, "on the plate a subagent's card has")
-    assert.equal(drawn.tagName, "BUTTON", "the whole plate, so the run is reachable")
-    assert.equal(drawn.textContent?.trim(), `${TITLE}Ran for 12s · claude-sonnet-4-5`)
+    const line = routine.querySelector("[data-slot=routine-receipt]")
+    const drawn = line?.querySelector("button")
+    assert.ok(line && drawn, "the routine's message wears the app's own receipt line")
+    assert.equal(drawn.tagName, "BUTTON", "the whole line, so the run is reachable")
+    assert.equal(drawn.textContent?.trim(), `${TITLE} ran for 12s`)
     assert.equal(drawn.getAttribute("aria-label"), `Routine: ${TITLE}`, "and saying what it opens")
-    assert.equal(
-      plate.querySelector("[data-slot=routine-card] [data-slot=routine-card]"),
-      null,
-      "one card, not a card in a card",
+    // The line is context for the words under it: one column, the line first, the words after it.
+    const column = line.parentElement
+    assert.match(column?.className ?? "", /flex-col/, "stacked, not side by side")
+    assert.equal(column?.firstElementChild, line, "the line is first in that column")
+    assert.match(column?.lastElementChild?.textContent ?? "", new RegExp(SAID.slice(0, 24)))
+    assert.doesNotMatch(
+      drawn.textContent ?? "",
+      /claude-sonnet/,
+      "the model is the sheet's to say, not the thread's",
     )
-    assert.equal(ordinary.querySelector("[data-slot=routine-card]"), null, "the reply above it carries none")
-    assert.equal(findAll("[data-slot=routine-card]").length, 1, "one card in the whole thread")
+    assert.equal(
+      ordinary.querySelector("[data-slot=routine-receipt]"),
+      null,
+      "the reply above it carries none",
+    )
+    assert.equal(findAll("[data-slot=routine-receipt]").length, 1, "one line in the whole thread")
     assert.equal(askedFor(asked, "/routines"), 1, "the chat's runs were read once")
   })
 })
@@ -177,6 +185,8 @@ test("tapping the chip opens the sheet with the run's transcript and no composer
     await until(async () => sheetText().includes(ANSWER), "the run's own rows")
     assert.match(sheetText(), new RegExp(PROMPT), "its request")
     assert.match(sheetText(), new RegExp(TITLE), "under the routine's name")
+    // The sheet says when it ran and what it ran on, in that order, which the line leaves out.
+    assert.match(sheetText(), /\w{3} \d{1,2}(st|nd|rd|th), \d{4} · claude-sonnet-4-5/)
     assert.equal(sheet()?.querySelector("textarea"), null, "a receipt takes no message")
     assert.equal(
       sheet()?.querySelector('textarea[aria-label="Message"]'),
@@ -207,7 +217,7 @@ test("a host that doesn't advertise the feature is asked for nothing and draws n
       await until(async () => askedFor(asked, "/plugins/memento/info") > 0, "the feature read")
       await settle()
       assert.equal(askedFor(asked, "/routines"), 0, "nothing was asked of the chat")
-      assert.equal(findAll("[data-slot=routine-card]").length, 0, "and no chip is drawn")
+      assert.equal(findAll("[data-slot=routine-receipt]").length, 0, "and no line is drawn")
       assert.ok(rowWith(SAID), "the bot's message still draws, as any reply does")
     },
   )
@@ -227,7 +237,7 @@ test("a chat with no routine message is asked nothing, and draws nothing extra",
       await until(async () => askedFor(asked, "/plugins/memento/info") > 0, "the feature read")
       await settle()
       assert.equal(askedFor(asked, "/routines"), 0, "nothing was asked of the chat")
-      assert.equal(findAll("[data-slot=routine-card]").length, 0, "and nothing is drawn")
+      assert.equal(findAll("[data-slot=routine-receipt]").length, 0, "and nothing is drawn")
       assert.ok(rowWith(ORDINARY), "while the bot's reply still draws, as any reply does")
     },
   )

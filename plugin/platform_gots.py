@@ -271,21 +271,34 @@ def _run(db: Any, job_id: Optional[str]) -> Run:
 
 
 def _model_of(row: Dict[str, Any]) -> Optional[str]:
-    """The model the run used: the session's own, or the one its config names."""
-    model = row.get("model")
-    if isinstance(model, str) and model:
-        return model
+    """The model the run used, as the sheet names it: ``provider/model`` where both are known.
+
+    A session keeps the model it ran on in its own column and the provider that billed it in another;
+    a lock the app set carries both in ``model_config``. Whichever answers first wins, and a run that
+    knows only half is named by that half rather than guessed at.
+    """
     config = row.get("model_config")
     if isinstance(config, str) and config:
         try:
             config = json.loads(config)
         except (TypeError, ValueError):
-            return None
-    if isinstance(config, dict):
-        named = config.get("model")
-        if isinstance(named, str) and named:
-            return named
-    return None
+            config = None
+    config = config if isinstance(config, dict) else {}
+    lock = config.get("browser_model_lock") if isinstance(config.get("browser_model_lock"), dict) else {}
+    model = _named(row.get("model")) or _named(config.get("model")) or _named(lock.get("model"))
+    provider = (
+        _named(row.get("billing_provider"))
+        or _named(config.get("provider"))
+        or _named(lock.get("provider"))
+    )
+    if model and provider:
+        return f"{provider}/{model}"
+    return model
+
+
+def _named(value: Any) -> Optional[str]:
+    """A non-empty string, or None: an empty column names nothing."""
+    return value if isinstance(value, str) and value.strip() else None
 
 
 def _seconds_of(row: Dict[str, Any]) -> Optional[float]:

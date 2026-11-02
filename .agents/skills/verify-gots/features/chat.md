@@ -14,8 +14,8 @@ its place in the sidebar's Recents across reloads.
 - `chat-reattach` — a reply still streaming when the page reloads picks its run up and finishes
   (`reattach`).
 - `chat-submission` — two sends made at once start one run and get one reply (`submission`).
-- `chat-routine-message` — a routine's answer draws as the bot's own message, with a card saying how
-  long the run took that opens the run read-only (`routine-message`).
+- `chat-routine-message` — a routine's answer draws as the bot's own message, with a line above it
+  saying how long the run took that opens the run read-only (`routine-message`).
 
 ## How to get to it (user POV)
 
@@ -53,8 +53,8 @@ Preconditions:
 - **A routine's message.** Say `routine message` in a new chat and run
   `pnpm e2e routine-message --shots "$GOTS_VERIFY_ARTIFACTS/<run-id>"`. The mock answers, then
   delivers a routine's message of its own: the reply above it keeps its own words, the message opens
-  with an aside opener, and a card under it names the routine and says how long the run took.
-  Tapping the card opens the run's transcript, which holds no textbox. The proof is `PASS: a routine's message drew as the bot's own`
+  with an aside opener, and a line above the words names the routine and says how long the run took.
+  Tapping the line opens the run's transcript, which holds no textbox. The proof is `PASS: a routine's message drew as the bot's own`
   and the `routine-message-390-light-message.png` and `-run.png` shots.
 - **Proof of a whole pass.** Keep the run's `PASS:` transcript and the `chat-message-*.png` shots in
   `$GOTS_VERIFY_ARTIFACTS/<run-id>`; they name the feature id and the entry point (the composer).

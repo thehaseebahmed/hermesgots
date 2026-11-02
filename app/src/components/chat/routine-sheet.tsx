@@ -61,7 +61,10 @@ function RunView({ run, server }: { run: RoutineRun; server: PluginServer }) {
     <>
       <PopupHeader className="gap-1 pb-3">
         <PopupTitle>{run.title ?? "Routine"}</PopupTitle>
-        <p className="text-sm text-muted-foreground">{`Ran ${ranAt(run.at)}`}</p>
+        {/* The thread's line says how long the run took; when it ran and what it ran on are here. */}
+        <p className="text-sm text-muted-foreground">
+          {[ranOn(run.at), run.model].filter(Boolean).join(" · ")}
+        </p>
       </PopupHeader>
       <div className="flex flex-col gap-4 px-4 pb-6">
         {messages?.map((message) => (
@@ -83,14 +86,20 @@ function RunView({ run, server }: { run: RoutineRun; server: PluginServer }) {
   )
 }
 
-/** The day and time a run's delivery was stamped with, in this reader's own clock. */
-function ranAt(at: number) {
-  return new Date(at).toLocaleString(undefined, {
-    day: "numeric",
-    month: "short",
-    hour: "numeric",
-    minute: "2-digit",
-  })
+/** The day a run was stamped with, as a reader says it: "Nov 3rd, 2026". */
+function ranOn(at: number) {
+  const when = new Date(at)
+  const day = when.getDate()
+  const ordinal =
+    day % 10 === 1 && day !== 11
+      ? "st"
+      : day % 10 === 2 && day !== 12
+        ? "nd"
+        : day % 10 === 3 && day !== 13
+          ? "rd"
+          : "th"
+  const month = when.toLocaleString("en-US", { month: "short" })
+  return `${month} ${day}${ordinal}, ${when.getFullYear()}`
 }
 
 /** Runs that are over don't change, so a transcript is read once per connection and run. */
