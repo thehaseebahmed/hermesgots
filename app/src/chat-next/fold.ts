@@ -281,9 +281,10 @@ export function foldTurns(rows: Row[], partial = false, showReminders = false): 
     // turn of its own, and the row folds into that one (ADR 0081). The turn is the routine row's, so
     // the message keeps the id the chip is matched to.
     const routine = isRoutineRow(row)
-    const opened = row.role === "assistant" && routine
-      ? { user: "", parts: [], done: false, delivered: [], routine: true, row: row.id }
-      : undefined
+    const opened =
+      row.role === "assistant" && routine
+        ? { user: "", parts: [], done: false, delivered: [], routine: true, row: row.id }
+        : undefined
     if (opened) turns.push(opened)
     // Rows read newest first can open on a reply whose request is older still: it is drawn alone. A
     // reply the host carried across a compaction opens the turn its archived request left.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import logging
 import re
 import sqlite3
 import sys
@@ -14,6 +15,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from hermes_constants import get_hermes_home
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -102,6 +105,23 @@ def _link_state() -> Dict[str, Any]:
     }
 
 
+def _platform_state(link: Any, home: Path) -> Dict[str, Any]:
+    """Turns delivery on for the profile being linked, and says whether the gateway has to restart.
+
+    A routine's answer arrives over the ``gots`` platform, and Hermes refuses a platform that isn't
+    enabled in the profile's config — so the tab's own link step writes it, the way ``memento link``
+    does. Only a file that changed needs the restart, which is what the tab then tells the user.
+    """
+    try:
+        changed = link.enable_platform(home)
+    except Exception:
+        logger.debug("memento: couldn't enable the gots platform", exc_info=True)
+        return {}
+    if not changed:
+        return {}
+    return {"restart": "Restart the gateway so the Gots platform connects, or routines won't deliver."}
+
+
 class LinkBody(BaseModel):
     code: str
     site: str
@@ -129,7 +149,7 @@ def link_profile(body: LinkBody) -> Dict[str, Any]:
         link.check_in(home, process_env=False)
     except link.LinkError as error:
         raise HTTPException(status_code=400, detail=str(error)) from None
-    return {**_link_state(), "warning": link.http_warning(url)}
+    return {**_link_state(), "warning": link.http_warning(url), **_platform_state(link, home)}
 
 
 @router.post("/link/env")
@@ -142,7 +162,7 @@ def link_env() -> Dict[str, Any]:
         raise HTTPException(status_code=409, detail="Link this profile first.")
     link.apply_env(home, link.env_changes(home, state["url"], state.get("origins") or []))
     link.publish(home, state, process_env=False, force=True)
-    return _link_state()
+    return {**_link_state(), **_platform_state(link, home)}
 
 
 @router.post("/unlink")

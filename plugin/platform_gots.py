@@ -268,7 +268,9 @@ def _acquire(db: Any, session_id: str, holder: str) -> bool:
     """Takes the chat's turn lease, which is the fence a row is written behind."""
     take = getattr(db, "try_acquire_session_turn_lease", None)
     if not callable(take):
-        return False
+        # No lease API means no turn to split: an older host writes the row at once rather than
+        # queueing a message that could never be written, which is what a False here would do.
+        return True
     try:
         return bool(take(session_id, holder, ttl_seconds=LEASE_TTL_SECONDS))
     except Exception:
@@ -396,7 +398,9 @@ def _remember(
             """INSERT INTO routine_messages
                    (execution, session_id, chat_id, job_id, title, run_session, text, at, row, notify)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(execution) DO UPDATE SET row = COALESCE(excluded.row, routine_messages.row)""",
+               ON CONFLICT(execution) DO UPDATE SET
+                   row = COALESCE(excluded.row, routine_messages.row),
+                   text = excluded.text""",
             (
                 execution,
                 chat["session"],
@@ -644,12 +648,16 @@ def routines(path: Path, home: Path, session_id: str) -> List[Dict[str, Any]]:
     """
     if not path.exists() or not session_id:
         return []
+    # The chat's own ids, not the one asked with: a rotation moves a chat to a child session, and the
+    # device's record of it doesn't move, so asking by one id would name nothing after a compaction.
+    ids = _lineage(home, session_id)
+    marks = ", ".join("?" for _ in ids)
     conn = connect(path)
     try:
         rows = conn.execute(
-            """SELECT execution, job_id, title, run_session, at FROM routine_messages
-               WHERE session_id = ? AND row IS NOT NULL ORDER BY at""",
-            (session_id,),
+            f"""SELECT execution, job_id, title, run_session, at FROM routine_messages
+                WHERE session_id IN ({marks}) AND row IS NOT NULL ORDER BY at""",
+            tuple(ids),
         ).fetchall()
     finally:
         conn.close()
@@ -835,12 +843,12 @@ def attach(
     try:
         if execution:
             last = conn.execute(
-                "SELECT execution, text FROM routine_messages WHERE execution = ? AND row IS NOT NULL",
+                "SELECT execution, text, row FROM routine_messages WHERE execution = ?",
                 (execution,),
             ).fetchone()
         else:
             last = conn.execute(
-                """SELECT execution, text FROM routine_messages
+                """SELECT execution, text, row FROM routine_messages
                    WHERE session_id = ? AND row IS NOT NULL ORDER BY at DESC LIMIT 1""",
                 (chat["session"],),
             ).fetchone()
@@ -848,17 +856,28 @@ def attach(
         conn.close()
     if last is None:
         return {"error": "A routine's file arrived with no message of its own to name it on."}
-    execution, text = last
+    execution, text, landed = last
     carried = _media_paths(text)
     if len(carried) >= MAX_ATTACHMENTS:
         return {"error": f"A routine's message carries {MAX_ATTACHMENTS} files; this one was dropped."}
     staged = stage(home, chat["session"], source)
     if staged is None:
         return {"error": f"{Path(str(source)).name} couldn't be copied into this bot's attachments."}
+    updated = _with_media(text, [staged])
+    if not landed:
+        # The message is still waiting for the chat: its file is named on the words it will be
+        # written with, which is the only copy of them that becomes a row.
+        conn = connect(path)
+        try:
+            conn.execute(
+                "UPDATE routine_messages SET text = ? WHERE execution = ?", (updated[:MAX_TEXT], execution)
+            )
+        finally:
+            conn.close()
+        return {"success": True, "queued": True}
     row = _current_rows(home, chat["session"]).get(execution)
     if row is None:
         return {"error": "The routine's message isn't in this chat any more, so its file has nowhere to go."}
-    updated = _with_media(text, [staged])
     if not _rewrite(home, row, updated):
         return {"error": "Couldn't name that file on the routine's message."}
     conn = connect(path)
@@ -1010,11 +1029,30 @@ def fill_deliver(**kwargs: Any) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _asked_in_a_chat(session_id: Any) -> bool:
+    """Whether this tool call is happening in one of this bot's chats, by its Hermes session."""
+    if not isinstance(session_id, str) or not session_id:
+        return False
+    try:
+        found = chats.read(current_path())
+    except Exception:
+        return False
+    return any(
+        ((chat.get("value") or chat).get("hermesSessionId")) == session_id
+        for chat in (found.values() if isinstance(found, dict) else found)
+    )
+
+
 def _fill_deliver(kwargs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if kwargs.get("tool_name") != "cronjob":
         return None
     args = kwargs.get("args")
     if not isinstance(args, dict) or args.get("action") != "create":
+        return None
+    # Only a routine asked for in one of this bot's chats is answered in it: a routine created from
+    # Telegram or a terminal belongs where it was asked for, and sweeping it into Main would be a
+    # delivery the user never asked this bot for.
+    if not _asked_in_a_chat(kwargs.get("session_id")):
         return None
     deliver = args.get("deliver")
     fill: Dict[str, Any] = {}

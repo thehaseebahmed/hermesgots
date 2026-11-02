@@ -282,6 +282,14 @@ function foldRows(
   // Where the reply's text since its last tool call starts, and the notice that text was cut by.
   let segment = 0
   let notice: string | undefined
+  /** A routine message's own id: its delivery where the row names one, its row otherwise. */
+  const routineId = (row: SessionMessage, rowId: string) => {
+    const execution = row.display_metadata?.routine?.execution
+    return typeof execution === "string" && execution
+      ? `h-${conversationId}-routine-${execution}`
+      : rowId
+  }
+
   const newReply = (id: string, createdAt: number) => {
     segment = 0
     notice = undefined
@@ -366,7 +374,9 @@ function foldRows(
     // A routine's answer is the bot's own message and not the reply above it carrying on: it starts
     // a message of its own, whose words, media tags and stats land the way any reply's do (ADR 0081).
     if (row.role === "assistant" && isRoutineRow(row)) {
-      reply = newReply(id, createdAt)
+      // Named after its delivery rather than its row: a rotated compaction re-emits the row under a
+      // fresh id, and a message that kept the old id would be written a second time beside itself.
+      reply = newReply(routineId(row, id), createdAt)
       reply.hermesRowId = row.id
       reply.routine = true
     }

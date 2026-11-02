@@ -14,12 +14,8 @@ its place in the sidebar's Recents across reloads.
 - `chat-reattach` — a reply still streaming when the page reloads picks its run up and finishes
   (`reattach`).
 - `chat-submission` — two sends made at once start one run and get one reply (`submission`).
-- `chat-routine-message` — a routine's answer draws as the bot's own message, separate from the reply
-  above it, with a chip that opens the run read-only and no composer in the sheet (ADR 0081). Proved
-  by the component tier, which is where the fold, the chip and the sheet are decided:
-  `scripts/test-routine-fold.mjs`, `scripts/test-routine-run.tsx`. In the browser, the claim is a
-  Reticle check: send `routine message` against the mock, then `--expect` that the thread holds the
-  aside row and its chip and that the sheet carries no composer.
+- `chat-routine-message` — a routine's answer draws as the bot's own message, with a chip that opens
+  the run read-only (`routine-message`).
 
 ## How to get to it (user POV)
 
@@ -54,6 +50,12 @@ Preconditions:
   continues to `done` after the reload — read back with `lastReply`, not just seen in the bubble.
 - **Concurrent sends.** Send twice quickly. Run `pnpm e2e submission`. One run and one reply arrive
   (the second send queues while the first streams).
+- **A routine's message.** Say `routine message` in a new chat and run
+  `pnpm e2e routine-message --shots "$GOTS_VERIFY_ARTIFACTS/<run-id>"`. The mock answers, then
+  delivers a routine's message of its own: the reply above it keeps its own words, the message opens
+  with an aside opener, and a chip under it names the routine. Tapping the chip opens the run's
+  transcript, which holds no textbox. The proof is `PASS: a routine's message drew as the bot's own`
+  and the `routine-message-390-light-message.png` and `-run.png` shots.
 - **Proof of a whole pass.** Keep the run's `PASS:` transcript and the `chat-message-*.png` shots in
   `$GOTS_VERIFY_ARTIFACTS/<run-id>`; they name the feature id and the entry point (the composer).
 

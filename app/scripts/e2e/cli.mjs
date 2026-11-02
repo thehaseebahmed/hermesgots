@@ -44,6 +44,11 @@ export const FLOWS = {
     script: "e2e/chat-message.mjs",
     about: "Start a new chat, send a message, get the whole reply and find it in Recents",
   },
+  "routine-message": {
+    script: "e2e/routine-message.mjs",
+    about:
+      "A routine's answer arrives in the chat that asked for it as the bot's own message, apart from the reply above it and opening as an aside, with a chip that opens the run's transcript read-only — at 390 and 1024px in both themes",
+  },
   "chat-title": {
     script: "e2e/chat-title.mjs",
     about:

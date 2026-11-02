@@ -60,7 +60,7 @@ function RunView({ run, server }: { run: RoutineRun; server: PluginServer }) {
   return (
     <>
       <PopupHeader className="gap-1 pb-3">
-        <PopupTitle>{run.title}</PopupTitle>
+        <PopupTitle>{run.title ?? "Routine"}</PopupTitle>
         <p className="text-sm text-muted-foreground">{`Ran ${ranAt(run.at)}`}</p>
       </PopupHeader>
       <div className="flex flex-col gap-4 px-4 pb-6">

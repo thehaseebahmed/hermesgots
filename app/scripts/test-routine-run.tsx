@@ -3,8 +3,8 @@
  * the routine that spoke, and the chip opens the run behind it — the run's transcript, read-only,
  * with no composer (Hermes refuses a turn on the `cron` session it wrote). A run the host no longer
  * holds reads as a plain sentence; a host that doesn't advertise `routine_message` is asked nothing
- * and draws nothing; and a chat with no routine message in it still costs its one read, since only
- * the route says which rows a routine drew.
+ * and draws nothing; and only a routine's own message asks for a chat's runs, so a thread without one
+ * asks nothing at all.
  */
 import assert from "node:assert/strict"
 import test from "node:test"

@@ -19,10 +19,17 @@ import {
 } from "@/lib/routine-runs"
 import { cn } from "@/lib/utils"
 
-/** Whether the host named enough of a delivery for a chip to name the routine and open its run. */
+/**
+ * Whether the host named enough of a delivery for a chip to open its run: the routine it came from
+ * and the session the run wrote. The routine's name is what the chip says, and a routine with none
+ * is still a run the reader can open.
+ */
 function namesRun(run: RoutineRun | undefined): run is RoutineRun {
-  return Boolean(run && run.jobId && run.title && run.runSession)
+  return Boolean(run && run.jobId && run.runSession)
 }
+
+/** The name a chip gives a routine the host didn't name. */
+const UNNAMED = "Routine"
 
 /**
  * The chip that stands on a routine's message: which routine spoke, on the reply's own column and in
@@ -35,12 +42,12 @@ export function RoutineChip({ run, onOpen }: { run: RoutineRun; onOpen: () => vo
       <button
         type="button"
         data-slot="routine-chip"
-        aria-label={`Routine: ${run.title}`}
+        aria-label={`Routine: ${run.title ?? UNNAMED}`}
         onClick={onOpen}
         className="flex min-h-11 w-fit max-w-full items-center gap-2 rounded-full border border-border/70 px-3 text-xs text-muted-foreground outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/50"
       >
         <BotIcon className="size-3.5 shrink-0" aria-hidden />
-        <span className="min-w-0 truncate">{run.title}</span>
+        <span className="min-w-0 truncate">{run.title ?? UNNAMED}</span>
         <ChevronRightIcon className="size-3.5 shrink-0" aria-hidden />
       </button>
     </div>

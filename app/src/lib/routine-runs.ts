@@ -5,9 +5,7 @@
  *
  * The read is the plugin's, not the transcript's: a compaction re-emits carried rows under fresh row
  * ids while the delivery's display metadata survives, so only the host can say which row a routine's
- * message is drawn at now. That is why a chat with no routine message still costs one request — the
- * route is what says which rows are a routine's — and why a message the answer doesn't name draws no
- * chip at all.
+ * message is drawn at now — and why a message the answer doesn't name draws no chip at all.
  */
 import { useEffect, useState } from "react"
 
@@ -49,7 +47,6 @@ const askedRows = new Set<string>()
 const ASKED_ROWS = 512
 
 const keyOf = (config: HermesConfig, sessionId: string) => `${connectionKey(config)}\n${sessionId}`
-
 
 /**
  * Asks a chat's bot for its routine messages, once per chat unless `again`. A read that fails keeps

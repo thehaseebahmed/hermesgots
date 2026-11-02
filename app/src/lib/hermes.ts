@@ -1416,6 +1416,8 @@ export interface SessionMessage {
     notification_category?: string
     /** The host keeps the row out of the thread: it is written as `hidden` instead. */
     presentation_suppressed?: boolean
+    /** On a routine's message, the delivery it came from — the one id that survives a compaction. */
+    routine?: { execution?: string } | null
   } | null
   finish_reason?: string | null
 }
@@ -3075,7 +3077,12 @@ export interface ClosedRepo {
 export async function closeSession(
   config: HermesConfig,
   sessionId: string,
-): Promise<{ removed: boolean; kept: KeptWorktree[]; results: ClosedRepo[]; error: string | null }> {
+): Promise<{
+  removed: boolean
+  kept: KeptWorktree[]
+  results: ClosedRepo[]
+  error: string | null
+}> {
   const response = await request(pluginSession(config, sessionId, "/close"), {
     method: "POST",
     headers: headers(config),

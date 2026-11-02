@@ -22,9 +22,14 @@ const row = (
   extra: Partial<SessionMessage> = {},
 ): SessionMessage => ({ id, role, content, timestamp: AT, ...extra })
 
-/** A routine's row as the plugin writes it: an assistant row whose display kind says so. */
+/** A routine's row as the plugin writes it: an assistant row whose display kind says so, and whose
+ * display metadata names the delivery it came from. */
 const routine = (id: number, content: string, extra: Partial<SessionMessage> = {}) =>
-  row(id, "assistant", content, { display_kind: "routine_message", ...extra })
+  row(id, "assistant", content, {
+    display_kind: "routine_message",
+    display_metadata: { routine: { execution: "job-1:cron_job-1_9" } },
+    ...extra,
+  })
 
 const drawn = (rows: SessionMessage[]) => toMessages("c-1", SESSION, rows)
 
@@ -105,4 +110,19 @@ test("a routine's row is a turn of its own, which is what the catch-up keeps", (
     turns[1].rows.map((one) => one.id),
     [3],
   )
+})
+
+test("a carried copy of a routine's message lands on the message already drawn", () => {
+  // A rotated compaction re-emits the row under a fresh id: the message is named after its delivery,
+  // so the copy is the same message rather than a second one beside it.
+  const before = drawn([
+    row(1, "user", "check the feeds"),
+    routine(3, "Morning watch: three new items."),
+  ])
+  const after = drawn([
+    row(1, "user", "check the feeds"),
+    routine(9, "Morning watch: three new items.", { timestamp: AT + 60 }),
+  ])
+  assert.equal(before[1].id, after[1].id, "one id across the compaction")
+  assert.notEqual(before[1].hermesRowId, after[1].hermesRowId, "while the row it points at moved")
 })

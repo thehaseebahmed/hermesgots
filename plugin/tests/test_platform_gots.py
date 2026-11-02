@@ -411,22 +411,44 @@ class RoutineMessage(unittest.TestCase):
         self.assertIn("deliver: gots:main", platform_gots.PROMPT)
 
     def test_deliver_is_filled_only_when_the_model_named_nothing(self):
-        filled = platform_gots.fill_deliver(tool_name="cronjob", args={"action": "create", "prompt": "watch"})
+        filled = platform_gots.fill_deliver(
+            tool_name="cronjob",
+            session_id=SESSION,
+            args={"action": "create", "prompt": "watch"},
+        )
         self.assertEqual(filled, {"action": "modify", "args": {"deliver": "gots:main", "attach_to_session": False}})
         kept = platform_gots.fill_deliver(
-            tool_name="cronjob", args={"action": "create", "deliver": "telegram:1", "attach_to_session": True}
+            tool_name="cronjob",
+            session_id=SESSION,
+            args={"action": "create", "deliver": "telegram:1", "attach_to_session": True},
         )
         self.assertIsNone(kept)
 
+    def test_a_routine_asked_for_elsewhere_is_left_alone(self):
+        # Asked for in another platform's chat, the routine belongs where it was asked for: sweeping
+        # it into this bot's Main thread would be a delivery nobody here asked for.
+        self.assertIsNone(
+            platform_gots.fill_deliver(
+                tool_name="cronjob",
+                session_id="telegram-42",
+                args={"action": "create", "prompt": "watch"},
+            )
+        )
+        self.assertIsNone(platform_gots.fill_deliver(tool_name="cronjob", args={"action": "create"}))
+
     def test_a_gots_job_never_mirrors_itself_into_the_chat(self):
         named = platform_gots.fill_deliver(
-            tool_name="cronjob", args={"action": "create", "deliver": "gots:main", "attach_to_session": True}
+            tool_name="cronjob",
+            session_id=SESSION,
+            args={"action": "create", "deliver": "gots:main", "attach_to_session": True},
         )
         self.assertEqual(named, {"action": "modify", "args": {"attach_to_session": False}})
 
     def test_nothing_else_is_rewritten(self):
         self.assertIsNone(platform_gots.fill_deliver(tool_name="terminal", args={"command": "ls"}))
-        self.assertIsNone(platform_gots.fill_deliver(tool_name="cronjob", args={"action": "list"}))
+        self.assertIsNone(
+            platform_gots.fill_deliver(tool_name="cronjob", session_id=SESSION, args={"action": "list"})
+        )
         self.assertIsNone(
             platform_gots.fill_deliver(tool_name="cronjob", args={"action": "create", "deliver": "gots:main",
                                                                   "attach_to_session": False})
