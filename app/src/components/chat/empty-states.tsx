@@ -25,6 +25,9 @@ export const SETUP_COPY = "Point Gots at your Hermes Agent API server to start c
 export const THREAD_MISSING = "The thread didn't load."
 export const THREAD_MISSING_WHY = "This device couldn't read it from the host."
 
+/** The shell every pane in a chat that has nothing to scroll shares: centred, clear of the header. */
+const PANE = "flex flex-1 flex-col items-center justify-center px-4 pt-24 pb-8 text-center"
+
 export function EmptyState({
   botId,
   configured,
@@ -41,7 +44,7 @@ export function EmptyState({
   line?: boolean
 }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-6 px-4 pt-24 pb-8 text-center">
+    <div className={`${PANE} gap-6`}>
       <Bot id={botId} animate className="size-24" />
       {configured ? (
         <div className="flex max-w-md flex-col items-center gap-3">
@@ -64,7 +67,7 @@ export function EmptyState({
 /** A thread this device could not read: it says so and offers the read again. */
 export function MissingThread({ onRetry }: { onRetry: () => void }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 pt-24 pb-8 text-center">
+    <div className={`${PANE} gap-3`}>
       <p className="text-sm font-medium">{THREAD_MISSING}</p>
       <p className="max-w-sm text-sm text-muted-foreground">{THREAD_MISSING_WHY}</p>
       <Button variant="outline" onClick={onRetry}>
@@ -85,7 +88,7 @@ export function MainEmptyState({
   onSend: (text: string) => Promise<void>
 }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-6 px-4 pt-24 pb-8 text-center">
+    <div className={`${PANE} gap-6`}>
       <Bot id={botId} animate className="size-24" />
       <ReadyLine botId={botId} id={id} />
       <div className="flex max-w-md flex-wrap justify-center gap-2">
