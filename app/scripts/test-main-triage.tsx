@@ -10,8 +10,16 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { MemoryRouter } from "react-router"
 
 import { MovedMarker } from "@/components/chat/moved-marker"
-import { sendFromMain, settleTriaging, stopMessage } from "@/lib/chat"
+import {
+  queueMessage,
+  refreshQueue,
+  sendFromMain,
+  sendMessage,
+  settleTriaging,
+  stopMessage,
+} from "@/lib/chat"
 import { db, mainThreadId, type Message, type Profile } from "@/lib/db"
+import type { Move } from "@/lib/hermes"
 import { moveMarks } from "@/lib/move-marks"
 import { refreshMoves, undoMove } from "@/lib/moves"
 import { TRIAGE_MS } from "@/lib/freshness"
@@ -121,6 +129,17 @@ async function seed(
 }
 
 const messagesOf = (id: string) => db.messages.where("conversationId").equals(id).toArray()
+/** A move the host recorded while its clock ran two minutes ahead of this device's. */
+const skewedMove = (overrides: Partial<Move> = {}): Move => ({
+  id: "m1",
+  text: "more on Lisbon",
+  threadId: "t1",
+  at: Date.now() + 120_000,
+  undone: false,
+  undoable: true,
+  new: false,
+  ...overrides,
+})
 const triaged = (seen: { path: string }[]) => seen.filter((r) => r.path.endsWith("/triage"))
 /** The turns posted to Hermes, by the session each was for. */
 const runsFor = (seen: { path: string; body: any }[], session: string) =>
@@ -399,6 +418,116 @@ test("markers sit in time order among Main's messages, and an undone move has no
     marks.trailing.map((m) => m.id),
     ["m3"],
   )
+})
+
+test("a message typed after a move is stamped after it, the held row and all", async () => {
+  await seed("route-skew")
+  host("route-skew", "stay")
+  const move = skewedMove()
+  await db.conversations.update(MAIN, { moves: [move] })
+  await db.messages.add({
+    id: "r0",
+    conversationId: MAIN,
+    role: "assistant",
+    content: "before the move",
+    status: "done",
+    createdAt: move.at - 60_000,
+  })
+  const fetchWith = globalThis.fetch
+  let answer: (() => void) | undefined
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input instanceof Request ? input.url : input))
+    if (url.pathname.endsWith("/triage")) await new Promise<void>((done) => (answer = done))
+    return fetchWith(input, init)
+  }) as typeof fetch
+  const sending = sendFromMain(MAIN, "and this stays")
+  const held = async () => (await messagesOf(MAIN)).find((m) => m.status === "triaging")
+  await until(async () => Boolean((await held()) && answer), "the held row and its ask")
+  assert.ok((await held())!.createdAt > move.at, "the held row sorts after the move it follows")
+  answer!()
+  assert.equal(await sending, undefined)
+  const rows = (await messagesOf(MAIN)).sort((a, b) => a.createdAt - b.createdAt)
+  const sent = rows.find((m) => m.content === "and this stays")
+  // The refused run takes its empty reply with it, so the message is the last row drawn.
+  assert.equal(rows.at(-1)?.id, sent?.id, "nothing follows the message for a marker to sit under")
+  const marks = moveMarks(rows, [move], new Set<string>())
+  assert.deepEqual(
+    marks.before.get(sent?.id ?? "")?.map((m) => m.id),
+    ["m1"],
+  )
+  assert.deepEqual(marks.trailing, [])
+})
+
+test("a plain Main send, with no triage behind it, is stamped after the move too", async () => {
+  await seed("route-skew-plain")
+  host("route-skew-plain", "stay")
+  const move = skewedMove()
+  await db.conversations.update(MAIN, { moves: [move] })
+  await sendMessage(MAIN, "typed later")
+  const sent = (await messagesOf(MAIN)).find((m) => m.content === "typed later")
+  assert.ok(sent && sent.createdAt > move.at, "the message sorts after the move")
+})
+
+test("a message waiting in the queue sorts after the move too, so the marker stays put", async () => {
+  await seed("route-skew-queued")
+  host("route-skew-queued", "stay", ["triage", "moves"])
+  const move = skewedMove()
+  await db.conversations.update(MAIN, { moves: [move] })
+  await queueMessage(MAIN, "typed while it runs")
+  const rows = await messagesOf(MAIN)
+  const waiting = rows.find((m) => m.content === "typed while it runs")
+  assert.equal(waiting?.status, "queued")
+  assert.ok(waiting.createdAt > move.at, "the waiting row sorts after the move")
+  const marks = moveMarks(rows, [move], new Set<string>())
+  assert.deepEqual(marks.trailing, [], "so the marker is not left at the end of the chat")
+})
+
+/** A second chat, so a sync that leaves two replies streaming leaves them here, not in Main. */
+const ADOPTED = "main-adopt"
+
+test("two turns the host started in one pass take a time each, above the move", async () => {
+  await seed("route-skew-adopt")
+  host("route-skew-adopt", "stay")
+  const move = skewedMove()
+  await db.conversations.put({
+    id: ADOPTED,
+    profileId: (await db.profiles.toArray())[0].id,
+    title: "Adopted",
+    hermesSessionId: `memento-${ADOPTED}`,
+    createdAt: 1,
+    updatedAt: 1,
+    changedAt: 0,
+    moves: [move],
+  })
+  const fetchWith = globalThis.fetch
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input instanceof Request ? input.url : input))
+    if (url.pathname.endsWith("/queue"))
+      return json({
+        items: [],
+        sent: [
+          { id: "s1", text: "first", created_at: 1, run_id: "r1", run_status: "running" },
+          { id: "s2", text: "second", created_at: 2, run_id: "r2", run_status: "running" },
+        ],
+        paused: false,
+      })
+    // A reply followed by its run's own status, which says it is over: a run left running would be
+    // followed for the rest of the file.
+    if (/\/runs\/[^/]+\/events$/.test(url.pathname))
+      return new Response("", { headers: { "content-type": "text/event-stream" } })
+    if (/\/v1\/runs\/[^/]+$/.test(url.pathname))
+      return json({ status: "completed", created_at: 1, output: "", usage: {} })
+    return fetchWith(input, init)
+  }) as typeof fetch
+  await refreshQueue(ADOPTED)
+  const rows = (await messagesOf(ADOPTED)).sort((a, b) => a.createdAt - b.createdAt)
+  const users = rows.filter((m) => m.role === "user")
+  assert.deepEqual(
+    users.map((m) => m.content),
+    ["first", "second"],
+  )
+  assert.ok(users[0].createdAt > move.at, "the first lands after the move")
+  assert.ok(users[1].createdAt > users[0].createdAt, "and the second after it, not on its time")
 })
 
 test("tapping a marker opens its thread", async () => {

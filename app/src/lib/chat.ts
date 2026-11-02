@@ -60,6 +60,7 @@ import {
 } from "@/lib/history"
 import { unknownLastTurn } from "@/lib/model-changes"
 import { modelOf, pickOf, wantsPin } from "@/lib/model-pick"
+import { movesFloor } from "@/lib/move-marks"
 import { askTriage, canTriage, triaging } from "@/lib/triage"
 import { takeHostTitle } from "@/lib/title"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
@@ -913,7 +914,10 @@ export async function requeueSteer(conversationId: string, text: string) {
     content,
     ...(attachments.length ? { attachments } : {}),
     status: "queued",
-    createdAt: queued ? queued.createdAt - 1 : Date.now(),
+    createdAt: movesFloor(
+      (await hostOf(conversationId))?.conversation.moves,
+      queued ? queued.createdAt - 1 : Date.now(),
+    ),
   })
 }
 
@@ -1069,14 +1073,11 @@ async function followTurnRun(turn: Turn, runId: string) {
   return settleRun(turn.draft, await trackRun(turn, runId))
 }
 
-/**
- * When a new turn starts: now, or just after the chat's last message when the host's clock, which
- * stamped the turns loaded from it, runs ahead of this device's. Queued messages wait after it.
- */
-function nextAt(messages: Message[]) {
+/** Queued rows are skipped: sending one re-stamps it. */
+function nextAt(conversation: Pick<Conversation, "moves">, messages: readonly Message[]) {
   return messages.reduce(
     (at, m) => (m.status === "queued" ? at : Math.max(at, m.createdAt + 1)),
-    Date.now(),
+    movesFloor(conversation.moves, Date.now()),
   )
 }
 
@@ -1094,7 +1095,7 @@ async function prepareSend(
   // The first send is what fixes the chat's model; every send after it reads the pick it left.
   const { conversation: pinned, release } = await pinModel(conversation, profile)
   const history = await getMessages(conversationId)
-  const now = nextAt(history)
+  const now = nextAt(pinned, history)
   // The pick in effect, not the profile's advertised default name, which isn't a model id.
   const sent = pickOf(pinned, profile)
   const userMessage: Message = {
@@ -1471,7 +1472,7 @@ export async function sendFromMain(
       content,
       ...(sent.length ? { attachments: sent } : {}),
       status: "triaging",
-      createdAt: nextAt(await getMessages(conversationId)),
+      createdAt: nextAt(host.conversation, await getMessages(conversationId)),
     }
     heldId = held.id
     await db.messages.add(held)
@@ -1536,6 +1537,7 @@ export async function queueMessage(
 ): Promise<string | undefined> {
   const content = text.trim()
   if (!content && !attachments.length) return undefined
+  const host = await hostOf(conversationId)
   const message: Message = {
     id: randomId(),
     conversationId,
@@ -1543,9 +1545,8 @@ export async function queueMessage(
     content,
     ...(attachments.length ? { attachments } : {}),
     status: "queued",
-    createdAt: Date.now(),
+    createdAt: movesFloor(host?.conversation.moves, Date.now()),
   }
-  const host = await hostOf(conversationId)
   if (host && (await hostQueue(host.config))) {
     try {
       const { item, sent } = await queueOnHost(
@@ -1604,6 +1605,7 @@ async function syncQueue(conversationId: string) {
   const startedIds = new Set(sent.map((item) => item.id))
   let finished = false
   const follow: Message[] = []
+  let at = nextAt(host.conversation, local)
   await db.transaction("rw", db.messages, async () => {
     for (const m of local) {
       if (m.hostQueued && m.status === "queued" && !waiting.has(m.id) && !startedIds.has(m.id))
@@ -1648,7 +1650,8 @@ async function syncQueue(conversationId: string) {
       if (inThread) continue
       if (running && item.runId) {
         if (controllers.has(conversationId)) continue
-        const now = nextAt(local)
+        const now = at
+        at += 2
         await db.messages.put({
           id: item.id,
           conversationId,

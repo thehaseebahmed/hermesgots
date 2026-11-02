@@ -2,6 +2,7 @@ import { connectionKey, serverConfig } from "@/lib/connection"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { db } from "@/lib/db"
 import { getMoves, hasPluginFeature, postMoveUndo, type Move } from "@/lib/hermes"
+import { noteFailure } from "@/lib/report"
 import { tracked } from "@/lib/tracked"
 
 /** Bots whose plugin has no moves route (an older plugin). */
@@ -23,6 +24,7 @@ export async function refreshMoves(conversationId: string) {
     if (!(await hasPluginFeature(config, "moves"))) return
     moves = await getMoves(config, conversation.hermesSessionId)
   } catch (error) {
+    noteFailure("Reading a chat's moves", error)
     if (await lacksRoute(profile, error, "moves")) unsupported.start(key)
     return
   }

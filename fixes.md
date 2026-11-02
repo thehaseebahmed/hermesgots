@@ -2491,3 +2491,64 @@ a wrapper only one of its two homes has, which this branch corrects in the test 
   through, and a draft built on it is not what this branch is for.
 
 ---
+
+---
+
+# Deferred: what a Moved marker's own clock leaves behind
+
+`fix "chat: stamp a turn typed in Main after the newest move"` floors a new turn on the newest move
+the host recorded, so a message typed after a move can no longer be drawn above it. Two `/code-review`
+passes (standards, then spec backed by probes on the repo's own harness) found the floor's edge cases
+and one producer it does not reach. What they found inside the branch is fixed on it; three things
+outlive it.
+
+## 1. The floor reads a cached list, so a move recorded a moment ago may not be in it
+
+`nextAt` (`app/src/lib/chat.ts`) floors on `conversation.moves`, which is refreshed after a triage
+(`void refreshMoves`, `lib/triage.ts`) and otherwise only when the chat's history catches up, throttled
+to `FOLLOW_UP_MS` — two minutes (`lib/history.ts`). A second message typed in Main right after a move,
+or any message on a second device before its next catch-up, is floored against a list that lacks that
+move and lands above the marker: the reported bug, one message later. The house rule forbids asking the
+host on the send path, so no fetch closes it.
+
+- Cost: the fix's promise is narrower than it reads — it holds for the move the app already knows about.
+- Suggested fix: stop asking *what the host recorded* and ask *what the host's clock is*. The offset is
+  derivable from a fact the app already holds and discards: `history.ts` matches a locally-stamped user
+  row to its host row and computes `hermesAt`, and the difference between that row's `timestamp` and
+  the local `createdAt` is exactly `host − device`. Persist it on the conversation, learn and clamp it
+  in `reconcile`, and stamp `Date.now() + offset`; moves then need no floor at all.
+- Why it is not applied here: it is a new column, a Dexie bump, learning inside a hot path, and a clamp
+  for when the device clock is corrected — its own task, not a review pass.
+
+## 2. The newer chat screen stamps its own turn with no floor at all
+
+`app/src/chat-next/page.tsx` builds its optimistic turn with `const at = retrying?.at ?? Date.now()`
+and hands the rows to `useMainFlow`, which draws `moveMarks` over the same list. Probed as data (a turn
+at the device's clock plus a move two minutes ahead puts the marker in `trailing`, where the report
+says it appears), not as a driven screen.
+
+- Cost: until the host's row replaces the live turn, that screen can draw a marker under a message
+  typed after the move — the same shape, seconds long.
+- Suggested fix: the offset from entry 1, applied wherever a turn has no host time; a floor on the
+  newest host turn's `at` would do in the meantime.
+- Why it is not applied here: it is another screen's producer, reproduced as a shape rather than
+  driven, and one screen of two is the honest scope for a bug fixed where it was reported.
+
+## 3. A floored stamp is in the device's future, and two readers say so
+
+A floor set by a host clock running ahead writes `createdAt` (and `conversation.updatedAt`) ahead of
+`Date.now()`. The chat list renders `formatRelative(age, now)` from it and reads "in 2 min"; the reply
+stats measure a turn as `endedAt - startedAt` off the draft's `createdAt`, so a five-second reply can
+read as minutes.
+
+- Cost: a visible oddity whenever the clocks differ, and it presents more often now that a locally-typed
+  row can carry the skew, where before only host rows did.
+- Suggested fix: measure a turn from its own `Date.now()` at open and keep the ordering stamp separate;
+  clamp a relative time that lands in the future to "now".
+- Why it is not applied here: pre-existing for every host-stamped row, and both fixes reach code this
+  branch never touched.
+
+---
+
+Found by the `/simplify-code`, then `/no-comments`, then `/code-review` passes on this branch; the
+pull request does not wait on any of them.
