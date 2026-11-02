@@ -24,7 +24,8 @@ import {
 
 const body = () => document.body.textContent ?? ""
 /** The big bot the new-session empty state draws — nowhere else in a session's pane. */
-const face = () => find('[role="img"]')
+const botFace = () => find('[role="img"]')
+const headerTitle = () => find('[data-slot="header-title"]')?.textContent?.trim()
 
 /** A session that has something in it, with none of what it holds on this device. */
 async function seedPastSession() {
@@ -52,8 +53,9 @@ test("a session whose thread cannot be read says so instead of drawing a new one
   await mount(chatScreen("s-past"), async () => {
     await settle()
     assert.ok(body().includes(THREAD_MISSING), "the pane says the thread didn't load")
+    assert.equal(headerTitle(), "A session", "and the header keeps the session's own title")
     assert.ok(body().includes("Try again"), "and offers a retry")
-    assert.equal(face(), null, "the session is not drawn as one nobody started")
+    assert.equal(botFace(), null, "the session is not drawn as one nobody started")
   })
 })
 
@@ -80,7 +82,7 @@ test("a session nothing was sent in still draws as a new one", async () => {
   globalThis.fetch = async () => json({})
   await mount(chatScreen("s-draft"), async () => {
     await settle()
-    assert.ok(face(), "the new session draws its bot")
+    assert.ok(botFace(), "the new session draws its bot")
     assert.ok(!body().includes(THREAD_MISSING), "and no read is claimed to have failed")
     assert.ok(!body().includes("Try again"), "with nothing to retry")
   })

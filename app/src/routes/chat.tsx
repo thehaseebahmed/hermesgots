@@ -1013,7 +1013,8 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   const needsHistory =
     Boolean(conversation && conversation.updatedAt > conversation.createdAt) &&
     messages?.length === 0
-  const loadingHistory = needsHistory && historyMissing !== id
+  const threadUnread = needsHistory && historyMissing === id
+  const loadingHistory = needsHistory && !threadUnread
   // The pane says the read failed and offers Try again; a toast on top of it says it twice.
   const readHistory = useCallback(() => {
     if (!id) return
@@ -1034,10 +1035,8 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   const updatedAt = conversation?.updatedAt
   const hasMessages = (messages?.length ?? 0) > 0
   const hasCards = Boolean(cards && (cards.before.size || cards.trailing.length))
-  const missingHistory = needsHistory && historyMissing === id
   // A session with a past is never drawn as one nobody started: it has a thread, unread.
-  const unstarted =
-    !gone && configured && !hasMessages && !hasCards && !loadingHistory && !needsHistory
+  const unstarted = !gone && configured && !hasMessages && !hasCards && !needsHistory
   // The agents this chat's agent delegated to, for their cards in the thread. Only a call that set a
   // subagent to work turns the poll on: a list, steer or stop runs no agent to wait for (ADR 0053).
   const spawning = useMemo(() => spawnInFlight(messages), [messages])
@@ -1429,7 +1428,7 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
         <div className="flex flex-1 items-center justify-center">
           <Spinner className="size-6" />
         </div>
-      ) : missingHistory ? (
+      ) : threadUnread ? (
         <MissingThread onRetry={retryHistory} />
       ) : conversation?.main && botThreads && configured ? (
         <MainEmptyState botId={profile?.botId} id={conversation?.id} onSend={send} />
