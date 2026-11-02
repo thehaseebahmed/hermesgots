@@ -282,6 +282,29 @@ class StateTest(Base):
         self.assertEqual(state["models"], {})
         self.assertIsNone(state["elsewhere"], "another recording is not another machine")
 
+    def test_a_record_that_names_no_bytes_is_owed_a_fresh_one(self) -> None:
+        record = probe_record({"base": 9.0})
+        record["fixture"] = {"bytes": 95300, "ms": 2977}
+        put_setting(self.path, speech_probe.KEY, record)
+        state = speech_probe.state(self.path, speech.sizes(), ["base"])
+        self.assertTrue(state["owed"], "a record that can't say which bytes it heard is not a measurement")
+        self.assertEqual(state["models"], {})
+
+    def test_a_record_taken_under_another_python_is_still_this_machine(self) -> None:
+        elsewhere = {**speech_probe.machine(), "python": "3.9.0"}
+        put_setting(self.path, speech_probe.KEY, probe_record({"base": 9.0}, host=elsewhere))
+        state = speech_probe.state(self.path, speech.sizes(), ["base"])
+        self.assertFalse(state["owed"], "an interpreter upgrade is the same machine")
+        self.assertIsNone(state["elsewhere"])
+        self.assertEqual(state["models"]["base"]["realtime"], 9.0)
+
+    def test_a_record_named_like_this_host_with_other_hardware_is_unnamed(self) -> None:
+        elsewhere = {**speech_probe.machine(), "cpus": 2}
+        put_setting(self.path, speech_probe.KEY, probe_record({"base": 9.0}, host=elsewhere))
+        state = speech_probe.state(self.path, speech.sizes(), ["base"])
+        self.assertTrue(state["owed"])
+        self.assertEqual(state["elsewhere"]["name"], "", "never 'measured on this host, not this host'")
+
     def test_nothing_on_disk_says_there_is_nothing_to_time(self) -> None:
         state = speech_probe.state(self.path, speech.sizes(), [])
         self.assertTrue(state["owed"])

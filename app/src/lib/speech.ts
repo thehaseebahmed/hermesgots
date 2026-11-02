@@ -317,7 +317,10 @@ export function probeNote(probe: SpeechProbe | undefined, measuring = false): st
   if (!probe) return null
   if (measuring) return "Measuring this host's hearing…"
   if (!probe.owed) return probe.measured > 0 ? "Measured on this host" : null
-  if (probe.elsewhere?.name) return `Measured on ${probe.elsewhere.name}, not this host.`
+  if (probe.elsewhere)
+    return probe.elsewhere.name
+      ? `Measured on ${probe.elsewhere.name}, not this host.`
+      : "Measured on another machine, not this host."
   if (probe.reason) return probe.reason
   // A host can owe a measurement while holding others — a model downloaded since the last probe.
   return probe.measured > 0

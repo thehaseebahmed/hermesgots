@@ -86,6 +86,13 @@ def stamp() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
+MACHINE_FIELDS = ("name", "machine", "system", "cpus")
+
+
+def _comparable(host: Mapping[str, Any]) -> Dict[str, Any]:
+    return {field: host.get(field) for field in MACHINE_FIELDS}
+
+
 def machine() -> Dict[str, Any]:
     """The machine a measurement was taken on: named, so another one's can't pass for this one's.
 
@@ -170,11 +177,21 @@ def kept(path: Path) -> Optional[Dict[str, Any]]:
 
 
 def _elsewhere(held: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
-    """Another machine's measurement, named, where the record isn't this machine's own."""
+    """Another machine's measurement, named, where the record isn't this machine's own.
+
+    Compared on what makes a machine and how fast it hears — its name, architecture, system and
+    processor count — not on the Python the plugin happens to run under: an interpreter upgrade is
+    the same machine, and calling it somebody else's would refuse a measurement that is still this
+    host's. A name that matches while something else doesn't is not named back, since "measured on
+    this host, not this host" says nothing.
+    """
     taken = held.get("host") if isinstance(held.get("host"), dict) else {}
-    if taken == machine():
+    if {field: taken.get(field) for field in MACHINE_FIELDS} == _comparable(machine()):
         return None
-    return {"name": str(taken.get("name") or ""), "at": str(held.get("at") or "")}
+    name = str(taken.get("name") or "")
+    if name == machine()["name"]:
+        name = ""
+    return {"name": name, "at": str(held.get("at") or "")}
 
 
 def state(
@@ -185,7 +202,8 @@ def state(
     ``sizes`` is the catalogue's download figure per model, which the recommendation weighs the
     measured rows by; ``present`` names the models on disk, which decides whether an owed
     measurement can be taken at all. A record from another machine, or one taken on other bytes than
-    this plugin's recording, is no measurement of this host: its models are left out, its machine is
+    this plugin's recording — or one that doesn't say which bytes it heard — is no measurement of this
+    host: its models are left out, its machine is
     named, and the host is owed a fresh one. The measurement per model comes back under ``models``:
     a map, which is what a caller states on its rows.
 
@@ -198,7 +216,7 @@ def state(
     elsewhere = _elsewhere(held) if held is not None else None
     taken_on = held.get("fixture") if held is not None and isinstance(held.get("fixture"), dict) else {}
     rehash = None if held is None else digest()
-    stale = held is not None and taken_on.get("sha256") not in (None, rehash)
+    stale = held is not None and taken_on.get("sha256") != rehash
     if held is None or elsewhere is not None or stale:
         reason = None
         if elsewhere is None and not present:

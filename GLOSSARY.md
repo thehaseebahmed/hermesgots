@@ -540,7 +540,7 @@ The model on a bot's host that hears its speech-to-text. Its size is the trade b
 _Avoid_: whisper model, fast-whisper, STT model, engine, ASR
 
 **Hearing measurement**:
-What a host timed of itself, once — its own speech models each decoding one short recording, with the load allowed for — kept per model and per machine: the realtime factor, how many seconds of speech a model hears in a second here, and the row it recommends. The model picker's rows state it and name the one recommended; a row nobody measured says so rather than quoting a figure, and a measurement taken on another machine is never drawn as this host's.
+What a host timed of itself, once — its own speech models each decoding one short recording, with the load allowed for — kept per model and per machine: the realtime factor, how many seconds of speech a model hears in a second here, and the row it recommends. The model picker's rows state it and name the one recommended; a row nobody measured says so rather than quoting a figure, and a measurement taken on another machine — or on other bytes than the recording now shipped — is never drawn as this host's.
 _Avoid_: benchmark, speed score, realtime estimate, perf number, probe result
 
 **Speech provider**:

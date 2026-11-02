@@ -218,6 +218,11 @@ test("the line under the rows says whose measurement it is, or why there is none
     "another machine's measurement is named, never drawn as this host's",
   )
   assert.equal(
+    probeNote({ ...probe, owed: true, measured: 0, elsewhere: { name: "", at: "" } }),
+    "Measured on another machine, not this host.",
+    "an unnamed machine is still somebody else, never 'this host, not this host'",
+  )
+  assert.equal(
     probeNote({ ...probe, owed: true, measured: 0, reason: "No speech model is on disk yet." }),
     "No speech model is on disk yet.",
     "the host's own reason for having nothing to time",
