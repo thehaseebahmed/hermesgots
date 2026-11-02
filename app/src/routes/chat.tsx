@@ -71,6 +71,7 @@ import {
   useMessageScrollerScrollable,
 } from "@/components/ui/message-scroller"
 import { Spinner } from "@/components/ui/spinner"
+import { Button } from "@/components/ui/button"
 import {
   queueMessage,
   refreshQueue,
@@ -855,6 +856,12 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
       .finally(() => setLoadingEarlier(false))
   }, [id])
   const [historyMissing, setHistoryMissing] = useState<string>()
+  // Try again runs the read once more: nothing about the chat moved, so the effect needs a nudge.
+  const [historyAttempt, setHistoryAttempt] = useState(0)
+  const retryHistory = useCallback(() => {
+    setHistoryMissing(undefined)
+    setHistoryAttempt((attempt) => attempt + 1)
+  }, [])
   const readyRef = useRef<{ id?: string }>(undefined)
 
   const resolved = { ...DEFAULT_SETTINGS, ...settings }
@@ -1018,18 +1025,20 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
     if (!id || !needsHistory) return
     reconcileHistory(id)
       .then((count) => count || setHistoryMissing(id))
-      .catch((error) => {
-        setHistoryMissing(id)
-        toast.error(error instanceof Error ? error.message : "Couldn't load this chat.")
-      })
-  }, [id, needsHistory])
+      // The thread says the read failed and offers Try again; a toast on top of it says it twice.
+      .catch(() => setHistoryMissing(id))
+  }, [id, needsHistory, historyAttempt])
 
   // Other devices add turns on Hermes. Catch up when the chat opens, when sync brings news of it,
   // when this tab comes back, and now and then while it's on screen.
   const updatedAt = conversation?.updatedAt
   const hasMessages = (messages?.length ?? 0) > 0
   const hasCards = Boolean(cards && (cards.before.size || cards.trailing.length))
-  const unstarted = !gone && configured && !hasMessages && !hasCards && !loadingHistory
+  // A chat with a past this device holds no rows of had its transcript read, and it came back
+  // empty: the pane says so and offers Try again rather than drawing a session nobody started.
+  const missingHistory = needsHistory && historyMissing === id
+  const unstarted =
+    !gone && configured && !hasMessages && !hasCards && !loadingHistory && !needsHistory
   // The agents this chat's agent delegated to, for their cards in the thread. Only a call that set a
   // subagent to work turns the poll on: a list, steer or stop runs no agent to wait for (ADR 0053).
   const spawning = useMemo(() => spawnInFlight(messages), [messages])
@@ -1420,6 +1429,16 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
       ) : loadingHistory ? (
         <div className="flex flex-1 items-center justify-center">
           <Spinner className="size-6" />
+        </div>
+      ) : missingHistory ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 pt-24 pb-8 text-center">
+          <p className="text-sm font-medium">The thread didn't load.</p>
+          <p className="max-w-sm text-sm text-muted-foreground">
+            This device couldn't read it from the host.
+          </p>
+          <Button variant="outline" onClick={retryHistory}>
+            Try again
+          </Button>
         </div>
       ) : conversation?.main && botThreads && configured ? (
         <MainEmptyState botId={profile?.botId} id={conversation?.id} onSend={send} />
