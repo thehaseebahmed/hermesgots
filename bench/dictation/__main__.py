@@ -1,7 +1,7 @@
 """One command that hears the fixtures on this host and prints what each take cost.
 
     python3 -m bench.dictation                     # hear every fixture, compare with the baseline
-    python3 -m bench.dictation --cut pause-first   # the same audio, sliced another way
+    python3 -m bench.dictation --cut long-floor    # the same audio, sliced by the rule the app ran before
     python3 -m bench.dictation --out record.json   # keep the whole record
     python3 -m bench.dictation --write-baseline    # rewrite the committed baseline
     python3 -m bench.dictation --self-check        # the bench's own rules, with no decoder
@@ -102,7 +102,7 @@ def parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "the baseline to read this run against (default: the one committed beside the fixtures "
-            "for this cut policy, e.g. baseline.json, or baseline-pause-first.json)"
+            "for this cut policy, e.g. baseline.json, or baseline-long-floor.json)"
         ),
     )
     command.add_argument(
@@ -315,6 +315,19 @@ def _rule_problems() -> List[str]:
         problems.append("the vocabulary rule: a word that came back isn't read as spelled")
     if words_module.spelled(["Gots"], "the guts plugin")["spelled"] is not False:
         problems.append("the vocabulary rule: a word that didn't come back is read as spelled")
+    # The cap needs no pause, and that is the only thing that ends a take whose room is never quiet
+    # enough to confirm one: a 30 s wall of sound must be cut at 25 s by the app's rule and never by
+    # the rule it replaced (#771).
+    rate = 8000
+    loud = [0.3 if index % 2 else -0.3 for index in range(rate * 30)]
+    capped = cutting.pieces(loud, rate, cutting.POLICIES["device"])
+    if [piece.ms for piece in capped] != [25_000, 5_000]:
+        problems.append(
+            "the device policy doesn't end a Piece at its cap with nothing quiet in the room, "
+            f"which cut {[piece.ms for piece in capped]}"
+        )
+    if len(cutting.pieces(loud, rate, cutting.POLICIES["long-floor"])) != 1:
+        problems.append("the long-floor policy cuts a take with nothing quiet in it, which the app never did")
     return problems
 
 
@@ -332,6 +345,13 @@ def _baseline_problems() -> List[str]:
             problems.append(
                 f"{BASELINE.name} has no {key}, so a run can't be refused as incomparable with it"
             )
+    # A baseline taken on another cut is not a baseline of this rule: every run would be refused as
+    # incomparable against it, which reads as a moved policy rather than the stale file it is.
+    if committed.get("cut") != cutting.POLICIES["device"].stated():
+        problems.append(
+            f"{BASELINE.name} was taken on another cut or another rule than the device policy, "
+            "so no run could be read against it"
+        )
     if (committed.get("fixtures") or {}).get("sha256") != fixtures_module.digest(fixtures)["sha256"]:
         problems.append(f"{BASELINE.name} was taken on other bytes than these fixtures")
     named = {take.get("fixture") for take in committed.get("takes") or ()}
@@ -369,6 +389,24 @@ def _baseline_problems() -> List[str]:
     return problems
 
 
+def _other_baseline_problems() -> List[str]:
+    """Every baseline beside the first names the cut policy its own filename claims.
+
+    `baseline.json` is held to `device` above; `baseline-<policy>.json` is the file a run of that
+    policy is read against, and one taken on another cut is refused as incomparable on every run of
+    it — a stale file reported as a moved policy.
+    """
+    problems = []
+    for path in sorted(BASELINE.parent.glob("baseline-*.json")):
+        name = path.stem.removeprefix("baseline-")
+        policy = cutting.POLICIES.get(name)
+        if policy is None:
+            problems.append(f"{path.name} names no cut policy this bench has")
+        elif baseline_module.load(path).get("cut") != policy.stated():
+            problems.append(f"{path.name} was taken on another cut than the {name} policy")
+    return problems
+
+
 def _self_check() -> int:
     """The bench's own rules and its fixture set, answered without a decoder anywhere near it."""
     fixtures = fixtures_module.load()
@@ -379,6 +417,7 @@ def _self_check() -> int:
         + _rule_problems()
         + cutting.app_rule_problems(cutting.POLICIES["device"])
         + _baseline_problems()
+        + _other_baseline_problems()
     )
     if problems:
         print("self-check failed:")

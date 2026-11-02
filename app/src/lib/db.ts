@@ -639,6 +639,13 @@ export interface SavedDictation {
   kind?: "pieces" | "stream"
   /** Where the caret was when the take began, so a restored take lands where it was left. */
   caret?: number
+  /**
+   * The Take id the host knows this recording by, missing on a row written before the field existed.
+   * A take its device abandoned — a reload, a crash — is still held there, and a host hears one take
+   * per bot, so the page that finds this recording takes that take away before anything else names
+   * one (ADR 0074).
+   */
+  take?: string
 }
 
 /**

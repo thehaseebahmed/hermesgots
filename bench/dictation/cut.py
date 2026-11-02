@@ -3,9 +3,9 @@
 The app decides this, not the host: while the user talks, it measures the microphone's loudness every
 50 ms, learns the room's own floor, and closes a Piece on a pause it can confirm. The bench is handed
 the same rule as data — ``POLICIES`` — so identical audio can be sliced two ways and the only variable
-is where the cut falls. ``device`` is the rule the app runs today; ``pause-first`` is the one a Piece
-closing on the first confirmed pause would run; ``whole`` cuts nothing, which is the take the app
-records when its meter is missing.
+is where the cut falls. ``device`` is the rule the app runs today; ``long-floor`` is the one it ran
+before #771, kept so the same audio is a diff rather than a memory; ``whole`` cuts nothing, which is
+the take the app records when its meter is missing.
 
 What is measured, and how: the app reads RMS over a 512-sample window every 50 ms at the microphone's
 own rate, so the bench reads each 50 ms window of the fixture's samples. That is the same rule over
@@ -25,10 +25,11 @@ from typing import Dict, Iterator, List, Sequence, Tuple
 
 from . import ROOT
 
-# The app's own numbers (`app/src/lib/dictation.ts`): PIECE_MS, PAUSE_MS, LONG_PIECE_MS,
-# SHORT_PAUSE_MS, QUIET_MIN, QUIET_MAX and SAMPLE_MS, with the floor's creep towards a noisier room.
-# `app_rule_problems` reads that file and holds these to it, because a bench that slices by a rule the
-# app has stopped running measures the wrong thing and calls it a baseline.
+# The app's own numbers (`app/src/lib/dictation.ts`): PIECE_MS, PAUSE_MS, LONG_PIECE_MS, QUIET_MIN,
+# QUIET_MAX and SAMPLE_MS, with the floor's creep towards a noisier room. A cap that takes no pause is
+# a zero here and no constant there, which is why `app_rule_problems` keeps no fourth name for it.
+# That function reads the app's file and holds these numbers to it, because a bench that slices by a
+# rule the app has stopped running measures the wrong thing and calls it a baseline.
 QUIET_MIN = 0.012
 QUIET_MAX = 0.05
 WINDOW_MS = 50
@@ -49,13 +50,18 @@ class CutPolicy:
     cap_pause_ms: int
     pauses: bool = True
 
-    def closes(self, length_ms: int, pause_ms: int) -> bool:
-        """Whether a Piece this long, with a pause this long behind it, ends here."""
-        if not self.pauses:
+    def closes(self, length_ms: int, pause_ms: int, heard: bool = True) -> bool:
+        """Whether a Piece this long, with a pause this long behind it, ends here.
+
+        A ``cap_pause_ms`` of zero is a cap that needs no pause at all: the Piece ends at its length
+        whatever the meter hears. Both arms still want the meter to have heard something since the
+        last cut, so a room's tone alone never makes a Piece.
+        """
+        if not self.pauses or not heard:
             return False
-        return (length_ms >= self.floor_ms and pause_ms >= self.pause_ms) or (
-            length_ms >= self.cap_ms and pause_ms >= self.cap_pause_ms
-        )
+        if length_ms >= self.cap_ms and pause_ms >= self.cap_pause_ms:
+            return True
+        return length_ms >= self.floor_ms and pause_ms >= self.pause_ms
 
     def stated(self) -> Dict[str, object]:
         """The policy as a record names it, so two runs can be refused as incomparable."""
@@ -75,11 +81,11 @@ class CutPolicy:
 APP_RULE = ROOT / "app" / "src" / "lib" / "dictation.ts"
 
 POLICIES: Dict[str, CutPolicy] = {
-    # The rule the app runs today, and the rule a longer Piece is argued from (ADR 0075), so the
-    # same bytes are sliced two ways and the only variable is where the cut falls.
-    "device": CutPolicy("device", floor_ms=6000, pause_ms=700, cap_ms=25_000, cap_pause_ms=350),
-    "pause-first": CutPolicy(
-        "pause-first", floor_ms=1200, pause_ms=350, cap_ms=25_000, cap_pause_ms=350
+    # The rule the app runs today, and the numbers `app_rule_problems` holds to its file (#771). A
+    # Piece is also the tail a Stop waits for, so its cap takes no pause: `cap_pause_ms` of zero.
+    "device": CutPolicy("device", floor_ms=1200, pause_ms=350, cap_ms=25_000, cap_pause_ms=0),
+    "long-floor": CutPolicy(
+        "long-floor", floor_ms=6000, pause_ms=700, cap_ms=25_000, cap_pause_ms=350
     ),
     # No meter, so no cut: the recording goes whole, as one Piece.
     "whole": CutPolicy("whole", floor_ms=0, pause_ms=0, cap_ms=0, cap_pause_ms=0, pauses=False),
@@ -136,9 +142,10 @@ def _read_elsewhere(path: Path) -> Tuple[array, int]:
 def app_rule_problems(policy: CutPolicy) -> List[str]:
     """The ``device`` policy against the app's own file: a rule that drifts is a baseline that lies.
 
-    The app's cut is TypeScript and the bench's is Python, so the numbers live twice by necessity.
-    This is the one place the two copies are put side by side: `device` claims to be the rule the app
-    runs today, and a number the app has moved is a number the bench is measuring instead of it.
+    The app's cut is TypeScript and the bench's is Python, so the numbers live twice by necessity, and
+    this is where the two copies are put side by side. It compares the numbers the app declares, not
+    the shape of its branch: what it can prove is that a number moved, never that the app consults each
+    one where the policy does.
     """
     if not APP_RULE.exists():
         return [f"{APP_RULE.relative_to(ROOT)} isn't here: the app's cut rule can't be compared"]
@@ -148,7 +155,6 @@ def app_rule_problems(policy: CutPolicy) -> List[str]:
         "PIECE_MS": stated["floor_ms"],
         "PAUSE_MS": stated["pause_ms"],
         "LONG_PIECE_MS": stated["cap_ms"],
-        "SHORT_PAUSE_MS": stated["cap_pause_ms"],
         "QUIET_MIN": stated["quiet_min"],
         "QUIET_MAX": stated["quiet_max"],
         "SAMPLE_MS": stated["window_ms"],
@@ -166,6 +172,12 @@ def app_rule_problems(policy: CutPolicy) -> List[str]:
             )
     if "0.002" not in text:
         problems.append("the app's floor no longer creeps by 0.002, which the policy still does")
+    # The cap's pause is no longer a constant to compare against: an app that still waits for one is a
+    # rule this policy isn't measuring, and SHORT_PAUSE_MS is the name it had.
+    if policy.cap_pause_ms == 0 and re.search(r"\bSHORT_PAUSE_MS\b", text):
+        problems.append(
+            f"the {policy.name} policy's cap needs no pause, and the app still keeps SHORT_PAUSE_MS"
+        )
     return problems
 
 
@@ -200,11 +212,14 @@ def pieces(samples: Sequence[float], rate: int, policy: CutPolicy) -> List[Piece
             heard = True
         elif quiet_since is None:
             quiet_since = now_ms
-        if heard and quiet_since is not None:
-            if policy.closes(now_ms - started, now_ms - quiet_since):
-                edges.append(now_ms)
-                started = now_ms
-                heard = False
+        length = now_ms - started
+        pause = 0 if quiet_since is None else now_ms - quiet_since
+        # Asked even while the room is loud: a cap that needs no pause is the only thing bounding a
+        # take whose floor never drops quiet enough to confirm one.
+        if policy.closes(length, pause, heard):
+            edges.append(now_ms)
+            started = now_ms
+            heard = False
     if edges[-1] < total_ms:
         edges.append(total_ms)
     return [Piece(start, end) for start, end in zip(edges, edges[1:]) if end > start]

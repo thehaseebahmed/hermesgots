@@ -2552,3 +2552,32 @@ read as minutes.
 
 Found by the `/simplify-code`, then `/no-comments`, then `/code-review` passes on this branch; the
 pull request does not wait on any of them.
+
+# Deferred fixes from the review of a Piece's cut rule
+
+Four reviewers (reuse, quality, efficiency, altitude) on `feat(dictation): a Piece closes at a pause,
+and at twenty-five seconds`. Everything they found is applied on this branch except the entry below,
+which is a policy the host owns and this ticket does not decide.
+
+## Careful
+
+### 1. A Retry re-uploads the whole take into a drain allowance fixed for the take it replaced
+
+Shorter Pieces raise what a full take costs to decode: the bench's own record reads 12.1 s of decode
+for 58.7 s of speech under the old rule and 21.7 s under the new one, 0.206 → 0.370 decode-seconds per
+spoken second. A Confirm only ever drains the backlog, so that number is invisible on the ordinary
+path — but a Retry (and a restored take) re-uploads every Piece at once, and `plugin/dictation.py`'s
+drain is bounded by one `QUEUE_SECONDS = 30.0` however much is waiting. The longest take that fits
+therefore drops from roughly 145 s of speech to roughly 81 s, and a Retry inside that band re-uploads
+in full and then answers 504 "The take is still being heard." — a take whose audio was fine.
+
+- Cost: a failed Retry on a long take, after the whole upload has been paid, on the network where a
+  Retry is most likely to be pressed.
+- Suggested fix: make the drain's allowance a function of what it owes (the Pieces held, or the
+  decode rate the host has observed), or start its deadline when the last Piece lands rather than when
+  the first arrived; failing that, bound how much of a take a Retry re-sends.
+- Why it is deferred: the allowance is the host's, in a module this branch does not otherwise touch,
+  and how long a Stop may wait is a decision of its own — the ticket fixes the cut, not the queue.
+
+Found by the efficiency angle of this branch's cleanup pass; it does not block.
+

@@ -102,15 +102,19 @@ export const MAX_MS = 10 * 60 * 1000
 const MIN_MS = 300
 /** One hung Upload must not hold the take: the bound the host stated covers the rest (ADR 0074). */
 const UPLOAD_MS = 60_000
+/** How long a Retry waits for the dead take's own DELETE before it carries on regardless. */
+const RELEASE_MS = 5000
 const UPLOAD_TRIES = 3
 const RETRY_MS = 400
 const TYPES = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/mp4", "audio/webm"]
 export const BARS = 32
 export const SAMPLE_MS = 50
-const PIECE_MS = 6000
-const PAUSE_MS = 700
+// A Piece closes on the first pause the meter can confirm once a short floor of speech has passed, and
+// at its cap regardless of pause — a Piece is also the tail a Stop waits for, so the cap stays under
+// the host's own queue allowance (#771, ADR 0075).
+const PIECE_MS = 1200
+const PAUSE_MS = 350
 const LONG_PIECE_MS = 25_000
-const SHORT_PAUSE_MS = 350
 // Loudness (RMS of the wave, 0 to 1) under which the mic counts as quiet.
 export const QUIET_MIN = 0.012
 export const QUIET_MAX = 0.05
@@ -205,12 +209,16 @@ interface Session {
   recording: Recording | null
   /** The Uploads in flight, one Piece after another; true when every Piece the take holds is up. */
   uploading: Promise<boolean> | null
+  /** The take's own DELETE going out, so a Retry waits for it rather than racing it. */
+  released: Promise<unknown> | null
   /** The indexes the host has taken, so a Retry and a 409's re-send know what is left. */
   sent: Set<number>
   inflight: AbortController | null
   /** The Confirm in flight: a slot of its own, so an Upload can never clobber it or the other way. */
   asking: AbortController | null
   finishing: Promise<string | null> | null
+  /** A Retry in flight, so a second tap on the bar's own button joins it rather than starting one. */
+  retrying: Promise<string | null | undefined> | null
   error: unknown
   /** Why the take itself died (the recorder errored, the track ended): Retry still sends its Pieces. */
   failure: DictationFailure | null
@@ -236,10 +244,12 @@ const newSession = (
   caret,
   recording: null,
   uploading: null,
+  released: null,
   sent: new Set(),
   inflight: null,
   asking: null,
   finishing: null,
+  retrying: null,
   error: null,
   failure: null,
   stopping: null,
@@ -279,6 +289,7 @@ function save(session: Session, now = false) {
           at: Date.now(),
           kind: "pieces",
           caret: session.caret,
+          take: session.take,
         })
       else await db.dictations.delete(key)
     })
@@ -449,6 +460,25 @@ export function useChunkedDictation(
     return tracked
   }, [])
 
+  /**
+   * Takes a take the device gave up on off its host. A host hears one take per bot, so an id has to
+   * be released before a fresh one names another, and a Retry waits on that answer rather than racing
+   * it. A refusal here is not the user's problem: a take that still can't land says so in the host's
+   * own words, once.
+   */
+  const dropTake = useCallback(
+    (
+      current: Session,
+      take: string,
+      why = "Taking a take the device gave up on off its bot's host",
+    ) => {
+      waitDrops(take)
+      current.released = cancelDictation(latest.current.config, take).catch(quietly(why))
+      return current.released
+    },
+    [],
+  )
+
   /** Ends a take whose recorder died, keeping the Pieces already cut so Retry can send them. */
   const fail = useCallback(
     (current: Session, recording: Recording, failed: DictationFailure) => {
@@ -457,12 +487,13 @@ export function useChunkedDictation(
       current.recording = null
       current.stopping = end(recording)
       stopInflight(current)
+      void dropTake(current, current.take)
       releaseTake(current.profile, current.lock)
       current.lock = null
       setLevels(null)
       showFailure({ ...failed, discard: true })
     },
-    [showFailure],
+    [dropTake, showFailure],
   )
 
   const openSegment = useCallback(
@@ -551,15 +582,18 @@ export function useChunkedDictation(
           if (!quiet) quietSince = null
           else quietSince ??= now
           if (segment && !quiet) segment.heard = true
-          if (segment?.heard && quietSince !== null && segment.recorder.state === "recording") {
+          if (segment?.recorder.state === "recording") {
             const length = now - segment.startedAt
-            const pause = now - quietSince
+            const pause = quietSince === null ? 0 : now - quietSince
+            // The cap bounds speech, not a room's tone: a segment that has heard nothing is never cut,
+            // so silence costs no Piece.
             if (
-              (length >= PIECE_MS && pause >= PAUSE_MS) ||
-              (length >= LONG_PIECE_MS && pause >= SHORT_PAUSE_MS)
+              segment.heard &&
+              (length >= LONG_PIECE_MS || (length >= PIECE_MS && pause >= PAUSE_MS))
             ) {
               openSegment(current, recording)
               segment.recorder.stop()
+              quietSince = null
             }
           }
           if (motion && session.current === current) {
@@ -653,20 +687,17 @@ export function useChunkedDictation(
     (current: Session, failed: DictationFailure) => {
       if (session.current !== current) return null
       stopInflight(current)
-      waitDrops(current.take)
       current.error = null
       current.sent.clear()
       save(current, true)
       // The host may have lost its speech provider since, and it holds audio this take can never
       // confirm again — a Retry mints a fresh id — so it is taken off the host now.
       void readDictationInfo(latest.current.config, true)
-      void cancelDictation(latest.current.config, current.take).catch(
-        quietly("Taking a failed take off its bot's host"),
-      )
+      void dropTake(current, current.take)
       showFailure({ ...failed, discard: true })
       return null
     },
-    [showFailure],
+    [dropTake, showFailure],
   )
 
   const settle = useCallback(
@@ -739,16 +770,13 @@ export function useChunkedDictation(
     const current = session.current
     session.current = null
     if (current) {
-      waitDrops(current.take)
       forget(current)
       stopInflight(current)
       if (current.recording) void end(current.recording)
-      void cancelDictation(latest.current.config, current.take).catch(
-        quietly("Taking a cancelled take off its bot's host"),
-      )
+      void dropTake(current, current.take, "Taking a cancelled take off its bot's host")
     }
     showIdle()
-  }, [showIdle])
+  }, [dropTake, showIdle])
 
   /**
    * Ends the recording and returns its words: `""` for a recording too short to hold speech, null
@@ -795,20 +823,35 @@ export function useChunkedDictation(
     [cancel, settle],
   )
 
-  /** Sends the take again, under a fresh Take id, so no late Piece of the dead one can join it. */
+  /**
+   * Sends the take again, under a fresh Take id, so no late Piece of the dead one can join it. The
+   * take the host may still be holding goes first, and this waits a bound for it rather than for ever:
+   * a Retry is a tap, and a host that won't answer is a failure this take can report.
+   */
   const retry = useCallback(async () => {
     const current = session.current
     if (!current) return null
-    waitDrops(current.take)
-    if (!current.pieces.length) {
-      cancel()
-      return ""
+    if (current.retrying) return current.retrying
+    const run = (async () => {
+      if (!current.pieces.length) {
+        cancel()
+        return ""
+      }
+      await bounded(current.released ?? dropTake(current, current.take), RELEASE_MS)
+      if (session.current !== current) return null
+      current.take = randomId()
+      current.sent.clear()
+      current.error = null
+      save(current, true)
+      return settle(current)
+    })()
+    current.retrying = run
+    const done = () => {
+      if (current.retrying === run) current.retrying = null
     }
-    current.take = randomId()
-    current.sent.clear()
-    current.error = null
-    return settle(current)
-  }, [cancel, settle])
+    void run.then(done, done)
+    return run
+  }, [cancel, dropTake, settle])
 
   useEffect(() => {
     let live = true
@@ -821,6 +864,9 @@ export function useChunkedDictation(
           saved.pieces.map((piece) => ({ blob: piece.blob, ms: piece.ms })),
           saved.caret,
         )
+        // The take that recorded this audio died with its device, and the host still holds it: it
+        // goes now, so a Retry finds the bot free even if this page is never used again.
+        if (saved.take) void dropTake(session.current, saved.take)
         session.current.failure = failureOf("clip", RESTORED, { discard: true })
         setFailure(session.current.failure)
         setStatus("failed")
@@ -843,7 +889,7 @@ export function useChunkedDictation(
       }
       showIdle()
     }
-  }, [key, showIdle])
+  }, [dropTake, key, showIdle])
 
   return {
     status,

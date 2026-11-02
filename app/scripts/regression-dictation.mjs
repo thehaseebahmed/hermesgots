@@ -116,7 +116,7 @@ const refuseNextConfirm = (count = 1) => mockJson("/__mock/dictation-refuse", { 
  * take that cut fewer Pieces than asked still Stops and still measures, and the caller says what it
  * expected.
  */
-async function dictate(page, pieces = 2) {
+async function dictate(page, pieces = 3) {
   const before = (await mockDictation()).clips.length
   await page.getByRole("button", { name: "Voice", exact: true }).click()
   await page.getByRole("button", { name: "Stop" }).waitFor()
@@ -286,19 +286,19 @@ try {
     const page = await open(mock, PHONE, "light", talker)
     const { confirm_ms: base } = await mockDictation()
     const first = await dictate(page)
-    assert.equal(first.sent.length, 2, "two pieces sent before Stop")
+    assert.equal(first.sent.length, 3, "three pieces sent before Stop")
     assert.deepEqual(
       first.sent.map((clip) => clip.index),
-      [0, 1],
+      [0, 1, 2],
       "each Piece names its index in the take",
     )
     assert.equal(first.sent[0].take, first.sent[1].take, "and the take the app minted when it started")
     assert.ok(first.sent[0].take, "a Take id, not a pair of flags")
-    assert.equal(first.all.length, 3, "the last Piece went up at Stop, and no more")
+    assert.equal(first.all.length, 4, "the last Piece went up at Stop, and no more")
     // The Confirm tidies the whole take, so only the first "um" goes and the rest is as heard.
     assert.equal(
       await page.getByRole("textbox").last().inputValue(),
-      [SENTENCE, HEARD, HEARD].join(" "),
+      [SENTENCE, HEARD, HEARD, HEARD].join(" "),
     )
 
     const plain = printWait(await takeWait(page), base)

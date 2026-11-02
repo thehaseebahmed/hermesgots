@@ -46,7 +46,7 @@ reporting a pass.
 
 | Flag | What it does |
 | --- | --- |
-| `--cut device\|pause-first\|whole` | where a Piece's cut falls (default `device`, the rule the app runs today) |
+| `--cut device\|long-floor\|whole` | where a Piece's cut falls (default `device`, the rule the app runs today; `long-floor` is the rule it ran before #771) |
 | `--level none\|light\|medium\|high` | the bot's Cleanup level (default `none`, which makes no call) |
 | `--model`, `--compute-type`, `--language`, `--beam-size`, `--threads` | the decoder; all named in the record |
 | `--no-hearing` | send each Piece with no prompt. On by default, because the Hearing prompt is what carries a Vocabulary to the decoder (ADR 0067) |
@@ -54,7 +54,7 @@ reporting a pass.
 | `--no-vocabulary` | drop the fixtures' Vocabulary; the names case is meant to fail without it |
 | `--fixture NAME` | hear one fixture (repeatable) |
 | `--cleanup-url`, `--cleanup-model`, `--cleanup-key` | an OpenAI-compatible endpoint for a cleaning level |
-| `--baseline PATH` | the baseline to read this run against (default: the one committed for this cut policy — `baseline.json` for `device`, `baseline-pause-first.json` for `pause-first`) |
+| `--baseline PATH` | the baseline to read this run against (default: the one committed for this cut policy — `baseline.json` for `device`, `baseline-long-floor.json` for `long-floor`) |
 | `--out PATH` | write the run's whole record as JSON |
 | `--write-baseline` | rewrite the committed baseline from this run |
 | `--no-check` | record and print without reading the baseline |
@@ -70,7 +70,7 @@ cannot be mistaken for the one a baseline was taken on.
 | Fixture | What it is for | Route |
 | --- | --- | --- |
 | `one-piece` | a one-Piece take: one thing said, nothing else | local |
-| `straddle` | a sentence that straddles a pause: one Piece under `device`, two under `pause-first` | local |
+| `straddle` | a sentence that straddles a pause: one Piece under `long-floor`, two under `device` | local |
 | `long` | a long unbroken take: past the floor with no pause to open at | local |
 | `silence` | room tone: no words at all | local |
 | `names` | names said against a Vocabulary (`Gots`, `Memento`, `Haseeb`, `Nous Research`) | local |
@@ -135,18 +135,23 @@ A baseline belongs to the machine that took it: the same bytes and the same mode
 differently on another CPU, so the run's `host` is part of what it is compared on, and a run from a
 machine the baseline was not taken on is refused rather than read as a regression.
 
-There is one baseline per cut policy — `baseline.json` for `device`, `baseline-pause-first.json` for
-`pause-first` — so the two slices of the same audio are a diff rather than a memory. On this host they
+There is one baseline per cut policy — `baseline.json` for `device`, `baseline-long-floor.json` for
+`long-floor` — so the two slices of the same audio are a diff rather than a memory. On this host they
 read:
 
-| | `device` | `pause-first` |
+| | `long-floor` (before #771) | `device` (since #771) |
 | --- | --- | --- |
 | `straddle` | 1 Piece | 2 Pieces |
 | `sixty` | 7 Pieces, 12.1 s decode | 15 Pieces, 21.7 s decode |
+| `sixty`'s longest Piece | 9.9 s | 5.4 s |
 | `sixty`'s words | word error rate 0.03 | word error rate 0.04 |
 
-More Pieces buy a smaller tail at Stop and cost more decodes, and the words barely move — the trade
-#771 exists to weigh.
+The seam now lands where the speaker stopped instead of wherever the six-second floor next found
+quiet: more Pieces buy a smaller tail at Stop and cost more decodes.
+
+The words are the one place a cut can show: every Piece is heard on its own, so fifteen Pieces on
+`sixty` land one word differently from seven. The other eight fixtures land the same words, which is
+what makes the count and the tail a cut's own doing.
 
 - A run that disagrees with it exits 1 and prints where, word by word — and a take whose words did
   not move says so, so a cut change is not read as a decoding one.

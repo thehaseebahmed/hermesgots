@@ -106,6 +106,27 @@ test("a kept take is sent under a Take id of its own", async () => {
   })
 })
 
+test("a kept take's own id is taken off the host before its Pieces go up again", async () => {
+  await seed("reclaimed", { take: "dead-take" })
+  const hosted = host()
+  await mount(composer, async () => {
+    await click(button("Retry"))
+    await until(async () => field() === `Before hello there after`, "the words")
+    // A host hears one take per bot: the one this device gave up on goes before a fresh id names
+    // another, or the first Piece is refused as a second take.
+    assert.deepEqual(
+      hosted.cancels().map((call) => call.take),
+      ["dead-take"],
+      "the dead take is taken away",
+    )
+    assert.ok(
+      hosted.calls.indexOf(hosted.cancels()[0]) < hosted.calls.indexOf(hosted.pieces()[0]),
+      "and before the first Piece of the fresh one",
+    )
+    assert.notEqual(hosted.pieces()[0].take, "dead-take", "which the Pieces name")
+  })
+})
+
 test("discarding a kept take removes it, and leaves the draft as it was", async () => {
   await seed("discarded")
   const hosted = host()
