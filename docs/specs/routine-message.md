@@ -2,8 +2,9 @@
 
 Status: grilled 2026-11-02 against the code, the glossary and the ADRs it touches; every decision
 below is settled and recorded in ADR 0081. Published as #788 with tickets #789, #790, #791, #792 and
-#793. The spec carries `ready-for-agent` and the tickets stay bare, so the agent claims the spec and
-works the graph in order.
+#793, which are worked in that order. The spec carries `ready-for-agent` and the tickets stay bare, so
+the agent claims the spec and works the graph. #788 is blocked by the gate issue #795, which the docs
+pull request #794 closes: work starts on that merge, when this file is on `main`.
 
 ## Problem Statement
 
