@@ -57,7 +57,7 @@ export function RoutineChip({ run, onOpen }: { run: RoutineRun; onOpen: () => vo
         type="button"
         aria-label={`Routine: ${run.title ?? UNNAMED}`}
         onClick={onOpen}
-        className="flex min-h-11 w-fit max-w-full items-center gap-1.5 text-xs text-muted-foreground outline-none hover:underline focus-visible:underline"
+        className="flex min-h-11 w-fit max-w-full items-center gap-1.5 text-sm leading-5 text-muted-foreground outline-none hover:underline focus-visible:underline"
       >
         <TimerIcon className="size-3.5 shrink-0" aria-hidden />
         <span className="min-w-0 truncate">
