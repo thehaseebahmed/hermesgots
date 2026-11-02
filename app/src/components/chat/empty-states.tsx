@@ -22,6 +22,10 @@ export function ReadyLine({ botId, id }: { botId?: string; id?: string }) {
 
 export const SETUP_COPY = "Point Gots at your Hermes Agent API server to start chatting."
 
+/** A session whose transcript this device holds none of, and could not read: it says so, and why. */
+export const THREAD_MISSING = "The thread didn't load."
+export const THREAD_MISSING_WHY = "This device couldn't read it from the host."
+
 export function EmptyState({
   botId,
   configured,
@@ -54,6 +58,23 @@ export function EmptyState({
           </Button>
         </>
       )}
+    </div>
+  )
+}
+
+/**
+ * A session with a past this device holds no rows of, whose transcript the host did not hand over:
+ * the pane says the read failed and offers the read again, rather than drawing a session nobody
+ * started. A session nothing was sent in is the new one it is, and never lands here.
+ */
+export function MissingThread({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 pt-24 pb-8 text-center">
+      <p className="text-sm font-medium">{THREAD_MISSING}</p>
+      <p className="max-w-sm text-sm text-muted-foreground">{THREAD_MISSING_WHY}</p>
+      <Button variant="outline" onClick={onRetry}>
+        Try again
+      </Button>
     </div>
   )
 }

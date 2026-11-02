@@ -71,7 +71,6 @@ import {
   useMessageScrollerScrollable,
 } from "@/components/ui/message-scroller"
 import { Spinner } from "@/components/ui/spinner"
-import { Button } from "@/components/ui/button"
 import {
   queueMessage,
   refreshQueue,
@@ -139,7 +138,7 @@ import {
 import { lastActivityAt } from "@/lib/session-work"
 import { hold, type HoldSlot } from "@/lib/chat-hold"
 import { useBotThreads, useThreads } from "@/lib/threads"
-import { EmptyState, MainEmptyState } from "@/components/chat/empty-states"
+import { EmptyState, MainEmptyState, MissingThread } from "@/components/chat/empty-states"
 import { isUnsent } from "@/chat-next/unsent"
 import { HeaderBack } from "@/components/chat/header-back"
 import { useSessionLeave } from "@/components/chat/session-leave"
@@ -1431,15 +1430,7 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
           <Spinner className="size-6" />
         </div>
       ) : missingHistory ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 pt-24 pb-8 text-center">
-          <p className="text-sm font-medium">The thread didn't load.</p>
-          <p className="max-w-sm text-sm text-muted-foreground">
-            This device couldn't read it from the host.
-          </p>
-          <Button variant="outline" onClick={retryHistory}>
-            Try again
-          </Button>
-        </div>
+        <MissingThread onRetry={retryHistory} />
       ) : conversation?.main && botThreads && configured ? (
         <MainEmptyState botId={profile?.botId} id={conversation?.id} onSend={send} />
       ) : (
