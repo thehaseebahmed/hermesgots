@@ -24,7 +24,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import events
+from . import events, ticker
 from .store import connect, db_path
 
 logger = logging.getLogger(__name__)
@@ -43,8 +43,7 @@ _lock = threading.Lock()
 _watched: Dict[str, Tuple[Optional[str], Path]] = {}
 # The key each profile's requests came with, for posting its runs ("" is the default profile).
 _keys: Dict[str, str] = {}
-_loop: Optional[asyncio.AbstractEventLoop] = None
-_event: Optional[asyncio.Event] = None
+_ticker = ticker.Ticker("queue")
 
 
 class StartError(Exception):
@@ -63,7 +62,7 @@ def watch(session_id: str, profile: Optional[str], path: Path, authorization: Op
 
 def wake() -> None:
     """Has the dispatcher look again now; safe from any thread (Hermes's hooks run in others)."""
-    events.poke(_loop, _event)
+    _ticker.wake()
 
 
 def _item(row: Any) -> Dict[str, Any]:
@@ -564,27 +563,22 @@ async def tick(adapter: Any, session_id: str, profile: Optional[str], path: Path
 
 async def run(adapter: Any, home: Path) -> None:
     """Starts each session's next queued turn once its run is over, for as long as the server runs."""
-    global _loop, _event
-    _loop = asyncio.get_running_loop()
-    _event = asyncio.Event()
-    try:
-        found = await asyncio.to_thread(waiting_sessions, db_path(home))
-    except Exception:
-        logger.debug("memento: couldn't read the queue", exc_info=True)
-        found = []
-    for session_id, profile in found:
-        if not profile or profile == "default":
-            watch(session_id, None, db_path(home))
-    while True:
-        try:
-            await asyncio.wait_for(_event.wait(), TICK_SECONDS)
-        except asyncio.TimeoutError:
-            pass
-        _event.clear()
-        with _lock:
-            watched = list(_watched.items())
-        for session_id, (profile, path) in watched:
+
+    async def watched() -> None:
+        for session_id, (profile, path) in list(_watched.items()):
             try:
                 await tick(adapter, session_id, profile, path)
             except Exception:
                 logger.debug("memento: queue tick failed for %s", session_id, exc_info=True)
+
+    async def resume() -> None:
+        try:
+            found = await asyncio.to_thread(waiting_sessions, db_path(home))
+        except Exception:
+            logger.debug("memento: couldn't read the queue", exc_info=True)
+            return
+        for session_id, profile in found:
+            if not profile or profile == "default":
+                watch(session_id, None, db_path(home))
+
+    await _ticker.run(TICK_SECONDS, watched, before=resume)

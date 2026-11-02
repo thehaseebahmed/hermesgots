@@ -20,6 +20,7 @@ export type PushCategory =
   | "code_afk_pr"
   | "code_setup_failed"
   | "routine_failed"
+  | "routine_message"
   | "research_input"
   | "research_done"
   | "research_failed"
@@ -96,6 +97,13 @@ export const PUSH_CATEGORIES: PushCategoryInfo[] = [
   },
   { id: "routine_failed", feature: "routines", title: "Routine failed", on: true, importance: 3 },
   {
+    id: "routine_message",
+    feature: "routines",
+    title: "Messages from Bots",
+    on: true,
+    importance: 3,
+  },
+  {
     id: "research_input",
     feature: "research",
     title: "Brief or scope to review",
@@ -123,7 +131,7 @@ export function wantedCategories(prefs: PushPrefs | undefined) {
 
 /**
  * The categories this device can reach, and so the channels it gets: Meetings' two exist only once
- * that experiment is on, the other fourteen always.
+ * that experiment is on, the other fifteen always.
  */
 export function reachableCategories(meetings?: boolean) {
   return PUSH_CATEGORIES.filter((category) => category.feature !== "meetings" || Boolean(meetings))

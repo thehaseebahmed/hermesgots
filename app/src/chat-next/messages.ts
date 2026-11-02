@@ -167,6 +167,10 @@ function rowsOf(
       ...(stats && !live ? { stats } : {}),
       status: live ? "streaming" : turn.failed ? "error" : "done",
       ...(turn.failed && !live ? { statusText: turn.failed.text } : {}),
+      // A routine's message wears the chip of the run that wrote it, matched to the row it landed at
+      // (ADR 0081): the fold kept that row on the turn, since a routine's turn has no request.
+      ...(turn.routine ? { routine: true } : {}),
+      ...(turn.routine && turn.row !== undefined ? { hermesRowId: turn.row } : {}),
       createdAt,
     })
   return rows

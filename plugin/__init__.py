@@ -56,6 +56,7 @@ from . import (
     openui,
     outbox,
     pipeline,
+    platform_gots,
     projects,
     progress,
     prompt_builder,
@@ -387,6 +388,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             asyncio.ensure_future(merges.run(home)),
             # Queued messages start their turn once the session's run is over; see outbox.py.
             asyncio.ensure_future(outbox.run(adapter, home)),
+            # A routine's message that waited for its chat writes once the chat is free; see
+            # platform_gots.py.
+            asyncio.ensure_future(platform_gots.run(adapter, home)),
             asyncio.ensure_future(alerts.run(home)),
             # Research missions write up once their researcher stops; see research.py.
             asyncio.ensure_future(research.run(home)),
@@ -585,6 +589,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     *([openui.FEATURE] if openui_info else []),
                     # A message sent from Main is sorted into a thread by the host; see triage.py.
                     *(["triage", "moves", "triage_model"] if triage.available() is None else []),
+                    # A routine's answer delivered into a chat as the bot's own message, and the
+                    # route that names the run behind it (platform_gots.py, ADR 0081).
+                    *([platform_gots.FEATURE] if platform_gots.available() is None else []),
                     # A failed turn taken out of the transcript before its message is sent again.
                     "failed_turn_clear",
                     # Hermes's own MCP built-ins, and the MCP screen with them; see mcp.py.
@@ -1001,6 +1008,13 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         # that scope isn't visible inside to_thread.
         return current_path()
 
+    def profile_home() -> Path:
+        # On the loop thread, for the reason store_path is: the scope a request runs in is not the one
+        # a worker thread sees.
+        from hermes_constants import get_hermes_home
+
+        return Path(get_hermes_home())
+
     async def list_chats(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -1042,10 +1056,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 logger.debug("memento: couldn't resolve session %s", session_id, exc_info=True)
         found = await asyncio.to_thread(context.read, path, session_id) or {}
         changes = await asyncio.to_thread(model_changes.read, path, session_id, asked_id)
-        # The profile's home is read on the loop thread, where its scope is visible.
-        from hermes_constants import get_hermes_home
-
-        compacted = await asyncio.to_thread(compactions.read, Path(get_hermes_home()), session_id)
+        compacted = await asyncio.to_thread(compactions.read, profile_home(), session_id)
         body = {
             "object": "memento.context",
             "session_id": session_id,
@@ -1059,6 +1070,19 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             body["compactions"] = compacted
         # Never a 404 for an unknown session: the app reads a 404 as a missing plugin.
         return web.json_response(body)
+
+    async def session_routines(request: "web.Request") -> "web.Response":
+        """The routine messages a chat holds, each with the row it is drawn at now (ADR 0081)."""
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        session_id = request.match_info["session_id"]
+        path = store_path()
+        found = await asyncio.to_thread(
+            platform_gots.routines, path, profile_home(), session_id
+        )
+        # An empty list for a chat with none, never a 404: the app draws no chip and asks nothing more.
+        return web.json_response({"object": platform_gots.OBJECT, "routines": found})
 
     async def account_usage(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1169,9 +1193,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return web.json_response({"object": "memento.projects", "projects": rows})
 
     def hermes_home() -> Path:
-        from hermes_constants import get_hermes_home
-
-        return Path(get_hermes_home())
+        return profile_home()
 
     async def github_status(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1945,6 +1967,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/github/repos", github_repos)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/label", label_session)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/context", session_context)
+    app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/routines", session_routines)
     app.router.add_get(f"{PREFIX}/usage", account_usage)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/todos", session_todos)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/agents", session_agents)
@@ -3035,6 +3058,9 @@ def register(ctx) -> None:
         # What each run executed, kept on its stage for the details sheet; see commands.py.
         register_hook("pre_tool_call", commands.before_tool)
         register_hook("pre_tool_call", research.before_tool)
+        # A routine created in this chat names where it delivers, unless the model said so itself;
+        # see platform_gots.py.
+        register_hook("pre_tool_call", platform_gots.fill_deliver)
         register_hook("pre_llm_call", sessions.before_llm)
         register_hook("post_llm_call", sessions.after_llm)
         register_hook("on_session_end", sessions.after_run)
@@ -3051,6 +3077,8 @@ def register(ctx) -> None:
         register_hook("on_session_end", events.on_turn_end)
         # The run is over, so a queued message can go now rather than at the next tick.
         register_hook("on_session_end", lambda **_kwargs: outbox.wake())
+        # And a routine's message that waited for this chat's turn is written now; see platform_gots.py.
+        register_hook("on_session_end", lambda **_kwargs: platform_gots.wake())
         # And AFK looks for the next task now when a project session ends; see afk.py.
         register_hook("on_session_end", afk.after_run)
         # A subagent's own session id and core's, so a card's Stop can name the live child it stops;
@@ -3074,6 +3102,9 @@ def register(ctx) -> None:
     meetings.register(ctx)
     dictation_cleanup.register(ctx)
     openui.register(ctx)
+    # Gots is a delivery platform, so a routine can speak in a chat (platform_gots.py, ADR 0081).
+    platform_gots.register(ctx)
+    platform_gots.register_section(ctx)
     register_handler = getattr(ctx, "register_platform_handler", None)
     if register_handler is None:
         logger.warning("memento: this Hermes version can't add API server routes; update Hermes")

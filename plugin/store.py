@@ -29,8 +29,9 @@ logger = logging.getLogger(__name__)
 # replaces the log's index with the one every read asks for. 48 adds `heard`, the words as the host
 # heard them beside the words that landed (ADR 0062). 49 adds what tidied a take (ADR 0074). 50 adds
 # a session's close and the report it ends with (`closes.py`, ADR 0080): one new table, so nothing
-# already written has to move.
-SCHEMA_VERSION = 50
+# already written has to move. 51 adds the routine messages a chat holds and the one that is still
+# waiting for its chat to be free (`platform_gots.py`, ADR 0081): two indexes beside one new table.
+SCHEMA_VERSION = 51
 
 
 def db_path(hermes_home: Path) -> Path:
@@ -806,5 +807,32 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute(
             """CREATE INDEX IF NOT EXISTS close_ended
                    ON session_closes (ended_at) WHERE ended_at IS NOT NULL"""
+        )
+        # v51: the routine messages a chat holds (platform_gots.py, ADR 0081). One row per delivery,
+        # keyed by the execution that wrote it so a replayed delivery is one message; `row` is NULL
+        # while the message waits for its chat to be free, and the row it landed at afterwards — the
+        # route resolves that row again at read time, since a compaction re-emits it under a new id.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS routine_messages (
+                   execution TEXT PRIMARY KEY,
+                   session_id TEXT NOT NULL,
+                   chat_id TEXT NOT NULL,
+                   job_id TEXT,
+                   title TEXT,
+                   run_session TEXT,
+                   text TEXT NOT NULL,
+                   at INTEGER NOT NULL,
+                   row INTEGER,
+                   notify INTEGER NOT NULL DEFAULT 1
+               )"""
+        )
+        # The writer asks for what is waiting on every look; the route asks for one chat's messages.
+        conn.execute(
+            """CREATE INDEX IF NOT EXISTS routine_waiting
+                   ON routine_messages (at) WHERE row IS NULL"""
+        )
+        conn.execute(
+            """CREATE INDEX IF NOT EXISTS routine_chat
+                   ON routine_messages (session_id, at)"""
         )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

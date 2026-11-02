@@ -505,6 +505,12 @@ export interface Message {
   /** The Hermes transcript row a user message was matched to, once the device has seen it. */
   hermesRowId?: number
   /**
+   * A routine's message: the bot said it while working, not in a turn of this chat (ADR 0081). The
+   * fold sets it from the row's display kind, and the chip it carries is drawn only where the host's
+   * `sessions/{id}/routines` names the run behind it.
+   */
+  routine?: boolean
+  /**
    * When that row was written, on the host's clock. A compaction re-emits the carried tail under fresh
    * row ids with their times untouched, so this, not the row id, is what identifies a turn the device
    * already holds when a later catch-up meets it again.

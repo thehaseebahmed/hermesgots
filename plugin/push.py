@@ -75,6 +75,7 @@ KINDS = (
     "research_done",
     "research_failed",
     "afk_pr",
+    "routine_message",
     "meeting_done",
     "meeting_failed",
 )
@@ -92,6 +93,7 @@ CATEGORIES = (
     "code_afk_pr",
     "code_setup_failed",
     "routine_failed",
+    "routine_message",
     "research_input",
     "research_done",
     "research_failed",
@@ -102,7 +104,9 @@ CATEGORIES = (
 LEGACY_CATEGORIES = ("chat_input", "code_input")
 # Kinds that are about a chat's session, so that chat can be muted.
 SESSION_KINDS = (
-    "approval", "question", "plan", "run_done", "run_failed", "pr_checks", "pr_merged", "afk_pr"
+    "approval", "question", "plan", "run_done", "run_failed", "pr_checks", "pr_merged", "afk_pr",
+    # A routine's answer lands in a chat's own session, so that chat's mute silences it too.
+    "routine_message",
 )
 INPUT_KINDS = ("approval", "question", "plan")
 
@@ -110,6 +114,8 @@ INPUT_KINDS = ("approval", "question", "plan")
 def category_of(kind: str, project: bool = False) -> str:
     if kind == "routine_failed":
         return "routine_failed"
+    if kind == "routine_message":
+        return "routine_message"
     if kind == "clone_failed":
         return "code_setup_failed"
     if kind in ("research_brief", "research_scope"):

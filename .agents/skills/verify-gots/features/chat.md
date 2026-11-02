@@ -14,6 +14,12 @@ its place in the sidebar's Recents across reloads.
 - `chat-reattach` — a reply still streaming when the page reloads picks its run up and finishes
   (`reattach`).
 - `chat-submission` — two sends made at once start one run and get one reply (`submission`).
+- `chat-routine-message` — a routine's answer draws as the bot's own message, separate from the reply
+  above it, with a chip that opens the run read-only and no composer in the sheet (ADR 0081). Proved
+  by the component tier, which is where the fold, the chip and the sheet are decided:
+  `scripts/test-routine-fold.mjs`, `scripts/test-routine-run.tsx`. In the browser, the claim is a
+  Reticle check: send `routine message` against the mock, then `--expect` that the thread holds the
+  aside row and its chip and that the sheet carries no composer.
 
 ## How to get to it (user POV)
 

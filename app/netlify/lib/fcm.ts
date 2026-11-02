@@ -26,6 +26,7 @@ export const PUSH_KINDS = [
   "research_done",
   "research_failed",
   "afk_pr",
+  "routine_message",
   "meeting_done",
   "meeting_failed",
 ] as const
@@ -44,6 +45,7 @@ export const PUSH_CATEGORIES = [
   "code_afk_pr",
   "code_setup_failed",
   "routine_failed",
+  "routine_message",
   "research_input",
   "research_done",
   "research_failed",
@@ -61,6 +63,7 @@ export function categoryOf(kind: PushKind): PushCategory | "test" {
   if (kind === "plan") return "code_input"
   if (kind === "clone_failed") return "code_setup_failed"
   if (kind === "routine_failed") return "routine_failed"
+  if (kind === "routine_message") return "routine_message"
   if (kind === "research_brief" || kind === "research_scope") return "research_input"
   if (kind === "research_done" || kind === "research_failed") return kind
   if (kind === "meeting_done" || kind === "meeting_failed") return kind
@@ -106,6 +109,7 @@ const WORDS: Record<PushKind, string> = {
   research_done: "Your research is ready",
   research_failed: "The mission stopped with an error",
   afk_pr: "A task's pull request is ready to review",
+  routine_message: "A bot has a message",
   meeting_done: "Your meeting notes are ready",
   meeting_failed: "Meeting notes failed",
   test: "This is a test notification",
@@ -114,6 +118,7 @@ const WORDS: Record<PushKind, string> = {
 // When the plugin is older or couldn't find a name.
 const UNTITLED: Partial<Record<PushKind, string>> = {
   routine_failed: "A routine",
+  routine_message: "A bot",
   clone_failed: "A project",
   research_brief: "A research mission",
   research_scope: "A research mission",

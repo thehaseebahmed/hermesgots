@@ -470,6 +470,43 @@ def apply_env(home: Path, changes: Dict[str, str]) -> None:
         _set_env(home, key, value)
 
 
+# Where a profile turns Gots on as a delivery platform (ADR 0081). Hermes reads it at startup, so a
+# write only takes effect after a restart — which is why the link step says so.
+PLATFORM_KEY = "platforms.gots.enabled"
+
+
+def enable_platform(home: Path) -> bool:
+    """Turns the Gots platform on in the profile's ``config.yaml``; True when the file changed.
+
+    Without it a routine's delivery fails with Hermes's own "platform 'gots' not configured/enabled"
+    rather than arriving in a chat, so linking a bot is when it is turned on. The key is written
+    alone, so the rest of the file and its comments stay as the user wrote them; a profile that
+    already has it on is left alone and needs no restart for this.
+    """
+    path = home / "config.yaml"
+    try:
+        from utils import atomic_roundtrip_yaml_update
+    except Exception:
+        return False
+    held: Dict[str, Any] = {}
+    try:
+        from gateway.run import _load_gateway_config
+
+        config = _load_gateway_config(config_path=path) or {}
+        section = (config.get("platforms") or {}).get("gots")
+        held = section if isinstance(section, dict) else {}
+    except Exception:
+        logger.debug("memento: couldn't read %s", path, exc_info=True)
+    if held.get("enabled") is True:
+        return False
+    try:
+        atomic_roundtrip_yaml_update(path, PLATFORM_KEY, True)
+        return True
+    except Exception:
+        logger.warning("memento: couldn't turn the Gots platform on in %s", path, exc_info=True)
+        return False
+
+
 def http_warning(url: str) -> Optional[str]:
     if url.startswith("http://") and not re.match(r"^http://(localhost|127\.|\[::1\])", url):
         return "A browser on https won't call an http:// URL. Use https (Tailscale, a tunnel or a proxy)."
@@ -519,8 +556,12 @@ def cmd_link(args: Any) -> int:
             print(f"Linked {record(home, state, process_env=True)['name']}. It shows up in Gots now.")
         else:
             print("Linked, but this profile has no API_SERVER_KEY yet, so the app can't use it.")
+        # Gots is a delivery platform now, so a routine made in a chat can answer there (ADR 0081).
+        if enable_platform(home):
+            restart = True
+            print("Turned Gots on as a delivery platform, so a routine's answer can arrive in a chat.")
         if restart:
-            print("Restart the gateway to apply the .env changes: hermes gateway restart")
+            print("Restart the gateway to apply the changes: hermes gateway restart")
         warning = http_warning(url)
         if warning:
             print(f"Note: {warning}")

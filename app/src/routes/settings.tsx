@@ -490,6 +490,7 @@ const CATEGORY_ICONS: Record<PushCategory, LucideIcon> = {
   code_afk_pr: GitPullRequestArrowIcon,
   code_setup_failed: FolderXIcon,
   routine_failed: CalendarXIcon,
+  routine_message: MessageSquareTextIcon,
   research_input: ClipboardCheckIcon,
   research_done: BookOpenCheckIcon,
   research_failed: CircleAlertIcon,

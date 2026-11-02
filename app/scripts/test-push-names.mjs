@@ -1,5 +1,5 @@
 /**
- * The sixteen notification types, each named for the event it reports: the title as the web's list
+ * The seventeen notification types, each named for the event it reports: the title as the web's list
  * shows it, how loudly its channel is created, whether it starts on, and the name Android's flat
  * list shows (the feature's in front, since that list has no headings). A device that already has
  * the channels keeps them, so the ids here are the ones that were shipped and must not move.
@@ -22,6 +22,7 @@ const NAMED = [
   ["code_afk_pr", "Pull request ready to review", 3, true],
   ["code_setup_failed", "Project setup failed", 3, true],
   ["routine_failed", "Routine failed", 3, true],
+  ["routine_message", "Messages from Bots", 3, true],
   ["research_input", "Brief or scope to review", 4, true],
   ["research_done", "Mission ready", 3, true],
   ["research_failed", "Mission failed", 3, true],
@@ -41,7 +42,7 @@ const byId = (id) => {
 }
 
 test("every type reads as the event it reports", () => {
-  assert.equal(PUSH_CATEGORIES.length, NAMED.length, "the sixteen stay sixteen")
+  assert.equal(PUSH_CATEGORIES.length, NAMED.length, "the seventeen stay seventeen")
   for (const [id, title] of NAMED) assert.equal(byId(id).title, title, id)
 })
 
@@ -70,7 +71,7 @@ test("the two renamed types are the only wording that changed", () => {
     research_input: "Brief or scope to review",
   }
   for (const [id, title] of Object.entries(renamed)) assert.equal(byId(id).title, title)
-  // The other fourteen keep the wording they shipped with, as this table has it.
+  // The other fifteen keep the wording they shipped with, as this table has it.
   assert.deepEqual(
     PUSH_CATEGORIES.filter((c) => !(c.id in renamed)).map((c) => c.title),
     NAMED.filter(([id]) => !(id in renamed)).map(([, title]) => title),
@@ -92,8 +93,8 @@ test("a merged pull request is the quietest news there is", () => {
 
 test("every failure and every completion makes a sound but does not peek", () => {
   const quiet = PUSH_CATEGORIES.filter((c) => c.importance === 3).map((c) => c.id)
-  assert.deepEqual(quiet, at(3), "the twelve in the list are the twelve in the table")
-  assert.equal(quiet.length, 12)
+  assert.deepEqual(quiet, at(3), "the thirteen in the list are the thirteen in the table")
+  assert.equal(quiet.length, 13)
 })
 
 test("the ids are the ones a device already has its channels under", () => {
@@ -116,7 +117,12 @@ test("Android's list carries the feature, since it has no headings", () => {
   assert.equal(
     channelName(byId("routine_failed")),
     "Routine failed",
-    "Routines carries no prefix: its one type already names it",
+    "Routines carries no prefix: a failure there already names itself",
+  )
+  assert.equal(
+    channelName(byId("routine_message")),
+    "Messages from Bots",
+    "and a bot's message is named for whose it is",
   )
 })
 

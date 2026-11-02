@@ -26,6 +26,7 @@ import { actionOf, spawnStamp } from "@/lib/spawn"
 import { labelComparable } from "@/lib/tool-preview"
 import { clip, describeCall, parseArgs, patchStats, writeStats } from "@/lib/tool-calls"
 import { progressReminderNotes, progressRemindersShown } from "@/lib/progress-reminder"
+import { isRoutineRow } from "@/lib/routine-message"
 import { equal } from "@/lib/equal"
 
 export { MAX_TEXT_CHARS, patchStats } from "@/lib/tool-calls"
@@ -238,7 +239,10 @@ export function turnsFromRows(rows: SessionMessage[], summaries?: SummaryRows): 
     rows = withoutRepeatedRestatements(seamOrder(rows, summaries), summaries)
   const groups: SessionMessage[][] = []
   for (const row of rows) {
-    if ((isTurnStart(row, summaries) && !isWakePrompt(row)) || !groups.length) groups.push([row])
+    // A routine's message is a turn of its own, with no request of the user's: the catch-up keeps one
+    // reply per turn, so a turn it shared would leave the message out of the thread entirely.
+    if ((isTurnStart(row, summaries) && !isWakePrompt(row)) || !groups.length || isRoutineRow(row))
+      groups.push([row])
     else groups[groups.length - 1].push(row)
   }
   return groups.map((group) => ({
@@ -358,6 +362,13 @@ function foldRows(
         ...(row.timestamp ? { hermesAt: createdAt } : {}),
       })
       continue
+    }
+    // A routine's answer is the bot's own message and not the reply above it carrying on: it starts
+    // a message of its own, whose words, media tags and stats land the way any reply's do (ADR 0081).
+    if (row.role === "assistant" && isRoutineRow(row)) {
+      reply = newReply(id, createdAt)
+      reply.hermesRowId = row.id
+      reply.routine = true
     }
     reply ??= newReply(id, createdAt)
     if (row.role === "tool") {
@@ -854,11 +865,13 @@ function turnsOf(
     const user = messages.find((m) => m.role === "user")
     const reply = messages.find((m) => m.role === "assistant")
     // A catch-up keeps one reply per turn. The turn a wake run opened has no user message at all, and
-    // its reply is still the thread's next message.
+    // its reply is still the thread's next message; a routine's turn is the same, its reply being the
+    // bot's own message.
     return {
       user,
       reply,
       wake: isWakePrompt(group[0]),
+      routine: isRoutineRow(group[0]),
       // A compaction's carried rows have lower ids than the request they now follow, so a turn's
       // parts are its own rows, not the id range they happen to span.
       rows: new Set(group.map((row) => row.id)),
@@ -997,11 +1010,12 @@ async function reconcile(conversationId: string) {
       writes.push(message)
       floor = message.createdAt + 1
     }
-    for (const { user, reply, wake, rows: ids } of turns) {
+    for (const { user, reply, wake, routine, rows: ids } of turns) {
       if (!user) {
         // The turn a wake run opened: the prompt draws nothing, and the answer it brought is the
-        // thread's next message — a reply of its own, after the turn it closed.
-        if (wake && reply) {
+        // thread's next message — a reply of its own, after the turn it closed. A routine's message
+        // is the same shape: no request of the user's, and the bot's own words to write.
+        if ((wake || routine) && reply) {
           parts.push(...partsOf(current, sessionId, ids, reply.id))
           put(reply)
           continue

@@ -98,6 +98,10 @@ export const CLOSE_REPORT_GAP_MS = 5_000
 /** How long a known library count is trusted before it's read again. */
 export const LIBRARY_MS = 60_000
 
+/** How long a chat's routine messages are used before the thread asks again: the route's answer
+ * moves only when a delivery lands, and the chip it draws is worth one read a minute. */
+export const ROUTINES_MS = 60_000
+
 /** A bot's MCP servers, while a server is connecting or the Server access sheet is open: a state that
  * moves on its own is watched; one the screen can't change is read once on open and left. */
 export const MCP_WORK_MS = 3_000

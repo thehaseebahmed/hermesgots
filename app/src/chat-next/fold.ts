@@ -2,6 +2,7 @@ import { splitAttachments, steerWords } from "../lib/attachment-text.ts"
 import { isSeamScaffolding, seamDrawnContent } from "../lib/compaction-seam.ts"
 import type { MessageStats } from "../lib/db.ts"
 import { progressReminderNotes } from "../lib/progress-reminder.ts"
+import { isRoutineRow } from "../lib/routine-message.ts"
 
 import type { Timing } from "../lib/reply-stats.ts"
 
@@ -86,6 +87,8 @@ export interface Turn {
   failed?: { text: string; row: number }
   /** A reply the host started when a subagent finished: it answers no message of the user's. */
   wake?: boolean
+  /** A routine's message: the bot said it while working, a turn of its own (ADR 0081). */
+  routine?: boolean
   /** The children whose results this wake turn carries, as the host names them. */
   delivered: string[]
 }
@@ -274,6 +277,14 @@ export function foldTurns(rows: Row[], partial = false, showReminders = false): 
       })
       continue
     }
+    // A routine's answer is the bot's own message, not the reply above it carrying on: it opens a
+    // turn of its own, and the row folds into that one (ADR 0081). The turn is the routine row's, so
+    // the message keeps the id the chip is matched to.
+    const routine = isRoutineRow(row)
+    const opened = row.role === "assistant" && routine
+      ? { user: "", parts: [], done: false, delivered: [], routine: true, row: row.id }
+      : undefined
+    if (opened) turns.push(opened)
     // Rows read newest first can open on a reply whose request is older still: it is drawn alone. A
     // reply the host carried across a compaction opens the turn its archived request left.
     const turn =
@@ -315,8 +326,11 @@ export function foldTurns(rows: Row[], partial = false, showReminders = false): 
       seamed = true
       continue
     }
+    // A routine's message the host carried across a compaction is the copy of one already drawn, so
+    // it is skipped like any reply's copy; the turn it opened goes with it, empty.
     if (first && !asked.length && row.content && repeatsEarlier(turns, row.content)) {
       seamed = true
+      if (opened && turns.at(-1) === opened) turns.pop()
       continue
     }
     turn.done = !asked.length && Boolean(row.finish_reason)

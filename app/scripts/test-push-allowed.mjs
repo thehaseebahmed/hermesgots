@@ -129,7 +129,11 @@ test("a channel the phone never had is made with its row's importance", () => {
     ),
     "the first launch's defaults, one channel each",
   )
-  assert.equal(plan.length, 14, "and none for a feature this phone cannot reach")
+  assert.equal(
+    plan.length,
+    PUSH_CATEGORIES.filter((category) => category.feature !== "meetings").length,
+    "and none for a feature this phone cannot reach",
+  )
   for (const channel of plan) {
     const row = PUSH_CATEGORIES.find((category) => category.id === channel.id)
     assert.equal(channel.name, channelName(row), channel.id)

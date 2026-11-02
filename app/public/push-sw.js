@@ -18,6 +18,7 @@ const WORDS = {
   research_done: "Your research is ready",
   research_failed: "The mission stopped with an error",
   afk_pr: "A task's pull request is ready to review",
+  routine_message: "A bot has a message",
   meeting_done: "Your meeting notes are ready",
   meeting_failed: "Meeting notes failed",
 }
@@ -25,6 +26,7 @@ const WORDS = {
 // When the plugin is older or couldn't find a name.
 const UNTITLED = {
   routine_failed: "A routine",
+  routine_message: "A bot",
   clone_failed: "A project",
   research_brief: "A research mission",
   research_scope: "A research mission",

@@ -22,6 +22,7 @@ import { LineRow } from "@/components/chat/status-line"
 import { ThinkingLine } from "@/components/chat/thinking-line"
 import { ToolGroup } from "@/components/chat/tool-group"
 import { ReminderRow } from "@/components/chat/reminder-row"
+import { RoutineReceipt } from "@/components/chat/routine-run"
 import { useRemindersShown } from "@/components/chat/use-reminders-shown"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Button } from "@/components/ui/button"
@@ -791,7 +792,14 @@ export const MessageItem = memo(function MessageItem({
             {i > 0 && breaks[i - 1].node}
             {(parts.length > 0 || (last && footerShown)) && (
               <AssistantRow conversationId={message.conversationId} busy={busy} parts={parts}>
-                {last && footer}
+                {last && (
+                  <>
+                    {/* A routine's message wears its run's chip under its words (ADR 0081); every
+                        other reply draws nothing and asks the host nothing. */}
+                    {message.routine && <RoutineReceipt message={message} />}
+                    {footer}
+                  </>
+                )}
               </AssistantRow>
             )}
           </Fragment>
