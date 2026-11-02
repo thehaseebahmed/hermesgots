@@ -19,6 +19,13 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ?? "playwright")
 /** A short id so each run's sessions are new to the mock, which keeps its state between flows. */
 export const runId = () => Math.random().toString(36).slice(2, 8)
 
+/** The page's own words, in the order the app drew them. */
+export const drawn = (page) => page.evaluate(() => document.body.innerText)
+
+/** A user's words, long enough that a few turns fill a phone's pane. */
+export const long = (name, turns = 10) =>
+  `${name}: ` + Array.from({ length: turns }, (_, i) => `The ${name}'s point ${i + 1}.`).join(" ")
+
 /**
  * Resolves once nothing the clock drives is still moving: a sheet's slide, a pane's push, a fade.
  * Two frames first, so a transition the last step started has been created; then every animation

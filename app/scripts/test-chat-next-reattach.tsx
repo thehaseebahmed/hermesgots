@@ -86,7 +86,7 @@ test("two devices follow one run at once and each draws every word as it is writ
       () => assert.deepEqual(lastTurn(laptop)?.texts, both),
       "the device that joined draws every word too, the early ones replayed",
     )
-    assert.equal(host.asked.subscriptions, 2, "two followers of the one run")
+    assert.equal(host.asked.eventReads, 2, "two followers of the one run")
     run.finish("Words for both. And more for both.")
     await showsEverything(phone, host, "the device that sent it, once the run ends")
     await showsEverything(laptop, host, "the device that joined, once the run ends")
@@ -194,18 +194,18 @@ test("a run the host has dropped is not drawn as a failure over the thread", asy
   const host = fakeHost("memento-reattach-ghost", { plugin: true })
   host.seed([{ user: "earlier", reply: "Earlier.", tools: 1 }])
   host.startElsewhere("in flight")
-  host.retire()
+  host.retireLatest()
   await withDevice(openDevice(host), async (phone) => {
     await eventually(
       () => assert.equal(lastTurn(phone)?.user, "in flight"),
       "the request the run wrote before it was dropped",
     )
-    const asked = host.asked.subscriptions
+    const asked = host.asked.eventReads
     await wait(300)
     assert.equal(phone.alert(), undefined, "no error is drawn for a run the host no longer has")
     // A poll that honoured the listing again would ask for the gone run's events on every tick.
     assert.equal(
-      host.asked.subscriptions,
+      host.asked.eventReads,
       asked,
       "the events of a run the host no longer has are not asked for again",
     )

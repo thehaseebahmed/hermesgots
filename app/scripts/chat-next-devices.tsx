@@ -80,9 +80,7 @@ export async function openDevice(
         <Routes>
           <Route
             path="/next"
-            element={
-              <ChatNextPage pollMs={pollMs} idleMs={idleMs} database={database} />
-            }
+            element={<ChatNextPage pollMs={pollMs} idleMs={idleMs} database={database} />}
           />
         </Routes>
       </MemoryRouter>,

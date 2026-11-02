@@ -65,7 +65,7 @@ const waitingOn = async (host: Host, device: Device) => {
     200,
   )
   await eventually(
-    () => assert.ok(host.asked.subscriptions > 0),
+    () => assert.ok(host.asked.eventReads > 0),
     "the run's events are being read",
     200,
   )
@@ -220,13 +220,13 @@ test.describe("a run already waiting when the chat opens", () => {
     run.ask(TEA)
     await withDevice(openDevice(host, SLOW), async (phone) => {
       await waitingOn(host, phone)
-      const read = host.asked.subscriptions
+      const read = host.asked.eventReads
       host.dropConnections()
       await wait(300)
       assert.deepEqual(questionOf(phone), asking, "the form outlives the stream that brought it")
       assert.equal(phone.alert(), undefined, "and nothing says the page failed")
       await eventually(
-        () => assert.ok(host.asked.subscriptions > read),
+        () => assert.ok(host.asked.eventReads > read),
         "the page rejoins the run once its poll comes round",
         1_000,
       )

@@ -4,7 +4,18 @@
 // the flow says the archive is offered, that asking puts every archived turn back once and in the
 // host's order above the window, and that the divider comes to rest where the compaction ran
 // (ADR 0058).
-import { app, assert, flow, mockPost, pass, runId, runStatus, startRun } from "./lib.mjs"
+import {
+  app,
+  assert,
+  drawn,
+  flow,
+  long,
+  mockPost,
+  pass,
+  runId,
+  runStatus,
+  startRun,
+} from "./lib.mjs"
 
 /** The words this device holds in one set of its transcript, oldest first. */
 const held = (page, chatId, set = "live") =>
@@ -29,13 +40,8 @@ const whole = (page, chatId) =>
     return (await db.sessionStates.get(chat.hermesSessionId))?.archived === true
   }, chatId)
 
-const drawn = (page) => page.evaluate(() => document.body.innerText)
 const offers = (page) => page.locator("[data-earlier]").count()
-const count = (text, word) => text.split(word).length - 1
-
-/** A user's words, long enough that the window and the archive each fill a phone's pane. */
-const long = (name) =>
-  `${name}: ` + Array.from({ length: 6 }, (_, i) => `The ${name}'s point ${i + 1}.`).join(" ")
+const times = (text, word) => text.split(word).length - 1
 
 await flow(
   "chat-next-archive",
@@ -55,7 +61,7 @@ await flow(
     // Another device holds the whole conversation; this one has never opened it.
     const archived = ["alpha", "bravo", "charlie"]
     for (const name of [...archived, "delta"]) {
-      const run = await startRun(sessionId, long(name))
+      const run = await startRun(sessionId, long(name, 6))
       await until(async () => (await runStatus(run)) === "completed", 30_000, `"${name}" to end`)
     }
     // The host compacts in place and leaves nothing at the seam: the rows it keeps live come back
@@ -117,7 +123,7 @@ await flow(
         foot.indexOf("Compaction") < foot.indexOf("zulu:"),
       "the compaction's divider sits between the turns it carried and the turn after it",
     )
-    assert.equal(count(foot, "Compaction"), 1, "one compaction, one divider")
+    assert.equal(times(foot, "Compaction"), 1, "one compaction, one divider")
 
     // Walked up the pane as a reader's own finger does it: chat-next draws what is near the
     // viewport, so the reach is a run of steps rather than one jump.

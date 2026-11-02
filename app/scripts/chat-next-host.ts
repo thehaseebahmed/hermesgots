@@ -182,15 +182,14 @@ export function fakeHost(
   const rows: Row[] = []
   const expected: ExpectedTurn[] = []
   const runs = new Map<string, RunState>()
-  /** The run the plugin's listing still names after the gateway dropped it. */
-  let ghost: string | undefined
+  let droppedRun: string | undefined
   const answers: { run: string; prompt_id: string; generation: number; answer: string }[] = []
   const approvals: { run: string; choice: string }[] = []
   const asked = {
     transcript: 0,
     archive: 0,
     runs: 0,
-    subscriptions: 0,
+    eventReads: 0,
     health: 0,
     stops: 0,
     agentStops: 0,
@@ -766,7 +765,7 @@ export function fakeHost(
       dispatch()
       const live = [...runs].filter(([, state]) => !state.done).at(-1)
       // A run the gateway dropped is still listed: the plugin's own sweep is what forgets it.
-      const named = live?.[0] ?? ghost
+      const named = live?.[0] ?? droppedRun
       return reply({
         object: "memento.runs",
         sessions: named ? { [session]: "running" } : {},
@@ -856,7 +855,7 @@ export function fakeHost(
     // screen reads the two answers differently (`api.ts`).
     const stream = /^\/v1\/runs\/([^/]+)\/events$/.exec(path)
     if (stream) {
-      asked.subscriptions++
+      asked.eventReads++
       if (!runs.has(stream[1])) return reply({ error: { code: "run_not_found" } }, 404)
       return events(stream[1], Number(url.searchParams.get("last_seq") ?? -1))
     }
@@ -987,12 +986,12 @@ export function fakeHost(
     return run
   }
 
-  /** Drops a run the plugin's `runs/live` still names, as the gateway does before its sweep does. */
-  function retire() {
+  /** Drops the run started last, as the gateway does before the plugin's sweep forgets it. */
+  function retireLatest() {
     const retired = [...runs.keys()].at(-1)
     if (!retired) throw new Error("No run to retire.")
     runs.delete(retired)
-    ghost = retired
+    droppedRun = retired
     return retired
   }
 
@@ -1045,6 +1044,6 @@ export function fakeHost(
     dropConnections,
     breakConnections,
     startElsewhere,
-    retire,
+    retireLatest,
   }
 }

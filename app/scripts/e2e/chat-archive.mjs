@@ -4,7 +4,7 @@
 // where the compaction happened rather than at the top of a truncated window (ADR 0058). The reach
 // replaces a button, so what only a browser can say is that nothing above the window is on the
 // device before the reader gets to the pane's top and the whole archive is there after it.
-import { app, assert, flow, mock, pass, runId, runStatus, startRun } from "./lib.mjs"
+import { app, assert, drawn, flow, long, mock, pass, runId, runStatus, startRun } from "./lib.mjs"
 
 const auth = { Authorization: "Bearer mock-key", "Content-Type": "application/json" }
 
@@ -29,12 +29,7 @@ const hasMore = (page, chatId) =>
     chatId,
   )
 
-const drawn = (page) => page.evaluate(() => document.body.innerText)
 const count = (messages, text) => messages.filter((m) => m.text.includes(text)).length
-
-/** A user's words, long enough that a few turns fill a phone's pane. */
-const long = (name) =>
-  `${name}: ` + Array.from({ length: 10 }, (_, i) => `The ${name}'s point ${i + 1}.`).join(" ")
 
 await flow(
   "chat-archive",
@@ -138,10 +133,7 @@ await flow(
       divider > page1.indexOf("sixth") && divider < page1.indexOf("tenth"),
       "the compaction's divider sits between the turns it carried and the one after it",
     )
-    assert.ok(
-      page1.split("Compaction").length - 1 === 1,
-      "one compaction, one divider",
-    )
+    assert.ok(page1.split("Compaction").length - 1 === 1, "one compaction, one divider")
     await shot("archive")
     pass("the divider stands where the compaction happened, with the archive above it")
   },

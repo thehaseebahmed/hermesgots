@@ -704,7 +704,7 @@ export function ChatNextThread({
   }, [folded, held?.live, doing.waiting, held?.answers])
   const offersEarlier = compacted || seamIn(turns)
   const [draft, setDraft] = useState("")
-  const [earlier, setEarlier] = useState<"idle" | "reading" | "failed">("idle")
+  const [earlier, setEarlier] = useState<"idle" | "reading" | "failed" | "spent">("idle")
   // The older pages of the transcript, read one after another once the newest is drawn. A token is
   // handed to each run, and a run whose token is no longer the latest is stale and lands nothing.
   const [older, setOlder] = useState<"idle" | "reading" | "failed">("idle")
@@ -1031,8 +1031,11 @@ export function ChatNextThread({
       } catch (error) {
         if (alive.current.signal.aborted) return
         // A stream that died mid-read is not a page that failed, nor is a run the host has dropped.
-        if (error instanceof RunGone) goneRuns.current.add(run)
-        else if (!(error instanceof TypeError)) dispatch(failure(error))
+        if (error instanceof RunGone) {
+          // Once per run, and the only trace: the reader is told nothing.
+          if (!goneRuns.current.has(run)) console.debug("[chat-next] the host dropped run", run)
+          goneRuns.current.add(run)
+        } else if (!(error instanceof TypeError)) dispatch(failure(error))
       } finally {
         streaming.current = false
         if (followingRun.current === run) followingRun.current = undefined
@@ -1455,6 +1458,9 @@ export function ChatNextThread({
     setEarlier("reading")
     try {
       const rows = await readTranscript({ server, key }, session, alive.current.signal, true)
+      // Nothing above the window is the host's answer too: the offer has no more to give, and
+      // recording an empty read as the archive would hide it behind a flag saying one loaded.
+      if (!rows.length) return setEarlier("spent")
       dispatch({ type: "earlier", rows })
       setEarlier("idle")
       await catchUp()
@@ -1549,7 +1555,7 @@ export function ChatNextThread({
       older={older === "idle" ? undefined : { state: older, retry }}
       origin={origin}
       earlier={
-        !held?.archived && offersEarlier
+        !held?.archived && offersEarlier && earlier !== "spent"
           ? { state: earlier, load: () => void loadEarlier() }
           : undefined
       }

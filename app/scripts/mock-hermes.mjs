@@ -5994,7 +5994,7 @@ http
           }
         : undefined
       const copies = tail.map((row) => ({ ...row, id: ++lastRowId }))
-      const seam = summary
+      const seam = hidden
         ? [
             summary,
             {
