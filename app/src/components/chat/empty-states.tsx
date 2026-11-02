@@ -1,4 +1,5 @@
-import { SettingsIcon } from "lucide-react"
+import { useState } from "react"
+import { CheckIcon, CopyIcon, SettingsIcon } from "lucide-react"
 import { Link } from "react-router"
 
 import { Bot } from "@/components/bot"
@@ -62,14 +63,45 @@ export function EmptyState({
   )
 }
 
-/** A thread this device could not read: it says so and offers the read again. */
-export function MissingThread({ onRetry }: { onRetry: () => void }) {
+/**
+ * A thread this device could not read: it says so, offers the read again, and can hand support the
+ * facts of the read that failed — written to the clipboard, or shown to be copied by hand where the
+ * clipboard is refused.
+ */
+export function MissingThread({
+  onRetry,
+  details,
+}: {
+  onRetry: () => void
+  details: () => string
+}) {
+  const [copied, setCopied] = useState<boolean | "failed">(false)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(details())
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1500)
+    } catch {
+      setCopied("failed")
+    }
+  }
   return (
     <div className={`${PANE} gap-3`}>
       <p className="text-sm font-medium">{THREAD_MISSING}</p>
-      <Button variant="outline" className="min-h-11" onClick={onRetry}>
-        Try again
-      </Button>
+      <div className="flex flex-wrap justify-center gap-2">
+        <Button variant="outline" className="min-h-11" onClick={onRetry}>
+          Try again
+        </Button>
+        <Button variant="ghost" className="min-h-11" onClick={() => void copy()}>
+          {copied === true ? <CheckIcon /> : <CopyIcon />}
+          Copy details
+        </Button>
+      </div>
+      {copied === "failed" && (
+        <pre className="max-h-64 w-full max-w-md overflow-auto rounded-2xl bg-muted p-3 text-left font-mono text-xs leading-relaxed break-all whitespace-pre-wrap select-all">
+          {details()}
+        </pre>
+      )}
     </div>
   )
 }

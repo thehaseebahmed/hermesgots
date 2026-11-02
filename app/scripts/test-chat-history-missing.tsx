@@ -87,3 +87,25 @@ test("a session nothing was sent in still draws as a new one", async () => {
     assert.ok(!body().includes("Try again"), "with nothing to retry")
   })
 })
+
+test("Copy details hands support the failed read, without the bot's address", async () => {
+  await seedPastSession()
+  transcriptHost([], () => true)
+  const copied: string[] = []
+  Object.defineProperty(globalThis.navigator, "clipboard", {
+    configurable: true,
+    value: { writeText: async (text: string) => void copied.push(text) },
+  })
+  await mount(chatScreen("s-past"), async () => {
+    await settle()
+    await click(findText("button", "Copy details"))
+    assert.equal(copied.length, 1, "the details went to the clipboard")
+    const block = copied[0]
+    assert.ok(block.includes('"id": "s-past"'), "it names the chat")
+    assert.ok(block.includes('"ended": "network"'), "and how the read ended")
+    assert.ok(block.includes('"name": "HermesError"'), "and what threw")
+    assert.ok(block.includes('"stack"'), "with the stack that walked to it")
+    assert.ok(block.includes('"stored": 0'), "and that this device holds nothing")
+    assert.ok(!block.includes("history.test"), "never the bot's address")
+  })
+})

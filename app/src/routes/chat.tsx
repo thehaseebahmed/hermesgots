@@ -139,6 +139,7 @@ import { lastActivityAt } from "@/lib/session-work"
 import { hold, type HoldSlot } from "@/lib/chat-hold"
 import { useBotThreads, useThreads } from "@/lib/threads"
 import { EmptyState, MainEmptyState, MissingThread } from "@/components/chat/empty-states"
+import { describeReadFailure, formatReadFailure } from "@/lib/read-failure"
 import { isUnsent } from "@/chat-next/unsent"
 import { HeaderBack } from "@/components/chat/header-back"
 import { useSessionLeave } from "@/components/chat/session-leave"
@@ -855,6 +856,8 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
       .finally(() => setLoadingEarlier(false))
   }, [id])
   const [historyMissing, setHistoryMissing] = useState<string>()
+  /** When the read failed and what it threw, kept so the pane can hand support the facts. */
+  const [readFailure, setReadFailure] = useState<{ at: number; error?: unknown }>()
   const readyRef = useRef<{ id?: string }>(undefined)
 
   const resolved = { ...DEFAULT_SETTINGS, ...settings }
@@ -1018,9 +1021,17 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   // The pane says the read failed and offers Try again; a toast on top of it says it twice.
   const readHistory = useCallback(() => {
     if (!id) return
+    const at = Date.now()
     reconcileHistory(id)
-      .then((count) => count || setHistoryMissing(id))
-      .catch(() => setHistoryMissing(id))
+      .then((count) => {
+        if (count) return
+        setReadFailure({ at })
+        setHistoryMissing(id)
+      })
+      .catch((error) => {
+        setReadFailure({ at, error })
+        setHistoryMissing(id)
+      })
   }, [id])
   useEffect(() => {
     if (needsHistory) readHistory()
@@ -1029,6 +1040,19 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
     setHistoryMissing(undefined)
     readHistory()
   }, [readHistory])
+  const readDetails = useCallback(() => {
+    if (!readFailure || !conversation || !profile) return ""
+    return formatReadFailure(
+      describeReadFailure({
+        at: readFailure.at,
+        error: readFailure.error,
+        chat: conversation,
+        profile,
+        stored: messages?.length ?? 0,
+        endpoint: "/api/sessions/{id}/messages",
+      }),
+    )
+  }, [readFailure, conversation, profile, messages])
 
   // Other devices add turns on Hermes. Catch up when the chat opens, when sync brings news of it,
   // when this tab comes back, and now and then while it's on screen.
@@ -1429,7 +1453,7 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
           <Spinner className="size-6" />
         </div>
       ) : threadUnread ? (
-        <MissingThread onRetry={retryHistory} />
+        <MissingThread onRetry={retryHistory} details={readDetails} />
       ) : conversation?.main && botThreads && configured ? (
         <MainEmptyState botId={profile?.botId} id={conversation?.id} onSend={send} />
       ) : (
