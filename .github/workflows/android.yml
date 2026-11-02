@@ -118,6 +118,9 @@ jobs:
           # URL can be built from one. Unset, this falls back to production rather than building a
           # tester app with no sync at all.
           VITE_SITE_URL: ${{ vars.MEMENTO_CANDIDATE_URL || vars.MEMENTO_SITE_URL }}
+          # Crash reports from a tester build land in the same project as the release; the release
+          # it came from tells them apart. Unset, the app reports nothing.
+          VITE_SENTRY_DSN: ${{ vars.SENTRY_DSN }}
 
       - name: Version
         run: |

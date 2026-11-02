@@ -161,6 +161,8 @@ jobs:
         run: pnpm build:android
         env:
           VITE_SITE_URL: ${{ vars.MEMENTO_SITE_URL }}
+          # Crash reports land in tha-org/gots-app; unset, the app reports nothing.
+          VITE_SENTRY_DSN: ${{ vars.SENTRY_DSN }}
 
       - name: Firebase config
         if: env.FIREBASE_GOOGLE_SERVICES != ''
