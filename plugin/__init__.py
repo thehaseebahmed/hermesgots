@@ -58,6 +58,7 @@ from . import (
     projects,
     progress,
     prompt_builder,
+    reporting,
     repos,
     research,
     speech,
@@ -2941,6 +2942,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
 
 
 def register(ctx) -> None:
+    # Off unless the host set GOTS_SENTRY_DSN; see reporting.py.
+    reporting.start(VERSION)
     register_hook = getattr(ctx, "register_hook", None)
     if register_hook is not None:
         register_hook("post_api_request", context.record)
