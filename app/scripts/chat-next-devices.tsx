@@ -68,7 +68,8 @@ export async function openDevice(
     pollMs = 20,
     idleMs = 20,
     database = deviceDatabase(),
-  }: { pollMs?: number; idleMs?: number; database?: SessionDb } = {},
+    compacted = false,
+  }: { pollMs?: number; idleMs?: number; database?: SessionDb; compacted?: boolean } = {},
 ) {
   const container = document.createElement("div")
   document.body.append(container)
@@ -80,7 +81,14 @@ export async function openDevice(
         <Routes>
           <Route
             path="/next"
-            element={<ChatNextPage pollMs={pollMs} idleMs={idleMs} database={database} />}
+            element={
+              <ChatNextPage
+                pollMs={pollMs}
+                idleMs={idleMs}
+                database={database}
+                compacted={compacted}
+              />
+            }
           />
         </Routes>
       </MemoryRouter>,

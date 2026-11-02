@@ -288,3 +288,27 @@ test.describe("finished while away: the reply ended with no device watching", ()
     })
   })
 })
+
+test.describe("a compaction that leaves no hidden row", () => {
+  /**
+   * The host recorded as `delegate-compaction-before`: Hermes archived the older turns and wrote
+   * nothing where the summary went, so no row of the transcript says the archive exists — the chat's
+   * own record of the compaction is the only word, and the divider the app draws from it stands above
+   * a thread whose first row is a carried request. A device that holds none of the archived turns
+   * must still be offered them; before the record was read, nothing on the screen could say where
+   * they were, and the thread showed a divider over its window with no way back above it.
+   */
+  test("a device that reads the chat's record is offered the rows it archived", async () => {
+    const host = setUp("no-hidden-row")
+    const before = await openDevice(host)
+    await turn(before, host, "one", "First.")
+    await turn(before, host, "two", "Second.", 2)
+    await turn(before, host, "three", "Third.")
+    host.compact({ hidden: false })
+    await before.close()
+    await withDevice(openDevice(host, { compacted: true }), async (phone) => {
+      await showsEverything(phone, host, "the window the compaction left")
+      await reachesBack(phone, host)
+    })
+  })
+})

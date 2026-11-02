@@ -46,6 +46,7 @@ import {
   stopRun,
   HostAway,
   HostRefused,
+  RunGone,
   type Connection,
   type Queued,
 } from "./api"
@@ -614,6 +615,12 @@ interface ThreadOptions {
   stallMs?: number
   /** The device's database; a test gives each device its own (ADR 0065). */
   database?: SessionDb
+  /**
+   * The host says a compaction took rows out of this chat's transcript. It is the only word on
+   * whether anything was archived (ADR 0058): a host that leaves no hidden row at the seam draws
+   * its divider from this record alone, so nothing in the live rows says the archive exists.
+   */
+  compacted?: boolean
 }
 
 /** The dev route: a session opened by `?server=&key=&session=`. */
@@ -639,6 +646,7 @@ export function ChatNextThread({
   idleMs = IDLE_MS,
   stallMs = STALL_MS,
   database = db,
+  compacted = false,
   server,
   apiKey: key,
   session,
@@ -1018,8 +1026,11 @@ export function ChatNextThread({
       } catch (error) {
         if (alive.current.signal.aborted) return
         // A stream that died mid-read is not a page that failed: the run carries on without us and the
-        // next poll rejoins it. Anything the host answered with — a refused key, no stream at all — is.
-        if (!(error instanceof TypeError)) dispatch(failure(error))
+        // next poll rejoins it. Nor is a run the host no longer has: the listing that named it
+        // outlived it, and the transcript read below is the account of the turn. Anything else the
+        // host answered with — a refused key, a stream it would not open — is.
+        if (!(error instanceof TypeError) && !(error instanceof RunGone))
+          dispatch(failure(error))
       } finally {
         streaming.current = false
         if (followingRun.current === run) followingRun.current = undefined
@@ -1533,7 +1544,8 @@ export function ChatNextThread({
       origin={origin}
       earlier={
         !held?.archived &&
-        turns.some((turn) => turn.parts.some((part) => part.kind === "compaction"))
+        (compacted ||
+          turns.some((turn) => turn.parts.some((part) => part.kind === "compaction")))
           ? { state: earlier, load: () => void loadEarlier() }
           : undefined
       }

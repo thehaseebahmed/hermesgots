@@ -185,3 +185,22 @@ test("a run that takes over as the last one ends is joined without leaving the c
     await showsEverything(phone, host, "all of it once the second run ends")
   })
 })
+
+/**
+ * A listing that outlived the run it names. The plugin's `runs/live` says a run is going; the gateway
+ * has already dropped it, so the join's read of its events is answered 404 — and the page treated
+ * that as a failure of the page, drawing the host's words in the thread's error slot, over a chat
+ * whose transcript it had. A run the host no longer has is a run there is nothing to watch: the
+ * transcript is the account of the turn, and the join ends quietly like a stream that died.
+ */
+test("a run the host has dropped is not drawn as a failure over the thread", async () => {
+  const host = fakeHost("memento-reattach-ghost", { plugin: true })
+  host.seed([{ user: "earlier", reply: "Earlier.", tools: 1 }])
+  host.startElsewhere("in flight").finish("In flight.")
+  host.retire()
+  await withDevice(openDevice(host), async (phone) => {
+    await showsEverything(phone, host, "the transcript, the only account of the turn")
+    await wait(200)
+    assert.equal(phone.alert(), undefined, "no error is drawn for a run the host no longer has")
+  })
+})

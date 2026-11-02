@@ -172,6 +172,11 @@ export const FLOWS = {
     about:
       "A chat on chat-next whose host can't be reached says so in its header — the host's words, or the device's once the browser is off the network — keeps its composer, draws nothing of it in the thread, answers a send in a breath, and keeps a message the host never took in the thread marked Not sent, with Retry and Cancel, across a reload",
   },
+  "chat-next-archive": {
+    script: "e2e/chat-next-archive.mjs",
+    about:
+      "A chat on chat-next that the host compacted without leaving a row at the seam opens on its live window with the compaction's divider over it, offers the rows it archived, and puts every turn back once in the host's order with the divider in its place",
+  },
   "chat-archive": {
     script: "e2e/chat-archive.mjs",
     about:

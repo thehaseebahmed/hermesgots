@@ -5958,7 +5958,10 @@ http
     // copy stands for them, so a turn reads once. A device that already showed those turns meets them
     // again as new rows.
     if (url.pathname === "/__mock/compact" && req.method === "POST") {
-      const { session_id: sessionId, rows = 50 } = await readBody(req)
+      // `hidden: false` is the host that leaves nothing at the seam: the same archive and the same
+      // carried tail, with no summary row and no task-list notice where the compaction ran — the
+      // shape a real recording of it has, and the one no row of the transcript can date.
+      const { session_id: sessionId, rows = 50, hidden = true } = await readBody(req)
       const stored = transcripts.get(sessionId)
       if (!stored) return json(res, 404, { error: { message: "Session not found" } })
       const tail = stored.slice(-Math.max(1, rows))
@@ -5988,30 +5991,35 @@ http
         ].join("\n"),
       }
       const copies = tail.map((row) => ({ ...row, id: ++lastRowId }))
-      transcripts.set(sessionId, [
-        ...archived,
-        summary,
-        {
-          id: ++lastRowId,
-          session_id: sessionId,
-          timestamp: Date.now() / 1000,
-          role: "user",
-          // The host ships this row as a plain `user` row: its synthetic flag never reaches the
-          // store, so no `display_kind` marks it and the app must read the seam off the text.
-          content: [
-            "[Your active task list was preserved across context compression]",
-            "- [>] 4. Compaction note row (in_progress)",
-            "",
-            "[Skills pruned during compression — reload before acting on these tasks]",
-            "The task list above crossed the compression boundary verbatim, but the skill " +
-              "instructions that governed it were pruned.",
-          ].join("\n"),
-        },
-        ...copies,
-      ])
+      const seam = hidden
+        ? [
+            summary,
+            {
+              id: ++lastRowId,
+              session_id: sessionId,
+              timestamp: Date.now() / 1000,
+              role: "user",
+              // The host ships this row as a plain `user` row: its synthetic flag never reaches the
+              // store, so no `display_kind` marks it and the app must read the seam off the text.
+              content: [
+                "[Your active task list was preserved across context compression]",
+                "- [>] 4. Compaction note row (in_progress)",
+                "",
+                "[Skills pruned during compression — reload before acting on these tasks]",
+                "The task list above crossed the compression boundary verbatim, but the skill " +
+                  "instructions that governed it were pruned.",
+              ].join("\n"),
+            },
+          ]
+        : []
+      transcripts.set(sessionId, [...archived, ...seam, ...copies])
       compactions.set(sessionId, [
         ...(compactions.get(sessionId) ?? []),
-        { at: Math.round(summary.timestamp * 1000), row: summary.id },
+        hidden
+          ? { at: Math.round(summary.timestamp * 1000), row: summary.id }
+          : // A host that wrote nothing at the seam names no row: the compaction is in its record
+            // alone, dated to the moment it ran — after every row it carried, before the next turn.
+            { at: Date.now() },
       ])
       return json(res, 200, { ok: true, rows: copies.length, archived: archived.length })
     }

@@ -17,20 +17,20 @@ ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
 
-The registry in `app/scripts/e2e/cli.mjs` holds **86 keys**, and every one of them has a row
-below. `pnpm e2e list` prints the same 86 keys, and the rows here are grouped by the ticket that
+The registry in `app/scripts/e2e/cli.mjs` holds **87 keys**, and every one of them has a row
+below. `pnpm e2e list` prints the same 87 keys, and the rows here are grouped by the ticket that
 takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
 | --------- | ------ |
-| stay | 28 |
+| stay | 29 |
 | component | 54 |
 | plugin | 2 |
 | delete | 2 |
-| **total** | **86** |
+| **total** | **87** |
 
-Of those 86, 80 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
-reuses `todos.mjs`, so 79 distinct files) and 6 point at the older
+Of those 87, 81 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
+reuses `todos.mjs`, so 80 distinct files) and 6 point at the older
 `app/scripts/regression-*.mjs`.
 
 #297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**.
@@ -168,25 +168,31 @@ neither can draw is the clip itself, recorded in the page, uploaded, served back
 
 A twenty-seventh stay arrives with the question a run had to be reopened for: `question-muted`, because the claim is that a prompt raised while nothing is listening still reaches the page. A host sends a prompt's request only to the subscribers it has at the time, so a question raised as a call's previous one is answered goes out on nobody's stream and lives only on the run's status; the page that answered is following that run, so it has to read the status and it has to be polling while it follows. The `muted` mock publishes every prompt after a call's first to its status alone, and nothing below the browser poll has a clock: the claim is that the form appears without the chat being left and opened again, which is a page, a timer and a composer. It fails at the base commit on the second question and passes with the page's read in place.
 
+A twenty-eighth stay has arrived with the other half of the compacted chat's archive:
+`chat-next-archive`, because the claim is that the offer to read back exists at all. A host can
+compact a chat in place and write nothing at the seam — no hidden row, no summary — so no row of the
+live transcript says where the archive is; the chat's own record of the compaction is the only word,
+and a thread that never reads it draws its divider over a truncated window and offers nothing. The
+claim is the whole screen's: that the record turns the offer on, and that asking lands the host's
+archived turns once, in order, under a divider that stays where the compaction ran.
+`test-chat-next-compaction-matrix.tsx` holds the page's gate over the same host (handed the record
+as a prop), so it passes whether or not anything in the app reads the chat's own; this flow is the
+only place the app is asked, and it fails at the base commit on the button alone.
+
 `app/scripts/test-e2e-registry.mjs`, a unit test, holds the registry and this page to each other:
 a key with no row here, a row with no key, a verdict outside the four, a count in the table above
-<<<<<<< HEAD
-that its rows don't add up to, or a stay beyond the twenty-seven fails the app's gates. A new flow is
+that its rows don't add up to, or a stay beyond the twenty-eight fails the app's gates. A new flow is
 then an argument this page has to carry, never a default (ADR 0019).
-=======
-that its rows don't add up to, or a stay beyond the twenty-seven fails the app's gates. A new flow is then
-an argument this page has to carry, never a default (ADR 0019).
->>>>>>> f62ff015 (test(e2e): a tap on media opens the previewer, a file opens a tab)
 
 Check any of it in one line:
 
 ```bash
-grep -c '^| `' docs/e2e-flow-audit.md                           # 86 rows, one per registry key
-grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 27
-grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 55
+grep -c '^| `' docs/e2e-flow-audit.md                           # 87 rows, one per registry key
+grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 29
+grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 54
 grep -c '^| `[a-z0-9-]*` | delete |' docs/e2e-flow-audit.md    # 2
 grep -c '^| `[a-z0-9-]*` | plugin |' docs/e2e-flow-audit.md    # 2
-cd app && pnpm -s e2e list | wc -l                             # 86 keys in the registry
+cd app && pnpm -s e2e list | wc -l                             # 87 keys in the registry
 git show 8a4e842^:app/scripts/e2e/cli.mjs |
   sed -n '/^const FLOWS = {/,/^}$/p' | grep -c '^  [a-z"-]*: {'  # 61, before goal mode left
 ```
@@ -391,6 +397,7 @@ them — they are what the end-to-end registry holds once the other 59 keys leav
 | `foreign-run` | stay | A run started elsewhere shows as running in Code and on the open session screen, is followed to its end, and leaves no duplicate. | A run this browser never started, on a host that owns it: the app only discovers it. |
 | `steer-offer` | stay | A code session returned to mid-run, with two turns queued behind its run: the field offers "Steer the response…" for each of the three runs the page follows and never reads "Queue a message…", sampled from the screen's first paint, with the two queued turns' own ends gating the assertions. | The state it catches is a run the host lists that this page is not following. The component harness has no state where the pre-fix value is observable: an empty chat draws the fallback form, whose field carries no placeholder, and a chat holding a finished turn reads `Message …` on both trees (the liveness gap recorded in `fixes.md`). At the base commit a returned-to session reads `Queue a message…` for the run's whole duration, and that is what this measures. |
 | `compressed-run` | stay | A chat another device started and Hermes compressed before this device loaded it lands its transcript and follows its run to its end — whether the rotation came before the run or mid-run. | A test host rotating the session id mid-run, the mechanism the plugin's run keying broke on. A faked HTTP boundary would answer the shape the code expects rather than the one the host sends. |
+| `chat-next-archive` | stay | A chat another device compacted in place with nothing left at the seam — no hidden row, no summary — opened on a device that holds none of it: the thread draws its live window with the compaction's divider over it and offers the messages the host archived, and asking lands every archived turn once, in the host's order, above the window, the divider coming to rest between the turns the compaction carried and the turn written after it, with the rows and the silence after them surviving a reload. | The app's own reading of the chat: the offer exists only if the screen consults the chat's record of the compaction, which is the one place a host that writes nothing at the seam says anything. `test-chat-next-compaction-matrix.tsx` holds the gate over a host of the same shape, handed the record as a prop — so it passes whether or not anything in the app ever reads the chat's own, which is exactly what failed. | `test-chat-next-compaction-matrix.tsx` holds the gate, the merge and the divider's place; `test-history-window.mjs` the walk's rule. This flow is the only place the app is asked. |
 | `chat-archive` | stay | A chat Hermes compacted in place, opened on a device that never held it: the pane draws the live window alone with nothing older on the device, and when the reader reaches the top the archived turns come back — each once, the cursor cleared at the chat's first row, the thread grown above the pane — with the compaction's divider still below the turns it carried and above the row written after it. | A reach and a prepend: the pane's scroll offset at its top edge deciding when the window grows, and the thread's height changing under a reader who has not been thrown. jsdom has no scroll offset and no height, so `test-archive-thread.tsx` proves the same rows draw right but would pass whether the archive arrived on a scroll, on a button, or not at all. | `test-archive-thread.tsx` holds the draw (each turn once, the divider's place) and `test-history-window.mjs` the walk's rule; this flow is the only place the reach is made. |
 | `chat-next-older` | stay | A chat of thirty turns opened on chat-next with the host holding its older pages back: the newest page is drawn and the pane stands on its end, the loader sits at the top of the pane and not among the thread's rows, then the older pages are put above — one after another, newest first — and the loader goes with the last: a reader at the end keeps the newest reply on the same line of the page, a reader up in the thread keeps the line they are reading, and the pane moved down the thread by what was added. | A prepend under a reader: the line a reply stands on after rows are added above it, and a loader that adds or takes away a row at the top of the flow. jsdom has no layout, so `test-chat-next-older.tsx` proves the pages arrive in order above the same rows under the same ids, but would pass had the thread jumped by a screen. | `test-chat-next-pages.mjs` holds the paging rule (which page is read next, when the chat is whole, how pages join) and `test-chat-next-older.tsx` the draw; this flow is the only place the reader's place is measured. |
 | `away` | stay | A chat on the new screen whose host is blocked: the header's subtitle says "This host isn't answering" where its own line would be, and "You're offline" once the browser is taken off the network, coming back to the host's words; the composer is still drawn and takes typing; nothing about the host is drawn in the thread; a send made while away is answered inside a breath rather than fifteen seconds, its message stays in the thread dimmed and marked Not sent with Retry and Cancel, outlives a reload, leaves the thread as the turn draws it on Retry, and is taken out by Cancel with its words left out of the field. | The browser's own network stack, the chat's real header, and a wall clock a timeout is measured on. `navigator.onLine` and a request that never answers are the browser's, the header is the route's and not the thread's (no plain view draws one), and "answers in a breath" is the difference between four seconds and fifteen — `test-away.mjs` holds the rule and `test-chat-next-unsent.tsx` the row, but each would pass had the send waited a read's fifteen and had the composer gone with the host. | `test-away.mjs` holds the two sentences and the short wait `test-chat-next-unsent.tsx` the row's place, order, controls and files across a reopen, and `test-chat-next-gate.tsx` that a host that isn't there keeps the composer and sends nothing behind the user's back; this flow is the only place the header wears the words and the wait is timed. |

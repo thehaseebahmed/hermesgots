@@ -182,6 +182,8 @@ export function fakeHost(
   const rows: Row[] = []
   const expected: ExpectedTurn[] = []
   const runs = new Map<string, RunState>()
+  /** Runs the plugin's listing still names after the gateway dropped them. */
+  const ghosts = new Set<string>()
   const answers: { run: string; prompt_id: string; generation: number; answer: string }[] = []
   const approvals: { run: string; choice: string }[] = []
   const asked = {
@@ -764,10 +766,12 @@ export function fakeHost(
     if (plugin && path === "/api/plugins/memento/runs/live") {
       dispatch()
       const live = [...runs].filter(([, state]) => !state.done).at(-1)
+      // A run the gateway dropped is still listed: the plugin's own sweep is what forgets it.
+      const named = live?.[0] ?? [...ghosts].at(-1)
       return reply({
         object: "memento.runs",
-        sessions: live ? { [session]: "running" } : {},
-        run_ids: live ? { [session]: live[0] } : {},
+        sessions: named ? { [session]: "running" } : {},
+        run_ids: named ? { [session]: named } : {},
         waiting: {},
         subagents: agents.some((agent) => agent.status === "running")
           ? { [session]: agents.filter((agent) => agent.status === "running").length }
@@ -902,7 +906,7 @@ export function fakeHost(
    * went. A turn still being worked keeps its work but loses its request to the archive, which is
    * what the real host did to a request in flight. Wake turns are not modelled.
    */
-  function compact({ keep = 1 }: { keep?: number } = {}) {
+  function compact({ keep = 1, hidden = true }: { keep?: number; hidden?: boolean } = {}) {
     const live = rows.filter((row) => !row.archived).sort((a, b) => a.order - b.order)
     const starts = live.filter((row) => row.role === "user" && !row.display_kind)
     const last = live.at(-1)
@@ -918,9 +922,11 @@ export function fakeHost(
     doomed.forEach((row) => (row.archived = true))
     const after = live.filter((row) => !row.archived)
     const at = after[0] ? after[0].order - 0.5 : (live.at(-1)?.order ?? 0) + 0.5
-    write("user", "", { display_kind: "hidden", order: at })
+    // A Hermes that leaves nothing at the seam still archived the rows: the divider is the chat's
+    // own record of the compaction, so no row of the transcript says where it ran.
+    if (hidden) write("user", "", { display_kind: "hidden", order: at })
     const base = expected.length - count
-    compactions.push({ row: rows.at(-1)!, turn: base + count, inside: carried })
+    if (hidden) compactions.push({ row: rows.at(-1)!, turn: base + count, inside: carried })
     for (let index = base; index < base + (open ? cut : cut); index++) gone.add(index)
     if (carried) lostRequest.add(base + cut)
   }
@@ -973,6 +979,19 @@ export function fakeHost(
   }
 
   /**
+   * The plugin's `runs/live` names a run the gateway has already dropped: a listing that outlived
+   * the run it points at, so a device that joins it asks for events of an id the host no longer has
+   * and is answered 404. The transcript is the only account of the turn.
+   */
+  function retire() {
+    const ghost = [...runs.keys()].at(-1)
+    if (!ghost) throw new Error("No run to retire.")
+    runs.delete(ghost)
+    ghosts.add(ghost)
+    return ghost
+  }
+
+  /**
    * Holds the transcript page at `offset` back: a read of it waits, as on a slow link, until `release`.
    * The page is asked for (`offsets`) at once, so a test can tell it is in flight.
    */
@@ -1021,5 +1040,6 @@ export function fakeHost(
     dropConnections,
     breakConnections,
     startElsewhere,
+    retire,
   }
 }
