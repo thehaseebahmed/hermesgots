@@ -12,10 +12,13 @@ import { handBackNativeSignIn, handleBackButton } from "@/lib/native"
 import { startLive } from "@/lib/live"
 import { startPush } from "@/lib/push"
 import { startResumeTrace } from "@/lib/resume-trace"
+import { startSentry } from "@/lib/sentry"
 import { startSync } from "@/lib/sync"
 import { watchToastOffset } from "@/lib/toast"
 import { onReturn } from "@/lib/wake"
 import "@/index.css"
+
+void startSentry()
 
 if (!handBackNativeSignIn()) {
   handleBackButton()

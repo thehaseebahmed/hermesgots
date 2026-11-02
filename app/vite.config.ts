@@ -1,5 +1,6 @@
 import { execSync } from "node:child_process"
 import path from "node:path"
+import { sentryVitePlugin } from "@sentry/vite-plugin"
 import { reticle } from "@reticlehq/vite-plugin"
 import tailwindcss from "@tailwindcss/vite"
 import react from "@vitejs/plugin-react"
@@ -20,12 +21,29 @@ function commit() {
   }
 }
 
+const version = `${pkg.version} · ${commit()}`
+
+// Source maps are built and uploaded only where a token can pay for them, and the files are dropped
+// after the upload so the deploy serves no readable source. A build without the token is unchanged.
+const uploads = Boolean(process.env.SENTRY_AUTH_TOKEN)
+
 export default defineConfig(({ mode }) => ({
   define: {
-    __APP_VERSION__: JSON.stringify(`${pkg.version} · ${commit()}`),
+    __APP_VERSION__: JSON.stringify(version),
     __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
   },
+  build: { sourcemap: uploads },
   plugins: [
+    uploads &&
+      sentryVitePlugin({
+        org: "tha-org",
+        project: "gots-app",
+        authToken: process.env.SENTRY_AUTH_TOKEN,
+        // The same string the app reports as its release, so a stack lands on the build it came from.
+        release: { name: version },
+        sourcemaps: { filesToDeleteAfterUpload: ["./dist/**/*.map"] },
+        telemetry: false,
+      }),
     // Dev-only: the Reticle verification SDK's build plugin (see the Dockerfile). It stamps source
     // locations and injects the connect call while the dev server runs, and is inert in a build.
     reticle(),
