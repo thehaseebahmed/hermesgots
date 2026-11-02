@@ -1,7 +1,8 @@
 /**
  * What the composer does with a message sent while a reply runs, by what it carries: one of files
  * goes to the reply as a steer, and one carrying a photo waits in the queue — which the field's own
- * placeholder says. And how a steer of files reads back in the thread it joined.
+ * placeholder says. And how a steer reads back in the thread it joined: what it says, and where it
+ * stands when the run read it between two calls.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -9,7 +10,7 @@ import { act } from "react"
 
 import { Composer } from "@/components/chat/composer"
 import { attachmentsText } from "@/lib/attachment-text"
-import type { Attachment, Message } from "@/lib/db"
+import { db, type Attachment, type Message, type ToolEvent } from "@/lib/db"
 
 import {
   botProfile,
@@ -17,10 +18,12 @@ import {
   connection,
   findAll,
   find,
+  findText,
   json,
   mount,
   seedChat,
   sendPress,
+  serveTranscript,
   settle,
   text,
   type,
@@ -28,6 +31,18 @@ import {
 } from "./component-kit.tsx"
 
 const bot = connection("composer-steer")
+
+const call = (label: string, startedAt: number, extra: Partial<ToolEvent> = {}): ToolEvent => ({
+  toolCallId: `t-${label}`,
+  tool: "terminal",
+  label,
+  status: "completed",
+  startedAt,
+  endedAt: startedAt + 100,
+  ...extra,
+})
+
+const calling = (id: string) => ({ id, function: { name: "terminal", arguments: "{}" } })
 
 // jsdom can't decode an image, so a photo has to be one the browser made a bitmap of; scaling
 // answers with the file itself for a small photo, so no canvas is needed either.
@@ -163,4 +178,109 @@ test("a steer of a file reads in the thread as what the user wrote", async () =>
     assert.match(text(), /read this/, "the reply shows what the user wrote")
     assert.doesNotMatch(text(), /<attachment/, "not the markers it reached the model as")
   })
+})
+
+test("a steer the run read between two calls splits the row of calls there", async () => {
+  globalThis.fetch = (async () => json({})) as typeof fetch
+  // Both calls stand at the reply's one text offset, the steer's too, and at the turn's own time:
+  // only the count says where it stood among them.
+  const at = "working on it".length
+  const tools: ToolEvent[] = [
+    call("ls", 1000, { contentOffset: at }),
+    call("pwd", 5000, { contentOffset: at }),
+  ]
+  const messages: Message[] = [
+    {
+      id: "u1",
+      conversationId: "c1",
+      role: "user",
+      content: "start",
+      status: "done",
+      createdAt: 1,
+    },
+    {
+      id: "a1",
+      conversationId: "c1",
+      role: "assistant",
+      content: "working on it",
+      status: "done",
+      createdAt: 2,
+      tools,
+      steers: [{ id: "s1", text: "read this", contentOffset: at, toolsBefore: 1, at: 2 }],
+    },
+  ]
+  await seedChat({ id: "c1", messages, profile: botProfile("steer-splits-calls") })
+  await mount(chatScreen("c1"), async () => {
+    await until(
+      () => findAll('[data-slot="tool-group"]').length === 2,
+      "a row of calls either side of the steer",
+    )
+    const [above, below] = findAll('[data-slot="tool-group"]')
+    const steer = findText('[data-slot="message-content"]', "read this")
+    assert.ok(steer, "the steer is drawn")
+    assert.ok(
+      above.compareDocumentPosition(steer) & Node.DOCUMENT_POSITION_FOLLOWING,
+      "the call it landed after stands above it",
+    )
+    assert.ok(
+      below.compareDocumentPosition(steer) & Node.DOCUMENT_POSITION_PRECEDING,
+      "and the call the run made after it stands below",
+    )
+  })
+})
+
+test("a steer this device kept without the run's calls takes the fold's count", async () => {
+  // A stream that missed the run's events kept the words, the steer, and no calls: its count is
+  // zero whatever the run did, so the transcript's own is the one that places it.
+  await seedChat({
+    id: "c-merge",
+    profile: botProfile("steer-merge"),
+    messages: [
+      {
+        id: "u1",
+        conversationId: "c-merge",
+        role: "user",
+        content: "go",
+        status: "done",
+        createdAt: 1,
+      },
+      {
+        id: "a1",
+        conversationId: "c-merge",
+        role: "assistant",
+        content: "working on it",
+        status: "done",
+        createdAt: 2,
+        steers: [
+          {
+            id: "s1",
+            text: "also this",
+            contentOffset: 7,
+            toolsBefore: 0,
+            at: 2,
+          },
+        ],
+      },
+    ],
+  })
+  serveTranscript([
+    { id: 1, role: "user", content: "go", timestamp: 1 },
+    { id: 2, role: "assistant", content: "working on it", timestamp: 2, tool_calls: [calling("a")] },
+    { id: 3, role: "tool", content: "ok", tool_call_id: "a", timestamp: 3 },
+    { id: 4, role: "user", content: "also this", timestamp: 4, display_kind: "steer" },
+    { id: 5, role: "assistant", content: null, timestamp: 5, tool_calls: [calling("b")] },
+    { id: 6, role: "tool", content: "/app", tool_call_id: "b", timestamp: 6 },
+    { id: 7, role: "assistant", content: "Done.", timestamp: 7, finish_reason: "stop" },
+  ])
+  await db.conversations.update("c-merge", { updatedAt: 99 })
+  await mount(chatScreen("c-merge"), async () => {
+    await until(async () => (await db.messages.get("a1"))?.tools?.length === 2, "the calls land")
+  })
+  await settle()
+  const kept = await db.messages.get("a1")
+  assert.deepEqual(
+    (kept?.steers ?? []).map(({ text, contentOffset, toolsBefore }) => [text, contentOffset, toolsBefore]),
+    [["also this", 7, 1]],
+    "the count the fold kept, and the offset this device drew its own words at",
+  )
 })

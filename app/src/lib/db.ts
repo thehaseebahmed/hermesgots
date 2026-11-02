@@ -432,6 +432,8 @@ export interface Steer {
   text: string
   /** Where in the reply's text it was sent, so it sits there in the thread. */
   contentOffset: number
+  /** Calls drawn above it, as a compaction's seam counts them; absent before the app kept one. */
+  toolsBefore?: number
   at: number
 }
 

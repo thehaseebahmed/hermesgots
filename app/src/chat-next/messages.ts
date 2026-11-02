@@ -130,6 +130,7 @@ function rowsOf(
         id: `${id}-s${steers.length}`,
         text: part.text,
         contentOffset: content.length,
+        toolsBefore: tools.length,
         at: createdAt,
       })
     else if (part.kind === "reminder")

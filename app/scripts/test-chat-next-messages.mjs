@@ -131,6 +131,31 @@ test("a steer sits where it was sent, and a wake turn draws no request", () => {
   )
 })
 
+test("a steer the run read between two calls keeps its place among them", () => {
+  const rows = [
+    row(1, "user", "go"),
+    row(2, "assistant", "Working.", { tool_calls: [call("a", "terminal", { command: "ls" })] }),
+    row(3, "tool", "ok", { tool_call_id: "a" }),
+    row(4, "user", "also this", { display_kind: "steer" }),
+    row(5, "assistant", "", { tool_calls: [call("b", "terminal", { command: "pwd" })] }),
+    row(6, "tool", "/app", { tool_call_id: "b" }),
+    row(7, "assistant", "Done.", { finish_reason: "stop" }),
+  ]
+  const [, reply] = messagesOf("chat", foldTurns(rows))
+  // Both calls share the offset the steer landed at, so only the count can place it among them.
+  assert.deepEqual(
+    reply.steers.map(({ text, contentOffset, toolsBefore }) => [text, contentOffset, toolsBefore]),
+    [["also this", "Working.".length, 1]],
+  )
+  assert.deepEqual(
+    reply.tools.map((tool) => [tool.label, tool.contentOffset]),
+    [
+      ["ls", "Working.".length],
+      ["pwd", "Working.".length],
+    ],
+  )
+})
+
 test("a compaction inside a reply is a seam naming the summary's row", () => {
   const rows = [
     row(1, "user", "go"),

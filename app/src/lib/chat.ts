@@ -1805,7 +1805,13 @@ export async function steerQueued(message: Message) {
   // keeps for `requeueSteer` to read back as the files they name.
   draft.steers = [
     ...(draft.steers ?? []),
-    { id: message.id, text: said, contentOffset: draft.content.length, at: Date.now() },
+    {
+      id: message.id,
+      text: said,
+      contentOffset: draft.content.length,
+      toolsBefore: draft.tools.length,
+      at: Date.now(),
+    },
   ]
   touch()
 }

@@ -1,5 +1,10 @@
 # A tool row never lands between two thought rows
 
+**Superseded in its rejected option to split a tool group where something fell between its calls by
+[ADR 0079](0079-a-steer-splits-the-tool-group-where-it-landed.md)**: the rejection stands for a
+stretch of thinking, which draws above the group; a steer is the reader's own message, and it splits
+the group where it landed.
+
 A stretch of thinking draws ABOVE the tool row whose call it follows — above the whole group when
 consecutive calls merged into one — instead of below it. A reply whose two calls touch therefore
 reads *Thought, Tools*, not *Thought, Tools, Thought*: while the second call of a group ran, the

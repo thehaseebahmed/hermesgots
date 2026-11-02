@@ -626,7 +626,8 @@ export const MessageItem = memo(function MessageItem({
   const runningTool = tools.some((t) => t.status === "running")
 
   // An answered approval and each steer split the reply so they sit where they happened: what
-  // Hermes said and ran before, the card or the user's message, then what came after.
+  // Hermes said and ran before, the card or the user's message, then what came after. A steer that
+  // landed between two calls splits that run of calls there, by the count the fold kept.
   const breaks: {
     key: string
     offset: number
@@ -646,6 +647,7 @@ export const MessageItem = memo(function MessageItem({
       key: steer.id,
       offset: steer.contentOffset,
       time: steer.at,
+      toolsBefore: steer.toolsBefore,
       node: <SteerBubble text={steer.text} />,
     })
   for (const seam of message.seams ?? [])

@@ -329,6 +329,7 @@ function foldRows(
           id,
           text: steerWords(row.content ?? ""),
           contentOffset: reply.content.length,
+          toolsBefore: reply.tools?.length ?? 0,
           at: createdAt,
         },
       ]
@@ -581,6 +582,21 @@ function mergeSeams(local: Message, reply: Message | undefined) {
   if (!found?.length) return undefined
   const held = (local.seams ?? []).map((seam) => seam.id).join()
   return found.map((seam) => seam.id).join() === held ? undefined : found
+}
+
+/**
+ * The fold's steer counts, in place of a reply this device drew without its calls: every steer it
+ * kept counted none of them.
+ */
+function withFoldedSteers(local: Message, reply: Message | undefined): Partial<Message> | undefined {
+  const found = reply?.steers
+  const held = local.steers ?? []
+  // A fold holding fewer steers than this device is behind it, and leaves them as they are.
+  if (!found?.length || held.length > found.length) return undefined
+  if (held.length !== found.length) return { steers: found }
+  // The lists pair in order, as a fold's calls do: the device keeps the offsets its own words were
+  // drawn at, and takes the count the transcript counted them against.
+  return { steers: held.map((steer, at) => ({ ...steer, toolsBefore: found[at].toolsBefore })) }
 }
 
 /** The fold's reminder rows, their absence included: a reply nothing re-folds still reads today. */
@@ -1045,7 +1061,7 @@ async function reconcile(conversationId: string) {
             ...restored,
             tools: withTranscriptToolOffsets(restored, reply),
             ...mergedRuns(reply, local),
-            steers: local.steers ?? reply.steers,
+            ...withFoldedSteers(restored, reply),
             ...(seams ? { seams } : {}),
             ...withReminders(restored, reply),
           })
