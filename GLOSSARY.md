@@ -619,6 +619,14 @@ _Avoid_: notification type, group, topic, preference
 A category as a phone holds it — one record per category in Android's notification settings, which is where a phone switches that category.
 _Avoid_: topic, group, notification class
 
+**Routine message**:
+A message a routine posts into a chat as the bot: written into that chat's own history, so the thread draws it, the bot remembers saying it and the user can reply to it. It names the routine that wrote it, and opens with an aside opener when it arrives while the chat is in a turn or just after one.
+_Avoid_: notification, card, notice, automation message
+
+**Routine run**:
+The execution a routine message came from, opened from that message as a transcript with no composer: a run's session refuses turns and allows reading.
+_Avoid_: job run, execution, log, cron session
+
 **Notification settings**:
 The screen that decides what a device is told about: the app's own list of categories on the web, and the phone's own list of channels in the Android app.
 _Avoid_: notification types, notification preferences, alert settings
