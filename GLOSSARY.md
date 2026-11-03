@@ -488,7 +488,7 @@ One **Piece**'s audio arriving on a bot's host, stamped with the **Take id** and
 _Avoid_: clip, chunk, push, POST
 
 **Confirm**:
-The one call that ends a **Take**: it names how many **Pieces** the take has, and the host answers with the words that landed, the words as **Heard**, how long the take took to say, and how it was tidied. It is the only call that carries a take's words and the only one that runs **Cleanup**; a host holding fewer Pieces than it names refuses it, saying which are missing.
+The one call that ends a **Take**: it names how many **Pieces** the take has, and the host answers with the words that landed, the words as **Transcribed**, how long the take took to say, and how it was tidied. It is the only call that carries a take's words and the only one that runs **Cleanup**; a host holding fewer Pieces than it names refuses it, saying which are missing.
 _Avoid_: finish, finalize, commit, stop call
 
 **Take wait**:
@@ -504,15 +504,15 @@ What a device waits after the last word of a take: the recorder closing, the las
 _Avoid_: stop latency, felt latency, perceived speed, delay
 
 **Dictation**:
-One finished take as the log keeps it: the bot that heard it, when, how many words and how long they took to say, two texts — **Heard**, the words the host's speech model wrote down, and **Cleaned up**, the words as they landed in the composer after Cleanup — and what tidied them: the **Cleanup level**, whether the Cleanup changed anything, and the **Speech provider** and model behind it. It is kept on that bot's host and mirrored on the device, which is what the Dictation screen's History lists by month and its Stats count.
+One finished take as the log keeps it: the bot that heard it, when, how many words and how long they took to say, two texts — **Transcribed**, the words the host's speech model wrote down, and **Cleaned up**, the words as they landed in the composer after Cleanup — and what tidied them: the **Cleanup level**, whether the Cleanup changed anything, and the **Speech provider** and model behind it. It is kept on that bot's host and mirrored on the device, which is what the AI Dictation screen's History lists by month and its Stats count.
 _Avoid_: recording, transcript, entry, voice note
 
-**Heard**:
+**Transcribed**:
 The words a take's speech provider wrote down, before Cleanup: one text, its **Pieces** joined by the host in the order they were cut. A dictation keeps it beside the words that landed, and the two are the same text when the cleanup found nothing to change or never answered.
-_Avoid_: raw, raw transcript, uncorrected text, whisper output
+_Avoid_: heard, raw, raw transcript, uncorrected text, whisper output
 
 **Cleaned up**:
-The words a take landed in the composer once Cleanup had its say: the dictation's own text, the one its words are counted on and Copy copies. It is the same text as **Heard** where the cleanup found nothing to change or never answered, and the sheet then draws one block rather than two.
+The words a take landed in the composer once Cleanup had its say: the dictation's own text, the one its words are counted on and Copy copies. It is the same text as **Transcribed** where the cleanup found nothing to change or never answered, and the sheet then draws one block rather than two.
 _Avoid_: tidied, cleaned, corrected text, polished
 
 **Piece**:
@@ -520,11 +520,11 @@ The unit a take uploads: one stretch of its recording, cut at a pause or at its 
 _Avoid_: chunk, slice, segment, part
 
 **Cleanup**:
-The pass that tidies a take's finished words, once over the whole text inside the **Confirm**, on the bot's cleanup model, at the bot's **Cleanup level**. What it may change is its level's; what no level may change is what the take says. It is bounded, and one that misses its budget, fails or answers something no level would produce leaves the words as the host heard them.
+The pass that tidies a take's finished words, once over the whole text inside the **Confirm**, on the bot's cleanup model, at the bot's **Cleanup level**. What it may change is its level's; what no level may change is what the take says. It is bounded, and one that misses its budget, fails or answers something no level would produce leaves the words as the host heard them. It runs only for a take its host heard: a take that left the host is transcribed once, and lands as **Transcribed**.
 _Avoid_: polish, post-processing, formatting, correction
 
 **Cleanup level**:
-How much Cleanup may change in one bot's takes: **None**, **Light**, **Medium** or **High**. **None** makes no call at all — the heard words are what lands. **Light** takes out fillers, false starts and slips, and repairs grammar, punctuation, casing and numbers. **Medium** does Light's work and tightens: wordiness, redundancy and run-ons, without dropping information. **High** does Medium's work and compresses — it may restructure a sentence, drop hedges and low-value words, and reorder within it. No level adds content, answers a question the take asked, or changes a name, a number or what the person asked for. The level is the bot's, kept on its host and read for every take, and a bot that has never picked runs **Light**.
+How much Cleanup may change in one bot's takes: **None**, **Light**, **Medium** or **High**. **None** makes no call at all — the heard words are what lands. **Light** takes out fillers, false starts and slips, and repairs grammar, punctuation, casing and numbers. **Medium** does Light's work and tightens: wordiness, redundancy and run-ons, without dropping information. **High** does Medium's work and compresses — it may restructure a sentence, drop hedges and low-value words, and reorder within it. No level adds content, answers a question the take asked, or changes a name, a number or what the person asked for. The level is the bot's, kept on its host and read for every take its host hears, and a bot that has never picked runs **Light**. A bot whose takes leave the host keeps its level, unread, for a return to Local.
 _Avoid_: cleanup tier, style, strength, aggressiveness, mode, preset
 
 **Vocabulary**:
@@ -547,9 +547,9 @@ _Avoid_: benchmark, speed score, realtime estimate, perf number, probe result
 The one backend a bot's Hermes sends audio to. Until it is picked it is **Automatic**, and the host decides — its own model first, then whichever cloud provider it holds a key for.
 _Avoid_: STT backend, engine, speech service, voice provider
 
-**Heard on the host**:
-The path a bot's speech-to-text actually runs: the host's own model where its Hermes resolves `local` or `local_command`, and otherwise the cloud **Speech provider** its host picked — the same one its voice notes use. The app reads which from the host (`info.dictation.provider`), and the Dictation tab names the provider whenever a take leaves the host.
-_Avoid_: local mode, offline mode, on-device
+**Transcribed on the host**:
+The path a bot's speech-to-text actually runs: the host's own model where its Hermes resolves `local` or `local_command`, and otherwise the cloud **Speech provider** its host picked — the same one its voice notes use. The app reads which from the host (`info.dictation.provider`), and the Speech-to-text page says so where a take would leave the host.
+_Avoid_: heard on the host, local mode, offline mode, on-device
 
 ## Settings
 
