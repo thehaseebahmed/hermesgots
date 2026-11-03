@@ -3227,6 +3227,10 @@ async function streamCompletion(req, res, body) {
 // MOCK_WITHHOLD_PROMPT=1 sends a prompt's request (`clarify.request`, `approval.request`) only to the
 // listeners there when it was made: a subscriber that arrives afterwards gets none of it on the
 // replay, so the run's status is the one place its wait can be read — what a phone comes back to.
+// MOCK_LIVE_CLARIFY=1 asks a question the way Hermes 0.22.5 does from its own route: one prompt per
+// question, a `prompt_id` and never the plugin's `clarify_id` or `questions`, so a screen that only
+// knows the plugin's batch shape sees nothing and one that reads prompts draws a single question.
+const LIVE_CLARIFY = process.env.MOCK_LIVE_CLARIFY === "1"
 const runs = new Map()
 // Sessions a finished subagent still owes a wake turn to — `waking` on runs/live, what the plugin
 // reports between a turn ending and its wake turn starting, so no screen reads the session at rest
@@ -3855,18 +3859,17 @@ function startRun(req, body, options = {}) {
       for (const [at, question] of questions.entries()) {
         // One object for both readers: the run's status and the stream say the same thing, as an
         // approval's do.
-        run.clarify = {
+        const prompt = {
           event: "clarify.request",
           run_id: id,
           timestamp: Date.now() / 1000,
-          clarify_id,
-          questions,
           prompt_id: `${clarify_id}-${at}`,
           execution_generation: 0,
           question: question.question,
           choices: question.choices ?? [],
           multi_select: Boolean(question.multi_select),
         }
+        run.clarify = LIVE_CLARIFY ? prompt : { ...prompt, clarify_id, questions }
         if (!MUTE_PROMPT || at === 0) push("clarify.request", run.clarify)
         const settled = await Promise.race([
           new Promise((resolve) => pendingPrompts.set(run.clarify.prompt_id, resolve)),

@@ -7,6 +7,7 @@ import test from "node:test"
 
 import type { RunEvent } from "@/chat-next/api"
 import { initial, reduce, threadTurns, type ThreadState, type Waiting } from "@/chat-next/state"
+import { questionAt } from "@/lib/clarify"
 import type { Row } from "@/chat-next/fold"
 import { events as recordedEvents, fixture as recorded } from "./chat-next-fixtures.ts"
 import { NOTE, stored } from "./progress-reminder-fixture.ts"
@@ -859,4 +860,147 @@ test("a steer is drawn from the transcript alone when this page draws no reply",
     ["please slow down"],
     "the transcript's own row is the one that draws it",
   )
+})
+
+/** The arguments a real run wrote for a call that asked three questions, asked one at a time. */
+const ASK_CALL: Row = {
+  id: 3,
+  role: "assistant",
+  content: "",
+  finish_reason: "tool_calls",
+  tool_calls: [
+    {
+      id: "c3",
+      function: {
+        name: "clarify",
+        arguments: JSON.stringify({
+          questions: [
+            { question: "Which environment?", choices: ["staging", "production"] },
+            { question: "Which services?", choices: ["api", "worker"], multi_select: true },
+            { question: "Who reviews it?" },
+          ],
+        }),
+      },
+    },
+  ],
+}
+
+/** A page joined to a run whose call asked three questions, with one prompt heard. */
+const ASKING: ThreadState = reduce(
+  reduce(reduce(initial, { type: "attach", run: "r" }), {
+    type: "waiting",
+    waiting: { ...PROMPT, promptId: "c3-0", question: "Which environment?" },
+  }),
+  { type: "transcript", rows: [{ id: 1, role: "user", content: "go" }, ASK_CALL], final: false },
+)
+
+test("a question draws the questions of the call that asked it, on the page the host is on", () => {
+  assert.deepEqual(
+    ASKING.questionSet?.map((one) => one.question),
+    ["Which environment?", "Which services?", "Who reviews it?"],
+    "every question the agent put in one call",
+  )
+  assert.equal(questionAt(ASKING.questionSet ?? [], "Which environment?"), 0, "and the page asked")
+  const moved = reduce(ASKING, {
+    type: "run",
+    event: {
+      event: "clarify.request",
+      run_id: "r",
+      prompt_id: "c3-1",
+      execution_generation: 1,
+      question: "Which services?",
+      choices: ["api", "worker"],
+      multi_select: true,
+    },
+  })
+  assert.equal(questionAt(moved.questionSet ?? [], "Which services?"), 1, "the card turns with it")
+  assert.equal(moved.questionSet?.length, 3, "with the call's other questions still on it")
+})
+
+test("a question already answered is not raised again by a replayed stream", () => {
+  const answered = reduce(ASKING, { type: "answered" })
+  assert.equal(answered.waiting, undefined, "the answer takes the card away")
+  const replayed = reduce(answered, {
+    type: "run",
+    event: {
+      event: "clarify.request",
+      run_id: "r",
+      prompt_id: "c3-0",
+      execution_generation: 1,
+      question: "Which environment?",
+      choices: ["staging", "production"],
+      multi_select: false,
+    },
+  })
+  assert.equal(replayed.waiting, undefined, "a stream replayed from further back does not undo it")
+})
+
+test("a rejoin replays the questions already answered, and the card stays on the one asked", () => {
+  const ask = (promptId: string, question: string) => ({
+    type: "run" as const,
+    event: {
+      event: "clarify.request",
+      run_id: "r",
+      prompt_id: promptId,
+      execution_generation: 1,
+      question,
+      choices: [],
+      multi_select: false,
+    },
+  })
+  const answered = (question: string) => ({
+    type: "answered" as const,
+    answer: { question, choicesOffered: null, value: "" },
+  })
+
+  let state = reduce(ASKING, answered("Which environment?"))
+  // The host's own settle arrives after the answer, with no question waiting on it.
+  state = reduce(state, {
+    type: "run",
+    event: { event: "clarify.settled", run_id: "r", prompt_id: "c3-0", execution_generation: 1 },
+  })
+  assert.equal(state.questionSet?.length, 3, "and the call's questions outlive the settle")
+  state = reduce(state, ask("c3-1", "Which services?"))
+  state = reduce(state, answered("Which services?"))
+  state = reduce(state, ask("c3-2", "Who reviews it?"))
+  assert.equal(questionAt(state.questionSet ?? [], "Who reviews it?"), 2, "the host is on the third")
+
+  // The stream is joined again: every request this call made is replayed, from its first.
+  const replayed = reduce(
+    reduce(state, ask("c3-0", "Which environment?")),
+    ask("c3-1", "Which services?"),
+  )
+  assert.equal(replayed.waiting?.promptId, "c3-2", "and the card is still on the question asked")
+  assert.equal(
+    questionAt(replayed.questionSet ?? [], replayed.waiting?.question ?? ""),
+    2,
+    "not walked back through the call's questions",
+  )
+})
+
+test("a page answered with no question waiting is not raised again by a replay", () => {
+  const ask = (promptId: string, question: string) => ({
+    type: "run" as const,
+    event: {
+      event: "clarify.request",
+      run_id: "r",
+      prompt_id: promptId,
+      execution_generation: 1,
+      question,
+      choices: [],
+      multi_select: false,
+    },
+  })
+  // The answer closes the card, so nothing is waiting when the stream is joined again and replays
+  // the request this page already answered.
+  const answered = reduce(ASKING, {
+    type: "answered",
+    answer: { question: "Which environment?", choicesOffered: null, value: "staging" },
+  })
+  assert.equal(answered.waiting, undefined, "the card is gone")
+  const replayed = reduce(answered, ask("c3-0", "Which environment?"))
+  assert.equal(replayed.waiting, undefined, "and the replayed request does not bring it back")
+  assert.equal(replayed.questionSet?.length, 3, "the call's questions are still known")
+  // The run's own next question is still raised.
+  assert.equal(reduce(replayed, ask("c3-1", "Which services?")).waiting?.promptId, "c3-1")
 })

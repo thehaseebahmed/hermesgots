@@ -26,18 +26,20 @@ export interface ThreadStore {
   apply: (event: ThreadEvent, keep?: () => boolean) => Promise<void>
 }
 
-export type Doing = Pick<ThreadState, "status" | "running" | "waiting" | "error">
+export type Doing = Pick<ThreadState, "status" | "running" | "waiting" | "questionSet" | "error">
 
 const sameDoing = (a: Doing, b: ThreadState) =>
   a.status === b.status &&
   a.running === b.running &&
   a.waiting === b.waiting &&
+  a.questionSet === b.questionSet &&
   a.error === b.error
 
-const doingOf = ({ status, running, waiting, error }: ThreadState): Doing => ({
+const doingOf = ({ status, running, waiting, questionSet, error }: ThreadState): Doing => ({
   status,
   running,
   waiting,
+  questionSet,
   error,
 })
 

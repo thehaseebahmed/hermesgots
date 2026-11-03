@@ -28,6 +28,9 @@ interface Picked {
   usingOther: boolean
 }
 
+/** Nothing picked yet: a question the card has not been answered on reads as this. */
+const NOTHING_PICKED: Picked = Object.freeze({ choices: [], other: "", usingOther: false })
+
 function answerOf(question: ClarifyQuestion, picked: Picked): string | string[] | null {
   const typed = picked.other.trim()
   if (!question.choices) return typed || null
@@ -181,19 +184,28 @@ const HALF_SCREEN = "max-h-[50dvh]"
  * in the thread (`ClarifyCard`). One question is a plain form. Two or more are pages of one card
  * (swipe, or the arrows beside its count), and any question may be skipped — so a question longer
  * than the screen never takes the card's own buttons off it.
+ *
+ * `askedId` is what a host that asks one prompt at a time needs (Hermes's own route): the question
+ * the host waits on, of every question the agent put in one call. The card opens on it, follows it
+ * as the host moves on, and answers only it — the rest are the call's other questions, read ahead.
  */
 export function QuestionCard({
   message,
+  askedId,
   onAnswer = (answers) => answerClarify(message, answers),
 }: {
   message: Message
+  /** The question the host waits on; absent where the call's questions are answered at once. */
+  askedId?: string
   /** Where the answers go; the chat's own engine unless the screen drawing the card answers itself. */
   onAnswer?: (answers: ClarifyAnswers) => Promise<void>
 }) {
   const { questions } = message.clarify!
   const paged = questions.length > 1
+  const askedPage = askedId ? questions.findIndex((one) => one.id === askedId) : -1
+  const oneAtATime = askedPage >= 0
   const [pending, setPending] = useState(false)
-  const [page, setPage] = useState(0)
+  const [page, setPage] = useState(oneAtATime ? askedPage : 0)
   const card = useRef<HTMLDivElement>(null)
   const head = useRef<HTMLDivElement>(null)
   const foot = useRef<HTMLDivElement>(null)
@@ -201,13 +213,12 @@ export function QuestionCard({
   const pages = useRef<(HTMLDivElement | null)[]>([])
   // The row is as tall as the page showing, so a short question leaves no gap above the buttons.
   const [height, setHeight] = useState<number>()
-  const [picked, setPicked] = useState<Record<string, Picked>>(() =>
-    Object.fromEntries(questions.map((q) => [q.id, { choices: [], other: "", usingOther: false }])),
-  )
+  // A question read in after the prompt named another has nothing picked yet: an empty form.
+  const [picked, setPicked] = useState<Record<string, Picked>>({})
+  const pickOf = (id: string): Picked => picked[id] ?? NOTHING_PICKED
   const answers: ClarifyAnswers = Object.fromEntries(
-    questions.map((q) => [q.id, answerOf(q, picked[q.id])]),
+    questions.map((q) => [q.id, answerOf(q, pickOf(q.id))]),
   )
-  const anything = Object.values(answers).some(Boolean)
   const last = page === questions.length - 1
 
   // The row scrolls (a swipe, or the buttons below), so the page is read back from where it rests.
@@ -260,15 +271,26 @@ export function QuestionCard({
   }, [page, paged])
 
   const goTo = (index: number) => {
-    const el = row.current
-    if (el) el.scrollTo({ left: index * el.clientWidth, behavior: motion() })
+    row.current?.scrollTo({ left: index * row.current.clientWidth, behavior: motion() })
   }
+
+  // Turns with the host, without taking the arrows away between its turns.
+  const [turnedTo, setTurnedTo] = useState(askedPage)
+  if (oneAtATime && turnedTo !== askedPage) {
+    setTurnedTo(askedPage)
+    setPage(askedPage)
+  }
+  useEffect(() => {
+    if (oneAtATime) goTo(askedPage)
+  }, [oneAtATime, askedPage])
 
   // Leaves this question unanswered (a skipped question is null to Hermes) and moves on.
   const current = questions[page]
+  const answerable = oneAtATime ? questions[askedPage] : current
   const skip = () => {
-    setPicked((all) => ({ ...all, [current.id]: { choices: [], other: "", usingOther: false } }))
-    if (last) void send({ ...answers, [current.id]: null })
+    setPicked((all) => ({ ...all, [answerable.id]: NOTHING_PICKED }))
+    if (oneAtATime) void send({ [answerable.id]: null })
+    else if (last) void send({ ...answers, [current.id]: null })
     else goTo(page + 1)
   }
 
@@ -347,8 +369,8 @@ export function QuestionCard({
               >
                 <Question
                   question={question}
-                  picked={picked[question.id]}
-                  disabled={pending}
+                  picked={pickOf(question.id)}
+                  disabled={pending || (oneAtATime && i !== askedPage)}
                   onChange={onChange(question.id)}
                 />
               </div>
@@ -359,7 +381,7 @@ export function QuestionCard({
         <CardContent className="min-h-0 overflow-y-auto overscroll-contain">
           <Question
             question={questions[0]}
-            picked={picked[questions[0].id]}
+            picked={pickOf(questions[0].id)}
             disabled={pending}
             onChange={onChange(questions[0].id)}
           />
@@ -376,7 +398,7 @@ export function QuestionCard({
         >
           Skip
         </Button>
-        {paged && !last ? (
+        {paged && !last && !oneAtATime ? (
           <Button
             type="button"
             size="lg"
@@ -390,8 +412,10 @@ export function QuestionCard({
           <Button
             size="lg"
             className="h-11 flex-1 sm:min-w-40 sm:flex-none"
-            disabled={pending || (paged ? !answers[current.id] : !anything)}
-            onClick={() => void send()}
+            disabled={pending || !answers[answerable.id] || (oneAtATime && page !== askedPage)}
+            onClick={() =>
+              void send(oneAtATime ? { [answerable.id]: answers[answerable.id] } : answers)
+            }
           >
             Send
           </Button>

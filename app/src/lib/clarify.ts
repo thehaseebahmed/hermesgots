@@ -4,6 +4,8 @@
  * view every screen draws can never disagree about the shape.
  */
 
+import type { ClarifyQuestion } from "@/lib/db"
+
 /** One question and the answer it was given, as the app writes them. */
 export interface ClarifyResponse {
   question: string
@@ -23,6 +25,37 @@ export interface ClarifyAsked {
 export interface ClarifyRead {
   asked: ClarifyAsked[]
   outcome?: string
+}
+
+/**
+ * The questions a list of them carries, in the agent's order: the one reading of
+ * `{ id?, question?, choices?, multi_select? }[]`, shared by a `clarify.request` event, a run
+ * prompt's own list and the arguments of the call that asked. An entry with no words is no
+ * question, and a question's choices are what make it a multi-select one.
+ */
+export function questionsIn(list: unknown): ClarifyQuestion[] {
+  if (!Array.isArray(list)) return []
+  return list.flatMap((entry, index) => {
+    const raw = (entry ?? {}) as Record<string, unknown>
+    if (typeof raw.question !== "string" || !raw.question.trim()) return []
+    const choices = Array.isArray(raw.choices)
+      ? raw.choices.filter((one): one is string => typeof one === "string" && Boolean(one.trim()))
+      : []
+    return [
+      {
+        id: typeof raw.id === "string" && raw.id ? raw.id : `q${index}`,
+        question: raw.question.trim(),
+        ...(choices.length ? { choices, multiSelect: raw.multi_select === true } : {}),
+      },
+    ]
+  })
+}
+
+/** The page a question is on, by its words: the one rule every reader of a question set matches by. */
+export function questionAt(questions: ClarifyQuestion[], asked: string): number {
+  const text = asked.trim()
+  if (!text) return -1
+  return questions.findIndex((one) => one.question === text)
 }
 
 const listOf = (value: unknown) =>

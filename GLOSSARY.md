@@ -73,7 +73,7 @@ When a device last had a session's thread rendered on it. It stays on that devic
 _Avoid_: last seen, read receipt, unread count
 
 **Question**:
-A bot's ask its user must answer before its turn can go on, drawn in place of the composer, and never kept back by work the bot has running.
+A bot's ask its user must answer before its turn can go on, drawn in place of the composer, and never kept back by work the bot has running. One call may put several, and they are one card: a page per question with arrows between them, the page showing the one the host waits on, because a host asks them one at a time and moves on only as each is answered.
 _Avoid_: clarify, prompt, ask
 
 **Approval**:

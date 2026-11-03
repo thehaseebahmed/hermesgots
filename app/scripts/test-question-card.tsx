@@ -172,3 +172,62 @@ test("an open-ended question is its own answer, with no choices to pick", async 
     },
   )
 })
+
+test("a host that asks one question at a time draws the whole ask, and only the page it asks answers", async () => {
+  answered()
+  await mount(
+    <QuestionCard
+      message={message([
+        { id: "q0", question: "Which environment?", choices: ["staging", "production"] },
+        { id: "q1", question: "What should the change be called?" },
+        { id: "q2", question: "Who reviews it?", choices: ["Platform", "Product"] },
+      ])}
+      askedId="q1"
+      onAnswer={async (given) => {
+        answers.push(given)
+      }}
+    />,
+    async () => {
+      pagesRow()
+      assert.match(text(), /Questions2 of 3/, "the card opens on the question the host asks")
+      assert.equal(inert(1), false, "that is the page showing")
+      assert.equal(
+        (findText("[data-slot=button]", "staging") as HTMLButtonElement).disabled,
+        true,
+        "a question the host is not on yet cannot be answered",
+      )
+      assert.equal(
+        (findText("[data-slot=button]", "Platform") as HTMLButtonElement).disabled,
+        true,
+        "nor one it has not reached at all",
+      )
+      assert.equal(arrow("Next question")?.disabled, false, "the arrows still read the whole ask")
+
+      await type(find("textarea") as HTMLTextAreaElement, "rename it")
+      await click(findText("[data-slot=button]", "Send"))
+      await settle()
+      assert.deepEqual(answers, [{ q1: "rename it" }], "only the question asked is answered")
+    },
+  )
+})
+
+test("the card opens on the page the host asks, not on the first of the ask", async () => {
+  answered()
+  const ask = [
+    { id: "q0", question: "Which environment?", choices: ["staging", "production"] },
+    { id: "q1", question: "Who reviews it?", choices: ["Platform", "Product"] },
+  ]
+  await mount(
+    <QuestionCard message={message(ask)} askedId="q1" onAnswer={async () => {}} />,
+    async () => {
+      pagesRow()
+      assert.match(text(), /2 of 2/, "the second question is the one showing")
+      assert.equal(inert(0), true, "the one already answered is put away")
+      assert.equal(
+        (findText("[data-slot=button]", "staging") as HTMLButtonElement).disabled,
+        true,
+        "and cannot be answered again",
+      )
+    },
+  )
+})

@@ -1,5 +1,6 @@
-import { clarifyAnswered, type ClarifyResponse } from "@/lib/clarify"
-import type { LiveTurn, MessageStats, Unsent } from "@/lib/db"
+import { questionsAround } from "@/lib/clarify-questions"
+import { clarifyAnswered, questionAt, type ClarifyResponse } from "@/lib/clarify"
+import type { ClarifyQuestion, LiveTurn, MessageStats, Unsent } from "@/lib/db"
 import { progressReminderNote } from "@/lib/progress-reminder"
 import { measureReply } from "@/lib/reply-stats"
 import { promptFrom, type RunPrompt } from "@/lib/run-prompt"
@@ -63,6 +64,17 @@ export interface ThreadState {
   /** What the run is held up on, until the user's answer or someone else's takes it away. */
   waiting?: Waiting
   /**
+   * The questions of the call whose prompt the run waits on. Hermes asks them one at a time, so the
+   * card between two prompts holds this: the call's row is in the transcript, which a running turn
+   * does not take rows from, and a reader must see the whole set rather than the one asked.
+   */
+  questionSet?: ClarifyQuestion[]
+  /**
+   * The prompts this page has answered. A stream joined again replays them from the run's first, and
+   * a request whose answer already went in must not put its question back on the card.
+   */
+  answeredPrompts?: string[]
+  /**
    * The results this page wrote onto calls the host's stream carries none for: a clarify's answer,
    * which Hermes serves with an empty preview and writes whole only into the transcript. Keyed by
    * the call, so an answer stands wherever that call is drawn from.
@@ -85,7 +97,8 @@ interface Settled {
 
 /**
  * A prompt the run is held up on, as `lib/run-prompt` reads it off the run's own status — the one
- * account of the prompt's fields, whether it arrived as an event or as a read.
+ * account of the prompt's fields, whether it arrived as an event or as a read. A question's call
+ * is the thread's (`questionSet`), which outlives the one prompt being asked.
  */
 export type Waiting = RunPrompt
 
@@ -262,11 +275,7 @@ function withClarifyAnswer(
     (call) => ({
       // A call rebuilt from a replayed run carries an empty preview again: the answers this page
       // already recorded for it are what the next question's answer merges into.
-      result: clarifyAnswered(
-        call.result || known?.[call.id],
-        givenAnswer(answer),
-        "submitted",
-      ),
+      result: clarifyAnswered(call.result || known?.[call.id], givenAnswer(answer), "submitted"),
     }),
     "last",
   )
@@ -531,12 +540,56 @@ function readChangesNothing(state: ThreadState, read: Waiting): boolean {
   return read.promptId === state.waiting?.promptId
 }
 
+/**
+ * The questions of the call a waiting question came out of: the row the agent wrote when the thread
+ * has it, else the set already held, which survives between the call's one-at-a-time prompts.
+ *
+ * The rows win where they name the question, so a second call that repeats an earlier question's
+ * words is drawn from its own row rather than the set an older call left behind.
+ */
+function questionsFor(
+  state: ThreadState,
+  waiting: Waiting | undefined,
+  rows: Row[] = state.rows,
+): ClarifyQuestion[] | undefined {
+  if (!waiting || waiting.kind !== "question") return undefined
+  const found = questionsAround(waiting.question, rows)
+  if (found) return found
+  const held = state.questionSet
+  return held && questionAt(held, waiting.question) >= 0 ? held : undefined
+}
+
+/** Whether two readings of one question set agree, so a read that found the same set changes nothing. */
+function sameQuestions(a: ClarifyQuestion[], b?: ClarifyQuestion[]): boolean {
+  if (b === undefined || a.length !== b.length) return false
+  return a.every(
+    (one, at) =>
+      one.id === b[at].id &&
+      one.question === b[at].question &&
+      one.choices?.join("\u0000") === b[at].choices?.join("\u0000"),
+  )
+}
+
 /** What a live event says the run is waiting on, if it says anything. */
-function waitingAfter(waiting: Waiting | undefined, event: RunEvent): Waiting | undefined {
+function waitingAfter(state: ThreadState, event: RunEvent): Waiting | undefined {
+  const waiting = state.waiting
   const raised = ["clarify.request", "approval.request"].includes(event.event)
     ? promptFrom(event, event.run_id ?? "")
     : undefined
-  if (raised) return raised
+  // A stream replayed from where it dropped off carries the prompts it already carried: one this
+  // page answered, and a page of the call behind the one the host asks. Raising either again would
+  // take the card back to a question its answer went to.
+  if (raised) {
+    const set = state.questionSet
+    const page = raised.kind === "question" && set ? questionAt(set, raised.question) : -1
+    const asked =
+      state.waiting?.kind === "question" ? questionAt(set ?? [], state.waiting.question) : -1
+    const answered =
+      state.answeredPrompts?.includes(raised.promptId) ||
+      (page >= 0 && asked >= 0 && page < asked)
+    const settled = sameSettled(state.settled, raised)
+    return settled || answered ? waiting : raised
+  }
   // A prompt that settles is the one on screen, or an old one the screen has moved on from.
   if (SETTLED.includes(event.event))
     return event.prompt_id === waiting?.promptId ? undefined : waiting
@@ -547,7 +600,13 @@ function waitingAfter(waiting: Waiting | undefined, event: RunEvent): Waiting | 
 export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
   switch (event.type) {
     case "transcript": {
-      if (state.running && !event.final) return state
+      // The call's row is the only place the rest of its questions survive, so it is read for a prompt
+      // that names one, even mid-stream.
+      const found = questionsFor(state, state.waiting, event.rows)
+      if (state.running && !event.final)
+        return !found || sameQuestions(found, state.questionSet)
+          ? state
+          : { ...state, questionSet: found }
       const rows = event.joined ? overlay(state.rows, event.rows) : event.rows
       if (!rows) return state
       const partial = event.more ?? state.partial
@@ -581,6 +640,9 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         // question must not go with the socket. Only the turn's own end, an answer given here or the
         // host's `*.settled` event takes a wait away.
         waiting: done ? undefined : state.waiting,
+        ...(done
+          ? { questionSet: undefined }
+          : { questionSet: questionsFor(state, state.waiting, rows) }),
         ...(done ? { settled: settledWith(state) } : {}),
       }
     }
@@ -620,9 +682,10 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       }
     }
     case "unsent": {
-      const unsent = [...(state.unsent ?? []).filter((one) => one.id !== event.row.id), event.row].sort(
-        (a, b) => a.at - b.at,
-      )
+      const unsent = [
+        ...(state.unsent ?? []).filter((one) => one.id !== event.row.id),
+        event.row,
+      ].sort((a, b) => a.at - b.at)
       const failed = event.error !== undefined
       return {
         ...state,
@@ -664,6 +727,8 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         run: event.run,
         running: true,
         waiting,
+        questionSet: waiting ? state.questionSet : undefined,
+        answeredPrompts: waiting ? state.answeredPrompts : undefined,
         live: last
           ? { turn: { ...last, parts: [], done: false }, replaces: true, replay: reach(last) }
           : undefined,
@@ -676,9 +741,9 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       return sameQueue(state.queue, next) ? state : { ...state, queue: next }
     }
     case "waiting": {
-      const read = event.waiting
-      if (readChangesNothing(state, read)) return state
-      return { ...state, waiting: read }
+      const { waiting } = event
+      if (readChangesNothing(state, waiting)) return state
+      return { ...state, waiting, questionSet: questionsFor(state, waiting) }
     }
     case "agents":
       return sameAgents(state.agents, event.agents) ? state : { ...state, agents: event.agents }
@@ -691,7 +756,13 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       // Only the run this page was following can have settled that way: a wait raised since belongs
       // to another run, and a `gone` still in flight from an earlier look is not about it.
       if (state.waiting === undefined || state.waiting.run !== event.run) return state
-      return { ...state, waiting: undefined, settled: settledWith(state) }
+      return {
+        ...state,
+        waiting: undefined,
+        questionSet: undefined,
+        answeredPrompts: undefined,
+        settled: settledWith(state),
+      }
     case "answered": {
       // The card goes at once; the host's `*.settled` event confirms it. A question's call reads
       // the answer from here until the transcript's own result reaches it — and the answer is kept
@@ -710,13 +781,25 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       return {
         ...state,
         waiting: undefined,
-        ...(state.waiting ? { settled: settledWith(state) } : {}),
+        ...(state.waiting
+          ? {
+              settled: settledWith(state),
+              answeredPrompts: [...(state.answeredPrompts ?? []), state.waiting.promptId],
+            }
+          : {}),
         ...(live ? { live } : {}),
         ...(answers ? { answers } : {}),
       }
     }
     case "run": {
-      const waiting = waitingAfter(state.waiting, event.event)
+      const waiting = waitingAfter(state, event.event)
+      const ended = ENDINGS.includes(event.event.event)
+      const questionSet = ended
+        ? undefined
+        : waiting?.kind === "question"
+          ? questionsFor(state, waiting)
+          : state.questionSet
+      const answeredPrompts = ended ? undefined : state.answeredPrompts
       // A prompt the stream says is settled is not raised again by a status read still carrying it.
       const settled =
         SETTLED.includes(event.event.event) && event.event.prompt_id
@@ -738,9 +821,15 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         )
           moved = { ...moved, replay: undefined }
       }
-      if (waiting === state.waiting && moved === held && sameSettled(settled, state.settled))
+      if (
+        waiting === state.waiting &&
+        moved === held &&
+        sameSettled(settled, state.settled) &&
+        questionSet === state.questionSet &&
+        answeredPrompts === state.answeredPrompts
+      )
         return state
-      return { ...state, waiting, settled, live: moved }
+      return { ...state, waiting, settled, live: moved, questionSet, answeredPrompts }
     }
     case "failed":
       // What this page could not read is not what the host settled.

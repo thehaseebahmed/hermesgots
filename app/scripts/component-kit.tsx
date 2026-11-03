@@ -18,6 +18,19 @@ import { THINKING_WORD } from "@/lib/thinking"
 import { WAKE_PROMPT_FOOTER, WAKE_PROMPT_HEADER } from "@/lib/wake-prompt"
 import { ChatPage } from "@/routes/chat"
 
+// A DOM without layout has no scroll to move, and a paged card moves one: the page it lands on is
+// what the next assertion reads, so the scroll is applied and announced rather than thrown away.
+if (!Element.prototype.scrollTo)
+  Element.prototype.scrollTo = function (
+    this: Element,
+    options?: ScrollToOptions | number,
+    toY?: number,
+  ) {
+    this.scrollLeft = typeof options === "number" ? options : (options?.left ?? this.scrollLeft)
+    this.scrollTop = typeof options === "number" ? (toY ?? 0) : (options?.top ?? this.scrollTop)
+    this.dispatchEvent(new Event("scroll"))
+  } as typeof Element.prototype.scrollTo
+
 export function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,

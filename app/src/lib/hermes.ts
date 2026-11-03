@@ -1,3 +1,4 @@
+import { questionsIn } from "@/lib/clarify"
 import { connectionKey } from "@/lib/connection"
 import { heardOf } from "@/lib/dictation-log"
 import { namedLevel, type CleanupLevel } from "@/lib/speech"
@@ -111,17 +112,7 @@ export interface ApprovalRespondedEvent {
 
 /** The questions of a `clarify.request` event in the app's shape; none when the event has none. */
 export function clarifyQuestions(event: ClarifyRequestEvent): ClarifyQuestion[] {
-  return (event.questions ?? []).flatMap((q, i) => {
-    if (!q || typeof q !== "object" || !q.question) return []
-    const choices = Array.isArray(q.choices) ? q.choices.map(String).filter(Boolean) : []
-    return [
-      {
-        id: String(q.id ?? `q${i}`),
-        question: String(q.question),
-        ...(choices.length ? { choices, multiSelect: Boolean(q.multi_select) } : {}),
-      },
-    ]
-  })
+  return questionsIn(event.questions)
 }
 
 export interface StreamHandlers {

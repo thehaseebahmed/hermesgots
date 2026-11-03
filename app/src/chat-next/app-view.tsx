@@ -43,7 +43,8 @@ import { AgentsContext, runningAgents, type AgentsSource } from "@/lib/agents"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { attachmentsText } from "@/lib/attachment-text"
 import { compactionMarks } from "@/lib/compactions"
-import { db, type ApprovalChoice, type Message } from "@/lib/db"
+import { questionAt, questionsIn } from "@/lib/clarify"
+import { db, type ApprovalChoice, type ClarifyQuestion, type Message } from "@/lib/db"
 import type { DelegatedAgent } from "@/lib/hermes"
 import { usePluginFeatureOn } from "@/lib/features"
 import { describeActivity } from "@/lib/format"
@@ -58,6 +59,7 @@ import { delegated } from "./agents"
 import { clearFailedTurn } from "./api"
 import { messagesOf, heldMessage, replyId } from "./messages"
 import { ChatNextThread, type PromptProps, type ThreadViewProps } from "./page"
+import type { Waiting } from "./state"
 
 /** A bot's Main as chat-next draws it: whose threads are its cards, and which one is open. */
 export interface MainView {
@@ -444,13 +446,28 @@ export function AppThreadView({
 
 const APPROVAL_CHOICES: ApprovalChoice[] = ["once", "session", "always", "deny"]
 
+type QuestionWait = Extract<Waiting, { kind: "question" }>
+
+/** The questions a wait draws: the call's own where the thread read them, else the one it names. */
+const drawnFor = (waiting: QuestionWait, questions?: ClarifyQuestion[]): ClarifyQuestion[] =>
+  questions && questionAt(questions, waiting.question) >= 0
+    ? questions
+    : questionsIn([
+        {
+          id: waiting.promptId,
+          question: waiting.question,
+          choices: waiting.choices,
+          multi_select: waiting.multiSelect,
+        },
+      ])
+
 /**
  * The prompt a run is held up on, drawn as the app draws one everywhere: the approval card with the
  * tool that asked and every choice the host offers, and the question card with its choices and an
  * Other. The cards read a message, so the wait is dressed as the reply it interrupts, and an answer
  * goes where chat-next sends it rather than through the old engine.
  */
-export function AppPrompt({ waiting, answer, asker }: PromptProps) {
+export function AppPrompt({ waiting, questions: read, answer, asker }: PromptProps) {
   const message = useMemo((): Message => {
     const base = {
       id: `prompt-${waiting.promptId}`,
@@ -491,23 +508,19 @@ export function AppPrompt({ waiting, answer, asker }: PromptProps) {
       clarify: {
         runId: waiting.run,
         clarifyId: waiting.promptId,
-        questions: [
-          {
-            id: "q0",
-            question: waiting.question,
-            ...(waiting.choices.length ? { choices: waiting.choices } : {}),
-            ...(waiting.multiSelect ? { multiSelect: true } : {}),
-          },
-        ],
+        questions: drawnFor(waiting, read),
       },
     }
-  }, [waiting, asker])
+  }, [waiting, read, asker])
   if (waiting.kind === "approval") return <ApprovalCard message={message} onAnswer={answer} />
+  const drawn = message.clarify?.questions ?? []
+  const askedId = drawn[questionAt(drawn, waiting.question)]?.id ?? "q0"
   return (
     <QuestionCard
       message={message}
+      askedId={askedId}
       onAnswer={(answers) => {
-        const given = answers.q0
+        const given = answers[askedId]
         return answer(Array.isArray(given) ? given.join(", ") : (given ?? ""))
       }}
     />

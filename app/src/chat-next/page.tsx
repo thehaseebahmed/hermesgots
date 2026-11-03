@@ -25,7 +25,15 @@ import { LOADING_ACTIVITY } from "@/lib/format"
 import { NOT_SENT } from "@/lib/words"
 import { onSessionMoved, useLive } from "@/lib/live"
 import { knownLiveRun, useHostBusy, useLiveRunId, useLiveSubagents } from "@/lib/waiting"
-import { db, getSettings, type Attachment, type MessageStats, type SessionDb, type Unsent } from "@/lib/db"
+import {
+  db,
+  getSettings,
+  type Attachment,
+  type ClarifyQuestion,
+  type MessageStats,
+  type SessionDb,
+  type Unsent,
+} from "@/lib/db"
 import { randomId } from "@/lib/utils"
 import { toast } from "sonner"
 
@@ -52,7 +60,7 @@ import {
   type Connection,
   type Queued,
 } from "./api"
-import { clarifyRead } from "@/lib/clarify"
+import { clarifyRead, questionAt } from "@/lib/clarify"
 import { WAITING_ON_ANSWER } from "@/lib/format"
 import { PROMPT_RETRY_MS } from "@/lib/freshness"
 import { foldTurns, type Row, type ToolCall, type Turn } from "./fold"
@@ -559,6 +567,8 @@ const QUIET_RUN_MS = 1_500
 /** What a prompt drawn by the app is handed: the wait, and how to answer it. */
 export interface PromptProps {
   waiting: Waiting
+  /** The questions of the call the wait came out of, where the thread has read them. */
+  questions?: ClarifyQuestion[]
   /** Rejects when the host did not take the answer, so the card can say so. */
   answer: (value: string) => Promise<void>
   /** The tool the reply was running when it asked, where the host names none. */
@@ -1111,6 +1121,20 @@ export function ChatNextThread({
     [server, key, dispatch],
   )
 
+  // A prompt names one question; the call's row holds the rest, in a page the page already reads.
+  const askedWord = doing.waiting?.kind === "question" ? doing.waiting.question : undefined
+  const unread =
+    askedWord && doing.waiting && questionAt(doing.questionSet ?? [], askedWord) < 0
+      ? doing.waiting.promptId
+      : undefined
+  const readFor = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (!unread || !server || !key || !session) return
+    if (readFor.current === unread) return
+    readFor.current = unread
+    void catchUp()
+  }, [unread, server, key, session, catchUp])
+
   // A server that streams its changes says when this session moved, so the timer below only has to
   // be a safety net while the stream is open.
   const streamOpen = useLive(server && key ? { baseUrl: server, apiKey: key } : undefined)
@@ -1339,7 +1363,10 @@ export function ChatNextThread({
         return dispatch({ type: "moved" })
       }
       prepared = prepareTurn ? await prepareTurn(words, kept) : undefined
-      const posting = { signal: alive.current.signal, timeoutMs: sendTimeoutMs(away, READ_TIMEOUT_MS) }
+      const posting = {
+        signal: alive.current.signal,
+        timeoutMs: sendTimeoutMs(away, READ_TIMEOUT_MS),
+      }
       run = prepared
         ? await postRun({ server, key }, prepared.body, id, posting)
         : await startRun({ server, key }, session, words, id, posting)
@@ -1350,7 +1377,11 @@ export function ChatNextThread({
       // A run held on a prompt takes no new turn, and the form is what answers it: asking also puts
       // the form up, for a page that had not read the wait when the send went out.
       if (error instanceof HostRefused && (await askWait())) {
-        dispatch({ type: "unsent", row: { id, text: words, at, attachments }, error: WAITING_ON_ANSWER })
+        dispatch({
+          type: "unsent",
+          row: { id, text: words, at, attachments },
+          error: WAITING_ON_ANSWER,
+        })
         return
       }
       // Why it didn't go is said where the reader is. Every other request this screen makes that
@@ -1549,6 +1580,7 @@ export function ChatNextThread({
       <Prompt
         key={doing.waiting.promptId}
         waiting={doing.waiting}
+        questions={doing.questionSet}
         asker={asker}
         answer={async (value) => {
           const asked = doing.waiting as Waiting

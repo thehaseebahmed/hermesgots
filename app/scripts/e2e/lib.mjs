@@ -292,11 +292,19 @@ export const choiceButton = (scope, choice) =>
     name: new RegExp(`^${choice.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
   })
 
-/** Answers the question in `scope` — by picking one of its choices, or by typing into it — and sends
- * it, waiting on nothing further. */
+/** The one page of a question card showing, where the card holds a call's questions as pages. */
+export const questionPage = (scope) => scope.locator("[data-question-page]:not([inert])")
+
+/**
+ * Answers the question in `scope` — by picking one of its choices, or by typing into it — and sends
+ * it, waiting on nothing further. A card holding a call's questions shows one page of them, and an
+ * answer belongs to that page: the others are questions the host is not asking yet.
+ */
 export async function answerWith(scope, { pick, type }) {
-  if (pick) await choiceButton(scope, pick).first().click()
-  else await scope.getByPlaceholder("Type your answer").fill(type)
+  const page = (await questionPage(scope).count()) ? questionPage(scope) : scope
+  if (pick) await choiceButton(page, pick).first().click()
+  else await page.getByPlaceholder("Type your answer").fill(type)
+  // Send is the card's, not the page's: the footer sits outside the pages.
   await scope.getByRole("button", { name: "Send", exact: true }).click()
 }
 
