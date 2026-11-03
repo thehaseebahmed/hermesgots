@@ -19,7 +19,7 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from . import (
     afk,
@@ -81,6 +81,12 @@ from .store import current_path
 logger = logging.getLogger(__name__)
 
 PREFIX = "/api/plugins/memento"
+# A batch read of sessions' pull requests waits this long before answering with the rest unread. A
+# screen asks after every session it lists, and each session's read is a chain of outbound calls
+# (see `github.py`); the calls themselves are bounded there, once, for every route.
+PRS_BATCH_DEADLINE_S = 8.0
+# The resolve passes a batch starts, held here so nothing collects a future still running.
+_resolving: Set[Any] = set()
 # Gots shows 24 runs per job.
 DEFAULT_PER_JOB = 24
 MAX_PER_JOB = 200
@@ -500,6 +506,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "sessions",
                     "runs",
                     "prs",
+                    # Every listed session's pull requests in one read (the Code screen's). An app
+                    # that predates it reads each session's own route instead.
+                    "prs_batch",
                     "plans",
                     "library",
                     # How often a bot is asked to say what it is doing: a row on its General page
@@ -1675,38 +1684,100 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             sessions._clear_cwd(session_id)
         return web.json_response({"object": "memento.workspace.removed", **result})
 
+    def prs_of(home: Path, record: Dict[str, Any]) -> List[List[Dict[str, Any]]]:
+        """Each repo's pull requests, newest first, from a session's own record."""
+        per_repo = []
+        for repo in record["repos"]:
+            if not repo.get("path") or not repo.get("branch"):
+                continue
+            per_repo.append(
+                github.pull_requests(home, repo["repo_root"], repo["branch"], strict=True)
+            )
+        return per_repo
+
+    def merged_here(per_repo: List[List[Dict[str, Any]]]) -> bool:
+        """Whether a repo's newest — the one the session is working on — has merged."""
+        return any(group and group[0]["state"] == "merged" for group in per_repo)
+
+    async def settled_prs(home: Path, session_id: str, record: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """A session's pull requests, and the resolve a merged one asks for."""
+        per_repo = await asyncio.to_thread(prs_of, home, record) if record else []
+        if merged_here(per_repo):
+            try:
+                await asyncio.to_thread(merges.check, home, {session_id})
+            except Exception:
+                logger.debug("memento: resolving a merged session failed", exc_info=True)
+        return [pr for group in per_repo for pr in group]
+
     async def session_pr(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
             return denied
         path, home = store_path(), hermes_home()
-        record = await asyncio.to_thread(sessions.record_for, path, home, request.match_info["session_id"])
-
-        def lookup():
-            """Each repo's pull requests, newest first; the newest one each is what resolves."""
-            per_repo = []
-            for repo in (record or {}).get("repos", []):
-                if not repo.get("path") or not repo.get("branch"):
-                    continue
-                # Strict: a GitHub failure must not come back as "no pull requests", which the app
-                # stores over the ones it already knows and the PRs tab empties out.
-                per_repo.append(
-                    github.pull_requests(home, repo["repo_root"], repo["branch"], strict=True)
-                )
-            return per_repo
-
+        session_id = request.match_info["session_id"]
+        record = await asyncio.to_thread(sessions.record_for, path, home, session_id)
         try:
-            per_repo = await asyncio.to_thread(lookup) if record else []
+            prs = await settled_prs(home, session_id, record)
         except github.GitHubError as error:
             return _error(web, str(error), error.status)
-        prs = [pr for group in per_repo for pr in group]
-        # A repo's newest is the one the session is working on: its merge is what resolves it.
-        if any(group and group[0]["state"] == "merged" for group in per_repo):
-            try:
-                await asyncio.to_thread(merges.check, home, {request.match_info["session_id"]})
-            except Exception:
-                logger.debug("memento: resolving a merged session failed", exc_info=True)
         return web.json_response({"object": "memento.prs", "prs": prs})
+
+    # A screen asks after every session it lists, and each read is a chain of outbound calls: the
+    # batch answers them in one request, a few at a time and within a deadline, so a dependency
+    # that hangs costs neither a worker per session nor the client's whole read budget.
+    async def session_prs_batch(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        # One task a session, however many times the query names it.
+        asked = list(dict.fromkeys(one for one in request.query.getall("session", []) if one))
+        if not asked:
+            return _error(web, "Missing session", 400)
+        path, home = store_path(), hermes_home()
+        # The slot is taken before the record read, so a batch is bounded in the pool it shares with
+        # every other route rather than in waiting alone, and the deadline covers the whole of it.
+        slots = asyncio.Semaphore(github.MAX_OUTBOUND)
+        merged: Set[str] = set()
+
+        async def one(session_id: str):
+            async with slots:
+                record = await asyncio.to_thread(sessions.record_for, path, home, session_id)
+                # A session this store doesn't know is unread, not a session with no pull requests:
+                # the app writes an empty answer over what the row already holds.
+                if not record:
+                    return session_id, None
+                per_repo = await asyncio.to_thread(prs_of, home, record)
+                if merged_here(per_repo):
+                    merged.add(session_id)
+                return session_id, [pr for group in per_repo for pr in group]
+
+        tasks = {asyncio.create_task(one(session_id)): session_id for session_id in asked}
+        done, pending = await asyncio.wait(tasks, timeout=PRS_BATCH_DEADLINE_S)
+        # A read still out at the deadline is dropped from the answer, not waited on: what it holds
+        # is a thread already bounded by `github.READ_TIMEOUT_S`, and the app asks again next time.
+        for task in pending:
+            task.cancel()
+        prs: Dict[str, List[Dict[str, Any]]] = {}
+        unread = [tasks[task] for task in pending]
+        for task in done:
+            session_id = tasks[task]
+            try:
+                _, found = task.result()
+            except Exception:
+                logger.debug("memento: the batch read of %s failed", session_id, exc_info=True)
+                unread.append(session_id)
+                continue
+            if found is None:
+                unread.append(session_id)
+            else:
+                prs[session_id] = found
+        # One resolve pass for every merged session the batch saw, not one per session — and off the
+        # answer: it reads the chat list and every repo again, which is not the client's to wait on.
+        if merged:
+            pass_ = asyncio.get_running_loop().run_in_executor(None, merges.check, home, merged)
+            _resolving.add(pass_)
+            pass_.add_done_callback(_resolving.discard)
+        return web.json_response({"object": "memento.prs", "prs": prs, "unread": unread})
 
     async def session_library(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1976,6 +2047,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/workspace/remove", remove_workspace)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/mode", post_mode)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/prs", session_pr)
+    # Every listed session's pull requests in one read, for a screen that lists them.
+    app.router.add_get(f"{PREFIX}/prs", session_prs_batch)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/library", session_library)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/close", close_session)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/closes", start_close)

@@ -20,6 +20,7 @@ import {
   getSessionClose,
   getSessionLibrary,
   getSessionPrs,
+  getSessionPrsBatch,
   getWorkspace,
   hasPluginFeature,
   HermesError,
@@ -29,6 +30,7 @@ import {
   startSessionClose,
   type HermesProject,
   type HermesProjectFolder,
+  type PullRequest,
   type SessionClose,
   type SessionWorkspace,
 } from "@/lib/hermes"
@@ -70,8 +72,10 @@ export const MODE_LABELS: Record<SessionMode, string> = {
   plan: "Plan",
 }
 
+type SessionTarget = { conversation: Conversation; profile: Profile; key: string }
+
 /** The session and its bot, when the bot's plugin can hold its workspace. */
-async function tracked(conversationId: string) {
+async function tracked(conversationId: string): Promise<SessionTarget | null> {
   const conversation = await db.conversations.get(conversationId)
   const profile = conversation && (await db.profiles.get(conversation.profileId))
   // Keyless chats have no session id Hermes knows.
@@ -201,26 +205,133 @@ export async function refreshLibrary(conversationId: string) {
   await db.conversations.update(conversationId, { library: { count, at: Date.now() } })
 }
 
-/** Reads the branch's pull request in each of the session's repos from the plugin. */
-export async function refreshPrs(conversationId: string, { force = false } = {}) {
-  const found = await tracked(conversationId)
-  // A discarded session's pull requests stay as it closed them; its branch is gone.
-  if (
-    !found?.conversation.worktree ||
-    found.conversation.discardedAt ||
-    unsupported.cooling(found.key)
+/** Joins the read already out for this session, or starts one. */
+export function refreshPrs(conversationId: string, { force = false } = {}) {
+  const pending = prsInFlight.get(conversationId)
+  if (pending) return pending
+  const read = readPrs(conversationId, force)
+  trackInFlight([conversationId], read)
+  return read
+}
+
+/**
+ * Reads every named session's pull requests in one request per bot, the way the Code screen asks
+ * after the sessions it lists: nine rows were nine requests, each a chain of calls on the host.
+ * A bot whose plugin predates the batch answers its sessions one at a time, as it always did.
+ */
+export async function refreshPrsOf(conversationIds: string[], { force = false } = {}) {
+  const found = (await Promise.all(conversationIds.map(tracked))).filter(prsReadable)
+  const groups = new Map<string, { profile: Profile; rows: Conversation[] }>()
+  for (const one of found) {
+    if (!force && !dueForPrs(one.conversation)) continue
+    const group = groups.get(one.key) ?? { profile: one.profile, rows: [] }
+    group.rows.push(one.conversation)
+    groups.set(one.key, group)
+  }
+  await Promise.all(
+    [...groups.values()].map(async ({ profile, rows }) => {
+      const key = connectionKey(profile)
+      const oneAtATime = () => Promise.all(rows.map((row) => refreshPrs(row.id, { force })))
+      if (
+        batchUnsupported.cooling(key) ||
+        !(await hasPluginFeature(profile, "prs_batch").catch(() => false))
+      ) {
+        await oneAtATime()
+        return
+      }
+      // The batch's rows join the in-flight map before the request goes out, so a chat asking after
+      // one of them while it runs waits on this read rather than paying the chain again. Released
+      // before any fallback, which reads those same rows one at a time.
+      const settled = deferred()
+      trackInFlight(
+        rows.map((row) => row.id),
+        settled.promise,
+      )
+      let answer
+      try {
+        answer = await getSessionPrsBatch(
+          profile,
+          rows.map((row) => row.hermesSessionId),
+          AbortSignal.timeout(READ_TIMEOUT_MS),
+        )
+      } catch (error) {
+        settled.release()
+        noteFailure("Reading sessions' pull requests", error)
+        // A host that doesn't answer the route keeps the rows it has, and reads them one at a time
+        // for a while rather than paying a failing request before every batch.
+        if (await lacksRoute(profile, error, "prs_batch")) batchUnsupported.start(key)
+        await oneAtATime()
+        return
+      }
+      // A session the host named unread — or left out — keeps what this device already holds.
+      const unread = new Set(answer.unread)
+      try {
+        await Promise.all(
+          rows
+            .filter((row) => !unread.has(row.hermesSessionId) && answer.prs[row.hermesSessionId])
+            .map((row) => storePrs(row.id, answer.prs[row.hermesSessionId])),
+        )
+      } finally {
+        settled.release()
+      }
+    }),
   )
-    return
-  const { conversation, profile } = found
-  // When this device last read, not when a pull request last moved: `pr.at` carries the move (a
-  // Code row's last activity reads it), so the gate keeps its own clock — the way refreshLibrary
-  // keeps `libraryRead` beside `library.at`.
+}
+
+/** A promise a caller can settle from outside: the batch's rows wait on the answer, not the request. */
+function deferred() {
+  let release = () => {}
+  const promise = new Promise<void>((resolve) => (release = resolve))
+  return { promise, release }
+}
+
+/**
+ * A session this host can read pull requests for at all: it has a worktree to read a branch from,
+ * and hasn't been discarded (its pull requests stay as it closed them; its branch is gone).
+ */
+function prsReadable(found: SessionTarget | null): found is SessionTarget {
+  return Boolean(
+    found?.conversation.worktree &&
+    !found.conversation.discardedAt &&
+    !unsupported.cooling(found.key),
+  )
+}
+
+/** When each session's pull requests are already being read: a second ask joins the first. */
+const prsInFlight = new Map<string, Promise<void>>()
+
+/** A read joins the rows it answers for, and leaves them together once it settles. */
+function trackInFlight(ids: string[], read: Promise<void>) {
+  const forget = () => {
+    for (const id of ids) if (prsInFlight.get(id) === read) prsInFlight.delete(id)
+  }
+  for (const id of ids) prsInFlight.set(id, read)
+  void read.then(forget, forget)
+}
+
+/** Bots whose plugin doesn't answer the batch read, for a while: the per-session route stands in. */
+const batchUnsupported = cooldown()
+
+/**
+ * Whether this device's copy is old enough to read again. The clock is when this device last read,
+ * not when a pull request last moved: `pr.at` carries the move (a Code row's last activity reads
+ * it), so the gate keeps its own — the way refreshLibrary keeps `libraryRead` beside `library.at`.
+ */
+function dueForPrs(conversation: Conversation) {
   const newest = (conversation.prs ?? []).length
     ? Math.min(...(conversation.prs ?? []).map((pr) => pr.at))
     : 0
-  const readAt = prsRead.get(conversationId) ?? newest
+  const readAt = prsRead.get(conversation.id) ?? newest
   const trusted = prChecksPending(conversation.prs) ? PR_PENDING_MS : PR_MS
-  if (!force && conversation.prs?.length && Date.now() - readAt < trusted) return
+  return !conversation.prs?.length || Date.now() - readAt >= trusted
+}
+
+/** Reads the branch's pull request in each of the session's repos from the plugin. */
+async function readPrs(conversationId: string, force: boolean) {
+  const found = await tracked(conversationId)
+  if (!prsReadable(found)) return
+  const { conversation, profile } = found
+  if (!force && !dueForPrs(conversation)) return
   let prs
   try {
     prs = await getSessionPrs(
@@ -234,6 +345,13 @@ export async function refreshPrs(conversationId: string, { force = false } = {})
     return
   }
   unsupported.clear(found.key)
+  await storePrs(conversationId, prs)
+}
+
+/** Keeps what the host answered, stamped per pull request, and resolves a session its PR merged. */
+async function storePrs(conversationId: string, prs: PullRequest[]) {
+  const conversation = await db.conversations.get(conversationId)
+  if (!conversation) return
   prsRead.set(conversationId, Date.now())
   const before = new Map((conversation.prs ?? []).map((pr) => [prKey(pr), pr]))
   // A pull request carries its moment on its own record, and it means the pull request's last
@@ -252,8 +370,7 @@ export async function refreshPrs(conversationId: string, { force = false } = {})
     return same ? old : { ...pr, at: Date.now() }
   })
   const previous = conversation.prs ?? []
-  const changed =
-    stamped.length !== previous.length || stamped.some((pr) => !previous.includes(pr))
+  const changed = stamped.length !== previous.length || stamped.some((pr) => !previous.includes(pr))
   if (changed) await db.conversations.update(conversationId, { prs: stamped })
   // The plugin resolves the session once its pull request merges; the chat list brings that here.
   const wasState = new Map(previous.map((pr) => [prKey(pr), pr.state]))
@@ -305,7 +422,10 @@ async function pushSessionMode(conversation: Conversation, mode: SessionMode) {
  * a device that leaves is told by Code's own screen instead. A plugin from before the route gets
  * the synchronous call, which holds the request and answers with what it couldn't do.
  */
-export async function closeSessionWork(conversation: Conversation, profile: Profile): Promise<void> {
+export async function closeSessionWork(
+  conversation: Conversation,
+  profile: Profile,
+): Promise<void> {
   const session = conversation.hermesSessionId
   if (!session || !hasServer(profile) || profile.disabled) return
   if (await hasPluginFeature(profile, "closes")) {
@@ -367,11 +487,7 @@ const CLOSE_WAIT_MS = 30_000
  * Reads the close asked for until it ends, then tells it: the report the button's own device gets
  * while it is still here. Give up quietly after a while — Code reads the report later anyway.
  */
-async function followClose(
-  conversationId: string,
-  profile: Profile,
-  started: SessionClose,
-) {
+async function followClose(conversationId: string, profile: Profile, started: SessionClose) {
   const until = Date.now() + CLOSE_WAIT_MS
   let close = started
   while (close.state === "closing" && Date.now() < until) {

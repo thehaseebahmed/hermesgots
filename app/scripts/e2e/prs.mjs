@@ -1,14 +1,17 @@
 // The project's Pull requests tab: a session that shipped a pull request lists it, and a host that
-// can't reach GitHub leaves the tab as it was — the read fails, so the app keeps the pull requests it
-// already knows instead of storing "no pull requests" over them (see plugin/github.py's `strict`).
+// can't reach GitHub leaves the tab as it was — the batch names that session unread, so the app
+// keeps the pull requests it already knows instead of storing "no pull requests" over them (see
+// plugin/github.py's `strict` and the batch route's `unread`).
 import { app, assert, flow, mock, pass, runId } from "./lib.mjs"
 
 await flow("prs", async ({ page, profileId, seed, send, stored, until, shot }) => {
   // A run that failed mid-way leaves the mock failing; every run starts from a host that answers.
   await fetch(`${mock}/__mock/prs`, { method: "POST", body: JSON.stringify({ fail: false }) })
-  const statuses = []
-  page.on("response", (response) => {
-    if (response.url().includes("/prs")) statuses.push(response.status())
+  // The batch reads the screen makes, as the host answered them.
+  const batches = []
+  page.on("response", async (response) => {
+    if (!response.url().includes("/prs?session=")) return
+    await response.json().then((body) => batches.push(body), () => undefined)
   })
   const project = `${app}/projects/${profileId}/p_1a2b3c4d`
 
@@ -28,8 +31,9 @@ await flow("prs", async ({ page, profileId, seed, send, stored, until, shot }) =
   await shot("shipped")
   pass("a shipped pull request lists in the project's Pull requests tab")
 
-  // A host that can't reach GitHub: the read answers an error, and what the app already knows stays.
-  // The failure goes on first, so no read of the new session can answer an empty list meanwhile.
+  // A host that can't reach GitHub: the read answers with the session unread, and what the app
+  // already knows stays. The failure goes on first, so no read of the new session can answer an
+  // empty list meanwhile.
   const known = `prs-known-${runId()}`
   await fetch(`${mock}/__mock/prs`, { method: "POST", body: JSON.stringify({ fail: true }) })
   await seed([{ id: known, title: "A session with a pull request", projectId: "p_1a2b3c4d" }])
@@ -55,9 +59,13 @@ await flow("prs", async ({ page, profileId, seed, send, stored, until, shot }) =
       ],
     })
   }, known)
-  statuses.length = 0
+  batches.length = 0
   await page.goto(project)
-  await until(async () => statuses.includes(502), 20_000, "the failing read of the session's PRs")
+  await until(
+    async () => batches.some((batch) => batch.unread.includes(known)),
+    20_000,
+    "the batch naming the session it couldn't read",
+  )
   assert.equal(
     (await stored(known))?.length,
     1,

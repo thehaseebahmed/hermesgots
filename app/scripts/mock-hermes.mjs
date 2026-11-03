@@ -4114,6 +4114,7 @@ http
           "subagent_stop",
           "subagents_stop_all",
           "prs",
+          "prs_batch",
           "plans",
           "clarify",
           "attachments",
@@ -6287,6 +6288,67 @@ http
       chatTitles.set(child, chatTitles.get(session) ?? "Compressed")
       return json(res, 200, { ok: true, session, child })
     }
+    /**
+     * One session's pull requests as the plugin answers them. The live one's state follows the
+     * turns: "merge" merges it, "close" closes it, "break" fails its checks, "pending" runs them.
+     */
+    const prsOf = (id) => {
+      const workspace = projectSessions.get(id)
+      if (PRS_FAIL)
+        return { status: 502, body: { error: { message: "Couldn't reach GitHub from the server." } } }
+      const turns = userTurns(id)
+      const said = (word) => turns.some((r) => new RegExp(word, "i").test(r.content))
+      const pendingTurn = turns.findLast((r) => /pending/i.test(r.content))
+      const checksRunning =
+        pendingTurn && Date.now() / 1000 - pendingTurn.timestamp < PENDING_CHECK_S
+      const live = (workspace?.prs ?? []).find((pr) => !pr.state)
+      const state = !live
+        ? null
+        : workspace.closed || said("close")
+          ? "closed"
+          : said("merge")
+            ? "merged"
+            : "draft"
+      const prs = (workspace?.prs ?? []).map((pr) => ({
+        repo: pr.repo,
+        number: pr.number,
+        title: pr.title,
+        url: pr.url,
+        state: pr.state ?? state,
+        // A finished pull request's checks don't matter any more, so only the live one has them.
+        checks: pr.state
+          ? null
+          : said("break")
+            ? "failure"
+            : checksRunning
+              ? "pending"
+              : "success",
+      }))
+      // Like the plugin: a merge of the live one resolves the session in the chat list, once.
+      if (state === "merged" && !workspace.mergeResolved) {
+        workspace.mergeResolved = true
+        for (const [chatId, entry] of pluginChats)
+          if (entry.value?.hermesSessionId === id && !entry.value.resolvedAt)
+            pluginChats.set(chatId, {
+              at: Math.max(Date.now(), entry.at + 1),
+              value: { ...entry.value, resolvedAt: Date.now() },
+            })
+      }
+      return { status: 200, body: { object: "memento.prs", prs } }
+    }
+    // Every named session's pull requests in one read, which is how the Code screen asks.
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/memento/prs" && req.method === "GET") {
+      const asked = url.searchParams.getAll("session")
+      if (!asked.length) return json(res, 400, { error: { message: "Missing session" } })
+      const prs = {}
+      const unread = []
+      for (const id of asked) {
+        const answer = prsOf(id)
+        if (answer.status !== 200 || !projectSessions.has(id)) unread.push(id)
+        else prs[id] = answer.body.prs
+      }
+      return json(res, 200, { object: "memento.prs", prs, unread })
+    }
     const sessionRoute =
       /^\/api\/plugins\/memento\/sessions\/([^/]+)\/(workspace|workspace\/remove|mode|prs|library|close|closes)$/.exec(
         url.pathname,
@@ -6451,55 +6513,8 @@ http
         })
       }
       if (route === "prs" && req.method === "GET") {
-        // A host that can't reach GitHub answers an error, never an empty list: the app reads an
-        // empty one as "no pull requests" and stores it over the ones it already knows.
-        if (PRS_FAIL)
-          return json(res, 502, { error: { message: "Couldn't reach GitHub from the server." } })
-        // Every pull request the session opened, newest first, the ones it already finished
-        // included, as the plugin answers them. The live one's state follows the turns: "merge"
-        // merges it, "close" closes it, and a new one is always a draft; "break" fails their checks
-        // and "pending"
-        // runs them for a while before they pass.
-        const turns = userTurns(id)
-        const said = (word) => turns.some((r) => new RegExp(word, "i").test(r.content))
-        const pendingTurn = turns.findLast((r) => /pending/i.test(r.content))
-        const checksRunning =
-          pendingTurn && Date.now() / 1000 - pendingTurn.timestamp < PENDING_CHECK_S
-        const live = (workspace?.prs ?? []).find((pr) => !pr.state)
-        const state = !live
-          ? null
-          : workspace.closed || said("close")
-            ? "closed"
-            : said("merge")
-              ? "merged"
-              : "draft"
-
-        const prs = (workspace?.prs ?? []).map((pr) => ({
-          repo: pr.repo,
-          number: pr.number,
-          title: pr.title,
-          url: pr.url,
-          state: pr.state ?? state,
-          // A finished pull request's checks don't matter any more, so only the live one has them.
-          checks: pr.state
-            ? null
-            : said("break")
-              ? "failure"
-              : checksRunning
-                ? "pending"
-                : "success",
-        }))
-        // Like the plugin: a merge of the live one resolves the session in the chat list, once.
-        if (state === "merged" && !workspace.mergeResolved) {
-          workspace.mergeResolved = true
-          for (const [chatId, entry] of pluginChats)
-            if (entry.value?.hermesSessionId === id && !entry.value.resolvedAt)
-              pluginChats.set(chatId, {
-                at: Math.max(Date.now(), entry.at + 1),
-                value: { ...entry.value, resolvedAt: Date.now() },
-              })
-        }
-        return json(res, 200, { object: "memento.prs", prs })
+        const answer = prsOf(id)
+        return json(res, answer.status, answer.body)
       }
     }
     const chatSession = /^\/api\/sessions\/([^/]+)$/.exec(url.pathname)

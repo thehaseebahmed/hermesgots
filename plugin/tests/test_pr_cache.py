@@ -37,6 +37,7 @@ class FakeClock:
 class PrCacheTests(unittest.TestCase):
     def setUp(self):
         github._pr_cache.clear()
+        github._pr_failed.clear()
         self.reads = 0
         self.clock = FakeClock()
         self._patches = [
@@ -52,6 +53,7 @@ class PrCacheTests(unittest.TestCase):
         for one in self._patches:
             one.stop()
         github._pr_cache.clear()
+        github._pr_failed.clear()
 
     def _serve(self, rows, conclusion="success"):
         """``_get`` serving a branch's pulls, their check-runs and their status; counts every read."""
@@ -121,7 +123,7 @@ class PrCacheTests(unittest.TestCase):
             self.assertEqual(github.pull_requests(Path("/fake/home"), "/repo", "branch"), [])
             self.assertIsNone(github.pull_request(Path("/fake/home"), "/repo", "branch"))
 
-    def test_a_failure_answers_none_unless_strict(self):
+    def test_a_failure_is_remembered_without_being_answered(self):
         with self._failing():
             self.assertIsNone(
                 github.pull_request(Path("/fake/home"), "/repo", "branch"),
@@ -129,16 +131,32 @@ class PrCacheTests(unittest.TestCase):
             )
             with self.assertRaises(github.GitHubError):
                 github.pull_request(Path("/fake/home"), "/repo", "branch", strict=True)
-
-    def test_a_failure_is_never_cached(self):
+        self.assertEqual(github._pr_cache, {}, "a failure must not be cached as an answer")
+        self.assertEqual(len(github._pr_failed), 1, "the failure is remembered under its key")
+        reads = self.reads
+        # Inside the window: no second call, and the contract still holds for both callers — a
+        # lenient read answers its empty list rather than throwing what `strict` asks for.
         with self._failing():
             self.assertIsNone(github.pull_request(Path("/fake/home"), "/repo", "branch"))
             with self.assertRaises(github.GitHubError):
                 github.pull_request(Path("/fake/home"), "/repo", "branch", strict=True)
-        self.assertEqual(github._pr_cache, {}, "a failure must not be cached as an answer")
+        self.assertEqual(self.reads, reads, "a failure a moment old is not asked after again")
+        self.clock.advance(github.PR_FAILURE_CACHE_S + 1)
         self.assertEqual(
-            self._read("success")["number"], 27, "the read after it still goes out and finds the PR"
+            self._read("success")["number"], 27, "the read after the window goes out and finds the PR"
         )
+        self.assertEqual(github._pr_failed, {}, "and the remembered failure goes with it")
+
+    def test_a_remembered_failure_keeps_the_status_it_had(self):
+        def refused(path, auth):
+            raise github.GitHubError("GitHub rejected the server's token.", 401)
+
+        with patch.object(github, "_get", refused):
+            with self.assertRaises(github.GitHubError):
+                github.pull_request(Path("/fake/home"), "/repo", "branch", strict=True)
+        with self.assertRaises(github.GitHubError) as raised:
+            github.pull_request(Path("/fake/home"), "/repo", "branch", strict=True)
+        self.assertEqual(raised.exception.status, 401, "a 401 reads as a 401, not a gateway failure")
 
     def test_pending_checks_expire_at_the_short_window(self):
         self.assertEqual(self._read("pending")["checks"], "pending")
@@ -170,6 +188,39 @@ class PrCacheTests(unittest.TestCase):
         self.clock.advance(github.PR_CACHE_S)
         self._read("failure")
         self.assertGreater(self.reads, reads)
+
+
+class OutboundBoundsTests(unittest.TestCase):
+    """A read is bounded shorter than the app waits on it; a write keeps GitHub's own patience."""
+
+    def test_a_read_is_bounded_shorter_than_the_apps_own_read(self):
+        timeouts = []
+
+        def fetch(path, auth, method="GET", data=None, timeout=None):
+            timeouts.append(github.READ_TIMEOUT_S if timeout is None else timeout)
+            return ([], "")
+
+        with patch.object(github, "_fetch", fetch):
+            github._get("/x", None)
+            github._request("/x", None)
+        self.assertEqual(timeouts[0], github.READ_TIMEOUT_S, "a read takes the short bound")
+        self.assertLess(
+            github.READ_TIMEOUT_S, 15, "shorter than the 15 s the app gives a request"
+        )
+        self.assertGreater(
+            github.WRITE_TIMEOUT_S, github.READ_TIMEOUT_S, "a write waits longer than a read"
+        )
+
+    def test_a_call_with_no_slot_gives_up_rather_than_parking(self):
+        held = [github._outbound.acquire(blocking=False) for _ in range(github.MAX_OUTBOUND)]
+        self.assertTrue(all(held), "every slot was free to take")
+        try:
+            with patch.object(github, "READ_TIMEOUT_S", 0.05):
+                with self.assertRaises(github.GitHubBusy):
+                    github._get("/x", None)
+        finally:
+            for _ in held:
+                github._outbound.release()
 
 
 if __name__ == "__main__":

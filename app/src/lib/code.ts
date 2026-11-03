@@ -15,7 +15,8 @@ import {
 } from "@/lib/freshness"
 import { useAnyChange } from "@/lib/live"
 import { usePoll } from "@/lib/poll"
-import { prChecksPending, refreshPrs, refreshWorkspace } from "@/lib/workspace"
+import { quietly } from "@/lib/report"
+import { prChecksPending, refreshPrsOf, refreshWorkspace } from "@/lib/workspace"
 import { cachedTail, needsTailRead, rememberTail } from "@/lib/session-tail"
 import type { LocalTurn } from "@/lib/session-work"
 
@@ -119,21 +120,39 @@ export function useSessionFollowUps(sessions: Conversation[] | undefined, open?:
   const read = useRef(new Map<string, number>())
   useEffect(() => {
     const now = Date.now()
+    const ready: string[] = []
+    const late: Conversation[] = []
     for (const c of sessions ?? []) {
       const last = read.current.get(c.id)
       if (last !== undefined && now - last < SESSION_REREAD_MS) continue
       read.current.set(c.id, now)
-      const workspace = !c.worktree || last !== undefined
-      void (workspace ? refreshWorkspace(c.id) : Promise.resolve()).then(() => {
-        void refreshPrs(c.id)
-      })
+      if (!c.worktree) {
+        late.push(c)
+        continue
+      }
+      ready.push(c.id)
+      // A row this device has seen is re-read alongside rather than in front of the rest.
+      if (last !== undefined) void refreshWorkspace(c.id).catch(quietly("Reading a workspace"))
+    }
+    // One read for every row this device can read now; a bot whose plugin predates the batch
+    // answers them one at a time from inside `refreshPrsOf`.
+    if (ready.length) void refreshPrsOf(ready).catch(quietly("Reading sessions' pull requests"))
+    for (const c of late) {
+      // Its worktree isn't here yet, so there is no branch to read until the host names one.
+      void refreshWorkspace(c.id)
+        .then(() => refreshPrsOf([c.id]))
+        .catch(quietly("Reading sessions' pull requests"))
     }
   }, [sessions])
   const runningChecks = (sessions ?? []).filter((c) => c.id !== open && prChecksPending(c.prs))
   // Forced, so the freshness gate doesn't skip a tick that lands just inside its window.
   usePoll(
     () => {
-      for (const c of runningChecks) void refreshPrs(c.id, { force: true })
+      if (runningChecks.length)
+        void refreshPrsOf(
+          runningChecks.map((c) => c.id),
+          { force: true },
+        ).catch(quietly("Reading sessions' pull requests"))
     },
     PR_PENDING_MS,
     [],

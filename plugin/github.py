@@ -37,6 +37,16 @@ ORIGIN_RE = re.compile(r"github\.com[:/]([A-Za-z0-9-]+/[A-Za-z0-9._-]+?)(?:\.git
 PR_CACHE_S = 30
 # Checks still running are read again this often, so the app's pill is current while they do.
 PR_PENDING_CACHE_S = 10
+# A lookup that failed is remembered this long: a dependency that is down must not become a retry
+# storm, and every device's poll would otherwise pay the whole chain again.
+PR_FAILURE_CACHE_S = 30
+# How long one outbound call may take. A read waits less than the app's own read timeout (15 s), so
+# a dead dependency costs a worker a moment rather than the client's entire budget; a write keeps
+# the whole of it, since nothing else is waiting on the answer.
+READ_TIMEOUT_S = 5.0
+WRITE_TIMEOUT_S = 15.0
+# Outbound calls in flight at once across this process, whatever asks for them.
+MAX_OUTBOUND = 3
 # A branch's pull requests, newest first as GitHub answers them; a session's history is short.
 MAX_PRS = 100
 
@@ -53,6 +63,13 @@ class GitHubError(Exception):
     def __init__(self, message: str, status: int = 502):
         super().__init__(message)
         self.status = status
+
+
+class GitHubBusy(GitHubError):
+    """More calls are out than this host allows at once: a wait, not a failure of GitHub's."""
+
+    def __init__(self) -> None:
+        super().__init__("GitHub is busy on this host; try again in a moment.", 503)
 
 
 def _gh_cli_token() -> Optional[str]:
@@ -99,8 +116,14 @@ def _page(path: str, auth: Optional[str]) -> Tuple[Any, str]:
 
 
 def _fetch(
-    path: str, auth: Optional[str], method: str = "GET", data: Optional[Dict[str, Any]] = None
+    path: str,
+    auth: Optional[str],
+    method: str = "GET",
+    data: Optional[Dict[str, Any]] = None,
+    timeout: Optional[float] = None,
 ) -> Tuple[Any, str]:
+    """One call to GitHub. The slot is taken with the same patience as the call, so a caller queued
+    behind a dependency that hangs gives up with an answer instead of parking a thread."""
     # Without a token, public repos still answer (rate-limited).
     request = urllib.request.Request(
         f"{API}{path}",
@@ -114,8 +137,12 @@ def _fetch(
             "X-GitHub-Api-Version": "2022-11-28",
         },
     )
+    if timeout is None:
+        timeout = READ_TIMEOUT_S if method == "GET" else WRITE_TIMEOUT_S
+    if not _outbound.acquire(timeout=min(timeout, READ_TIMEOUT_S)):
+        raise GitHubBusy()
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
             raw = response.read()
             link = response.headers.get("Link") or ""
             # A DELETE answers 204 with no body.
@@ -126,6 +153,8 @@ def _fetch(
         raise GitHubError(_error_message(error) or f"GitHub answered {error.code}.") from None
     except (urllib.error.URLError, TimeoutError, ValueError):
         raise GitHubError("Couldn't reach GitHub from the server.") from None
+    finally:
+        _outbound.release()
 
 
 def _error_message(error: urllib.error.HTTPError) -> Optional[str]:
@@ -373,6 +402,11 @@ def origin_repo(repo_root: str) -> Optional[str]:
 
 
 _pr_cache: Dict[Tuple[str, str, Optional[int]], Tuple[float, List[Dict[str, Any]]]] = {}
+# A lookup that couldn't reach GitHub, and when it failed, under the key it was asked for.
+_pr_failed: Dict[Tuple[str, str, Optional[int]], Tuple[float, str, int]] = {}
+# Outbound calls in flight: every call this module makes passes through it, so a screen asking after
+# a dozen sessions queues a few at a time rather than holding a worker per session.
+_outbound = threading.BoundedSemaphore(MAX_OUTBOUND)
 
 
 FAILED_CONCLUSIONS = {"failure", "timed_out", "cancelled", "action_required", "startup_failure"}
@@ -437,6 +471,21 @@ def _cache_ttl(value: List[Dict[str, Any]]) -> float:
     return PR_PENDING_CACHE_S if any(pr.get("checks") == "pending" for pr in value) else PR_CACHE_S
 
 
+def _cached_answer(
+    repo_root: str, branch: str, limit: Optional[int]
+) -> Optional[List[Dict[str, Any]]]:
+    """A branch's answer this host already holds: its own, or a whole one a capped read takes the
+    newest of. A capped answer never serves a whole read, which is why ``limit`` is in the key."""
+    found = _pr_cache.get((repo_root, branch, limit))
+    if found and time.time() - found[0] < _cache_ttl(found[1]):
+        return found[1]
+    if limit is not None:
+        whole = _pr_cache.get((repo_root, branch, None))
+        if whole and time.time() - whole[0] < _cache_ttl(whole[1]):
+            return whole[1][:limit]
+    return None
+
+
 def _live(row: Any) -> bool:
     """Whether a pull request's checks are worth asking after: it's open, a draft included.
 
@@ -462,21 +511,32 @@ def pull_requests(
     finished pull request's no longer matter, and each lookup is a request of its own.
 
     ``limit`` asks GitHub for only the newest few, for the caller that wants one (``pull_request``).
-    The answer is cached under its own key, so a capped read can never serve the app's read of the
-    session's whole history.
+    An answer is cached under its own key, and a whole one also answers a capped read with its
+    newest; a capped answer never answers a whole read.
 
     Cached for a short while per branch: the app asks after every turn and on every catch-up. A
     cached answer serves a call without ``checks`` too; one without them isn't cached.
 
     ``strict`` lets the GitHub failure out instead of answering an empty list, so a caller that must
     tell "no pull requests" from "couldn't ask GitHub" — the app's read of a session's pull requests
-    — never reads one as the other. Either way a failed lookup isn't cached: a failure isn't an
-    answer.
+    — never reads one as the other. A failure is remembered for a short while rather than answered,
+    so a dependency that is down costs the next caller nothing: a lenient caller still gets its empty
+    list, and only a strict one is refused. An answer is never built from a remembered failure.
     """
     key = (repo_root, branch, limit)
-    cached = _pr_cache.get(key)
-    if not fresh and cached and time.time() - cached[0] < _cache_ttl(cached[1]):
-        return cached[1]
+    if not fresh:
+        cached = _cached_answer(repo_root, branch, limit)
+        if cached is not None:
+            return cached
+    remembered = _pr_failed.get(key)
+    if remembered and not fresh:
+        at, message, status = remembered
+        if time.time() - at < PR_FAILURE_CACHE_S:
+            # It couldn't reach GitHub a moment ago: asking again now only holds a worker for nothing.
+            if strict:
+                raise GitHubError(message, status)
+            return []
+        del _pr_failed[key]
     value: List[Dict[str, Any]] = []
     failed = False
     repo = origin_repo(repo_root)
@@ -487,10 +547,19 @@ def pull_requests(
             rows = _get(
                 f"/repos/{repo}/pulls?head={head}&state=all&per_page={limit or MAX_PRS}", auth
             )
-        except GitHubError:
+        except GitHubBusy:
+            # Too many calls out already: a wait, so nothing is remembered against GitHub itself,
+            # and a lenient caller still gets the empty list its contract promises.
             if strict:
                 raise
             failed, rows = True, []
+        except GitHubError as error:
+            _pr_failed[key] = (time.time(), str(error), error.status)
+            if strict:
+                raise
+            failed, rows = True, []
+        else:
+            _pr_failed.pop(key, None)
         if isinstance(rows, list):
             rows = rows[:limit] if limit else rows
             value = [
@@ -528,12 +597,16 @@ def _prune_cache() -> None:
     stale = time.time() - PR_CACHE_S * 4
     for key in [key for key, (at, _) in _pr_cache.items() if at < stale]:
         del _pr_cache[key]
+    for key in [key for key, entry in _pr_failed.items() if entry[0] < stale]:
+        del _pr_failed[key]
 
 
 def forget_pull_request(repo_root: str, branch: str) -> None:
     """Forgets a branch's answers, the capped one ``pull_request`` keeps included."""
     for key in [key for key in _pr_cache if key[:2] == (repo_root, branch)]:
         del _pr_cache[key]
+    for key in [key for key in _pr_failed if key[:2] == (repo_root, branch)]:
+        del _pr_failed[key]
 
 
 def create_pull_request(

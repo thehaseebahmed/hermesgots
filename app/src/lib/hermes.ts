@@ -3259,9 +3259,40 @@ export async function getSessionPrs(
     headers: headers(config),
     signal,
   })
-  const prs: unknown = (await response.json())?.prs
-  if (!Array.isArray(prs)) return []
-  return prs
+  return parsePrs((await response.json())?.prs)
+}
+
+/**
+ * Every named session's pull requests in one read: what a screen listing sessions asks for,
+ * instead of one request per row. `unread` names the sessions the host couldn't answer for, whose
+ * rows keep what the device already holds.
+ */
+export async function getSessionPrsBatch(
+  config: HermesConfig,
+  sessionIds: string[],
+  signal?: AbortSignal,
+): Promise<{ prs: Record<string, PullRequest[]>; unread: string[] }> {
+  const query = new URLSearchParams()
+  for (const id of sessionIds) query.append("session", id)
+  const response = await request(`${pluginRoot(config.baseUrl)}/prs?${query}`, {
+    headers: headers(config),
+    signal,
+  })
+  const body = await response.json()
+  const prs: Record<string, PullRequest[]> = {}
+  if (body?.prs && typeof body.prs === "object") {
+    for (const [sessionId, list] of Object.entries(body.prs)) prs[sessionId] = parsePrs(list)
+  }
+  const unread = Array.isArray(body?.unread)
+    ? body.unread.filter((id: unknown): id is string => typeof id === "string")
+    : []
+  return { prs, unread }
+}
+
+/** The pull requests a route answered, read defensively: an older host may name fields it lacks. */
+function parsePrs(value: unknown): PullRequest[] {
+  if (!Array.isArray(value)) return []
+  return value
     .filter((pr) => typeof pr?.number === "number" && PR_STATES.has(pr.state))
     .map((pr) => ({
       repo: typeof pr.repo === "string" ? pr.repo : "",
