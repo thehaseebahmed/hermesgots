@@ -1399,7 +1399,6 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
                         <ThreadCard
                           key={`card-${entry.thread.chat.id}`}
                           thread={entry.thread}
-                          botId={profile?.botId}
                           profileId={conversation?.profileId ?? ""}
                           open={entry.thread.chat.id === openThread}
                           beside={Boolean(routeThread)}

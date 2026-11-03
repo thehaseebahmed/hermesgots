@@ -8,13 +8,13 @@ import {
   Undo2Icon,
 } from "lucide-react"
 
-import { Bot } from "@/components/bot"
 import { useCodeFace } from "@/components/chat/code-face"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Spinner } from "@/components/ui/spinner"
 import type { Move } from "@/lib/hermes"
 import { COLUMN } from "@/lib/layout"
 import { stayHere } from "@/lib/nav"
+import { openerWords } from "@/lib/thread-cards"
 import type { Thread } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { reasonText } from "@/lib/waiting"
@@ -26,9 +26,14 @@ export function StateIcon({ state }: { state: Thread["state"] }) {
   return <MessageCircleIcon className="size-5 text-muted-foreground" />
 }
 
+/**
+ * A thread drawn where it began: the message that opened it, in the user's own bubble where this
+ * device holds it, and under that the thread itself — its state, its name and a way in. The bubble's
+ * words are the message's and the card's line is the thread's name, never the other way round; no
+ * avatar, because a card is not a turn (ADR 0082, amending 0034).
+ */
 export function ThreadCard({
   thread,
-  botId,
   profileId,
   open = false,
   beside = false,
@@ -37,7 +42,6 @@ export function ThreadCard({
   onUndo,
 }: {
   thread: Thread
-  botId?: string
   profileId: string
   open?: boolean
   beside?: boolean
@@ -48,17 +52,23 @@ export function ThreadCard({
 }) {
   const face = useCodeFace()
   const label = thread.reason ? reasonText(thread.reason) : undefined
+  const opener = openerWords(thread, move)
   return (
-    <div data-slot="thread-card" className={cn("flex flex-col items-start gap-1.5", COLUMN)}>
-      <Bubble variant="default" align="end" className="max-w-[85%] self-end">
-        <BubbleContent
-          className={cn("line-clamp-4 px-4 py-2.5 text-[15px] whitespace-pre-wrap", face)}
-        >
-          {move?.text ?? thread.opener ?? thread.chat.title}
-        </BubbleContent>
-      </Bubble>
-      <div className="mt-1.5 flex w-full max-w-[calc(85%+2.5rem)] items-end gap-2">
-        <Bot id={botId} className="size-8 self-end" />
+    <div
+      data-slot="thread-card"
+      data-thread={thread.chat.id}
+      className={cn("flex flex-col items-start gap-1.5", COLUMN)}
+    >
+      {opener && (
+        <Bubble variant="default" align="end" className="max-w-[85%] self-end">
+          <BubbleContent
+            className={cn("line-clamp-4 px-4 py-2.5 text-[15px] whitespace-pre-wrap", face)}
+          >
+            {opener}
+          </BubbleContent>
+        </Bubble>
+      )}
+      <div className="mt-1.5 flex w-full max-w-[85%] items-end">
         <div
           className={cn(
             "flex min-h-14 min-w-0 flex-1 items-center gap-3 rounded-2xl border bg-card px-4 py-2",
@@ -85,7 +95,7 @@ export function ThreadCard({
           )}
         </div>
       </div>
-      <div className="-mt-3.5 ml-10 flex min-h-11 items-center gap-1">
+      <div className="-mt-3.5 ml-2 flex min-h-11 items-center gap-1">
         <Link
           to={`/c/${thread.chat.id}`}
           replace={beside}

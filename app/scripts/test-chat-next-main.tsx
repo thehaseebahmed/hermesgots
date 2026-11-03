@@ -62,8 +62,17 @@ async function seedMain(name: string) {
     ],
     { bots: [bot], botThreads: true, settings: { chatNext: true } },
   )
-  // The thread has been sent in, as one triage or a /thread made would have.
+  // The thread has been sent in, as one triage or a /thread made would have: the message that opened
+  // it is what its card says, so this device is given that row too.
   await db.conversations.update(`${name}-t1`, { updatedAt: 5 })
+  await db.messages.put({
+    id: `${name}-t1-open`,
+    conversationId: `${name}-t1`,
+    role: "user",
+    content: "Book the flights",
+    status: "done",
+    createdAt: 3,
+  })
   return { bot, main, thread: `${name}-t1`, host: fakeHost(`memento-${main}`, { plugin: true }) }
 }
 
@@ -83,8 +92,8 @@ test("Main opens on chat-next under the bot's name, with its threads as cards in
     assert.match(find("[data-chat-next] header")?.textContent ?? "", /1 thread/)
     assert.match(
       find('[data-chat-next] [data-slot="thread-card"]')?.textContent ?? "",
-      /Trip to Lisbon/,
-      "the bot's thread is a card in Main's flow",
+      /Book the flights/,
+      "the bot's thread is a card in Main's flow, carrying the message that opened it",
     )
   })
 })

@@ -1,5 +1,11 @@
 # The bot opens Main, and its threads are cards drawn inside it
 
+**Amended in the card's shape by
+[ADR 0082](0082-a-threads-card-keeps-the-message-in-its-bubble-and-the-name-on-the-card.md)
+(2026-11-03):** a card carries the thread's name, the message that opened it stays in its own bubble
+where it was typed, the bot's avatar is gone, and the card spins while a run of that thread is in
+flight. Where a card is drawn, and when, stands as this ADR decided.
+
 Clicking a bot opens its Main thread, and every thread the bot has is a card drawn in Main's own flow at the time that thread was started — one screen is the bot. Main's composer never mints a thread: what it sends is triaged (ADR 0029), and a thread the user means to start is asked for with the `/thread` command, which takes the model picked in the composer for the thread it opens. The `/b/` card screen goes away: home and the Chats list's bot row resolve to Main, a stale `/b/` link redirects there, and at `xl` Main itself is the pane beside an open thread.
 
 A card is drawn for every new thread whoever opened it — the user's `/thread` or triage — with its opener bubble, so a message that opened a thread is visible where it was typed. A marker and a card are never drawn for the same message: where a card sits, it does the marker's work, carrying Undo until the thread replies. A message triage moved into an *older* thread keeps its Moved marker, with its link and Undo, at the time it left; that thread's own card stays where it always was.

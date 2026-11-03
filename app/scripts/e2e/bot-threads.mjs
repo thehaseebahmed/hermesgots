@@ -1,4 +1,15 @@
-import { addBot, app, assert, centred, flow, mockAuth, pass, readHeader, settled } from "./lib.mjs"
+import {
+  addBot,
+  app,
+  assert,
+  cardOf,
+  centred,
+  flow,
+  mockAuth,
+  pass,
+  readHeader,
+  settled,
+} from "./lib.mjs"
 
 const NEW_MOCK = process.env.TRIAGE_NEW_MOCK_URL
 const THREAD_MOCK = process.env.TRIAGE_THREAD_MOCK_URL
@@ -27,12 +38,9 @@ const OLDER_THREAD = "Keep the gate open"
 
 const count = (page, selector) => page.locator(selector).count()
 
-const cardWith = (page, said) =>
-  page.locator('[data-slot="thread-card"]').filter({ hasText: said }).first()
-
 function sequence(page) {
   return page.evaluate(
-    ([messages, threads]) => {
+    (messages) => {
       const content = document.querySelector('[data-slot="message-scroller-content"]')
       if (!content) return []
       return [...content.children]
@@ -41,14 +49,14 @@ function sequence(page) {
           const slot = child.getAttribute("data-slot")
           const said = child.textContent?.trim() ?? ""
           if (slot === "day-heading" || slot === "other") return []
-          if (slot === "thread-card")
-            return [`card:${threads.find((thread) => said.includes(thread.title))?.title ?? said}`]
+          // By the thread the card draws: the words on it are not a stable key.
+          if (slot === "thread-card") return [`card:${child.getAttribute("data-thread")}`]
           if (slot === "message-scroller-item")
             return [`message:${messages.find((message) => said.includes(message)) ?? said}`]
           return []
         })
     },
-    [MESSAGES, THREADS],
+    MESSAGES,
   )
 }
 
@@ -518,14 +526,14 @@ await flow(
       await sequence(page),
       [
         `message:${MESSAGES[0]}`,
-        `card:${THREADS[0].title}`,
+        `card:${THREADS[0].id}`,
         `message:${MESSAGES[1]}`,
         `message:${MESSAGES[2]}`,
-        `card:${THREADS[1].title}`,
+        `card:${THREADS[1].id}`,
       ],
       "each card sits where its thread began, between the messages written around it",
     )
-    const card = cardWith(page, THREADS[0].title)
+    const card = cardOf(page, THREADS[0].id)
     assert.ok(
       (await card.textContent())?.includes(THREADS[0].opener),
       "the card shows the message that opened it",
@@ -576,22 +584,23 @@ await flow(
       after.slice(0, 5),
       [
         `message:${MESSAGES[0]}`,
-        `card:${THREADS[0].title}`,
+        `card:${THREADS[0].id}`,
         `message:${MESSAGES[1]}`,
         `message:${MESSAGES[2]}`,
-        `card:${THREADS[1].title}`,
+        `card:${THREADS[1].id}`,
       ],
       "the cards already there keep their places",
     )
     assert.equal(after.at(-1)?.startsWith("card:"), true, "the newest card closes the flow")
+    const newest = await page.locator('[data-slot="thread-card"]').last().textContent()
     assert.equal(
-      after.at(-1)?.includes(STARTED),
+      newest?.includes(STARTED),
       true,
       "the started thread's card holds the message that opened it",
     )
     assert.equal(
-      after.filter((entry) => entry.includes(STARTED)).length,
-      1,
+      after.filter((entry) => entry.startsWith("message:") && entry.includes(STARTED)).length,
+      0,
       "only the card carries it: /thread is never triaged",
     )
     assert.equal(await page.getByText(/Moved to/).count(), 0, "a /thread message is never triaged")
@@ -775,7 +784,7 @@ await flow(
       "Main and a thread, side by side on a laptop",
     )
     // The started thread's card, in the Main that stays on screen beside whatever the pane holds.
-    const startedCard = cardWith(page, STARTED)
+    const startedCard = cardOf(page, threadId)
     await startedCard.getByRole("link", { name: /View thread/ }).click()
     await page.waitForURL(`**/c/${threadId}`, { timeout: 15_000 })
     await until(

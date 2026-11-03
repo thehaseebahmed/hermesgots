@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { threadCards } from "../src/lib/thread-cards.ts"
+import { openerWords, threadCards } from "../src/lib/thread-cards.ts"
 
 const message = (id, createdAt, extra = {}) => ({
   id,
@@ -112,4 +112,19 @@ test("no threads, or none yet read, draws nothing", () => {
     assert.equal(cards.before.size, 0)
     assert.deepEqual(trailing(cards), [])
   }
+})
+
+test("a card's bubble says the move that opened its thread before anything else", () => {
+  const opened = thread("t30", 30, { opener: "What the user typed in it" })
+  assert.equal(openerWords(opened, { text: "What triage moved in" }), "What triage moved in")
+})
+
+test("a card's bubble says the first message the user sent, and nothing without one", () => {
+  assert.equal(
+    openerWords(thread("t30", 30, { opener: "What the user typed in it" })),
+    "What the user typed in it",
+  )
+  // A thread this device holds no message of draws no bubble: its name is the card's line, and the
+  // name never stands in for a message nobody here has.
+  assert.equal(openerWords(thread("t30", 30)), undefined)
 })

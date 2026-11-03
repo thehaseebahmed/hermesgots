@@ -15,6 +15,7 @@ import {
   seedSettings,
   settle,
   text,
+  threadCard,
   until,
 } from "./component-kit.tsx"
 
@@ -51,7 +52,8 @@ async function reset() {
   return mainThreadId(bot.id)
 }
 
-async function seed() {
+/** Seeds Main and its threads; `without` names a thread this device is given no transcript of. */
+async function seed({ without = [] }: { without?: string[] } = {}) {
   const mainId = await reset()
   await db.messages.bulkPut([
     msg("m1", mainId, "user", MAIN_MESSAGES[0], at(-3, 9)),
@@ -70,26 +72,28 @@ async function seed() {
       muted,
     })),
   )
-  await db.messages.bulkPut([
-    msg("a-1", "t-a", "user", "Something about a plan", at(-3, 11)),
-    msg("b-1", "t-b", "user", "Thread b's opener", at(-2, 11)),
-    msg("b-2", "t-b", "assistant", "A reply", at(-2, 12)),
-    msg("d-1", "t-d", "user", "Thread d's opener", at(-2, 13)),
-    msg("c-1", "t-c", "user", "Thread c's opener", at(0, 11)),
-  ])
+  await db.messages.bulkPut(
+    [
+      msg("a-1", "t-a", "user", "Something about a plan", at(-3, 11)),
+      msg("b-1", "t-b", "user", "Thread b's opener", at(-2, 11)),
+      msg("b-2", "t-b", "assistant", "A reply", at(-2, 12)),
+      msg("d-1", "t-d", "user", "Thread d's opener", at(-2, 13)),
+      msg("c-1", "t-c", "user", "Thread c's opener", at(0, 11)),
+    ].filter((row) => !without.includes(row.conversationId)),
+  )
 }
 
 const content = () => find('[data-slot="message-scroller-content"]')
 
-function flow(threads = THREADS, bodies = MAIN_MESSAGES) {
+function flow(bodies = MAIN_MESSAGES) {
   return [...(content()?.children ?? [])]
     .filter((child) => !child.hasAttribute("data-message-scroller-spacer"))
     .map((child) => {
       const slot = child.getAttribute("data-slot")
       const said = child.textContent?.trim() ?? ""
       if (slot === "day-heading") return `day:${said}`
-      if (slot === "thread-card")
-        return `card:${threads.find((thread) => said.includes(thread.title))?.title ?? said}`
+      // By the thread the card draws: the words on it are not a stable key.
+      if (slot === "thread-card") return `card:${child.getAttribute("data-thread")}`
       if (slot === "moved-marker") return `marker:${child.getAttribute("data-move")}`
       if (child.getAttribute("role") === "separator") {
         const label = child.getAttribute("aria-label") ?? ""
@@ -102,6 +106,7 @@ function flow(threads = THREADS, bodies = MAIN_MESSAGES) {
 }
 
 const cards = () => findAll('[data-slot="thread-card"]')
+const card = (threadId: string) => threadCard(threadId)
 const heading = (timestamp: number) => `day:${dayOf(timestamp, Date.now())}`
 const drawn = () => until(async () => cards().length === THREADS.length, "Main's cards")
 
@@ -113,14 +118,14 @@ test("Main draws its threads as cards where they started, under its own day head
     assert.deepEqual(flow(), [
       heading(at(-3, 9)),
       `message:${MAIN_MESSAGES[0]}`,
-      "card:Thread a",
+      "card:t-a",
       heading(at(-2, 9)),
       `message:${MAIN_MESSAGES[1]}`,
-      "card:Thread b",
-      "card:Thread d",
+      "card:t-b",
+      "card:t-d",
       heading(at(0, 9)),
       `message:${MAIN_MESSAGES[2]}`,
-      "card:Thread c",
+      "card:t-c",
     ])
     assert.equal(findAll('[data-slot="day-heading"]').at(-1)?.textContent, "Today")
   })
@@ -132,7 +137,10 @@ test("Main is never drawn as a card among its own messages", async () => {
   await mount(chatScreen(mainThreadId(bot.id)), async () => {
     await drawn()
     assert.equal(cards().length, THREADS.length)
-    assert.ok(cards().every((card) => !card.textContent?.includes("Main")))
+    assert.ok(
+      cards().every((one) => one.getAttribute("data-thread") !== mainThreadId(bot.id)),
+      "no card is drawn for Main itself",
+    )
   })
 })
 
@@ -148,24 +156,52 @@ test("a card keeps its place when its thread gets a message", async () => {
     })
     await settle()
     assert.deepEqual(flow(), before, "the card holds the place its thread started in")
-    const card = cards().find((one) => one.textContent?.includes("Thread b"))
-    assert.ok(card?.textContent?.includes("2 replies"), "the card reads the thread's new state")
+    assert.ok(
+      card("t-b")?.textContent?.includes("2 replies"),
+      "the card reads the thread's new state",
+    )
   })
 })
 
-test("a card reads as it did on the bot's screen", async () => {
+test("a card keeps its message in the bubble and its name on the card, with no avatar", async () => {
   await seed()
   globalThis.fetch = async () => json({})
   await mount(chatScreen(mainThreadId(bot.id)), async () => {
     await drawn()
-    const card = cards().find((one) => one.textContent?.includes("Thread b"))
-    assert.ok(card, "the thread's card is on screen")
-    assert.ok(card.textContent?.includes("Thread b's opener"), "its opener above it")
-    assert.ok(card.textContent?.includes("Thread b"), "its title")
-    assert.ok(card.textContent?.includes("1 reply"), "how many replies it has")
-    assert.ok(card.querySelector("svg.lucide-message-circle"), "its state, an icon")
-    const muted = cards().find((one) => one.textContent?.includes("Thread d"))
-    assert.ok(muted?.querySelector('[aria-label="Muted"]'), "a muted thread's mark")
+    const one = card("t-b")
+    assert.ok(one, "the thread's card is on screen")
+    const bubble = one.querySelector('[data-slot="bubble-content"]')
+    assert.equal(bubble?.textContent, "Thread b's opener", "the message that opened it, in its bubble")
+    assert.ok(one.textContent?.includes("Thread b"), "and the thread's name on the card below it")
+    assert.notEqual(bubble?.textContent, "Thread b", "the bubble never carries the name instead")
+    assert.equal(
+      one.querySelector('[role="img"]'),
+      null,
+      "no bot avatar: a card is not a turn",
+    )
+    assert.ok(one.textContent?.includes("1 reply"), "how many replies it has")
+    assert.ok(one.querySelector("svg.lucide-message-circle"), "its state, an icon")
+    // The name is the card's line only: the bubble carries the message, never the name standing in
+    // for a message this device does not hold.
+    const words = card("t-a")
+    assert.ok(
+      words?.querySelector('[data-slot="bubble-content"]')?.textContent?.includes("Something about a plan"),
+      "a card's bubble says the message that opened it",
+    )
+    assert.ok(card("t-d")?.querySelector('[aria-label="Muted"]'), "a muted thread's mark")
+  })
+})
+
+test("a thread whose transcript isn't here draws no bubble, and its name on the card", async () => {
+  await seed({ without: ["t-a"] })
+  globalThis.fetch = async () => json({})
+  await mount(chatScreen(mainThreadId(bot.id)), async () => {
+    await drawn()
+    assert.equal(cards().length, THREADS.length, "the card keeps its place among the others")
+    const one = card("t-a")
+    assert.ok(one, "the thread's card is still drawn")
+    assert.equal(one.querySelector('[data-slot="bubble"]'), null, "with no message to show")
+    assert.ok(one.textContent?.includes("Thread a"), "and says the one thing it has: its name")
   })
 })
 
@@ -174,9 +210,9 @@ test("tapping a card opens its thread, and back returns to Main", async () => {
   globalThis.fetch = async () => json({})
   await mount(chatScreen(mainThreadId(bot.id)), async () => {
     await drawn()
-    const card = cards().find((one) => one.textContent?.includes("Thread b"))
-    assert.ok(card, "the thread's card is on screen")
-    await click(card.querySelector("a"))
+    const one = card("t-b")
+    assert.ok(one, "the thread's card is on screen")
+    await click(one.querySelector("a"))
     assert.ok(text().includes("Thread b"), "the thread opened")
     assert.ok(text().includes("A reply"), "with its own messages")
     await click(find('[aria-label="Back to Cards"]'))
@@ -263,10 +299,10 @@ test("a Main left with no messages reads its moves, its divider and its cards by
       "Main's cards and the thread its moves name",
     )
     assert.deepEqual(
-      flow([...STARTED_LATER, TAKING]),
+      flow(),
       [
         heading(at(-1, 9)),
-        "card:Memento updates & Hermes docker restart",
+        "card:t-memento",
         heading(at(0, 6)),
         // Every one of these moves and the compaction were made before the first of these threads
         // began, so all five lead the cards — the order the clock gives them, not the order the
@@ -276,10 +312,10 @@ test("a Main left with no messages reads its moves, its divider and its cards by
         "marker:mv3",
         "marker:mv4",
         "compaction",
-        "card:clef:27b vs d3 comparison",
-        "card:Compile requests per month table",
-        "card:Create a skill with cli",
-        "card:LiteLLM config",
+        "card:t-clef",
+        "card:t-compile",
+        "card:t-skill",
+        "card:t-litellm",
       ],
       "the newest thing in Main is drawn last, under every message triage took before it",
     )

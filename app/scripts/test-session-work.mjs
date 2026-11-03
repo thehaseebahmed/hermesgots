@@ -93,6 +93,10 @@ test("a wake the host has settled stops the working it owed", () => {
 test("a thread's pill reads working while its subagents run", () => {
   assert.equal(threadState({ subagents: 1 }), "working")
   assert.equal(threadState({ streaming: true }), "working")
+  // A run the host lists but this device is not streaming — one started on another device — is a
+  // spinner on the thread's card too, so the card never says "nothing here" about a run that runs.
+  assert.equal(threadState({ live: "running" }), "working")
+  assert.equal(threadState({ live: "waiting_for_approval" }), "waiting")
   assert.equal(threadState({}), "idle")
 })
 

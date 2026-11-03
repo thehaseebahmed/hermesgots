@@ -470,6 +470,12 @@ export async function type(element: Element | null, value: string) {
 export const text = () => document.body.textContent ?? ""
 export const find = (selector: string) => document.querySelector(selector)
 export const findAll = (selector: string) => [...document.querySelectorAll(selector)]
+/**
+ * The card Main draws for a thread, by the thread it draws and never by the words on it: those are the
+ * thread's own message, which a fixture can reword (ADR 0082).
+ */
+export const threadCard = (threadId: string) =>
+  find(`[data-slot="thread-card"][data-thread="${threadId}"]`)
 export const findText = (selector: string, label: string) =>
   findAll(selector).find((one) => one.textContent?.includes(label)) ?? null
 

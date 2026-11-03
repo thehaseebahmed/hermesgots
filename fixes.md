@@ -2629,3 +2629,29 @@ the opposite order to `readPace`'s, so folding them in is a behaviour change per
 
 Found by the reuse, quality and altitude angles of this branch's cleanup pass; the pull request does
 not wait on it.
+
+---
+
+# Deferred by the review passes on Main's thread cards
+
+## Careful
+
+### 1. The opener read takes the first `user` row, which can be a row the thread never draws
+
+`useThreads` (`src/lib/threads.ts`) fills a card's `opener` from the first row of the thread's local
+window whose role is `user`, with no filter for the kinds the thread hides — a wake prompt
+(`src/lib/wake-prompt.ts`'s `isWakePrompt`, which `history.ts` skips) and seam scaffolding land in
+`db.messages` as ordinary user rows. A device holding only a thread's newer pages can therefore draw that
+machinery as the card's words.
+
+- Cost: one card in a long thread reads as `[ASYNC DELEGATION COMPLETE — …]` instead of the message the
+  user sent. It is worse than it was before the cards changed: the text used to sit in a bubble under the
+  thread's name, and it is now the card's whole line (ADR 0082).
+- Suggested fix: the rule that decides what a thread draws is the fold's (`history.ts`'s `isShown`,
+  `fold.ts`'s `isRequest`), so the fact belongs on the row the fold wrote — a local flag beside
+  `hermesAt` — and the opener read skips a row without it. Matching `isWakePrompt` inside `threads.ts`
+  instead would be a second predicate to keep in step with the first.
+- Why it is not applied here: the read predates this branch, and the fix's blast radius is the fold, the
+  stored row shape and a re-fold of what the device holds — code this change never touches.
+
+Found by the `/simplify` altitude angle on this branch; the pull request does not wait on it.

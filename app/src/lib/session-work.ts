@@ -63,6 +63,8 @@ export interface ThreadFacts {
   waiting?: boolean
   /** This device's newest reply is still streaming. */
   streaming?: boolean
+  /** The host says a run of this thread is in flight, whoever started it. */
+  live?: LiveTurn
   /** This device's newest reply failed. */
   failed?: boolean
   /** How many of the thread's subagents the host still holds at work. */
@@ -216,6 +218,7 @@ export function isUnread(activity: number, mark: number | undefined): boolean {
 export function threadState(thread: ThreadFacts): ThreadState {
   const state = sessionState({
     local: { streaming: thread.streaming, waiting: thread.waiting },
+    live: thread.live,
     subagents: thread.subagents,
     waking: thread.waking,
   })

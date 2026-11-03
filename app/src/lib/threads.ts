@@ -17,7 +17,13 @@ import {
 import { useXLarge } from "@/lib/media"
 import { byName } from "@/lib/compare"
 import { threadState, type ThreadState } from "@/lib/session-work"
-import { useLiveSubagents, useLiveWaking, useWaiting, type WaitingReason } from "@/lib/waiting"
+import {
+  useAllLiveRuns,
+  useLiveSubagents,
+  useLiveWaking,
+  useWaiting,
+  type WaitingReason,
+} from "@/lib/waiting"
 
 /** How many of a bot's newest threads its screen lists, and Main draws as cards. */
 const THREADS = 50
@@ -74,6 +80,9 @@ export function useThreads(profileId: string | undefined): Thread[] | undefined 
   const live = useWaiting()
   const subagents = useLiveSubagents()
   const wakes = useLiveWaking()
+  // The host's own account of which threads have a run in flight: a card shows a spinner for a run
+  // started on another device too, where this device has no reply of its own to stream.
+  const runs = useAllLiveRuns()
   const answer = useLiveQuery(async () => {
     if (!profileId) return { profileId, rows: [] }
     const chats = await db.conversations
@@ -141,13 +150,14 @@ export function useThreads(profileId: string | undefined): Thread[] | undefined 
       const state = threadState({
         waiting: Boolean(reason),
         streaming,
+        live: runs[chat.hermesSessionId],
         failed,
         subagents: subagents[chat.hermesSessionId],
         waking: wakes[chat.hermesSessionId],
       })
       return { chat, opener, last, replies, state, reason }
     })
-  }, [answer, profileId, live, subagents, wakes])
+  }, [answer, profileId, live, runs, subagents, wakes])
 }
 
 export interface BotSummary {

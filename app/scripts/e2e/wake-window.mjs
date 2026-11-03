@@ -5,7 +5,7 @@
 // run its course (ADR 0057). What only a browser reaches: the app learning the fact from the poll the
 // moment the run ends, holding it across a navigation to another screen, and giving it up when the
 // wake turn appears — against a mock that holds the wake back long enough to watch.
-import { app, assert, flow, mock, pass, runId } from "./lib.mjs"
+import { app, assert, cardSelector, flow, mock, pass, runId } from "./lib.mjs"
 
 const ASK = "delegate and ask"
 const QUESTION = "Should the cap cover the archived journals too?"
@@ -40,16 +40,15 @@ await flow(
       const body = await answered.json()
       return { session: body.sessions?.[sessionId] ?? null, waking: body.waking?.[sessionId] ?? 0 }
     }
-    // Main's card for the chat, as the DOM draws it: the spinner while anything of it is at work,
-    // the message glyph when nothing is.
+    // Main's card for the chat, as page.evaluate draws it: the spinner while anything of it is at
+    // work, the message glyph when nothing is.
     const card = () =>
-      page.evaluate((title) => {
-        const cards = [...document.querySelectorAll("[data-slot=thread-card]")]
-        const found = cards.find((one) => one.textContent?.includes(title))
+      page.evaluate((selector) => {
+        const found = document.querySelector(selector)
         return found
           ? { drawn: true, spinning: Boolean(found.querySelector("[data-slot=spinner]")) }
           : null
-      }, TITLE)
+      }, cardSelector(chat))
 
     await send(ASK)
     await page.getByText(QUESTION).waitFor({ timeout: 20_000 })

@@ -289,7 +289,6 @@ export function AppThreadView({
                           <ThreadCard
                             key={`card-${entry.thread.chat.id}`}
                             thread={entry.thread}
-                            botId={main?.botId}
                             profileId={main?.profileId ?? ""}
                             open={entry.thread.chat.id === main?.openThread}
                             beside={Boolean(main?.beside)}

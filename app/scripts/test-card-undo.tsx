@@ -16,6 +16,7 @@ import {
   seedSettings,
   settle,
   text,
+  threadCard,
   until,
 } from "./component-kit.tsx"
 
@@ -148,12 +149,11 @@ const joined: Move = {
   new: false,
 }
 
-const cards = () => findAll('[data-slot="thread-card"]')
-const card = (title: string) => cards().find((one) => one.textContent?.includes(title)) ?? null
+const card = (threadId: string) => threadCard(threadId) ?? null
 const marker = () => findAll("p").find((one) => one.textContent?.startsWith("Moved to")) ?? null
 /** The line's one link, which covers the line so a press anywhere on the sentence goes to the thread. */
 const lineLink = () => marker()?.querySelector("a") ?? null
-const settles = (title: string) => until(async () => card(title) !== null, `the ${title} card`)
+const settles = (threadId: string) => until(async () => card(threadId) !== null, `the ${threadId} card`)
 const undoIn = (element: Element | null) =>
   [...(element?.querySelectorAll("button") ?? [])].find(
     (button) => button.getAttribute("aria-label") === "Undo",
@@ -163,8 +163,8 @@ test("a triage-opened thread's card carries Undo, and no marker is drawn beside 
   await seed([opened])
   host([opened])
   await mount(chatScreen(MAIN), async () => {
-    await settles("New thread")
-    const drawn = card("New thread")
+    await settles("n1")
+    const drawn = card("n1")
     assert.ok(drawn, "the thread triage opened is a card in Main's flow")
     assert.ok(drawn.textContent?.includes(MOVED), "its opener shows the message that left Main")
     assert.ok(undoIn(drawn), "the card offers Undo")
@@ -176,8 +176,8 @@ test("the card's opener is the moved message where this device holds no copy of 
   await seed([opened], { copy: false })
   host([opened])
   await mount(chatScreen(MAIN), async () => {
-    await settles("New thread")
-    const drawn = card("New thread")
+    await settles("n1")
+    const drawn = card("n1")
     assert.ok(drawn, "the thread triage opened is a card in Main's flow")
     assert.ok(
       drawn.textContent?.includes(MOVED),
@@ -191,8 +191,8 @@ test("the card stops offering Undo once its thread has replied", async () => {
   await seed([replied])
   host([replied])
   await mount(chatScreen(MAIN), async () => {
-    await settles("New thread")
-    const drawn = card("New thread")
+    await settles("n1")
+    const drawn = card("n1")
     assert.ok(drawn, "the card is still there")
     assert.equal(undoIn(drawn), null, "a thread that replied can't be taken back")
     assert.doesNotMatch(text(), /Moved to/)
@@ -203,11 +203,11 @@ test("a message moved into an older thread keeps its marker, and that thread's c
   await seed([joined])
   host([joined])
   await mount(chatScreen(MAIN), async () => {
-    await settles("Older thread")
+    await settles("t-old")
     assert.match(text(), /Moved to .*Older thread/, "the marker names the thread it joined")
     assert.equal(find('a[href="/c/t-old"]') !== null, true, "and links to it")
     assert.ok(undoIn(marker()), "the marker keeps its Undo")
-    const drawn = card("Older thread")
+    const drawn = card("t-old")
     assert.ok(drawn, "the older thread's own card is where it always was")
     assert.ok(drawn.textContent?.includes("An older plan"), "it keeps the opener it always had")
     assert.ok(
@@ -222,11 +222,11 @@ test("undoing from the card asks the host, and the card stops offering it", asyn
   await seed([opened])
   host([opened])
   await mount(chatScreen(MAIN), async () => {
-    await settles("New thread")
-    await click(undoIn(card("New thread")))
+    await settles("n1")
+    await click(undoIn(card("n1")))
     assert.deepEqual(undos, [`${MAIN_SESSION}/moves/move-new/undo`])
     await settle()
-    assert.equal(undoIn(card("New thread")), null, "the undone move leaves no Undo behind")
+    assert.equal(undoIn(card("n1")), null, "the undone move leaves no Undo behind")
   })
 })
 
@@ -237,15 +237,15 @@ test("undoing returns the message to Main and takes away the thread that existed
   await seed([opened], { copy: false })
   host([opened])
   await mount(chatScreen(MAIN), async () => {
-    await settles("New thread")
-    assert.ok(card("New thread"), "the message left as a card, not a message")
+    await settles("n1")
+    assert.ok(card("n1"), "the message left as a card, not a message")
     assert.equal(inMain(MOVED), false)
-    await click(undoIn(card("New thread")))
+    await click(undoIn(card("n1")))
     await until(async () => inMain(MOVED), "the message back in Main")
     await act(async () => void (await syncChatsOf([bot.id])))
     await settle()
     assert.equal(await db.conversations.get("n1"), undefined, "the thread is gone from this device")
-    assert.equal(card("New thread"), null, "and so is its card")
+    assert.equal(card("n1"), null, "and so is its card")
     assert.equal(marker(), null, "with no marker left in its place")
   })
 })
@@ -254,11 +254,11 @@ test("Undo on the card refuses once the thread has replied, and the card keeps n
   await seed([opened])
   host([opened], { refuse: true })
   await mount(chatScreen(MAIN), async () => {
-    await settles("New thread")
-    await click(undoIn(card("New thread")))
+    await settles("n1")
+    await click(undoIn(card("n1")))
     assert.deepEqual(undos, [`${MAIN_SESSION}/moves/move-new/undo`])
     await settle()
-    assert.equal(undoIn(card("New thread")), null, "a refused undo still drops the button")
+    assert.equal(undoIn(card("n1")), null, "a refused undo still drops the button")
   })
 })
 
@@ -354,7 +354,7 @@ test("the whole Moved line goes to the thread, and Undo still answers for itself
   await seed([joined])
   host([joined])
   await mount(chatScreen(MAIN), async () => {
-    await settles("Older thread")
+    await settles("t-old")
     const line = marker()
     const link = lineLink()
     assert.ok(line && link, "the line and its link")

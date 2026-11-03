@@ -462,6 +462,13 @@ export const LOOKS = [1440, 390].map((width) => ({
   options: { viewport: { width, height: width < 768 ? 844 : 900 }, dark: width < 768 },
 }))
 
+/**
+ * The selector for Main's card of a thread: a card draws the thread's own message, so a flow finds it
+ * by the thread it draws and never by the words on it (ADR 0082).
+ */
+export const cardSelector = (id) => `[data-slot="thread-card"][data-thread="${id}"]`
+export const cardOf = (page, id) => page.locator(cardSelector(id))
+
 function helpers(page) {
   const composer = page.getByRole("textbox").last()
   return {

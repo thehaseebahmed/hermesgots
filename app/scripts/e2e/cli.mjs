@@ -469,7 +469,7 @@ export const FLOWS = {
     script: "e2e/bot-threads.mjs",
     extra: { TRIAGE_NEW_MOCK_URL: "triage-new", TRIAGE_THREAD_MOCK_URL: "triage-thread" },
     about:
-      "A bot opens Main, its threads are cards where they began, /thread with text opens a thread, and triage's answers read as a card with Undo or a Moved marker",
+      "A bot opens Main, its threads are cards where they began, each under the message that opened it, /thread with text opens a thread, and triage's answers read as a card with Undo or a Moved marker",
   },
   "card-widths": {
     script: "e2e/card-widths.mjs",
