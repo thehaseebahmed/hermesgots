@@ -66,7 +66,7 @@ export interface Turn {
   /** The id of the row that opened the turn, where the transcript has it. */
   row?: number
   user: string
-  /** When the request was written, in ms, where the host said. */
+  /** When the turn began, in ms: its request's row, or else the row that opened it. */
   at?: number
   /** What the request carried, read off its marker lines, which are not the user's words. */
   files?: SentFile[]
@@ -162,14 +162,17 @@ function pushSeam(parts: Part[], seam: Part) {
   if (parts.at(-1)?.kind !== "compaction") parts.push(seam)
 }
 
-/** A turn whose request the host archived: what is drawn from the summary on is the work it carried. */
-const carriedTurn = (): Turn => ({
+/** The turn a row opens, before anything is folded into it: no request, dated by that row. */
+const emptyTurn = (at?: number): Turn => ({
   user: "",
   parts: [],
-  done: true,
-  carried: true,
+  done: false,
   delivered: [],
+  ...(at !== undefined ? { at } : {}),
 })
+
+/** A turn whose request the host archived: what is drawn from the summary on is the work it carried. */
+const carriedTurn = (at?: number): Turn => ({ ...emptyTurn(at), done: true, carried: true })
 
 /**
  * The line Hermes opens the active request's restatement with after a compaction. The request it
@@ -215,13 +218,18 @@ export function foldTurns(rows: Row[], partial = false, showReminders = false): 
     const seam = pending
     pending = undefined
     let last = turns.at(-1)
-    if (!last) turns.push((last = carriedTurn()))
+    if (!last) turns.push((last = carriedTurn(seam.at)))
     pushSeam(last.parts, seam)
   }
   const writtenAfter = (row: Row) => {
     if (pending?.at === undefined) return true
     const at = msOf(row)
     return at === undefined || at > pending.at
+  }
+  const openTurn = (datedBy: Row, fields: Omit<Partial<Turn>, "at"> = {}) => {
+    const turn: Turn = { ...emptyTurn(msOf(datedBy)), ...fields }
+    turns.push(turn)
+    return turn
   }
   for (const row of rows) {
     // What the host wrote after the compaction closes the reply above it.
@@ -246,19 +254,15 @@ export function foldTurns(rows: Row[], partial = false, showReminders = false): 
       if (DELIVERY.test(content)) {
         const last = turns.at(-1)
         const wake =
-          last?.wake && !last.done && last.parts.length === 0
-            ? last
-            : turns[turns.push({ user: "", parts: [], done: false, wake: true, delivered: [] }) - 1]
+          last?.wake && !last.done && last.parts.length === 0 ? last : openTurn(row, { wake: true })
         const child = CHILD.exec(content)?.[1]
         if (child) wake.delivered.push(child)
         continue
       }
       const { text, attachments } = splitAttachments(content)
-      const at = msOf(row)
-      turns.push({
+      openTurn(row, {
         row: row.id,
         user: text,
-        ...(at !== undefined ? { at } : {}),
         ...(attachments.length
           ? {
               files: attachments.map(({ name, type, size, image, path, host }) => ({
@@ -271,9 +275,6 @@ export function foldTurns(rows: Row[], partial = false, showReminders = false): 
               })),
             }
           : {}),
-        parts: [],
-        done: false,
-        delivered: [],
       })
       continue
     }
@@ -283,21 +284,14 @@ export function foldTurns(rows: Row[], partial = false, showReminders = false): 
     const routine = isRoutineRow(row)
     const opened =
       row.role === "assistant" && routine
-        ? { user: "", parts: [], done: false, delivered: [], routine: true, row: row.id }
+        ? openTurn(row, { routine: true, row: row.id })
         : undefined
-    if (opened) turns.push(opened)
     // Rows read newest first can open on a reply whose request is older still: it is drawn alone. A
     // reply the host carried across a compaction opens the turn its archived request left.
     const turn =
       turns.at(-1) ??
       (row.role === "assistant" && (partial || pending)
-        ? turns[
-            turns.push(
-              pending
-                ? { user: "", parts: [], done: false, carried: true, delivered: [] }
-                : { user: "", parts: [], done: false, cut: true, delivered: [] },
-            ) - 1
-          ]
+        ? openTurn(row, pending ? { carried: true } : { cut: true })
         : undefined)
     if (!turn) continue
     if (row.role === "tool") {
@@ -342,6 +336,7 @@ export function foldTurns(rows: Row[], partial = false, showReminders = false): 
       turn.parts.push({ kind: "text", text: row.content ?? "", ...(thought ? { thought } : {}) })
       thought = undefined
     }
+    const callAt = msOf(row)
     for (const one of asked) {
       const note = refusals.get(one.id)
       if (note !== undefined) {
@@ -355,7 +350,7 @@ export function foldTurns(rows: Row[], partial = false, showReminders = false): 
         id: one.id,
         name: one.function.name,
         arguments: one.function.arguments,
-        ...(msOf(row) !== undefined ? { startedAt: msOf(row) } : {}),
+        ...(callAt !== undefined ? { startedAt: callAt } : {}),
         ...(thought ? { thought } : {}),
       }
       thought = undefined

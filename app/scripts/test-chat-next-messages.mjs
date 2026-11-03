@@ -112,13 +112,16 @@ test("a request's files are its attachments, and its marker lines are not its wo
 
 test("a steer sits where it was sent, and a wake turn draws no request", () => {
   const rows = [
-    row(1, "user", "go"),
-    row(2, "assistant", "Working.", { tool_calls: [call("a", "terminal", { command: "ls" })] }),
-    row(3, "tool", "ok", { tool_call_id: "a" }),
-    row(4, "user", "also this", { display_kind: "steer" }),
-    row(5, "assistant", "Done.", { finish_reason: "stop" }),
-    row(6, "user", "[ASYNC DELEGATION COMPLETE — child-1]\nresult"),
-    row(7, "assistant", "The child finished.", { finish_reason: "stop" }),
+    row(1, "user", "go", { timestamp: 100 }),
+    row(2, "assistant", "Working.", {
+      timestamp: 101,
+      tool_calls: [call("a", "terminal", { command: "ls" })],
+    }),
+    row(3, "tool", "ok", { timestamp: 102, tool_call_id: "a" }),
+    row(4, "user", "also this", { timestamp: 103, display_kind: "steer" }),
+    row(5, "assistant", "Done.", { timestamp: 104, finish_reason: "stop" }),
+    row(6, "user", "[ASYNC DELEGATION COMPLETE — child-1]\nresult", { timestamp: 200 }),
+    row(7, "assistant", "The child finished.", { timestamp: 201, finish_reason: "stop" }),
   ]
   const drawn = messagesOf("chat", foldTurns(rows))
   assert.deepEqual(
@@ -128,6 +131,11 @@ test("a steer sits where it was sent, and a wake turn draws no request", () => {
   assert.deepEqual(
     drawn[1].steers.map(({ text, contentOffset }) => [text, contentOffset]),
     [["also this", "Working.".length]],
+  )
+  assert.equal(
+    drawn[2].createdAt,
+    200_000,
+    "the wake run's answer is drawn at the delivery that woke it, not at the epoch",
   )
 })
 
@@ -199,4 +207,3 @@ test("a live turn's unplaced thinking draws as the run still to come", () => {
   const [, reply] = messagesOf("chat", [turn], { streaming: true })
   assert.deepEqual(reply.reasoningRuns, [{ text: "Hmm." }])
 })
-

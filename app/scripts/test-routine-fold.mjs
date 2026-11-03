@@ -54,6 +54,21 @@ test("a routine row on its own draws as one message", () => {
   assert.equal(message.routine, true)
 })
 
+test("a routine's message is dated the time its row was written", () => {
+  const at = Date.UTC(2026, 10, 3, 6, 0)
+  const [turn] = foldTurns([
+    routine(3, "Morning watch: three new items.", { timestamp: at / 1000 }),
+  ])
+  assert.equal(turn.at, at, "the turn keeps its row's time, in ms")
+  const [message] = messagesOf("chat-1", [turn])
+  assert.equal(message.createdAt, at, "a message with no request above it is dated its own row")
+})
+
+test("a routine's row the host didn't time leaves the turn undated", () => {
+  const [turn] = foldTurns([routine(4, "Morning watch: three new items.")])
+  assert.equal(turn.at, undefined, "nothing is invented for a row with no time of its own")
+})
+
 test("a routine row sets its own turn's done, never the reply's above it", () => {
   const rows = [
     row(1, "user", "check the feeds", { timestamp: 100 }),

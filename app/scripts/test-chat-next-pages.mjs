@@ -112,10 +112,35 @@ test("an older page goes above the rows held, and rows it shares with them are n
   assert.equal(prepend(held, range(71, 80)), held, "nothing new is the very rows held")
 })
 
+test("a page that opens on a compaction is drawn at the seam's own time", () => {
+  const [turn] = foldTurns([
+    {
+      id: 40,
+      role: "user",
+      content: "Summary of the conversation so far.",
+      display_kind: "hidden",
+      timestamp: 500,
+    },
+    { id: 41, role: "assistant", content: "still working", timestamp: 502, finish_reason: "stop" },
+  ])
+  assert.equal(
+    turn.carried,
+    true,
+    "the summary's request is archived, so the turn it opens is carried",
+  )
+  assert.equal(turn.at, 500_000, "and it is dated the summary that opened it, not the epoch")
+})
+
 test("a reply whose request is in an older page is drawn alone, and whole once the page lands", () => {
   // Rows 71..120 open on a reply: its request, row 69, is in the page not read yet.
   const newest = [
-    { id: 70, role: "assistant", content: "the end of an answer", finish_reason: "stop" },
+    {
+      id: 70,
+      role: "assistant",
+      content: "the end of an answer",
+      finish_reason: "stop",
+      timestamp: 700,
+    },
     row(71),
     row(72),
   ]
@@ -124,14 +149,23 @@ test("a reply whose request is in an older page is drawn alone, and whole once t
   assert.equal(alone[0].cut, true)
   assert.equal(alone[0].user, "")
   assert.equal(alone[0].row, undefined)
+  assert.equal(
+    alone[0].at,
+    700_000,
+    "an answer read without its request is drawn at its own row's time",
+  )
   assert.deepEqual(alone[0].parts, [{ kind: "text", text: "the end of an answer" }])
   assert.equal(alone[0].done, true, "an earlier turn is finished by what follows it")
   assert.equal(foldTurns(newest).length, 1, "a whole transcript drops a reply before any request")
 
-  const whole = foldTurns([{ id: 69, role: "user", content: "the question" }, ...newest], true)
+  const whole = foldTurns(
+    [{ id: 69, role: "user", content: "the question", timestamp: 690 }, ...newest],
+    true,
+  )
   assert.equal(whole.length, 2)
   assert.equal(whole[0].user, "the question")
   assert.equal(whole[0].row, 69)
+  assert.equal(whole[0].at, 690_000, "and once its request lands the turn is drawn at the request")
   assert.equal(whole[0].cut, undefined)
   assert.deepEqual(whole[0].parts, alone[0].parts)
 })
