@@ -12,7 +12,7 @@ import types
 import unittest
 from unittest import mock
 
-from plugin import dictation, dictation_cleanup
+from plugin import dictation, dictation_cleanup, speech
 
 
 def hermes(**overrides):
@@ -477,7 +477,8 @@ class ConfirmTest(unittest.TestCase):
         self.assertFalse(asked[0]["prompt"].cleaning)
 
     def test_a_cloud_take_is_uploaded_whole_once_at_the_confirm(self) -> None:
-        tt, patch = hermes(_get_provider=lambda cfg: "groq")
+        config = {"local": {"model": "small"}, "groq": {"model": "whisper-large-v3"}}
+        tt, patch = hermes(_get_provider=lambda cfg: "groq", _load_stt_config=lambda: config)
         with patch:
             self.upload(index=0, data=b"one")
             self.upload(index=1, data=b"two")
@@ -488,8 +489,17 @@ class ConfirmTest(unittest.TestCase):
         self.assertFalse(os.path.exists(tt.audio[0]["path"]))
         self.assertEqual(answer["heard"], "Uploaded take.")
         self.assertEqual(answer["provider"], "groq")
-        self.assertEqual(answer["model"], "small", "the model the bot picked, cloud or not")
+        self.assertEqual(answer["model"], "whisper-large-v3", "the model that actually heard it")
+        self.assertNotEqual(answer["model"], "small", "never the model a local decode would have used")
         self.assertEqual(dictation._takes.get(("p", "take-1")), None, "its audio is gone with it")
+
+    def test_a_take_heard_here_still_names_the_local_model(self) -> None:
+        _, patch = hermes()
+        with patch:
+            self.upload(index=0, data=b"one")
+            answer = dictation.confirm("p", "take-1", 1, level="light")
+        self.assertEqual(answer["provider"], "local")
+        self.assertEqual(answer["model"], "small", "a local take is heard by the local model")
 
     def test_a_cloud_take_sends_no_hearing_prompt_and_never_reaches_the_local_model(self) -> None:
         tt, patch = hermes(_get_provider=lambda cfg: "groq")
@@ -497,6 +507,35 @@ class ConfirmTest(unittest.TestCase):
             self.upload()
             dictation.confirm("p", "take-1", 1, level="none")
         self.assertEqual(tt.calls, [])
+
+    def test_a_provider_whose_model_the_host_cannot_name_records_none(self) -> None:
+        config = {"local": {"model": "small"}, "groq": {"language": "en"}}
+        _, patch = hermes(_get_provider=lambda cfg: "groq", _load_stt_config=lambda: config)
+        with patch:
+            self.upload()
+            answer = dictation.confirm("p", "take-1", 1, level="none")
+        self.assertEqual(answer["provider"], "groq")
+        self.assertEqual(answer["model"], "", "no model rather than the local one")
+        self.assertNotEqual(answer["model"], "small")
+
+    def test_an_unwritten_model_is_the_providers_schema_default(self) -> None:
+        defaults = {"local": {"model": "base"}, "elevenlabs": {"model_id": "scribe_v2"}}
+        config = {"local": {"model": "small"}, "elevenlabs": {"language_code": "en"}}
+        _, patch = hermes(_get_provider=lambda cfg: "elevenlabs", _load_stt_config=lambda: config)
+        with patch, mock.patch.object(speech, "_defaults", lambda: defaults):
+            self.upload()
+            answer = dictation.confirm("p", "take-1", 1, level="none")
+        self.assertEqual(answer["provider"], "elevenlabs")
+        self.assertEqual(answer["model"], "scribe_v2", "the provider's own spelling of its model")
+
+    def test_a_provider_whose_default_model_is_blank_records_none(self) -> None:
+        defaults = {"local": {"model": "base"}, "xai": {"model": ""}}
+        config = {"local": {"model": "small"}, "xai": {"language": "en"}}
+        _, patch = hermes(_get_provider=lambda cfg: "xai", _load_stt_config=lambda: config)
+        with patch, mock.patch.object(speech, "_defaults", lambda: defaults):
+            self.upload()
+            answer = dictation.confirm("p", "take-1", 1, level="none")
+        self.assertEqual(answer["model"], "", "an empty default names nothing to record")
 
     def test_a_vendor_failure_is_hermes_reason_and_ends_the_take(self) -> None:
         broken = lambda path, source=None: {"success": False, "error": "GROQ_API_KEY not set"}

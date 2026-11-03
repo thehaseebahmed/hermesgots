@@ -492,6 +492,61 @@ class SttHost:
             target[keys[-1]] = value
 
 
+class ProviderModelTest(unittest.TestCase):
+    """The model a provider transcribes with, as ``speech.provider_model`` names it (ADR 0082)."""
+
+    def model(self, provider, section, defaults=DEFAULTS):
+        with mock.patch.object(speech, "_defaults", lambda: defaults):
+            return speech.provider_model(provider, section)
+
+    def test_a_written_model_is_the_one_the_provider_is_asked_for(self) -> None:
+        self.assertEqual(
+            self.model("groq", {"local": {"model": "small"}, "groq": {"model": "whisper-large-v3"}}),
+            "whisper-large-v3",
+            "the provider's own setting, never the local model's name",
+        )
+
+    def test_an_unwritten_model_falls_back_to_hermes_default(self) -> None:
+        self.assertEqual(
+            self.model("groq", {"groq": {"language": "en"}}),
+            DEFAULTS["groq"]["model"],
+            "a bot that never picked a model is on the host's own",
+        )
+
+    def test_elevenlabs_holds_its_model_under_model_id(self) -> None:
+        self.assertEqual(
+            self.model("elevenlabs", {"elevenlabs": {"model_id": "scribe_v1"}}), "scribe_v1"
+        )
+        self.assertEqual(
+            self.model("elevenlabs", {"elevenlabs": {"model_id": ""}}),
+            DEFAULTS["elevenlabs"]["model_id"],
+            "a blank pick reads as no pick, so the default answers",
+        )
+        self.assertEqual(
+            self.model("elevenlabs", {"elevenlabs": {"model": "scribe_v1"}}),
+            DEFAULTS["elevenlabs"]["model_id"],
+            "the key it does not spell its model with is not read",
+        )
+
+    def test_a_default_that_is_blank_names_no_model(self) -> None:
+        self.assertEqual(self.model("xai", {"xai": {"language": "en"}}), "")
+        self.assertEqual(self.model("deepinfra", {}), "", "a typed name nobody wrote is no model")
+
+    def test_a_provider_the_defaults_do_not_declare_names_no_model(self) -> None:
+        self.assertEqual(self.model("mine", {"mine": {"language": "en"}}), "")
+        self.assertEqual(self.model("groq", {}, defaults={}), "", "a host shipping no defaults")
+        with mock.patch.object(speech, "_defaults", side_effect=ImportError("no stt defaults")):
+            self.assertEqual(speech.provider_model("groq", {"groq": {"language": "en"}}), "")
+
+    def test_a_written_model_is_answered_without_the_hosts_defaults(self) -> None:
+        with mock.patch.object(speech, "_defaults", side_effect=ImportError("no stt defaults")):
+            self.assertEqual(
+                speech.provider_model("groq", {"groq": {"model": "whisper-large-v3"}}),
+                "whisper-large-v3",
+                "what the config states is known whatever the host ships",
+            )
+
+
 class SttReadTest(TempStore):
     def test_the_read_answers_the_page_in_one_block(self) -> None:
         section = {"enabled": True, "language": "es", "local": {"model": "small"}}

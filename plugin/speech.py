@@ -339,6 +339,38 @@ def _flatten(section: Dict[str, Any], prefix: str = f"{STT_KEY}.") -> Dict[str, 
     return out
 
 
+# The field a provider holds its model under; every other provider spells it "model" (the app's
+# ``PROVIDER_FIELDS`` in ``app/src/lib/stt-settings.ts`` is the table, and ElevenLabs is the one).
+MODEL_FIELDS = {"elevenlabs": "model_id"}
+
+
+def provider_model(provider: str, section: Dict[str, Any]) -> str:
+    """The model ``provider`` transcribes with, as ``section`` (an ``stt`` block) or its default says.
+
+    A provider's own block names its model where the bot has written one; where it hasn't, Hermes's
+    schema default for that provider's model key is what the vendor is asked for. A provider this
+    host can name neither way — one the defaults don't declare, a host shipping no defaults at all,
+    or a default that is the empty string — answers ``""``: a row records no model rather than a
+    model the provider never ran (ADR 0082).
+    """
+    name = str(provider or "").strip().lower()
+    if not name:
+        return ""
+    key = MODEL_FIELDS.get(name, "model")
+    written = (section or {}).get(name) if isinstance(section, dict) else None
+    if isinstance(written, dict):
+        stated = written.get(key)
+        if isinstance(stated, str) and stated.strip():
+            return stated.strip()
+    try:
+        defaults = _flatten(_defaults())
+    except Exception:
+        logger.debug("memento: this host declares no speech defaults", exc_info=True)
+        return ""
+    default = defaults.get(f"{STT_KEY}.{name}.{key}")
+    return default.strip() if isinstance(default, str) and default.strip() else ""
+
+
 def stt_available() -> bool:
     """Whether this host declares the speech settings the page draws: no defaults, no feature."""
     try:

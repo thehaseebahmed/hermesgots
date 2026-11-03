@@ -716,10 +716,31 @@ def _upload_whole(take: Take) -> str:
             take.drop_audio()
 
 
+def _heard_model(state: Dict[str, Any]) -> str:
+    """The model that did the work: this host's own for a take it heard, else the provider's own.
+
+    A take heard on ``local`` or ``local_command`` was decoded by the model the host states. One a
+    cloud provider heard was decoded by that provider's model, which only its own setting — or
+    Hermes's default for it — can name; a host that can't name it answers nothing rather than the
+    local model's name, so a row never pairs a provider with a model it never ran (ADR 0082).
+    """
+    name = str((state.get("provider") or {}).get("name") or "")
+    if name in LOCAL_BACKENDS:
+        return str(state.get("model") or "")
+    # Imported here: `speech` reads this module at import, so a top-level import would be a cycle.
+    from . import speech
+
+    try:
+        return speech.provider_model(name, _local_config(_tools()))
+    except Exception:
+        logger.debug("memento: couldn't name the model behind a take", exc_info=True)
+        return ""
+
+
 def _behind(state: Dict[str, Any]) -> Tuple[str, str]:
     """The provider and model behind a take, as far as the host can name them."""
     route = state.get("provider") or {}
-    return str(route.get("name") or ""), str(state.get("model") or "")
+    return str(route.get("name") or ""), _heard_model(state)
 
 
 def confirm(
