@@ -2655,3 +2655,49 @@ machinery as the card's words.
   stored row shape and a re-fold of what the device holds — code this change never touches.
 
 Found by the `/simplify` altitude angle on this branch; the pull request does not wait on it.
+# Deferred by the cleanup pass on a user's message as markdown
+
+Four reviewers (reuse, quality, efficiency, altitude) read `fix(chat): a user's message draws its own
+markdown`. Everything they found is applied on the branch — the renderer now owns the colours its
+`fill` tone changes, one `UserBubble` draws the user's words in the message, the steer and the Moved
+marker, chat-next's own turn, steer, held and queued rows all draw them through the same tone, and
+the bubble markup exists once instead of four times. Two entries remain: one mechanism the pass
+exposed inside the renderer's lazy chunk, and one change it measured and declined.
+
+## Careful
+
+### 1. A renderer chunk that fails to load blanks the thread, and now takes the user's own words with it
+
+`components/chat/markdown.tsx` loads `markdown-renderer.tsx` behind `lazy()`. React caches a rejected
+import on the lazy object for the life of the tab, so a chunk that cannot be fetched — a deploy that
+replaced the hashed filenames under an open tab, a service-worker precache that missed it — throws on
+every mount, and the nearest boundary is the route's `CrashBoundary`, which also forgets the last
+chat. Before this branch only a reply needed that chunk; a thread's user messages now do too.
+
+- Cost: one failed import blanks a whole thread, including messages that used to draw without it,
+  and a reload is the only way back.
+- Suggested fix: retry the import once inside `markdown.tsx`, then render the plain
+  `<p className="whitespace-pre-wrap">` the `Suspense` fallback already draws, keeping the recovery in
+  the renderer so no call site has to know about it.
+- Why it is deferred: the failure path belongs to the shared renderer every reply rides, the fix
+  turns it into a new error boundary over reply rendering, and neither a component test nor a flow
+  can make a chunk import fail here — the change needs its own proof.
+
+### 2. A message that never streams is still parsed through the streaming block splitter
+
+`Markdown` splits its text with `markdownBlocks` and gives each block its own `ReactMarkdown`, which
+builds a fresh unified pipeline per block. That split is the streaming reply's optimisation — the
+finished blocks stay memoised as the text grows — and buys a message, drawn once and never changed,
+nothing.
+
+- Measured (pure JavaScript, node 22 in this container, the branch's own modules): 12 paragraphs
+  2.274 ms split against 0.955 ms whole (2.4×); 30 paragraphs 5.204 against 1.629 (3.2×); 4 paragraphs
+  0.889 against 0.502 (1.8×). The change itself costs +0.18 ms a row on a 120-message mount.
+- Suggested fix: a non-streaming path on `Markdown` that renders the children as one `Block`. Its
+  older companion — `whitespace-normal [&_*]:whitespace-pre-wrap` on the wrapper — is now on the bubble
+  for a different reason: without it react-markdown's newline between two blocks paints a blank line
+  nobody typed (ADR 0083). With it in place, the split itself is the only thing left to remove.
+- Why it is deferred: the saving sits inside the noise of a row mount, on a path that draws once, and
+  the change is a second mode on a component every reply rides.
+
+Found by the simplify pass on this branch; neither entry blocks the pull request.

@@ -13,6 +13,7 @@ import {
 import { useSearchParams } from "react-router"
 
 import { Markdown } from "@/components/chat/markdown"
+import { UserBubble } from "@/components/chat/user-bubble"
 import { ReminderRow } from "@/components/chat/reminder-row"
 import { stopSubagents } from "@/lib/agents"
 import { readPace, sendTimeoutMs } from "@/lib/away"
@@ -177,9 +178,9 @@ const TurnView = memo(
               </ul>
             ) : null}
             {turn.user ? (
-              <p data-user className="rounded-2xl bg-muted px-4 py-2 whitespace-pre-wrap">
-                {turn.user}
-              </p>
+              <div data-user className="flex justify-end">
+                <UserBubble>{turn.user}</UserBubble>
+              </div>
             ) : null}
           </div>
         )}
@@ -211,9 +212,7 @@ const TurnView = memo(
           if (part.kind === "steer")
             return (
               <div key={at} data-steer className="ml-auto w-fit max-w-[85%] space-y-1 text-right">
-                <p className="rounded-2xl bg-muted px-4 py-2 text-left whitespace-pre-wrap">
-                  {part.text}
-                </p>
+                <UserBubble>{part.text}</UserBubble>
                 <p className="text-xs text-muted-foreground">Steered</p>
               </div>
             )
@@ -432,12 +431,12 @@ function HeldRow({
         </p>
       ) : null}
       {text ? (
-        <p
+        <div
           data-held-text
           className="rounded-2xl bg-muted px-4 py-2 text-left whitespace-pre-wrap opacity-60"
         >
-          {text}
-        </p>
+          <Markdown tone="fill">{text}</Markdown>
+        </div>
       ) : null}
       <div className="flex justify-end gap-3 text-xs text-muted-foreground">{children}</div>
     </div>

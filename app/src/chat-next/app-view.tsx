@@ -19,6 +19,7 @@ import { CHAT_FACE, CodeFaceProvider } from "@/components/chat/code-face"
 import { DayHeading } from "@/components/chat/day-heading"
 import { EmptyState, MainEmptyState } from "@/components/chat/empty-states"
 import { useMainFlow } from "@/components/chat/main-flow"
+import { Markdown } from "@/components/chat/markdown"
 import { MessageItem } from "@/components/chat/message-item"
 import { FollowAfterApproval, FollowOnSend } from "@/components/chat/follow"
 import { useFirstRows } from "@/components/chat/first-rows"
@@ -359,9 +360,9 @@ export function AppThreadView({
                         <p className="text-xs text-muted-foreground">{item.files.join(", ")}</p>
                       )}
                       {item.text && (
-                        <p className="max-w-[85%] rounded-3xl bg-muted px-4 py-2.5 whitespace-pre-wrap opacity-60">
-                          {item.text}
-                        </p>
+                        <div className="max-w-[85%] rounded-3xl bg-muted px-4 py-2.5 whitespace-pre-wrap opacity-60">
+                          <Markdown tone="fill">{item.text}</Markdown>
+                        </div>
                       )}
                       <div className="flex items-center gap-1 text-xs text-muted-foreground">
                         <span data-queued-state className="px-2">

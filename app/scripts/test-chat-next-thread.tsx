@@ -41,6 +41,12 @@ test("a session opened by address draws its request, its words and its calls fro
     for (let tries = 0; !find("[data-user]") && tries < 20; tries++) await settle()
 
     assert.match(find("[data-user]")?.textContent ?? "", /^Do these steps in order/)
+    assert.ok(find("[data-user] [data-slot=bubble]"), "the message wears the app's bubble")
+    assert.equal(
+      find("[data-user] [data-slot=markdown]")?.getAttribute("data-tone"),
+      "fill",
+      "and draws its words as markdown on the bubble's own colour",
+    )
     const replies = findAll("[data-text]").map((one) => one.textContent ?? "")
     assert.equal(replies.length, 2, "the two stretches of words, and nothing for the empty rows")
     assert.equal(replies[0], "I'll work through these in order.")

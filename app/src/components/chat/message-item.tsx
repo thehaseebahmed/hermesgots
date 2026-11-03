@@ -12,8 +12,8 @@ import { toast } from "sonner"
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { attachmentUrl } from "@/lib/attachment-url"
 import { MediaItems, type MediaItem } from "@/components/chat/media-gallery"
-import { useCodeFace } from "@/components/chat/code-face"
 import { Markdown } from "@/components/chat/markdown"
+import { UserBubble } from "@/components/chat/user-bubble"
 import { AgentCards } from "@/components/chat/agent-card"
 import { MediaTag } from "@/components/chat/media-image"
 import { Compacted } from "@/components/chat/model-change"
@@ -24,7 +24,6 @@ import { ToolGroup } from "@/components/chat/tool-group"
 import { ReminderRow } from "@/components/chat/reminder-row"
 import { RoutineReceipt } from "@/components/chat/routine-run"
 import { useRemindersShown } from "@/components/chat/use-reminders-shown"
-import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Button } from "@/components/ui/button"
 import { Message as MessageRow, MessageContent } from "@/components/ui/message"
 import { spawnedAgent } from "@/lib/spawn"
@@ -342,16 +341,11 @@ function SentAttachments({
 
 /** Something the user steered the reply with, where it reached the agent. */
 function SteerBubble({ text }: { text: string }) {
-  const face = useCodeFace()
   const said = steerWords(text)
   return (
     <MessageRow align="end" className={COLUMN}>
       <MessageContent className="items-end gap-1">
-        <Bubble variant="default" align="end">
-          <BubbleContent className={cn("px-4 py-2.5 text-[15px] whitespace-pre-wrap", face)}>
-            {said}
-          </BubbleContent>
-        </Bubble>
+        <UserBubble>{said}</UserBubble>
         <div className="flex items-center gap-1 px-1 text-xs text-muted-foreground">
           <CornerDownRightIcon className="size-3.5" />
           Steered
@@ -508,7 +502,6 @@ export const MessageItem = memo(function MessageItem({
   compactions,
   actions,
 }: MessageItemProps) {
-  const face = useCodeFace()
   const remindersShown = useRemindersShown(Boolean(message.reminders?.length))
   // Replies type out a word at a time, however Hermes delivers them.
   const content = useReveal(message.role === "assistant" ? message.content : "")
@@ -589,15 +582,7 @@ export const MessageItem = memo(function MessageItem({
                   className="size-4 shrink-0 text-destructive"
                 />
               )}
-              {message.content && (
-                <Bubble variant="default" align="end" className={dim ? "opacity-60" : undefined}>
-                  <BubbleContent
-                    className={cn("px-4 py-2.5 text-[15px] whitespace-pre-wrap", face)}
-                  >
-                    {message.content}
-                  </BubbleContent>
-                </Bubble>
-              )}
+              {message.content && <UserBubble dim={dim}>{message.content}</UserBubble>}
             </div>
           )}
           {queued && <QueuedActions message={message} paused={paused} />}

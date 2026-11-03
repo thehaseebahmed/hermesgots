@@ -1,12 +1,11 @@
 import { MessagesSquareIcon, Undo2Icon } from "lucide-react"
 
-import { useCodeFace } from "@/components/chat/code-face"
 import { SystemLine, SystemLink } from "@/components/chat/system-line"
+import { UserBubble } from "@/components/chat/user-bubble"
 import { COLUMN } from "@/lib/layout"
 import { stayHere } from "@/lib/nav"
 import { cn } from "@/lib/utils"
 
-import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import type { Move } from "@/lib/hermes"
 
 /**
@@ -27,14 +26,9 @@ export function MovedMarker({
   current?: boolean
   onUndo?: (move: Move) => void
 }) {
-  const face = useCodeFace()
   return (
     <div data-slot="moved-marker" data-move={move.id} className={cn("flex flex-col gap-1", COLUMN)}>
-      <Bubble variant="default" align="end" className="self-end">
-        <BubbleContent className={cn("px-4 py-2.5 text-[15px] whitespace-pre-wrap", face)}>
-          {move.text}
-        </BubbleContent>
-      </Bubble>
+      <UserBubble className="self-end">{move.text}</UserBubble>
       {/* The bot's reply, a line like a tool group's: only the thread's name is a link. */}
       <SystemLine>
         Moved to
