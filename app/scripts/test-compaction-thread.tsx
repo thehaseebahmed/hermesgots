@@ -65,30 +65,35 @@ const turn: Message[] = [
 /** What the thread drew, read while it is on the page: its dividers, and where one landed. */
 interface Drawn {
   dividers: number
-  /** The row holding the divider, and the row holding the turn after the compaction. */
-  place: { divider: number; second: number }
+  /** The row holding the divider, and the row holding the message it was asked about. */
+  place: { divider: number; after: number }
 }
 
 const dividers = () => findAll("[role=separator]")
 
+/** What the thread has drawn: its dividers, and the row holding the message asked about. */
+const drawnNow = (text = SECOND): Drawn => {
+  const drawn = dividers()
+  const items = findAll("[data-slot=message-scroller-item]")
+  return {
+    dividers: drawn.length,
+    place: {
+      divider: items.findIndex((item) => drawn.some((one) => item.contains(one))),
+      after: items.findIndex((item) => item.textContent?.includes(text)),
+    },
+  }
+}
+
 async function screen(compactions: unknown[], id = "chat-1"): Promise<Drawn> {
   host(compactions)
   await seedChat({ id, messages: turn, profile: bot })
-  let seen: Drawn = { dividers: 0, place: { divider: -1, second: -1 } }
+  let seen: Drawn = { dividers: 0, place: { divider: -1, after: -1 } }
   await mount(chatScreen(id), async () => {
     await until(async () => findAll("[data-slot=message]").length > 0, "the thread's rows")
     // The divider's words ride the markdown renderer, a lazy import on this route.
     await import("@/components/chat/markdown-renderer")
     if (compactions.length) await until(async () => dividers().length > 0, "the divider")
-    const drawn = dividers()
-    const items = findAll("[data-slot=message-scroller-item]")
-    seen = {
-      dividers: drawn.length,
-      place: {
-        divider: items.findIndex((item) => drawn.some((one) => item.contains(one))),
-        second: items.findIndex((item) => item.textContent?.includes(SECOND)),
-      },
-    }
+    seen = drawnNow()
   })
   return seen
 }
@@ -96,8 +101,7 @@ async function screen(compactions: unknown[], id = "chat-1"): Promise<Drawn> {
 test("the compaction the host recorded draws its divider above the next message", async () => {
   const drawn = await screen([{ at: AT, tokens: 168_000, window: 200_000 }], "chat-divided")
   assert.equal(drawn.dividers, 1, `one divider, found ${drawn.dividers}`)
-  // Above the first message written after it, in that message's own row.
-  assert.equal(drawn.place.divider, drawn.place.second, "it sits on the turn after the compaction")
+  assert.equal(drawn.place.divider, drawn.place.after, "it sits on the turn after the compaction")
   // And the device keeps the host's list, so a reload draws it again from what it has.
   const conversation = await db.conversations.get("chat-divided")
   assert.deepEqual(
@@ -112,10 +116,35 @@ test("a device that loaded the chat after it was compacted still marks it", asyn
   // everything this one loads is newer than the mark and the divider stands above the first of them.
   const drawn = await screen([{ at: 900 }], "chat-fresh")
   assert.equal(drawn.dividers, 1, `one divider, found ${drawn.dividers}`)
-  assert.equal(drawn.place.divider, 0, "it stands above the first message the device holds")
+  assert.equal(drawn.place.divider, 0, "it stands above the first message held")
 })
 
 test("a chat the host never compacted draws nothing", async () => {
   const drawn = await screen([], "chat-open")
   assert.equal(drawn.dividers, 0, "no compaction, no divider")
+})
+
+test("a compaction newer than every message waits for the row written after it", async () => {
+  const id = "chat-waiting"
+  const AFTER = "the ask written after it"
+  host([{ at: 3_000 }])
+  await seedChat({ id, messages: turn, profile: bot })
+  await mount(chatScreen(id), async () => {
+    await until(async () => findAll("[data-slot=message]").length > 0, "the thread's rows")
+    await import("@/components/chat/markdown-renderer")
+    assert.equal(drawnNow().dividers, 0, "no divider at the foot of a thread holding messages")
+
+    await db.messages.put({
+      id: "ask-3",
+      conversationId: id,
+      role: "user",
+      content: AFTER,
+      status: "done",
+      createdAt: 4_000,
+    })
+    await until(async () => drawnNow().dividers > 0, "the divider the next message gives it")
+    const drawn = drawnNow(AFTER)
+    assert.equal(drawn.dividers, 1, "one divider, not a second one at the foot")
+    assert.equal(drawn.place.divider, drawn.place.after, "it sits above the row written after it")
+  })
 })

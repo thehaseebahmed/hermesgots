@@ -9,7 +9,7 @@ import type { Compaction } from "@/lib/hermes"
 export interface CompactionMarks {
   /** The messages to draw a divider above, each with the compaction it marks. */
   before: Map<string, Compaction>
-  /** A compaction came after everything the thread shows, so its divider closes the thread. */
+  /** The divider a flow holding no message keeps: nothing above it, nothing after it. */
   trailing?: Compaction
 }
 
@@ -18,32 +18,42 @@ export const compactionAt = (compaction: Compaction) => compaction.at
 
 /**
  * Each compaction sits above the first message written after it, on the host's clock. That is exact
- * for one made between turns, and for one made as a turn opens it lands between the user's message and
- * the reply; one made while a reply runs lands after that reply, above whatever comes next, or at the
- * end of the thread while nothing has. One that predates every message this device holds stands above
- * the first of them: Hermes keeps the rows it took away off the transcript, so the top of what a device
- * can load is where its compaction happened. Several in one gap are one divider, the first's. One a
- * reply already draws inside itself, at its seam, draws nothing here — the placement is this one
- * function's to make, wherever the divider ends up. A chat holding no message at all keeps the one
- * that made it: a Main whose turns were all triaged away has nothing above the divider, and it is
- * still where the host compacted the context the markers below are missing.
+ * for one made between turns, and for one made as a turn opens it lands between the user's message
+ * and the reply; one made while a reply runs is drawn at that reply's seam, where the fold names
+ * its row. One that predates every message this device holds stands above the first of them: Hermes
+ * keeps the rows it took away off the transcript, so the top of what a device can load is where its
+ * compaction happened. Several in one gap are one divider, the first's. One a reply already draws
+ * inside itself, at its seam, draws nothing here — the placement is this one function's to make,
+ * wherever the divider ends up.
+ *
+ * A divider is only drawn where the thread can say what it separates. Nothing in a thread with
+ * messages is "after everything": a reply is one row stamped when its turn opened, so a mark newer
+ * than the last message may belong inside that reply — the work it did after the compaction is in
+ * the same row — and drawing it at the foot would put it past work it came before. Such a mark
+ * waits for the message written after it, the row it is drawn above. Only a chat holding no message
+ * at all keeps the one that made it: a Main whose turns were all triaged away has nothing above the
+ * divider, and it is still where the host compacted the context the markers below are missing.
+ *
+ * `undefined` is a chat nobody has read yet, which is not an empty one: it marks nothing, since the
+ * rows about to arrive may hold the reply the mark fell inside.
  */
-export function compactionMarks(messages: Message[], compactions?: Compaction[]): CompactionMarks {
+export function compactionMarks(
+  messages: Message[] | undefined,
+  compactions?: Compaction[],
+): CompactionMarks {
+  if (!compactions?.length || !messages) return { before: new Map() }
+  if (!messages.length) return { before: new Map(), trailing: compactions[0] }
   const marks: CompactionMarks = { before: new Map() }
-  if (!compactions?.length) return marks
   const inside = new Set(
     messages.flatMap((message) =>
       (message.seams ?? []).map((seam) => compactionOf(seam, compactions)),
     ),
   )
-  // The host's own time where the row kept it: `createdAt` is this device's, and a catch-up can
-  // floor it forward past the mark, one row the wrong side of the line.
-  const at = (message: Message) => message.hermesAt ?? message.createdAt
+  const hostTime = (message: Message) => message.hermesAt ?? message.createdAt
   for (const compaction of compactions) {
     if (inside.has(compaction)) continue
-    const next = messages.find((message) => at(message) > compactionAt(compaction))
-    if (!next) marks.trailing ??= compaction
-    else if (!marks.before.has(next.id)) marks.before.set(next.id, compaction)
+    const next = messages.find((message) => hostTime(message) > compactionAt(compaction))
+    if (next && !marks.before.has(next.id)) marks.before.set(next.id, compaction)
   }
   return marks
 }

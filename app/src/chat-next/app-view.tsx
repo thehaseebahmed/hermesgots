@@ -206,7 +206,7 @@ export function AppThreadView({
     thread: messages,
     moves,
     compaction: compacted.trailing,
-    on: Boolean(main),
+    asMain: Boolean(main),
     routeChat: main?.routeChat,
   })
   const { drawn, cut } = useFirstRows(chatId, flow, flow.length > 0)

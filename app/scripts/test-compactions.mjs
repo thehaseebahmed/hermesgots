@@ -38,9 +38,9 @@ test("one as a turn opens sits between the user's message and the reply", () => 
   assert.deepEqual(marked(thread, [{ at: 205 }]), { before: ["a2"], trailing: false })
 })
 
-test("one after everything closes the thread", () => {
+test("one after everything is drawn nowhere", () => {
   const thread = [...turn(1, 100)]
-  assert.deepEqual(marked(thread, [{ at: 500 }]), { before: [], trailing: true })
+  assert.deepEqual(marked(thread, [{ at: 500 }]), { before: [], trailing: false })
 })
 
 test("several in one gap are one divider", () => {
@@ -72,8 +72,10 @@ test("no compactions, or none known, mark nothing", () => {
 })
 
 test("a chat holding no message keeps the compaction that made it, which closes its flow", () => {
-  // A Main whose every turn was triaged away: nothing in it to sit above, so the divider is what the
-  // foot of its flow holds, exactly as it is for a message-less thread waiting on its first page.
+  // A Main whose every turn was triaged away: nothing in it to sit above, so the divider is what
+  // the foot of its flow holds.
+  const mark = { at: 500, tokens: 7 }
+  assert.deepEqual(compactionMarks([], [mark]).trailing, mark, "the mark itself, with its size")
   assert.deepEqual(marked([], [{ at: 1 }]), { before: [], trailing: true })
 })
 
@@ -84,12 +86,10 @@ test("each divider carries the compaction it marks, the first of a gap", () => {
   assert.deepEqual(marks.before.get("u2"), first)
   const head = compactionMarks(turn(1, 100), [{ at: 20 }, { at: 50 }])
   assert.deepEqual(head.before.get("u1"), { at: 20 })
-  const last = compactionMarks(thread, [{ at: 500, tokens: 7 }])
-  assert.deepEqual(last.trailing, { at: 500, tokens: 7 })
 })
 
 test("one a reply draws inside itself draws nothing between turns", () => {
-  // The seam names the row its summary became, so the divider is the reply's own and not this one's.
+  // The seam names the row its summary became, so the divider is the reply's own, not this one's.
   const thread = [
     ...turn(1, 100),
     message("u2", "user", 200),
@@ -107,5 +107,13 @@ test("one the record has no row for is matched to its seam by time", () => {
   ]
   assert.deepEqual(marked(thread, [{ at: 205 }]), { before: [], trailing: false })
   // A time further off than the host's own clock can drift is not that compaction.
-  assert.deepEqual(marked(thread, [{ at: 5_000 }]), { before: [], trailing: true })
+  assert.deepEqual(marked(thread, [{ at: 5_000 }]), { before: [], trailing: false })
+})
+
+test("one made while a reply runs is never drawn under it", () => {
+  assert.deepEqual(marked(turn(1, 1_000), [{ at: 5_000, row: 7 }]), { before: [], trailing: false })
+})
+
+test("a chat nobody has read yet marks nothing, which is not the same as an empty one", () => {
+  assert.deepEqual(marked(undefined, [{ at: 1 }]), { before: [], trailing: false })
 })

@@ -880,9 +880,9 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   )
   // Where the host compacted this chat's context: the first message after each carries a divider above
   // it. One that fell inside a reply is drawn in the reply, where it happened, and not by this; one
-  // made after everything here closes the flow, which is Main's to place.
+  // with no message after it is drawn only where the flow holds none, which is Main's to place.
   const compacted = useMemo(
-    () => compactionMarks(thread ?? [], conversation?.compactions),
+    () => compactionMarks(thread, conversation?.compactions),
     [thread, conversation?.compactions],
   )
   const {
@@ -899,7 +899,7 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
     thread,
     moves: conversation?.moves,
     compaction: compacted.trailing,
-    on: Boolean(botThreads && conversation?.main),
+    asMain: Boolean(botThreads && conversation?.main),
     listFor: gone ? profile?.id : undefined,
     afterUndo: refreshQueue,
     routeChat,

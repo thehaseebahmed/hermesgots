@@ -1,5 +1,7 @@
 # A card, a marker and a divider where Main's messages run out read one clock
 
+**Amended by ADR 0082**: a divider with no message after it is not drawn at the foot of a thread holding messages — it waits for the message written after it, and only a flow holding no message keeps a closing one; the hold on a chat whose first read is still out lives in `compactionMarks` now, which marks nothing until its rows arrive.
+
 **Amends [ADR 0034](0034-the-bot-opens-main-and-its-threads-are-cards-in-it.md)**, which settled
 that every thread's card is drawn "at the time that thread was started" and rejected collecting the
 cards in one block at the end of Main. Both stand: a card still sits where its thread began, against

@@ -38,7 +38,7 @@ export function mainTail({
   cards?: readonly Thread[]
   /** The moves no message follows, from `moveMarks`' own trailing. */
   moves?: readonly Move[]
-  /** A compaction made after everything Main shows, from `compactionMarks`' trailing. */
+  /** The divider a flow holding no message keeps, from `compactionMarks`' trailing. */
   compaction?: Compaction
 }): TailItem[] {
   const items: TailItem[] = [

@@ -244,7 +244,7 @@ The host's record of the models a chat's calls ran on, one row per change. A thr
 _Avoid_: model switch, model update, fallback
 
 **Compaction**:
-A point where Hermes compressed a chat's context — in place under the same session, the default, or by ending the session and continuing in a child. The host records when, the context's size where it measured one, and the summary's own row for one made in place. The thread draws a divider above the first message written after it, above the first message a device holds where a compaction took away everything that device can load, or inside the reply it fell in, at its seam, where the record is matched by that row (else by the summary's own time). A compaction drawn that way draws no second divider between turns.
+A point where Hermes compressed a chat's context — in place under the same session, the default, or by ending the session and continuing in a child. The host records when, the context's size where it measured one, and the summary's own row for one made in place. The thread draws a divider above the first message written after it, above the first message a device holds where a compaction took away everything that device can load, or inside the reply it fell in, at its seam, where the record is matched by that row (else by the summary's own time). A compaction drawn that way draws no second divider between turns. A divider is drawn only where the thread can say what it separates, so one with no message after it is not drawn at the foot of a thread holding messages — the last may be a reply that ran past the mark — and waits for the message written after it; only a flow holding no message at all keeps a closing divider.
 _Avoid_: compression event, summary
 
 **Carried copy**:

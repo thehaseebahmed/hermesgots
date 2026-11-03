@@ -33,7 +33,7 @@ export function useMainFlow({
   thread,
   moves,
   compaction,
-  on,
+  asMain,
   listFor,
   afterUndo,
   routeChat,
@@ -42,10 +42,10 @@ export function useMainFlow({
   profileId: string
   thread: Message[] | undefined
   moves: Move[] | undefined
-  /** What closes the flow: `compactionMarks`' own trailing, when the host left one. */
+  /** What closes a flow holding no message: `compactionMarks`' trailing, where there is one. */
   compaction?: Compaction
-  /** Main draws its threads as cards. */
-  on: boolean
+  /** This flow is a bot's Main, so its threads draw as cards. */
+  asMain: boolean
   /** The bot whose threads are read, where something other than the cards needs the list. */
   listFor?: string
   /** What the screen reads again once a move is undone. */
@@ -53,10 +53,10 @@ export function useMainFlow({
   /** The thread the address names, whose marker leads nowhere. */
   routeChat?: string
 }) {
-  const threadList = useThreads(on ? profileId : listFor)
+  const threadList = useThreads(asMain ? profileId : listFor)
   const cards = useMemo(
-    () => (on ? threadList && threadCards(thread ?? NO_ROWS, threadList) : undefined),
-    [on, thread, threadList],
+    () => (asMain ? threadList && threadCards(thread ?? NO_ROWS, threadList) : undefined),
+    [asMain, thread, threadList],
   )
   const drawnAsCards = useMemo(() => drawnThreadIds(cards), [cards])
   const marks = useMemo(
@@ -68,11 +68,9 @@ export function useMainFlow({
       mainTail({
         cards: cards?.trailing,
         moves: marks.trailing,
-        // Held until the chat's own read answers: a divider over a chat still reading leads the rows
-        // about to arrive, then jumps above them. `thread` is undefined exactly until it has answered.
-        compaction: thread ? compaction : undefined,
+        compaction,
       }),
-    [cards, marks, compaction, thread],
+    [cards, marks, compaction],
   )
   const now = useNow()
   const flow = useMemo(() => {
