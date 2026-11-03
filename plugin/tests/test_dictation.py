@@ -8,8 +8,10 @@ ready, what reaches faster-whisper, and how its answers come back.
 from __future__ import annotations
 
 import os
+import tempfile
 import types
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from plugin import dictation, dictation_cleanup, speech
@@ -501,6 +503,18 @@ class ConfirmTest(unittest.TestCase):
         self.assertEqual(answer["provider"], "local")
         self.assertEqual(answer["model"], "small", "a local take is heard by the local model")
 
+    def test_a_row_names_the_route_its_words_went_through_not_the_one_after_it(self) -> None:
+        tt, patch = hermes()
+        with patch:
+            self.upload()
+            # The bot is moved to a vendor between its last Piece and its Confirm: the words were
+            # heard here, so the row keeps this host's model and route rather than the vendor's.
+            tt._get_provider = lambda cfg: "groq"
+            answer = dictation.confirm("p", "take-1", 1, level="none")
+        self.assertEqual(answer["provider"], "local", "the route the take was heard on")
+        self.assertEqual(answer["model"], "small", "and the model it was heard with")
+        self.assertEqual(tt.audio, [], "a take this host heard is never uploaded")
+
     def test_a_cloud_take_sends_no_hearing_prompt_and_never_reaches_the_local_model(self) -> None:
         tt, patch = hermes(_get_provider=lambda cfg: "groq")
         with patch:
@@ -508,15 +522,28 @@ class ConfirmTest(unittest.TestCase):
             dictation.confirm("p", "take-1", 1, level="none")
         self.assertEqual(tt.calls, [])
 
-    def test_a_provider_whose_model_the_host_cannot_name_records_none(self) -> None:
-        config = {"local": {"model": "small"}, "groq": {"language": "en"}}
-        _, patch = hermes(_get_provider=lambda cfg: "groq", _load_stt_config=lambda: config)
-        with patch:
+    def test_a_cloud_takes_words_land_untidied_whatever_level_the_app_asked(self) -> None:
+        _, patch = hermes(_get_provider=lambda cfg: "groq")
+        with patch, mock.patch.object(dictation_cleanup, "finish") as finish:
             self.upload()
-            answer = dictation.confirm("p", "take-1", 1, level="none")
-        self.assertEqual(answer["provider"], "groq")
-        self.assertEqual(answer["model"], "", "no model rather than the local one")
-        self.assertNotEqual(answer["model"], "small")
+            answer = dictation.confirm("p", "take-1", 1, level="high")
+        finish.assert_not_called()
+        self.assertEqual(answer["text"], "Uploaded take.", "the vendor's words are what lands")
+        self.assertEqual(answer["heard"], answer["text"], "one block, not two identical ones")
+        self.assertEqual(answer["level"], dictation_cleanup.NONE)
+        self.assertFalse(answer["cleaned"])
+
+    def test_a_cloud_takes_answer_leaves_the_bots_stored_level_where_it_was(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        path = Path(tmp.name) / "memento.db"
+        speech.set_level(path, "high")
+        _, patch = hermes(_get_provider=lambda cfg: "groq")
+        with patch:
+            self.upload(profile=path)
+            answer = dictation.confirm(path, "take-1", 1, level="high")
+        self.assertEqual(answer["level"], "none")
+        self.assertEqual(speech.read_level(path), "high", "the level is kept for a Local route")
 
     def test_an_unwritten_model_is_the_providers_schema_default(self) -> None:
         defaults = {"local": {"model": "base"}, "elevenlabs": {"model_id": "scribe_v2"}}
@@ -527,6 +554,16 @@ class ConfirmTest(unittest.TestCase):
             answer = dictation.confirm("p", "take-1", 1, level="none")
         self.assertEqual(answer["provider"], "elevenlabs")
         self.assertEqual(answer["model"], "scribe_v2", "the provider's own spelling of its model")
+
+    def test_a_provider_whose_model_the_host_cannot_name_records_none(self) -> None:
+        config = {"local": {"model": "small"}, "groq": {"language": "en"}}
+        _, patch = hermes(_get_provider=lambda cfg: "groq", _load_stt_config=lambda: config)
+        with patch:
+            self.upload()
+            answer = dictation.confirm("p", "take-1", 1, level="none")
+        self.assertEqual(answer["provider"], "groq")
+        self.assertEqual(answer["model"], "", "no model rather than the local one")
+        self.assertNotEqual(answer["model"], "small")
 
     def test_a_provider_whose_default_model_is_blank_records_none(self) -> None:
         defaults = {"local": {"model": "base"}, "xai": {"model": ""}}
@@ -558,10 +595,10 @@ class ConfirmTest(unittest.TestCase):
         _, patch = hermes(_get_provider=lambda cfg: "groq")
         with patch:
             state = dictation.info("light")
-        self.assertGreaterEqual(
+        self.assertEqual(
             state["wait_ms"],
-            (dictation.QUEUE_SECONDS + dictation.CLOUD_SECONDS) * 1000,
-            "a cloud take's Confirm uploads the whole of it, and the bar is told so",
+            int((dictation.QUEUE_SECONDS + dictation.CLOUD_SECONDS) * 1000),
+            "a cloud take uploads the whole of it and runs no Cleanup to wait for",
         )
 
     def test_a_confirm_naming_more_pieces_than_a_take_can_hold_is_refused(self) -> None:
@@ -575,10 +612,21 @@ class ConfirmTest(unittest.TestCase):
         with patch:
             for level in dictation_cleanup.LEVELS:
                 state = dictation.info(level)
-                self.assertGreaterEqual(
+                self.assertEqual(
                     state["wait_ms"],
-                    (dictation.QUEUE_SECONDS + dictation_cleanup.deadline_of(level)) * 1000,
-                    f"the {level} level's bound covers its own Cleanup",
+                    int((dictation.QUEUE_SECONDS + dictation_cleanup.deadline_of(level)) * 1000),
+                    f"a local host's {level} level carries its own Cleanup's deadline",
+                )
+
+    def test_a_cloud_hosts_bound_drops_the_cleanup_term_at_every_level(self) -> None:
+        _, patch = hermes(_get_provider=lambda cfg: "groq")
+        with patch:
+            for level in dictation_cleanup.LEVELS:
+                state = dictation.info(level)
+                self.assertEqual(
+                    state["wait_ms"],
+                    int((dictation.QUEUE_SECONDS + dictation.CLOUD_SECONDS) * 1000),
+                    f"no Cleanup runs on a cloud take, so {level} moves no bar",
                 )
 
 

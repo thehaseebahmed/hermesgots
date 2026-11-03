@@ -18,7 +18,9 @@ import { Screen } from "@/components/settings-chrome"
 import { connectionKey } from "@/lib/connection"
 import { monthLabel, orderOf, spelledCount } from "@/lib/dictation-log"
 import { db } from "@/lib/db"
+import { readSpeech } from "@/lib/speech"
 import { SettingsPage } from "@/routes/settings"
+import { speech } from "./dictation-page-kit.tsx"
 import {
   botProfile,
   click,
@@ -178,13 +180,7 @@ async function seed(bots: Bot[]) {
     if (bot.known)
       await db.speechCache.put({
         key: connectionKey(profile),
-        at: 0,
-        speech: {
-          model: bot.known,
-          models: [],
-          cleanup: { model: null, allowed: false, reason: null, level: "light" },
-          hearing: { sent: false },
-        },
+        speech: readSpeech(speech({ model: bot.known })),
       })
     for (const row of bot.rows ?? [])
       await db.dictationLog.put({

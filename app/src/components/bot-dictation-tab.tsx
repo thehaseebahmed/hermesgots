@@ -60,6 +60,9 @@ import { plural } from "@/lib/tools"
 import { cn } from "@/lib/utils"
 import { MAX_WORD, addWord, cleanWord, readVocabulary, removeWord } from "@/lib/vocabulary"
 
+/** Why the cleanup's rows are shut on a bot whose takes leave the host (ADR 0082). */
+const CLEANUP_LOCAL_ONLY = "Cleanup is only available with local models."
+
 /**
  * The Speech-to-text page: the words this bot's speech leans towards and the model that tidies a
  * take, both Gots's own, over the bot's own Hermes — the model that hears it, and every setting
@@ -77,7 +80,7 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
   // nothing here may be written from it.
   const muted = speech.stale
   // A bot this device never read shows a loader in place of the rows rather than a page of blanks.
-  const loading = speech.supported && !settings && speech.check !== "failed"
+  const loading = speech.loading
   const navigate = useNavigate()
   const words = readVocabulary(profile.vocabulary)
   const info = useModelInfo(profile)
@@ -88,9 +91,9 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
   const models = settings ? modelsFor(settings, block) : []
   const otherProviders = block ? providerRows(block) : []
   const heard = settings ? heardLine(settings.provider) : null
-  // The picker is where a measurement is asked for (ADR 0075), and a muted page asks for none.
+  // The picker is where a measurement is asked for (ADR 0075); the muted row that cannot open it and
+  // the hook's own guard are what keep a stale page from starting one.
   const openSpeech = () => {
-    if (muted) return
     setPick("speech")
     void speech.measure()
   }
@@ -199,6 +202,7 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
               settings={settings}
               saving={speech.saving}
               muted={muted}
+              cloud={Boolean(settings.provider?.cloud)}
               levels={speech.levels}
               hearing={speech.hearing}
               developer={Boolean(developer)}
@@ -780,14 +784,16 @@ function VocabularyRow({ profile, words }: { profile: Profile; words: string[] }
 function CleanupRow({
   tag,
   settings,
-  saving,
-  muted,
+  shut,
+  unavailable,
   onClick,
 }: {
   tag?: string
   settings: SpeechSettings | undefined
-  saving: boolean
-  muted: boolean
+  /** The card's rows are shut: a write is out, the page is stale, or cleanup cannot run here. */
+  shut: boolean
+  /** The card's own line already says why this row is shut, so the row adds no second reason. */
+  unavailable: boolean
   onClick: () => void
 }) {
   const pick = settings?.cleanup.model
@@ -798,8 +804,13 @@ function CleanupRow({
       <ValueRow
         title="Cleanup model"
         tag={tag}
-        purpose={settings?.cleanup.reason ?? "This host doesn't let Gots pick the model."}
+        purpose={
+          unavailable
+            ? undefined
+            : (settings?.cleanup.reason ?? "This host doesn't let Gots pick the model.")
+        }
         value="Default"
+        muted
         disabled
         data-setting="cleanup-model"
       />
@@ -810,8 +821,8 @@ function CleanupRow({
       tag={tag}
       purpose="The model that tidies a take's finished words"
       value={pick ? fullModel(pick) : "Default"}
-      muted={muted}
-      disabled={saving || muted}
+      muted={shut}
+      disabled={shut}
       onClick={onClick}
       data-setting="cleanup-model"
     />
@@ -823,6 +834,7 @@ function CleanupSection({
   settings,
   saving,
   muted,
+  cloud,
   levels,
   hearing,
   developer,
@@ -833,6 +845,8 @@ function CleanupSection({
   settings: SpeechSettings
   saving: boolean
   muted: boolean
+  /** The take leaves the host: Cleanup never runs on one a vendor transcribed (ADR 0082). */
+  cloud: boolean
   levels: boolean
   hearing: boolean
   developer: boolean
@@ -840,8 +854,19 @@ function CleanupSection({
   onHearing: (sent: boolean) => void
   onPick: () => void
 }) {
+  // A host that carries no level keeps the page it had: the rule is drawn by the build that knows it,
+  // and one that can't take a level could not explain what it is holding.
+  const unavailable = cloud && levels
+  // Every row of the card is shut for the same reasons the page is: a write is out, the answer is
+  // this device's cached copy, or cleanup cannot run on a cloud route at all.
+  const shut = saving || muted || unavailable
   return (
     <Card id="cleanup" title="Cleanup">
+      {unavailable && (
+        <p className="px-5 text-sm text-muted-foreground" data-cleanup-unavailable>
+          {CLEANUP_LOCAL_ONLY}
+        </p>
+      )}
       <Group>
         {levels && (
           <ValueRow
@@ -849,8 +874,8 @@ function CleanupSection({
             tag="Gots"
             purpose="How much the tidying changes in a take"
             value={levelName(settings.cleanup.level)}
-            muted={muted}
-            disabled={saving || muted}
+            muted={shut}
+            disabled={shut}
             onClick={onLevel}
             data-setting="cleanup-level"
           />
@@ -858,8 +883,8 @@ function CleanupSection({
         <CleanupRow
           tag="Gots"
           settings={settings}
-          saving={saving}
-          muted={muted}
+          shut={shut}
+          unavailable={unavailable}
           onClick={onPick}
         />
         {hearing && developer && (
@@ -868,7 +893,7 @@ function CleanupSection({
             title="Hearing prompt"
             subtitle="Whether the speech model is told this bot's names before it listens"
             checked={settings.hearing.sent}
-            disabled={saving || muted}
+            disabled={shut}
             onCheckedChange={onHearing}
             data-setting="hearing-prompt"
           />

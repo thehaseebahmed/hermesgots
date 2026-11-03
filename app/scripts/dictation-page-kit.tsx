@@ -183,11 +183,15 @@ export function host(
     models?: unknown
     /** The fresh `stt` block a write answers with: the one the page draws after it. */
     nextStt?: unknown
+    /** What `GET speech` answers once a setting has been written: the route a pick moved to. */
+    afterStt?: Speech
     /** What a `POST stt` answers with where the host refuses the write. */
     refuseStt?: string
   } = {},
 ) {
   const calls: { path: string; method: string; body: unknown }[] = []
+  // A setting the page wrote: the read that follows answers with the route the pick moved the bot to.
+  let written = false
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = new URL(String(input)).pathname
     const method = init?.method ?? "GET"
@@ -203,6 +207,7 @@ export function host(
       const body = init?.body ? JSON.parse(String(init.body)) : undefined
       calls.push({ path, method, body })
       if (options.refuseStt) return json({ error: { message: options.refuseStt } }, 400)
+      written = true
       return json({ stt: options.nextStt ?? options.speech?.stt })
     }
     if (path.endsWith("/api/plugins/memento/speech/probe")) {
@@ -221,7 +226,7 @@ export function host(
       if (options.stallSpeech) return new Promise<Response>(() => {})
       if (options.refuseSpeech) return json({ error: { message: options.refuseSpeech } }, 500)
       if (!options.speech) return json({}, 404)
-      return json({ speech: options.speech })
+      return json({ speech: written ? (options.afterStt ?? options.speech) : options.speech })
     }
     return json({}, 404)
   }
@@ -383,7 +388,6 @@ export async function seedCache(patch: Record<string, unknown> = {}) {
   if (!profile) return
   await db.speechCache.put({
     key: connectionKey(profile),
-    at: 0,
     speech: readSpeech(speech(patch)),
   })
 }

@@ -339,35 +339,39 @@ def _flatten(section: Dict[str, Any], prefix: str = f"{STT_KEY}.") -> Dict[str, 
     return out
 
 
-# The field a provider holds its model under; every other provider spells it "model" (the app's
-# ``PROVIDER_FIELDS`` in ``app/src/lib/stt-settings.ts`` is the table, and ElevenLabs is the one).
-MODEL_FIELDS = {"elevenlabs": "model_id"}
+# The two spellings Hermes gives a provider's model: ElevenLabs' is ``model_id``; every other
+# provider's is ``model``. Which one a provider takes is read from its own schema block below, so a
+# provider whose schema spells it a third way is named without teaching this module a table.
+MODEL_FIELDS = ("model", "model_id")
 
 
 def provider_model(provider: str, section: Dict[str, Any]) -> str:
     """The model ``provider`` transcribes with, as ``section`` (an ``stt`` block) or its default says.
 
-    A provider's own block names its model where the bot has written one; where it hasn't, Hermes's
-    schema default for that provider's model key is what the vendor is asked for. A provider this
-    host can name neither way — one the defaults don't declare, a host shipping no defaults at all,
-    or a default that is the empty string — answers ``""``: a row records no model rather than a
-    model the provider never ran (ADR 0082).
+    The field read is the one the host's own schema declares for that provider, so a model the bot
+    has written is what the vendor is asked for, and a bot that never picked one is on the host's
+    default. A provider this host can name neither way — one the defaults don't declare, a host
+    shipping no defaults at all, or a default that is the empty string — answers ``""``: a row
+    records no model rather than a model the provider never ran (ADR 0082).
     """
     name = str(provider or "").strip().lower()
     if not name:
         return ""
-    key = MODEL_FIELDS.get(name, "model")
-    written = (section or {}).get(name) if isinstance(section, dict) else None
-    if isinstance(written, dict):
-        stated = written.get(key)
-        if isinstance(stated, str) and stated.strip():
-            return stated.strip()
+    block = (section or {}).get(name) if isinstance(section, dict) else None
+    block = block if isinstance(block, dict) else {}
     try:
         defaults = _flatten(_defaults())
     except Exception:
         logger.debug("memento: this host declares no speech defaults", exc_info=True)
-        return ""
-    default = defaults.get(f"{STT_KEY}.{name}.{key}")
+        defaults = {}
+    field = next(
+        (one for one in MODEL_FIELDS if f"{STT_KEY}.{name}.{one}" in defaults),
+        MODEL_FIELDS[0],
+    )
+    stated = block.get(field)
+    if isinstance(stated, str) and stated.strip():
+        return stated.strip()
+    default = defaults.get(f"{STT_KEY}.{name}.{field}")
     return default.strip() if isinstance(default, str) and default.strip() else ""
 
 

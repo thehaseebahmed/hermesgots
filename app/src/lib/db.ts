@@ -715,8 +715,6 @@ export interface DictationStats {
 export interface SpeechCacheRow {
   /** The `connectionKey` of the bot whose host answered. */
   key: string
-  /** When this device read it. */
-  at: number
   /** The host's speech settings, as `readSpeech` read them at the time. */
   speech: SpeechSettings
 }
@@ -1193,8 +1191,19 @@ db.version(29).stores({ sentFiles: SESSION_STORES.sentFiles })
 db.version(30).stores({ mediaCache: "key, at" })
 // v31: the last speech answer each bot's host gave this device, so the Speech-to-text page draws its
 // rows at once rather than a page of blank space, and the Bots line names the model it last read
-// (ADR 0082). A new table: nothing older has to be moved into it.
-db.version(31).stores({ speechCache: "key, at" })
+// (ADR 0082). A new table: nothing older has to be moved into it. The speech model a bot used to
+// carry was that answer's only remembered part, and it is deleted rather than left behind: `botValue`
+// syncs every field it isn't told to keep, so a dead one would travel to the account document.
+db.version(31)
+  .stores({ speechCache: "key" })
+  .upgrade((tx) =>
+    tx
+      .table<Profile & { speechModel?: string }>("profiles")
+      .toCollection()
+      .modify((profile) => {
+        delete profile.speechModel
+      }),
+  )
 
 db.on("populate", (tx) => seedProfile(tx))
 
@@ -1324,6 +1333,7 @@ export async function deleteProfile(id: string, { remote = false, last = false }
     db.skills,
     db.meetingRecordings,
     db.mediaCache,
+    db.speechCache,
   ]
   return db.transaction("rw", tables, async () => {
     const alone = (await db.profiles.count()) <= 1
@@ -1346,6 +1356,7 @@ export async function deleteProfile(id: string, { remote = false, last = false }
       await db.dictationLog.where("connection").equals(key).delete()
       await db.dictationStats.delete(key)
       await db.mediaCache.where("key").startsWith(mediaKeyPrefix(profile.baseUrl)).delete()
+      await db.speechCache.delete(key)
     }
     await db.conversations.bulkDelete(ids)
     await db.profiles.delete(id)
@@ -1493,6 +1504,7 @@ export async function clearAllData() {
     db.sessionStates,
     db.sentFiles,
     db.mediaCache,
+    db.speechCache,
   ]
   await db.transaction("rw", tables, async () => {
     await Promise.all(tables.map((table) => table.clear()))

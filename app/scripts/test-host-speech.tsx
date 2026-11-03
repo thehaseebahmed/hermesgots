@@ -1,9 +1,10 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { db } from "@/lib/db"
+import { clearAllData, db, deleteProfile } from "@/lib/db"
 import { cachedSpeech, getSpeech, probeSpeech, setSpeech } from "@/lib/host-speech"
 import { connectionKey } from "@/lib/connection"
+import { botProfile, connection } from "./component-kit.tsx"
 
 const config = { baseUrl: "http://host.test:8642/v1", apiKey: "key" }
 
@@ -119,4 +120,22 @@ test("a read keeps the host's whole answer on this device, keyed by the connecti
   host({ error: { message: "No speech here." } }, 500)
   await assert.rejects(getSpeech(config))
   assert.equal((await cachedSpeech(connectionKey(config)))?.model, "base", "a failed read keeps it")
+})
+
+test("a bot's copy of its host's answer goes with the bot, and a clear leaves none", async () => {
+  const server = connection("dropped")
+  const profile = botProfile("dropped")
+  await db.profiles.clear()
+  await db.speechCache.clear()
+  await db.profiles.put(profile)
+  host({ speech: answer })
+  await getSpeech(server)
+  assert.ok(await db.speechCache.get(connectionKey(server)), "the answer this device read")
+
+  await deleteProfile(profile.id, { last: true })
+  assert.equal(await db.speechCache.count(), 0, "goes with the bot it belongs to")
+
+  await getSpeech(server)
+  await clearAllData()
+  assert.equal(await db.speechCache.count(), 0, "and Clear local data leaves no copy behind")
 })

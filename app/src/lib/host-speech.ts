@@ -32,20 +32,23 @@ export const READ_FAILED = "Couldn't read this bot's host."
 
 /** The last speech answer a bot's host gave this device, or nothing where it never read one. */
 export async function cachedSpeech(key: string): Promise<SpeechSettings | undefined> {
-  return (await db.speechCache.get(key))?.speech
+  try {
+    return (await db.speechCache.get(key))?.speech
+  } catch (error) {
+    noteFailure("Reading this device's copy of the host's speech settings", error)
+    return undefined
+  }
 }
 
 /**
  * Keeps a host's answer on this device, per bot: it is the copy the next open draws at once, before
  * a fresh read lands. Never synced — one connection's answer is drawn on that bot's screens alone.
+ * Written as it arrives rather than compared first: a successful read is a fresh answer by
+ * definition, and reading the row back to skip a put costs about what the put does.
  */
 async function keepSpeech(config: Server, settings: SpeechSettings) {
   try {
-    await db.speechCache.put({
-      key: connectionKey(config),
-      at: Date.now(),
-      speech: settings,
-    })
+    await db.speechCache.put({ key: connectionKey(config), speech: settings })
   } catch (error) {
     noteFailure("Keeping this host's speech settings", error)
   }
@@ -87,7 +90,7 @@ export async function setSpeech(
  * (ADR 0082). A write while nothing fresh has landed is refused here as well as in the page, so a
  * stale level or model never reaches the host.
  */
-export function useSpeech(profile?: (Server & { id?: string }) | null) {
+export function useSpeech(profile?: Server | null) {
   const baseUrl = profile?.baseUrl ?? ""
   const apiKey = profile?.apiKey ?? ""
   const key = connectionKey({ baseUrl, apiKey })
@@ -192,11 +195,24 @@ export function useSpeech(profile?: (Server & { id?: string }) | null) {
       const stt = await save(() =>
         setSttSetting({ baseUrl, apiKey }, setting, value, AbortSignal.timeout(WRITE_TIMEOUT_MS)),
       )
-      if (stt)
-        setState((held) =>
-          held?.key === key ? { key, settings: { ...held.settings, stt } } : held,
+      if (!stt) return false
+      // The host's answer is the block it now holds, so the copy this device keeps moves with it:
+      // the next open draws the write rather than the answer before it.
+      const merged = state?.settings ? { ...state.settings, stt } : undefined
+      if (merged) {
+        setState({ key, settings: merged })
+        await keepSpeech({ baseUrl, apiKey }, merged)
+      }
+      // Who hears a take is not in the `stt` block this answers with, so a provider pick is followed
+      // by the read that names it: the page greys Cleanup on that route, and must not keep saying the
+      // provider the bot has just left (ADR 0082).
+      if (setting === "stt.provider") {
+        const fresh = await save(() =>
+          getSpeech({ baseUrl, apiKey }, AbortSignal.timeout(READ_TIMEOUT_MS)),
         )
-      return Boolean(stt)
+        if (fresh) setState({ key, settings: fresh })
+      }
+      return true
     },
     [save, state, key, baseUrl, apiKey],
   )
@@ -248,6 +264,8 @@ export function useSpeech(profile?: (Server & { id?: string }) | null) {
     settings,
     /** Whether those values are the cached copy: every row is drawn muted and untappable. */
     stale: !settled && Boolean(held),
+    /** Whether a read is out and this device holds nothing to draw in its place: a loader, no rows. */
+    loading: supported && !settings && failed !== key,
     model,
     check,
     supported,

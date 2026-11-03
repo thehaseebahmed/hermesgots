@@ -3386,6 +3386,18 @@ function heardBy() {
   const local = name === "local" || name === "local_command"
   return { name, backend: local ? name : null, cloud: !local && name !== "none" }
 }
+/**
+ * The model a provider transcribes with, as `plugin/speech.py`'s `provider_model` names it: the model
+ * the bot wrote for it, else the schema's default, and nothing where the host can name neither.
+ */
+function providerModel(name) {
+  const field =
+    ["model", "model_id"].find((one) => `stt.${name}.${one}` in STT_DEFAULTS) ?? "model"
+  const key = `stt.${name}.${field}`
+  const written = stt.values[key]
+  const value = typeof written === "string" && written.trim() ? written : STT_DEFAULTS[key]
+  return typeof value === "string" && value.trim() ? value.trim() : ""
+}
 // plugin/moves.py: the messages triage moved out of each Main session, for its Moved markers.
 const moves = new Map()
 let openuiOn = true
@@ -5545,7 +5557,11 @@ http
       }
       const ms = held.order.reduce((total, index) => total + (held.pieces.get(index)?.ms ?? 0), 0)
       const heard = dictationWords(held)
-      const level = speech.level
+      const route = heardBy()
+      // ADR 0082: Cleanup runs only for a take this host heard. A take whose audio left for a vendor
+      // is transcribed once and those words are what land, answered at the host's None whatever the
+      // bot's stored level is — the level is kept for the moment the route is Local again.
+      const level = route.cloud ? "none" : speech.level
       if (DICTATION === "fail")
         return json(res, 502, {
           error: { message: "Local transcription failed: the model ran out of memory." },
@@ -5554,7 +5570,7 @@ http
       await new Promise((resolve) => setTimeout(resolve, dictationConfirmMs))
       // A cleanup that fails or finds nothing to change lands the words as they were heard; the
       // level is still named, and `cleaned` says which of the two happened (ADR 0074).
-      const cleaned = DICTATION_TIDY === "ok" && level !== "none" && Boolean(heard)
+      const cleaned = !route.cloud && DICTATION_TIDY === "ok" && level !== "none" && Boolean(heard)
       const text = cleaned ? tidyWhole(heard) : heard
       dictationTakes.delete(take)
       const answer = {
@@ -5564,8 +5580,10 @@ http
         ms,
         level,
         cleaned,
-        provider: heardBy().name,
-        model: heardBy().cloud ? "" : "base",
+        provider: route.name,
+        // The model that actually heard it (ADR 0082): this host's own for a take it heard, else the
+        // provider's as its own settings or Hermes's defaults state it.
+        model: route.cloud ? providerModel(route.name) : "base",
       }
       dictationConfirms.push({ take, pieces: count, level, cleaned })
       return json(res, 200, answer)

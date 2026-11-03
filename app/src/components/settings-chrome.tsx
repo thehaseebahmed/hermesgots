@@ -247,6 +247,9 @@ export function SwitchRow({
         variant === "header" ? headerRowClass : rowClass,
         "cursor-pointer",
         variant === "nested" && "pl-9",
+        // A shut row dims as a whole: the switch greys itself, and a title left at full strength
+        // would read as a setting a reader can still change.
+        disabled && "opacity-60",
       )}
       {...rest}
     >
@@ -347,7 +350,8 @@ export function ValueRow({
   purpose?: string
   /** The value the setting holds; left off where the row holds something other than a value. */
   value?: string | null
-  /** The value is the host's own default rather than one written here: read muted, not accented. */
+  /** The value is not this row's to claim as written here — the host's own default, a copy this
+   * device cached, or a setting that is unavailable — so it reads muted rather than accented. */
   muted?: boolean
   onClick?: () => void
   disabled?: boolean

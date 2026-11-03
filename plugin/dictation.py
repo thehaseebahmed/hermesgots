@@ -6,7 +6,8 @@ app can't reach, so the audio comes here instead.
 The app uploads audio and nothing else, stamped with the Take id it minted and each Piece's index in
 the take. The host holds the take under that id, hears each Piece as it lands, and answers the one
 call that carries words — the Confirm — with the take whole: its tidied text, the words as heard, how
-long it took to say, and what tidied it (ADR 0074). A take lands whole or not at all.
+long it took to say, and what tidied it (ADR 0074). A take that left the host is transcribed once and
+those words are what land: it is not tidied at all (ADR 0082). A take lands whole or not at all.
 
 Every Hermes internal here is read with ``getattr``: one that moves only means dictation is off.
 """
@@ -91,11 +92,15 @@ class Take:
         self,
         *,
         cloud: bool,
+        provider: str,
         hint: str,
         vocabulary: Sequence[str],
         hearing: bool,
     ) -> None:
         self.cloud = cloud
+        # The route that decided how this take is heard, fixed with `cloud` at its first Piece, so
+        # the row names the provider its words really went through even if the bot moves mid-take.
+        self.provider = provider
         self.hint = hint
         self.vocabulary = tuple(vocabulary)
         self.hearing = hearing
@@ -218,11 +223,12 @@ def wait_ms(level: Optional[str] = None, *, cloud: bool = False) -> int:
     """The longest a Confirm can take from arriving to answering: the queue, the Cleanup and any upload.
 
     Derived where all three live, so a fifth level, a slower provider or a cloud take's upload moves
-    the app's bar without an app release (ADR 0074).
+    the app's bar without an app release (ADR 0074). A cloud take runs no Cleanup (ADR 0082), so its
+    bound carries the queue and the upload and the level moves a local host's bar alone.
     """
     from . import dictation_cleanup
 
-    seconds = QUEUE_SECONDS + dictation_cleanup.deadline_of(level)
+    seconds = QUEUE_SECONDS + (0.0 if cloud else dictation_cleanup.deadline_of(level))
     if cloud:
         seconds += CLOUD_SECONDS
     return int(round(seconds * 1000))
@@ -621,7 +627,8 @@ def upload(
         state = info()
         if not state.get("ready"):
             raise DictationError(state.get("reason") or "Dictation is off on the host.", 409)
-        cloud = bool((state.get("provider") or {}).get("cloud"))
+        route = state.get("provider") or {}
+        cloud = bool(route.get("cloud"))
         hears = bool(hearing() if callable(hearing) else hearing)
         with _takes_lock:
             _expire()
@@ -633,6 +640,7 @@ def upload(
                     raise DictationError("This bot is already hearing a take.", 409)
                 take = _takes[key] = Take(
                     cloud=cloud,
+                    provider=str(route.get("name") or ""),
                     hint=hint,
                     vocabulary=vocabulary or (),
                     hearing=hears,
@@ -716,31 +724,40 @@ def _upload_whole(take: Take) -> str:
             take.drop_audio()
 
 
-def _heard_model(state: Dict[str, Any]) -> str:
-    """The model that did the work: this host's own for a take it heard, else the provider's own.
+def _heard_model(state: Dict[str, Any], take: Take) -> str:
+    """The model that did the work: this take's own for one it heard, else the provider's own.
 
-    A take heard on ``local`` or ``local_command`` was decoded by the model the host states. One a
-    cloud provider heard was decoded by that provider's model, which only its own setting — or
-    Hermes's default for it — can name; a host that can't name it answers nothing rather than the
-    local model's name, so a row never pairs a provider with a model it never ran (ADR 0082).
+    A take this host heard was decoded by the model its first Piece fixed, and its words went
+    through the route recorded with it. One that left the host is decoded by whichever provider its
+    Confirm resolves, so that route's own model — or Hermes's default for it — is what can be named;
+    a host that can't name it answers nothing rather than the local model's name, so a row never
+    pairs a provider with a model it never ran (ADR 0082).
     """
+    if not take.cloud:
+        return str(take.model or state.get("model") or "")
     name = str((state.get("provider") or {}).get("name") or "")
-    if name in LOCAL_BACKENDS:
-        return str(state.get("model") or "")
+    if not name or name == "none":
+        return ""
     # Imported here: `speech` reads this module at import, so a top-level import would be a cycle.
     from . import speech
 
     try:
-        return speech.provider_model(name, _local_config(_tools()))
+        cfg = _local_config(_tools())
     except Exception:
-        logger.debug("memento: couldn't name the model behind a take", exc_info=True)
+        # The host itself can't be read: a fact about the host, not a model it declined to name.
+        logger.debug("memento: couldn't read the host's speech settings", exc_info=True)
         return ""
+    return speech.provider_model(name, cfg)
 
 
-def _behind(state: Dict[str, Any]) -> Tuple[str, str]:
+def _behind(state: Dict[str, Any], take: Take) -> Tuple[str, str]:
     """The provider and model behind a take, as far as the host can name them."""
-    route = state.get("provider") or {}
-    return str(route.get("name") or ""), _heard_model(state)
+    name = (
+        take.provider
+        if not take.cloud
+        else str((state.get("provider") or {}).get("name") or "")
+    )
+    return name, _heard_model(state, take)
 
 
 def confirm(
@@ -755,7 +772,8 @@ def confirm(
 
     ``count`` is how many Pieces the app sent; a host holding fewer refuses with ``MissingPieces``
     and exactly the indexes it is missing, so a dropped upload cannot land a short take. A complete
-    take is drained, tidied at the bot's level and answered once; the entry goes as it is answered.
+    take is drained, tidied at the bot's level where this host heard it, and answered once; the
+    entry goes as it is answered. A take that left the host is not tidied at all (ADR 0082).
     """
     from . import dictation_cleanup
 
@@ -775,12 +793,19 @@ def confirm(
         raise MissingPieces(missing)
     try:
         heard = _upload_whole(take) if take.cloud else _drain(take)
-        answer = dictation_cleanup.finish(
-            heard,
-            take.vocabulary,
-            hint=take.hint,
-            prompt=dictation_cleanup.DictationCleanupPrompt.ForLevel(level).Build(),
-            model=model,
+        # Cleanup runs only for a take this host heard: a cloud take's words are what lands, and the
+        # level is the host's None whatever the app passed (ADR 0082). The bot's stored level is not
+        # read, cleared or rewritten here — it is kept for the moment its route is Local again.
+        answer = (
+            {"text": heard, "level": dictation_cleanup.NONE, "cleaned": False}
+            if take.cloud
+            else dictation_cleanup.finish(
+                heard,
+                take.vocabulary,
+                hint=take.hint,
+                prompt=dictation_cleanup.DictationCleanupPrompt.ForLevel(level).Build(),
+                model=model,
+            )
         )
     except BaseException:
         # A take that could not be answered ends here too: the app's Retry starts another under a
@@ -789,7 +814,7 @@ def confirm(
             if _takes.get(key) is take:
                 _drop(key)
         raise
-    provider, heard_model = _behind(state)
+    provider, heard_model = _behind(state, take)
     with _takes_lock:
         if _takes.get(key) is take:
             _drop(key)
