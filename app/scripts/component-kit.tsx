@@ -380,7 +380,15 @@ export async function click(element: Element | null) {
   await settle()
 }
 
-export async function until(check: () => Promise<boolean>, what: string, ms = 5000) {
+/**
+ * How long a wait is given by default. The screens poll on a four-second beat (`AGENT_WORK_MS`), so a
+ * condition that only a poll can satisfy is entitled to more than one of them; the tier runs three
+ * files at once and a shared runner can be slow, so a shorter budget failed on scheduling rather than
+ * on behaviour. A wait that never comes true still fails, just later.
+ */
+export const WAIT_MS = 12_000
+
+export async function until(check: () => Promise<boolean>, what: string, ms = WAIT_MS) {
   for (const end = Date.now() + ms; Date.now() < end;) {
     if (await check()) return
     await new Promise((resolve) => setTimeout(resolve, 10))

@@ -48,7 +48,8 @@ the gates it waits behind (ADR 0052): one disposition is added to a set that alr
 - The press is answered on the screen as well: the composer's Stop says it is stopping while the run
   it was pressed for is its job and something is at work, believes a quiet reading only after one read
   of the session's children could have contradicted it, and comes back as Stop at once when the host
-  says it took none of the press, when another run takes the button, or after fifteen seconds — so a
+  says it took none of the press, when another run takes the button, or fifteen seconds after the press
+  itself, which a reading that lands later can shorten but never lengthen — so a
   stop that takes a second to unwind is not tapped twice and one that never landed can be asked for
   again (`app/src/components/chat/composer.tsx`, `STOP_ASKED_MS`/`STOP_SETTLED_MS`).
 - Both screens count a session's children from the host's own `runs/live` count as well as the rows

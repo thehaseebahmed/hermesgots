@@ -262,9 +262,12 @@ export function Composer({
   // at work (ADR 0085).
   const [stopAsked, setStopAsked] = useState(false)
   const askedFor = useRef<string | undefined>(undefined)
+  /** The latest the press answers for: fifteen seconds from the press, shortened by a quiet reading. */
+  const answeredBy = useRef(0)
   const pressStop = () => {
     if (stopAsked) return
     askedFor.current = runId
+    answeredBy.current = Date.now() + STOP_ASKED_MS
     setStopAsked(true)
     // The host's answer is what ends a press that asked for nothing — a stop it refused, or a session
     // whose children it had already let go (ADR 0085).
@@ -279,10 +282,14 @@ export function Composer({
       setStopAsked(false)
       return
     }
-    // Nothing at work is believed only after a read of the children could have said otherwise.
+    // Nothing at work is believed only after a read of the children could have said otherwise — and
+    // only ever believed earlier, never later: a read that began before the press can land after it,
+    // and re-arming on that stale "still running" pinned the button for another fifteen seconds.
+    const now = Date.now()
+    if (!working) answeredBy.current = Math.min(answeredBy.current, now + STOP_SETTLED_MS)
     const timer = window.setTimeout(
       () => setStopAsked(false),
-      working ? STOP_ASKED_MS : STOP_SETTLED_MS,
+      Math.max(0, answeredBy.current - now),
     )
     return () => window.clearTimeout(timer)
   }, [stopAsked, runId, working])
