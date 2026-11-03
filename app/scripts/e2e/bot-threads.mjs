@@ -671,6 +671,18 @@ await flow(
     await marker.waitFor({ timeout: 25_000 })
     const link = marker.locator(`a[href="/c/${olderId}"]`)
     assert.equal(await link.count(), 1, "the marker links the older thread it moved into")
+    // A reader aims at the sentence, not at the thread's name: the whole line goes where it goes.
+    // A reader aims at the sentence, not at the thread's name: the line's own empty space, past the
+    // words and away from Undo, is the link that goes to the thread.
+    assert.equal(
+      await marker.evaluate((line, href) => {
+        const box = line.getBoundingClientRect()
+        const hit = document.elementFromPoint(box.left + 220, box.top + 16)
+        return hit?.closest("a")?.getAttribute("href") === href
+      }, `/c/${olderId}`),
+      true,
+      "the whole line answers a press",
+    )
     assert.equal(
       await page.evaluate((said) => {
         const content = document.querySelector('[data-slot="message-scroller-content"]')

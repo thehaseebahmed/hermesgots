@@ -3,7 +3,7 @@
 // delivers the routine's message into the same chat, which is what a real host does when a job fires.
 import { assert, flow, pass } from "./lib.mjs"
 
-const CHIP = "[data-slot=routine-receipt] button"
+const LINE = "[data-slot=routine-receipt] p"
 const SHEET = "[data-slot=routine-run]"
 const SAID = "the tide turns at 06:40"
 const RAN = "The tide turns at 06:40"
@@ -25,7 +25,7 @@ async function drive({ page, send, lastReply, until, shot }) {
   // where a routine's message is drawn from.
   await page.waitForTimeout(500)
   await page.reload()
-  await until(async () => (await page.locator(CHIP).count()) === 1, 15_000, "the routine's chip")
+  await until(async () => (await page.locator(LINE).count()) === 1, 15_000, "the routine's line")
   const thread = await page.getByRole("main").innerText()
   assert.ok(thread.includes(SAID), "the routine's words are in the thread")
   // The chat was active moments ago, so the message opens as an aside rather than as an answer.
@@ -34,7 +34,8 @@ async function drive({ page, send, lastReply, until, shot }) {
   assert.match(thread, /Ran “Morning watch” in \d/, "the line says how long the run took")
   await shot("message")
 
-  await page.locator(CHIP).click()
+  // A reader aims at the sentence, not at the name: the whole line is the target.
+  await page.locator(LINE).click({ position: { x: 10, y: 20 } })
   await until(async () => (await page.locator(SHEET).count()) === 1, 10_000, "the run sheet")
   const dialog = page.locator(SHEET)
   assert.equal(await dialog.getByRole("textbox").count(), 0, "the sheet carries no composer")

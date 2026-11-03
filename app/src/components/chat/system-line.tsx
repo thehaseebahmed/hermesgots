@@ -12,12 +12,13 @@ import type { LucideIcon } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 /**
- * The line itself: full width and 44px tall, so the whole sentence is a thumb's target even though
- * only its link answers a press — the shape the Moved marker has always had.
+ * The line itself: full width and 44px tall, and the box its link stretches to fill. The sentence is
+ * what a reader aims at, so the whole line answers a press — its one link covers the box, and any
+ * second control on the line (Undo) stands above that cover with `relative z-10`.
  */
 export function SystemLine({ children, className }: { children?: ReactNode; className?: string }) {
   return (
-    <p className={cn("min-h-11 py-3 text-sm leading-5 text-muted-foreground", className)}>
+    <p className={cn("relative min-h-11 py-3 text-sm leading-5 text-muted-foreground", className)}>
       {children}
     </p>
   )
@@ -51,8 +52,9 @@ export function SystemLink({
       {children}
     </>
   )
+  // The link covers the line its sentence sits in, so the whole line goes where the name goes.
   const className =
-    "font-medium text-info underline-offset-2 outline-none hover:underline focus-visible:underline"
+    "font-medium text-info underline-offset-2 outline-none after:absolute after:inset-0 after:content-[''] hover:underline focus-visible:underline"
   if (to)
     return (
       <Link to={to} state={state} onClick={onClick} aria-label={label} className={className}>

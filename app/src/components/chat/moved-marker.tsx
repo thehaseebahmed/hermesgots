@@ -71,7 +71,7 @@ export function MovedMarker({
             type="button"
             onClick={() => onUndo(move)}
             aria-label="Undo"
-            className="-my-3 flex w-fit items-center gap-1 py-3 font-medium text-info underline-offset-2 outline-none hover:underline focus-visible:underline"
+            className="relative z-10 -my-3 flex w-fit items-center gap-1 py-3 font-medium text-info underline-offset-2 outline-none hover:underline focus-visible:underline"
           >
             <Undo2Icon className="size-3.5" />
             Undo

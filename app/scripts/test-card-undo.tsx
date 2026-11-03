@@ -151,6 +151,8 @@ const joined: Move = {
 const cards = () => findAll('[data-slot="thread-card"]')
 const card = (title: string) => cards().find((one) => one.textContent?.includes(title)) ?? null
 const marker = () => findAll("p").find((one) => one.textContent?.startsWith("Moved to")) ?? null
+/** The line's one link, which covers the line so a press anywhere on the sentence goes to the thread. */
+const lineLink = () => marker()?.querySelector("a") ?? null
 const settles = (title: string) => until(async () => card(title) !== null, `the ${title} card`)
 const undoIn = (element: Element | null) =>
   [...(element?.querySelectorAll("button") ?? [])].find(
@@ -344,4 +346,22 @@ test("a chat the host answers without a pick keeps the pin this device holds", a
     PICK,
     "the pin survived the merge",
   )
+})
+
+test("the whole Moved line goes to the thread, and Undo still answers for itself", async () => {
+  // A reader aims at the sentence, not at its last word: the line's link covers the line, and the
+  // one control that must not follow it (Undo) stands above that cover.
+  await seed([joined])
+  host([joined])
+  await mount(chatScreen(MAIN), async () => {
+    await settles("Older thread")
+    const line = marker()
+    const link = lineLink()
+    assert.ok(line && link, "the line and its link")
+    assert.match(line.className, /relative/, "the line is the box the link covers")
+    assert.match(link.className, /after:absolute after:inset-0/, "the link fills it")
+    const undo = undoIn(line)
+    assert.ok(undo, "Undo is on the line")
+    assert.match(undo.className, /relative z-10/, "and above the cover, so a press on it undoes")
+  })
 })

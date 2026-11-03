@@ -159,6 +159,8 @@ test("a routine's message says which run wrote it, above its words", async () =>
     assert.equal(line.textContent?.trim(), `Ran “${TITLE}” in 12s`)
     assert.match(line.className, /min-h-11 py-3 text-sm leading-5/, "the Moved marker's own line")
     assert.equal(drawn.tagName, "BUTTON", "the name is the one thing that goes somewhere")
+    assert.match(line.className, /relative/, "the line is the box the press covers")
+    assert.match(drawn.className, /after:absolute after:inset-0/, "and the name's press fills it")
     assert.equal(drawn.textContent?.trim(), TITLE)
     assert.equal(drawn.getAttribute("aria-label"), `Routine: ${TITLE}`, "and saying what it opens")
     // The line is context for the words under it: one column, the line first, the words after it.
