@@ -532,6 +532,11 @@ class ConfirmTest(unittest.TestCase):
         self.assertEqual(answer["heard"], answer["text"], "one block, not two identical ones")
         self.assertEqual(answer["level"], dictation_cleanup.NONE)
         self.assertFalse(answer["cleaned"])
+        self.assertEqual(
+            sorted(field for field in dictation_cleanup.untidied("") if field in answer),
+            sorted(dictation_cleanup.untidied("")),
+            "the same record an untidied take answers with, field for field",
+        )
 
     def test_a_cloud_takes_answer_leaves_the_bots_stored_level_where_it_was(self) -> None:
         tmp = tempfile.TemporaryDirectory()

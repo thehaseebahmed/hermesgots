@@ -823,7 +823,24 @@ test("a failed read leaves the cached copy muted, under the host's own sentence"
   })
 })
 
-test("a muted page starts no measurement", async () => {
+test("a provider's page waits for the host rather than answering for it", async () => {
+  await seed(
+    "cold-provider",
+    ["dictation", "speech_model", "stt_settings"],
+    {},
+    { speech: speech({ stt: STT() }), stallSpeech: true },
+  )
+  await mount(editor("/settings/bots/bot-1/speech-to-text/providers/groq"), async () => {
+    assert.ok(loading(), "the page-level loader, as on the page it came from")
+    assert.equal(
+      find("[data-stt-provider]")?.textContent?.includes("doesn't declare"),
+      false,
+      "and no sentence about the host before it has answered",
+    )
+  })
+})
+
+test("a muted page's rows take no taps, so no measurement starts", async () => {
   const calls = await seed(
     "cached-probe",
     ["dictation", "speech_model", "speech_probe"],

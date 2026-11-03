@@ -33,7 +33,10 @@ export const READ_FAILED = "Couldn't read this bot's host."
 /** The last speech answer a bot's host gave this device, or nothing where it never read one. */
 export async function cachedSpeech(key: string): Promise<SpeechSettings | undefined> {
   try {
-    return (await db.speechCache.get(key))?.speech
+    const row = await db.speechCache.get(key)
+    // Normalised on the way out like every other answer: a copy written by an older build is read
+    // by this one's own rules, not drawn in whatever shape it was stored.
+    return row ? readSpeech(row.speech) : undefined
   } catch (error) {
     noteFailure("Reading this device's copy of the host's speech settings", error)
     return undefined
@@ -55,16 +58,12 @@ async function keepSpeech(config: Server, settings: SpeechSettings) {
 }
 
 export async function getSpeech(config: Server, signal?: AbortSignal): Promise<SpeechSettings> {
-  const settings = readSpeech(await getSpeechSettings(config, signal))
-  await keepSpeech(config, settings)
-  return settings
+  return kept(config, () => getSpeechSettings(config, signal))
 }
 
 /** Asks the host to time its own hearing, and answers the record the picker's rows are drawn from. */
 export async function probeSpeech(config: Server, signal?: AbortSignal): Promise<SpeechSettings> {
-  const settings = readSpeech(await probeSpeechSettings(config, signal))
-  await keepSpeech(config, settings)
-  return settings
+  return kept(config, () => probeSpeechSettings(config, signal))
 }
 
 /** Whether a bot's speech read is still owed, and when it came back empty-handed. */
@@ -75,7 +74,12 @@ export async function setSpeech(
   patch: SpeechPatch,
   signal?: AbortSignal,
 ): Promise<SpeechSettings> {
-  const settings = readSpeech(await setSpeechSettings(config, patch, signal))
+  return kept(config, () => setSpeechSettings(config, patch, signal))
+}
+
+/** One answer read and kept: every path that asks the host leaves this device its copy. */
+async function kept(config: Server, ask: () => Promise<unknown>): Promise<SpeechSettings> {
+  const settings = readSpeech(await ask())
   await keepSpeech(config, settings)
   return settings
 }
@@ -121,6 +125,9 @@ export function useSpeech(profile?: Server | null) {
   // Kept with the connection they belong to, as `failed` is: another bot's probe is not this bot's.
   const [measuring, setMeasuring] = useState("")
   const [measureProblem, setMeasureProblem] = useState<{ key: string; message: string }>()
+  // Whether the answer this hook holds is the host's own rather than this device's older copy: the
+  // one question every guard below and the page's greying both ask (ADR 0082).
+  const settled = state?.key === key
 
   // The copy this device last read, drawn before the read lands: a phone with no signal still shows
   // the page it answered five minutes ago rather than a blank one (ADR 0082).
@@ -174,7 +181,7 @@ export function useSpeech(profile?: Server | null) {
     async (patch: SpeechPatch) => {
       // Nothing fresh has landed, so what the page holds is this device's copy of an older answer:
       // writing it would send a value the host may have moved past (ADR 0082).
-      if (state?.key !== key) return false
+      if (!settled) return false
       const settings = await save(() =>
         setSpeech({ baseUrl, apiKey }, patch, AbortSignal.timeout(WRITE_TIMEOUT_MS)),
       )
@@ -185,13 +192,13 @@ export function useSpeech(profile?: Server | null) {
       setMeasureProblem(undefined)
       return true
     },
-    [save, state, key, baseUrl, apiKey],
+    [save, settled, baseUrl, apiKey],
   )
 
   /** One speech setting, written on its own: the host answers the whole block it now holds. */
   const writeStt = useCallback(
     async (setting: string, value: SttValue) => {
-      if (state?.key !== key) return false
+      if (!settled) return false
       const stt = await save(() =>
         setSttSetting({ baseUrl, apiKey }, setting, value, AbortSignal.timeout(WRITE_TIMEOUT_MS)),
       )
@@ -224,10 +231,10 @@ export function useSpeech(profile?: Server | null) {
    * of the page — a probe is an aid to a pick, never the pick itself.
    */
   const measure = useCallback(async () => {
-    // A page drawing this device's cached copy asks the host nothing: a stale block must not put it
-    // to work timing models for rows nobody may keep (ADR 0082).
-    if (!probeSupport || measuring === key || state?.key !== key) return
-    const held = state?.key === key ? state.settings : undefined
+    if (!probeSupport || measuring === key) return
+    // Nothing settled is nothing to measure: a page drawing this device's cached copy asks the host
+    // nothing, so a stale block never puts it to work timing models for rows nobody may keep.
+    const held = settled ? state?.settings : undefined
     // Nothing on disk is a host with nothing to time, and it already says so in `reason`.
     if (!held?.probe?.owed || held.probe.reason) return
     setMeasuring(key)
@@ -248,9 +255,8 @@ export function useSpeech(profile?: Server | null) {
     } finally {
       setMeasuring((running) => (running === key ? "" : running))
     }
-  }, [probeSupport, measuring, state, key, baseUrl, apiKey])
+  }, [probeSupport, measuring, settled, state, key, baseUrl, apiKey])
 
-  const settled = state?.key === key
   // The last answer this device read stands until the fresh one lands, so the page opens on values
   // rather than on blank rows and the Bots line names the model that host last reported.
   const held = cached?.key === key ? cached.settings : undefined

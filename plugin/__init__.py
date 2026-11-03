@@ -2071,7 +2071,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return web.json_response({"object": "memento.dictation_warm", **result})
 
     async def confirm_dictation(request: "web.Request") -> "web.Response":
-        """The one call that carries a take's words: what was heard, tidied at the bot's level."""
+        """The one call that carries a take's words: what was heard, tidied at the bot's level where
+        this host heard it — a take that left the host is answered as it was transcribed (ADR 0082)."""
         denied = unauthorized(request)
         if denied is not None:
             return denied

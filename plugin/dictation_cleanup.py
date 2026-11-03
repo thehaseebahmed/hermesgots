@@ -319,6 +319,17 @@ def _ask_model(
     return text if isinstance(text, str) else None
 
 
+def untidied(text: str) -> Dict[str, Any]:
+    """A take nothing tidied: the words as they were heard, at the level that changes nothing.
+
+    The one shape a take's answer has when no cleanup ran — a Confirm of a take that left the host,
+    whose audio a vendor decoded (ADR 0082), and the record ``finish`` answers for a bot whose level
+    is ``NONE``. Written here rather than at each caller, so a field added to a take's answer lands
+    on every take instead of the local ones alone.
+    """
+    return {"text": text, "cleaned": False, "ms": 0, "level": NONE}
+
+
 def finish(
     text: Any,
     vocabulary: Sequence[str] = (),
@@ -343,7 +354,7 @@ def finish(
         raise DictationError("Body needs the dictation's text.", 400)
     asked = prompt
     if not asked.cleaning:
-        return {"text": text, "cleaned": False, "ms": 0, "level": asked.level}
+        return untidied(text)
     started = time.monotonic()
     said = " ".join(text.split())
     tidied = None

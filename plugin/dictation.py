@@ -228,10 +228,9 @@ def wait_ms(level: Optional[str] = None, *, cloud: bool = False) -> int:
     """
     from . import dictation_cleanup
 
-    seconds = QUEUE_SECONDS + (0.0 if cloud else dictation_cleanup.deadline_of(level))
     if cloud:
-        seconds += CLOUD_SECONDS
-    return int(round(seconds * 1000))
+        return int(round((QUEUE_SECONDS + CLOUD_SECONDS) * 1000))
+    return int(round((QUEUE_SECONDS + dictation_cleanup.deadline_of(level)) * 1000))
 
 
 def info(level: Optional[str] = None) -> Dict[str, Any]:
@@ -797,7 +796,7 @@ def confirm(
         # level is the host's None whatever the app passed (ADR 0082). The bot's stored level is not
         # read, cleared or rewritten here — it is kept for the moment its route is Local again.
         answer = (
-            {"text": heard, "level": dictation_cleanup.NONE, "cleaned": False}
+            dictation_cleanup.untidied(heard)
             if take.cloud
             else dictation_cleanup.finish(
                 heard,

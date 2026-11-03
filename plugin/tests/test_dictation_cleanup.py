@@ -167,6 +167,14 @@ class FinishTest(unittest.TestCase):
         self.assertEqual(got["level"], "none")
         self.assertEqual(llm.calls, [])
 
+    def test_an_untidied_answer_is_the_record_a_none_take_answers_with(self) -> None:
+        got, _ = cleaned(NONE, {"text": "Hello there."})
+        self.assertEqual(
+            dictation_cleanup.untidied("um hello there"),
+            got,
+            "one shape for a take nothing tidied, whichever route it came by",
+        )
+
     def test_a_light_cleanup_tidies_the_text_and_says_which_level(self) -> None:
         got, _ = cleaned(
             LIGHT,
