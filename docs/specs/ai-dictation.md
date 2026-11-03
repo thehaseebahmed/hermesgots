@@ -46,8 +46,9 @@ nothing where the host cannot name one.
 those words are what land; the host answers it at level **None**, with `cleaned` false and the two
 texts equal, so the sheet draws one block. The bot's level is kept rather than cleared, and reads
 again the moment its route is **Local**. The Speech-to-text page draws the cleanup card's three rows
-greyed and untappable under one reason line, and the row's own muted line says **Not tidied** in the
-same words a take the user set to None reads.
+greyed and untappable, with nothing said about it — a row that takes no taps reads as unavailable on
+its own — and the row's own muted line says **Not tidied** in the same words a take the user set to
+None reads.
 
 The Speech-to-text page opens on the last answer this device received: every row drawn, every row
 muted and untappable until a fresh read replaces it, a page-level loader where nothing was ever read,
@@ -111,9 +112,10 @@ deadline moves a local host's bar exactly as it does today.
 
 **What the page draws.** The Speech-to-text page draws the **Cleanup level** row, the cleanup model
 row and the **Hearing prompt** switch greyed and untappable while the bot's route is a cloud provider,
-under one reason line: *Cleanup is only available with local models.* The rows are greyed rather than
-hidden, so the settings a reader can see are the settings the bot has, and a host that advertises no
-**Cleanup level** feature keeps the page it has today.
+and says nothing beside them: the greying is the whole of it. (A reason line — *Cleanup is only
+available with local models.* — was dropped on review as explaining a rule the reader can see.) The
+rows are greyed rather than hidden, so the settings a reader can see are the settings the bot has, and
+a host that advertises no **Cleanup level** feature keeps the page it has today.
 
 **The page's last answer.** The whole speech payload is cached on the device, per bot, keyed by the
 connection it came from, and written on every successful read and every successful write. It is this
@@ -149,8 +151,8 @@ have component cases. No new seam is proposed.
   printing only a provider. Prior art: the screen's own component cases.
 - The page: the cached copy drawn with every row muted and untappable before the read lands, the
   page-level loader where nothing is cached, the muted copy kept under a failed read's banner, the
-  clean-up card greyed with its reason for a cloud route, and the Bots line reading the cache. Prior
-  art: the page's component cases and the host-speech cases.
+  clean-up card's rows greyed and untappable on a cloud route with no sentence beside them, and the
+  Bots line reading the cache. Prior art: the page's component cases and the host-speech cases.
 
 Good tests here assert what a reader sees and what the wire carries — a block's label, a line's words,
 a payload's fields, a row's stored value — never the order of a render or the shape of a hook.
@@ -201,8 +203,8 @@ because it is the only one that changes what a take does.
   muted row still reads as a fact. The reason a row is muted is the absence of a fresh answer, and the
   banner is the host's own sentence, so the failure mode is a page that looks older than it feels.
 - **Not tidied reading as a choice.** A cloud take and a take the user set to None read identically on
-  the row. That is deliberate — one state, one word — and the page's reason line is the only place the
-  difference is explained, so a user who never opens that page may read the rule as their own pick.
+  the row, and the page no longer explains the rule anywhere: the greying says a row is unavailable,
+  never why. A reader who never learns the rule may take the result for their own **Cleanup level**.
 - **A pair recorded by an older host.** Until both sides carry the fix, a cloud row can read
   `groq · base`. The sheet prints what it was given rather than recomputing it, so the wrong pair is
   visible rather than hidden — the alternative would let the app invent a model the host never named.

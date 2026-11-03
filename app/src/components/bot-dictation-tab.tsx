@@ -60,9 +60,6 @@ import { plural } from "@/lib/tools"
 import { cn } from "@/lib/utils"
 import { MAX_WORD, addWord, cleanWord, readVocabulary, removeWord } from "@/lib/vocabulary"
 
-/** Why the cleanup's rows are shut on a bot whose takes leave the host (ADR 0082). */
-const CLEANUP_LOCAL_ONLY = "Cleanup is only available with local models."
-
 /**
  * The Speech-to-text page: the words this bot's speech leans towards and the model that tidies a
  * take, both Gots's own, over the bot's own Hermes — the model that hears it, and every setting
@@ -788,15 +785,12 @@ function CleanupRow({
   tag,
   settings,
   shut,
-  unavailable,
   onClick,
 }: {
   tag?: string
   settings: SpeechSettings | undefined
   /** The card's rows are shut: a write is out, the page is stale, or cleanup cannot run here. */
   shut: boolean
-  /** The card's own line already says why this row is shut, so the row adds no second reason. */
-  unavailable: boolean
   onClick: () => void
 }) {
   const pick = settings?.cleanup.model
@@ -807,11 +801,7 @@ function CleanupRow({
       <ValueRow
         title="Cleanup model"
         tag={tag}
-        purpose={
-          unavailable
-            ? undefined
-            : (settings?.cleanup.reason ?? "This host doesn't let Gots pick the model.")
-        }
+        purpose={settings?.cleanup.reason ?? "This host doesn't let Gots pick the model."}
         value="Default"
         muted
         disabled
@@ -863,11 +853,8 @@ function CleanupSection({
   const shut = saving || muted || unavailable
   return (
     <Card id="cleanup" title="Cleanup">
-      {unavailable && (
-        <p className="px-5 text-sm text-muted-foreground" data-cleanup-unavailable>
-          {CLEANUP_LOCAL_ONLY}
-        </p>
-      )}
+      {/* The greying is the whole of it: a row that takes no taps says it is unavailable, and a
+          sentence beside it would explain a rule the reader can see. */}
       <Group>
         {levels && (
           <ValueRow
@@ -881,13 +868,7 @@ function CleanupSection({
             data-setting="cleanup-level"
           />
         )}
-        <CleanupRow
-          tag="Gots"
-          settings={settings}
-          shut={shut}
-          unavailable={unavailable}
-          onClick={onPick}
-        />
+        <CleanupRow tag="Gots" settings={settings} shut={shut} onClick={onPick} />
         {hearing && developer && (
           <SwitchRow
             id="stt-hearing-prompt"

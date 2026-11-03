@@ -705,7 +705,7 @@ test("a provider pick is followed by the route it moved to, and Cleanup shuts at
   )
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
     await until(async () => Boolean(row("cleanup-level")), "the cleanup's card")
-    assert.equal(find("[data-cleanup-unavailable]"), null, "a local route keeps Cleanup live")
+    assert.equal(off(row("cleanup-level")), false, "a local route keeps Cleanup live")
     await click(row("stt.provider"))
     const groq = findAll('[data-pick-list="Provider"] > button').find((one) =>
       (one.textContent ?? "").includes("Groq"),
@@ -714,10 +714,7 @@ test("a provider pick is followed by the route it moved to, and Cleanup shuts at
     await click(groq)
     // The `stt` block a write answers with carries no route: the page reads again, and the card
     // shuts on the provider the bot has just moved to rather than on the one it left.
-    await until(
-      async () => Boolean(find("[data-cleanup-unavailable]")),
-      "the card shut once the route moved",
-    )
+    await until(async () => off(row("cleanup-level")), "the card shut once the route moved")
     assert.equal(off(row("cleanup-level")), true, "and its level takes no taps")
   })
 })
@@ -859,7 +856,7 @@ test("a muted page's rows take no taps, so no measurement starts", async () => {
   })
 })
 
-test("a bot whose takes leave the host greys Cleanup, under one reason", async () => {
+test("a bot whose takes leave the host greys Cleanup's rows and says nothing about it", async () => {
   const calls = await seed(
     "cleanup-cloud",
     ["dictation", "speech_model", "cleanup_level", "hearing_prompt"],
@@ -874,15 +871,15 @@ test("a bot whose takes leave the host greys Cleanup, under one reason", async (
   await db.settings.update("settings", { developer: true })
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
     await until(async () => Boolean(row("hearing-prompt")), "the cleanup's card")
-    const reason = find("[data-cleanup-unavailable]")
-    assert.equal(
-      reason?.textContent?.trim(),
-      "Cleanup is only available with local models.",
-      "the one line explaining the three rows",
-    )
-    assert.equal(findAll("[data-cleanup-unavailable]").length, 1, "said once, not once a row")
     for (const name of ["cleanup-level", "cleanup-model"])
-      assert.equal(off(row(name)), true, `${name} takes no taps`)
+      assert.equal(off(row(name)), true, `the card is drawn as shut, ${name} takes no taps`)
+    // The card's own words, read off the rows it draws: the greying is the whole of it.
+    const card = row("cleanup-level")?.closest("[data-settings-group]")
+    assert.equal(
+      /only available|local models/i.test(card?.textContent ?? ""),
+      false,
+      "and no sentence explains the greying",
+    )
     assert.equal(off(switchIn("hearing-prompt")), true, "nor the Hearing prompt's switch")
     await click(row("cleanup-level"))
     assert.equal(findAll("[data-cleanup-levels]").length, 0, "so nothing opens under it")
@@ -899,7 +896,6 @@ test("a bot that hears on its own host keeps Cleanup live", async () => {
   )
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
     await until(async () => Boolean(row("cleanup-level")), "the cleanup's card")
-    assert.equal(find("[data-cleanup-unavailable]"), null, "no reason line")
     assert.equal(off(row("cleanup-level")), false, "the level takes taps")
     assert.equal(off(row("cleanup-model")), false, "and so does the model")
     await click(row("cleanup-level"))
@@ -916,7 +912,6 @@ test("a host that carries no level keeps the page it had, cloud route or not", a
   )
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
     await until(async () => Boolean(row("cleanup-model")), "the cleanup's card")
-    assert.equal(find("[data-cleanup-unavailable]"), null, "nothing the host can't explain")
     assert.equal(off(row("cleanup-model")), false, "and the model row stays as it was")
   })
 })
