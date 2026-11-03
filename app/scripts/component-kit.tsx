@@ -478,6 +478,9 @@ export const threadCard = (threadId: string) =>
   find(`[data-slot="thread-card"][data-thread="${threadId}"]`)
 export const findText = (selector: string, label: string) =>
   findAll(selector).find((one) => one.textContent?.includes(label)) ?? null
+/** The one element a selector reaches whose `aria-label` is exactly this: a Gallery cell, a row. */
+export const labelled = (selector: string, label: string) =>
+  findAll(selector).find((one) => one.getAttribute("aria-label") === label) ?? null
 
 /**
  * Asserts nothing on the screen matches a selector, or a control reading `label`. The failure names

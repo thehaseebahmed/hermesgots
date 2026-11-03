@@ -4,11 +4,11 @@
 // holding none of its bytes — read back from the host's transcript, as a chat synced from another
 // device is — where it still draws its cells, every one of them from a URL the host signed.
 //
-// A tap on a cell opens the app's own Previewer on the photo, in the thread it was reading. A tap
-// on a file's row hands the file to the browser: a note is shown in a new tab, and an archive —
-// which the browser has no viewer for — is saved under its own name, with its bytes in it. That
-// second part is the claim no lower tier reaches: the component test fakes the tab, and only the
-// browser's own download pipeline saves the file under a name the user can find.
+// A tap on a cell opens the app's own Previewer on the photo, in the thread it was reading. A tap on
+// a file's row hands the file to the browser: a note is shown in a new tab, and an archive — which
+// the browser has no viewer for — is saved under its own name, with its bytes in it. That second
+// part is the claim no lower tier reaches: the component test fakes the tab, and only the browser's
+// own download pipeline saves the file under a name the user can find.
 import { statSync } from "node:fs"
 
 import { app, assert, flow, pass, runId, SEND_CHORD } from "./lib.mjs"
@@ -65,7 +65,7 @@ const gallery = (page) =>
     }
   })
 
-await flow("file-message", async ({ page, seed, until, shot }) => {
+await flow("file-message", async ({ page, seed, until, shot, centreOf, drag }) => {
   const chatId = `e2e-files-${runId()}`
   await seed([{ id: chatId, title: "Files" }])
   await page.goto(`${app}/c/${chatId}`)
@@ -189,6 +189,45 @@ await flow("file-message", async ({ page, seed, until, shot }) => {
   )
   await shot("previewer")
   pass("a tap on the photo opened the app's Previewer, with no tab and no platform viewer")
+
+  const transformOf = () =>
+    page.evaluate(
+      () => document.querySelector('[data-slot="previewer-photo"]')?.style.transform ?? "",
+    )
+  const middle = await centreOf('[role="dialog"] [data-slot="previewer-photo"]')
+  // Off-centre on purpose: a tap at the middle magnifies by nothing, so only this leg can show that
+  // the point tapped is the one that stays put.
+  const tap = { x: middle.x + 60, y: middle.y - 40 }
+  // What the rule owes a double tap at that point: the tapped point stays, so the offset is the tap's
+  // own distance from the middle times one minus the scale.
+  const held = { x: -1.5 * (tap.x - middle.x), y: -1.5 * (tap.y - middle.y) }
+  const at = (dx, dy) => new RegExp(`translate3d\\(${dx}px, ${dy}px, 0(px)?\\)`)
+  await page.mouse.dblclick(tap.x, tap.y)
+  await until(
+    async () => /scale\(2\.5\)/.test(await transformOf()),
+    5_000,
+    "the photo magnified by two taps",
+  )
+  assert.match(
+    await transformOf(),
+    at(held.x, held.y),
+    "the point tapped is drawn where it was tapped",
+  )
+  await shot("previewer-zoomed")
+  await drag(tap, -60, -40)
+  await until(
+    async () => at(held.x - 60, held.y - 40).test(await transformOf()),
+    5_000,
+    "the magnified photo moved by what the finger moved",
+  )
+  await page.mouse.dblclick(tap.x, tap.y)
+  await until(
+    async () => /translate3d\(0px, 0px, 0(px)?\) scale\(1\)/.test(await transformOf()),
+    5_000,
+    "the whole frame again",
+  )
+  pass("two taps magnified the photo at the point tapped, a drag moved it, and two more put it back")
+
   await page.getByRole("button", { name: "Close" }).click()
   assert.equal(opened.length, 0, "nothing opened outside the app")
 

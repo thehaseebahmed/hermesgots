@@ -1,4 +1,15 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react"
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+  type RefObject,
+} from "react"
 import { ChevronLeftIcon, ChevronRightIcon, RotateCwIcon, Trash2Icon, XIcon } from "lucide-react"
 
 import { FullscreenPopup, PopupTitle } from "@/components/popup"
@@ -9,6 +20,17 @@ import { useImageReady } from "@/lib/image"
 import type { MediaKind } from "@/lib/media-kind"
 import type { MediaStage } from "@/lib/media-stage"
 import { cn } from "@/lib/utils"
+import {
+  UNZOOMED,
+  zoomDragged,
+  zoomPinched,
+  zoomSettled,
+  zoomTapped,
+  type Pinch,
+  type Frame,
+  type ZoomPoint,
+  type ZoomView,
+} from "@/lib/zoom"
 
 /** One piece of media the Previewer can draw: a photo, a clip or a recording. */
 export interface PreviewItem {
@@ -89,13 +111,236 @@ export function usePreviewer(): PreviewerFace {
   return useContext(PreviewerContext) ?? INERT
 }
 
-/** A photo at its own shape, holding the box it lands in while its URL arrives. */
-function Picture({ item, onRetry }: { item: PreviewItem; onRetry?: (item: PreviewItem) => void }) {
+/**
+ * A photo at its own shape — the record's where it keeps one, the file's own once it lands — so the
+ * box it reports through `frame` is the picture's own, which is what a drag may reach.
+ */
+function Picture({
+  item,
+  frame,
+  onBroken,
+}: {
+  item: PreviewItem
+  /** The photo's box, in the pane: the gestures read their edges from it. */
+  frame: RefObject<HTMLDivElement | null>
+  onBroken: () => void
+}) {
   const { ready, onLoad, onError } = useImageReady(item.src ?? "")
-  // A photo the browser couldn't decode keeps its place and says so: one tap asks again, and the
-  // picture starts over — a new element, since a URL the host mints again may be the same string.
+  const [shape, setShape] = useState<{ width: number; height: number } | null>(
+    item.width && item.height ? { width: item.width, height: item.height } : null,
+  )
+  const ratio = shape ? shape.width / shape.height : undefined
+  const style = shape
+    ? { aspectRatio: `${shape.width} / ${shape.height}`, width: `min(100cqw, 100cqh * ${ratio})` }
+    : undefined
+  return (
+    <div
+      ref={frame}
+      className={cn("relative", !shape && "h-full w-full")}
+      style={style}
+      aria-busy={!ready || undefined}
+    >
+      {!ready && <Skeleton className="absolute inset-0 rounded-2xl" />}
+      <img
+        src={item.src}
+        alt={item.name}
+        onLoad={(event) => {
+          onLoad()
+          const img = event.currentTarget
+          if (!shape && img.naturalWidth) {
+            setShape({ width: img.naturalWidth, height: img.naturalHeight })
+          }
+        }}
+        onError={() => {
+          onError()
+          onBroken()
+        }}
+        className={cn("h-full w-full rounded-2xl bg-muted object-contain", !ready && "invisible")}
+        draggable={false}
+      />
+    </div>
+  )
+}
+
+const TAP_SLOP_PX = 10
+const DOUBLE_TAP_MS = 320
+const DOUBLE_TAP_GAP_PX = 24
+
+/** A finger on the photo, in the page's own px. */
+interface Touch {
+  x: number
+  y: number
+}
+
+/** One touch on the photo, from the first finger landing to the last one lifting. */
+interface Gesture {
+  /** The fingers down, in the order they landed: a pinch is the first two of them. */
+  fingers: Map<number, Touch>
+  /** The view the touch began from, and where its first finger landed. */
+  start: ZoomView
+  downAt: Touch
+  /** The pane's middle, in page px, measured when the touch landed. */
+  centre: Touch
+  /** The photo's own box and the pane it is drawn in, measured at the same moment. */
+  frame: Frame
+  /** The two fingers as they last were, which the next pinch move is measured against. */
+  last: Pinch
+  /** Whether this touch can still be a tap: false once it moves, or a second finger lands. */
+  tappable: boolean
+}
+
+/**
+ * A photo the reader can get closer to: a pinch about the point between the fingers, a double tap to
+ * reading size and back again, and a drag while magnified. The page is held off this box by
+ * `touch-none`, and every measurement a move needs is taken when the touch lands — a `pointermove`
+ * that reads the layout forces a style recalculation on the gesture that has to hold frame rate.
+ */
+function Zoomed({ item, onRetry }: { item: PreviewItem; onRetry?: (item: PreviewItem) => void }) {
+  const surface = useRef<HTMLDivElement | null>(null)
+  const frame = useRef<HTMLDivElement | null>(null)
+  const [view, setView] = useState<ZoomView>(UNZOOMED)
+  // What the transform on screen was drawn at, so two moves in one frame compose.
+  const shown = useRef<ZoomView>(UNZOOMED)
+  const [smooth, setSmooth] = useState(false)
+  const gesture = useRef<Gesture | null>(null)
+  const lastTap = useRef<{ at: number; x: number; y: number } | null>(null)
   const [broken, setBroken] = useState(false)
   const [attempt, setAttempt] = useState(0)
+
+  /** The next view, drawn when it differs from the one already on screen. */
+  const apply = useCallback((next: ZoomView) => {
+    shown.current = next
+    setView((current) =>
+      current.scale === next.scale && current.x === next.x && current.y === next.y ? current : next,
+    )
+  }, [])
+
+  useEffect(() => {
+    const photo = frame.current
+    const pane = surface.current
+    if (!photo || !pane) return
+    const observer = new ResizeObserver(() =>
+      apply(
+        zoomSettled(shown.current, {
+          photo: { width: photo.clientWidth, height: photo.clientHeight },
+          pane: { width: pane.clientWidth, height: pane.clientHeight },
+        }),
+      ),
+    )
+    observer.observe(photo)
+    observer.observe(pane)
+    return () => observer.disconnect()
+  }, [apply, broken, attempt])
+
+  const spread = (fingers: Touch[]) => {
+    const [first, second] = fingers
+    return second ? Math.hypot(second.x - first.x, second.y - first.y) : 0
+  }
+  const middle = (fingers: Touch[]): Touch => {
+    const [first, second] = fingers
+    return second ? { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 } : first
+  }
+  /** A point of the page, in px from the middle of the pane: the space the rule anchors in. */
+  const inPane = (point: Touch, pane: Touch): ZoomPoint => ({
+    x: point.x - pane.x,
+    y: point.y - pane.y,
+  })
+
+  const landed = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId)
+    const held = gesture.current
+    const fingers = new Map(held?.fingers ?? [])
+    fingers.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    const down = [...fingers.values()]
+    const rect = surface.current?.getBoundingClientRect()
+    const photo = frame.current
+    const centre = {
+      x: (rect?.left ?? 0) + (rect?.width ?? 0) / 2,
+      y: (rect?.top ?? 0) + (rect?.height ?? 0) / 2,
+    }
+    setSmooth(false)
+    gesture.current = {
+      fingers,
+      start: shown.current,
+      downAt: down.length > 1 ? middle(down) : down[0],
+      centre,
+      frame: {
+        photo: { width: photo?.clientWidth ?? 0, height: photo?.clientHeight ?? 0 },
+        pane: { width: rect?.width ?? 0, height: rect?.height ?? 0 },
+      },
+      last: { spread: down.length > 1 ? spread(down) : 0, middle: inPane(middle(down), centre) },
+      tappable: down.length === 1,
+    }
+    if (down.length > 1) lastTap.current = null
+  }
+
+  const travelled = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const held = gesture.current
+    if (!held?.fingers.has(event.pointerId)) return
+    held.fingers.set(event.pointerId, { x: event.clientX, y: event.clientY })
+    const down = [...held.fingers.values()]
+    if (down.length > 1) {
+      const now = { spread: spread(down), middle: inPane(middle(down), held.centre) }
+      // Two fingers that landed on one px have nothing to scale by: the move that parts them starts
+      // the pinch, and diving by a zero spread would jump to the ceiling.
+      if (!held.last.spread) {
+        if (now.spread) held.last = now
+        return
+      }
+      apply(zoomPinched(shown.current, held.last, now, held.frame))
+      held.last = now
+      return
+    }
+    if (Math.hypot(event.clientX - held.downAt.x, event.clientY - held.downAt.y) > TAP_SLOP_PX)
+      held.tappable = false
+    if (held.start.scale === 1) return
+    apply(
+      zoomDragged(
+        held.start,
+        event.clientX - held.downAt.x,
+        event.clientY - held.downAt.y,
+        held.frame,
+      ),
+    )
+  }
+
+  /** Re-base the touch on the one finger still down: a drag from where it is, never a tap. */
+  const rebase = (held: Gesture) => {
+    if (held.fingers.size === 0) {
+      gesture.current = null
+      return
+    }
+    held.start = shown.current
+    held.downAt = [...held.fingers.values()][0]
+    held.tappable = false
+  }
+
+  const lifted = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const held = gesture.current
+    if (!held) return
+    const tapped = held.tappable && held.fingers.size === 1
+    held.fingers.delete(event.pointerId)
+    rebase(held)
+    if (!tapped) return
+    const point = { at: event.timeStamp, x: event.clientX, y: event.clientY }
+    const before = lastTap.current
+    lastTap.current = point
+    if (!before || point.at - before.at > DOUBLE_TAP_MS) return
+    if (Math.hypot(point.x - before.x, point.y - before.y) > DOUBLE_TAP_GAP_PX) return
+    lastTap.current = null
+    setSmooth(true)
+    apply(zoomTapped(shown.current, inPane(point, held.centre), held.frame))
+  }
+
+  /** A touch the browser took away — a scroll, a system gesture — is never half of a double tap. */
+  const dropped = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const held = gesture.current
+    if (!held) return
+    held.fingers.delete(event.pointerId)
+    lastTap.current = null
+    rebase(held)
+  }
+
   if (broken)
     return (
       <Retry
@@ -107,30 +352,27 @@ function Picture({ item, onRetry }: { item: PreviewItem; onRetry?: (item: Previe
         }}
       />
     )
-  // As large as the viewer's room allows at the photo's own shape.
-  const ratio = item.width && item.height ? item.width / item.height : undefined
-  const style = ratio
-    ? { aspectRatio: `${item.width} / ${item.height}`, width: `min(100cqw, 100cqh * ${ratio})` }
-    : undefined
+
   return (
     <div
-      className={cn("relative", !ratio && "h-full w-full")}
-      style={style}
-      aria-busy={!ready || undefined}
+      ref={surface}
+      className="relative flex h-full w-full touch-none items-center justify-center overflow-hidden select-none"
+      onPointerDown={landed}
+      onPointerMove={travelled}
+      onPointerUp={lifted}
+      onPointerCancel={dropped}
     >
-      {!ready && <Skeleton className="absolute inset-0 rounded-2xl" />}
-      <img
-        key={attempt}
-        src={item.src}
-        alt={item.name}
-        onLoad={onLoad}
-        onError={() => {
-          onError()
-          setBroken(true)
-        }}
-        className={cn("h-full w-full rounded-2xl bg-muted object-contain", !ready && "invisible")}
-        draggable={false}
-      />
+      <div
+        data-slot="previewer-photo"
+        className={cn(
+          "flex h-full w-full items-center justify-center",
+          view.scale > 1 ? "cursor-grab active:cursor-grabbing" : "cursor-default",
+          smooth && "transition-transform duration-200 ease-out motion-reduce:transition-none",
+        )}
+        style={{ transform: `translate3d(${view.x}px, ${view.y}px, 0) scale(${view.scale})` }}
+      >
+        <Picture key={attempt} item={item} frame={frame} onBroken={() => setBroken(true)} />
+      </div>
     </div>
   )
 }
@@ -154,7 +396,7 @@ function Shown({ item, onRetry }: { item: PreviewItem; onRetry?: (item: PreviewI
   if (item.state === "failed" || (item.state === "ready" && !item.src))
     return <Retry item={item} onRetry={onRetry} />
   if (!item.src || item.state === "reading") return <Skeleton className="h-2/3 w-2/3 rounded-2xl" />
-  if (item.kind === "image") return <Picture item={item} onRetry={onRetry} />
+  if (item.kind === "image") return <Zoomed key={item.key} item={item} onRetry={onRetry} />
   // A player the platform draws: it starts paused because nothing here asks it to play, and it
   // streams, seeks and buffers by its own rules rather than by anything this app holds.
   if (item.kind === "video")

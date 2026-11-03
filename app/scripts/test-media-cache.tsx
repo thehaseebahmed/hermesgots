@@ -19,7 +19,7 @@ import {
   botProfile,
   chatScreen,
   connection,
-  findAll,
+  labelled,
   mediaHost,
   mediaReads,
   mount,
@@ -69,8 +69,7 @@ const message = (attachments: Attachment[]): Message => ({
   attachments,
 })
 
-const cell = (name: string) =>
-  findAll("button").find((button) => button.getAttribute("aria-label") === `Open ${name}`) ?? null
+const cell = (name: string) => labelled("button", `Open ${name}`)
 const filled = (button: Element | null) => Boolean(button) && !button!.hasAttribute("aria-busy")
 const drawn = (name: string) => cell(name)?.querySelector("img")?.getAttribute("src") ?? ""
 

@@ -469,9 +469,27 @@ export const LOOKS = [1440, 390].map((width) => ({
 export const cardSelector = (id) => `[data-slot="thread-card"][data-thread="${id}"]`
 export const cardOf = (page, id) => page.locator(cardSelector(id))
 
+/** The middle of the element a selector reaches, in the page's own px: where a drag starts. */
+export const centreOf = (page, selector) =>
+  page.evaluate((sel) => {
+    const box = document.querySelector(sel).getBoundingClientRect()
+    return { x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2) }
+  }, selector)
+
+/** One finger, or a mouse, dragging from `at` by the given px, settled afterwards. */
+export async function dragBy(page, at, dx, dy) {
+  await page.mouse.move(at.x, at.y)
+  await page.mouse.down()
+  await page.mouse.move(at.x + dx, at.y + dy, { steps: 10 })
+  await page.mouse.up()
+  await settled(page)
+}
+
 function helpers(page) {
   const composer = page.getByRole("textbox").last()
   return {
+    centreOf: (selector) => centreOf(page, selector),
+    drag: (at, dx, dy) => dragBy(page, at, dx, dy),
     /** A thread's message row holding `text`. */
     row: (text) => page.locator("[data-slot=message]").filter({ hasText: text }),
     /** Sends a photo from the page, as the composer's own attachment flow would. */

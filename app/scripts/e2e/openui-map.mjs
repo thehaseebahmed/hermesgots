@@ -1,4 +1,4 @@
-import { app, assert, flow, pass, settled } from "./lib.mjs"
+import { app, assert, centreOf, dragBy, flow, pass, settled } from "./lib.mjs"
 
 const REPLY = "[data-slot=message][data-align=start]"
 const MAP = "[data-slot=map]"
@@ -78,14 +78,8 @@ async function place(page) {
   await settled(page)
 }
 
-const middle = (page) =>
-  page.evaluate((selector) => {
-    const box = document.querySelector(selector).getBoundingClientRect()
-    return { x: Math.round(box.left + box.width / 2), y: Math.round(box.top + box.height / 2) }
-  }, MAP)
-
 async function wheel(page, dy) {
-  const at = await middle(page)
+  const at = await centreOf(page, MAP)
   await page.mouse.move(at.x, at.y)
   await page.mouse.wheel(0, dy)
   await settled(page)
@@ -96,7 +90,7 @@ async function wheel(page, dy) {
  * pipeline so `touch-action` decides what it does — scrolling the thread, or the map's pan.
  */
 async function swipe(page, dy) {
-  const at = await middle(page)
+  const at = await centreOf(page, MAP)
   const client = await page.context().newCDPSession(page)
   const steps = 10
   await client.send("Input.dispatchTouchEvent", {
@@ -116,12 +110,7 @@ async function swipe(page, dy) {
 }
 
 async function drag(page, dx, dy) {
-  const at = await middle(page)
-  await page.mouse.move(at.x, at.y)
-  await page.mouse.down()
-  await page.mouse.move(at.x + dx, at.y + dy, { steps: 10 })
-  await page.mouse.up()
-  await settled(page)
+  await dragBy(page, await centreOf(page, MAP), dx, dy)
 }
 
 const view = (seen) => seen.labels.map((label) => `${label.left},${label.top}`).join(" ")
@@ -264,7 +253,7 @@ await flow(
     )
 
     await place(page)
-    const at = await middle(page)
+    const at = await centreOf(page, MAP)
     await page.touchscreen.tap(at.x, at.y)
     await until(
       async () => (await facts(page)).active === "true",

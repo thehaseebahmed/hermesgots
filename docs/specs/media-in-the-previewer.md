@@ -14,6 +14,11 @@ minted when it runs out — a page outlives the ten minutes a signature lives fo
 drawn (a photo's bytes, a clip's first frame) is kept on the device and drawn from there first. The
 decisions below about where a tap goes, the cap by kind and a cell that keeps its place all stand.
 
+Amended by [ADR 0084](adr/0084-a-photo-in-the-previewer-is-magnified-where-the-reader-touched-it.md):
+the photo the Previewer draws is magnified by a pinch or a double tap about the point touched, and
+dragged only as far as it overflows the pane. "A photo at its own shape" is where it opens and where it
+returns; a clip's and a recording's players keep their own touch surfaces.
+
 ## Problem Statement
 
 Three things about media are wrong at once, and a user sees all three.

@@ -17,6 +17,7 @@ import {
   chatScreen,
   click,
   findAll,
+  labelled,
   mediaHost,
   mediaReads,
   mount,
@@ -74,13 +75,9 @@ const message = (attachments: Attachment[]): Message => ({
 })
 
 const gallery = () => findAll('[role="group"][aria-label="Gallery"]')[0] ?? null
-const cell = (name: string) =>
-  findAll("button").find((button) => button.getAttribute("aria-label") === `Open ${name}`) ?? null
-const row = (name: string) =>
-  findAll("button").find((button) => button.getAttribute("aria-label") === `Play ${name}`) ?? null
-const download = (name: string) =>
-  findAll("button").find((button) => button.getAttribute("aria-label") === `Download ${name}`) ??
-  null
+const cell = (name: string) => labelled("button", `Open ${name}`)
+const row = (name: string) => labelled("button", `Play ${name}`)
+const download = (name: string) => labelled("button", `Download ${name}`)
 
 /** Whether the cell or row a file draws in has answered: its place is kept, busy until it has. */
 const filled = (button: Element | null) => Boolean(button) && !button!.hasAttribute("aria-busy")

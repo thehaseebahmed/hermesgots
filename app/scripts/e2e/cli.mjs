@@ -216,7 +216,7 @@ export const FLOWS = {
   "file-message": {
     script: "e2e/file-message.mjs",
     about:
-      "A message sent with a note, an archive and a photo draws the photo in the Gallery and the files as rows, a tap on the photo opens the app's Previewer, and a tap on a row opens a new tab — showing the note and saving the archive under its own name",
+      "A message sent with a note, an archive and a photo draws the photo in the Gallery and the files as rows, a tap on the photo opens the app's Previewer — where two taps magnify it, a drag moves it and two more put it back — and a tap on a row opens a new tab, showing the note and saving the archive under its own name",
   },
   "media-clip": {
     script: "e2e/media-clip.mjs",
