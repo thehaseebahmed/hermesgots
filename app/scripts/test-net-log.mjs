@@ -1,0 +1,122 @@
+/**
+ * What the network log names and counts (ADR 0086): a request named by its route and never by its
+ * URL, the numbers under a bot's name, the newest requests the log keeps, and the block a copy hands
+ * over — which can carry nothing a row does not already hold.
+ */
+import assert from "node:assert/strict"
+import test from "node:test"
+
+import {
+  clockLabel,
+  endingLabel,
+  figuresOf,
+  formatNetLog,
+  routeOf,
+  trimmed,
+  waitLabel,
+} from "../src/lib/net-log.ts"
+
+const row = (patch) => ({
+  id: "r1",
+  at: 1_000,
+  bot: ["bot-1"],
+  route: "GET models",
+  ms: 100,
+  ending: "answered",
+  ...patch,
+})
+
+test("a request is named by its route, never by its URL", () => {
+  assert.equal(routeOf("http://hermes.test/v1/chat/completions", "POST"), "POST chat/completions")
+  assert.equal(
+    routeOf(
+      "http://hermes.test/api/sessions/1f0c6f2e-0a41-4b8e-9a4a-2a4a2a4a2a4a/messages?limit=50",
+    ),
+    "GET sessions/:id/messages",
+  )
+  assert.equal(routeOf("http://hermes.test/api/plugins/memento/events?since=3"), "GET events")
+  assert.equal(
+    routeOf("http://hermes.test/api/plugins/memento/p/work/sessions/12/queue/7/stop", "POST"),
+    "POST sessions/:id/queue/:id/stop",
+  )
+})
+
+test("nothing a request carried survives into its route", () => {
+  const route = routeOf("http://secret-host.test/v1/models?api_key=sk-live-secret")
+  assert.equal(route, "GET models")
+  assert.doesNotMatch(route, /secret-host|sk-live|api_key|\?/, "no address, key or query")
+})
+
+test("the numbers are read off the requests the log still holds", () => {
+  const figures = figuresOf([
+    row({ id: "a", at: 1, ms: 100 }),
+    row({ id: "b", at: 2, ms: 200 }),
+    row({ id: "c", at: 3, ms: 300 }),
+    row({ id: "d", at: 4, ms: 400 }),
+    row({ id: "e", at: 5, ms: 1000 }),
+    row({ id: "f", at: 6, ms: 60_000, ending: "timeout" }),
+  ])
+  assert.equal(figures.count, 6)
+  assert.equal(figures.failed, 1, "a timeout is a failure")
+  assert.equal(figures.average, 400, "a minute of waiting for nothing is not an answer's speed")
+  assert.equal(figures.slowest, 400, "the slowest 5% of the answers")
+})
+
+test("the newest stream open and the newest first words are the ones shown", () => {
+  const figures = figuresOf([
+    row({ id: "a", at: 1, stream: true, frame: 400 }),
+    row({ id: "b", at: 2, stream: true, frame: 180 }),
+    row({ id: "c", at: 3, words: 2_400, stream: true, frame: 90 }),
+  ])
+  assert.equal(figures.open, 90, "the newest frame")
+  assert.equal(figures.words, 2_400, "the newest send's wait")
+})
+
+test("nothing recorded reads as no number at all", () => {
+  const figures = figuresOf([])
+  assert.deepEqual(figures, {
+    count: 0,
+    failed: 0,
+    average: null,
+    slowest: null,
+    open: null,
+    words: null,
+  })
+})
+
+test("the log keeps its newest requests and lets the oldest go", () => {
+  const rows = [1, 2, 3, 4, 5].map((at) => row({ id: `r${at}`, at }))
+  assert.deepEqual(
+    trimmed(rows, 3).map((one) => one.at),
+    [5, 4, 3],
+  )
+  assert.equal(trimmed(rows, 50), rows, "under the cap nothing is copied or reordered")
+})
+
+test("a status reads as the code it answered with, or how it ended", () => {
+  assert.equal(endingLabel(row({ status: 200 })), "200")
+  assert.equal(endingLabel(row({ ending: "refused", status: 502 })), "502")
+  assert.equal(endingLabel(row({ ending: "network", status: undefined })), "never landed")
+  assert.equal(endingLabel(row({ ending: "timeout" })), "timed out")
+  assert.equal(endingLabel(row({ ending: "stopped" })), "stopped")
+})
+
+test("a wait reads in milliseconds under a second and in seconds above it", () => {
+  assert.equal(waitLabel(312), "312 ms")
+  assert.equal(waitLabel(1_240), "1.2 s")
+  assert.equal(waitLabel(null), "—")
+  assert.match(clockLabel(Date.UTC(2026, 0, 1, 14, 22, 8)), /14:22:08|22:08/)
+})
+
+test("a copied log carries the rows and nothing they did not hold", () => {
+  const text = formatNetLog([
+    row({ id: "a", at: 1_000, status: 200, stream: true, frame: 120 }),
+    row({ id: "b", at: 2_000, ending: "network", status: undefined }),
+  ])
+  const parsed = JSON.parse(text)
+  assert.equal(parsed.kept, 2)
+  assert.equal(parsed.requests[0].at, new Date(2_000).toISOString(), "newest first")
+  assert.equal(parsed.requests[0].ending, "network")
+  assert.equal(parsed.requests[1].frame, 120)
+  assert.doesNotMatch(text, /http:|apiKey|api_key|sk-/, "no address, key or URL rides along")
+})

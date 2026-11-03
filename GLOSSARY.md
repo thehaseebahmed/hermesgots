@@ -566,6 +566,24 @@ _Avoid_: empty, blank, unset value, fallback
 A note Gots puts in front of the bot asking it to say, briefly, what it has done and what is next, then to carry on with the work rather than end there: a reply of words and no tool call ends the run. Where the list has fallen behind it also asks for it, naming `todo_list`. A bot's reminders are set per bot, on its General page under Progress updates, as Off, Quiet, Normal or Chatty — and none of them promise the bot will speak: how much it says is the model's own choice. A thread draws nothing for the note, since it is the host talking to the model; the one place it is drawn is the device's own developer view, behind **Show progress reminders** in Developer settings, where it stands as a row of its own with the note behind a tap.
 _Avoid_: nudge, check-in, status ping, verbosity, quiet mode
 
+## Diagnostics
+
+**Network log**:
+The record this device keeps of its own requests to a bot's host, while Developer settings' **Network log** switch is on: one **request** for each call the app made, in the order it made them, held newest-first and only as far back as its cap reaches. It is this device's observation — a request is there because this phone made it — so it never syncs, never leaves the device except when a person copies it, and never says what a bot did.
+_Avoid_: telemetry, metrics, performance data, trace, diagnostics
+
+**Request**:
+One call this device made to a bot's host, as the network log holds it: the route the app names it by, the bot it was for, when it was asked, how long until its answer began, the status it answered with, and how it ended — answered, refused, never landed, timed out or stopped. A request that opens a stream holds its first frame too, which is what reads as how long connecting took. It is neither a turn's duration nor a model's thinking, which are the host's to measure.
+_Avoid_: span, sample, entry, event, latency
+
+**Stream open**:
+The wait between asking a bot's host for a stream and its first frame arriving: the time to first byte, plus however long the host took to send its first event. It is the closest this device comes to a connect time — DNS, TCP and TLS happen below it and are not visible here — so it is never drawn as a handshake's own figure.
+_Avoid_: connect latency, handshake, connection time, round trip
+
+**First words**:
+The wait between this device sending a message and the reply's first words arriving, with the network, the host's queue and the model's own start all inside one figure. It is what a person means when they say a bot is slow, it is kept only for a message this device sent, and it is never called network time nor compared with a request's own duration.
+_Avoid_: response time, latency, time to first token, bot latency
+
 ## Testing
 
 **Tier**:

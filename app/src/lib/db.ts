@@ -60,6 +60,12 @@ export interface Settings {
   showProgressReminders?: boolean
   /** AFK's workflow library: a project's Workflow row, its library and its editor. Developer, local. */
   afkWorkflows?: boolean
+  /**
+   * Records this device's own requests to each bot's host — how long each took, what it answered and
+   * how it ended — for the Network log screen (`net-log.ts`, ADR 0086). Developer, local, off by
+   * default: nothing is measured or written until it is on.
+   */
+  netLog?: boolean
   /** How the bot-threads sidebar orders the bots; unset is `recent`. Local. */
   botSort?: BotSort
   /** Whether the sidebar is shrunk to icons on tablet and wider; unset is expanded. Local. */
@@ -882,6 +888,33 @@ export interface MediaCacheRow {
   at: number
 }
 
+/**
+ * One call this device made to a bot's host, as the network log keeps it (`net-log.ts`, ADR 0086):
+ * the route the app names it by, the bots whose server it went to, and how it ended. Nothing the
+ * request carried is here — no address, no key, no body, no message text — so a row is safe to copy.
+ */
+export interface NetRequest {
+  id: string
+  /** When it was asked, on this device's clock. */
+  at: number
+  /** The bots whose server answered it; a stream several bots share names them all. */
+  bot: string[]
+  /** The app's own name for the route, such as `GET sessions/:id/messages`. */
+  route: string
+  /** Milliseconds until the host's answer began. */
+  ms: number
+  /** The status the host answered with, where it answered with one. */
+  status?: number
+  /** How it ended: an answer, a refusal, no answer at all, no answer in time, or this device stopping. */
+  ending: "answered" | "refused" | "network" | "timeout" | "stopped"
+  /** This request opened a stream. */
+  stream?: true
+  /** Milliseconds to the stream's first frame, once it arrived. */
+  frame?: number
+  /** Milliseconds from the send to the reply's first words, on a message this device sent. */
+  words?: number
+}
+
 export const db = new Dexie("memento") as Dexie & {
   settings: EntityTable<Settings, "id">
   profiles: EntityTable<Profile, "id">
@@ -903,6 +936,7 @@ export const db = new Dexie("memento") as Dexie & {
   sentFiles: SessionDb["sentFiles"]
   mediaCache: EntityTable<MediaCacheRow, "key">
   speechCache: EntityTable<SpeechCacheRow, "key">
+  netLog: EntityTable<NetRequest, "id">
 }
 
 db.version(1).stores({
@@ -1205,6 +1239,11 @@ db.version(31)
       }),
   )
 
+// v32: this device's own record of the requests it made to each bot's host, for the Network log
+// screen behind Developer's switch (ADR 0086). A new table: nothing older has to be moved into it,
+// and it is empty until the switch is turned on.
+db.version(32).stores({ netLog: "id, at, bot" })
+
 db.on("populate", (tx) => seedProfile(tx))
 
 /**
@@ -1334,6 +1373,7 @@ export async function deleteProfile(id: string, { remote = false, last = false }
     db.meetingRecordings,
     db.mediaCache,
     db.speechCache,
+    db.netLog,
   ]
   return db.transaction("rw", tables, async () => {
     const alone = (await db.profiles.count()) <= 1
@@ -1357,6 +1397,8 @@ export async function deleteProfile(id: string, { remote = false, last = false }
       await db.dictationStats.delete(key)
       await db.mediaCache.where("key").startsWith(mediaKeyPrefix(profile.baseUrl)).delete()
       await db.speechCache.delete(key)
+      // Its requests go with it; a twin bot on the same server keeps its own by its own id.
+      await db.netLog.filter((row) => row.bot.includes(id)).delete()
     }
     await db.conversations.bulkDelete(ids)
     await db.profiles.delete(id)
@@ -1505,6 +1547,7 @@ export async function clearAllData() {
     db.sentFiles,
     db.mediaCache,
     db.speechCache,
+    db.netLog,
   ]
   await db.transaction("rw", tables, async () => {
     await Promise.all(tables.map((table) => table.clear()))

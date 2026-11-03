@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react"
+import { useEffect, useMemo, useState, type CSSProperties } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   ArchiveXIcon,
@@ -48,7 +48,7 @@ import { itemToOpen, useCodePane, type FeaturePane } from "@/lib/pane"
 import { readProjects, useAllProjects } from "@/lib/projects"
 import { quietly } from "@/lib/report"
 import { createSignal } from "@/lib/store"
-import { cn } from "@/lib/utils"
+import { Chip } from "@/components/chip"
 import {
   reasonText,
   useAllLiveRuns,
@@ -403,32 +403,6 @@ function matches({ c, project }: Row, query: string) {
   if (!words.length) return true
   const text = [c.title, project?.name, c.worktree?.branch].join(" ").toLowerCase()
   return words.every((word) => text.includes(word))
-}
-
-function Chip({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean
-  onClick: () => void
-  children: ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      className={cn(
-        "flex h-11 shrink-0 items-center gap-1.5 rounded-full border px-4 text-sm font-medium transition-colors",
-        active
-          ? "border-foreground bg-foreground text-background"
-          : "bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
-      )}
-    >
-      {children}
-    </button>
-  )
 }
 
 const names = new Intl.ListFormat(undefined, { type: "conjunction" })

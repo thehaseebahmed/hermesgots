@@ -28,6 +28,7 @@ import {
   type WorkflowEntry,
 } from "@/lib/workflow"
 import { isNative } from "@/lib/native"
+import { ask, sawFrame, sawWords } from "@/lib/net-watch"
 import type { Fingerprint, Totals } from "@/lib/dictation-log"
 import { promptEntry } from "@/lib/run-prompt"
 import type { CronSchedule } from "@/lib/schedule"
@@ -177,7 +178,8 @@ function headers(config: HermesConfig, extra?: Record<string, string>) {
 async function request(url: string, init: RequestInit) {
   let response: Response
   try {
-    response = await fetch(url, init)
+    // The one place a request to a bot's host is made: the network log watches here (ADR 0086).
+    response = await ask(url, init)
   } catch (error) {
     if (error instanceof DOMException && ["AbortError", "TimeoutError"].includes(error.name))
       throw error
@@ -330,7 +332,11 @@ export async function streamChat(
         const choice = payload?.choices?.[0]
         const delta = choice?.delta
         if (delta?.reasoning_content) handlers.onReasoning?.(delta.reasoning_content)
-        if (delta?.content) handlers.onContent?.(delta.content)
+        if (delta?.content) {
+          // The send's own wait is over at its first words (ADR 0086).
+          sawWords(response)
+          handlers.onContent?.(delta.content)
+        }
         if (choice?.finish_reason) finishReason = choice.finish_reason
         if (payload?.usage) {
           usage = {
@@ -1976,7 +1982,13 @@ export async function followEvents(
     signal: options.signal,
   })
   if (!response.body) throw new HermesError("Hermes returned an empty response.")
+  let first = true
   for await (const { event, data } of readSse(response.body, EVENTS_IDLE_MS)) {
+    if (first) {
+      first = false
+      // The frame is what the network log reads as how long the stream took to open.
+      sawFrame(response)
+    }
     let payload: unknown
     try {
       payload = JSON.parse(data)

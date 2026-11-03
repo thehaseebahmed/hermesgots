@@ -3,6 +3,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { useTheme } from "next-themes"
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router"
 import {
+  ActivityIcon,
   ArrowLeftIcon,
   AudioLinesIcon,
   BellIcon,
@@ -44,6 +45,7 @@ import type { BotSub } from "@/lib/bot-subs"
 import { botPageOf, botPath, botTabOf, botTabPath, type BotPage } from "@/lib/bot-tabs"
 import { botSubOf, botSubPath } from "@/lib/bot-subs"
 import { Banner } from "@/components/banner"
+import { NetworkLogScreen } from "@/components/network-log"
 import { Bot } from "@/components/bot"
 import { OnlineDot } from "@/components/bot-card"
 import { LinkSheet } from "@/components/link-bots"
@@ -121,6 +123,7 @@ const SECTIONS: Record<string, { title: string; render: () => ReactNode }> = {
   notifications: { title: NOTIFICATION_SETTINGS, render: () => <NotificationTypes /> },
   data: { title: "Local data", render: () => <DataSettings /> },
   developer: { title: "Developer", render: () => <DeveloperSettings /> },
+  network: { title: "Network log", render: () => <NetworkLogScreen /> },
 }
 
 /** Which section the menu shows as open, and whether picking one swaps it in place. */
@@ -591,6 +594,14 @@ const LIVE_LABELS: Record<LiveStatus, { label: string; detail: string }> = {
 export function DeveloperSettings() {
   const bots = useLiveQuery(listProfiles, [])
   const settings = useLiveQuery(getSettings, [])
+  // What the log holds, so the switch and its row say what turning it on has collected.
+  const log = useLiveQuery(async () => {
+    const [count, failed] = await Promise.all([
+      db.netLog.count(),
+      db.netLog.filter((row) => row.ending !== "answered").count(),
+    ])
+    return { count, failed }
+  }, [])
   return (
     <>
       <Group>
@@ -645,6 +656,24 @@ export function DeveloperSettings() {
         <SyncServerRow />
       </Group>
       <Group>
+        <SwitchRow
+          id="network-log"
+          icon={TimerIcon}
+          title="Network log"
+          subtitle="Records this device's requests to each bot"
+          checked={Boolean(settings?.netLog)}
+          onCheckedChange={(checked) => saveSettings({ netLog: checked })}
+        />
+        {(settings?.netLog || Boolean(log?.count)) && (
+          <Row
+            to="network"
+            icon={ActivityIcon}
+            title="View the log"
+            subtitle={
+              log?.count ? `${log.count} requests · ${log.failed} failed` : "Nothing recorded yet"
+            }
+          />
+        )}
         {bots?.map((bot) => (
           <LiveRow key={bot.id} bot={bot} />
         ))}

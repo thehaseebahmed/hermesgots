@@ -2757,3 +2757,36 @@ again — the same silence that made the reported stop need a second press.
   share, and widening its answer is a change across those callers rather than to the stop path alone.
 
 Found by the simplify pass on this branch; neither entry blocks the pull request.
+
+---
+
+# Deferred fixes from the network log
+
+Landed on this branch: the Developer **Network log** switch, its screen (pills, summary strip, table,
+copy and clear), the recorder both transports ask through, and the store behind it (ADR 0086,
+`docs/specs/network-log.md`). Two things the spec asked for are recorded here instead of built.
+
+### 1. The new chat screen records no first words
+
+The classic screen's send is one streaming request, so the wait from sending to the reply's first
+words is that request's own. The new chat screen posts a run and reads the reply's words on a second
+stream, so no single request spans the wait, and recording it would mean carrying the send's instant
+across two requests and holding two definitions behind one line.
+
+- Cost: the New chat screen shows Connected in and its requests but never a first-words figure.
+- Suggested fix: have the send stash its instant against the run id, and the run stream land words
+  against it on the first `message.delta`; the summary line stays one definition because both
+  screens would then measure from a send rather than from a stream open.
+- Why it is deferred: it changes the chat-next client's send path and the shape of a row that is
+  currently one request's own, and the classic screen already answers the question it was added for.
+
+### 2. No request or response sizes
+
+A row holds how long a request took and never how many bytes came back.
+
+- Cost: a slow answer that is slow because it is a large one reads the same as a slow host.
+- Suggested fix: read `Content-Length` where the host sends one and record it; a compressed
+  streaming body has no honest size to report, so the field would be absent for streams either way.
+- Why it is deferred: the count a person actually wants is the body's, and bodies are consumed
+  directly at every read in the client rather than through one wrapper, so it is a change to every
+  body read rather than a field on the row.

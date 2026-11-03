@@ -10,6 +10,7 @@ import { Toaster } from "@/components/ui/sonner"
 import { recoverInterruptedMessages } from "@/lib/chat"
 import { handBackNativeSignIn, handleBackButton } from "@/lib/native"
 import { startLive } from "@/lib/live"
+import { startNetLog } from "@/lib/net-recorder"
 import { startPush } from "@/lib/push"
 import { startResumeTrace } from "@/lib/resume-trace"
 import { startSentry } from "@/lib/sentry"
@@ -26,6 +27,7 @@ if (!handBackNativeSignIn()) {
   void recoverInterruptedMessages()
   void startSync()
   startLive()
+  startNetLog()
   startPush()
   onReturn(() => startResumeTrace())
 }
