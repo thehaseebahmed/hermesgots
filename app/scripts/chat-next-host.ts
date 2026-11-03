@@ -152,11 +152,6 @@ const PROMPT_EVENTS = new Set(["clarify.request", "approval.request"])
 const MEDIA_LIFE_S = 600
 
 /**
- * `plugin` serves the Gots plugin's `runs/live`; `version` is what `/health` says Hermes is;
- * `latency` is how long, in ms, a transcript read takes to be answered; `withhold` sends a prompt's
- * request only to the subscribers there when it was made, never to one that joins afterwards.
- */
-/**
  * The user row Hermes keeps for a run's input: a plain string as it came, or the newest message of a
  * list, whose content `host-row.mjs` writes the way the host's own row is written.
  */
@@ -170,6 +165,14 @@ function durable(input: unknown): string | null {
   return durableUserRow(content)
 }
 
+/**
+ * `plugin` serves the Gots plugin's `runs/live`; `version` is what `/health` says Hermes is;
+ * `latency` is how long, in ms, a transcript read takes to be answered; `withhold` sends a prompt's
+ * request only to the subscribers there when it was made, never to one that joins afterwards.
+ * `cooperative` keeps a stopped child working until its own boundary, which is how core's
+ * `interrupt_subagent` really behaves (`plugin/delegation.py`); `false` ends it at the request, which
+ * is only what a child between calls looks like.
+ */
 export function fakeHost(
   session: string,
   {
@@ -177,12 +180,23 @@ export function fakeHost(
     version = "0.22.5",
     latency = 0,
     withhold = false,
-  }: { plugin?: boolean; version?: string; latency?: number; withhold?: boolean } = {},
+    cooperative = true,
+    refuseStops = false,
+  }: {
+    plugin?: boolean
+    version?: string
+    latency?: number
+    withhold?: boolean
+    cooperative?: boolean
+    /** Answers every stop with a 500, as a host that cannot carry it out does. */
+    refuseStops?: boolean
+  } = {},
 ) {
   const rows: Row[] = []
   const expected: ExpectedTurn[] = []
   const runs = new Map<string, RunState>()
   let droppedRun: string | undefined
+  let heldRun: Promise<void> | undefined
   const answers: { run: string; prompt_id: string; generation: number; answer: string }[] = []
   const approvals: { run: string; choice: string }[] = []
   const asked = {
@@ -245,6 +259,10 @@ export function fakeHost(
     latest.body = item.body as Record<string, unknown>
   }
   const agents: AgentRecord[] = []
+  /** The children a cooperative stop asked for, which end when `endAgents` is called. */
+  const askedIds: string[] = []
+  /** The card a child's own row draws, which its end moves with the record. */
+  const cards = new Map<string, { status: "running" | "done" }>()
   const children = new Map<string, Row[]>()
   const compactions: { row?: Row; turn: number; inside: boolean }[] = []
   const gone = new Set<number>()
@@ -425,6 +443,8 @@ export function fakeHost(
           agents.push(agent)
           children.set(agent.id, [childRow(agent.id, "user", agent.goal)])
         })
+        const bornCards = list.map((goal) => ({ goal, status: "running" as const }))
+        born.forEach((agent, at) => cards.set(agent.id, bornCards[at]))
         write(
           "tool",
           JSON.stringify({
@@ -444,11 +464,10 @@ export function fakeHost(
           tool_call_id: call,
           preview: "",
         })
-        const cards = born.map((agent) => ({ goal: agent.goal, status: "running" as const }))
-        turn.agents.push(...cards)
+        turn.agents.push(...bornCards)
         return born.map((agent, at): Child => ({
           id: agent.id,
-          finish: (result) => finishChild(agent, cards[at], result, delegation, born),
+          finish: (result) => finishChild(agent, bornCards[at], result, delegation, born),
         }))
       },
       tool(name, preview, result) {
@@ -499,6 +518,14 @@ export function fakeHost(
     ...extra,
   })
 
+  /** A child's own row closes: core writes `agent_close` whichever way the turn went. */
+  function closeChild(agent: AgentRecord, card: { status: "running" | "done" }) {
+    agent.ended_at = ++clock
+    agent.end_reason = "agent_close"
+    agent.status = "done"
+    card.status = "done"
+  }
+
   /**
    * What Hermes does when a background child ends: its own transcript closes, and the parent's gets
    * the unit's batch row once the last of its children is in, then this child's notice, and a wake
@@ -525,11 +552,8 @@ export function fakeHost(
       }),
       childRow(agent.id, "assistant", result, { finish_reason: "stop" }),
     )
-    agent.ended_at = ++clock
-    agent.end_reason = "agent_close"
-    agent.status = "done"
+    closeChild(agent, card)
     agent.tool_calls = 1
-    card.status = "done"
     if (siblings.every((one) => one.status === "done"))
       write("user", `[ASYNC DELEGATION BATCH COMPLETE — ${delegation}]\nThe unit has finished.`, {
         display_kind: "async_delegation_complete",
@@ -620,6 +644,7 @@ export function fakeHost(
     const stopping = /^\/v1\/runs\/([^/]+)\/stop$/.exec(path)
     if (stopping && init?.method === "POST") {
       asked.stops++
+      if (refuseStops) return reply({ error: { code: "stop_failed", message: "no" } }, 500)
       const state = runs.get(decodeURIComponent(stopping[1]))
       if (!state) return reply({ error: { code: "run_not_found" } }, 404)
       state.cancel?.()
@@ -635,6 +660,7 @@ export function fakeHost(
           { error: { message: "Run is waiting on the user", code: "run_waiting_for_user" } },
           409,
         )
+      if (heldRun) await heldRun
       asked.runs++
       const { id, run } = start(durable(body.input))
       latest.run = run
@@ -818,7 +844,10 @@ export function fakeHost(
     ) {
       asked.agentStops++
       const running = agents.filter((agent) => agent.status === "running")
-      running.forEach((agent) => (agent.status = "done"))
+      // A cooperative stop is a request: the child leaves at its next boundary, so its card reads
+      // running until `endAgents` says it got there.
+      if (cooperative) askedIds.push(...running.map((agent) => agent.id))
+      else running.forEach((agent) => (agent.status = "done"))
       return reply({
         object: "memento.agents_stop",
         stopped: running.length,
@@ -1011,10 +1040,37 @@ export function fakeHost(
     }
   }
 
+  /**
+   * Holds every `POST /v1/runs` until `release`: the window between a send and the run id it names,
+   * which is when a press has no run to stop yet.
+   */
+  function holdRuns() {
+    let release = () => {}
+    const wait = new Promise<void>((resolve) => (release = resolve))
+    heldRun = wait
+    return {
+      release: () => {
+        heldRun = undefined
+        release()
+      },
+    }
+  }
+
   /** The transcript page at `offset` answers 500 until `fix`. */
   function fail(offset: number) {
     failing.add(offset)
     return { fix: () => failing.delete(offset) }
+  }
+
+  /**
+   * The children a cooperative stop asked for reach their boundary and end, closed the way core
+   * closes a stopped child: `agent_close` on its own row, whatever the turn went on to do.
+   */
+  function endAgents() {
+    for (const agent of agents) {
+      if (!askedIds.includes(agent.id) || agent.status !== "running") continue
+      closeChild(agent, cards.get(agent.id) ?? { status: "running" })
+    }
   }
 
   // The host answers every request this process makes from the moment it exists.
@@ -1025,6 +1081,7 @@ export function fakeHost(
     seed,
     offsets,
     hold,
+    holdRuns,
     fail,
     expected,
     view,
@@ -1033,6 +1090,7 @@ export function fakeHost(
     answers,
     approvals,
     agents,
+    endAgents,
     rows,
     latest,
     queue,

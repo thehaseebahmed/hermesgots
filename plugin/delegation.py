@@ -32,9 +32,11 @@ of a wake is a disposition in the plugin's own store, and each one is a bound:
   that failed, which costs one attempt and a wait that grows (``WAKE_BACKOFF_SECONDS``). Holding
   costs nothing: nothing was posted, so no attempt is spent.
 - dropped: never posted, and why. A workflow stage keeps its one run; the host refused permanently
-  (``gone``); the end is older than ``WAKE_MAX_AGE_MS`` (``stale``); or it failed
-  ``WAKE_MAX_ATTEMPTS`` times (``exhausted``). A drop is recorded once, at the drop, so a watcher
-  that looks every 5 seconds never says the same thing twice.
+  (``gone``); the end is older than ``WAKE_MAX_AGE_MS`` (``stale``); it failed
+  ``WAKE_MAX_ATTEMPTS`` times (``exhausted``); or the child was stopped on purpose (``stopped``) —
+  the stop is the user's answer, and a wake turn behind it would start the chat again by itself
+  (ADR 0085). A drop is recorded once, at the drop, so a watcher that looks every 5 seconds never
+  says the same thing twice.
 - sent: posted, and the gate after the post was still clear.
 
 A workflow stage is the exception: it keeps its one run, because the stage it moves to is posted on
@@ -86,6 +88,7 @@ WAKE_MAX_ATTEMPTS = 8
 WAKE_BACKOFF_SECONDS = (5.0, 15.0, 45.0, 135.0, 405.0, 1215.0, 3645.0)
 WAKE_MAX_AGE_MS = 48 * 60 * 60 * 1000
 DROP_STAGE, DROP_GONE, DROP_STALE, DROP_EXHAUSTED = "stage", "gone", "stale", "exhausted"
+DROP_STOPPED = "stopped"
 
 # Core's completion notice, and its machine-provenance footer (``INTERNAL_NOTIFICATION_FOOTER``,
 # gateway/run_notifications.py), which every notification that re-enters a conversation as a
@@ -1057,11 +1060,12 @@ def started(
 def stop(hermes_home: Path, parent_id: str, subagent_id: str) -> Dict[str, Any]:
     """Stops one subagent's work, from the child's session id the app holds.
 
-    The stop is ``_interrupt_one`` — core's own per-subagent ``interrupt_subagent``, which is what
-    its model-facing ``delegate_task(action='stop')`` calls. A host too old to offer it, or a child
-    that isn't running any more, answers what it always did.
+    The stop is core's own per-subagent ``interrupt_subagent``, which is what its model-facing
+    ``delegate_task(action='stop')`` calls, and it settles the wake the child's end would have owed
+    its conversation (``_stop_children``). A host too old to offer it, or a child that isn't running
+    any more, answers what it always did.
     """
-    row = _stop_row(hermes_home, subagent_id)
+    row = _stop_children(Path(hermes_home), parent_id, [subagent_id])[0]
     if not row["stopped"]:
         return {"stopped": False, "reason": row["reason"]}
     events.note("runs", parent_id, db_path(hermes_home), True)
@@ -1077,16 +1081,34 @@ def stop_all(hermes_home: Path, session_id: str, live: Collection[str] = ()) -> 
     so this is its own call (ADR 0051). A child is at work while something holds it — its parent's
     run, which ``live`` names, or core's registry of the children this process runs — so an open row
     nobody holds is left alone, exactly as ``children`` reads it for the app's cards. Each stop is
-    core's per-child ``interrupt_subagent``, the call a card's own button makes.
+    core's per-child ``interrupt_subagent``, the call a card's own button makes, and each settles the
+    wake its child was owed (``_stop_children``).
     """
     home = Path(hermes_home)
     named = [
         child["id"] for child in children(home, session_id, set(live)) if child["status"] == "running"
     ]
-    rows = [_stop_row(home, child_id) for child_id in named]
+    rows = _stop_children(home, session_id, named)
     if any(row["stopped"] for row in rows):
         events.note("runs", session_id, db_path(home), True)
     return {"agents": rows, "stopped": sum(1 for row in rows if row["stopped"])}
+
+
+def _stop_children(home: Path, parent_id: str, child_ids: Iterable[str]) -> List[Dict[str, Any]]:
+    """Stops each child and settles the wakes of the ones that stopped — the plugin's one stop.
+
+    Every stop this plugin carries out comes through here: a card's, the composer's, and the
+    fan-out that hands a stopped run's stop to the children it began. The settle lives here rather
+    than in ``_interrupt_one`` because it is the *stop* that is the user's answer (ADR 0085), not
+    the interrupt: a child that had already ended when the press arrived answers ``False``, and its
+    own end is still news its bot is owed.
+
+    One write for the batch, after the stops that landed, and only for children still owed a wake —
+    a press behind another press (the session route, then the run fan-out) settles nothing twice.
+    """
+    rows = [_stop_row(home, child_id) for child_id in child_ids]
+    _settle_stopped_wakes(home, parent_id, [row["id"] for row in rows if row["stopped"]])
+    return rows
 
 
 def _stop_row(hermes_home: Path, child_id: str) -> Dict[str, Any]:
@@ -1105,6 +1127,38 @@ def _stop_row(hermes_home: Path, child_id: str) -> Dict[str, Any]:
     if not stopped:
         return {"id": child_id, "stopped": False, "reason": "That subagent isn't running any more."}
     return {"id": child_id, "stopped": True}
+
+
+def _settle_stopped_wakes(hermes_home: Path, parent_id: str, child_ids: Iterable[str]) -> None:
+    """Drops the wakes these children's ends would otherwise owe the conversation.
+
+    A stop is the user's answer, and the wake is a run of the same conversation: the reader pressed
+    Stop, and the child's own end then started the chat again by itself (ADR 0085). The mark is what
+    the sweep reads, so it is written as soon as the stop lands — the sweep looks every five seconds
+    and would otherwise catch an end the press has already settled. A child nothing of ours stopped
+    still wakes as it always did, with its reason and its partial output.
+
+    Only children still owed a wake are written: one whose mark has settled is left alone, and the
+    store's own no-op path would still take its write lock for it. A mark with no status is one a
+    store older than v41 wrote — a wake that was posted — so it is settled too (``SETTLED_WAKES``).
+    """
+    ids = [one for one in child_ids if one]
+    if not ids:
+        return
+    path = db_path(hermes_home)
+    try:
+        marks = sessions.wake_marks(path, ids)
+        owed = [
+            one
+            for one in ids
+            if one not in marks or marks[one]["status"] not in sessions.SETTLED_WAKES
+        ]
+        if owed:
+            sessions.drop_wakes(path, parent_id, owed, DROP_STOPPED)
+    except (sqlite3.Error, OSError):
+        # A store that can't take the mark leaves the wakes owed, so the chat may still start a run
+        # behind the press — the very symptom this settles — and only this line says so.
+        logger.warning("memento: couldn't settle the wakes of %s", ", ".join(ids), exc_info=True)
 
 
 def _interrupt_one(home: Path, subagent_id: str) -> Optional[bool]:
@@ -1192,8 +1246,9 @@ def stop_run(home: Path, run: Dict[str, Any]) -> List[str]:
     ended is left alone, its card and its result already where they belong. A run with no start time
     to compare names every live child of its session.
 
-    Each named child is stopped on its own, through core's per-child ``interrupt_subagent``
-    (``_interrupt_one``), which is the stop the card asks for. Core's other stop,
+    Each named child is stopped on its own, through core's per-child ``interrupt_subagent``, the call
+    a card makes, which settles the wake each stopped child's end would have owed the conversation
+    (ADR 0085). Core's other stop,
     ``interrupt_for_session`` (``tools/async_delegation.py:1267-1290``), is no use here: its only
     selectors are a session's — ``session_key``, ``origin_ui_session_id`` or ``parent_session_id``
     (``_session_records``, ``:738-750``) — so it would stop every live delegation of the session,
@@ -1211,9 +1266,9 @@ def stop_run(home: Path, run: Dict[str, Any]) -> List[str]:
         for child in children(home, session_id, {session_id})
         if child["status"] == "running" and _since(child["started_at"], began)
     ]
-    for child_id in named:
-        if _interrupt_one(home, child_id) is False:
-            logger.debug("memento: %s named no subagent core could stop", child_id)
+    for row in _stop_children(home, session_id, named):
+        if not row["stopped"]:
+            logger.debug("memento: %s named no subagent core could stop", row["id"])
     return named
 
 

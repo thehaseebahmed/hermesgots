@@ -20,6 +20,7 @@ import type { ModeSettings } from "@/components/chat/mode-menu"
 import { usePreviewer, type PreviewItem } from "@/components/chat/previewer"
 import { SlashMenu } from "@/components/chat/slash-menu"
 import { VoiceBar } from "@/components/chat/voice-bar"
+import { Spinner } from "@/components/ui/spinner"
 import {
   InputGroup,
   InputGroupAddon,
@@ -28,6 +29,7 @@ import {
 } from "@/components/ui/input-group"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { filesReason, fresh, isPhoto, MAX_ATTACHMENTS } from "@/lib/attachment-caps"
+import { AGENT_WORK_MS } from "@/lib/freshness"
 import { openAttachment, prepareIntake } from "@/lib/attachments"
 import { attachmentUrl } from "@/lib/attachment-url"
 import { mediaCell, mediaKind } from "@/lib/media-kind"
@@ -70,6 +72,18 @@ import { cn, randomId } from "@/lib/utils"
 
 const HOLD_MS = 400
 const SLIDE_CANCEL_PX = 80
+/**
+ * How long a press answers for while something is still at work: long enough for a cooperative stop
+ * to reach the child's boundary and show it, after which Stop comes back so a stop that never landed
+ * can be asked for again (ADR 0085).
+ */
+const STOP_ASKED_MS = 15_000
+/**
+ * How long a press answers for once nothing looks to be at work: one read of the session's children,
+ * because a quiet reading taken before the press's own stop has landed — or an older one still in
+ * flight — is not the answer, and a child that keeps working until its boundary is.
+ */
+const STOP_SETTLED_MS = AGENT_WORK_MS
 
 export function Composer({
   busy,
@@ -78,6 +92,7 @@ export function Composer({
   onSend,
   onQueue,
   onStop,
+  runId,
   onCommand,
   connection,
   botName = "Hermes",
@@ -136,7 +151,14 @@ export function Composer({
   onSend: (text: string, attachments: Attachment[]) => Promise<void> | void
   /** Called instead of `onSend` while a reply is streaming: a send queues the message. */
   onQueue: (text: string, attachments: Attachment[]) => Promise<void> | void
-  onStop: () => void
+  /**
+   * Asks for the session's stop, and answers whether the host took any of it. `false` — or a refused
+   * promise — says nothing the press asked for is being carried out, so the press is not acknowledged
+   * and the button stays the reader's to press.
+   */
+  onStop: () => boolean | void | Promise<boolean>
+  /** The run this composer's Stop is for: the acknowledgement stands only while it is the same one. */
+  runId?: string
   /** How many subagents the session has at work: with the turn over, Stop is still the session's. */
   subagentsRunning?: number
   onCommand: (
@@ -236,6 +258,34 @@ export function Composer({
   const steering = steersNow(value, attachments)
   // One press stops everything the session has going, so Send's place is Stop while either works.
   const working = busy || subagentsRunning > 0
+  // The press is answered while the run it was made for is this button's job and something is still
+  // at work (ADR 0085).
+  const [stopAsked, setStopAsked] = useState(false)
+  const askedFor = useRef<string | undefined>(undefined)
+  const pressStop = () => {
+    if (stopAsked) return
+    askedFor.current = runId
+    setStopAsked(true)
+    // The host's answer is what ends a press that asked for nothing — a stop it refused, or a session
+    // whose children it had already let go (ADR 0085).
+    void Promise.resolve(onStop()).then((asked) => {
+      if (asked === false) setStopAsked(false)
+    })
+  }
+  useEffect(() => {
+    if (!stopAsked) return
+    // A different run is the button's job now; a run that simply ended is not another one.
+    if (runId !== undefined && runId !== askedFor.current) {
+      setStopAsked(false)
+      return
+    }
+    // Nothing at work is believed only after a read of the children could have said otherwise.
+    const timer = window.setTimeout(
+      () => setStopAsked(false),
+      working ? STOP_ASKED_MS : STOP_SETTLED_MS,
+    )
+    return () => window.clearTimeout(timer)
+  }, [stopAsked, runId, working])
 
   // The menu follows the caret: a `/` that begins a word opens it, wherever in the message it is.
   const token = slashToken(value, caret)
@@ -549,7 +599,7 @@ export function Composer({
     const field = event.currentTarget
     if (isInterrupt(event.nativeEvent, working, field.selectionStart !== field.selectionEnd)) {
       event.preventDefault()
-      onStop()
+      pressStop()
       return
     }
     if (event.key === "Escape") {
@@ -594,16 +644,18 @@ export function Composer({
           <MicIcon />
         </InputGroupButton>
       )}
-      {working && !canSend ? (
+      {stopAsked || (working && !canSend) ? (
+        // Left enabled rather than disabled, so a keyboard reader keeps their place and hears the
+        // new label; `pressStop` is what refuses the second press.
         <InputGroupButton
           type="button"
           variant="secondary"
           size="icon-sm"
           className="size-11 rounded-full"
-          onClick={onStop}
-          aria-label="Stop"
+          aria-label={stopAsked ? "Stopping" : "Stop"}
+          onClick={pressStop}
         >
-          <SquareIcon className="fill-current" />
+          {stopAsked ? <Spinner aria-hidden /> : <SquareIcon className="fill-current" />}
         </InputGroupButton>
       ) : (
         <InputGroupButton

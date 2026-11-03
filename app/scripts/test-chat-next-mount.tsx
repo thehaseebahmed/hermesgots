@@ -110,7 +110,16 @@ test("a bot served at /p/<profile> reaches its plugin inside the plugin's own pr
 async function onChatNext(
   id: string,
   patch: Partial<Profile> = {},
-  { plugin = false, settings = {} }: { plugin?: boolean; settings?: Partial<Settings> } = {},
+  {
+    plugin = false,
+    settings = {},
+    host: hostOptions = {},
+  }: {
+    plugin?: boolean
+    settings?: Partial<Settings>
+    /** What the host is like: a cooperative stop, a slow read, a prompt it holds back. */
+    host?: Parameters<typeof fakeHost>[1]
+  } = {},
 ) {
   const defaultPick = { provider: "anthropic", model: "claude-sonnet-5-5" }
   await seedChats([{ id, title: "Sky colours" }], {
@@ -118,7 +127,7 @@ async function onChatNext(
     bots: [{ ...bot, baseUrl: `http://${id}.test/v1`, modelChoice: defaultPick, ...patch }],
     settings: { chatNext: true, ...settings },
   })
-  return { host: fakeHost(`memento-${id}`, { plugin }), defaultPick }
+  return { host: fakeHost(`memento-${id}`, { ...hostOptions, plugin }), defaultPick }
 }
 
 async function sendFromComposer(text: string) {
@@ -299,7 +308,8 @@ test("Stop stops the run the thread is following", async () => {
     await until(() => Boolean(find('button[aria-label="Stop"]')), "the composer offers Stop")
     await click(find('button[aria-label="Stop"]'))
     await until(() => host.asked.stops === 1, "the host was asked to stop it")
-    await until(() => Boolean(find('button[aria-label="Send"]')), "and Send comes back")
+    // Past the settle window: the press is answered until a quiet reading has had time to be contradicted.
+    await until(() => Boolean(find('button[aria-label="Send"]')), "and Send comes back", 10_000)
   })
 })
 
@@ -596,6 +606,24 @@ test("a finished turn reads what the plugin holds beside it, and its todo list i
   })
 })
 
+test("a stop the host refused still leaves Stop for the run it could not stop", async () => {
+  // A refusal is not a stop: the run is still live on the host, so the button that comes back has to
+  // be Stop rather than Send, which would post a message into a running turn.
+  const { host } = await onChatNext("c-stop-refused", {}, { plugin: true, host: { refuseStops: true } })
+  await mount(chatScreen("c-stop-refused"), async () => {
+    await sendFromComposer("Keep going")
+    await until(() => host.asked.runs === 1, "the turn is running")
+    await until(() => Boolean(find('button[aria-label="Stop"]')), "the composer offers Stop")
+    await click(find('button[aria-label="Stop"]'))
+    await until(() => host.asked.stops === 1, "the host refused the stop")
+    await until(
+      () => Boolean(find('button[aria-label="Stop"]')),
+      "the run the host still holds is Stoppable again",
+    )
+    assert.equal(find('button[aria-label="Send"]'), null, "and Send is not offered over a live run")
+  })
+})
+
 test("a chat's first turn takes the title Hermes gave its session", async () => {
   const { host } = await onChatNext("c-title")
   // Seeded chats carry a title the user set, which the host's never replaces.
@@ -692,6 +720,80 @@ test("while a subagent works the composer is Stop, and one press stops the sessi
     await until(() => Boolean(find('button[aria-label="Stop"]')), "Stop stays while a child works")
     await click(find('button[aria-label="Stop"]'))
     await until(() => host.asked.agentStops === 1, "the plugin was asked to stop the children")
+  })
+})
+
+test("a press asks the plugin what it still holds, even before this device has read a child", async () => {
+  // The other half of the repeated tap: a child dispatched seconds ago is not in the list yet, so a
+  // press that stopped only the children it could name left one running — and needed pressing again.
+  const { host } = await onChatNext("c-stop-none", {}, { plugin: true })
+  await mount(chatScreen("c-stop-none"), async () => {
+    await sendFromComposer("Just a turn")
+    await until(() => host.asked.runs === 1, "the turn is running")
+    await until(() => host.asked.info > 0, "the plugin has said what it can do")
+    await until(() => Boolean(find('button[aria-label="Stop"]')), "the composer offers Stop")
+    await click(find('button[aria-label="Stop"]'))
+    await until(() => host.asked.agentStops === 1, "the host was asked what it still has at work")
+  })
+})
+
+test("a press with no run to stop yet hands Stop back for the run that lands", async () => {
+  // The window between Send and the run id it names: the press has no run to stop, and the run that
+  // lands a moment later is not the one it asked about — so the button must come back to Stop rather
+  // than sit as a Stopping that refuses the press meant for the new turn.
+  const { host } = await onChatNext("c-stop-early", {}, { plugin: true })
+  await mount(chatScreen("c-stop-early"), async () => {
+    const post = host.holdRuns()
+    await sendFromComposer("Start something")
+    await until(() => Boolean(find('button[aria-label="Stop"]')), "the composer offers Stop")
+    await click(find('button[aria-label="Stop"]'))
+    await settle()
+    // The host answered that it had nothing to stop, so nothing is acknowledged and the button is
+    // still the reader's: the run that lands a moment later is the one the next press stops.
+    assert.ok(find('button[aria-label="Stop"]'), "a press that stopped nothing is not acknowledged")
+    post.release()
+    await until(() => host.asked.runs === 1, "the run lands")
+    await until(() => Boolean(find('button[aria-label="Stop"]')), "and Stop is the press again")
+    await click(find('button[aria-label="Stop"]'))
+    await until(() => host.asked.stops === 1, "the turn that landed is the one it stops")
+  })
+})
+
+test("a stop is answered on the spot, so a press still unwinding is not pressed again", async () => {
+  // The report: Stop tapped three times because nothing happened for a second. A subagent's stop is
+  // cooperative, so the child keeps working for a moment after the press: the composer says it is
+  // stopping, asks for nothing more while it does, and hands Send back once the child has ended.
+  const { host } = await onChatNext(
+    "c-stop-asked",
+    {},
+    { plugin: true, host: { cooperative: true } },
+  )
+  await mount(chatScreen("c-stop-asked"), async () => {
+    await sendFromComposer("Fan out")
+    await until(() => host.asked.runs === 1, "the turn is running")
+    host.latest.run!.delegate("look into it")
+    await until(() => host.asked.info > 0, "the plugin has said what it can do")
+    await until(() => Boolean(find('button[aria-label="Stop"]')), "the composer offers Stop")
+    await click(find('button[aria-label="Stop"]'))
+    await until(() => host.asked.agentStops === 1, "the host was asked to stop the child")
+    await until(() => Boolean(find('button[aria-label="Stopping"]')), "the press is answered")
+    assert.equal(
+      (find('button[aria-label="Stopping"]') as HTMLButtonElement).disabled,
+      false,
+      "and stays focusable, so a keyboard reader keeps their place and hears the new label",
+    )
+    await click(find('button[aria-label="Stopping"]'))
+    await settle()
+    assert.equal(host.asked.stops, 1, "a second tap is not a second stop")
+    assert.equal(host.asked.agentStops, 1, "nor a second stop of the session's children")
+    host.endAgents()
+    // The quiet has to hold for one read of the children before it is believed (STOP_SETTLED_MS), so
+    // this waits past that window rather than the helper's default five seconds.
+    await until(
+      () => Boolean(find('button[aria-label="Send"]')),
+      "Send returns once it has ended",
+      10_000,
+    )
   })
 })
 

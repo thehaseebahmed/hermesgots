@@ -1,8 +1,9 @@
 # Delegation that never blocks a question
 
 Status: grilled 2026-10-23, every decision settled and recorded in ADR 0038; the delivery's drawing
-has since changed per ADR 0052 — the thread draws nothing for a delivery row. The build order at the
-end is the tickets' shape when implementation starts.
+has since changed per ADR 0052 — the thread draws nothing for a delivery row — and a subagent the
+user stopped no longer wakes its bot (ADR 0085), the stop settling the wake it would have owed. The
+build order at the end is the tickets' shape when implementation starts.
 
 ## Goal
 

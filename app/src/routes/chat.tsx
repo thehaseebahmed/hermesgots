@@ -772,6 +772,7 @@ function NextComposerBody({
         sendOnEnter={sendOnEnter ?? DEFAULT_SETTINGS.sendOnEnter}
         subagentsRunning={controls.subagents}
         onStop={controls.stop}
+        runId={controls.runId}
         session={
           session
             ? {
@@ -1076,7 +1077,13 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   // subagent to work turns the poll on: a list, steer or stop runs no agent to wait for (ADR 0053).
   const spawning = useMemo(() => spawnInFlight(messages), [messages])
   const agents = useSessionAgents(conversation ?? undefined, profile, spawning, busy)
-  const subagentsRunning = useMemo(() => runningAgents(agents).length, [agents])
+  // A child is at work if this device's list says so or the host's own count does: the list folds
+  // the answers to a stop made here, so it reads quiet while the host still holds the child.
+  const hostChildren = useLiveSubagents()[conversation?.hermesSessionId ?? ""] ?? 0
+  const subagentsRunning = useMemo(
+    () => Math.max(runningAgents(agents).length, hostChildren),
+    [agents, hostChildren],
+  )
   const lastId = thread?.at(-1)?.id
   // The count is drawn once: on the last reply's own line, or at the thread's foot where it draws
   // none. This screen draws no catch-up line, so it has no second row to keep it off.
@@ -1098,19 +1105,19 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
     [agents, baseUrl, apiKey, conversation?.hermesSessionId, setAgentView],
   )
   const hostStopsAll = usePluginFeatureOn(profile, "subagents_stop_all")
-  const stopEverything = useCallback(async () => {
-    if (!id) return
+  /** The screen's Stop: the turn, and every subagent the session holds. */
+  const stopEverything = useCallback((): boolean => {
+    if (!id) return false
     stopMessage(id)
-    if (!agentsSource?.sessionId) return
-    try {
-      await stopSubagents(agentsSource.server, agentsSource.sessionId, agentsSource.agents, {
+    if (agentsSource?.sessionId)
+      void stopSubagents(agentsSource.server, agentsSource.sessionId, agentsSource.agents, {
         stopAll: hostStopsAll,
+      }).catch(() => {
+        // A subagent the host declined says why on its own card; only a call that never landed has
+        // nowhere to say it.
+        toast.error("Couldn't stop the subagents.")
       })
-    } catch {
-      // A subagent the host declined says why on its own card; only a call that never landed has
-      // nowhere to say it.
-      toast.error("Couldn't stop the subagents.")
-    }
+    return true
   }, [id, agentsSource, hostStopsAll])
   // Only persistent /v1/runs work survives losing the app's connection; legacy streams do not.
   useBreakReminderEligibility(
@@ -1567,7 +1574,8 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
             filesFeature={filesFeature}
             imagesAvailable={profile?.imageInput !== false}
             subagentsRunning={subagentsRunning}
-            onStop={() => void stopEverything()}
+            onStop={stopEverything}
+            runId={runId}
             main={Boolean(botThreads && isMain)}
             onCommand={(command, message) => {
               switch (command) {

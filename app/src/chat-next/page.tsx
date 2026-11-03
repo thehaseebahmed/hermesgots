@@ -24,7 +24,7 @@ import { onlineNow } from "@/lib/online"
 import { LOADING_ACTIVITY } from "@/lib/format"
 import { NOT_SENT } from "@/lib/words"
 import { onSessionMoved, useLive } from "@/lib/live"
-import { knownLiveRun, useLiveRunId, useHostBusy } from "@/lib/waiting"
+import { knownLiveRun, useHostBusy, useLiveRunId, useLiveSubagents } from "@/lib/waiting"
 import { db, getSettings, type Attachment, type MessageStats, type SessionDb, type Unsent } from "@/lib/db"
 import { randomId } from "@/lib/utils"
 import { toast } from "sonner"
@@ -580,8 +580,10 @@ export interface ComposerControls {
   canSteer: boolean
   /** How many of the session's subagents are still at work, which keep it Stop rather than Send. */
   subagents: number
-  /** Ends the running reply and every subagent the session holds. */
-  stop: () => void
+  /** Ends the running reply and every subagent the session holds; false when the host took none of it. */
+  stop: () => boolean | Promise<boolean>
+  /** The run that Stop is for, so its acknowledgement ends when another run takes the button. */
+  runId?: string
 }
 
 interface ThreadOptions {
@@ -995,6 +997,7 @@ export function ChatNextThread({
   // prompt it has not been told about reports nothing running, and the page then slows to its idle
   // pace — a chat that only catches up when it is opened again.
   const [live, setLive] = useState(false)
+
   const busy = live || following || working || owed || starting || inQueue > 0 || handedOff || hostBusy
   // What the poll reads, held so a state object the reducer hands back new does not restart the
   // timer before it ever fires.
@@ -1246,6 +1249,9 @@ export function ChatNextThread({
     server && key ? { baseUrl: server, apiKey: key } : undefined,
     session ?? undefined,
   )
+  // The run this chat is on, as Stop and the composer's acknowledgement both name it: the one this
+  // page follows, else the one the host lists — the press reaches it either way (ADR 0085).
+  const currentRun = followingRun.current ?? hostRunId
   useEffect(() => {
     if (!ready || !hostRunId || !server || !key || !session) return
     join(hostRunId)
@@ -1436,19 +1442,51 @@ export function ChatNextThread({
     { baseUrl: server ?? "", apiKey: key ?? "" },
     "subagents_stop_all",
   )
-  const subagents = agents.filter((agent) => agent.status === "running").length
-  /** The session's Stop: the run it follows, and every subagent it holds, whichever turn began them. */
-  function stop() {
-    if (!server || !key) return
-    const run = followingRun.current
+  // How many of the session's children are at work: the host's own count from the shared poll, and
+  // the rows this page has read — a child is at work if either says so, since either read can be the
+  // one that is behind (the press that missed one is the double press ADR 0085 closes).
+  const listedSubagents = agents.filter((agent) => agent.status === "running").length
+  const hostSubagents = useLiveSubagents()[session ?? ""] ?? 0
+  const subagents = Math.max(listedSubagents, hostSubagents)
+  /**
+   * The session's Stop: the run it is drawn for, and every subagent it holds, whichever turn began
+   * them. Answers whether the host took any of it, which is what the composer's acknowledgement
+   * stands on (ADR 0085).
+   */
+  async function stop(): Promise<boolean> {
+    if (!server || !key) return false
+    const run = currentRun
+    const stops: Promise<boolean>[] = []
     if (run)
-      stopRun({ server, key }, run).catch((error) => {
-        if (!(error instanceof RunGone)) dispatch(failure(error))
-      })
-    if (!session || !subagents) return
-    stopSubagents({ baseUrl: server, apiKey: key }, session, agents.map(delegated), {
-      stopAll: hostStopsAll,
-    }).catch(() => dispatch(failure(new Error("Couldn't stop the subagents."))))
+      stops.push(
+        stopRun({ server, key }, run).then(
+          () => true,
+          (error) => {
+            if (!(error instanceof RunGone)) {
+              // A refused stop leaves the run where it was, so it is not a turn that failed: the run
+              // is read again now, and the button says Stop for it rather than waiting for a poll.
+              toast.error(error instanceof Error ? error.message : "Couldn't stop the run.")
+              void joinLive()
+            }
+            return false
+          },
+        ),
+      )
+    // Passed on whether or not this device read a child: `stopSubagents` decides what is worth a
+    // request (lib/agents.ts).
+    if (session)
+      stops.push(
+        stopSubagents({ baseUrl: server, apiKey: key }, session, agents.map(delegated), {
+          stopAll: hostStopsAll,
+        }).then(
+          (answer) => answer.rows.some((row) => row.stopped),
+          (error) => {
+            toast.error(error instanceof Error ? error.message : "Couldn't stop the subagents.")
+            return false
+          },
+        ),
+      )
+    return (await Promise.all(stops)).some(Boolean)
   }
 
   // An answer that fails is said so; one that lands takes the card away at once, and the host's
@@ -1543,6 +1581,7 @@ export function ChatNextThread({
         canSteer: Boolean(steerTurn),
         subagents,
         stop,
+        runId: currentRun,
       }}
     />
   ) : (

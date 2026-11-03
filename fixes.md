@@ -2732,3 +2732,28 @@ interrupted, so its thread outlives the Confirm that gave up on it, and nothing 
   is a ticket of its own rather than a cleanup.
 
 Found by the simplify pass on this branch; it does not block the pull request.
+
+# Deferred: what the stop pass's two axes found outside its own lines
+
+Three passes on `fix(chat): a stop press is answered …` (ADR 0085) — simplify, comments, and a two-axis
+review — applied everything the branch itself introduced. What is left is a mechanism the branch runs
+through rather than one it wrote, recorded here instead.
+
+## Careful
+
+### 1. A fan-out whose `state.db` read fails is never retried for that run
+
+`delegation.sweep_stops` marks a run as handed *before* it reads the session's children, and
+`delegation.children` swallows a `sqlite3.Error` into `[]` (a 2-second timeout is the common cause). So a
+stop that lands while the store is locked names no children, settles no wakes, and never looks at that run
+again — the same silence that made the reported stop need a second press.
+
+- Cost: a transient lock loses both halves of a stop for that run, permanently, with one debug line.
+- Suggested fix: have `children` answer three ways (children, none, couldn't tell) and mark the run handed
+  only when the read landed; the sweep then retries the run on its next tick. `stop_all` wants the same
+  distinction — it currently answers `stopped: 0` for a read that failed, which reads exactly like a
+  session with nothing to stop.
+- Why it is deferred: `children` is the read the app's cards, both stop routes and the wake watcher all
+  share, and widening its answer is a change across those callers rather than to the stop path alone.
+
+Found by the simplify pass on this branch; neither entry blocks the pull request.

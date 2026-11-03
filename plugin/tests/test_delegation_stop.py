@@ -29,7 +29,8 @@ from types import ModuleType
 from typing import Any, Dict, List
 from unittest import mock
 
-from plugin import delegation
+from plugin import delegation, sessions
+from plugin.store import db_path
 
 
 class Adapter:
@@ -425,6 +426,72 @@ class StopAllTest(Harness):
         self.assertEqual([row["id"] for row in answer["agents"]], ["c1"])
         self.assertEqual(answer["agents"][0]["stopped"], False, "core had no record to stop")
 
+
+class StoppedWakeTest(Harness):
+    """A stop settles the wake its child's end would owe the conversation (ADR 0085).
+
+    The wake exists so a finished child's work reaches its bot. A child the user stopped has no work
+    left to report, and the wake turn it would post is a run of the very conversation the press asked
+    to leave alone — the reader stopped everything and watched the chat start again by itself.
+    """
+
+    def wake_mark(self, child_id: str) -> Dict[str, Any]:
+        return sessions.wake_marks(db_path(self.home), [child_id]).get(child_id) or {}
+
+    def test_a_stopped_child_s_wake_is_settled_before_it_ends(self) -> None:
+        self.session("s")
+        self.session("c1", "s", delegate_from="s", goal="build it")
+        self.adapter.run("run-1", "stopping", "s")
+        self.assertEqual(delegation.sweep_stops(self.adapter, [self.home]), ["c1"])
+        # Nothing has ended yet: the mark is written now because the sweep looks every five seconds
+        # and may read the end the moment the child closes.
+        self.assertEqual(self.wake_mark("c1").get("status"), "dropped")
+        self.assertEqual(self.wake_mark("c1").get("reason"), delegation.DROP_STOPPED)
+
+    def test_a_child_the_stop_left_alone_still_wakes(self) -> None:
+        # An earlier turn's child is its own card's to stop (ADR 0038), so its end is news its bot is
+        # owed — the drop belongs to the press, not to every child in the session.
+        self.session("s")
+        self.session("earlier", "s", delegate_from="s")
+        self.session("this-run", "s", delegate_from="s")
+        self.adapter.run("run-1", "stopping", "s", created_at=self.clock - 0.5)
+        self.assertEqual(delegation.sweep_stops(self.adapter, [self.home]), ["this-run"])
+        self.assertEqual(self.wake_mark("this-run").get("status"), "dropped")
+        self.assertEqual(self.wake_mark("earlier"), {}, "no press named it, so nothing settles it")
+
+    def test_a_session_s_stop_settles_every_child_it_stopped(self) -> None:
+        self.session("s")
+        self.session("early", "s", delegate_from="s")
+        self.session("late", "s", delegate_from="s")
+        self.adapter.run("run-1", "completed", "s")
+        answer = delegation.stop_all(self.home, "s", set())
+        self.assertEqual(answer["stopped"], 2)
+        self.assertEqual(
+            {child: self.wake_mark(child).get("status") for child in ("early", "late")},
+            {"early": "dropped", "late": "dropped"},
+        )
+
+    def test_a_stop_that_reached_nothing_leaves_the_wake_alone(self) -> None:
+        # A host whose registry lost the child answers "not running any more": nothing was stopped, so
+        # the child's end is still read as its own and its bot is still owed the news.
+        self.session("s")
+        self.session("c1", "s", delegate_from="s")
+        self.core.declines = True
+        self.adapter.run("run-1", "stopping", "s")
+        self.assertEqual(delegation.sweep_stops(self.adapter, [self.home]), ["c1"])
+        self.assertEqual(self.wake_mark("c1"), {})
+
+    def test_a_host_with_no_stop_to_offer_still_owes_the_wake(self) -> None:
+        # An older Hermes has no per-child stop at all: the child is named and left, and its end is
+        # read as its own, so the drop belongs to a stop that really landed and to no other.
+        self.session("s")
+        self.session("c1", "s", delegate_from="s")
+        self.adapter.run("run-1", "stopping", "s")
+        bare = ModuleType("tools.delegate_tool_registry")
+        bare._active_subagents = self.core._active_subagents
+        with mock.patch.dict(sys.modules, {"tools.delegate_tool_registry": bare}):
+            self.assertEqual(delegation.sweep_stops(self.adapter, [self.home]), ["c1"])
+        self.assertEqual(self.wake_mark("c1"), {})
 
 if __name__ == "__main__":
     unittest.main()

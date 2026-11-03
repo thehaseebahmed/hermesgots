@@ -31,7 +31,7 @@ import time
 import unittest
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from unittest import mock
 
 import plugin
@@ -651,13 +651,39 @@ class WakeTest(unittest.TestCase):
         self.assertIn("I couldn't reach the sandbox.", text)
         self.assertTrue(text.endswith(FOOTER))
 
-    def test_a_stopped_subagent_wakes_as_interrupted(self) -> None:
+    def test_a_child_that_ended_on_its_own_wakes_as_interrupted(self) -> None:
+        # A child nothing of ours stopped; the count is what says so (ADR 0085).
         self.chat("s")
         self.child("c1", "s", goal="build it", said="Partway through.", trailing='[{"name": "shell"}]')
         self.assertEqual(self.sweep(), 1)
         text = self.text()
         self.assertIn("Status: interrupted", text)
         self.assertIn("The subagent did not complete successfully (status=interrupted).", text)
+
+    def test_a_child_the_user_stopped_never_wakes(self) -> None:
+        # The report this pins: Stop pressed with a subagent at work stopped everything, and then the
+        # chat started itself again. The child's work is over because the user said so, so there is no
+        # result to carry and no run to start (ADR 0085).
+        self.chat("s")
+        self.pinned("s")
+        self.child(
+            "c1", "s", goal="build it", said="Partway through.",
+            trailing='[{"name": "shell"}]', ended=False,
+        )
+        sessions.remember_agent(db_path(self.home), "c1", "sa-1")
+        with mock.patch.dict(sys.modules, Registry().modules()):
+            self.assertEqual(delegation.stop_all(self.home, "s", {"s"})["stopped"], 1)
+        # Core closes the child's row the way it closes any other: the stop leaves no trace in it.
+        self.conn.execute(
+            "UPDATE sessions SET ended_at = ?, end_reason = 'agent_close' WHERE id = 'c1'",
+            (self.clock + 20,),
+        )
+        self.conn.commit()
+        self.assertEqual(self.sweep(), 0, "a stop must not post a run behind itself")
+        self.assertEqual(self.posted, [])
+        self.assertEqual(self.mark("c1")["status"], "dropped")
+        self.assertEqual(self.mark("c1")["reason"], delegation.DROP_STOPPED)
+        self.assertEqual(delegation.waking_sessions(self.home), {}, "and nothing is still owed")
 
     def test_a_subagent_still_running_is_not_woken(self) -> None:
         self.chat("s")
@@ -965,6 +991,15 @@ class Registry:
         self.stopped.append(agent_id)
         return agent_id in self.live
 
+    def modules(self) -> Dict[str, Any]:
+        """The ``sys.modules`` a caller plants so the plugin's ``tools`` imports reach this fake."""
+        module = ModuleType("tools.delegate_tool_registry")
+        module.interrupt_subagent = self.interrupt_subagent
+        module._active_subagents = self._active_subagents
+        tools = ModuleType("tools")
+        tools.delegate_tool_registry = module
+        return {"tools": tools, "tools.delegate_tool_registry": module}
+
 
 class RouteAdapter:
     """The API server: its auth check, and nothing else the stop route reaches."""
@@ -982,18 +1017,12 @@ class StopRouteTest(unittest.TestCase):
         self.home = Path(self.tmp.name)
         self.addCleanup(self.tmp.cleanup)
         self.registry = Registry()
-        registry = ModuleType("tools.delegate_tool_registry")
-        registry.interrupt_subagent = self.registry.interrupt_subagent
-        registry._active_subagents = self.registry._active_subagents
         constants = ModuleType("hermes_constants")
         constants.get_hermes_home = lambda: str(self.home)
-        tools = ModuleType("tools")
-        tools.delegate_tool_registry = registry
         aiohttp = ModuleType("aiohttp")
         aiohttp.web = FakeWeb()
         planted = {
-            "tools": tools,
-            "tools.delegate_tool_registry": registry,
+            **self.registry.modules(),
             "hermes_constants": constants,
             "aiohttp": aiohttp,
             "aiohttp.web": aiohttp.web,
