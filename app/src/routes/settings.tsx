@@ -123,7 +123,7 @@ const SECTIONS: Record<string, { title: string; render: () => ReactNode }> = {
   notifications: { title: NOTIFICATION_SETTINGS, render: () => <NotificationTypes /> },
   data: { title: "Local data", render: () => <DataSettings /> },
   developer: { title: "Developer", render: () => <DeveloperSettings /> },
-  network: { title: "Network log", render: () => <NetworkLogScreen /> },
+  network: { title: "Network log", render: () => <DeveloperOnly /> },
 }
 
 /** Which section the menu shows as open, and whether picking one swaps it in place. */
@@ -594,11 +594,11 @@ const LIVE_LABELS: Record<LiveStatus, { label: string; detail: string }> = {
 export function DeveloperSettings() {
   const bots = useLiveQuery(listProfiles, [])
   const settings = useLiveQuery(getSettings, [])
-  // What the log holds, so the switch and its row say what turning it on has collected.
+  // Two counts off the store's own indexes, never the whole table read to filter it in JS.
   const log = useLiveQuery(async () => {
     const [count, failed] = await Promise.all([
       db.netLog.count(),
-      db.netLog.filter((row) => row.ending !== "answered").count(),
+      db.netLog.where("ending").notEqual("answered").count(),
     ])
     return { count, failed }
   }, [])
@@ -681,11 +681,19 @@ export function DeveloperSettings() {
       <Group>
         <DeviceStateRow />
       </Group>
-      <Button variant="outline" onClick={() => saveSettings({ developer: false })}>
+      <Button variant="outline" onClick={() => saveSettings({ developer: false, netLog: false })}>
         Hide developer settings
       </Button>
     </>
   )
+}
+
+/** The log behind Developer's switch: its section is not reachable by URL with the switch off. */
+function DeveloperOnly() {
+  const settings = useLiveQuery(getSettings, [])
+  // Nothing drawn while the device's settings are still being read: a redirect then would be a guess.
+  if (!settings) return null
+  return settings.developer ? <NetworkLogScreen /> : <Navigate to="/settings" replace />
 }
 
 function TestPushRow() {

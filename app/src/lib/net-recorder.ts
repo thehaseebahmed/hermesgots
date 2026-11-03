@@ -1,36 +1,30 @@
 /**
  * Records what this device's own requests cost: every call both chat screens make to a bot's host
- * passes the one wrapper here, and lands in the log behind Developer's Network log switch (ADR 0086).
+ * passes the one watcher here, and lands in the log behind Developer's Network log switch (ADR 0086).
  *
- * Nothing is measured while the switch is off — `netFetch` is then one boolean check in front of the
- * fetch it already made. While it is on, a row is written through a buffer, so a request never waits
- * on the store, and the log is trimmed to its newest few hundred on every flush.
+ * Nothing is measured while the switch is off: the seam holds no watcher and a request is the fetch it
+ * always was. On, a row reaches the store through a buffer, so a request never waits on it.
  */
 import { liveQuery } from "dexie"
 
 import { db, getSettings, listProfiles, type NetRequest, type Profile } from "@/lib/db"
-import { serverRoot } from "@/lib/host-url"
+import { pluginRoot, serverRoot } from "@/lib/host-url"
 import { KEPT, routeOf } from "@/lib/net-log"
-import { watchRequests } from "@/lib/net-watch"
-import { quietly } from "@/lib/report"
+import { watchRequests, type Watching } from "@/lib/net-watch"
+import { noteFailure } from "@/lib/report"
 import { randomId } from "@/lib/utils"
 
-/** How often what has been measured so far reaches the store. */
 const FLUSH_MS = 2000
 
-/**
- * How long a stream's row waits for its first frame before the log settles it as it stands, so a
- * stream that opens and then says nothing still shows up rather than sitting in memory for ever.
- */
-const HOLD_MS = 120_000
-
-let on = false
-/** Each bot's server, longest first, so the bot a request was for is read off its URL alone. */
+let recording = false
+/** Each bot's roots, longest first, so the bots a request was for are read off its URL alone. */
 let roots: { root: string; bots: string[] }[] = []
 let buffer: NetRequest[] = []
 let timer: number | undefined
 let flushing: Promise<unknown> | undefined
-/** Where each row's clock started, and the row a response is being watched for. */
+/** When the log was last emptied: a stream from before it must not put its row back. */
+let clearedAt = 0
+/** Where each row's clock started, and the row a response is still expected to send more of. */
 const starts = new WeakMap<NetRequest, number>()
 const watching = new WeakMap<Response, NetRequest>()
 
@@ -42,20 +36,38 @@ export function startNetLog() {
   liveQuery(async () => ({
     settings: await getSettings(),
     profiles: await listProfiles(),
-  })).subscribe(({ settings, profiles }) => {
-    on = Boolean(settings?.developer && settings.netLog)
-    roots = rootsOf(profiles)
-    install(on)
-    if (!on) void flush()
+  })).subscribe(
+    ({ settings, profiles }) => {
+      recording = Boolean(settings?.developer && settings.netLog)
+      roots = rootsOf(profiles)
+      watchRequests(recording ? watcher : undefined)
+      if (!recording) void flush()
+    },
+    (error) => noteFailure("Watching the network log's switch", error),
+  )
+  // A page being put away must not take the last seconds of evidence with it, nor a reload the
+  // request it was made to investigate.
+  window.addEventListener("pagehide", () => void flush())
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") void flush()
   })
 }
 
+/**
+ * Each bot's server and its plugin, which a multiplexed host serves under a different prefix, so a
+ * plugin call is attributed to its bot as the server's own calls are.
+ */
 function rootsOf(profiles: Profile[]) {
   const byRoot = new Map<string, string[]>()
+  const add = (root: string, id: string) => {
+    const bots = byRoot.get(root)
+    if (bots) bots.push(id)
+    else byRoot.set(root, [id])
+  }
   for (const profile of profiles) {
     if (!profile.baseUrl?.trim()) continue
-    const root = serverRoot(profile.baseUrl)
-    byRoot.set(root, [...(byRoot.get(root) ?? []), profile.id])
+    add(serverRoot(profile.baseUrl), profile.id)
+    add(pluginRoot(profile.baseUrl), profile.id)
   }
   return [...byRoot.entries()]
     .map(([root, bots]) => ({ root, bots }))
@@ -69,25 +81,27 @@ function botsFor(url: string) {
 
 const methodOf = (init?: RequestInit) => (init?.method ?? "GET").toUpperCase()
 
-function newRow(url: string, init: RequestInit | undefined, started: number): NetRequest {
+function settle(
+  url: string,
+  init: RequestInit | undefined,
+  started: number,
+  ending: NetRequest["ending"],
+  status?: number,
+): NetRequest {
   const row: NetRequest = {
     id: randomId(),
     at: Date.now(),
-    bot: botsFor(url),
+    bots: botsFor(url),
     route: routeOf(url, methodOf(init)),
-    ms: 0,
-    ending: "answered",
+    ms: Math.round(performance.now() - started),
+    ending,
   }
+  if (status !== undefined) row.status = status
   starts.set(row, started)
   return row
 }
 
-/**
- * The one wrapper a request to a bot's host goes through. With the log off it is the fetch itself;
- * with it on, the same fetch, watched from just before it is asked to just after it answers.
- */
-export function netFetch(input: RequestInfo | URL, init?: RequestInit) {
-  if (!on) return fetch(input, init)
+function netFetch(input: RequestInfo | URL, init?: RequestInit) {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url
   const started = performance.now()
   return fetch(input, init).then(
@@ -102,54 +116,58 @@ export function netFetch(input: RequestInfo | URL, init?: RequestInit) {
   )
 }
 
+const watcher: Watching = {
+  ask: netFetch,
+  frame: landFrame,
+  words: landWords,
+}
+
 function answer(url: string, init: RequestInit | undefined, started: number, response: Response) {
-  const row = newRow(url, init, started)
-  row.ms = Math.round(performance.now() - started)
-  row.status = response.status
-  row.ending = response.ok ? "answered" : "refused"
-  if ((response.headers.get("content-type") ?? "").includes("text/event-stream")) row.stream = true
-  watching.set(response, row)
+  const row = settle(url, init, started, response.ok ? "answered" : "refused", response.status)
+  // Only a stream sends anything after its headers, so only a stream is watched for more.
+  if ((response.headers.get("content-type") ?? "").includes("text/event-stream")) {
+    row.stream = true
+    watching.set(response, row)
+  }
   queue(row)
 }
 
 function fail(url: string, init: RequestInit | undefined, started: number, error: unknown) {
-  const row = newRow(url, init, started)
-  row.ms = Math.round(performance.now() - started)
   const name = error instanceof DOMException ? error.name : ""
-  row.ending = name === "AbortError" ? "stopped" : name === "TimeoutError" ? "timeout" : "network"
-  queue(row)
-}
-
-/** One of a row's late numbers, whether it is still in the buffer or already written. */
-function land(response: Response, field: "frame" | "words") {
-  const row = watching.get(response)
-  if (!row || row[field] !== undefined) return
-  const value = Math.round(performance.now() - (starts.get(row) ?? performance.now()))
-  row[field] = value
-  if (buffer.includes(row)) {
-    schedule()
-    return
-  }
-  const patch = field === "frame" ? { frame: value } : { words: value }
-  void db.netLog.update(row.id, patch).catch(quietly("Recording a network wait"))
-}
-
-/** A stream's first frame arrived: what the log reads as how long connecting took. */
-export function netFrame(response: Response) {
-  land(response, "frame")
-}
-
-/** The reply's first words arrived: the send's own wait, never a request's. */
-export function netWords(response: Response) {
-  land(response, "words")
+  const ending = name === "AbortError" ? "stopped" : name === "TimeoutError" ? "timeout" : "network"
+  queue(settle(url, init, started, ending))
 }
 
 /**
- * Plugs the recorder into the seam both transports ask through, or takes it out again when the
- * switch is turned off: with nothing registered, a request is the fetch it always was.
+ * One of a stream's late numbers. The row is put again rather than patched, so a number arriving
+ * while that row's own write is in flight still lands: `bulkPut` upserts on the same id and instant.
  */
-function install(on: boolean) {
-  watchRequests(on ? { ask: netFetch, frame: netFrame, words: netWords } : undefined)
+function land(row: NetRequest, field: "frame" | "words", start: number | undefined) {
+  if (row[field] !== undefined || start === undefined || row.at <= clearedAt) return
+  row[field] = Math.round(performance.now() - start)
+  if (!buffer.includes(row)) buffer.push(row)
+  schedule()
+}
+
+/** How long this stream took to open, which is this request's own wait. */
+function landFrame(response: Response) {
+  const row = watching.get(response)
+  if (row) land(row, "frame", starts.get(row))
+}
+
+/** How long the send waited for words: this request's own wait unless another request was the send. */
+function landWords(response: Response, from?: number) {
+  const row = watching.get(response)
+  if (row) land(row, "words", from ?? starts.get(row))
+}
+
+/** Empties the log at the module that owns it, so rows still buffered cannot come back after it. */
+export async function clearNetLog() {
+  buffer = []
+  window.clearTimeout(timer)
+  timer = undefined
+  clearedAt = Date.now()
+  await db.netLog.clear()
 }
 
 function queue(row: NetRequest) {
@@ -161,37 +179,39 @@ function schedule() {
   if (timer !== undefined || !buffer.length) return
   timer = window.setTimeout(() => {
     timer = undefined
-    void flush()
-    schedule()
+    void flush().finally(schedule)
   }, FLUSH_MS)
 }
 
-/** Writes what has settled: everything but a stream still waiting for its first frame. */
+/** Writes everything buffered, putting the rows back when the store refuses them. */
 function flush() {
   if (flushing) return flushing
-  const now = Date.now()
-  const ready = buffer.filter(
-    (row) => row.frame !== undefined || !row.stream || now - row.at > HOLD_MS,
-  )
-  if (!ready.length) return Promise.resolve()
-  buffer = buffer.filter((row) => !ready.includes(row))
-  flushing = db.netLog
-    .bulkPut(ready)
-    .then(trim)
-    .catch(quietly("Writing the network log"))
+  if (!buffer.length) return Promise.resolve()
+  const ready = buffer
+  buffer = []
+  flushing = (async () => {
+    await db.netLog.bulkPut(ready)
+    // Counted rather than tallied: a row put again with a late frame is one row, and a tally says two.
+    if ((await db.netLog.count()) > KEPT) await trimNetLog()
+  })()
+    .catch((error) => {
+      // A refused write keeps its rows for the next pass: the log is the evidence, not a cache.
+      noteFailure("Writing the network log", error)
+      buffer = [...ready, ...buffer].slice(-KEPT)
+    })
     .finally(() => {
       flushing = undefined
     })
   return flushing
 }
 
-/** The log keeps its newest requests and lets the oldest go, the way the media cache trims itself. */
-async function trim() {
-  const count = await db.netLog.count()
-  if (count <= KEPT) return
+/** The log keeps its newest requests and lets the oldest go, as the media cache trims itself. */
+export async function trimNetLog() {
+  const total = await db.netLog.count()
+  if (total <= KEPT) return
   const oldest = await db.netLog
     .orderBy("at")
-    .limit(count - KEPT)
+    .limit(total - KEPT)
     .toArray()
   if (oldest.length) await db.netLog.bulkDelete(oldest.map((row) => row.id))
 }

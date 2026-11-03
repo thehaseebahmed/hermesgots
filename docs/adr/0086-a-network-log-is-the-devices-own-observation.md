@@ -31,7 +31,11 @@ off a bot's host.
 
 **Consequences.** Averages and the slowest 5% are derived on the device from the requests it still
 holds, so a request dropped by the cap changes them; that is honest, because this is a log and not a
-metric history. DNS, TCP and TLS phases are not visible to `fetch`, so a stream's open time is time to
+metric history. A request's ending is settled when its answer begins, so a stream this device stops
+mid-reply still reads as the answer it opened: the row says how long the host took to start, never
+that the reply broke in the middle. A route segment that carries a digit and eight or more characters
+is read as an id — a host's minted session ids are the reason — which is a heuristic, and a resource
+whose own name looks like one reads as `:id`. DNS, TCP and TLS phases are not visible to `fetch`, so a stream's open time is time to
 first byte plus the host's first event, never a handshake breakdown. No body, header, key or server
 address is kept: each request is built field by field, as `diagnostics.ts` and `read-failure.ts` are,
 and a test pins that. The switch is off by default and costs nothing while it is off; when it is on it

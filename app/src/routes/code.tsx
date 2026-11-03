@@ -48,7 +48,7 @@ import { itemToOpen, useCodePane, type FeaturePane } from "@/lib/pane"
 import { readProjects, useAllProjects } from "@/lib/projects"
 import { quietly } from "@/lib/report"
 import { createSignal } from "@/lib/store"
-import { Chip } from "@/components/chip"
+import { Chip, ChipRow } from "@/components/chip"
 import {
   reasonText,
   useAllLiveRuns,
@@ -308,11 +308,7 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
           <div className="flex flex-col gap-3">
             <ItemSearch value={query} onChange={setQuery} label="Search sessions" />
             {chips.length > 1 && (
-              <div
-                className="-mx-4 flex [scrollbar-width:none] gap-2 overflow-x-auto px-4"
-                role="group"
-                aria-label="Projects"
-              >
+              <ChipRow label="Projects">
                 <Chip active={!chip} onClick={() => setChip(undefined)}>
                   All
                 </Chip>
@@ -326,7 +322,7 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
                     {project.name}
                   </Chip>
                 ))}
-              </div>
+              </ChipRow>
             )}
           </div>
         )}

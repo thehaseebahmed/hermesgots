@@ -577,7 +577,7 @@ One call this device made to a bot's host, as the network log holds it: the rout
 _Avoid_: span, sample, entry, event, latency
 
 **Stream open**:
-The wait between asking a bot's host for a stream and its first frame arriving: the time to first byte, plus however long the host took to send its first event. It is the closest this device comes to a connect time — DNS, TCP and TLS happen below it and are not visible here — so it is never drawn as a handshake's own figure.
+The wait between asking a bot's host for a stream and its first frame arriving: the time to first byte, plus however long the host took to send its first event. It is the closest this device comes to a connect time — DNS, TCP and TLS happen below it and are not visible here — so the strip draws it as **Connected in**, never as a handshake's own figure.
 _Avoid_: connect latency, handshake, connection time, round trip
 
 **First words**:

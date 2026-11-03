@@ -1,4 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react"
+import { toast } from "sonner"
+
+/** Copies text, saying so when the browser refuses: one wording, and one place a refusal is handled. */
+export async function copyText(text: string, done?: () => void) {
+  try {
+    await navigator.clipboard.writeText(text)
+    done?.()
+  } catch {
+    toast.error("Couldn't copy that.")
+  }
+}
 
 /**
  * The check mark a copy button shows for a moment after a copy. The timer is held and cleared, so a

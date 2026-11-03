@@ -2764,23 +2764,10 @@ Found by the simplify pass on this branch; neither entry blocks the pull request
 
 Landed on this branch: the Developer **Network log** switch, its screen (pills, summary strip, table,
 copy and clear), the recorder both transports ask through, and the store behind it (ADR 0086,
-`docs/specs/network-log.md`). Two things the spec asked for are recorded here instead of built.
+`docs/specs/network-log.md`). The first-words figure the spec asked for on the new chat screen landed
+with the send keyed by its run id, so it is no longer deferred. One thing is recorded here instead.
 
-### 1. The new chat screen records no first words
-
-The classic screen's send is one streaming request, so the wait from sending to the reply's first
-words is that request's own. The new chat screen posts a run and reads the reply's words on a second
-stream, so no single request spans the wait, and recording it would mean carrying the send's instant
-across two requests and holding two definitions behind one line.
-
-- Cost: the New chat screen shows Connected in and its requests but never a first-words figure.
-- Suggested fix: have the send stash its instant against the run id, and the run stream land words
-  against it on the first `message.delta`; the summary line stays one definition because both
-  screens would then measure from a send rather than from a stream open.
-- Why it is deferred: it changes the chat-next client's send path and the shape of a row that is
-  currently one request's own, and the classic screen already answers the question it was added for.
-
-### 2. No request or response sizes
+### 1. No request or response sizes
 
 A row holds how long a request took and never how many bytes came back.
 
@@ -2790,3 +2777,16 @@ A row holds how long a request took and never how many bytes came back.
 - Why it is deferred: the count a person actually wants is the body's, and bodies are consumed
   directly at every read in the client rather than through one wrapper, so it is a change to every
   body read rather than a field on the row.
+
+### 2. A saved picture's own fetch is not in the log
+
+`app/src/lib/media-cache.ts` asks a bot's host for the bytes of an image it keeps a copy of, with
+`cache: "force-cache"` — it reads what the browser has just drawn, so most of those asks never touch
+the network — and the guard test allowlists that file by name.
+
+- Cost: a picture the app did re-fetch, on a bot whose images are slow, is missing from the log while
+  everything else about that bot is in it.
+- Suggested fix: send that call through `ask()`, and mark a row taken from the HTTP cache as such —
+  a cached read recorded as network time would be a worse lie than leaving it out.
+- Why it is deferred: `media-cache.ts` predates this branch and nothing in the change touches it; the
+  fix needs a cache-vs-network distinction on the row before it can be honest.

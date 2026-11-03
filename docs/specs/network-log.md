@@ -1,6 +1,6 @@
 # A Developer switch records this device's requests to each bot
 
-Status: built on `hermes/fuzzy-yeti-4a24`. Design: [ADR 0086](../adr/0086-a-network-log-is-the-devices-own-observation.md). Tickets: `01`–`05` under `.scratch/network-log/issues/` (local only, not published to a tracker). Nothing in this area had shipped when the spec was written (`origin/main` at `4566adf7`), so this spec is the whole of the work rather than a delta over built code. Two items the spec asks for are deferred with their reasons in `fixes.md`: first words on the new chat screen, and request or response sizes.
+Status: built on `hermes/fuzzy-yeti-4a24`. Design: [ADR 0086](../adr/0086-a-network-log-is-the-devices-own-observation.md). Tickets: `01`–`05` under `.scratch/network-log/issues/` (local only, not published to a tracker). Nothing in this area had shipped when the spec was written (`origin/main` at `4566adf7`), so this spec is the whole of the work rather than a delta over built code. One item the spec asks for is deferred with its reason in `fixes.md`: request or response sizes.
 
 ## Problem Statement
 
@@ -117,9 +117,10 @@ keeps the rows; Clear log is what empties them.
   component test and the Device state sheet test.
 - **A guard test** asserts that neither transport module grows a bare fetch outside the observed one,
   so a new call cannot escape the log silently.
-- **No new end-to-end flow**: the change is a setting, a table and a recorder, all of which the
-  component tier reaches; the send and stream paths it touches are already covered by the two e2e
-  budget flows, which must stay passing (ADR 0019).
+- **One new end-to-end flow**, `network-log`: the join no lower tier reaches is a request made through
+  the app's own transport, the buffered write behind it, and the screen's live query drawing it — the
+  component test seeds its rows, so it would pass with the recorder wired to nothing. The send and
+  stream paths it touches also stay covered by the two budget flows (ADR 0019).
 
 ## Out of Scope
 

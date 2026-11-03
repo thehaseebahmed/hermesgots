@@ -262,6 +262,11 @@ export const FLOWS = {
     about:
       "AFK's switch turns a project on and off on its host, and a reload reads that setting back — the project's, not the device's",
   },
+  "network-log": {
+    script: "e2e/network-log.mjs",
+    about:
+      "Developer's network log records this device's own requests to a bot's host, draws them per bot and all together, and empties on Clear",
+  },
   "afk-skills": {
     script: "e2e/afk-skills.mjs",
     about:

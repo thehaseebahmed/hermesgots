@@ -3,51 +3,34 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { CopyIcon, Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
 
-import { Chip } from "@/components/chip"
+import { Chip, ChipRow } from "@/components/chip"
 import { Group, useHeaderAction } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
+import { copyText } from "@/lib/copied"
 import { db, listProfiles, type NetRequest } from "@/lib/db"
-import { clockLabel, DRAWN, endingLabel, figuresOf, formatNetLog, waitLabel } from "@/lib/net-log"
+import { clockText, DRAWN, endingLabel, figuresOf, formatNetLog, waitText } from "@/lib/net-log"
+import { clearNetLog } from "@/lib/net-recorder"
 
 /**
  * Settings > Developer > Network log: this device's own requests to each bot's host, with the
  * numbers a slow app is diagnosed by (ADR 0086). The pills pick one bot or all of them; the summary
  * strip reads the selection's waits; the table is every request still in the log, newest first.
  *
- * The switch that records is Developer's own row, not this screen's: turning recording off leaves
- * what it already measured here to read, and Clear log is what empties it.
+ * The switch that records is Developer's own row: turning it off leaves what it measured to read.
  */
 export function NetworkLogScreen() {
   const rows = useLiveQuery(() => db.netLog.orderBy("at").reverse().toArray(), [])
   const bots = useLiveQuery(listProfiles, [])
-  const [picked, setPicked] = useState<string>()
-  const [busy, setBusy] = useState(false)
+  const [chosen, setChosen] = useState<string>()
 
-  const all = rows ?? []
-  const shown = picked ? all.filter((row) => row.bot.includes(picked)) : all
-  const figures = figuresOf(shown)
   const names = new Map((bots ?? []).map((bot) => [bot.id, bot.name]))
-  /** The bots this log has heard from, in the order the list holds them. */
-  const heard = (bots ?? []).filter((bot) => all.some((row) => row.bot.includes(bot.id)))
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(formatNetLog(all))
-      toast("Network log copied")
-    } catch {
-      toast.error("Couldn't copy that.")
-    }
-  }
-
-  const clear = async () => {
-    setBusy(true)
-    try {
-      await db.netLog.clear()
-      toast("Network log cleared")
-    } finally {
-      setBusy(false)
-    }
-  }
+  const all = rows ?? []
+  const heard = (bots ?? []).filter((bot) => all.some((row) => row.bots.includes(bot.id)))
+  // A pick only holds while its bot is still in the log: a cleared log leaves no filter to get stuck in.
+  const picked = chosen && heard.some((bot) => bot.id === chosen) ? chosen : undefined
+  const shown = picked ? all.filter((row) => row.bots.includes(picked)) : all
+  const drawn = shown.slice(0, DRAWN)
+  const figures = figuresOf(shown)
 
   useHeaderAction(
     "network-log",
@@ -58,7 +41,7 @@ export function NetworkLogScreen() {
         className="size-11 rounded-full"
         aria-label="Copy the network log"
         disabled={!all.length}
-        onClick={() => void copy()}
+        onClick={() => void copyText(formatNetLog(all), () => toast("Network log copied"))}
       >
         <CopyIcon />
       </Button>
@@ -67,52 +50,53 @@ export function NetworkLogScreen() {
         size="icon-lg"
         className="ml-2 size-11 rounded-full"
         aria-label="Clear the network log"
-        disabled={!all.length || busy}
-        onClick={() => void clear()}
+        disabled={!all.length}
+        onClick={() =>
+          void clearNetLog().then(
+            () => toast("Network log cleared"),
+            () => toast.error("Couldn't clear the log."),
+          )
+        }
       >
         <Trash2Icon />
       </Button>
     </>,
   )
 
+  // Nothing drawn until the log has been read: an empty table would say "nothing recorded" for a moment.
+  if (!rows) return null
   if (!all.length)
     return (
-      <p className="py-8 text-center text-sm text-muted-foreground">
-        No requests recorded yet. Turn on Network log in Developer settings, then use a bot.
-      </p>
+      <p className="py-8 text-center text-sm text-muted-foreground">No requests recorded yet.</p>
     )
 
   return (
     <>
       {heard.length > 1 && (
-        <div
-          className="-mx-4 flex [scrollbar-width:none] gap-2 overflow-x-auto px-4"
-          role="group"
-          aria-label="Bots"
-        >
-          <Chip active={!picked} onClick={() => setPicked(undefined)}>
+        <ChipRow label="Bots">
+          <Chip active={!picked} onClick={() => setChosen(undefined)}>
             All
           </Chip>
           {heard.map((bot) => (
             <Chip
               key={bot.id}
               active={picked === bot.id}
-              onClick={() => setPicked(picked === bot.id ? undefined : bot.id)}
+              onClick={() => setChosen(picked === bot.id ? undefined : bot.id)}
             >
               {bot.name}
             </Chip>
           ))}
-        </div>
+        </ChipRow>
       )}
 
       <Group>
         <dl className="grid grid-cols-2 gap-x-6 bg-card px-5 py-4">
           {(
             [
-              ["Average", waitLabel(figures.average)],
-              ["Slowest 5%", waitLabel(figures.slowest)],
+              ["Average", waitText(figures.average)],
+              ["Slowest 5%", waitText(figures.slowest)],
               ["Failed", `${figures.failed} of ${figures.count}`],
-              ["Connected in", waitLabel(figures.open)],
+              ["Connected in", waitText(figures.open)],
             ] as const
           ).map(([label, value]) => (
             <div key={label} className="flex flex-col py-1">
@@ -124,18 +108,18 @@ export function NetworkLogScreen() {
         {figures.words !== null && (
           <div className="flex items-baseline gap-2 bg-card px-5 py-3">
             <span className="text-sm text-muted-foreground">First words</span>
-            <span className="text-base font-medium tabular-nums">{waitLabel(figures.words)}</span>
+            <span className="text-base font-medium tabular-nums">{waitText(figures.words)}</span>
             {/* Not the network's own number: the host's queue and the model's start are in it. */}
             <span className="ml-auto text-xs text-muted-foreground">not network time</span>
           </div>
         )}
       </Group>
 
-      <NetTable rows={shown} names={names} />
+      <NetTable rows={drawn} names={names} />
 
-      {shown.length > DRAWN && (
+      {shown.length > drawn.length && (
         <p className="text-center text-xs text-muted-foreground">
-          Newest {DRAWN} of {shown.length} requests
+          Newest {drawn.length} of {shown.length} requests
         </p>
       )}
     </>
@@ -157,14 +141,14 @@ function NetTable({ rows, names }: { rows: NetRequest[]; names: Map<string, stri
           </tr>
         </thead>
         <tbody>
-          {rows.slice(0, DRAWN).map((row) => (
+          {rows.map((row) => (
             <tr key={row.id} className="h-11 border-t border-border">
-              <td className="pr-3 pl-4 tabular-nums">{clockLabel(row.at)}</td>
+              <td className="pr-3 pl-4 tabular-nums">{clockText(row.at)}</td>
               <td className="max-w-28 truncate pr-3">
-                {row.bot.map((id) => names.get(id) ?? "A bot").join(", ") || "—"}
+                {row.bots.map((id) => names.get(id) ?? "A bot").join(", ") || "—"}
               </td>
               <td className="max-w-56 truncate pr-3 font-mono text-xs">{row.route}</td>
-              <td className="pr-3 text-right tabular-nums">{waitLabel(row.ms)}</td>
+              <td className="pr-3 text-right tabular-nums">{waitText(row.ms)}</td>
               <td className="py-1 pr-4 text-right tabular-nums">
                 {endingLabel(row)}
                 {row.stream && <span className="ml-1 text-xs text-muted-foreground">stream</span>}

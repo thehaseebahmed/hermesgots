@@ -13,7 +13,7 @@ export function multiplexedProfile(baseUrl: string) {
   return serverRoot(baseUrl).match(/\/p\/([^/?#]+)$/)?.[1]
 }
 
-const PLUGIN_ROOT = "/api/plugins/memento"
+export const PLUGIN_ROOT = "/api/plugins/memento"
 
 /**
  * Where the Gots Hermes plugin serves its routes for this bot. Hermes registers its catch-all

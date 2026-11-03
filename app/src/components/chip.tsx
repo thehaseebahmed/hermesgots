@@ -2,11 +2,7 @@ import type { ReactNode } from "react"
 
 import { cn } from "@/lib/utils"
 
-/**
- * One pill of a sideways-scrolling row: the filter a list or a log is read through, with one of them
- * active at a time and an `All` beside them where the row needs one. 44px so a thumb hits it, and
- * shrink-0 so the row scrolls rather than squeezing its pills.
- */
+/** One pill of a sideways-scrolling row: 44px so a thumb hits it, shrink-0 so the row scrolls. */
 export function Chip({
   active,
   onClick,
@@ -30,5 +26,18 @@ export function Chip({
     >
       {children}
     </button>
+  )
+}
+
+/** The strip a row of `Chip`s lives in: sideways, never wrapped, no scrollbar. */
+export function ChipRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div
+      className="-mx-4 flex [scrollbar-width:none] gap-2 overflow-x-auto px-4"
+      role="group"
+      aria-label={label}
+    >
+      {children}
+    </div>
   )
 }

@@ -1,25 +1,24 @@
 /**
  * What the network log names and counts (ADR 0086): a request named by its route and never by its
- * URL, the numbers under a bot's name, the newest requests the log keeps, and the block a copy hands
- * over — which can carry nothing a row does not already hold.
+ * URL, the numbers under a bot's name, and the block a copy hands over — which can carry nothing a
+ * row does not already hold.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
 
 import {
-  clockLabel,
+  clockText,
   endingLabel,
   figuresOf,
   formatNetLog,
   routeOf,
-  trimmed,
-  waitLabel,
+  waitText,
 } from "../src/lib/net-log.ts"
 
 const row = (patch) => ({
   id: "r1",
   at: 1_000,
-  bot: ["bot-1"],
+  bots: ["bot-1"],
   route: "GET models",
   ms: 100,
   ending: "answered",
@@ -47,6 +46,20 @@ test("nothing a request carried survives into its route", () => {
   assert.doesNotMatch(route, /secret-host|sk-live|api_key|\?/, "no address, key or query")
 })
 
+test("a host's minted session id is an id, and a route's own name is not", () => {
+  assert.equal(
+    routeOf("http://hermes.test/api/sessions/e2e-netlog-dmk73b/agents"),
+    "GET sessions/:id/agents",
+  )
+  assert.equal(
+    routeOf(
+      "http://hermes.test/api/plugins/memento/sessions/memento-1a2b/failed-turn/clear",
+      "POST",
+    ),
+    "POST sessions/:id/failed-turn/clear",
+  )
+})
+
 test("the numbers are read off the requests the log still holds", () => {
   const figures = figuresOf([
     row({ id: "a", at: 1, ms: 100 }),
@@ -59,7 +72,7 @@ test("the numbers are read off the requests the log still holds", () => {
   assert.equal(figures.count, 6)
   assert.equal(figures.failed, 1, "a timeout is a failure")
   assert.equal(figures.average, 400, "a minute of waiting for nothing is not an answer's speed")
-  assert.equal(figures.slowest, 400, "the slowest 5% of the answers")
+  assert.equal(figures.slowest, 1000, "the slowest 5% of five answers is the slowest of them")
 })
 
 test("the newest stream open and the newest first words are the ones shown", () => {
@@ -70,6 +83,14 @@ test("the newest stream open and the newest first words are the ones shown", () 
   ])
   assert.equal(figures.open, 90, "the newest frame")
   assert.equal(figures.words, 2_400, "the newest send's wait")
+})
+
+test("a stream still opening quotes no older one's figure", () => {
+  const figures = figuresOf([
+    row({ id: "a", at: 1, stream: true, frame: 400 }),
+    row({ id: "b", at: 2, stream: true }),
+  ])
+  assert.equal(figures.open, null, "no number rather than a stale one")
 })
 
 test("nothing recorded reads as no number at all", () => {
@@ -84,15 +105,6 @@ test("nothing recorded reads as no number at all", () => {
   })
 })
 
-test("the log keeps its newest requests and lets the oldest go", () => {
-  const rows = [1, 2, 3, 4, 5].map((at) => row({ id: `r${at}`, at }))
-  assert.deepEqual(
-    trimmed(rows, 3).map((one) => one.at),
-    [5, 4, 3],
-  )
-  assert.equal(trimmed(rows, 50), rows, "under the cap nothing is copied or reordered")
-})
-
 test("a status reads as the code it answered with, or how it ended", () => {
   assert.equal(endingLabel(row({ status: 200 })), "200")
   assert.equal(endingLabel(row({ ending: "refused", status: 502 })), "502")
@@ -102,10 +114,10 @@ test("a status reads as the code it answered with, or how it ended", () => {
 })
 
 test("a wait reads in milliseconds under a second and in seconds above it", () => {
-  assert.equal(waitLabel(312), "312 ms")
-  assert.equal(waitLabel(1_240), "1.2 s")
-  assert.equal(waitLabel(null), "—")
-  assert.match(clockLabel(Date.UTC(2026, 0, 1, 14, 22, 8)), /14:22:08|22:08/)
+  assert.equal(waitText(312), "312 ms")
+  assert.equal(waitText(1_240), "1.2 s")
+  assert.equal(waitText(null), "—")
+  assert.match(clockText(Date.UTC(2026, 0, 1, 14, 22, 8)), /14:22:08|22:08/)
 })
 
 test("a copied log carries the rows and nothing they did not hold", () => {

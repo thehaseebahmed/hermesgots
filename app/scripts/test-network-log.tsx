@@ -8,22 +8,16 @@ import { MemoryRouter } from "react-router"
 
 import { NetworkLogScreen } from "@/components/network-log"
 import { db, type NetRequest } from "@/lib/db"
+import { KEPT } from "@/lib/net-log"
+import { clearNetLog, trimNetLog } from "@/lib/net-recorder"
 import { DeveloperSettings } from "@/routes/settings"
-import {
-  botProfile,
-  click,
-  find,
-  findAll,
-  mount,
-  seedSettings,
-  text,
-} from "./component-kit.tsx"
+import { botProfile, click, find, findAll, mount, seedSettings, text } from "./component-kit.tsx"
 
 const ada = botProfile("network-ada", { id: "bot-1", name: "Ada" })
 const grace = botProfile("network-grace", { id: "bot-2", name: "Grace" })
 
 const request = (patch: Partial<NetRequest> & { id: string; at: number }): NetRequest => ({
-  bot: [ada.id],
+  bots: [ada.id],
   route: "GET models",
   ms: 120,
   ending: "answered",
@@ -57,7 +51,7 @@ async function seedLog() {
     request({
       id: "r3",
       at: 3_000,
-      bot: [grace.id],
+      bots: [grace.id],
       route: "GET sessions/:id/messages",
       ms: 50_000,
       ending: "timeout",
@@ -76,12 +70,13 @@ test("off, the Developer switch records nothing and offers no log to read", asyn
       <DeveloperSettings />
     </MemoryRouter>,
     async () => {
-    assert.equal(checkedOf(switchOf()), false, "off until it is turned on")
-    assert.equal(find('a[href="/settings/network"]'), null, "no log to open until it records")
-    await click(switchOf())
-    assert.equal(checkedOf(switchOf()), true, "and on once it is")
-    assert.ok(find('a[href="/settings/network"]'), "the way into the log it now keeps")
-  })
+      assert.equal(checkedOf(switchOf()), false, "off until it is turned on")
+      assert.equal(find('a[href="/settings/network"]'), null, "no log to open until it records")
+      await click(switchOf())
+      assert.equal(checkedOf(switchOf()), true, "and on once it is")
+      assert.ok(find('a[href="/settings/network"]'), "the way into the log it now keeps")
+    },
+  )
   assert.equal((await db.settings.get("settings"))?.netLog, true, "the device kept the switch")
 })
 
@@ -114,6 +109,32 @@ test("All draws every bot and a bot's pill shows only its own", async () => {
     await click(findAll("button").find((button) => button.textContent === "All"))
     assert.equal(findAll("tbody tr").length, 3, "All again is every bot")
   })
+})
+
+test("the log keeps its newest requests and no more", async () => {
+  await db.netLog.clear()
+  const rows = Array.from({ length: KEPT + 60 }, (_, at) => request({ id: `r${at}`, at }))
+  await db.netLog.bulkPut(rows)
+  await trimNetLog()
+  assert.equal(await db.netLog.count(), KEPT, "trimmed to the cap")
+  const oldest = await db.netLog.orderBy("at").first()
+  assert.equal(oldest?.id, "r60", "the oldest went, not the newest")
+})
+
+test("a stream's late number puts its row again without counting it twice", async () => {
+  await db.netLog.clear()
+  const at = (n: number) => request({ id: `r${n}`, at: n })
+  await db.netLog.bulkPut(Array.from({ length: KEPT }, (_, n) => at(n)))
+  // The row the stream had already written, put again with its frame: one row, not two.
+  await db.netLog.bulkPut([{ ...at(KEPT - 1), stream: true, frame: 40 }])
+  await trimNetLog()
+  assert.equal(await db.netLog.count(), KEPT, "an exact count, so nothing is dropped past the cap")
+})
+
+test("Clear empties the log and keeps it empty", async () => {
+  await db.netLog.bulkPut([request({ id: "r1", at: 1_000 })])
+  await clearNetLog()
+  assert.equal(await db.netLog.count(), 0, "nothing left to read")
 })
 
 test("an empty log says how to fill it rather than drawing an empty table", async () => {

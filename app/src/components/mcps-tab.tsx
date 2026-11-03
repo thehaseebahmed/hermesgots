@@ -22,7 +22,7 @@ import {
   RowText,
   useHeaderAction,
 } from "@/components/settings-chrome"
-import { useCopied } from "@/lib/copied"
+import { copyText, useCopied } from "@/lib/copied"
 import { Button } from "@/components/ui/button"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
@@ -1401,14 +1401,8 @@ function ServerAccessSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, flow, server.state])
 
-  async function copy() {
-    if (!flow?.url) return
-    try {
-      await navigator.clipboard.writeText(flow.url)
-      noteCopied()
-    } catch {
-      toast.error("Couldn't copy that.")
-    }
+  function copy() {
+    if (flow?.url) void copyText(flow.url, noteCopied)
   }
 
   async function send() {

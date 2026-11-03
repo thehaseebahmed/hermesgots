@@ -23,7 +23,7 @@ import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { botTabPath } from "@/lib/bot-tabs"
 import { connectionKey } from "@/lib/connection"
-import { useCopied } from "@/lib/copied"
+import { copyText, useCopied } from "@/lib/copied"
 import { listProfiles, type DictationRecord, type Profile } from "@/lib/db"
 import { useDictationInfo } from "@/lib/dictation"
 import { byMonth, pooledRate, spelledCount, textsOf, wordsLabel } from "@/lib/dictation-log"
@@ -277,14 +277,7 @@ function EntrySheet({
   const { copied, noteCopied } = useCopied()
   const { heard, tidied } = textsOf(row)
   const cleanup = tidiedLine(row)
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(row.text)
-      noteCopied()
-    } catch {
-      toast.error("Couldn't copy that.")
-    }
-  }
+  const copy = () => void copyText(row.text, noteCopied)
   return (
     <Popup open onOpenChange={onOpenChange}>
       <PopupContent>

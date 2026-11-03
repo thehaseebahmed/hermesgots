@@ -1,6 +1,6 @@
 import { pluginRoot, serverRoot } from "../lib/host-url.ts"
 import { READ_TIMEOUT_MS } from "../lib/freshness.ts"
-import { ask, sawFrame } from "../lib/net-watch.ts"
+import { ask, sawFrame, sawWords, sent, sentFrom } from "../lib/net-watch.ts"
 import { promptOf } from "../lib/run-prompt.ts"
 
 import type { Agent } from "./agents"
@@ -185,6 +185,7 @@ export async function postRun(
   key: string,
   { signal, timeoutMs }: Posting = {},
 ): Promise<string> {
+  const started = performance.now()
   let response: Response
   try {
     response = await ask(`${root(connection)}/v1/runs`, {
@@ -205,6 +206,7 @@ export async function postRun(
   if (!response.ok) throw new Error((await refusal(response)) ?? answered(response))
   const { run_id } = (await response.json()) as { run_id?: unknown }
   if (typeof run_id !== "string") throw new Error("The host didn't start the run.")
+  sent(run_id, started)
   return run_id
 }
 
@@ -421,6 +423,7 @@ export async function followRun(
   ensure(response)
   if (!response.body) throw new Error("The host sent no stream.")
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader()
+  const from = sentFrom(runId)
   let pending = ""
   let first = true
   for (;;) {
@@ -436,12 +439,13 @@ export async function followRun(
         .map((line) => line.slice(5).trimStart())
         .join("\n")
       if (data) {
+        const event = JSON.parse(data) as RunEvent
         if (first) {
           first = false
-          // The frame is what the network log reads as how long the stream took to open.
           sawFrame(response)
         }
-        onEvent(JSON.parse(data) as RunEvent)
+        if (from !== undefined && event.event === "message.delta") sawWords(response, from)
+        onEvent(event)
       }
     }
   }

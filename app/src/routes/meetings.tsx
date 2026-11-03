@@ -125,6 +125,7 @@ import {
 import { createSignal } from "@/lib/store"
 import { useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
+import { Chip } from "@/components/chip"
 
 const message = (error: unknown, fallback: string) =>
   error instanceof Error && error.message ? error.message : fallback
@@ -445,32 +446,6 @@ function MeetingsList({ pane }: { pane?: PaneState }) {
       </div>
       <NewMeeting key={form} open={adding} onOpenChange={setAdding} />
     </div>
-  )
-}
-
-function Chip({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean
-  onClick: () => void
-  children: ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      className={cn(
-        "flex h-11 shrink-0 items-center gap-1.5 rounded-full border px-4 text-sm font-medium transition-colors",
-        active
-          ? "border-foreground bg-foreground text-background"
-          : "bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
-      )}
-    >
-      {children}
-    </button>
   )
 }
 
