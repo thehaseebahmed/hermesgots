@@ -15,7 +15,7 @@ import unittest
 from unittest import mock
 
 from plugin import dictation_cleanup
-from plugin.tests._helpers import with_model
+from plugin.tests._helpers import BOT, bot_scope, with_model
 
 LIGHT = dictation_cleanup.DictationCleanupPrompt.WithLightCleanup()
 MEDIUM = dictation_cleanup.DictationCleanupPrompt.WithMediumCleanup()
@@ -230,6 +230,18 @@ class FinishTest(unittest.TestCase):
     def test_a_call_that_raises_lands_the_words_as_heard(self) -> None:
         got, _ = cleaned(LIGHT, RuntimeError("the host's model is down"))
         self.assertEqual(got["text"], "um hello there")
+
+    def test_the_call_is_made_in_the_callers_own_profile_scope(self) -> None:
+        seen = []
+
+        def ask(prompt, input_text, model):
+            seen.append(BOT.get())
+            return "Tidied."
+
+        with bot_scope():
+            got = dictation_cleanup.finish("um hello there", prompt=LIGHT.Build(), ask=ask)
+        self.assertEqual(got["text"], "Tidied.")
+        self.assertEqual(seen, ["bot-a"], "the cleanup asks the bot's own model")
 
     def test_a_call_that_answers_in_the_wrong_shape_lands_the_words_as_heard(self) -> None:
         for answer in (None, {"words": "Hello there."}, {"text": 7}):

@@ -21,12 +21,11 @@ rides in as ``model`` and needs the plugin's model-override permission, as every
 from __future__ import annotations
 
 import logging
-import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, Optional, Sequence
 
-from .dictation import DictationError
+from .dictation import BoundedTimeout, DictationError, run_bounded
 
 logger = logging.getLogger(__name__)
 
@@ -254,24 +253,19 @@ def _prompt(text: str, vocabulary: Sequence[str], hint: str = "") -> str:
 
 
 def _within(deadline_s: float, call: Callable[[], Optional[str]]) -> Optional[str]:
-    """``call``'s answer, or None when it misses its budget — a late cleanup is worse than none."""
-    box: List[Optional[str]] = []
-    done = threading.Event()
+    """``call``'s answer, or None when it misses its budget — a late cleanup is worse than none.
 
-    def run() -> None:
-        try:
-            box.append(call())
-        except Exception:
-            logger.debug("memento: a cleanup raised", exc_info=True)
-        finally:
-            done.set()
-
-    worker = threading.Thread(target=run, name="memento-dictation-cleanup", daemon=True)
-    worker.start()
-    if not done.wait(deadline_s):
+    Nothing here reaches the take's ending: a cleanup that answered late, raised, or never answered
+    at all leaves the words as the host heard them, which is what ``finish`` lands.
+    """
+    try:
+        return run_bounded("memento-dictation-cleanup", deadline_s, call)
+    except BoundedTimeout:
         logger.debug(f"memento: a cleanup missed its {deadline_s}s budget")
         return None
-    return box[0] if box else None
+    except BaseException:  # noqa: BLE001 - a cleanup never costs a take its words
+        logger.debug("memento: a cleanup raised", exc_info=True)
+        return None
 
 
 def _ask_model(

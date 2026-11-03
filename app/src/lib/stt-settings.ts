@@ -27,7 +27,10 @@ export interface SttSettings {
     /** The host's own sentence for why nothing usable is there. */
     reason: string | null
   }
+  /** The providers this screen draws a row and a page for: every one but local, which has a card. */
   providers: { name: string; keySet: boolean | null }[]
+  /** What the Provider pick offers, local among them: the rows above are pages, this is the choice. */
+  choices: { name: string; keySet: boolean | null }[]
   /** Each provider's models, where the host ships a catalogue. */
   models: Record<string, string[]>
 }
@@ -178,6 +181,7 @@ export const PROVIDER_FIELDS: Record<string, readonly SttField[]> = {
 /** How a provider is written on screen; one the host declares later is read from its own name. */
 const PROVIDER_LABELS: Record<string, string> = {
   local: "Local",
+  local_command: "Local command",
   groq: "Groq",
   openai: "OpenAI",
   mistral: "Mistral",
@@ -211,6 +215,8 @@ export function readStt(raw: unknown): SttSettings | undefined {
   for (const [name, list] of Object.entries((block.models ?? {}) as Record<string, unknown>))
     if (Array.isArray(list))
       models[name] = list.filter((one): one is string => typeof one === "string")
+  const providers = providerEntries(block.providers)
+  const choices = providerEntries(block.choices)
   return {
     values,
     defaults,
@@ -219,20 +225,22 @@ export function readStt(raw: unknown): SttSettings | undefined {
       explicit: typeof provider.explicit === "string" ? provider.explicit : null,
       reason: typeof provider.reason === "string" ? provider.reason : null,
     },
-    providers: Array.isArray(block.providers)
-      ? block.providers.flatMap((one) => {
-          const row = (one ?? {}) as Record<string, unknown>
-          if (typeof row.name !== "string" || !row.name) return []
-          return [
-            {
-              name: row.name,
-              keySet: typeof row.key_set === "boolean" ? row.key_set : null,
-            },
-          ]
-        })
-      : [],
+    providers,
+    // A host from before the pick had a list of its own sends none, and its rows are what the pick
+    // drew — plus local, which is Hermes's to resolve and never needed the host to list it.
+    choices: choices.length ? choices : [{ name: "local", keySet: null }, ...providers],
     models,
   }
+}
+
+/** One entry of the host's provider lists, or nothing where it names no provider. */
+function providerEntries(raw: unknown): { name: string; keySet: boolean | null }[] {
+  if (!Array.isArray(raw)) return []
+  return raw.flatMap((one) => {
+    const row = (one ?? {}) as Record<string, unknown>
+    if (typeof row.name !== "string" || !row.name) return []
+    return [{ name: row.name, keySet: typeof row.key_set === "boolean" ? row.key_set : null }]
+  })
 }
 
 function scalars(raw: unknown): Record<string, SttValue> {
@@ -338,6 +346,65 @@ export function providerRows(block: SttSettings): ProviderRow[] {
       },
     ]
   })
+}
+
+/** One choice in the Provider pick: a provider, and the line under it where it has one. */
+export interface ProviderChoice {
+  /** `""` is Automatic, which is a real state and always the first choice. */
+  id: string
+  label: string
+  detail?: string
+}
+
+/**
+ * The Provider pick's choices: Automatic first, then the host's own order, local among them.
+ *
+ * A key is only known for the providers the screen draws rows for, so a choice with no entry there
+ * says nothing about a key rather than claiming it is missing.
+ */
+export function providerOptions(block: SttSettings): ProviderChoice[] {
+  const automatic: ProviderChoice = {
+    id: "",
+    label: "Automatic",
+    detail:
+      block.provider.name && block.provider.name !== "none"
+        ? providerLabel(block.provider.name)
+        : (block.provider.reason ?? undefined),
+  }
+  return [
+    automatic,
+    ...block.choices.map(({ name, keySet }) => ({
+      id: name,
+      label: providerLabel(name),
+      detail:
+        providerNote({ inUse: name === block.provider.name, keySet }) ?? undefined,
+    })),
+  ]
+}
+
+/**
+ * The backends Hermes decodes on the machine itself (`LOCAL_BACKENDS` in `plugin/dictation.py`):
+ * their settings are the Local card, and neither has a page of its own.
+ */
+const LOCAL_BACKENDS = new Set(["local", "local_command"])
+
+/**
+ * Whether a provider's settings are a page of their own. A local backend's are the screen's Local
+ * card, so a hand-typed address naming one is no page at all — the page it belongs to is where it
+ * lands.
+ */
+export function providerHasPage(name: string): boolean {
+  return !LOCAL_BACKENDS.has(name)
+}
+
+/**
+ * The choices one pick row offers: the providers on the Provider row, a provider's own models on
+ * every other — the two closed sets this screen picks from.
+ */
+export function pickOptions(block: SttSettings, row: SttSetting): ProviderChoice[] {
+  if (row.key === "stt.provider") return providerOptions(block)
+  const provider = row.key.split(".")[1]
+  return (block.models[provider] ?? []).map((name) => ({ id: name, label: name }))
 }
 
 /** The words a provider's row says about itself: the one Hermes uses, or the key it has none of. */

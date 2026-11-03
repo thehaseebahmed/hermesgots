@@ -4,7 +4,8 @@
  * nothing and its own value where it does; a number is typed as one or refused; the Provider row
  * names what Hermes resolved, or says why it resolved nothing; the local models are Gots's
  * catalogue kept to the names the host declares, with the one in play always in it; and a provider
- * whose models only a live catalogue names has no page until the host reports one.
+ * whose models only a live catalogue names has no page until the host reports one; and the Provider
+ * pick offers the host's own order with local in it, while the rows the screen draws leave it out.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -19,8 +20,11 @@ import {
   parseNumber,
   providerLabel,
   providerLine,
-  providerPage,
+  pickOptions,
+  providerHasPage,
   providerNote,
+  providerOptions,
+  providerPage,
   providerRows,
   providerModelKey,
   readStt,
@@ -68,6 +72,15 @@ const block = (patch = {}) =>
     },
     provider: { name: "local", reason: null, explicit: null },
     providers: [
+      { name: "groq", key_set: true },
+      { name: "openai", key_set: false },
+      { name: "mistral", key_set: false },
+      { name: "xai", key_set: false },
+      { name: "elevenlabs", key_set: false },
+      { name: "deepinfra", key_set: false },
+    ],
+    choices: [
+      { name: "local" },
       { name: "groq", key_set: true },
       { name: "openai", key_set: false },
       { name: "mistral", key_set: false },
@@ -232,6 +245,7 @@ test("the providers list is every provider but local, each over the model it hol
   assert.deepEqual(
     rows.map((row) => row.name),
     ["groq", "openai", "mistral", "xai", "elevenlabs"],
+    "local is in the host's list for the pick, and never among the provider rows",
   )
   const groq = rows.find((row) => row.name === "groq")
   assert.equal(groq.model, "whisper-large-v3-turbo", "the model it holds")
@@ -326,4 +340,79 @@ test("a host that carries none of this has no block at all", () => {
     "stt.enabled": true,
   })
   assert.equal(providerLabel("somethingnew"), "Somethingnew", "an unknown provider still reads")
+})
+
+test("the Provider pick offers local first, then the host's order, Automatic ahead of both", () => {
+  const options = providerOptions(block())
+  assert.deepEqual(
+    options.map((one) => one.id),
+    ["", "local", "groq", "openai", "mistral", "xai", "elevenlabs", "deepinfra"],
+    "every provider the pick can set, local among them, with the unhurried state first",
+  )
+  assert.equal(options[0].label, "Automatic", "which is a state, not the absence of one")
+  assert.equal(options[0].detail, "Local", "over the name the resolver answered")
+  assert.deepEqual(
+    options.slice(1).map((one) => one.label),
+    ["Local", "Groq", "OpenAI", "Mistral", "xAI", "ElevenLabs", "DeepInfra"],
+    "and each provider as the app spells it",
+  )
+})
+
+test("a choice says its key is missing only where the screen knows about one", () => {
+  const options = providerOptions(block())
+  const openai = options.find((one) => one.id === "openai")
+  assert.equal(openai?.detail, "Key not set", "a provider whose key the host lacks says so")
+  assert.equal(
+    options.find((one) => one.id === "local")?.detail,
+    "In use",
+    "the one hearing a take here says that, not that its key is missing",
+  )
+  const cloud = providerOptions({
+    ...block(),
+    provider: { name: "groq", reason: null, explicit: "groq" },
+  })
+  assert.equal(cloud.find((one) => one.id === "groq")?.detail, "In use", "the one Hermes hears on")
+  assert.equal(
+    cloud.find((one) => one.id === "local")?.detail,
+    undefined,
+    "and off it, local says nothing at all: it needs no key",
+  )
+  assert.equal(cloud[0].detail, "Groq", "while Automatic names the provider it resolved")
+})
+
+test("a host from before the pick's own list still offers local", () => {
+  const { choices, ...older } = block()
+  assert.equal(choices.length > 0, true, "the fixture carries one")
+  assert.deepEqual(
+    readStt({ ...older, values: {}, defaults: block().defaults }).choices.map((one) => one.name),
+    ["local", "groq", "openai", "mistral", "xai", "elevenlabs", "deepinfra"],
+    "the rows it has, and local, which was Hermes's to resolve all along",
+  )
+})
+
+test("a pick row offers the providers on the Provider row and that provider's models on its own", () => {
+  const providers = STT_ROWS.find((row) => row.key === "stt.provider")
+  const [first] = pickOptions(block(), providers)
+  assert.equal(first.id, "", "the Provider row picks a provider, Automatic first")
+  const model = STT_ROWS.find((row) => row.key === "stt.local.model")
+  assert.deepEqual(
+    pickOptions(block(), model).map((one) => one.id),
+    ["base", "tiny", "small", "medium", "large-v3", "turbo"],
+    "and the speech model row picks from the host's own catalogue",
+  )
+})
+
+test("a local backend's settings are a card, not a page, so its address is no page at all", () => {
+  assert.equal(providerHasPage("groq"), true, "a provider with rows of its own has a page")
+  assert.equal(providerHasPage("local"), false, "local's are drawn on the Local card")
+  assert.equal(
+    providerHasPage("local_command"),
+    false,
+    "and the other backend Hermes decodes on itself is the same card, not a page of its own",
+  )
+  assert.equal(
+    providerLabel("local_command"),
+    "Local command",
+    "a name with an underscore in it is not how a settings page says a thing",
+  )
 })

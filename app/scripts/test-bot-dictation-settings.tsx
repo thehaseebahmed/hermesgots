@@ -216,6 +216,40 @@ test("the providers card lists each one over its model, the one in use and a mis
   })
 })
 
+test("the Provider pick offers Local, and picking it writes the host's own name for it", async () => {
+  const calls = await seed(
+    "stt-provider-pick",
+    ["dictation", "speech_model", "stt_settings"],
+    {},
+    {
+      speech: speech({
+        stt: STT({ provider: { name: "groq", explicit: "groq", reason: null } }),
+      }),
+      nextStt: STT({ provider: { name: "local", explicit: "local", reason: null } }),
+      // A provider pick is followed by the read that names who hears the take now.
+      afterStt: speech({
+        stt: STT({ provider: { name: "local", explicit: "local", reason: null } }),
+      }),
+    },
+  )
+  await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    await click(row("stt.provider"))
+    const options = findAll('[data-pick-list="Provider"] > button')
+    assert.deepEqual(
+      options.map((one) => titleOf(one)),
+      ["Automatic", "Local", "Groq", "OpenAI", "ElevenLabs"],
+      "every provider the host declares, local among them, and Automatic ahead of them all",
+    )
+    await click(options[1])
+    assert.deepEqual(
+      calls.filter((call) => call.path.endsWith("/stt"))[0]?.body,
+      { key: "stt.provider", value: "local" },
+      "the pick is the one key, written with the host's own name for it",
+    )
+    assert.equal(valueOf(row("stt.provider")), "Local", "and the row says who hears the take")
+  })
+})
+
 test("a provider's page draws its own rows, and a pick writes that provider's key", async () => {
   const calls = await seed(
     "stt-provider-rows",
@@ -269,6 +303,24 @@ test("a list address with no item lands on the page that draws its rows", async 
   await mount(editor("/settings/bots/bot-1/speech-to-text/providers"), async () => {
     await until(async () => Boolean(speechPage()), "the page, since the rows are drawn on it")
     assert.equal(here(), "/settings/bots/bot-1/speech-to-text", "at the page's own address")
+  })
+})
+
+test("local's address is no page: it lands on the page whose Local card draws it", async () => {
+  await seed(
+    "stt-local-address",
+    ["dictation", "speech_model", "stt_settings"],
+    {},
+    { speech: speech({ stt: STT() }) },
+  )
+  await mount(editor("/settings/bots/bot-1/speech-to-text/providers/local"), async () => {
+    await until(async () => Boolean(speechPage()), "the page, since local's settings are its card")
+    assert.equal(here(), "/settings/bots/bot-1/speech-to-text", "at the page's own address")
+    assert.equal(
+      find("[data-stt-provider]"),
+      null,
+      "and no provider page claiming the app cannot draw what it draws below",
+    )
   })
 })
 

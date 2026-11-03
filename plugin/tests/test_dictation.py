@@ -15,6 +15,7 @@ from pathlib import Path
 from unittest import mock
 
 from plugin import dictation, dictation_cleanup, speech
+from plugin.tests._helpers import BOT, bot_scope
 
 
 def hermes(**overrides):
@@ -172,8 +173,8 @@ class HearingPromptTest(unittest.TestCase):
         )
 
 
-class TakeTest(unittest.TestCase):
-    """A take is held on the host under the app's id, and heard as its Pieces land (ADR 0074)."""
+class TakeCase(unittest.TestCase):
+    """One take's own fixture: the registry cleared around each case, and the Piece it is fed."""
 
     def setUp(self) -> None:
         self.forget()
@@ -182,6 +183,7 @@ class TakeTest(unittest.TestCase):
         self.forget()
 
     def forget(self) -> None:
+        """Ends every take this process holds, so a case never hears the one before it."""
         for profile, take in list(dictation._takes):
             dictation.cancel(profile, take)
 
@@ -215,6 +217,10 @@ class TakeTest(unittest.TestCase):
                 return
             dictation.time.sleep(0.01)
         raise AssertionError("the take's worker never finished")
+
+
+class TakeTest(TakeCase):
+    """A take is held on the host under the app's id, and heard as its Pieces land (ADR 0074)."""
 
     def test_a_piece_is_answered_with_its_take_and_index_and_no_words(self) -> None:
         _, patch = hermes()
@@ -394,21 +400,8 @@ class TakeTest(unittest.TestCase):
         self.assertEqual(caught.exception.status, 400)
 
 
-class ConfirmTest(unittest.TestCase):
+class ConfirmTest(TakeCase):
     """The one call that answers a take's words (ADR 0074)."""
-
-    def setUp(self) -> None:
-        for profile, take in list(dictation._takes):
-            dictation.cancel(profile, take)
-
-    def tearDown(self) -> None:
-        for profile, take in list(dictation._takes):
-            dictation.cancel(profile, take)
-
-    def upload(self, index=0, data=b"one", profile="p", take="take-1", ms=2500, **options):
-        return dictation.upload(
-            profile, take, index, data, "audio/webm", hearing=True, ms=ms, **options
-        )
 
     def test_the_confirm_answers_the_whole_take_in_one_payload(self) -> None:
         _, patch = hermes()
@@ -633,6 +626,37 @@ class ConfirmTest(unittest.TestCase):
                     int((dictation.QUEUE_SECONDS + dictation.CLOUD_SECONDS) * 1000),
                     f"no Cleanup runs on a cloud take, so {level} moves no bar",
                 )
+
+
+class ProfileScopeTest(TakeCase):
+    """The bot a take belongs to reaches a decode this plugin runs on a thread of its own."""
+
+    def test_a_cloud_takes_upload_is_decoded_in_the_bots_own_scope(self) -> None:
+        seen = []
+
+        def transcribe(path, source=None):
+            seen.append(BOT.get())
+            return {"success": True, "transcript": " Hello there. "}
+
+        _, patch = hermes(_get_provider=lambda cfg: "groq", transcribe_audio=transcribe)
+        with patch, bot_scope():
+            self.upload()
+            answer = dictation.confirm("p", "take-1", 1, level="none")
+        self.assertEqual(answer["text"], "Hello there.")
+        self.assertEqual(seen, ["bot-a"], "the upload reads the bot's own provider and key")
+
+    def test_a_local_takes_piece_is_heard_in_the_bots_own_scope(self) -> None:
+        seen = []
+
+        def local(path, model, prompt=None):
+            seen.append(BOT.get())
+            return {"success": True, "transcript": "Hello there."}
+
+        _, patch = hermes(_transcribe_local=local)
+        with patch, bot_scope():
+            self.upload()
+            self.wait(lambda: self.held().pieces[0]["text"] is not None)
+        self.assertEqual(seen, ["bot-a"], "the Piece's decode reads the bot's own model and prompt")
 
 
 class WarmTest(unittest.TestCase):

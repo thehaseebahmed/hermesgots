@@ -44,6 +44,17 @@ test("the list itself, with no fifth segment, is not an item", () => {
   assert.equal(one.item, "groq", "and named by its own id")
 })
 
+test("a provider whose settings are a card, not a page, has no page behind the address", () => {
+  assert.equal(botSubOf(TAB, "providers", "local"), undefined, "local's rows are the Local card")
+  assert.equal(
+    botSubOf(TAB, "providers", "local_command"),
+    undefined,
+    "and the other local backend's are the same card",
+  )
+  const cloud = botSubOf(TAB, "providers", "elevenlabs")
+  assert.equal(cloud?.item, "elevenlabs", "while a provider with its own page still opens")
+})
+
 test("a page that holds no items has no page behind it", () => {
   const sub = botSubOf(TAB, "vocabulary", "acme")
   assert.ok(sub, "the page itself is still there")

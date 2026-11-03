@@ -3313,7 +3313,20 @@ const STT_DEFAULTS = {
   "stt.elevenlabs.diarize": false,
   "stt.deepinfra.model": "",
 }
-const STT_PROVIDERS = ["groq", "openai", "mistral", "xai", "elevenlabs", "deepinfra"]
+// plugin/speech.py derives both lists from the same shape, so this does too: a provider is a block of
+// `stt.<name>.*` keys, and the pick adds local, whose settings are the page's own card.
+const STT_PROVIDERS = [
+  ...new Set(
+    Object.keys(STT_DEFAULTS)
+      .map((key) => key.split("."))
+      .filter((parts) => parts.length === 3)
+      .map((parts) => parts[1]),
+  ),
+].filter((name) => name !== "local")
+const STT_CHOICES = ["local", ...STT_PROVIDERS]
+// plugin/speech.py writes whatever name the pick sends and lets Hermes resolve it, so the only name
+// beyond the declared ones a pick can carry here is the other local backend.
+const STT_WRITABLE = [...STT_CHOICES, "local_command"]
 // The key a provider needs on the host, and the providers that have one here: the page asks only
 // whether a key is set, so this is the whole of what it can learn about a secret.
 const STT_KEYS_SET = new Set(["groq", "elevenlabs"])
@@ -3325,6 +3338,14 @@ const STT_CATALOGUES = {
   xai: ["grok-voice-transcribe-2.0"],
   elevenlabs: ["scribe_v2", "scribe_v1"],
 }
+// A provider with no key to check carries no `key_set`, as plugin/speech.py's entries do — which is
+// what keeps local's row from claiming a key it never needs.
+function sttEntries(names) {
+  return names.map((name) => ({
+    name,
+    ...(STT_PROVIDERS.includes(name) ? { key_set: STT_KEYS_SET.has(name) } : {}),
+  }))
+}
 const stt = { values: {} }
 function sttReading() {
   const explicit =
@@ -3333,7 +3354,8 @@ function sttReading() {
     values: { ...stt.values },
     defaults: STT_DEFAULTS,
     provider: { name: explicit ?? "local", explicit, reason: null },
-    providers: STT_PROVIDERS.map((name) => ({ name, key_set: STT_KEYS_SET.has(name) })),
+    providers: sttEntries(STT_PROVIDERS),
+    choices: sttEntries(STT_CHOICES),
     models: STT_CATALOGUES,
   }
 }
@@ -5607,7 +5629,7 @@ http
         if (body.value === null || body.value === undefined) delete stt.values[key]
         else if (key === "stt.provider") {
           const name = typeof body.value === "string" ? body.value.trim() : ""
-          if (!STT_PROVIDERS.includes(name))
+          if (!STT_WRITABLE.includes(name))
             return json(res, 400, { error: { message: "That isn't a provider this host declares." } })
           stt.values[key] = name
         } else if (typeof STT_DEFAULTS[key] === "number") {

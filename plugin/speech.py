@@ -384,8 +384,37 @@ def stt_available() -> bool:
 
 
 def _provider_names(defaults: Dict[str, Any]) -> List[str]:
-    """The providers the host declares, in its own order: every block of settings but ``local``."""
+    """The providers whose settings this page draws: every block of settings but ``local``.
+
+    Local's settings are the page's own *Local* card, so it gets no row and no drill-in page (ADR 0063).
+    """
     return [name for name, value in defaults.items() if isinstance(value, dict) and name != "local"]
+
+
+def _pick_names(providers: List[str], explicit: Optional[str], resolved: str) -> List[str]:
+    """What the **Provider** pick offers: ``local`` first, then the host's providers, then this bot's own.
+
+    ``local`` is not a provider block, so the list above never held it; the last term keeps a route with
+    no page here — ``local_command``, say — selectable rather than invisible.
+    """
+    names = ["local", *providers]
+    for name in (explicit, resolved):
+        if name and name != "none" and name not in names:
+            names.append(name)
+    return names
+
+
+def _provider_entries(names: Sequence[str], lookup: Optional[Callable[[str], Any]]) -> List[Dict[str, Any]]:
+    """Providers as the page reads them. A provider with no key to check carries no ``key_set``, so
+    "needs none" is not spelled the same way as "this host couldn't ask"."""
+    entries: List[Dict[str, Any]] = []
+    for name in names:
+        entry: Dict[str, Any] = {"name": name}
+        keyed = _key_set(name, lookup)
+        if keyed is not None:
+            entry["key_set"] = keyed
+        entries.append(entry)
+    return entries
 
 
 def _catalogues() -> Dict[str, List[str]]:
@@ -460,17 +489,19 @@ def stt_settings(config_path: Path, section: Optional[Dict[str, Any]] = None) ->
     catalogues = _catalogues()
     resolved = _resolved(section)
     lookup = _env_lookup()
+    providers = _provider_names(defaults_section)
+    explicit = pick.strip() if isinstance(pick, str) and pick.strip() else None
     return {
         "values": values,
         "defaults": defaults,
         "provider": {
             **resolved,
-            "explicit": pick.strip() if isinstance(pick, str) and pick.strip() else None,
+            "explicit": explicit,
         },
-        "providers": [
-            {"name": name, "key_set": _key_set(name, lookup)}
-            for name in _provider_names(defaults_section)
-        ],
+        "providers": _provider_entries(providers, lookup),
+        "choices": _provider_entries(
+            _pick_names(providers, explicit, resolved["name"]), lookup
+        ),
         "models": catalogues,
     }
 

@@ -2,18 +2,35 @@
 
 from __future__ import annotations
 
+import contextvars
 import json
 import re
 import sys
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence
 from unittest.mock import MagicMock, patch
 
 from plugin import dictation_cleanup, pipeline, workflows
 from plugin.tasks import READY_LABEL
+
+# Stands in for the host's own profile scope: `HERMES_HOME_OVERRIDE` and the secret scope are context
+# variables a request sets and `copy_context()` carries. Read by a fake decode the way Hermes reads
+# its own, so a test can prove the work ran as the bot it was done for.
+BOT = contextvars.ContextVar("memento-test-bot", default="the launch profile")
+
+
+@contextmanager
+def bot_scope(value: str = "bot-a") -> Iterator[None]:
+    """Enter one bot's scope, the way a request's thread has it, and take it back after."""
+    token = BOT.set(value)
+    try:
+        yield
+    finally:
+        BOT.reset(token)
 
 
 class FakeLlm:

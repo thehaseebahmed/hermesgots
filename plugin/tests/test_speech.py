@@ -560,7 +560,15 @@ class SttReadTest(TempStore):
         self.assertEqual(
             [row["name"] for row in block["providers"]],
             ["groq", "openai", "mistral", "xai", "elevenlabs", "deepinfra"],
-            "every provider the host declares but local, in its own order",
+            "the pages this screen draws: every provider but local, in the host's own order",
+        )
+        self.assertEqual(
+            [row["name"] for row in block["choices"]],
+            ["local", "groq", "openai", "mistral", "xai", "elevenlabs", "deepinfra"],
+            "the Provider pick: local first, then the same providers",
+        )
+        self.assertNotIn(
+            "key_set", block["choices"][0], "local needs no key, so it carries no verdict about one"
         )
         self.assertEqual(block["models"]["groq"], ["whisper-large-v3-turbo"], "the catalogues too")
 
@@ -612,6 +620,21 @@ class SttReadTest(TempStore):
                 speech.TURNED_OFF,
                 "a host turned off says that, not that it has no backend",
             )
+
+    def test_the_pick_keeps_a_route_it_has_no_page_for(self) -> None:
+        with SttHost({"provider": "local_command", "local": {"model": "small"}},
+                     resolved="local_command"):
+            block = speech.stt_settings(self.config)
+        self.assertEqual(
+            [row["name"] for row in block["choices"]],
+            ["local", "groq", "openai", "mistral", "xai", "elevenlabs", "deepinfra", "local_command"],
+            "a bot pinned to a route this page draws no row for can still see, and change, that pick",
+        )
+        self.assertNotIn(
+            "local_command",
+            [row["name"] for row in block["providers"]],
+            "and the rows it draws nothing for are unchanged",
+        )
 
     def test_a_provider_is_reported_by_presence_and_never_by_value(self) -> None:
         secret = "gsk_the-website-never-holds-this"

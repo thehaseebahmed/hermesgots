@@ -1,6 +1,6 @@
 import type { BotTab } from "@/lib/bot-tabs"
 import { botTabPath } from "@/lib/bot-tabs"
-import { providerLabel } from "@/lib/stt-settings"
+import { providerLabel, providerHasPage } from "@/lib/stt-settings"
 
 /**
  * What a page's sub-screens are. An edit is a pushed screen below 1024px and a centred card from it;
@@ -58,6 +58,7 @@ export function botSubOf(
     if (fixed.holds !== "items") return fixed
     if (!leaf) return undefined
     const name = decode(leaf)
+    if (!providerHasPage(name)) return undefined
     return { ...fixed, title: providerLabel(name), item: name }
   }
   if (!ITEM_PAGES.includes(tab)) return undefined

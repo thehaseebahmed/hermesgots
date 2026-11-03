@@ -14,6 +14,7 @@ Every Hermes internal here is read with ``getattr``: one that moves only means d
 
 from __future__ import annotations
 
+import contextvars
 import importlib.util
 import inspect
 import logging
@@ -24,6 +25,8 @@ import threading
 import time
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+
+from .profile_scope import thread_scope
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +115,7 @@ class Take:
         self.worker: Optional[threading.Thread] = None
         self.prompt: Optional[str] = None
         self.model: Optional[str] = None
+        self.scope: contextvars.Context = thread_scope()
 
     def spoken(self) -> int:
         """How long the take took to say: its Pieces' own spans, in arrival order, pauses left out."""
@@ -579,7 +583,7 @@ def _worker(take: Take) -> None:
             continue
         error: Optional[str] = None
         try:
-            text = _hear_piece(take, data, content_type)
+            text = take.scope.run(_hear_piece, take, data, content_type)
         except DictationError as failure:
             text, error = "", str(failure)
         except Exception:
@@ -677,26 +681,31 @@ def _drain(take: Take) -> str:
     return take.joined()
 
 
-def _bounded(seconds: float, call: Callable[[], Any]) -> Any:
-    """``call``'s answer, or DictationError when it hasn't come inside ``seconds``.
+class BoundedTimeout(DictationError):
+    """A call that ran past its bound. What that costs is the caller's to say."""
 
-    A vendor decode can't be interrupted, so the wait is the host's own: past it the take fails rather
-    than promising the app an answer the provider has stopped producing.
+
+def run_bounded(name: str, seconds: float, call: Callable[[], Any]) -> Any:
+    """Run ``call`` off this thread, within ``seconds``, in this thread's own scope.
+
+    Whatever ``call`` raised is re-raised here, ``BaseException`` included, so a decode that died
+    never reads as one that merely ran late.
     """
     box: List[Any] = []
     done = threading.Event()
+    context = thread_scope()
 
     def run() -> None:
         try:
-            box.append(call())
+            box.append(context.run(call))
         except BaseException as error:  # noqa: BLE001 - handed back to the caller's own handler
             box.append(error)
         finally:
             done.set()
 
-    threading.Thread(target=run, name="memento-dictation-upload", daemon=True).start()
+    threading.Thread(target=run, name=name, daemon=True).start()
     if not done.wait(seconds):
-        raise DictationError("The take couldn't be uploaded to its provider in time.", 504)
+        raise BoundedTimeout(f"{name} didn't answer in {seconds:.0f}s.", 504)
     answer = box[0] if box else None
     if isinstance(answer, BaseException):
         raise answer
@@ -715,9 +724,18 @@ def _upload_whole(take: Take) -> str:
             raise DictationError("The recording is too long.", 413)
         if not any(parts):
             return ""
-        return _landed(
-            _bounded(CLOUD_SECONDS, lambda: _temp(parts, content_type, _dispatcher(_tools())))
-        )
+        try:
+            return _landed(
+                run_bounded(
+                    "memento-dictation-upload",
+                    CLOUD_SECONDS,
+                    lambda: _temp(parts, content_type, _dispatcher(_tools())),
+                )
+            )
+        except BoundedTimeout:
+            # A vendor decode can't be interrupted, so the take fails rather than promising the app an
+            # answer the provider has stopped producing.
+            raise DictationError("The take couldn't be uploaded to its provider in time.", 504) from None
     finally:
         with _takes_lock:
             take.drop_audio()

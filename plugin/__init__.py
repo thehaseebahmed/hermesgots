@@ -997,20 +997,18 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return lambda: enter(profile)
 
     def host_config_path() -> Path:
-        # On the loop thread, like store_path: the API server scopes get_hermes_home() to the
-        # request's profile, and that scope isn't visible inside to_thread.
+        # On the loop thread, like store_path.
         from hermes_constants import get_hermes_home
 
         return Path(get_hermes_home()) / "config.yaml"
 
     def store_path() -> Path:
         # On the loop thread: the API server scopes get_hermes_home() to the request's profile, and
-        # that scope isn't visible inside to_thread.
+        # reading it here settles the path before any of the work goes to a thread.
         return current_path()
 
     def profile_home() -> Path:
-        # On the loop thread, for the reason store_path is: the scope a request runs in is not the one
-        # a worker thread sees.
+        # On the loop thread, for the reason store_path is.
         from hermes_constants import get_hermes_home
 
         return Path(get_hermes_home())
@@ -1107,7 +1105,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if denied is not None:
             return denied
         session_id = request.match_info["session_id"]
-        # On the loop thread, like store_path: the profile scope isn't visible inside to_thread.
+        # On the loop thread, like store_path.
         home = hermes_home()
         live, _ = await asyncio.to_thread(sessions.live_runs, adapter, None, home)
         found = await asyncio.to_thread(delegation.children, home, session_id, set(live))
@@ -1120,7 +1118,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return denied
         session_id = request.match_info["session_id"]
         agent_id = request.match_info["agent_id"]
-        # On the loop thread, like store_path: the profile scope isn't visible inside to_thread.
+        # On the loop thread, like store_path.
         home = hermes_home()
         found = await asyncio.to_thread(delegation.stop, home, session_id, agent_id)
         return web.json_response(
@@ -1132,7 +1130,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if denied is not None:
             return denied
         session_id = request.match_info["session_id"]
-        # On the loop thread, like store_path: the profile scope isn't visible inside to_thread.
+        # On the loop thread, like store_path.
         home = hermes_home()
         live, _ = await asyncio.to_thread(sessions.live_runs, adapter, None, home)
         found = await asyncio.to_thread(delegation.stop_all, home, session_id, live)
@@ -1792,7 +1790,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if denied is not None:
             return denied
         owned = owned_runs(request)
-        # On the loop thread: the profile scope isn't visible inside to_thread.
+        # On the loop thread, like store_path.
         home = hermes_home()
         roots: Dict[str, str] = {}
         live, run_ids = await asyncio.to_thread(

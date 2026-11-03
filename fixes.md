@@ -2701,3 +2701,34 @@ nothing.
   the change is a second mode on a component every reply rides.
 
 Found by the simplify pass on this branch; neither entry blocks the pull request.
+
+# Deferred fixes from the dictation provider reviews
+
+Four angles reviewed `fix(settings): a cloud take decodes as its bot, and Local is pickable`. Everything they found in this branch's own work is applied on it — the scope helper moved to
+`plugin/profile_scope.py`, the two bounded-thread runners collapsed into one, the Provider pick given
+its own `choices` list on the wire so `providers` means one thing again, and local's address taken off
+the provider-page route. One finding is a mechanism the branch merely made worse, and it is recorded
+here instead.
+
+## Careful
+
+### 1. A cloud upload that hangs keeps its thread, its context and the take's audio
+
+`plugin/dictation.py`'s `run_bounded` starts a thread per bounded call and waits `CLOUD_SECONDS` (300 s)
+for it. A vendor call that *refuses* returns in milliseconds and leaves nothing behind — measured: 20
+`ConnectionRefusedError` uploads, 0 live threads, 0 takes. A vendor call that *hangs* cannot be
+interrupted, so its thread outlives the Confirm that gave up on it, and nothing counts them.
+
+- Measured (this container, the branch's own module): 5 timed-out cloud uploads left 5 live
+  `memento-dictation-upload` threads (`threading.active_count()` 2 → 7), each still holding the take's
+  joined audio (up to `MAX_BYTES`, 9 MB). Carrying the request's profile scope onto the thread — what
+  this branch added — means each also holds that bot's home override and `.env` mapping for as long as
+  the vendor sits on the call.
+- Suggested fix: register live decoders under `_takes_lock` and refuse a cloud upload (409) once two
+  are stuck, or run them on a two-wide shared executor instead of a fresh thread each. The first adds a
+  refusal the app has no state for; the second changes how every bounded call is scheduled.
+- Why it is deferred: the leak predates this branch — it is the thread `_bounded` already started — and
+  the fix is a concurrency change to the Confirm path with a new refusal the app must be taught, which
+  is a ticket of its own rather than a cleanup.
+
+Found by the simplify pass on this branch; it does not block the pull request.

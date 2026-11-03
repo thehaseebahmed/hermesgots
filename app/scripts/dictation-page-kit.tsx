@@ -136,6 +136,12 @@ export const STT = (patch: Record<string, unknown> = {}) => ({
     { name: "openai", key_set: false },
     { name: "elevenlabs", key_set: true },
   ],
+  choices: [
+    { name: "local" },
+    { name: "groq", key_set: true },
+    { name: "openai", key_set: false },
+    { name: "elevenlabs", key_set: true },
+  ],
   models: {
     local: ["base", "small"],
     groq: ["whisper-large-v3-turbo", "whisper-large-v3"],

@@ -44,6 +44,7 @@ import {
   providerLabel,
   providerLine,
   providerNote,
+  pickOptions,
   providerPage,
   providerRows,
   rowOn,
@@ -550,7 +551,7 @@ function SettingSurface({
             label={row.label}
             searchable={false}
             selected={pickedFor(block, row)}
-            options={optionsFor(block, row)}
+            options={pickOptions(block, row)}
             onPick={(id) => {
               void onWrite(row.key, id ? id : null).then((ok) => {
                 if (ok) onClose()
@@ -578,33 +579,6 @@ function pickedFor(block: SttSettings, row: SttSetting): string {
   if (row.key === "stt.provider") return block.provider.explicit ?? ""
   const value = effective(block, row.key)
   return value === null ? "" : String(value)
-}
-
-/** The choices a pick offers: the providers, a provider's models, or nothing where it has none. */
-function optionsFor(
-  block: SttSettings,
-  row: SttSetting,
-): { id: string; label: string; detail?: string }[] {
-  if (row.key === "stt.provider")
-    return [
-      {
-        id: "",
-        label: "Automatic",
-        detail:
-          block.provider.name && block.provider.name !== "none"
-            ? providerLabel(block.provider.name)
-            : (block.provider.reason ?? undefined),
-      },
-      ...block.providers.map((one) => ({
-        id: one.name,
-        label: providerLabel(one.name),
-        detail:
-          providerNote({ inUse: one.name === block.provider.name, keySet: one.keySet }) ??
-          undefined,
-      })),
-    ]
-  const provider = row.key.split(".")[1]
-  return (block.models[provider] ?? []).map((name) => ({ id: name, label: name }))
 }
 
 /**
