@@ -1,7 +1,7 @@
-import { Link } from "react-router"
 import { MessagesSquareIcon, Undo2Icon } from "lucide-react"
 
 import { useCodeFace } from "@/components/chat/code-face"
+import { SystemLine, SystemLink } from "@/components/chat/system-line"
 import { COLUMN } from "@/lib/layout"
 import { stayHere } from "@/lib/nav"
 import { cn } from "@/lib/utils"
@@ -36,33 +36,32 @@ export function MovedMarker({
         </BubbleContent>
       </Bubble>
       {/* The bot's reply, a line like a tool group's: only the thread's name is a link. */}
-      <p className="min-h-11 py-3 text-sm leading-5 text-muted-foreground">
+      <SystemLine>
         Moved to
         {title ? (
           <>
             {" “"}
-            <Link
+            <SystemLink
+              icon={MessagesSquareIcon}
               to={`/c/${move.threadId}`}
               state={{ bot: profileId }}
               onClick={stayHere(current)}
-              className="font-medium text-info underline-offset-2 outline-none hover:underline focus-visible:underline"
             >
-              <MessagesSquareIcon className="mr-1 inline size-3.5 align-[-2px]" />
               {title}
-            </Link>
+            </SystemLink>
             {"”"}
           </>
         ) : (
           <>
             {" "}
-            <Link
+            <SystemLink
+              icon={MessagesSquareIcon}
               to={`/c/${move.threadId}`}
               state={{ bot: profileId }}
               onClick={stayHere(current)}
-              className="font-medium text-info underline-offset-2 hover:underline"
             >
               a thread
-            </Link>
+            </SystemLink>
           </>
         )}
         {move.undoable && onUndo && (
@@ -78,7 +77,7 @@ export function MovedMarker({
             Undo
           </button>
         )}
-      </p>
+      </SystemLine>
     </div>
   )
 }

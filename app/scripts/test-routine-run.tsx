@@ -151,19 +151,23 @@ test("a routine's message says which run wrote it, above its words", async () =>
     const routine = rowWith(SAID)
     const ordinary = rowWith(ORDINARY)
     assert.ok(routine && ordinary, "both replies are rows of the thread")
-    const line = routine.querySelector("[data-slot=routine-receipt]")
+    const receipt = routine.querySelector("[data-slot=routine-receipt]")
+    const line = receipt?.querySelector("p")
     const drawn = line?.querySelector("button")
-    assert.ok(line && drawn, "the routine's message wears the app's own receipt line")
-    assert.equal(drawn.tagName, "BUTTON", "the whole line, so the run is reachable")
-    assert.equal(drawn.textContent?.trim(), `${TITLE} ran for 12s`)
+    assert.ok(receipt && line && drawn, "the routine's message wears the app's own system line")
+    // The same sentence shape the Moved marker draws, with the run's name where the thread's goes.
+    assert.equal(line.textContent?.trim(), `Ran “${TITLE}” in 12s`)
+    assert.match(line.className, /min-h-11 py-3 text-sm leading-5/, "the Moved marker's own line")
+    assert.equal(drawn.tagName, "BUTTON", "the name is the one thing that goes somewhere")
+    assert.equal(drawn.textContent?.trim(), TITLE)
     assert.equal(drawn.getAttribute("aria-label"), `Routine: ${TITLE}`, "and saying what it opens")
     // The line is context for the words under it: one column, the line first, the words after it.
-    const column = line.parentElement
+    const column = receipt.parentElement
     assert.match(column?.className ?? "", /flex-col/, "stacked, not side by side")
-    assert.equal(column?.firstElementChild, line, "the line is first in that column")
+    assert.equal(column?.firstElementChild, receipt, "the line is first in that column")
     assert.match(column?.lastElementChild?.textContent ?? "", new RegExp(SAID.slice(0, 24)))
     assert.doesNotMatch(
-      drawn.textContent ?? "",
+      line.textContent ?? "",
       /claude-sonnet/,
       "the model is the sheet's to say, not the thread's",
     )

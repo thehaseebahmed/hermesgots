@@ -31,7 +31,7 @@ async function drive({ page, send, lastReply, until, shot }) {
   // The chat was active moments ago, so the message opens as an aside rather than as an answer.
   assert.match(thread, /On a side note, |As a quick aside, /, "the aside opener is there")
   // The line above the words says which run wrote them and how long it took (ADR 0081).
-  assert.match(thread, /Morning watch ran for \d/, "the line says how long the run took")
+  assert.match(thread, /Ran “Morning watch” in \d/, "the line says how long the run took")
   await shot("message")
 
   await page.locator(CHIP).click()

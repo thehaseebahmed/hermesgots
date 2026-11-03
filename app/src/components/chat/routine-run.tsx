@@ -7,9 +7,10 @@
  * drawn by — so the two never import each other.
  */
 import { useEffect, useState } from "react"
-import { ChevronRightIcon, TimerIcon } from "lucide-react"
+import { TimerIcon } from "lucide-react"
 
 import { RoutineRunSheet } from "@/components/chat/routine-sheet"
+import { SystemLine, SystemLink } from "@/components/chat/system-line"
 import type { Message } from "@/lib/db"
 import { usePluginFeatureOn } from "@/lib/features"
 import { COLUMN } from "@/lib/layout"
@@ -38,34 +39,28 @@ const UNNAMED = "Routine"
 /**
  * What the line says after the routine's name: how long it ran, and nothing else. The model is the
  * sheet's to say — a receipt in the thread answers "what is this and how long did it take", and the
- * run's own record is one tap away. A run the host couldn't time says only the routine's name.
+ * run's own record is one tap away. A run the host couldn't time names the routine alone.
  */
 function said(run: RoutineRun) {
-  return run.seconds === null ? "" : ` ran for ${ranFor(run.seconds)}`
+  return run.seconds === null ? "" : ` in ${ranFor(run.seconds)}`
 }
 
 /**
- * The line that stands above a routine's message: the routine's name in the link blue, what its run
- * took, and a chevron — the whole line one target, so the run is one tap away without a card taking
- * the thread's weight for a receipt.
+ * The line that stands above a routine's message, in the app's own sentence shape: "Ran “Morning
+ * watch” in 12s" — the same line the Moved marker draws, with the run's name where the thread's
+ * name goes, so a reader meets one pattern wherever the app talks about the thread instead of in it.
  */
 export function RoutineChip({ run, onOpen }: { run: RoutineRun; onOpen: () => void }) {
-  const line = said(run)
   return (
-    <div data-slot="routine-receipt" className={cn(COLUMN, "mb-1 flex")}>
-      <button
-        type="button"
-        aria-label={`Routine: ${run.title ?? UNNAMED}`}
-        onClick={onOpen}
-        className="flex min-h-11 w-fit max-w-full items-center gap-1.5 text-sm leading-5 text-muted-foreground outline-none hover:underline focus-visible:underline"
-      >
-        <TimerIcon className="size-3.5 shrink-0" aria-hidden />
-        <span className="min-w-0 truncate">
-          <span className="font-medium text-info">{run.title ?? UNNAMED}</span>
-          {line}
-        </span>
-        <ChevronRightIcon className="size-3.5 shrink-0" aria-hidden />
-      </button>
+    <div data-slot="routine-receipt" className={cn(COLUMN, "mb-1")}>
+      <SystemLine>
+        {"Ran “"}
+        <SystemLink icon={TimerIcon} onClick={onOpen} label={`Routine: ${run.title ?? UNNAMED}`}>
+          {run.title ?? UNNAMED}
+        </SystemLink>
+        {"”"}
+        {said(run)}
+      </SystemLine>
     </div>
   )
 }
