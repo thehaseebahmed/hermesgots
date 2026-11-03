@@ -1,5 +1,11 @@
 # The thread decides its one live row, and the reply draws it
 
+**Superseded in its catch-up clause by [ADR 0084](0084-a-thread-the-device-holds-opens-ready.md)
+(2026-11-03):** a thread the device holds opens ready, so no row of it stands for a catch-up and the
+thread's one live row is always the reply's. Everything else here stands: the row is decided by the
+thread rather than by the reply's own cluster, the count of subagents rides it or stands alone on it,
+and a thread never says one moment on two rows.
+
 **Amends [ADR 0075](0075-a-reply-ends-on-its-status-line-and-its-stats-stand-above-it.md)**, which took
 away the reason this could not be done and left the move itself to its own decision. The order 0075
 fixed stands; what changes is who decides what the row says.

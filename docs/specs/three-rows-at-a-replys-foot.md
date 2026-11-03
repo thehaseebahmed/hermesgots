@@ -9,6 +9,11 @@ blocked by the gate issue (#700) that the docs pull request carrying this file (
 starts on that merge. The spec carries `ready-for-agent` and the tickets stay bare, so the agent claims
 the spec and works the graph in order.
 
+Amended by [ADR 0084](adr/0084-a-thread-the-device-holds-opens-ready.md): the catch-up line the fourth
+user story asks for is retired — a thread the device holds opens ready, and the status line speaks only
+for the reply (ADR 0076), so story 24 reads as met by the loader a thread held nowhere draws instead.
+Every other story and decision here stands.
+
 ## Problem Statement
 
 A reply that is working says so in two places, in the colour the app keeps for what the reader can act

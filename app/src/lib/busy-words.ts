@@ -1,17 +1,7 @@
-export type BusyKind = "catching" | "thinking" | "writing"
+export type BusyKind = "thinking" | "writing"
 
 /** Single words only: the status line is a mood, and what the bot really does stays in its rows. */
 export const BUSY_WORDS: Record<BusyKind, readonly string[]> = {
-  catching: [
-    "Unspooling",
-    "Rummaging",
-    "Gathering",
-    "Dredging",
-    "Fetching",
-    "Unpacking",
-    "Collating",
-    "Retrieving",
-  ],
   thinking: [
     "Winnowing",
     "Plotting",

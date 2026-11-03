@@ -3,7 +3,7 @@ import type { ReactNode } from "react"
 import { useCodeFace } from "@/components/chat/code-face"
 import { SubagentCount } from "@/components/chat/subagent-count"
 import { WORK_ROW_CLASS, WorkSign } from "@/components/chat/work-row"
-import { CATCHING_ACTIVITY, THINKING_ACTIVITY, WRITING_ACTIVITY } from "@/lib/format"
+import { THINKING_ACTIVITY, WRITING_ACTIVITY } from "@/lib/format"
 import type { BusyKind } from "@/lib/busy-words"
 import type { FootLine } from "@/lib/thinking"
 import { REPLY_INSET } from "@/lib/layout"
@@ -14,7 +14,6 @@ import { cn } from "@/lib/utils"
 const KIND_OF = new Map<string, BusyKind>([
   [THINKING_ACTIVITY, "thinking"],
   [WRITING_ACTIVITY, "writing"],
-  [CATCHING_ACTIVITY, "catching"],
 ])
 
 /**

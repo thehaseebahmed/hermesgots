@@ -520,47 +520,27 @@ test("the thread draws one live row, and the count rides it", () => {
   const working = { status: "streaming", activity: "Writing…" }
 
   assert.deepEqual(
-    threadLineOf({ catching: true, catchingText: "Catching up…", running: 1 }),
-    { count: "alone", countLoader: true },
-    "while the thread catches up its one line is the catch-up line, and the count is its only words",
-  )
-  assert.deepEqual(
-    threadLineOf({ catching: true, catchingText: "Catching up…", running: 0 }),
-    { text: "Catching up…", count: "none", countLoader: false },
-    "with no subagent at work that line says the thread is reading, in its own word",
-  )
-  assert.deepEqual(
-    threadLineOf({ catching: false, catchingText: "Catching up…", running: 1, reply: working }),
+    threadLineOf({ running: 1, reply: working }),
     { text: "Writing…", count: "suffix", countLoader: false },
-    "with no catch-up line the reply's own line holds the count, riding its words",
+    "the reply's own line holds the count, riding its words",
   )
   assert.deepEqual(
-    threadLineOf({
-      catching: false,
-      catchingText: "Catching up…",
-      running: 1,
-      reply: { status: "done" },
-    }),
+    threadLineOf({ running: 1, reply: { status: "done" } }),
     { count: "alone", countLoader: true },
     "a finished reply's line is the count alone, its loader turning in the blue",
   )
   assert.equal(
-    threadLineOf({
-      catching: false,
-      catchingText: "Catching up…",
-      running: 1,
-      reply: { status: "error" },
-    }),
+    threadLineOf({ running: 1, reply: { status: "error" } }),
     undefined,
     "a reply that failed draws no line for the count to ride, so none is drawn",
   )
   assert.deepEqual(
-    threadLineOf({ catching: false, catchingText: "Catching up…", running: 1 }),
+    threadLineOf({ running: 1 }),
     { count: "alone", countLoader: false },
     "with no reply to speak for, the count stands on the thread's own row, turning no loader",
   )
   assert.equal(
-    threadLineOf({ catching: false, catchingText: "Catching up…", running: 0 }),
+    threadLineOf({ running: 0 }),
     undefined,
     "and with nothing to say the thread draws no row at all",
   )

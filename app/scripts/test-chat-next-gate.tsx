@@ -23,7 +23,7 @@ test("a host that can't be reached is away, not unsupported: the device draws wh
   try {
     await withDevice(openDevice(host, { database: first.database }), async (again) => {
       await showsEverything(again, host, "the chat as this device last saw it")
-      assert.equal(again.catching(), false, "and it does not say it is catching up")
+      assert.equal(again.loading(), false, "and it does not say it is still loading")
       assert.equal(again.away(), false, "and draws nothing about the host being away")
       assert.equal(again.composer(), true, "the composer stays while the host is away")
 
@@ -40,8 +40,12 @@ test("a host that can't be reached is away, not unsupported: the device draws wh
       const asked = host.asked.runs
       await showsEverything(again, host, "the chat is still the one the device holds")
 
+      const read = host.offsets.length
       globalThis.fetch = answer
-      await eventually(() => assert.equal(again.catching(), false), "the host to be read again")
+      await eventually(
+        () => assert.ok(host.offsets.length > read),
+        "the host to be read again",
+      )
       assert.deepEqual(
         again.unsent().map((row) => row.text),
         ["still here"],

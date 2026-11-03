@@ -1,5 +1,12 @@
 # The status line wears a rotating word, and a thread still loading says so
 
+**Superseded in its "Catching up is the thread's, not the host's" clause by
+[ADR 0084](0084-a-thread-the-device-holds-opens-ready.md) (2026-11-03):** a thread the device holds
+opens ready, its host read a reconcile landing behind it, so no thread says "Catching up…" and the
+word retires with the state it named. Everything else here stands: thinking and writing are dressed
+in one word from a pool of their own, the literal words an activity is true of are not, and a Main
+still loading draws no greeting.
+
 **Amends [ADR 0064](0064-a-work-row-turns-a-spinner-and-wears-its-mark-again.md)** on one point: its
 status line is no longer the fixed "Thinking…" and "Writing…".
 

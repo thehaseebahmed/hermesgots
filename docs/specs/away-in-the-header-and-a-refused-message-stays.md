@@ -2,7 +2,8 @@
 
 Status: grilled 2026-10-30, every decision settled and recorded in
 [ADR 0071](adr/0071-away-is-the-headers-word-and-a-refused-message-stays-in-the-thread.md), which amends
-ADR 0066 on one point, with the glossary's **Away** entry written alongside and **Catching up** amended.
+ADR 0066 on one point, with the glossary's **Away** entry written alongside and **Catching up** amended
+— and since retired with the word itself (ADR 0084).
 Published as #701 with tickets #702 to #705; the build order at the end is the tickets' shape when
 implementation starts. #701 is blocked by the gate issue (#707) that the docs pull request carrying this
 file (#706) closes — work starts on that merge. The spec carries `ready-for-agent` and the tickets stay
@@ -13,6 +14,10 @@ periodic read no longer keeps its idle intervals while away. A host the header i
 at the fast pace, slowing as it keeps not answering, because that read is the only thing that takes the
 words back. That is the change this spec's Out of Scope ruled out under "any change to the periodic
 read's intervals"; nothing else there moves.
+
+Amended by [ADR 0084](adr/0084-a-thread-the-device-holds-opens-ready.md): there is no first read's
+"catching up" line for away to suppress, since a thread the device holds opens ready with its host read
+landing behind it. The header stays the away words' one place, and nothing else in this spec moves.
 
 ## Problem Statement
 
@@ -99,8 +104,8 @@ that has come back still works. The timeout is a named constant beside the away 
 setting.
 
 **The header's subtitle is the away words' place, and only while away.** The subtitle comes back the
-moment the state clears. Away still suppresses the first read's "catching up" line, as it does now: two
-lines about the same wait would say it twice.
+moment the state clears. The header is the one place a wait is said while the host is away: nothing in
+the thread says it too.
 
 **No away notice in the thread, in either view.** The app view and the plain dev view both stop drawing
 the away line, so a test reading the plain markup and a reader in the app see the same absence.
@@ -178,8 +183,8 @@ connection retry, because a read that lands is what clears the state and the tim
 
 - ADR: [0071](adr/0071-away-is-the-headers-word-and-a-refused-message-stays-in-the-thread.md), which
   amends ADR 0066's "an away host keeps its banner".
-- Glossary: **Away** is new and names the state with its two wordings; **Catching up** is amended to say
-  the chat's header rather than a banner.
+- Glossary: **Away** is new and names the state with its two wordings; **Catching up** is retired with
+  the word itself (ADR 0084).
 - The current screen's failed-send behaviour is the shape this adopts, so it is worth reading before
   building rather than inventing a second one.
 - The agent guide's line describing the new screen says the composer is withheld when the host is away,

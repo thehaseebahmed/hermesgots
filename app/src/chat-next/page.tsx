@@ -21,7 +21,7 @@ import { connectionKey } from "@/lib/connection"
 import { usePluginFeatureOn } from "@/lib/features"
 import { CHAT_IDLE_MS, CHAT_POLL_MS, READ_TIMEOUT_MS, SAFETY_MS } from "@/lib/freshness"
 import { onlineNow } from "@/lib/online"
-import { CATCHING_ACTIVITY } from "@/lib/format"
+import { LOADING_ACTIVITY } from "@/lib/format"
 import { NOT_SENT } from "@/lib/words"
 import { onSessionMoved, useLive } from "@/lib/live"
 import { knownLiveRun, useLiveRunId, useHostBusy } from "@/lib/waiting"
@@ -372,10 +372,11 @@ export interface ThreadViewProps {
   agents: Agent[]
   failure?: string
   /**
-   * The first read of the thread is still out and the host hasn't been found away: what is drawn is
-   * what the device holds, which may be nothing yet, and the view says it is on its way.
+   * The host has not answered this page's first read, and it has not been found away. What the
+   * device holds is drawn either way: a view shows a loader for it only over a thread it holds
+   * nothing of, so a thread it does hold opens ready (ADR 0084).
    */
-  catchingUp: boolean
+  firstReadOut: boolean
   /**
    * Older pages of the transcript are being read (`reading`) or the last read failed (`failed`, and
    * `retry` reads on from there); absent once the chat is whole, so nothing is drawn for it then.
@@ -449,7 +450,7 @@ function PlainView({
   cards,
   goals,
   failure,
-  catchingUp,
+  firstReadOut,
   older,
   origin,
   earlier,
@@ -460,12 +461,13 @@ function PlainView({
   waiting,
   composer,
 }: ThreadViewProps) {
+  const heldNothing = !turns.length && !cards.length
   return (
     <main className="mx-auto w-full max-w-3xl space-y-6 p-4">
       {failure !== undefined ? <p role="alert">{failure}</p> : null}
-      {catchingUp ? (
-        <p data-catching-up role="status" className="text-sm text-muted-foreground">
-          {CATCHING_ACTIVITY}
+      {firstReadOut && heldNothing ? (
+        <p data-loading-fresh role="status" className="text-sm text-muted-foreground">
+          {LOADING_ACTIVITY}
         </p>
       ) : null}
       {older ? (
@@ -1579,7 +1581,7 @@ export function ChatNextThread({
       // A refusal's reason is the chat's own error: said above the thread until the next send clears
       // it, never repeated under the row it kept (that row says "Not sent" alone, ADR 0071).
       failure={doing.error}
-      catchingUp={doing.status === "loading" && !away}
+      firstReadOut={doing.status === "loading" && !away}
       older={older === "idle" ? undefined : { state: older, retry }}
       origin={origin}
       earlier={

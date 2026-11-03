@@ -58,7 +58,9 @@ export const subagentCountLabel = (count: number) =>
 /** The two activity lines the status line dresses in a rotating word (`busy-words.ts`). */
 export const THINKING_ACTIVITY = "Thinking…"
 export const WRITING_ACTIVITY = "Writing…"
-export const CATCHING_ACTIVITY = "Catching up…"
+
+/** What a thread this device holds nothing of says while its first read is out (ADR 0084). */
+export const LOADING_ACTIVITY = "Loading the thread…"
 
 /** One line saying what the bot is doing right now. */
 export function describeActivity(message: Message) {

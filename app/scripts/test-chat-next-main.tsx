@@ -98,6 +98,18 @@ test("Main opens on chat-next under the bot's name, with its threads as cards in
   })
 })
 
+test("a Main this device holds only a card of opens as a thread, under no loader", async () => {
+  const { main, host } = await seedMain("main-held-card")
+  const read = host.offsets.length
+  const held = host.hold(0)
+  await mount(screen(main), async () => {
+    await until(() => host.offsets.length > read, "the newest page is asked for")
+    assert.ok(find('[data-slot="thread-card"]'), "the card this device holds is drawn")
+    assert.equal(find("[data-loading-fresh]"), null, "and no loader stands over it (ADR 0084)")
+    held.release()
+  })
+})
+
 test("a message the host sends to a thread leaves Main, and nothing is posted to Main", async () => {
   const { main, thread, host } = await seedMain("main-moved")
   host.triage.decision = "thread"

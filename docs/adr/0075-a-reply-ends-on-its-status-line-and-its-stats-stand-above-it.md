@@ -1,5 +1,10 @@
 # A reply ends on its status line, and its stats stand above it
 
+**Superseded in its catch-up example by [ADR 0084](0084-a-thread-the-device-holds-opens-ready.md)
+(2026-11-03):** a thread the device holds opens ready, so the count of subagents at work is never
+riding a catch-up line. Everything else here stands: a reply ends on its status line and its stats
+stand above it.
+
 **Amends [ADR 0070](0070-the-status-line-is-muted-and-the-count-is-the-only-blue.md)** on one point: the
 order its foot is drawn in, for a reply that has finished. Everything 0070 decided about what the line
 says, what colour it wears and where the count rides it stands.

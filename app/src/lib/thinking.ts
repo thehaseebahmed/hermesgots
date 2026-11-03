@@ -322,29 +322,19 @@ export function replyFacts(
 }
 
 /**
- * The thread's one live row, and what it says (ADR 0076): the catch-up line while the thread's
- * first read is out — it stands where a reply's line would (ADR 0066), so the count of subagents at
- * work is its only words, its loader turning in the blue — and otherwise the last reply's own line,
- * decided by the same rule a screen with no catch-up line uses (`statusLineOf`). Where the thread
- * has no reply to speak for, the count stands alone without a loader, its own row as it always was.
+ * The thread's one live row, and what it says (ADR 0076): the last reply's own line, decided by the
+ * rule a single reply uses (`statusLineOf`), and where the thread has no reply to speak for, the
+ * count of subagents at work alone without a loader, its own row as it always was.
  *
- * One rule for the row means one row: a thread never says the same moment twice, once as its own
- * line and once as the catch-up's.
+ * A thread the device holds is never this row's subject: no row of it says the thread is still
+ * being read (ADR 0084), so this one speaks only for the reply.
  */
 export function threadLineOf(input: {
-  /** Whether the catch-up line stands: the first read is out and the device holds rows. */
-  catching: boolean
-  /** The catch-up line's words, which `StatusLine` dresses from the catching pool. */
-  catchingText: string
   /** How many subagents the session has at work. */
   running: number
   /** The last reply's facts, where the thread has a reply that draws a line at all. */
   reply?: ReplyFacts
 }): FootLine | undefined {
-  if (input.catching)
-    return input.running > 0
-      ? { count: "alone", countLoader: true }
-      : { text: input.catchingText, count: "none", countLoader: false }
   if (input.reply)
     return statusLineOf({ ...input.reply, count: input.running, countShown: input.running > 0 })
   return input.running > 0 ? { count: "alone", countLoader: false } : undefined

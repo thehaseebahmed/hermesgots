@@ -1,5 +1,10 @@
 # The status line is muted, the thought row says its own word, and the count is the only blue
 
+**Superseded in its catch-up example by [ADR 0084](0084-a-thread-the-device-holds-opens-ready.md)
+(2026-11-03):** a thread the device holds opens ready, so no rotating "Catching up…" stands where a
+reply would work. Everything else here stands: the line is muted in every state, the count of
+subagents at work is the one blue, and the thought row says its own word.
+
 **Amends [ADR 0069](0069-one-working-look-and-one-chat-face.md) and
 [ADR 0066](0066-the-status-line-wears-a-rotating-word-and-a-loading-thread-says-so.md)**: 0066's
 accent on the line and its loader, its loaderless wait, and its count as a work row of its own; 0069's

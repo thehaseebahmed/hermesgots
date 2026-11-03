@@ -94,8 +94,8 @@ export async function openDevice(
     /** What the page says went wrong, in the words the plain view draws it in. */
     alert: () => one("[role=alert]")?.textContent ?? undefined,
     draft: () => (one("[data-composer]") as HTMLTextAreaElement | null)?.value ?? undefined,
-    /** Whether the thread says it is catching up, as the first read of it is still out. */
-    catching: () => Boolean(one("[data-catching-up]")),
+    /** Whether the thread draws its loader: only a thread this device holds nothing of does. */
+    loading: () => Boolean(one("[data-loading-fresh]")),
     /** Whether the thread draws anything about a host it can't reach: it must not (ADR 0071). */
     away: () => Boolean(one("[data-away]")),
     /**

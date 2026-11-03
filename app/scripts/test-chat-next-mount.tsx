@@ -517,37 +517,40 @@ test("a chat this device holds nothing of loads under one loader mid-screen, not
   const first = host.hold(0)
   await mount(chatScreen("c-fresh"), async () => {
     await until(() => Boolean(find("[data-loading-fresh]")), "the first read has the one loader")
-    assert.equal(find("[data-catching-up]"), null, "and no words say it is catching up")
+    assert.equal(
+      find('[data-slot="status-line"]'),
+      null,
+      "and no line of the thread speaks for it",
+    )
     first.release()
     await until(() => replies().length > 0, "the chat arrives")
     assert.equal(find("[data-loading-fresh]"), null, "the loader goes with the rows")
   })
 })
 
-test("a chat this device already holds is caught up in the status line's words, with no loader", async () => {
+test("a chat this device already holds opens as a thread, with the host's answer landing behind it", async () => {
   const { host } = await onChatNext("c-held")
-  host.seed([{ user: "Look around", reply: "Found it.", tools: 0 }])
+  const opener = { user: "Look around", reply: "Found it.", tools: 0 }
+  host.seed([opener])
   await mount(chatScreen("c-held"), async () => {
     await until(() => replies().length > 0, "the chat is held")
   })
+  // A turn the host wrote since this device last read it: the open's read is what brings it.
+  host.seed([{ user: "And again", reply: "Still here.", tools: 0 }])
+  const read = host.offsets.length
   const second = host.hold(0)
   await mount(chatScreen("c-held"), async () => {
-    // The thread's one live row is drawn either as a row of its own or in the foot of the last reply
-    // that carries it (ADR 0076), so it is read where both of those draw it: the status line's own
-    // slot, whose words come from the catching pool. A wrapper only one of the two homes has would
-    // pass or fail on which of them drew it rather than on what the thread says.
-    const catchingWords = () =>
-      findAll('[data-slot="status-line"] [data-slot=status-words]')
-        .map((one) => one.textContent ?? "")
-        .find((text) => BUSY_WORDS.catching.some((word) => text === `${word}…`)) ?? ""
-    await until(() => catchingWords() !== "", "the held thread says it is catching up")
-    assert.ok(
-      catchingWords(),
-      `in one of the catching words, not a fixed phrase: ${catchingWords()}`,
+    await until(() => host.offsets.length > read, "the newest page is asked for")
+    assert.ok(replies().includes("Found it."), "the thread is drawn before the host answers")
+    assert.equal(find("[data-loading-fresh]"), null, "no loader mid-screen")
+    assert.equal(
+      find('[data-slot="status-line"]'),
+      null,
+      "and no line says the thread is still being read",
     )
-    assert.equal(find("[data-loading-fresh]"), null, "and no loader mid-screen")
-    assert.ok(replies().length > 0, "over the rows it already holds")
     second.release()
+    await until(() => replies().includes("Still here."), "the host's turn to land behind it")
+    assert.ok(replies().includes("Found it."), "over the rows the device already had")
   })
 })
 

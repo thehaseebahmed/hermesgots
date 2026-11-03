@@ -46,7 +46,7 @@ import { compactionMarks } from "@/lib/compactions"
 import { db, type ApprovalChoice, type Message } from "@/lib/db"
 import type { DelegatedAgent } from "@/lib/hermes"
 import { usePluginFeatureOn } from "@/lib/features"
-import { CATCHING_ACTIVITY, describeActivity } from "@/lib/format"
+import { describeActivity } from "@/lib/format"
 import { COLUMN_BOX, REPLY_INSET } from "@/lib/layout"
 import { modelChanges } from "@/lib/model-changes"
 import { useDraws } from "@/lib/openui-draws"
@@ -98,7 +98,7 @@ export function AppThreadView({
   streaming,
   agents,
   failure,
-  catchingUp,
+  firstReadOut,
   older,
   origin,
   earlier,
@@ -212,29 +212,24 @@ export function AppThreadView({
   })
   const { drawn, cut } = useFirstRows(chatId, flow, flow.length > 0)
   // A Main still being read is not an empty one: its greeting would say there is nothing here.
-  const empty = Boolean(main) && !flow.length && !streaming && !catchingUp
+  const empty = Boolean(main) && !flow.length && !streaming && !firstReadOut
   const unstarted = Boolean(blank) && !messages.length && !streaming && !queue?.items.length
-  // A thread this device holds nothing of has nothing to say "catching up" under: its first read
-  // is one loader in the middle of the pane, and only a thread already held says it in words.
-  const loadingFresh = catchingUp && !messages.length && !streaming && !unstarted
+  // The one loader a thread has, over a thread held nowhere (ADR 0084). `flow` is what the thread
+  // draws — messages, cards, markers — so a thread the device holds of any of them is never loading.
+  const loadingFresh = firstReadOut && !flow.length && !streaming && !unstarted
   const running = runningAgents(source.agents).length
   const last = messages.at(-1)
   const lastId = last?.id
-  // The thread's one line while its first read is out: the catch-up line stands where a reply's
-  // line would, so it takes the count of subagents at work rather than joining it (ADR 0066).
-  const catching = catchingUp && messages.length > 0
   // The thread decides its one live row (ADR 0076): the last reply draws it in its own foot where
   // that reply draws a line at all, and everywhere else the thread draws it, once.
   const holds = Boolean(last && carriesCount(last))
   const line = useMemo(
     () =>
       threadLineOf({
-        catching,
-        catchingText: CATCHING_ACTIVITY,
         running,
         ...(holds && last ? { reply: replyFacts(last, describeActivity(last)) } : {}),
       }),
-    [catching, running, holds, last],
+    [running, holds, last],
   )
   // Stable, so a reply's own memo holds: a fresh callback would redraw every row on every token.
   const showSubagents = useCallback(() => setSheet(true), [])
@@ -338,7 +333,7 @@ export function AppThreadView({
                       )
                     })}
                     {!holds && line && (
-                      <div className={COLUMN_BOX} {...(catching ? { "data-catching-up": "" } : {})}>
+                      <div className={COLUMN_BOX}>
                         <LineRow line={line} count={running} onOpen={showSubagents} seed={chatId} />
                       </div>
                     )}
