@@ -2,8 +2,8 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { db } from "@/lib/db"
-import { getSpeech, probeSpeech, rememberSpeech, setSpeech } from "@/lib/host-speech"
-import { botProfile } from "./component-kit.tsx"
+import { cachedSpeech, getSpeech, probeSpeech, setSpeech } from "@/lib/host-speech"
+import { connectionKey } from "@/lib/connection"
 
 const config = { baseUrl: "http://host.test:8642/v1", apiKey: "key" }
 
@@ -88,19 +88,35 @@ test("a probe the host refuses rejects in the host's own words", async () => {
   await assert.rejects(probeSpeech(config), /hearing a take right now/)
 })
 
-test("a read keeps the model on the bot without moving the bot's clock", async () => {
-  await db.profiles.clear()
-  const profile = botProfile("clock")
-  await db.profiles.put({ ...profile, updatedAt: 1000 })
+test("a read keeps the host's whole answer on this device, keyed by the connection it came from", async () => {
+  await db.speechCache.clear()
+  host({ speech: answer })
+  await getSpeech(config)
 
-  await rememberSpeech(profile.id, "small")
+  const kept = await db.speechCache.get(connectionKey(config))
+  assert.equal(kept?.speech.model, "small", "the answer a page opens on before its own read lands")
+  assert.equal(
+    kept?.speech.models[0]?.inUse,
+    true,
+    "the model list and everything else the page draws, not the name alone",
+  )
+  assert.equal(
+    await cachedSpeech(connectionKey(config)).then((one) => one?.model),
+    "small",
+    "and one reader answers it",
+  )
 
-  const kept = await db.profiles.get(profile.id)
-  assert.equal(kept?.speechModel, "small", "the next screen draws what the host last reported")
-  // The bot's own clock is what decides which device's copy wins, and a read is no claim on it: it
-  // would otherwise let a screen that was merely opened beat a rename made on another device.
-  assert.equal(kept?.updatedAt, 1000, "and the bot's own clock is where the user left it")
+  // A write is an answer too: the host states the block it now holds, and the device keeps it.
+  host({ speech: { ...answer, model: "base" } })
+  await setSpeech(config, { model: "base" })
+  assert.equal(
+    (await cachedSpeech(connectionKey(config)))?.model,
+    "base",
+    "a successful write replaces the copy",
+  )
 
-  await rememberSpeech(profile.id, "small")
-  assert.equal((await db.profiles.get(profile.id))?.updatedAt, 1000, "nor on a second read")
+  // A failed read keeps what was there: the page draws the older answer rather than nothing.
+  host({ error: { message: "No speech here." } }, 500)
+  await assert.rejects(getSpeech(config))
+  assert.equal((await cachedSpeech(connectionKey(config)))?.model, "base", "a failed read keeps it")
 })

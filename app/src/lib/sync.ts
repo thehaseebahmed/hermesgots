@@ -79,7 +79,6 @@ const LOCAL_BOT_FIELDS = [
   "contextWindow",
   "contextModel",
   "imageInput",
-  "speechModel",
 ] as const
 type BotValue = Omit<Profile, "id" | "updatedAt" | (typeof LOCAL_BOT_FIELDS)[number]>
 const CHAT_FIELDS = [

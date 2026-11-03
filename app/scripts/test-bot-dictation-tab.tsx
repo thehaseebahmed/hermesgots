@@ -29,6 +29,10 @@ import {
   add,
   draft,
   seed,
+  seedCache,
+  loading,
+  off,
+  STT,
   switchIn,
 } from "./dictation-page-kit.tsx"
 import { click, find, findAll, mount, text, type, until } from "./component-kit.tsx"
@@ -698,5 +702,96 @@ test("a host hearing takes on its own model draws no line about it", async () =>
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
     await until(async () => Boolean(row("speech-model")), "the model row the page always draws")
     assert.equal(row("heard-by"), null, "the model row already says where takes are heard")
+  })
+})
+
+test("the page opens on the last answer this device read, every row muted until a fresh one lands", async () => {
+  const calls = await seed(
+    "cached-page",
+    ["dictation", "speech_model", "stt_settings", "cleanup_level"],
+    {},
+    { speech: speech({ stt: STT() }), stallSpeech: true },
+  )
+  await seedCache({ model: "base", stt: STT() })
+  await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    await until(async () => Boolean(row("speech-model")), "the rows the cached copy holds")
+    assert.equal(loading(), null, "rows rather than a loader")
+    assert.equal(valueOf(row("speech-model")), "base", "the model this device last read")
+    assert.equal(valueColour(row("speech-model")), "muted", "drawn muted: no fresh read confirms it")
+    for (const name of ["speech-model", "cleanup-level", "cleanup-model"])
+      assert.equal(off(row(name)), true, `${name} takes no taps until the host answers`)
+    await click(row("cleanup-level"))
+    assert.equal(findAll("[data-cleanup-levels]").length, 0, "so a tap on it opens nothing")
+    assert.deepEqual(calls, [], "and nothing is written from a value that may be stale")
+  })
+})
+
+test("a fresh answer replaces the cached copy and unlocks the page", async () => {
+  await seed(
+    "cached-fresh",
+    ["dictation", "speech_model", "stt_settings", "cleanup_level"],
+    {},
+    { speech: speech({ model: "small", stt: STT() }) },
+  )
+  await seedCache({ model: "base", stt: STT() })
+  await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    await until(async () => valueOf(row("speech-model")) === "small", "the fresh answer")
+    assert.equal(off(row("speech-model")), false, "the row takes taps again")
+    assert.equal(valueColour(row("speech-model")), "accent", "and reads as the value it holds")
+    await click(row("cleanup-level"))
+    await until(async () => Boolean(find("[data-cleanup-levels]")), "the level's own cards")
+  })
+})
+
+test("a bot this device never read shows a loader in place of its rows", async () => {
+  await seed(
+    "cold-page",
+    ["dictation", "speech_model", "stt_settings", "cleanup_level"],
+    {},
+    { speech: speech({ stt: STT() }), stallSpeech: true },
+  )
+  await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    assert.ok(loading(), "a page-level loader")
+    assert.equal(row("speech-model"), null, "and no rows to read as an answer")
+    assert.equal(row("cleanup-level"), null, "none of them")
+  })
+})
+
+test("a failed read leaves the cached copy muted, under the host's own sentence", async () => {
+  await seed(
+    "cached-failed",
+    ["dictation", "speech_model", "stt_settings"],
+    {},
+    { refuseSpeech: "Speech-to-text is turned off on this host." },
+  )
+  await seedCache({ model: "base", stt: STT() })
+  await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    await until(async () => Boolean(find('[role="alert"]')), "the host's own sentence")
+    assert.match(
+      find('[role="alert"]')?.textContent ?? "",
+      /turned off on this host/,
+      "the reason the copy may be old",
+    )
+    assert.equal(valueOf(row("speech-model")), "base", "the cached answer stays under it")
+    assert.equal(off(row("speech-model")), true, "muted, not trusted")
+  })
+})
+
+test("a muted page starts no measurement", async () => {
+  const calls = await seed(
+    "cached-probe",
+    ["dictation", "speech_model", "speech_probe"],
+    {},
+    { speech: unmeasured(), stallSpeech: true },
+  )
+  await seedCache({ probe: unmeasured().probe })
+  await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    await until(async () => Boolean(row("speech-model")), "the cached rows")
+    await click(row("speech-model"))
+    assert.equal(
+      calls.filter((call) => call.path.endsWith("/speech/probe")).length,
+      0,
+      "a stale block puts the host to no work",
+    )
   })
 })

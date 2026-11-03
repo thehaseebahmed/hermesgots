@@ -20,7 +20,9 @@ import { MemoryRouter, Navigate, Route, Routes, useLocation, useParams } from "r
 import { BotSettingsList, BotSettingsPage } from "@/components/bot-settings"
 import { botSubOf } from "@/lib/bot-subs"
 import { botTabOf, botTabPath } from "@/lib/bot-tabs"
+import { connectionKey } from "@/lib/connection"
 import { db } from "@/lib/db"
+import { readSpeech } from "@/lib/speech"
 import { botProfile, click, find, findAll, json, seedSettings, until } from "./component-kit.tsx"
 
 export const speech = (patch: Record<string, unknown> = {}) => ({
@@ -171,6 +173,10 @@ export function host(
     refuseProbe?: string
     /** The probe never reached the host at all: a request a phone's dead connection drops. */
     failProbe?: boolean
+    /** The speech read never lands: a host still answering, or a phone with no signal at all. */
+    stallSpeech?: boolean
+    /** The host's own sentence for a speech read it refuses. */
+    refuseSpeech?: string
     refuse?: string
     writers?: { model: boolean; provider: boolean }
     /** The bot's models, as the cleanup pick's own picker reads them. */
@@ -212,6 +218,8 @@ export function host(
         if (options.refuse) return json({ error: { message: options.refuse } }, 400)
         return json({ speech: options.next ?? options.speech })
       }
+      if (options.stallSpeech) return new Promise<Response>(() => {})
+      if (options.refuseSpeech) return json({ error: { message: options.refuseSpeech } }, 500)
       if (!options.speech) return json({}, 404)
       return json({ speech: options.speech })
     }
@@ -359,8 +367,30 @@ export async function seed(
 ) {
   await seedSettings()
   await db.profiles.clear()
+  await db.speechCache.clear()
   await db.profiles.put(botProfile(name, patch))
   const server = host(features, options)
   globalThis.fetch = server.fetch
   return server.calls
 }
+
+/**
+ * The answer this device already read for the seeded bot, written where the page looks for it: what
+ * a phone that opened this page five minutes ago opens on again (ADR 0082).
+ */
+export async function seedCache(patch: Record<string, unknown> = {}) {
+  const profile = await db.profiles.get("bot-1")
+  if (!profile) return
+  await db.speechCache.put({
+    key: connectionKey(profile),
+    at: 0,
+    speech: readSpeech(speech(patch)),
+  })
+}
+
+/** The page-level loader, drawn where this device never read a bot's speech settings. */
+export const loading = () => find("[data-speech-loading]")
+
+/** Whether a row takes no taps: a row with a control of its own, or one standing on a cached answer. */
+export const off = (element: Element | null) =>
+  element?.hasAttribute("disabled") === true || element?.getAttribute("aria-disabled") === "true"

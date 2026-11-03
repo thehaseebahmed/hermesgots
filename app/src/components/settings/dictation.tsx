@@ -36,7 +36,7 @@ import {
 } from "@/lib/dictations"
 import { formatDuration } from "@/lib/format"
 import { levelName, namedLevel } from "@/lib/speech"
-import { useSpeech, type SpeechCheck } from "@/lib/host-speech"
+import { READ_FAILED, useSpeech, type SpeechCheck } from "@/lib/host-speech"
 import { cn } from "@/lib/utils"
 
 /** The rows the History tab draws before the reader reaches the end of them. */
@@ -348,6 +348,7 @@ function BotsTab({ profiles }: { profiles: Profile[] }) {
 /**
  * What a bot's host is doing about speech: the host's own sentence where it can't dictate, else the
  * model it last reported, "Checking…" until it reports one, and a word where the read itself failed.
+ * The model is the last answer this device read, kept until a fresh one confirms it (ADR 0082).
  */
 function speechLine({
   model,
@@ -360,7 +361,7 @@ function speechLine({
 }) {
   if (reason) return reason
   if (model) return `On · ${model}`
-  if (check === "failed") return "Couldn't read this bot's host."
+  if (check === "failed") return READ_FAILED
   if (check === "checking") return "Checking…"
   return "Off"
 }

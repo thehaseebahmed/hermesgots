@@ -76,7 +76,7 @@ type Bot = {
   dictation?: { ready: boolean; reason: string | null }
   /** The speech model its host reports, read by the bots tab's own refresh. */
   model?: string
-  /** The model already on the bot, as an earlier read left it. */
+  /** The speech answer this device already holds for the bot, drawn before the read lands. */
   known?: string
   /** A host that never answers, so the row is caught mid-read. */
   stalls?: boolean
@@ -166,14 +166,26 @@ async function seed(bots: Bot[]) {
   await db.profiles.clear()
   await db.dictationLog.clear()
   await db.dictationStats.clear()
+  await db.speechCache.clear()
   for (const bot of bots) {
     const profile = botProfile(bot.name, {
       id: bot.name,
       name: bot.label ?? bot.name,
-      speechModel: bot.known,
       apiKey,
     })
     await db.profiles.put(profile)
+    // The last answer this device read, where a case starts from a bot it has opened before.
+    if (bot.known)
+      await db.speechCache.put({
+        key: connectionKey(profile),
+        at: 0,
+        speech: {
+          model: bot.known,
+          models: [],
+          cleanup: { model: null, allowed: false, reason: null, level: "light" },
+          hearing: { sent: false },
+        },
+      })
     for (const row of bot.rows ?? [])
       await db.dictationLog.put({
         ...row,
@@ -673,12 +685,36 @@ test("a bot whose speech read failed says so, not nothing", async () => {
   })
 })
 
-test("opening the Bots tab fills the model its host reports onto the bot", async () => {
+test("the model a host reports is kept on this device for the next open", async () => {
   await seed([{ name: "a", label: "Aria", features: ["dictation", "dictations"], model: "base.en" }])
   await mount(screen(), async () => {
     await openTab("Bots")
-    await until(async () => (await db.profiles.get("a"))?.speechModel === "base.en", "the model kept")
+    const profile = await db.profiles.get("a")
+    assert.ok(profile)
+    await until(
+      async () => (await db.speechCache.get(connectionKey(profile)))?.speech.model === "base.en",
+      "the answer kept per connection",
+    )
     await until(async () => /On · base\.en/.test(botRow("a")?.textContent ?? ""), "the row's line")
+  })
+})
+
+test("a bot whose host is away still names the model this device last read", async () => {
+  await seed([
+    {
+      name: "a",
+      label: "Aria",
+      features: ["dictation", "dictations"],
+      known: "base.en",
+      fails: true,
+    },
+  ])
+  await mount(screen(), async () => {
+    await openTab("Bots")
+    await until(
+      async () => /On · base\.en/.test(botRow("a")?.textContent ?? ""),
+      "the cached model, not the failure",
+    )
   })
 })
 

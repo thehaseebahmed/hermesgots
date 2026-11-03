@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { botSubPath, type BotSub } from "@/lib/bot-subs"
 import { botTabPath } from "@/lib/bot-tabs"
@@ -64,11 +65,19 @@ import { MAX_WORD, addWord, cleanWord, readVocabulary, removeWord } from "@/lib/
  * take, both Gots's own, over the bot's own Hermes — the model that hears it, and every setting
  * that decides what a take returns, mirrored from the Dashboard's form one key at a time
  * (ADR 0063). Every row is a value that opens its pick, its form or its page (ADR 0055).
+ *
+ * The page opens on the last answer this device read, every row of it muted and untappable until a
+ * fresh one lands, and a loader where it never read one (ADR 0082).
  */
 export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub }) {
   const speech = useSpeech(profile)
   const settings = speech.supported ? speech.settings : undefined
   const block = speech.stt ? settings?.stt : undefined
+  // Nothing fresh has landed: what the page holds is this device's copy of an older answer, so
+  // nothing here may be written from it.
+  const muted = speech.stale
+  // A bot this device never read shows a loader in place of the rows rather than a page of blanks.
+  const loading = speech.supported && !settings && speech.check !== "failed"
   const navigate = useNavigate()
   const words = readVocabulary(profile.vocabulary)
   const info = useModelInfo(profile)
@@ -79,8 +88,9 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
   const models = settings ? modelsFor(settings, block) : []
   const otherProviders = block ? providerRows(block) : []
   const heard = settings ? heardLine(settings.provider) : null
-  // The picker is where a measurement is asked for (ADR 0075).
+  // The picker is where a measurement is asked for (ADR 0075), and a muted page asks for none.
   const openSpeech = () => {
+    if (muted) return
     setPick("speech")
     void speech.measure()
   }
@@ -96,6 +106,7 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
         block={block}
         speech={speech}
         name={sub.item}
+        muted={muted}
         back={botTabPath(profile.id, "speech-to-text")}
       />
     )
@@ -103,155 +114,168 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
 
   return (
     <div className="flex flex-col gap-4" data-bot-dictation>
-      {/* One notice for every write: the host's own sentence, at the page's head. */}
+      {/* One notice for every write, and the host's own sentence where a read failed: the cached
+          copy under it may be older than it looks. */}
       {speech.problem && (
         <Banner tone="error">
           <span role="alert">{speech.problem}</span>
         </Banner>
       )}
 
-      {/* A host that carries only the model draws the page it always had — no captions to name
-          groups it doesn't have, the two Gots rows marked where they sit. */}
-      {!block && (
-        <Group>
-          <SpeechModelRow
-            model={settings?.model ?? ""}
-            disabled={!settings || !models.length}
-            onClick={openSpeech}
-          />
-          <VocabularyRow profile={profile} words={words} />
-        </Group>
-      )}
-
-      {/* Every setting the host carries, in cards named for what they are about (ADR 0063). */}
-      {settings && block && (
-        <SpeechGroups
-          block={block}
-          settings={settings}
-          models={models}
-          saving={speech.saving}
-          onWrite={speech.writeStt}
-          onOpen={setOpen}
-          onPick={(pick) => (pick === "speech" ? openSpeech() : setPick(pick))}
-          profile={profile}
-          words={words}
-        />
-      )}
-
-      {/* Where a take goes, where it isn't heard on this host (ADR 0069). */}
-      {settings && heard && (
-        <Group>
-          <ValueRow
-            title="Heard by"
-            purpose={heard}
-            value={providerLabel(settings.provider?.name ?? "")}
-            muted
-            data-setting="heard-by"
-          />
-        </Group>
-      )}
-
-      {block && otherProviders.length > 0 && (
-        <Card id="providers" title="Providers">
-          <Group>
-            {otherProviders.map((row) => (
-              <ValueRow
-                key={row.name}
-                title={row.label}
-                purpose={row.model || undefined}
-                value={providerNote(row) ?? undefined}
-                muted={!row.inUse}
-                onClick={() =>
-                  navigate(botSubPath(profile.id, "speech-to-text", "providers", row.name))
-                }
-                data-setting={`providers-${row.name}`}
+      {loading ? (
+        <div className="flex items-center justify-center py-16" data-speech-loading>
+          <Spinner className="size-6 text-primary" />
+        </div>
+      ) : (
+        <>
+          {/* A host that carries only the model draws the page it always had — no captions to name
+              groups it doesn't have, the two Gots rows marked where they sit. */}
+          {!block && (
+            <Group>
+              <SpeechModelRow
+                model={settings?.model ?? ""}
+                muted={muted}
+                disabled={!settings || !models.length || muted}
+                onClick={openSpeech}
               />
-            ))}
-          </Group>
-        </Card>
-      )}
+              <VocabularyRow profile={profile} words={words} />
+            </Group>
+          )}
 
-      {/* The cleanup's own card after the host's: its model, and — where the plugin takes them — the
-          level a take is tidied at and, for a Developer, the Hearing prompt of its decode. */}
-      {settings && (
-        <CleanupSection
-          settings={settings}
-          saving={speech.saving}
-          levels={speech.levels}
-          hearing={speech.hearing}
-          developer={Boolean(developer)}
-          onLevel={() => setPick("level")}
-          onHearing={(sent) => (speech.saving ? undefined : void speech.setHearing(sent))}
-          onPick={() => setPick("cleanup")}
-        />
-      )}
+          {/* Every setting the host carries, in cards named for what they are about (ADR 0063). */}
+          {settings && block && (
+            <SpeechGroups
+              block={block}
+              settings={settings}
+              models={models}
+              saving={speech.saving}
+              muted={muted}
+              onWrite={speech.writeStt}
+              onOpen={setOpen}
+              onPick={(pick) => (pick === "speech" ? openSpeech() : setPick(pick))}
+              profile={profile}
+              words={words}
+            />
+          )}
 
-      {block && (
-        <SettingSurface
-          block={block}
-          row={open}
-          saving={speech.saving}
-          onWrite={speech.writeStt}
-          onClose={() => setOpen(undefined)}
-        />
-      )}
+          {/* Where a take goes, where it isn't heard on this host (ADR 0069). */}
+          {settings && heard && (
+            <Group>
+              <ValueRow
+                title="Heard by"
+                purpose={heard}
+                value={providerLabel(settings.provider?.name ?? "")}
+                muted
+                data-setting="heard-by"
+              />
+            </Group>
+          )}
 
-      {settings && (
-        <PickSurface
-          open={pick === "speech"}
-          onOpenChange={(open) => !open && setPick(undefined)}
-          title="Speech model"
-        >
-          <PickList
-            label="Speech models"
-            searchable={false}
-            selected={settings.model}
-            options={modelsFor(settings, block).map((row) => ({
-              id: row.name,
-              label: row.name,
-              badge: row.recommended ? "Recommended" : undefined,
-              detail: modelNotes(row),
-            }))}
-            onPick={(name) => {
-              if (name !== settings.model) void speech.choose(name)
-              setPick(undefined)
-            }}
-          />
-          <ProbeNote
-            probe={settings.probe}
-            measuring={speech.measuring}
-            problem={speech.measureProblem}
-          />
-        </PickSurface>
-      )}
+          {block && otherProviders.length > 0 && (
+            <Card id="providers" title="Providers">
+              <Group>
+                {otherProviders.map((row) => (
+                  <ValueRow
+                    key={row.name}
+                    title={row.label}
+                    purpose={row.model || undefined}
+                    value={providerNote(row) ?? undefined}
+                    muted={!row.inUse}
+                    disabled={muted}
+                    onClick={() =>
+                      navigate(botSubPath(profile.id, "speech-to-text", "providers", row.name))
+                    }
+                    data-setting={`providers-${row.name}`}
+                  />
+                ))}
+              </Group>
+            </Card>
+          )}
 
-      {settings && (
-        <PickSurface
-          open={pick === "level"}
-          onOpenChange={(open) => !open && setPick(undefined)}
-          title="Cleanup level"
-        >
-          <LevelPick
-            level={settings.cleanup.level}
-            saving={speech.saving}
-            onPick={(level) => {
-              if (!speech.saving) void speech.chooseLevel(level)
-              setPick(undefined)
-            }}
-          />
-        </PickSurface>
-      )}
+          {/* The cleanup's own card after the host's: its model, and — where the plugin takes them —
+              the level a take is tidied at and, for a Developer, the Hearing prompt of its decode. */}
+          {settings && (
+            <CleanupSection
+              settings={settings}
+              saving={speech.saving}
+              muted={muted}
+              levels={speech.levels}
+              hearing={speech.hearing}
+              developer={Boolean(developer)}
+              onLevel={() => setPick("level")}
+              onHearing={(sent) => (speech.saving ? undefined : void speech.setHearing(sent))}
+              onPick={() => setPick("cleanup")}
+            />
+          )}
 
-      {settings && (
-        <ModelPick
-          open={pick === "cleanup"}
-          title="Cleanup model"
-          profile={profile}
-          choice={settings.cleanup.model ?? undefined}
-          fallback={{ label: "Default", model: own?.model }}
-          onPick={(next) => (speech.saving ? undefined : void speech.chooseCleanup(next ?? null))}
-          onClose={() => setPick(undefined)}
-        />
+          {block && (
+            <SettingSurface
+              block={block}
+              row={open}
+              saving={speech.saving}
+              onWrite={speech.writeStt}
+              onClose={() => setOpen(undefined)}
+            />
+          )}
+
+          {settings && (
+            <PickSurface
+              open={pick === "speech"}
+              onOpenChange={(open) => !open && setPick(undefined)}
+              title="Speech model"
+            >
+              <PickList
+                label="Speech models"
+                searchable={false}
+                selected={settings.model}
+                options={modelsFor(settings, block).map((row) => ({
+                  id: row.name,
+                  label: row.name,
+                  badge: row.recommended ? "Recommended" : undefined,
+                  detail: modelNotes(row),
+                }))}
+                onPick={(name) => {
+                  if (name !== settings.model) void speech.choose(name)
+                  setPick(undefined)
+                }}
+              />
+              <ProbeNote
+                probe={settings.probe}
+                measuring={speech.measuring}
+                problem={speech.measureProblem}
+              />
+            </PickSurface>
+          )}
+
+          {settings && (
+            <PickSurface
+              open={pick === "level"}
+              onOpenChange={(open) => !open && setPick(undefined)}
+              title="Cleanup level"
+            >
+              <LevelPick
+                level={settings.cleanup.level}
+                saving={speech.saving}
+                onPick={(level) => {
+                  if (!speech.saving) void speech.chooseLevel(level)
+                  setPick(undefined)
+                }}
+              />
+            </PickSurface>
+          )}
+
+          {settings && (
+            <ModelPick
+              open={pick === "cleanup"}
+              title="Cleanup model"
+              profile={profile}
+              choice={settings.cleanup.model ?? undefined}
+              fallback={{ label: "Default", model: own?.model }}
+              onPick={(next) => (speech.saving ? undefined : void speech.chooseCleanup(next ?? null))}
+              onClose={() => setPick(undefined)}
+            />
+          )}
+        </>
       )}
     </div>
   )
@@ -263,6 +287,8 @@ type CardProps = {
   settings: SpeechSettings
   models: SpeechModel[]
   saving: boolean
+  /** The page holds this device's cached answer: its rows take no taps until a fresh one lands. */
+  muted: boolean
   onWrite: (key: string, value: SttValue) => Promise<boolean>
   onOpen: (row: SttSetting) => void
   onPick: (pick: "speech" | "cleanup") => void
@@ -308,7 +334,7 @@ function GroupRows({
   rows,
   ...props
 }: CardProps & { group: SttGroup; rows: readonly SttSetting[] }) {
-  const { block, settings, models, saving, onWrite, onOpen, onPick, profile, words } = props
+  const { block, settings, models, saving, muted, onWrite, onOpen, onPick, profile, words } = props
   // Vocabulary goes where the prompt it is appended after sits, and nowhere else.
   const after = rows.findIndex((row) => row.key === "stt.local.initial_prompt") + 1
   const cut = group === "local" && after > 0 ? after : rows.length
@@ -317,17 +343,26 @@ function GroupRows({
       <SpeechModelRow
         key={one.key}
         model={settings.model}
-        disabled={!models.length}
+        muted={muted}
+        disabled={!models.length || muted}
         onClick={() => onPick("speech")}
       />
     ) : one.key === "stt.provider" ? (
-      <ProviderRow key={one.key} row={one} block={block} saving={saving} onOpen={onOpen} />
+      <ProviderRow
+        key={one.key}
+        row={one}
+        block={block}
+        saving={saving}
+        muted={muted}
+        onOpen={onOpen}
+      />
     ) : (
       <HostRow
         key={one.key}
         row={one}
         block={block}
         saving={saving}
+        muted={muted}
         onWrite={onWrite}
         onOpen={onOpen}
       />
@@ -346,11 +381,13 @@ function ProviderRow({
   row,
   block,
   saving,
+  muted,
   onOpen,
 }: {
   row: SttSetting
   block: SttSettings
   saving: boolean
+  muted: boolean
   onOpen: (row: SttSetting) => void
 }) {
   const line = providerLine(block)
@@ -359,8 +396,9 @@ function ProviderRow({
       title={row.label}
       purpose={line.note ?? row.purpose}
       value={line.value}
-      muted={line.muted}
+      muted={line.muted || muted}
       busy={saving}
+      disabled={muted}
       onClick={() => onOpen(row)}
       data-setting={row.key}
     />
@@ -375,12 +413,14 @@ function HostRow({
   row,
   block,
   saving,
+  muted,
   onWrite,
   onOpen,
 }: {
   row: SttSetting
   block: SttSettings
   saving: boolean
+  muted: boolean
   onWrite: (key: string, value: SttValue) => Promise<boolean>
   onOpen: (row: SttSetting) => void
 }) {
@@ -389,7 +429,7 @@ function HostRow({
       id={`stt-${row.key}`}
       title={row.label}
       checked={rowOn(block, row.key)}
-      disabled={saving}
+      disabled={saving || muted}
       onCheckedChange={(next) => void onWrite(row.key, next)}
       data-setting={row.key}
     />
@@ -398,8 +438,9 @@ function HostRow({
       title={row.label}
       purpose={row.purpose}
       value={rowValue(block, row.key)}
-      muted={!explicitly(block, row.key)}
+      muted={!explicitly(block, row.key) || muted}
       busy={saving}
+      disabled={muted}
       onClick={() => onOpen(row)}
       data-setting={row.key}
     />
@@ -414,6 +455,7 @@ function SettingRows({
   rows,
   block,
   saving,
+  muted,
   onWrite,
   open,
   setOpen,
@@ -421,6 +463,7 @@ function SettingRows({
   rows: readonly SttSetting[]
   block: SttSettings
   saving: boolean
+  muted: boolean
   onWrite: (key: string, value: SttValue) => Promise<boolean>
   open: SttSetting | undefined
   setOpen: (row: SttSetting | undefined) => void
@@ -433,6 +476,7 @@ function SettingRows({
           row={row}
           block={block}
           saving={saving}
+          muted={muted}
           onWrite={onWrite}
           onOpen={setOpen}
         />
@@ -451,10 +495,12 @@ function SettingRows({
 /** The speech model's own row: the model the host has in play, opening the models it offers. */
 function SpeechModelRow({
   model,
+  muted,
   disabled,
   onClick,
 }: {
   model: string
+  muted: boolean
   disabled: boolean
   onClick: () => void
 }) {
@@ -463,6 +509,7 @@ function SpeechModelRow({
       title="Speech model"
       purpose="The model that hears this bot's speech-to-text"
       value={model}
+      muted={muted}
       disabled={disabled}
       onClick={onClick}
       data-setting="speech-model"
@@ -662,11 +709,13 @@ function ProviderPage({
   block,
   speech,
   name,
+  muted,
   back,
 }: {
   block: SttSettings | undefined
   speech: ReturnType<typeof useSpeech>
   name: string
+  muted: boolean
   back: string
 }) {
   const navigate = useNavigate()
@@ -683,6 +732,7 @@ function ProviderPage({
             rows={rows}
             block={block}
             saving={speech.saving}
+            muted={muted}
             onWrite={speech.writeStt}
             open={open}
             setOpen={setOpen}
@@ -731,11 +781,13 @@ function CleanupRow({
   tag,
   settings,
   saving,
+  muted,
   onClick,
 }: {
   tag?: string
   settings: SpeechSettings | undefined
   saving: boolean
+  muted: boolean
   onClick: () => void
 }) {
   const pick = settings?.cleanup.model
@@ -758,7 +810,8 @@ function CleanupRow({
       tag={tag}
       purpose="The model that tidies a take's finished words"
       value={pick ? fullModel(pick) : "Default"}
-      disabled={saving}
+      muted={muted}
+      disabled={saving || muted}
       onClick={onClick}
       data-setting="cleanup-model"
     />
@@ -769,6 +822,7 @@ function CleanupRow({
 function CleanupSection({
   settings,
   saving,
+  muted,
   levels,
   hearing,
   developer,
@@ -778,6 +832,7 @@ function CleanupSection({
 }: {
   settings: SpeechSettings
   saving: boolean
+  muted: boolean
   levels: boolean
   hearing: boolean
   developer: boolean
@@ -794,19 +849,26 @@ function CleanupSection({
             tag="Gots"
             purpose="How much the tidying changes in a take"
             value={levelName(settings.cleanup.level)}
-            disabled={saving}
+            muted={muted}
+            disabled={saving || muted}
             onClick={onLevel}
             data-setting="cleanup-level"
           />
         )}
-        <CleanupRow tag="Gots" settings={settings} saving={saving} onClick={onPick} />
+        <CleanupRow
+          tag="Gots"
+          settings={settings}
+          saving={saving}
+          muted={muted}
+          onClick={onPick}
+        />
         {hearing && developer && (
           <SwitchRow
             id="stt-hearing-prompt"
             title="Hearing prompt"
             subtitle="Whether the speech model is told this bot's names before it listens"
             checked={settings.hearing.sent}
-            disabled={saving}
+            disabled={saving || muted}
             onCheckedChange={onHearing}
             data-setting="hearing-prompt"
           />
