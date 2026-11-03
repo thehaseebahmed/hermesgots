@@ -215,13 +215,13 @@ test("a Main left with nothing but what left it draws them in one timeline here 
       () =>
         Boolean(
           find('[data-slot="moved-marker"]') &&
-          find('[role="separator"]') &&
+          find('[data-slot="compaction"]') &&
           find('[data-slot="thread-card"]'),
         ),
       "the marker, the divider and the card, each of them drawn",
     )
     const marker = find('[data-slot="moved-marker"]')!
-    const divider = find('[role="separator"]')!
+    const divider = find('[data-slot="compaction"]')!
     const card = find('[data-slot="thread-card"]')!
     // DOCUMENT_POSITION_FOLLOWING: the argument comes after the one asked about.
     const follows = (first: Element, then: Element) =>

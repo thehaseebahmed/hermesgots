@@ -26,6 +26,12 @@ Run `pnpm e2e idle-requests` and `pnpm e2e stream-writes` with chat-next on, and
 ### 3. The code face belongs to the agent's work only (done, built first)
 Not a parity gap: a change to what chat-next already does. In a code session JetBrains Mono (`font-code`) should read only as the agent's own output, and nothing else in the UI.
 
+**Superseded in part by [ADR 0087](adr/0087-one-piece-per-element-and-a-sessions-face-reaches-the-bots-words-alone.md)
+(2026-11-03):** the face now reaches the user's own bubble and the bot's own words inside a card — a
+question and its choices, an approval's description, a subagent's goal — while a card's title, a
+button, a count, a pill, a sheet's heading, the stats line and a divider stay in the app's face. The
+rest of this section still stands.
+
 **Today.** `routes/chat.tsx:502` puts `font-code` on the whole chat pane when `chat.projectId` is set, so the header, composer, pills, approval and question cards, and every card in the thread are in it. Sheets and drawers are portaled out of the pane, so they inherit nothing: a tool call's input and output (drawn with `font-mono`, which is not JetBrains Mono, in `tool-card.tsx` and `markdown-renderer.tsx`) never get the code face.
 
 **Wanted.**

@@ -15,7 +15,7 @@ import { Banner } from "@/components/banner"
 import { useBreakReminderEligibility } from "@/components/break-reminder-context"
 import { AgentPopup } from "@/components/chat/agent-card"
 import { ApprovalCard } from "@/components/chat/approval-card"
-import { CHAT_FACE, CodeFaceProvider } from "@/components/chat/code-face"
+import { CODE_FACE, CodeFaceProvider } from "@/components/chat/code-face"
 import { DayHeading } from "@/components/chat/day-heading"
 import { EmptyState, MainEmptyState } from "@/components/chat/empty-states"
 import { useMainFlow } from "@/components/chat/main-flow"
@@ -76,6 +76,8 @@ const ChatOf = createContext<{
   chatId: string
   main?: MainView
   blank?: BlankView
+  /** A project session, which draws the marks a chat does not (ADR 0087). */
+  code?: boolean
 }>({
   chatId: "",
 })
@@ -110,7 +112,7 @@ export function AppThreadView({
   stats,
   send,
 }: ThreadViewProps) {
-  const { chatId, main, blank } = useContext(ChatOf)
+  const { chatId, main, blank, code } = useContext(ChatOf)
   const messages = useMemo(
     () => messagesOf(chatId, turns, { streaming, inFlight, stats, origin }),
     [chatId, turns, streaming, inFlight, stats, origin],
@@ -295,7 +297,8 @@ export function AppThreadView({
                         )
                       if (entry.kind !== "message") return tailRow(entry)
                       const message = entry.message
-                      const change = changes.get(message.id)
+                      // A model change is a project session's mark; a chat draws none (ADR 0087).
+                      const change = code ? changes.get(message.id) : undefined
                       return (
                         <MessageScrollerItem key={message.id} messageId={message.id}>
                           {markersAbove.get(message.id)?.map(marker)}
@@ -528,16 +531,18 @@ export function AppChatNextThread({
   // Held by its fields, so a parent's render that changes nothing about Main draws nothing again.
   const mainKey = main ? JSON.stringify(main) : ""
   const blankKey = blank ? JSON.stringify(blank) : ""
+  const session = Boolean(code)
   const chat = useMemo(
     () => ({
       chatId,
       main: mainKey ? (JSON.parse(mainKey) as MainView) : undefined,
       blank: blankKey ? (JSON.parse(blankKey) as BlankView) : undefined,
+      code: session,
     }),
-    [chatId, mainKey, blankKey],
+    [chatId, mainKey, blankKey, session],
   )
   return (
-    <CodeFaceProvider value={code ? CHAT_FACE : undefined}>
+    <CodeFaceProvider value={code ? CODE_FACE : undefined}>
       <ChatOf.Provider value={chat}>
         <ChatNextThread {...props} View={AppThreadView} Prompt={AppPrompt} />
       </ChatOf.Provider>

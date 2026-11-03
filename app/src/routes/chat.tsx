@@ -37,7 +37,7 @@ import { useBreakReminderEligibility } from "@/components/break-reminder-context
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { ChatHeader } from "@/components/chat/chat-header"
-import { CHAT_FACE, CodeFaceProvider } from "@/components/chat/code-face"
+import { CODE_FACE, CodeFaceProvider } from "@/components/chat/code-face"
 import { ChatActions, LimitNotice, useChatUsage } from "@/components/chat/chat-actions"
 import { FollowAfterApproval, FollowOnSend } from "@/components/chat/follow"
 import { useFirstRows } from "@/components/chat/first-rows"
@@ -1416,7 +1416,8 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
                       )
                     if (entry.kind !== "message") return tailRow(entry)
                     const message = entry.message
-                    const change = changes.get(message.id)
+                    // A model change is a project session's mark; a chat draws none (ADR 0087).
+                    const change = session ? changes.get(message.id) : undefined
                     return (
                       <MessageScrollerItem key={message.id} messageId={message.id}>
                         {markersAbove.get(message.id)?.map(moveMarker)}
@@ -1667,7 +1668,7 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
   })
 
   return (
-    <CodeFaceProvider value={session ? CHAT_FACE : undefined}>
+    <CodeFaceProvider value={session ? CODE_FACE : undefined}>
       <div
         data-slot="chat-pane"
         data-pane={slot}

@@ -220,10 +220,11 @@ export type PlacingPart = {
 
 /**
  * The word a thinking row says while its words still arrive — the row's own, never one of the status
- * line's rotating ones (ADR 0070). The one home for it, so the row, the tests and the browser flow
- * that read it cannot drift apart.
+ * line's rotating ones (ADR 0070), and in sentence case like every other word the thread says
+ * (ADR 0087). The one home for it, so the row, the tests and the browser flow that read it cannot
+ * drift apart.
  */
-export const THINKING_WORD = "thinking"
+export const THINKING_WORD = "Thinking"
 
 /**
  * Where a reply's thinking rows stand among its parts — the one placing rule, asked by the thread

@@ -48,8 +48,8 @@ function watchAway(view: HTMLElement, away: () => void) {
 
 /**
  * One stretch of a reply's thinking. The row says what it is doing in its own word: while the
- * thinking still arrives it turns a loader beside the literal word "thinking", both in the row's
- * own muted colour, and wears no sign at all once this device has measured how long the run took.
+ * thinking still arrives it turns a loader beside the word "Thinking", both in the row's own muted
+ * colour, and wears no sign at all once this device has measured how long the run took.
  * The rotating words belong to the status line alone (ADR 0070). It opens the working-out in the
  * same sheet the tool row opens, so the thread's two accounts of the work read and open the same
  * way. A live run opened in the sheet lands on its newest words and keeps them in view while they

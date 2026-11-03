@@ -32,18 +32,27 @@ export function SystemLink({
   icon: Icon,
   to,
   state,
+  replace,
+  current,
   onClick,
   label,
+  slot,
   children,
 }: {
   icon: LucideIcon
   /** Where it goes, when it goes somewhere in the app. */
   to?: string
   state?: unknown
+  /** Whether arriving replaces the history entry — a thread opened beside the one already there. */
+  replace?: boolean
+  /** Whether the address already is this thing, so assistive tech says so. */
+  current?: boolean
   /** What it does instead, when it opens something over the thread, or where it must not leave. */
   onClick?: (event: MouseEvent<HTMLAnchorElement & HTMLButtonElement>) => void
   /** What the link is, for a reader who can't see the sentence around it. */
   label?: string
+  /** What a test or a style can name the pressable by, where the line's own sentence is one control. */
+  slot?: string
   children: ReactNode
 }) {
   const body = (
@@ -57,12 +66,27 @@ export function SystemLink({
     "font-medium text-info underline-offset-2 outline-none after:absolute after:inset-0 after:content-[''] hover:underline focus-visible:underline"
   if (to)
     return (
-      <Link to={to} state={state} onClick={onClick} aria-label={label} className={className}>
+      <Link
+        to={to}
+        replace={replace}
+        state={state}
+        onClick={onClick}
+        aria-label={label}
+        aria-current={current ? "page" : undefined}
+        data-slot={slot}
+        className={className}
+      >
         {body}
       </Link>
     )
   return (
-    <button type="button" onClick={onClick} aria-label={label} className={className}>
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      data-slot={slot}
+      className={className}
+    >
       {body}
     </button>
   )

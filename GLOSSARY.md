@@ -81,15 +81,23 @@ A bot's request to take a sensitive action, answered Once, Session, Always or De
 _Avoid_: permission prompt, consent, authorization
 
 **Card**:
-A block Gots draws for itself inside a chat — a question, an approval, a subagent's work, a session's state — as opposed to a message, a chat drawn in a bot's Main thread, or the blocks of an interface the model drew.
+A block Gots draws for itself inside a chat — a question, an approval, a subagent's work, a session's state — as opposed to a message, a chat drawn in a bot's Main thread, or the blocks of an interface the model drew. It comes in two shells and three kinds: a card that waits on the reader floats over the thread in its own colour, a card that records what happened lies flat and muted, and a card that stops the session — read-only, resolved, discarded — floats and stays mute, because it says a decision was taken rather than raising a fault. Its title is the app's words and keeps the app's face; what the bot said inside it takes the **Code face** in a session.
 _Avoid_: panel, box, widget, chip
 
 **Conversation**:
 The stored record of one exchange with a bot: the row a chat list shows and sync carries. A coding session's conversation also names its project.
 _Avoid_: chat object, session record, thread
 
+**Code face**:
+The face a project session's own words are drawn in, as against the app's face that chrome keeps
+everywhere: what the bot said and wrote — its reply, its thinking, its questions and their choices,
+an approval's description, a subagent's goal — and what the user typed or said in that session,
+inside a card as much as beside one. A card's title, a button, a count, a pill and a sheet's heading
+are the app's words and keep the app's face, and so does everything the app measured or worked out.
+_Avoid_: mono mode, code mode, terminal font
+
 **Thread**:
-A conversation's messages in the order they happened, as the screen draws them — what the agent said, what it ran, and what it thought. Every thread is drawn the same way, whoever it is with.
+A conversation's messages in the order they happened, as the screen draws them — what the agent said, what it ran, and what it thought. Every thread is drawn the same way, whoever it is with: one look per element on a bot's chat and a project session alike, and the one thing a session adds is its **Code face** over what the bot and the user said.
 _Avoid_: transcript, message log, feed, timeline
 
 **Away**:
@@ -97,11 +105,11 @@ A host this device could not reach — a read got no answer, or none in time —
 _Avoid_: offline (for the host), disconnected, down, unreachable
 
 **Thinking**:
-What a model worked out before it answered, kept with the reply and drawn as rows in the thread: one per run — a run being one contiguous stretch of thinking between tool calls — each drawn above the tool row whose call it follows and touching it — one block, on the reply's own left edge with its text — so a tool row never lands between two thought rows and a turn that ran something reads as its working-out over the work it led into. Rows with nothing between them but tool rows are one row, holding their stretches together; text, media, a card, a steer, an approval or another reply still keeps rows apart. A turn that has had no word of thinking yet draws no row of its own — the status line says the turn is thinking — and a stretch that follows a question or a delegated agent's card sits after that card. A row says what the turn is doing: a spinner ahead of the literal word "thinking" while the thinking still arrives, both in the row's own muted colour, and never while a call runs (the tool row says that) or while the turn waits on the reader (the status line says that); its measured label once the thinking is written down. It is the one place a working turn says it is thinking, so the status line below never says it too and turns no loader of its own while the row is turning one. It opens in the same sheet a call's details open in, holding the whole working-out as the reply's own markdown; the sheet never closes itself, a live run opened in it lands on its newest words and keeps them in view until the reader scrolls away inside it, and a run already written opens at the top. While it thinks it says that one literal word, not the status line's rotating one (its name for assistive tech and its sheet's heading stay "Thinking…"); it reads "Thought for 12s" where this device measured every stretch it holds, the spans added, and "Thought it through" where it did not; the thinking is kept with the reply on every device, the span only on the device's own row that measured it. Every thread draws it the same way — a chat's, a delegated agent's sub-thread, a coding session's own thread.
+What a model worked out before it answered, kept with the reply and drawn as rows in the thread: one per run — a run being one contiguous stretch of thinking between tool calls — each drawn above the tool row whose call it follows and touching it — one block, on the reply's own left edge with its text — so a tool row never lands between two thought rows and a turn that ran something reads as its working-out over the work it led into. Rows with nothing between them but tool rows are one row, holding their stretches together; text, media, a card, a steer, an approval or another reply still keeps rows apart. A turn that has had no word of thinking yet draws no row of its own — the status line says the turn is thinking — and a stretch that follows a question or a delegated agent's card sits after that card. A row says what the turn is doing: a spinner ahead of the word "Thinking" while the thinking still arrives, both in the row's own muted colour, and never while a call runs (the tool row says that) or while the turn waits on the reader (the status line says that); its measured label once the thinking is written down, and its sign's empty box kept so the words do not move when the run ends. The colour is the row's while it works and after: a row says its state by its loader, never by its grey. It is the one place a working turn says it is thinking, so the status line below never says it too and turns no loader of its own while the row is turning one. It opens in the same sheet a call's details open in, holding the whole working-out as the reply's own markdown; the sheet never closes itself, a live run opened in it lands on its newest words and keeps them in view until the reader scrolls away inside it, and a run already written opens at the top. While it thinks it says that one word, not the status line's rotating one (its name for assistive tech and its sheet's heading stay "Thinking…"); it reads "Thought for 12s" where this device measured every stretch it holds, the spans added, and "Thought it through" where it did not; the thinking is kept with the reply on every device, the span only on the device's own row that measured it. Every thread draws it the same way — a chat's, a delegated agent's sub-thread, a coding session's own thread.
 _Avoid_: chain of thought, scratchpad, reasoning trace
 
 **Work row**:
-The shape a reply draws its own work in: one line 29px tall on the reply's own edge, holding the sign that it is working and the label that says what the work is doing, and opening when there is something to open. A row at work turns a spinner ahead of its label — hidden from assistive tech, since the label already says it — and a group whose calls failed wears a mark in that same slot, with the reason dented under the words. A thought row and the tool group its calls merged into are both work rows; a turn that has said nothing yet draws neither.
+The shape a reply draws its own work in: one line 29px tall on the reply's own edge, holding the sign that it is working and the label that says what the work is doing, and opening when there is something to open. A row at work turns a spinner ahead of its label — hidden from assistive tech, since the label already says it — and a group whose calls failed wears a mark in that same slot, with the reason dented under the words. A row with neither keeps that slot's empty box, so a finished row's words stand where they stood while it worked. A thought row and the tool group its calls merged into are both work rows; a turn that has said nothing yet draws neither.
 _Avoid_: tool row (which is a work row holding calls), step, item, log line
 
 **Refused call**:
@@ -109,7 +117,7 @@ A tool call a hook turned back before it ran, whose result is the hook's note to
 _Avoid_: blocked call, failed call, denied call
 
 **Status line**:
-The one line under a reply that says what the turn is doing while it works — "Writing", "Running bash", the host's own words for it — a loader and those words together, both in the muted colour the thread's work rows wear. Its words are the only ones that rotate: where the turn is thinking and no thought row holds it, it says the rotating thinking word and turns the loader itself. It says nothing while a thought row above says the turn is thinking, and nothing while a call runs save the count of subagents at work. When the turn waits on the reader ("Waiting for your answer") its wait words stand in that place, whole and muted with the loader turning beside them, and the count rides at their end. Once the turn is done and its subagents still run, that count is its only words. The count is the one thing in the line in the info colour, and a loader wears that colour only when it turns for the count alone — any other loader wears the colour of the words it turns for. A failed or stopped reply draws no status line at all; its error or "Stopped" stands in that place.
+The one line under a reply that says what the turn is doing while it works — "Writing", "Running bash", the host's own words for it — a loader and those words together, both in the muted colour the thread's work rows wear. Its words are the only ones that rotate: where the turn is thinking and no thought row holds it, it says the rotating thinking word and turns the loader itself. The rotation is for the reader's eye alone: a screen reader is told the plain state — "Thinking", "Writing" — so the flavour never becomes a fresh announcement every four seconds. It says nothing while a thought row above says the turn is thinking, and nothing while a call runs save the count of subagents at work. When the turn waits on the reader ("Waiting for your answer") its wait words stand in that place, whole and muted with the loader turning beside them, and the count rides at their end. Once the turn is done and its subagents still run, that count is its only words. The count is the one thing in the line in the info colour, and a loader wears that colour only when it turns for the count alone — any other loader wears the colour of the words it turns for. A failed or stopped reply draws no status line at all; its error or "Stopped" stands in that place.
 _Avoid_: footer (that is where the line stands, not what it is), progress text, activity
 
 **Command**:
@@ -164,9 +172,9 @@ _Avoid_: alert, limit banner, usage warning
 One Hermes profile the user has linked to Gots: its own agent, skills and settings, reached at the host it runs on.
 _Avoid_: profile, agent, assistant
 
-**Thread**:
-One of a bot's chats, drawn as a card inside its Main thread at the time it was started. A project session is not one.
-_Avoid_: conversation, session
+**Thread card**:
+One of a bot's chats, drawn as a card inside its Main thread at the time it was started. A project session is not one. The message that opened it is drawn whole above the card; the card's way in says "Moved to “…”" where a move opened it and "View thread" otherwise, with the replies it has beside that, and Undo on the same line.
+_Avoid_: conversation, session, thread row
 
 **Main thread**:
 A bot's one permanent chat and the screen its bot opens to: its messages land there first, the ones needing no thread stay there, and every thread it has is drawn inside it as a card. It can't be deleted.
@@ -185,8 +193,12 @@ The model a bot's host makes that decision with. Nothing set means the bot's own
 _Avoid_: router model, decision model
 
 **Moved marker**:
-What the Main thread shows in place of a message triage sent into an older thread, with the way to undo it. A message that opened a new thread is drawn there as that thread's card instead.
+What the Main thread shows in place of a message triage sent into an older thread, with the way to undo it — the undo riding the same system line the thread's name stands in. A message that opened a new thread is drawn there as that thread's card instead, and the card's way in says the same "Moved to “…”".
 _Avoid_: redirect notice, forwarded message
+
+**Steer**:
+A message the user sends into a run already under way, drawn where it reached the agent: the user's own bubble, splitting the reply's work at that point, with "Steered" muted under it. The words are the user's, so the bubble is theirs; the caption is the one thing saying they arrived mid-run rather than as a new message.
+_Avoid_: interrupt, injection, mid-run message
 
 **Host**:
 The machine a bot's Hermes runs on: where its profiles, its MCP servers and the keys they use live.
@@ -239,6 +251,14 @@ _Avoid_: lock, freeze, sticky model
 **Model change**:
 The host's record of the models a chat's calls ran on, one row per change. A thread's divider is drawn from these, wherever they name a turn; where they don't — the newest turn, or one still being written — the model this device sent it with stands until the host has recorded the call.
 _Avoid_: model switch, model update, fallback
+
+**Divider**:
+A thing that happened between two turns, drawn as one piece: a squiggle on either side in the fainter border colour, broken by its words in the muted one at the thread's smallest size, and spoken as a separator. A day in a bot's Main, a compaction in any thread, and a model change in a project session — a chat draws no model change, and only a Main draws a day.
+_Avoid_: separator, rule, hairline, timestamp
+
+**Progress reminder**:
+A note the host writes to the model while a turn works, drawn as a system line where it fell in the work, saying the bare words "Progress reminder" and opening the host's note unparaphrased. It stands outside the calls beside it, so a tool row beside it counts only calls that ran.
+_Avoid_: nudge, check-in, reminder row
 
 **Compaction**:
 A point where Hermes compressed a chat's context — in place under the same session, the default, or by ending the session and continuing in a child. The host records when, the context's size where it measured one, and the summary's own row for one made in place. The thread draws a divider above the first message written after it, above the first message a device holds where a compaction took away everything that device can load, or inside the reply it fell in, at its seam, where the record is matched by that row (else by the summary's own time). A compaction drawn that way draws no second divider between turns.

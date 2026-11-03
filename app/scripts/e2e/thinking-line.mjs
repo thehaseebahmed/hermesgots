@@ -412,8 +412,8 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   assert.equal(streaming.rows[0].spins, true, "the row spins: it is still thinking")
   assert.equal(
     streaming.rows[0].label,
-    "thinking",
-    "saying the literal word, never one of the status line's rotating ones",
+    "Thinking",
+    "saying its own word, in sentence case, never one of the status line's rotating ones",
   )
   assert.equal(streaming.rows[0].colour, tone.muted, "in the row's own muted colour")
   assert.equal(streaming.rows[0].loaderColour, tone.muted, "its loader too")

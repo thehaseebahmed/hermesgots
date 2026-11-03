@@ -31,6 +31,7 @@ What the current chat screen (`CurrentChatPage` in `app/src/routes/chat.tsx`, ov
 ## Decided
 
 - A bot without the plugin's queue refuses a message sent mid-reply with a toast. The plugin is mandatory, so this stands.
+- The thread's elements are the shared components' (ADR 0087): a row, a card, a divider or a mark is drawn by one component for both screens, so the two cannot say the same element two ways while the switch still offers both.
 
 ## Still to check before the default changes
 

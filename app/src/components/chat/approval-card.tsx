@@ -2,7 +2,8 @@ import { useState } from "react"
 import { ShieldAlertIcon } from "lucide-react"
 import { toast } from "sonner"
 
-import { useMonoFace } from "@/components/chat/code-face"
+import { useCodeFace } from "@/components/chat/code-face"
+import { CodeBlock } from "@/components/chat/code-block"
 import { CARD_BASE } from "@/components/chat/session-cards"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
@@ -33,7 +34,7 @@ export function ApprovalCard({
   /** Where an answer goes; the chat's own engine unless the screen drawing the card answers itself. */
   onAnswer?: (choice: ApprovalChoice) => Promise<void>
 }) {
-  const mono = useMonoFace()
+  const face = useCodeFace()
   const approval = message.approval!
   const [pending, setPending] = useState<ApprovalChoice | null>(null)
   const resolved = approval.resolved
@@ -68,21 +69,22 @@ export function ApprovalCard({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        {approval.description && <p className="text-[15px]">{approval.description}</p>}
+        {approval.description && <p className={cn("text-[15px]", face)}>{approval.description}</p>}
         {approval.command && (
-          // A long command (a heredoc, a script) scrolls inside the card, so the card never pushes
-          // the thread and its own buttons off the screen.
-          <pre
-            tabIndex={0}
-            className={cn(
-              mono,
-              "max-h-[30dvh] overflow-y-auto overscroll-contain rounded-2xl bg-muted px-4 py-3 text-[13px] wrap-anywhere whitespace-pre-wrap",
-            )}
-          >
-            {approval.command}
-          </pre>
+          // The reply's own code block, labelled with the call's tool: a command reads the same in an
+          // approval as in the words it came from, and can be taken away with the same copy (ADR 0087).
+          // It scrolls past a third of the screen inside its own box, so a long heredoc never pushes
+          // the card's answers off the screen.
+          <CodeBlock
+            language={tool ?? "command"}
+            code={approval.command}
+            tone="page"
+            scrolling
+            className="my-0"
+          />
         )}
-        {tool && <p className="text-xs text-muted-foreground">Tool: {tool}</p>}
+        {/* The block's own label already names the tool where there is a command to label. */}
+        {tool && !approval.command && <p className="text-xs text-muted-foreground">Tool: {tool}</p>}
       </CardContent>
       {!resolved && (
         <CardFooter className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">

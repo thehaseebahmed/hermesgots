@@ -1,14 +1,14 @@
-import { Link } from "react-router"
 import {
   BellOffIcon,
-  ChevronRightIcon,
   CircleAlertIcon,
   CircleXIcon,
   MessageCircleIcon,
+  MessagesSquareIcon,
   Undo2Icon,
 } from "lucide-react"
 
 import { useCodeFace } from "@/components/chat/code-face"
+import { SystemLine, SystemLink } from "@/components/chat/system-line"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Spinner } from "@/components/ui/spinner"
 import type { Move } from "@/lib/hermes"
@@ -31,6 +31,12 @@ export function StateIcon({ state }: { state: Thread["state"] }) {
  * device holds it, and under that the thread itself — its state, its name and a way in. The bubble's
  * words are the message's and the card's line is the thread's name, never the other way round; no
  * avatar, because a card is not a turn (ADR 0082, amending 0034).
+ *
+ * The way in is the thread's one system line, whichever mark holds it (ADR 0087): "Moved to “…”"
+ * where a move opened the thread, as the moved marker says it, and "View thread" only where none
+ * did — with Undo riding that same line rather than a second control inside the card. The message
+ * above is drawn whole: the card's whole job is to show the message that opened the thread, so a
+ * preview clamped to four lines would hide the words it exists to repeat.
  */
 export function ThreadCard({
   thread,
@@ -53,6 +59,9 @@ export function ThreadCard({
   const face = useCodeFace()
   const label = thread.reason ? reasonText(thread.reason) : undefined
   const opener = openerWords(thread, move)
+  // A move that opened this thread is what the card's way in says; without one it is a card to view.
+  const moved = Boolean(move)
+  const title = thread.chat.title || "a thread"
   return (
     <div
       data-slot="thread-card"
@@ -61,9 +70,7 @@ export function ThreadCard({
     >
       {opener && (
         <Bubble variant="default" align="end" className="max-w-[85%] self-end">
-          <BubbleContent
-            className={cn("line-clamp-4 px-4 py-2.5 text-[15px] whitespace-pre-wrap", face)}
-          >
+          <BubbleContent className={cn("px-4 py-2.5 text-[15px] whitespace-pre-wrap", face)}>
             {opener}
           </BubbleContent>
         </Bubble>
@@ -83,36 +90,57 @@ export function ThreadCard({
           {thread.chat.muted && (
             <BellOffIcon className="size-4 shrink-0 text-muted-foreground" aria-label="Muted" />
           )}
-          {move?.undoable && onUndo && (
-            <button
-              type="button"
-              onClick={() => onUndo(move)}
-              aria-label="Undo"
-              className="-mr-3 flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-full text-info outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <Undo2Icon className="size-4" />
-            </button>
-          )}
         </div>
       </div>
-      <div className="-mt-3.5 ml-2 flex min-h-11 items-center gap-1">
-        <Link
-          to={`/c/${thread.chat.id}`}
-          replace={beside}
-          state={{ bot: profileId }}
-          aria-current={open ? "page" : undefined}
-          onClick={stayHere(current)}
-          className="flex min-h-11 items-center gap-1 rounded-full px-2 text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <span className="font-medium text-info">View thread</span>
-          {thread.replies > 0 && (
-            <span>
-              · {thread.replies} {thread.replies === 1 ? "reply" : "replies"}
-            </span>
-          )}
-          <ChevronRightIcon className="size-4" />
-        </Link>
-      </div>
+      <SystemLine className="-mt-3 ml-1.5 w-full">
+        {moved ? (
+          <>
+            Moved to{" “"}
+            <SystemLink
+              icon={MessagesSquareIcon}
+              to={`/c/${thread.chat.id}`}
+              replace={beside}
+              state={{ bot: profileId }}
+              current={open}
+              onClick={stayHere(current)}
+              label={title}
+            >
+              {title}
+            </SystemLink>
+            {"”"}
+          </>
+        ) : (
+          <SystemLink
+            icon={MessagesSquareIcon}
+            to={`/c/${thread.chat.id}`}
+            replace={beside}
+            state={{ bot: profileId }}
+            current={open}
+            onClick={stayHere(current)}
+            label={`View ${title}`}
+          >
+            View thread
+          </SystemLink>
+        )}
+        {thread.replies > 0 && (
+          <span>
+            · {thread.replies} {thread.replies === 1 ? "reply" : "replies"}
+          </span>
+        )}
+        {move?.undoable && onUndo && (
+          // On its own line as a block, so nothing sits between it and the sentence above. The
+          // padding and matching negative margin keep the target 44px tall without adding any space.
+          <button
+            type="button"
+            onClick={() => onUndo(move)}
+            aria-label="Undo"
+            className="relative z-10 -my-3 flex w-fit items-center gap-1 py-3 font-medium text-info underline-offset-2 outline-none hover:underline focus-visible:underline"
+          >
+            <Undo2Icon className="size-3.5" />
+            Undo
+          </button>
+        )}
+      </SystemLine>
     </div>
   )
 }

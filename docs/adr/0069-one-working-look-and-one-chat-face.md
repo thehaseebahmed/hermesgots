@@ -1,5 +1,9 @@
 # One working look for the status line and the thinking row, a code face for coding sessions, and one loader for a thread not held yet
 
+**Renamed (2026-11-03):** the constant this ADR calls `CHAT_FACE` is `CODE_FACE` today, and the face's
+reach was widened by [ADR 0087](0087-one-piece-per-element-and-a-sessions-face-reaches-the-bots-words-alone.md)
+to the bot's own words inside a card. The rest of this decision stands.
+
 **Superseded in its catch-up sentence by [ADR 0084](0084-a-thread-the-device-holds-opens-ready.md)
 (2026-11-03):** a thread the device holds is drawn ready rather than saying the read in the status
 line's rotating word, so the loader mid-pane is the only way a thread says it is loading. Everything

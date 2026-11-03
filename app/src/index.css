@@ -127,7 +127,7 @@
 @theme inline {
   --font-sans: "Figtree Variable", ui-sans-serif, system-ui, sans-serif;
   --font-heading: var(--font-sans);
-  /* What a chat is said in (`CHAT_FACE`). */
+  /* What a project session is said in (`CODE_FACE`). */
   --font-code: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
   --color-background: var(--background);
   --color-foreground: var(--foreground);

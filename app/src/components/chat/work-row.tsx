@@ -55,7 +55,9 @@ export const WorkLabel = forwardRef<HTMLSpanElement, ComponentProps<"span">>(fun
 
 /**
  * The row button over that shape: what follows the label (a ruler, a chevron) belongs to the row
- * itself, so each caller keeps its own, and the sign before it is `WorkSign`.
+ * itself, so each caller keeps its own, and the sign before it is `WorkSign`. A row with no sign
+ * keeps the sign's empty box, so a finished row's words stand where they stood while it worked
+ * (ADR 0087): a row says its state by its loader, never by a reflow.
  */
 export const WorkRow = forwardRef<
   HTMLButtonElement,
@@ -63,7 +65,7 @@ export const WorkRow = forwardRef<
 >(function WorkRow({ before, after, children, className, ...props }, ref) {
   return (
     <button ref={ref} type="button" className={cn(WORK_ROW_CLASS, className)} {...props}>
-      {before}
+      {before ?? <span aria-hidden className={SIGN} />}
       {children}
       {after}
     </button>

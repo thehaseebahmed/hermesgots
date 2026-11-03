@@ -12,6 +12,7 @@ import {
 import { toast } from "sonner"
 
 import { StatusLine } from "@/components/chat/status-line"
+import { useCodeFace } from "@/components/chat/code-face"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { sendMessage } from "@/lib/chat"
@@ -19,6 +20,7 @@ import { clarifyRead } from "@/lib/clarify"
 import type { ToolEvent } from "@/lib/db"
 import { WAITING_FOR_ANSWER } from "@/lib/format"
 import { COLUMN_BOX } from "@/lib/layout"
+import { cn } from "@/lib/utils"
 
 /**
  * The width rule every card the app draws inside a chat shares: the reading column's own
@@ -136,7 +138,7 @@ export function ResolvedCard({ onReopen }: { onReopen: () => void }) {
       <CardContent className="flex items-center gap-3">
         <CheckCircle2Icon className="size-6 shrink-0 text-success" />
         <div className="min-w-0 flex-1 text-sm">
-          <p className="font-medium">This thread is resolved.</p>
+          <p className="font-medium">This session is resolved.</p>
           <p className="text-muted-foreground">Reopen it to send more messages.</p>
         </div>
         <Button variant="outline" className="h-11 rounded-full px-4" onClick={onReopen}>
@@ -225,6 +227,7 @@ export function ClarifyCard({
   busy?: boolean
 }) {
   const running = tool.status === "running"
+  const face = useCodeFace()
   const send = useContext(AskAgainContext)
   const [asking, setAsking] = useState(false)
   const { asked, outcome } = readClarify(tool)
@@ -251,7 +254,7 @@ export function ClarifyCard({
     <ExchangeCard icon={<MessageCircleQuestionIcon className="size-4" />} title={title}>
       {missed ? (
         <>
-          {asked[0]?.question && <p>{asked[0].question}</p>}
+          {asked[0]?.question && <p className={face}>{asked[0].question}</p>}
           <Button
             variant="outline"
             size="lg"
@@ -267,12 +270,15 @@ export function ClarifyCard({
         answered &&
         asked.map((a, i) => (
           <div key={i} className="space-y-1">
-            {a.question && <p className="font-medium">{a.question}</p>}
+            {a.question && <p className={cn("font-medium", face)}>{a.question}</p>}
             {a.answers.length ? (
               a.answers.map((answer) => (
                 <p
                   key={answer}
-                  className="rounded-2xl bg-background px-3 py-2 wrap-anywhere whitespace-pre-wrap"
+                  className={cn(
+                    "rounded-2xl bg-background px-3 py-2 wrap-anywhere whitespace-pre-wrap",
+                    face,
+                  )}
                 >
                   {answer}
                 </p>

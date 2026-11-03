@@ -8,6 +8,7 @@ import {
 import { toast } from "sonner"
 
 import { CARD } from "@/components/chat/session-cards"
+import { useCodeFace } from "@/components/chat/code-face"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
@@ -51,6 +52,9 @@ export function ChoiceRow({
   disabled: boolean
   onClick: () => void
 }) {
+  // A choice is the bot's words, so a session says them in its own face; the badge beside it is the
+  // app's and keeps the app's (ADR 0087).
+  const face = useCodeFace()
   return (
     <Button
       type="button"
@@ -72,7 +76,7 @@ export function ChoiceRow({
       >
         {selected && <CheckIcon className="size-3.5" />}
       </span>
-      <span className="min-w-0 flex-1 wrap-anywhere">{label}</span>
+      <span className={cn("min-w-0 flex-1 wrap-anywhere", face)}>{label}</span>
       {recommended && (
         <Badge variant="secondary" className="shrink-0">
           Recommended
@@ -117,9 +121,10 @@ function Question({
       })
     }
   }
+  const face = useCodeFace()
   return (
     <div className="space-y-2">
-      <p className="text-[15px] font-medium">{question.question}</p>
+      <p className={cn("text-[15px] font-medium", face)}>{question.question}</p>
       {choices ? (
         <div className="space-y-1.5">
           {choices.map((choice, i) => (
@@ -144,7 +149,7 @@ function Question({
               value={picked.other}
               disabled={disabled}
               placeholder="Type your answer"
-              className="h-11 rounded-2xl"
+              className={cn("h-11 rounded-2xl", face)}
               onChange={(e) => onChange({ ...picked, other: e.target.value })}
             />
           )}
@@ -154,7 +159,7 @@ function Question({
           value={picked.other}
           disabled={disabled}
           placeholder="Type your answer"
-          className="min-h-20 rounded-2xl"
+          className={cn("min-h-20 rounded-2xl", face)}
           onChange={(e) => onChange({ ...picked, other: e.target.value })}
         />
       )}

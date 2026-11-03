@@ -3,6 +3,7 @@ import { BotIcon, CheckIcon, PauseIcon, SquareIcon } from "lucide-react"
 
 import { AGENT_WORK_MS } from "@/lib/freshness"
 import { Banner } from "@/components/banner"
+import { useCodeFace } from "@/components/chat/code-face"
 import { MessageItem } from "@/components/chat/message-item"
 import { FLAT_CARD } from "@/components/chat/session-cards"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
@@ -165,11 +166,14 @@ function CardBody({
   line?: ReactNode
   className?: string
 }) {
+  // The goal is the bot's sentence and takes a session's face; the meta line under it is the app's
+  // count of time and models (ADR 0087).
+  const face = useCodeFace()
   return (
     <span className={cn("flex min-w-0 flex-1 flex-col gap-1", className)}>
       <span className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
         <BotIcon className="size-4 shrink-0" />
-        <span className="min-w-0 flex-1 truncate">{title}</span>
+        <span className={cn("min-w-0 flex-1 truncate", face)}>{title}</span>
       </span>
       {line && (
         <span className="flex items-center gap-1.5 text-xs text-muted-foreground tabular-nums">

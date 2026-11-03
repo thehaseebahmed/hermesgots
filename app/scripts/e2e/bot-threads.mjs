@@ -642,8 +642,13 @@ await flow(
     )
     assert.equal(
       await page.getByText(/Moved to/).count(),
-      0,
-      "a triage-opened thread draws no Moved marker",
+      1,
+      "one line says where the message went: the card's own",
+    )
+    assert.equal(
+      await page.locator('[data-slot="thread-card"]').last().getByText(/Moved to/).count(),
+      1,
+      "and it is the card that carries it, not a marker beside it",
     )
     await until(
       async () => (await page.locator("[data-sonner-toast]").count()) === 0,
@@ -674,7 +679,7 @@ await flow(
 
     await send(TRIAGE_THREAD)
     const marker = page
-      .locator("p")
+      .locator('[data-slot="moved-marker"] p')
       .filter({ hasText: /Moved to/ })
       .first()
     await marker.waitFor({ timeout: 25_000 })

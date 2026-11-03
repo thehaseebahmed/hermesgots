@@ -17,6 +17,13 @@ const KIND_OF = new Map<string, BusyKind>([
 ])
 
 /**
+ * What a reader who can't see the rotation is told instead: the plain state, once per state. The
+ * rotating word is flavour for the eye — announcing a fresh one every four seconds would turn a
+ * personality into a stammer (ADR 0087).
+ */
+const PLAIN_STATE: Record<BusyKind, string> = { thinking: "Thinking", writing: "Writing" }
+
+/**
  * What a reply is doing, in one line under it: the chat's own activity line, and the line a
  * question the agent asked waits on while this screen holds its form in the composer slot. It turns
  * one loader whenever it has words to say, the wait words taking the busy words' place and keeping
@@ -47,10 +54,16 @@ export function StatusLine({
     >
       {word && <WorkSign />}
       {word && (
-        <span className="min-w-0 truncate" data-slot="status-words">
+        <span
+          className="min-w-0 truncate"
+          // A rotating word is the line's flavour; the state is what a reader is told, below.
+          aria-hidden={kind ? true : undefined}
+          data-slot="status-words"
+        >
           {word}
         </span>
       )}
+      {kind && <span className="sr-only">{PLAIN_STATE[kind]}</span>}
       {children}
     </div>
   )

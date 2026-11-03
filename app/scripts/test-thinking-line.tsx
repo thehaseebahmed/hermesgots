@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { db, type Message, type Settings, type ToolEvent } from "@/lib/db"
 import { BUSY_WORDS } from "@/lib/busy-words"
-import type { ReasoningRun } from "@/lib/thinking"
+import { THINKING_WORD, type ReasoningRun } from "@/lib/thinking"
 import {
   absent,
   botProfile,
@@ -180,8 +180,8 @@ test("a working row says its own word beside a loader, muted, and the footer nev
     const line = onlyThinkingLine()
     assert.equal(
       lineLabel(line),
-      "thinking",
-      "the row owns its word: the literal one, not the pool's",
+      THINKING_WORD,
+      "the row owns its word: its own, in sentence case, not the pool's",
     )
     assert.ok(spins(line), "with a loader ahead of it: the row is at work")
     assert.match(

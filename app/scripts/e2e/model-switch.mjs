@@ -1,6 +1,7 @@
-// A chat's model changed mid-thread: the pill under the composer picks a new one, and the thread
-// draws a divider naming it above the turn it answered with — after a reload too, in a session, and
-// as the turn opens where the host's record hasn't reached this device yet.
+// A model changed mid-thread: the pill under the composer picks a new one. A project session draws a
+// divider naming it above the turn it answered with — after a reload too, and as the turn opens where
+// the host's record hasn't reached this device yet. A bot's chat keeps the record and draws nothing: a
+// model a chat fell onto mid-run is a detail of the run, not a mark on the work (ADR 0087).
 import { app, assert, flow, mock, pass } from "./lib.mjs"
 
 await flow("model-switch", async ({ page, seed, send, lastReply, until, shot }) => {
@@ -36,7 +37,7 @@ await flow("model-switch", async ({ page, seed, send, lastReply, until, shot }) 
       return (await db.conversations.get(chat))?.modelChanges ?? null
     }, id)) ?? []
 
-  // One model throughout: nothing in the thread says anything.
+  // A bot's chat: one model in, then a switch. The host records both, and the thread stays silent.
   await page.goto(app)
   await page.getByRole("button", { name: /^Model:/ }).waitFor({ timeout: 15_000 })
   await pick(sonnet)
@@ -46,27 +47,14 @@ await flow("model-switch", async ({ page, seed, send, lastReply, until, shot }) 
   await done()
   assert.equal(await divider().count(), 0, "one model in, nothing to say")
 
-  // Switched with the pill: the divider lands above the turn the new model answered with.
   await pick(gpt)
   await send("and again")
-  await until(async () => (await divider().count()) === 1, 15_000, "the divider to appear")
-  await page.getByText("and again").last().waitFor()
-  assert.equal((await divider().innerText()).trim(), gpt, "the divider names the new model")
-  const place = await page.evaluate(() => {
-    const items = [...document.querySelectorAll("[data-slot=message-scroller-item]")]
-    return {
-      divider: items.findIndex((item) => item.querySelector("[role=separator]")),
-      turn: items.findIndex((item) => item.textContent?.includes("and again")),
-    }
-  })
-  assert.equal(place.divider, place.turn, "and sits above the turn it answered with")
-  // The host records the turn's own call as it runs, and this device reads that record when the turn
-  // ends, so both lists are only complete once it has — the divider no longer waits for that.
   await done()
+  assert.equal(await divider().count(), 0, "a chat draws no model change at all")
   assert.deepEqual(
     (await hosted(id)).map((c) => c.model),
     [sonnet, gpt],
-    "the host recorded both models",
+    "though the host recorded both models",
   )
   assert.deepEqual(
     (await stored(id)).map((c) => c.model),
@@ -74,21 +62,9 @@ await flow("model-switch", async ({ page, seed, send, lastReply, until, shot }) 
     "and the device kept what it read",
   )
   await shot("chat")
+  pass("a chat keeps the record and draws no model change")
 
-  // Still there after a reload: the device keeps the list, and reads the host's again on open.
-  await page.reload()
-  await until(async () => (await divider().count()) === 1, 15_000, "the divider after a reload")
-  assert.equal((await divider().innerText()).trim(), gpt, "the divider survives a reload")
-
-  // Picking the same model again changes nothing: no row on the host, no second divider.
-  await pick(gpt)
-  await send("and once more")
-  await done()
-  assert.equal(await divider().count(), 1, "re-picking the model adds no divider")
-  assert.equal((await hosted(id)).length, 2, "and the host records no second switch")
-  pass("a chat's switch shows once, above the turn it answered with, and survives a reload")
-
-  // A project session's thread draws it too.
+  // A project session draws it: above the turn the new model answered with.
   await seed([{ id: "e2e-model-switch", title: "Switch the model", projectId: "p_1a2b3c4d" }])
   await page.goto(`${app}/c/e2e-model-switch`)
   await pick(sonnet)
@@ -97,9 +73,32 @@ await flow("model-switch", async ({ page, seed, send, lastReply, until, shot }) 
   await pick(gpt)
   await send("carry on")
   await until(async () => (await divider().count()) === 1, 15_000, "the session's divider")
-  assert.equal((await divider().innerText()).trim(), gpt, "a session names the new model too")
+  await page.getByText("carry on").last().waitFor()
+  assert.equal((await divider().innerText()).trim(), gpt, "a session names the new model")
+  const place = await page.evaluate(() => {
+    const items = [...document.querySelectorAll("[data-slot=message-scroller-item]")]
+    return {
+      divider: items.findIndex((item) => item.querySelector("[role=separator]")),
+      turn: items.findIndex((item) => item.textContent?.includes("carry on")),
+    }
+  })
+  assert.equal(place.divider, place.turn, "and sits above the turn it answered with")
+  await done()
   await shot("session")
-  pass("a project session shows the divider as well")
+
+  // Still there after a reload: the device keeps the list, and reads the host's again on open.
+  await page.reload()
+  await until(async () => (await divider().count()) === 1, 15_000, "the divider after a reload")
+  assert.equal((await divider().innerText()).trim(), gpt, "the divider survives a reload")
+
+  // Picking the same model again changes nothing: no row on the host, no second divider.
+  const session = chatId()
+  await pick(gpt)
+  await send("and once more")
+  await done()
+  assert.equal(await divider().count(), 1, "re-picking the model adds no divider")
+  assert.equal((await hosted(session)).length, 2, "and the host records no second switch")
+  pass("a session's switch shows once, above the turn it answered with, and survives a reload")
 
   // A session whose first turn was sent with nothing picked: the host ran its own model, and this
   // device has no pick to name it by, so the switch's divider can only come from the host's record —

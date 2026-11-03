@@ -168,7 +168,11 @@ test("a triage-opened thread's card carries Undo, and no marker is drawn beside 
     assert.ok(drawn, "the thread triage opened is a card in Main's flow")
     assert.ok(drawn.textContent?.includes(MOVED), "its opener shows the message that left Main")
     assert.ok(undoIn(drawn), "the card offers Undo")
-    assert.doesNotMatch(text(), /Moved to/, "nothing is drawn twice")
+    // The card says where the message went, and says it once: the marker is the card, not a second
+    // line beside it (ADR 0087).
+    const said = findAll("p").filter((one) => one.textContent?.startsWith("Moved to"))
+    assert.equal(said.length, 1, "the move is said once")
+    assert.ok(drawn.contains(said[0]), "inside the card, not as a marker beside it")
   })
 })
 
@@ -195,7 +199,11 @@ test("the card stops offering Undo once its thread has replied", async () => {
     const drawn = card("n1")
     assert.ok(drawn, "the card is still there")
     assert.equal(undoIn(drawn), null, "a thread that replied can't be taken back")
-    assert.doesNotMatch(text(), /Moved to/)
+    assert.match(
+      drawn.textContent ?? "",
+      /Moved to/,
+      "it still says where the message went, without the way to take it back",
+    )
   })
 })
 
