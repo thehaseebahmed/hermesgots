@@ -4,7 +4,9 @@ Status: grilled 2026-11-03 against the code, the glossary and the ADRs it touche
 same day after the branch was rebased onto ADR 0074's wire; every decision below is recorded in
 [ADR 0082](../adr/0082-cleanup-is-only-for-a-take-its-host-transcribes.md). Published as #800 with
 tickets #801, #802, #803 and #804, which are worked in that order. The spec carries `ready-for-agent`
-and the tickets stay bare, so the agent claims the spec and works the graph.
+and the tickets stay bare, so the agent claims the spec and works the graph. #800 is blocked by the
+gate issue #806, which the docs pull request #805 closes: work starts on that merge, when this file is
+on `main`.
 
 ## Problem Statement
 
