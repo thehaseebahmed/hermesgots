@@ -116,7 +116,7 @@ export const NOTIFICATION_SETTINGS = "Notification settings"
 const SECTIONS: Record<string, { title: string; render: () => ReactNode }> = {
   account: { title: "Account", render: () => <AccountSettings /> },
   appearance: { title: "Appearance", render: () => <AppearanceSettings /> },
-  dictation: { title: "Dictation", render: () => <DictationSettings /> },
+  dictation: { title: "AI Dictation", render: () => <DictationSettings /> },
   community: { title: "Community", render: () => <CommunitySettings /> },
   notifications: { title: NOTIFICATION_SETTINGS, render: () => <NotificationTypes /> },
   data: { title: "Local data", render: () => <DataSettings /> },
@@ -794,7 +794,7 @@ function DictationRow() {
     <Row
       to="dictation"
       icon={AudioLinesIcon}
-      title="Dictation"
+      title="AI Dictation"
       subtitle={reported ? wordsLabel(totals.words) : "History, bots and stats"}
     />
   )
