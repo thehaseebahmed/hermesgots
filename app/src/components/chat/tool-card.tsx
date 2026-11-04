@@ -127,7 +127,8 @@ function Section({
 
 export function Details({ tool }: { tool: ToolEvent }) {
   const hasLabel = Boolean(tool.label) && tool.label !== tool.tool
-  const code = tool.tool === "terminal" ? exitCode(tool.result) : undefined
+  // A refused command never ran, so the code its result carries says nothing about how it went.
+  const code = tool.tool === "terminal" && tool.status !== "refused" ? exitCode(tool.result) : undefined
   return (
     <>
       {hasLabel && (

@@ -1,4 +1,5 @@
-import { forwardRef, type ComponentProps, type ReactNode } from "react"
+import { forwardRef, type ComponentProps, type ReactNode, type Ref } from "react"
+import { ChevronRightIcon } from "lucide-react"
 
 import { useCodeFace } from "@/components/chat/code-face"
 import { Spinner } from "@/components/ui/spinner"
@@ -13,6 +14,9 @@ import { cn } from "@/lib/utils"
  */
 export const WORK_ROW_CLASS =
   "relative flex min-h-[29px] w-full items-center gap-2 text-left text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+
+/** The row's own gap, `gap-2`, as the number a fit subtracts. */
+export const WORK_ROW_GAP = 8
 
 
 
@@ -35,9 +39,10 @@ export function WorkSign() {
 
 /**
  * A work row's words: the one box they are bounded by, whichever row draws them, so a long label
- * truncates in the row's shape rather than pushing what follows it (ADR 0050). It takes the room left
- * in the row: a shrink-wrapped box answers its text's width, so the fit would never learn the pane had
- * widened and a cut count would stay cut.
+ * truncates in the row's shape rather than pushing what follows it (ADR 0050). It answers its own
+ * text's width rather than taking the row's: what follows it (a chevron) stands where the words end,
+ * never pinned to the row's edge (ADR 0096). The room the words have is therefore the row's to
+ * measure, not this box's.
  */
 export const WorkLabel = forwardRef<HTMLSpanElement, ComponentProps<"span">>(function WorkLabel(
   { className, ...props },
@@ -48,22 +53,46 @@ export const WorkLabel = forwardRef<HTMLSpanElement, ComponentProps<"span">>(fun
     <span
       ref={ref}
       data-slot="work-label"
-      className={cn("min-w-0 flex-1 truncate", face, className)}
+      className={cn("min-w-0 truncate", face, className)}
       {...props}
     />
   )
 })
 
+/** The box a row's line is measured in, drawn in the face the label is drawn in (ADR 0096). */
+export const WorkRuler = forwardRef<HTMLSpanElement, ComponentProps<"span">>(function WorkRuler(
+  { className, ...props },
+  ref,
+) {
+  const face = useCodeFace()
+  return (
+    <span
+      ref={ref}
+      aria-hidden
+      data-slot="work-ruler"
+      className={cn("invisible absolute w-max whitespace-nowrap", face, className)}
+      {...props}
+    />
+  )
+})
+
+export function WorkMark() {
+  return <ChevronRightIcon data-slot="work-mark" className="size-4 shrink-0" aria-hidden />
+}
+
 /**
- * The row button over that shape: what follows the label (a ruler, a chevron) belongs to the row
- * itself, so each caller keeps its own. Nothing stands ahead of the label — a working row pulses its
- * own words rather than wearing a sign, so the words start and stay on the reply's edge whatever the
- * row is doing (ADR 0092).
+ * The row button over that shape, with what follows the label — a ruler, a mark — in `after`, wrapped
+ * in the one box a fit measures (`afterRef`). `working` marks the row so its words pulse. See ADR 0092
+ * and ADR 0096.
  */
 export const WorkRow = forwardRef<
   HTMLButtonElement,
-  ComponentProps<"button"> & { after?: ReactNode; working?: boolean }
->(function WorkRow({ after, children, className, working = false, ...props }, ref) {
+  ComponentProps<"button"> & {
+    after?: ReactNode
+    afterRef?: Ref<HTMLSpanElement>
+    working?: boolean
+  }
+>(function WorkRow({ after, afterRef, children, className, working = false, ...props }, ref) {
   return (
     <button
       ref={ref}
@@ -73,7 +102,11 @@ export const WorkRow = forwardRef<
       {...props}
     >
       {children}
-      {after}
+      {after && (
+        <span ref={afterRef} data-slot="work-after" className="flex shrink-0 items-center">
+          {after}
+        </span>
+      )}
     </button>
   )
 })

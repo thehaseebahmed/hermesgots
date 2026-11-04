@@ -112,10 +112,12 @@ _Avoid_: chain of thought, scratchpad, reasoning trace
 The shape a reply draws its own work in: one line 29px tall on the reply's own edge, holding only the
 label that says what the work is doing, and opening when there is something to open. It carries no
 mark at its start: a row at work pulses its own words in the muted colour it already wears, so it
-starts and stays on the reply's edge whatever it is doing. A group whose calls failed says so on a
-line under its words, and those words are the destructive colour. A thought row and the tool group
-its calls merged into are both work rows; a turn that has said nothing yet draws neither, and the
-status line — the one row that keeps a sign — says it instead (ADR 0092).
+starts and stays on the reply's edge whatever it is doing, and the chevron that opens it stands one
+gap past its words rather than at the row's edge. A group whose calls failed keeps that muted row and
+says so on a line under its words, which are the destructive colour — the failure is never worn by the
+row itself (ADR 0092, ADR 0096). A thought row and the tool group its calls merged into are both work
+rows; a turn that has said nothing yet draws neither, and the status line — the one row that keeps a
+sign — says it instead.
 _Avoid_: tool row (which is a work row holding calls), step, item, log line
 
 **Thread card**:
@@ -143,8 +145,8 @@ itself sorts this way (ADR 0091, ADR 0095).
 _Avoid_: sort mode, order by, asc/desc toggle
 
 **Refused call**:
-A tool call a hook turned back before it ran, whose result is the hook's note to the model rather than anything the call produced. A thread draws nothing for a progress reminder's own refused call — the note is the host talking to the model — so only the call the model repeats is the reader's, and a refusal any other hook made still shows.
-_Avoid_: blocked call, failed call, denied call
+A tool call a hook or the reader turned back before it ran, whose result is a note rather than anything the call produced. A thread draws nothing for a progress reminder's own refused call — the note is the host talking to the model — so only the call the model repeats is the reader's, and a refusal any other hook made, or an approval the reader denied, still shows. That one is not a failure: the call's row keeps the muted tone with no reason under it, and its sheet says it was refused rather than completed (ADR 0098).
+_Avoid_: blocked call (that is the host's word for one shape of it), failed call, denied call
 
 **Status line**:
 The one line under a reply that says what the turn is doing while it works — "Writing", "Running bash", the host's own words for it — a loader and those words together, both in the muted colour the thread's work rows wear. Its words are the only ones that rotate: where the turn is thinking and no thought row holds it, it says the rotating thinking word and turns the loader itself. The rotation is for the reader's eye alone: a screen reader is told the plain state — "Thinking", "Writing" — so the flavour never becomes a fresh announcement every four seconds. It says nothing while a thought row above says the turn is thinking, and nothing while a call runs save the count of subagents at work. When the turn waits on the reader ("Waiting for your answer") its wait words stand in that place, whole and muted with the loader turning beside them, and the count rides at their end. Once the turn is done and its subagents still run, that count is its only words. The count is the one thing in the line in the info colour, and a loader wears that colour only when it turns for the count alone — any other loader wears the colour of the words it turns for. A failed or stopped reply draws no status line at all; its error or "Stopped" stands in that place.

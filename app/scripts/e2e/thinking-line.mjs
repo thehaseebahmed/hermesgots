@@ -58,6 +58,7 @@ const LONG_FIRST = "the reasoning itself, so here is the whole of it"
 const LONG_LAST = "The deleting is theirs"
 /** How tall a reply's work row stands: the exception to the app's 44px target (ADR 0058). */
 const ROW_HEIGHT = 29
+const ROW_GAP = 8
 
 await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
   await page.goto(app)
@@ -184,6 +185,25 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
             rows: parts("thinking-line").map((line) => edge(line.firstElementChild ?? line)),
             groups: parts("tool-group").map(edge),
             text: parts("markdown").map(edge),
+            marks: [
+              ...parts("thinking-line").map((line) => line.firstElementChild),
+              ...parts("tool-group"),
+            ]
+              .filter(Boolean)
+              .map((control) => {
+                const label = control.querySelector("[data-slot=work-label]")
+                const mark = control.querySelector("[data-slot=work-mark]")
+                if (!label || !mark) return null
+                const row = control.getBoundingClientRect()
+                return {
+                  gap: Math.round(mark.getBoundingClientRect().x - label.getBoundingClientRect().right),
+                  // What is left of the row past the mark: a row whose words are shorter than its
+                  // width must leave some, which is the only way this tells the two shapes apart —
+                  // a label filling the row puts its mark flush with the row's edge and the gap is
+                  // one gap either way (ADR 0096).
+                  slack: Math.round(row.right - mark.getBoundingClientRect().right),
+                }
+              }),
           },
           // Asked of the row, not of the reply: the footer's own loader is a spinner too, and it
           // stands down only while a row names the work.
@@ -227,7 +247,7 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
    * — geometry only a laid-out page has, which is why it is asserted here and at every width.
    */
   const standing = (state, where) => {
-    const { rows: drawn, groups, text } = state.layout
+    const { rows: drawn, groups, text, marks } = state.layout
     assert.equal(drawn.length, 1, `${where}, the reply drew one row of thinking`)
     assert.equal(drawn[0].height, ROW_HEIGHT, `${where}, the row stands ${ROW_HEIGHT}px tall`)
     for (const group of groups)
@@ -243,6 +263,14 @@ await flow("thinking-line", async ({ page, send, lastReply, until, shot }) => {
       1,
       `${where}, every part stands on one left edge (${edges.join(", ")})`,
     )
+    assert.ok(marks.length > 0, `${where}, a row carries the mark that opens it`)
+    for (const mark of marks) {
+      assert.equal(mark?.gap, ROW_GAP, `${where}, the mark stands one gap past the words`)
+      assert.ok(
+        (mark?.slack ?? 0) >= ROW_GAP,
+        `${where}, with the row's own room still to its right (${mark?.slack}px), not pinned to the row's edge`,
+      )
+    }
   }
 
   /** The same, for a reply whose thinking a tool group follows: the two of them one block. */

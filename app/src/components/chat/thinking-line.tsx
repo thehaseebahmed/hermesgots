@@ -1,8 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react"
-import { ChevronRightIcon } from "lucide-react"
-
 import { Markdown } from "@/components/chat/markdown"
-import { WorkLabel, WorkRow } from "@/components/chat/work-row"
+import { WorkLabel, WorkMark, WorkRow } from "@/components/chat/work-row"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { COLUMN } from "@/lib/layout"
 import { prefersReducedMotion } from "@/lib/media"
@@ -148,7 +146,7 @@ export const ThinkingLine = memo(function ThinkingLine({
         aria-label={label}
         onClick={() => setOpen(true)}
         working={thinking}
-        after={<ChevronRightIcon className="size-4 shrink-0" aria-hidden />}
+        after={<WorkMark />}
       >
         <WorkLabel>{words}</WorkLabel>
       </WorkRow>

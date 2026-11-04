@@ -21,10 +21,10 @@ import { takeHostTitle } from "@/lib/title"
 import { splitAttachments, steerWords } from "@/lib/attachment-text"
 import { appendThinking, carrySpans } from "@/lib/thinking"
 import { readLiveRuns } from "@/lib/waiting"
-import { failureReason } from "@/lib/tools"
+import { settleTool } from "@/lib/tools"
 import { actionOf, spawnStamp } from "@/lib/spawn"
 import { labelComparable } from "@/lib/tool-preview"
-import { clip, describeCall, parseArgs, patchStats, writeStats } from "@/lib/tool-calls"
+import { clip, describeCall, parseArgs, writeStats } from "@/lib/tool-calls"
 import { progressReminderNotes, progressRemindersShown } from "@/lib/progress-reminder"
 import { isRoutineRow } from "@/lib/routine-message"
 import { equal } from "@/lib/equal"
@@ -392,13 +392,7 @@ function foldRows(
       if (tool) {
         tool.status = "completed"
         tool.endedAt = createdAt
-        if (row.content) {
-          tool.result = clip(row.content)
-          if (tool.tool === "patch") Object.assign(tool, patchStats(row.content))
-          // Hermes doesn't store whether a call failed; its result says, as Hermes itself reads it.
-          const error = failureReason(tool.tool, row.content)
-          if (error) Object.assign(tool, { status: "failed", error })
-        }
+        if (row.content) settleTool(tool, row.content)
       }
       continue
     }

@@ -68,7 +68,7 @@ import { clarifyResult } from "@/lib/clarify"
 import { quietly } from "@/lib/report"
 import { canSteer, midReply } from "@/lib/steer"
 import { forgetTail } from "@/lib/session-tail"
-import { actionOfPreview } from "@/lib/tools"
+import { actionOfPreview, callOutcome } from "@/lib/tools"
 import { needsTranscriptWords } from "@/lib/tool-preview"
 import { randomId } from "@/lib/utils"
 import { knownLiveRun, readLiveRuns } from "@/lib/waiting"
@@ -387,7 +387,13 @@ export function streamHandlers(turn: Turn): StreamHandlers {
         return
       }
       if (existing) {
-        existing.status = event.status
+        // A refusal reaches the stream as an error like a failure does; its result is what tells them
+        // apart, and only when the preview got that far (ADR 0098).
+        const refused =
+          event.status === "failed" &&
+          Boolean(event.result) &&
+          callOutcome(existing.tool, event.result).state === "refused"
+        existing.status = refused ? "refused" : event.status
         if (event.status !== "running") existing.endedAt = Date.now()
         if (event.status === "completed") void onTodoTool(turn.conversationId, existing.tool)
         // A question's full result is written when it's answered; the stream's preview is cut short.

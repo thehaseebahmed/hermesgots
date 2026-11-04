@@ -15,6 +15,8 @@ import {
   type ControlAction,
 } from "./spawn.ts"
 import { CRON_TOOL, PR_TOOL, TODO_TOOLS } from "./tool-preview.ts"
+import { clip, patchStats } from "./tool-calls.ts"
+import { REFUSED } from "./words.ts"
 
 export { CRON_TOOL, PR_TOOL, TODO_TOOLS } from "./tool-preview.ts"
 
@@ -257,17 +259,26 @@ const noun = (kind: Kind, count: number) =>
       ? kind.title.one
       : `${count} ${kind.title.many}`
 
-/** "Ran a command", "reading a file", "searched code": each kind once, in the order it first appears. */
+/**
+ * "Ran a command", "reading a file", "searched code": each kind once, in the order it first appears.
+ * A refused call never ran, so it is counted apart — a run of one refused command reads "Refused a
+ * command" rather than claiming it (ADR 0098).
+ */
 export function phrases(tools: ToolEvent[]) {
-  const counts = new Map<Kind, { count: number; running: boolean }>()
+  const counts = new Map<Kind, { count: number; running: boolean; refused: number }>()
   for (const tool of tools) {
     const kind = kindOf(tool)
-    const seen = counts.get(kind) ?? { count: 0, running: false }
-    counts.set(kind, { count: seen.count + 1, running: seen.running || tool.status === "running" })
+    const seen = counts.get(kind) ?? { count: 0, running: false, refused: 0 }
+    if (tool.status === "refused") {
+      counts.set(kind, { ...seen, refused: seen.refused + 1 })
+      continue
+    }
+    counts.set(kind, { ...seen, count: seen.count + 1, running: seen.running || tool.status === "running" })
   }
-  return [...counts].map(
-    ([kind, { count, running }]) => `${running ? kind.doing : kind.verb} ${noun(kind, count)}`,
-  )
+  return [...counts].flatMap(([kind, { count, running, refused }]) => [
+    ...(count ? [`${running ? kind.doing : kind.verb} ${noun(kind, count)}`] : []),
+    ...(refused ? [`${REFUSED} ${noun(kind, refused)}`] : []),
+  ])
 }
 
 /** "Running a command", for the line saying what the bot is doing. */
@@ -277,26 +288,49 @@ export function activityOf(tool: ToolEvent) {
 
 const firstLine = (text: string) => text.trim().split("\n")[0].trim()
 
+/** What a call's result says happened: it worked, it failed, or nobody ran it (ADR 0098). */
+export type CallOutcome =
+  | { state: "ok" }
+  | { state: "failed"; reason?: string }
+  | { state: "refused" }
+
 /**
- * Why a call failed, from its result, the way Hermes decides it (`_detect_tool_failure`): a
- * terminal command's non-zero exit, or an `error` field. Undefined when it looks like it worked.
+ * The rule a result is read by: a terminal command on its exit code, every other tool on
+ * `success: false` or a non-empty `error`; `error: null` is a call that worked; a `user_summary` is a
+ * description and never a reason; and a result whose `status` is `blocked` is a call nobody ran
+ * (ADR 0098).
  */
-export function failureReason(tool: string, result?: string): string | undefined {
-  if (!result) return undefined
+export function callOutcome(tool: string, result?: string): CallOutcome {
+  if (!result) return { state: "ok" }
   const envelope = readEnvelope(result)
-  if (!envelope) return /^Error\b/.test(result) ? firstLine(result) : undefined
+  if (!envelope) return /^Error\b/.test(result) ? { state: "failed", reason: firstLine(result) } : { state: "ok" }
   const fields = envelope.fields
-  if (typeof fields.user_summary === "string" && fields.user_summary)
-    return firstLine(fields.user_summary)
+  if (fields.status === "blocked") return { state: "refused" }
   const error = fields.error ?? fields.message
   const said = typeof error === "string" && error.trim() ? firstLine(error) : undefined
   if (tool === "terminal") {
     const code = fields.exit_code
-    if (typeof code !== "number" || code === 0) return undefined
-    return said ?? `Exit code ${code}`
+    if (typeof code !== "number" || code === 0) return { state: "ok" }
+    return { state: "failed", reason: said ?? `Exit code ${code}` }
   }
-  if (said && (fields.success === false || "error" in fields)) return said
-  return undefined
+  const failed =
+    fields.success === false || (typeof fields.error === "string" && fields.error.trim() !== "")
+  if (!failed) return { state: "ok" }
+  return said ? { state: "failed", reason: said } : { state: "failed" }
+}
+
+/**
+ * A call's stored result, settled onto its row: the result as the row keeps it, a patch's size, and
+ * what the outcome makes of the call. One function for both folds — a transcript parsed and a turn
+ * re-read — so a call cannot be worded one way when it streams and another after a reload.
+ */
+export function settleTool(tool: ToolEvent, result: string) {
+  tool.result = clip(result)
+  if (tool.tool === "patch") Object.assign(tool, patchStats(result))
+  const outcome = callOutcome(tool.tool, result)
+  if (outcome.state === "failed")
+    Object.assign(tool, { status: "failed", ...(outcome.reason ? { error: outcome.reason } : {}) })
+  else if (outcome.state === "refused") tool.status = "refused"
 }
 
 /** A terminal command's exit code, when its result says. */

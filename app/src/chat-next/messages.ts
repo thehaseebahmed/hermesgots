@@ -10,9 +10,9 @@ import type {
 } from "../lib/db.ts"
 import { actionOf, spawnStamp } from "../lib/spawn.ts"
 import { NOT_SENT } from "../lib/words.ts"
-import { clip, describeCall, parseArgs, patchStats, writeStats } from "../lib/tool-calls.ts"
+import { clip, describeCall, parseArgs, writeStats } from "../lib/tool-calls.ts"
 import { appendThinking, type ReasoningRun } from "../lib/thinking.ts"
-import { actionOfPreview, failureReason } from "../lib/tools.ts"
+import { actionOfPreview, settleTool } from "../lib/tools.ts"
 
 import type { ToolCall, Turn } from "./fold.ts"
 
@@ -202,12 +202,6 @@ function toolOf(call: ToolCall, offset: number, turnAt: number, running: boolean
     ...stats,
     ...(stats ? { created: true } : {}),
   }
-  if (call.result) {
-    tool.result = clip(call.result)
-    if (tool.tool === "patch") Object.assign(tool, patchStats(call.result))
-    // Hermes doesn't store whether a call failed; its result says, as Hermes itself reads it.
-    const error = failureReason(tool.tool, call.result)
-    if (error) Object.assign(tool, { status: "failed", error })
-  }
+  if (call.result) settleTool(tool, call.result)
   return tool
 }

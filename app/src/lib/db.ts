@@ -343,7 +343,8 @@ export interface ToolEvent {
   tool: string
   emoji?: string
   label: string
-  status: "running" | "completed" | "failed"
+  /** `refused` is a call a hook or the reader turned back before it ran (ADR 0098). */
+  status: "running" | "completed" | "failed" | "refused"
   startedAt: number
   endedAt?: number
   /** Length of the reply text when the tool started, so it renders where it happened. */

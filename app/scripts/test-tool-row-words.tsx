@@ -1,9 +1,4 @@
-/**
- * What a tool row puts beside its verb: the call's own words, and never the arguments a transcript
- * row fell back to. The decision is whether the label reads as an envelope, not whether it opens on
- * a brace — a command that starts with `{` is the words it is. A failed group draws here too: its
- * mark ahead of the words, its failure in the row's name, and the host's reason dented under them.
- */
+/** What a tool row puts beside its verb, and what its sheet says (ADR 0096, ADR 0098). */
 import assert from "node:assert/strict"
 import test from "node:test"
 
@@ -52,7 +47,7 @@ test("a row drops an envelope's arguments but keeps words that only open on a br
   )
 })
 
-test("a failed group says so on its own words, and its reason stands under them", async () => {
+test("a failed group says so under its words, and its own row keeps the muted tone", async () => {
   await mount(
     <MessageItem
       message={reply([
@@ -72,10 +67,10 @@ test("a failed group says so on its own words, and its reason stands under them"
         "the words lead the row: no mark stands ahead of them (ADR 0092)",
       )
       assert.equal(row?.querySelector('[data-slot="work-sign"]'), null, "and no sign is drawn")
-      assert.match(
+      assert.doesNotMatch(
         label?.className ?? "",
         /text-destructive/,
-        "the row's own words carry the failure's colour",
+        "the row's own words keep the muted tone: what failed is said under them (ADR 0096)",
       )
       assert.match(
         row?.getAttribute("aria-label") ?? "",
@@ -84,6 +79,11 @@ test("a failed group says so on its own words, and its reason stands under them"
       )
       const reason = find('[data-slot="tool-group-reason"]')
       assert.equal(reason?.textContent, "Exited 2", "the host's reason stands under the label")
+      assert.match(
+        reason?.className ?? "",
+        /text-destructive/,
+        "and carries the failure's colour alone",
+      )
       assert.doesNotMatch(
         reason?.className ?? "",
         /pl-6/,
@@ -93,6 +93,94 @@ test("a failed group says so on its own words, and its reason stands under them"
         reason?.previousElementSibling?.getAttribute("data-slot"),
         "tool-group",
         "and it follows the row it explains",
+      )
+    },
+  )
+})
+
+/**
+ * jsdom measures nothing, so a case that needs a fit lends the page its own widths — the row's
+ * `clientWidth`, and the width of a line drawn in it. Answers the undo, since these prototypes outlive
+ * the case.
+ */
+function withLayout(room: number) {
+  Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get: () => room })
+  Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+    configurable: true,
+    get(this: Element) {
+      return (this.textContent ?? "").length * 7
+    },
+  })
+  return () => {
+    for (const name of ["clientWidth", "offsetWidth"])
+      delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name]
+  }
+}
+
+test("a cut row says its count, and the sheet it opens names the whole run", async () => {
+  // The row needs a width for a cut to exist at all: with no room the fit leaves every phrase in the
+  // line, and the heading assertion below would be comparing it with itself.
+  const calls = [
+    call("c-1", "terminal", "ls"),
+    call("c-2", "read_file", "/etc/hosts"),
+    call("c-3", "patch", "/etc/hosts"),
+    call("c-4", "write_file", "/etc/notes"),
+  ]
+  const restore = withLayout(220)
+  try {
+    await mount(<MessageItem message={reply(calls)} />, async () => {
+      const row = find('[data-slot="tool-group"]')
+      assert.match(
+        row?.textContent ?? "",
+        /\(\+\d+\)$/,
+        "the row cuts its line, and says how many phrases it left out",
+      )
+      await click(row)
+      const heading = find("h2")
+      assert.equal(
+        heading?.textContent,
+        "Ran a command, read a file, edited a file, created a file",
+        "while the heading says every phrase the run holds",
+      )
+      assert.doesNotMatch(heading?.textContent ?? "", /\(\+\d+\)/, "and carries no cut count")
+      assert.equal(callRows().length, 4, "with one row per call beneath it")
+    })
+  } finally {
+    restore()
+  }
+})
+
+test("a call the reader refused wears no failure, and its sheet says so", async () => {
+  await mount(
+    <MessageItem
+      message={reply([
+        {
+          ...call("c-no", "terminal", "rm -rf /var/log"),
+          status: "refused",
+          result: JSON.stringify({
+            output: "",
+            exit_code: -1,
+            error: "BLOCKED: Command denied by user.",
+            status: "blocked",
+          }),
+        },
+      ])}
+    />,
+    async () => {
+      const row = find('[data-slot="tool-group"]')
+      assert.doesNotMatch(row?.getAttribute("aria-label") ?? "", /failed/, "the row is not a failure")
+      assert.equal(find('[data-slot="tool-group-reason"]'), null, "and draws no reason under it")
+      await click(row)
+      await click(find("ol li button"))
+      const sheets = [...document.querySelectorAll("[data-popup-form]")]
+        .map((one) => one.textContent ?? "")
+        .join(" ")
+      assert.match(sheets, /Refused/, "the call's sheet says it was refused, not Completed")
+      assert.doesNotMatch(sheets, /Exit code/, "and reports no exit code for a command that never ran")
+      assert.equal(
+        document.querySelectorAll("[data-popup-form] .text-destructive").length,
+        0,
+        "nothing in its sheet wears the failure's colour",
       )
     },
   )
