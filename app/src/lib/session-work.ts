@@ -98,6 +98,16 @@ export function sessionState(facts: SessionFacts): SessionState {
 }
 
 /**
+ * A session the Code list draws under Closed — resolved or discarded. Nothing more happens in it, so
+ * the list stops asking after its branch: only the session's own screen reads it again, when the
+ * user opens it. Read from the two stamps rather than from `sessionState`, because a session closed
+ * while its run is somehow still in flight is closed all the same.
+ */
+export function closedSession(facts: Pick<SessionFacts, "resolvedAt" | "discardedAt">) {
+  return Boolean(facts.resolvedAt || facts.discardedAt)
+}
+
+/**
  * Whether the session's own run is in flight — the primary fact every other claim is read against.
  * The host's status answers first: `running` is the run running, so a wait mark this device or an
  * earlier poll still holds never outranks it, and `waiting_for_approval` is the run blocked on the

@@ -66,6 +66,10 @@ class PrsBatchTests(unittest.TestCase):
             one.start()
             self.addCleanup(one.stop)
 
+        # A pool per test, made on first use so it takes the `MAX_OUTBOUND` this test patched; the
+        # plugin drops it afterwards, so its threads don't outlive the case that made them.
+        self.addCleanup(plugin._drop_chains)
+
         self.app, self.adapter = App(), Adapter()
         context = Context()
         plugin.register(context)
@@ -152,6 +156,40 @@ class PrsBatchTests(unittest.TestCase):
             answer = self.read(["s-a"])
         self.assertEqual(answer["status"], 200)
         self.assertEqual(answer["payload"]["unread"], ["s-a"], "a read too slow is left unread")
+
+    def test_a_batch_chain_runs_on_its_own_workers(self):
+        import threading
+
+        names = []
+
+        def read(home, root, branch, **rest):
+            names.append(threading.current_thread().name)
+            return []
+
+        with mock.patch.object(github, "pull_requests", read):
+            self.read([f"s-{n}" for n in range(4)])
+        self.assertTrue(names, "the batch read something")
+        self.assertTrue(
+            all(name.startswith("memento-prs") for name in names),
+            f"a batch's chains run on the batch's own workers, not the executor every other route "
+            f"shares: {sorted(set(names))}",
+        )
+
+    def test_a_closed_session_is_named_unread_and_costs_no_chain(self):
+        reads = []
+
+        def read(home, root, branch, **rest):
+            reads.append(branch)
+            return []
+
+        with mock.patch.object(
+            self.plugin.chats, "closed_sessions", return_value={"s-a"}
+        ), mock.patch.object(github, "pull_requests", read):
+            answer = self.read(["s-a"])
+        self.assertEqual(answer["status"], 200)
+        self.assertEqual(answer["payload"]["prs"], {})
+        self.assertEqual(answer["payload"]["unread"], ["s-a"])
+        self.assertEqual(reads, [], "a closed session's branch is not read at all")
 
     def test_no_session_named_is_a_refused_read(self):
         answer = self.read([])

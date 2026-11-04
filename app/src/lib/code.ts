@@ -15,8 +15,9 @@ import {
 } from "@/lib/freshness"
 import { useAnyChange } from "@/lib/live"
 import { usePoll } from "@/lib/poll"
+import { closedSession } from "@/lib/session-work"
 import { quietly } from "@/lib/report"
-import { prChecksPending, refreshPrsOf, refreshWorkspace } from "@/lib/workspace"
+import { prChecksPending, refreshPrsOf, refreshWorkspaces } from "@/lib/workspace"
 import { cachedTail, needsTailRead, rememberTail } from "@/lib/session-tail"
 import type { LocalTurn } from "@/lib/session-work"
 
@@ -82,8 +83,9 @@ export function useProjectSessions(only?: string, { tails: readTails = true } = 
   const local = useLiveQuery(async () => {
     if (!listed || !readTails) return undefined
     const now = Date.now()
-    const moved = listed.rows.filter((c) =>
-      needsTailRead(cachedTail(c.id), c.updatedAt, now, TAIL_MS),
+    // A closed session has no turn left to keep up with; its own screen reads it when opened.
+    const moved = listed.rows.filter(
+      (c) => !closedSession(c) && needsTailRead(cachedTail(c.id), c.updatedAt, now, TAIL_MS),
     )
     await Promise.all(
       moved.map(async (c) =>
@@ -121,30 +123,35 @@ export function useSessionFollowUps(sessions: Conversation[] | undefined, open?:
   useEffect(() => {
     const now = Date.now()
     const ready: string[] = []
-    const late: Conversation[] = []
+    const reread: string[] = []
+    const late: string[] = []
     for (const c of sessions ?? []) {
+      if (closedSession(c)) continue
       const last = read.current.get(c.id)
       if (last !== undefined && now - last < SESSION_REREAD_MS) continue
       read.current.set(c.id, now)
       if (!c.worktree) {
-        late.push(c)
+        late.push(c.id)
         continue
       }
       ready.push(c.id)
       // A row this device has seen is re-read alongside rather than in front of the rest.
-      if (last !== undefined) void refreshWorkspace(c.id).catch(quietly("Reading a workspace"))
+      if (last !== undefined) reread.push(c.id)
     }
+    if (reread.length) void refreshWorkspaces(reread).catch(quietly("Reading a workspace"))
     // One read for every row this device can read now; a bot whose plugin predates the batch
     // answers them one at a time from inside `refreshPrsOf`.
     if (ready.length) void refreshPrsOf(ready).catch(quietly("Reading sessions' pull requests"))
-    for (const c of late) {
-      // Its worktree isn't here yet, so there is no branch to read until the host names one.
-      void refreshWorkspace(c.id)
-        .then(() => refreshPrsOf([c.id]))
+    if (late.length) {
+      // Their worktrees aren't here yet, so there is no branch to read until the host names one.
+      void refreshWorkspaces(late)
+        .then(() => refreshPrsOf(late))
         .catch(quietly("Reading sessions' pull requests"))
     }
   }, [sessions])
-  const runningChecks = (sessions ?? []).filter((c) => c.id !== open && prChecksPending(c.prs))
+  const runningChecks = (sessions ?? []).filter(
+    (c) => c.id !== open && !closedSession(c) && prChecksPending(c.prs),
+  )
   // Forced, so the freshness gate doesn't skip a tick that lands just inside its window.
   usePoll(
     () => {

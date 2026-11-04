@@ -83,6 +83,8 @@ export const AGENT_WORK_MS = 4_000
 export const PR_MS = 30_000
 /** A pull request whose checks are still running, so the pill shows them as they finish. */
 export const PR_PENDING_MS = 10_000
+/** A bot left alone after an unanswered read: long enough that the retry outlives the read it repeats. */
+export const PR_QUIET_MS = READ_TIMEOUT_MS * 4
 /** The project screen reads a session's worktree and pull requests again, at most this often. */
 export const SESSION_REREAD_MS = 60_000
 

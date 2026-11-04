@@ -10,6 +10,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import {
+  closedSession,
   isUnread,
   lastActivityAt,
   rowTone,
@@ -30,6 +31,13 @@ const session = (facts = {}) => ({
 test("a live subagent with no live turn reads working", () => {
   assert.equal(sessionState(session({ subagents: 1 })), "working")
   assert.equal(sessionState(session({ local: { streaming: false }, subagents: 2 })), "working")
+})
+
+test("closed is the two stamps, not the state a run can outrank", () => {
+  assert.equal(closedSession({}), false)
+  assert.equal(closedSession({ resolvedAt: 1 }), true)
+  assert.equal(closedSession({ discardedAt: 1 }), true)
+  assert.equal(closedSession({ resolvedAt: 1, discardedAt: 2 }), true)
 })
 
 test("nothing at work is idle", () => {

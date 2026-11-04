@@ -1,8 +1,9 @@
 import { toast } from "sonner"
 
-import { LIBRARY_MS, PR_MS, PR_PENDING_MS, READ_TIMEOUT_MS } from "@/lib/freshness"
+import { LIBRARY_MS, PR_QUIET_MS, PR_MS, PR_PENDING_MS, READ_TIMEOUT_MS } from "@/lib/freshness"
 import { noteFailure } from "@/lib/report"
 import { connectionKey, hasServer } from "@/lib/connection"
+import { closedSession } from "@/lib/session-work"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
 import {
   db,
@@ -22,6 +23,7 @@ import {
   getSessionPrs,
   getSessionPrsBatch,
   getWorkspace,
+  getPluginFeatureList,
   hasPluginFeature,
   HermesError,
   closeSession,
@@ -60,7 +62,7 @@ const unsupported = cooldown()
  */
 const libraryRead = new Map<string, number>()
 /** When this device last read a session's pull requests — the freshness gate's own clock. */
-const prsRead = new Map<string, number>()
+const prsReadAt = new Map<string, number>()
 
 /** Whether any of a session's live pull requests still has checks running. */
 export const prChecksPending = (prs: PullRequestRef[] | undefined) =>
@@ -74,15 +76,31 @@ export const MODE_LABELS: Record<SessionMode, string> = {
 
 type SessionTarget = { conversation: Conversation; profile: Profile; key: string }
 
-/** The session and its bot, when the bot's plugin can hold its workspace. */
-async function tracked(conversationId: string): Promise<SessionTarget | null> {
-  const conversation = await db.conversations.get(conversationId)
-  const profile = conversation && (await db.profiles.get(conversation.profileId))
+/**
+ * The sessions a list can read, and their bots, in two round trips rather than two a row: a screen's
+ * tick asks about hundreds of rows, and `get` per row per tick measured 452 transactions to ask 24.
+ */
+async function targetsOf(conversationIds: string[]): Promise<SessionTarget[]> {
+  const rows = await db.conversations.bulkGet(conversationIds)
   // Keyless chats have no session id Hermes knows.
-  if (!conversation?.projectId || !profile?.apiKey || profile.disabled) return null
-  return { conversation, profile, key: connectionKey(profile) }
+  const wanted = rows.filter((row): row is Conversation => Boolean(row?.projectId))
+  if (!wanted.length) return []
+  const profiles = new Map(
+    (await db.profiles.bulkGet([...new Set(wanted.map((row) => row.profileId))]))
+      .filter((profile): profile is Profile => Boolean(profile?.apiKey && !profile.disabled))
+      .map((profile) => [profile.id, profile]),
+  )
+  return wanted.flatMap((conversation) => {
+    const profile = profiles.get(conversation.profileId)
+    return profile ? [{ conversation, profile, key: connectionKey(profile) }] : []
+  })
 }
 
+/** The session and its bot, when the bot's plugin can hold its workspace. */
+async function tracked(conversationId: string): Promise<SessionTarget | null> {
+  const [found] = await targetsOf([conversationId])
+  return found ?? null
+}
 async function store(conversationId: string, workspace: SessionWorkspace | null) {
   const current = await db.conversations.get(conversationId)
   if (!current) return
@@ -155,10 +173,33 @@ export async function ensureSessionWorkspace(
   }
 }
 
-/** Reads the session's workspace from the plugin: its mode and whether a plan is waiting. */
-export async function refreshWorkspace(conversationId: string) {
+/** What a read answered: the row stored, the host failed it, or there was nothing to ask. */
+type ReadAnswer = "read" | "failed" | "none"
+
+/**
+ * Reads the worktrees of a whole screen's sessions, a few at a time. A host working a turn answers
+ * none of them for a while, and ten reads that wait fifteen seconds each are ten sockets the
+ * transcript's own read is then queued behind.
+ */
+export async function refreshWorkspaces(conversationIds: string[]) {
+  for (let at = 0; at < conversationIds.length; at += PRS_READS_AT_ONCE) {
+    const read = conversationIds.slice(at, at + PRS_READS_AT_ONCE).map((id) => refreshWorkspace(id))
+    // Reads that couldn't be made at all say nothing about the host; reads that were made and failed
+    // say the host isn't answering, and the rest of the list waits a tick rather than sitting on
+    // sockets that will time out one by one.
+    const answered = await Promise.all(read)
+    if (!answered.includes("read") && answered.includes("failed")) return
+  }
+}
+
+/**
+ * Reads the session's workspace from the plugin: its mode and whether a plan is waiting. The answer
+ * separates a read that failed from one there was nothing to make — a closed plugin, no record, a
+ * bot already cooling — because only the first says anything about the host.
+ */
+export async function refreshWorkspace(conversationId: string): Promise<ReadAnswer> {
   const found = await tracked(conversationId)
-  if (!found || unsupported.cooling(found.key)) return
+  if (!found || unsupported.cooling(found.key)) return "none"
   let workspace
   try {
     workspace = await getWorkspace(
@@ -169,10 +210,11 @@ export async function refreshWorkspace(conversationId: string) {
   } catch (error) {
     noteFailure("Reading a session's workspace", error)
     if (await lacksRoute(found.profile, error, "sessions")) unsupported.start(found.key)
-    return
+    return "failed"
   }
   unsupported.clear(found.key)
   await store(conversationId, workspace)
+  return "read"
 }
 
 /**
@@ -220,22 +262,54 @@ export function refreshPrs(conversationId: string, { force = false } = {}) {
  * A bot whose plugin predates the batch answers its sessions one at a time, as it always did.
  */
 export async function refreshPrsOf(conversationIds: string[], { force = false } = {}) {
-  const found = (await Promise.all(conversationIds.map(tracked))).filter(prsReadable)
+  const found = (await targetsOf(conversationIds)).filter(prsReadable)
+  // The rows read longest ago first, so a tick of any size takes the stalest and the rest wait
+  // their turn rather than all of them being asked past a deadline that can't reach them.
+  const asked = (id: string) => prsAskedAt.get(id) ?? prsReadAt.get(id) ?? 0
+  // A closed session's branch is done moving as far as the list is concerned: reading it again is
+  // the session's own screen's job, when the user opens it.
+  const due = found
+    .filter((one) => !closedSession(one.conversation))
+    .filter((one) => force || dueForPrs(one.conversation))
+    .sort((a, b) => asked(a.conversation.id) - asked(b.conversation.id))
   const groups = new Map<string, { profile: Profile; rows: Conversation[] }>()
-  for (const one of found) {
-    if (!force && !dueForPrs(one.conversation)) continue
+  for (const one of due) {
     const group = groups.get(one.key) ?? { profile: one.profile, rows: [] }
+    // A bot's rows are one request with one deadline, so the cap is a bot's rows rather than the
+    // call's: counted across bots, a bot far down the order would spend several ticks with none.
+    if (group.rows.length >= PRS_TICK_MAX) continue
     group.rows.push(one.conversation)
     groups.set(one.key, group)
   }
   await Promise.all(
     [...groups.values()].map(async ({ profile, rows }) => {
       const key = connectionKey(profile)
-      const oneAtATime = () => Promise.all(rows.map((row) => refreshPrs(row.id, { force })))
-      if (
-        batchUnsupported.cooling(key) ||
-        !(await hasPluginFeature(profile, "prs_batch").catch(() => false))
-      ) {
+      // Stamped as the rows go into a request, whether or not the host answers for them: a row left
+      // unread is not the row the next tick takes first, or one unanswerable session starves the
+      // list. A tick that asks nothing at all stamps nothing, so a quiet bot's rows keep their turn.
+      const asked = () => {
+        for (const row of rows) prsAskedAt.set(row.id, Date.now())
+      }
+      const oneAtATime = async () => {
+        for (let at = 0; at < rows.length; at += PRS_READS_AT_ONCE) {
+          // One read that timed out is the host not answering: the rest of the list waits.
+          if (prsFailed.cooling(key)) return
+          await Promise.all(
+            rows.slice(at, at + PRS_READS_AT_ONCE).map((row) => refreshPrs(row.id, { force })),
+          )
+        }
+      }
+      if (prsFailed.cooling(key)) return
+      // A host that answered no features didn't answer: nine single reads behind its stall is what
+      // deepens one, so the rows keep what they hold — and the probe is left alone for a moment too,
+      // or every tick pays its fifteen seconds against the same hung socket.
+      const features = await getPluginFeatureList(profile)
+      if (!features) {
+        prsFailed.start(key)
+        return
+      }
+      if (batchUnsupported.cooling(key) || !features.includes("prs_batch")) {
+        asked()
         await oneAtATime()
         return
       }
@@ -247,6 +321,7 @@ export async function refreshPrsOf(conversationIds: string[], { force = false } 
         rows.map((row) => row.id),
         settled.promise,
       )
+      asked()
       let answer
       try {
         answer = await getSessionPrsBatch(
@@ -257,12 +332,15 @@ export async function refreshPrsOf(conversationIds: string[], { force = false } 
       } catch (error) {
         settled.release()
         noteFailure("Reading sessions' pull requests", error)
-        // A host that doesn't answer the route keeps the rows it has, and reads them one at a time
-        // for a while rather than paying a failing request before every batch.
+        // A failed batch is a host that couldn't answer, not a route that isn't there: the rows keep
+        // what they hold, and this bot is left alone for a moment rather than asked once per session.
+        // A route that really isn't there is the other case — it falls back, so it must not also be
+        // cooled as a failure, or the fallback it just chose never runs.
         if (await lacksRoute(profile, error, "prs_batch")) batchUnsupported.start(key)
-        await oneAtATime()
+        else prsFailed.start(key)
         return
       }
+      prsFailed.clear(key)
       // A session the host named unread — or left out — keeps what this device already holds.
       const unread = new Set(answer.unread)
       try {
@@ -287,14 +365,11 @@ function deferred() {
 
 /**
  * A session this host can read pull requests for at all: it has a worktree to read a branch from,
- * and hasn't been discarded (its pull requests stay as it closed them; its branch is gone).
+ * and its plugin answers the route. Whether it is closed is the caller's to decide — the list
+ * leaves a closed row alone, and the session's own screen reads it when the user opens it.
  */
 function prsReadable(found: SessionTarget | null): found is SessionTarget {
-  return Boolean(
-    found?.conversation.worktree &&
-    !found.conversation.discardedAt &&
-    !unsupported.cooling(found.key),
-  )
+  return Boolean(found?.conversation.worktree && !unsupported.cooling(found.key))
 }
 
 /** When each session's pull requests are already being read: a second ask joins the first. */
@@ -313,6 +388,23 @@ function trackInFlight(ids: string[], read: Promise<void>) {
 const batchUnsupported = cooldown()
 
 /**
+ * How many of a screen's sessions one tick asks about. A list can hold hundreds of rows, and every
+ * row in a request is a chain of GitHub calls on that bot: asked all at once, the batch answers past
+ * its deadline and the rows it couldn't reach are never refreshed. The rows read longest ago go
+ * first, so a screen of any size is read in turn.
+ */
+export const PRS_TICK_MAX = 24
+
+/** When each row was last asked about, whatever the host answered: a screen this large rotates. */
+const prsAskedAt = new Map<string, number>()
+
+/** Bots whose pull-request reads went unanswered, for a while: one read at a time, not nine. */
+const prsFailed = cooldown(PR_QUIET_MS)
+
+/** How many per-session reads an older plugin is asked for at once, for a screen's whole list. */
+export const PRS_READS_AT_ONCE = 3
+
+/**
  * Whether this device's copy is old enough to read again. The clock is when this device last read,
  * not when a pull request last moved: `pr.at` carries the move (a Code row's last activity reads
  * it), so the gate keeps its own — the way refreshLibrary keeps `libraryRead` beside `library.at`.
@@ -321,7 +413,7 @@ function dueForPrs(conversation: Conversation) {
   const newest = (conversation.prs ?? []).length
     ? Math.min(...(conversation.prs ?? []).map((pr) => pr.at))
     : 0
-  const readAt = prsRead.get(conversation.id) ?? newest
+  const readAt = prsReadAt.get(conversation.id) ?? newest
   const trusted = prChecksPending(conversation.prs) ? PR_PENDING_MS : PR_MS
   return !conversation.prs?.length || Date.now() - readAt >= trusted
 }
@@ -341,10 +433,15 @@ async function readPrs(conversationId: string, force: boolean) {
     )
   } catch (error) {
     noteFailure("Reading a session's pull requests", error)
+    // A route that isn't there is the plugin's shape, and an HTTP answer is about this session:
+    // only a read with no answer at all is the host, and only that quiets the reads beside it.
+    const status = error instanceof HermesError ? error.status : undefined
     if (await lacksRoute(profile, error, "prs")) unsupported.start(found.key)
+    else if (!status) prsFailed.start(found.key)
     return
   }
   unsupported.clear(found.key)
+  prsFailed.clear(found.key)
   await storePrs(conversationId, prs)
 }
 
@@ -352,7 +449,7 @@ async function readPrs(conversationId: string, force: boolean) {
 async function storePrs(conversationId: string, prs: PullRequest[]) {
   const conversation = await db.conversations.get(conversationId)
   if (!conversation) return
-  prsRead.set(conversationId, Date.now())
+  prsReadAt.set(conversationId, Date.now())
   const before = new Map((conversation.prs ?? []).map((pr) => [prKey(pr), pr]))
   // A pull request carries its moment on its own record, and it means the pull request's last
   // move: re-reads with nothing changed write nothing (and stamp nothing), so a row's last

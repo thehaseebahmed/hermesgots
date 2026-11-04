@@ -108,6 +108,23 @@ def by_session(path: Path, session_id: str) -> Optional[Dict[str, Any]]:
     return None if closed(found) else found
 
 
+def closed_sessions(path: Path) -> set[str]:
+    """The Hermes sessions whose chat the user is done with: resolved, discarded or deleted.
+
+    One read of the list, for a caller asking about many sessions at once — the per-session question
+    is ``by_session``'s, which answers None for "closed" and "no such chat" alike, and a batch that
+    must read an unknown session and skip a closed one cannot tell them apart through it.
+    """
+    found: set[str] = set()
+    for chat_id, entry in read(path).items():
+        if not closed(entry):
+            continue
+        value = entry.get("value")
+        named = value.get("hermesSessionId") if isinstance(value, dict) else None
+        found.add(named if isinstance(named, str) and named else chat_id)
+    return found
+
+
 def _naming_session(path: Path, session_id: str) -> list[Dict[str, Any]]:
     """Every record whose value names this Hermes session, as ``read`` would decode them.
 

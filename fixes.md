@@ -2790,3 +2790,62 @@ the network — and the guard test allowlists that file by name.
   a cached read recorded as network time would be a worse lie than leaving it out.
 - Why it is deferred: `media-cache.ts` predates this branch and nothing in the change touches it; the
   fix needs a cache-vs-network distinction on the row before it can be honest.
+
+---
+
+# Deferred fixes from the grilling round on the pull-request read storm
+
+A phone's network log and a bot's access log, read together, showed the Code screen asking after every
+listed session's pull requests one request at a time — 226 sessions, 8,768 requests in ninety minutes,
+236 starting in the same second — while the host answered each in 11ms. The branch answers them in one
+request a bot, backs off when a host can't answer, reads a big list a tick at a time, and leaves closed
+sessions to their own screens (ADR 0087, ADR 0088).
+
+A grilling round of three agents — the surface, the host, the written record — and the review passes
+before it are applied on the branch rather than filed: the 24-row cap counted per call instead of per
+bot; a discarded session unreadable even when opened; the batch answering a chain per closed row; a
+batch's chains running on the executor every other route shares; and the record's two contradictions, a
+failed batch described as falling back per session and a cap described as rejected.
+
+## Risky
+
+### 1. A batch's chains outlive the answer, and ticks stack them
+
+`session_prs_batch` stops waiting at `PRS_BATCH_DEADLINE_S` and cancels what is still out, but a chain
+already running on a worker cannot be cancelled: it runs to `github.READ_TIMEOUT_S` twice over (the slot
+wait, then the socket), and the next tick starts another `MAX_OUTBOUND` of them beside it. A probe of
+three ticks left 4, 7 and 10 threads over baseline, all answering `unread`.
+
+- Cost: on a bot whose GitHub is slow, a device polling every ten seconds adds three long-lived chains a
+  tick. Bounded per tick, not over time.
+- Suggested fix: register the in-flight reads per (home, session) so the next tick joins one already
+  running rather than starting a second — the shape `_resolving` already uses for `merges.check` — and
+  give each chain a deadline the read itself honours.
+- Why it is deferred: the in-flight map has to outlive a request and nothing in the plugin currently
+  owns that lifetime; it wants its own change and its own test.
+- Still on the shared executor: `merges.check` — the resolve pass a batch starts — runs through
+  `run_in_executor(None, …)`, so its GitHub reads sit on the pool the transcript's own read draws on.
+  It is off the answer path and once per batch, which is why it was left; moving it onto the chains'
+  pool would make it queue against the batch's own reads.
+
+### 2. A failed batch is remembered for its own `limit` only
+
+`_pr_failed`'s key includes the read's `limit`, so a batch failure (`limit=None`) is invisible to
+`pull_request`'s capped read (`limit=1`) that `merges.check` and `alerts` make: at a dead GitHub they pay
+a fresh chain each pass instead of reading the remembered failure.
+
+- Cost: two callers pay one chain per repo every five minutes while GitHub is unreachable — small, and
+  much better than the storm it replaced, but not the economy the failure cache was added for.
+- Suggested fix: key the failure on `(repo_root, branch)` and keep the cap in the answer rather than the
+  key, the same reshape the answer cache wants.
+- Why it is deferred: it changes what a cached answer may be served for, and this branch's tests pin the
+  current contract; #841 shipped the cache and this branch does not touch it.
+
+## Known red, and not this branch's
+
+`pnpm e2e prs` fails at its second case — "the batch naming the session it couldn't read" — and fails
+identically at `69d71f67` with none of this branch's commits, so it is not a regression here. The nightly
+suite has been red on main since 30 October. The rules that flow was going to cover (a bounded tick, a
+closed row) are asserted in `app/scripts/test-prs-batch.tsx`, which runs on every PR; the flow needs its
+own repair, in the session list that stops listing a seeded row after a reload.
+

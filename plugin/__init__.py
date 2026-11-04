@@ -13,6 +13,8 @@ set the profile's main model from a bot's Default model (``host_model.py``), lab
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
+import threading
 import time
 import contextlib
 import json
@@ -87,6 +89,35 @@ PREFIX = "/api/plugins/memento"
 PRS_BATCH_DEADLINE_S = 8.0
 # The resolve passes a batch starts, held here so nothing collects a future still running.
 _resolving: Set[Any] = set()
+# The workers a batch's pull-request chains run on: a slot here is a thread, and a read still queued
+# when the batch answers is a future that never starts, where `to_thread` could only be abandoned
+# running. Sized from `github.MAX_OUTBOUND`, made on first use so a test can patch the limit.
+_chains: Optional[concurrent.futures.ThreadPoolExecutor] = None
+_chains_lock = threading.Lock()
+
+
+async def _chain(read: Callable[..., Any], *args: Any) -> Any:
+    """A pull-request chain on the chains' own workers, queued rather than abandoned."""
+    return await asyncio.wrap_future(_chain_pool().submit(read, *args))
+
+
+def _drop_chains() -> None:
+    """Forget the chains' pool: its threads end as their work does, rather than outliving a test."""
+    global _chains
+    with _chains_lock:
+        pool, _chains = _chains, None
+    if pool is not None:
+        pool.shutdown(wait=False)
+
+
+def _chain_pool() -> concurrent.futures.ThreadPoolExecutor:
+    global _chains
+    with _chains_lock:
+        if _chains is None:
+            _chains = concurrent.futures.ThreadPoolExecutor(
+                max_workers=github.MAX_OUTBOUND, thread_name_prefix="memento-prs"
+            )
+        return _chains
 # Gots shows 24 runs per job.
 DEFAULT_PER_JOB = 24
 MAX_PER_JOB = 200
@@ -1701,7 +1732,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
 
     async def settled_prs(home: Path, session_id: str, record: Dict[str, Any]) -> List[Dict[str, Any]]:
         """A session's pull requests, and the resolve a merged one asks for."""
-        per_repo = await asyncio.to_thread(prs_of, home, record) if record else []
+        per_repo = await _chain(prs_of, home, record) if record else []
         if merged_here(per_repo):
             try:
                 await asyncio.to_thread(merges.check, home, {session_id})
@@ -1734,27 +1765,34 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if not asked:
             return _error(web, "Missing session", 400)
         path, home = store_path(), hermes_home()
-        # The slot is taken before the record read, so a batch is bounded in the pool it shares with
-        # every other route rather than in waiting alone, and the deadline covers the whole of it.
-        slots = asyncio.Semaphore(github.MAX_OUTBOUND)
         merged: Set[str] = set()
+        # One read of the chat list for the whole batch: a closed session's branch is done moving and
+        # the app leaves its row alone, so naming it unread keeps what the device holds and costs
+        # this host no chain at all — asked once here rather than once per row.
+        shut = await asyncio.to_thread(chats.closed_sessions, path)
+        # A record read takes a thread, and a batch's worth of them at once is the shared executor
+        # this route exists to spare: taken a few at a time, in the same slots the chains use.
+        records = asyncio.Semaphore(github.MAX_OUTBOUND)
 
         async def one(session_id: str):
-            async with slots:
+            if session_id in shut:
+                return session_id, None
+            async with records:
                 record = await asyncio.to_thread(sessions.record_for, path, home, session_id)
-                # A session this store doesn't know is unread, not a session with no pull requests:
-                # the app writes an empty answer over what the row already holds.
-                if not record:
-                    return session_id, None
-                per_repo = await asyncio.to_thread(prs_of, home, record)
-                if merged_here(per_repo):
-                    merged.add(session_id)
-                return session_id, [pr for group in per_repo for pr in group]
+            # A session this store doesn't know is unread, not a session with no pull requests:
+            # the app writes an empty answer over what the row already holds.
+            if not record:
+                return session_id, None
+            per_repo = await _chain(prs_of, home, record)
+            if merged_here(per_repo):
+                merged.add(session_id)
+            return session_id, [pr for group in per_repo for pr in group]
 
         tasks = {asyncio.create_task(one(session_id)): session_id for session_id in asked}
         done, pending = await asyncio.wait(tasks, timeout=PRS_BATCH_DEADLINE_S)
-        # A read still out at the deadline is dropped from the answer, not waited on: what it holds
-        # is a thread already bounded by `github.READ_TIMEOUT_S`, and the app asks again next time.
+        # A read still out at the deadline is dropped from the answer, not waited on: the ones still
+        # queued are cancelled before they start, and the running ones hold threads only for the
+        # timeout their own call was given.
         for task in pending:
             task.cancel()
         prs: Dict[str, List[Dict[str, Any]]] = {}
