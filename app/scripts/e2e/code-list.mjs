@@ -61,16 +61,21 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   assert.equal(await countIn(page, "Closed"), "2", "the closed count")
   pass("groups run Waiting for You, Idle, Closed with their counts, and the empty one stays hidden")
 
+  // A turn starting moves the session's own clock as well as writing its reply: the list re-reads a
+  // session's tail only when that clock has moved past the read it keeps (`needsTailRead`), so a row
+  // written alone leaves the screen reading the tail it already had.
   await page.evaluate(async () => {
     const { db } = await import("/src/lib/db.ts")
+    const at = Date.now()
     await db.messages.put({
       id: "cl-work-msg",
       conversationId: "cl-working",
       role: "assistant",
       content: "Working on it.",
       status: "streaming",
-      createdAt: Date.now(),
+      createdAt: at,
     })
+    await db.conversations.update("cl-working", { updatedAt: at })
   })
   await until(async () => (await group(page, "Working").count()) > 0, 15_000, "the working group")
   assert.deepEqual(await headings(page), ORDER, "all four, in their fixed order")
@@ -115,14 +120,15 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   await page.getByRole("menuitem", { name: /Title/ }).click()
   await until(async () => {
     const titles = await group(page, "Idle").locator("li").allTextContents()
-    return titles[0]?.includes("At rest") && titles[2]?.includes("Another idle")
+    return titles.at(-1)?.includes("Another idle") && titles[0]?.includes("At rest")
   }, 5_000, "the idle group turned round")
   assert.match(await sortButton().getAttribute("aria-label") ?? "", /Title, descending/,
     "the same key, the opposite arrow")
   await shot("sorted-desc")
   pass("picking the chosen sort again flips its arrow instead of choosing it twice")
 
-  await page.getByRole("button", { name: "Search", exact: true }).click()
+  // The list's own search button, not the sidebar's: the header's carries `data-search-toggle`.
+  await page.locator("button[data-search-toggle]").click()
   const search = page.getByLabel("Search sessions")
   await search.waitFor()
   await search.fill("work")
@@ -192,7 +198,11 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   assert.match(await sortButton().getAttribute("aria-label") ?? "",
     /Title, descending/, "this device remembers the sort, arrow and all")
   const reloaded = await group(page, "Idle").locator("li").allTextContents()
-  assert.ok(reloaded[0]?.includes("At rest"), "and the rows still run by it")
+  assert.ok(
+    reloaded.findIndex((one) => one.includes("At rest")) <
+      reloaded.findIndex((one) => one.includes("Another idle")),
+    "and the rows still run by it: Z to A, so At rest stands above Another idle",
+  )
   assert.equal(await closed.getByText("Finished work").isVisible(), false, "Closed is folded again")
   pass("the sort choice is kept on this device and the groups come back folded after a reload")
 
@@ -269,14 +279,16 @@ for (const [width, dark] of VARIANTS) {
       await seedMark(page, "clv-idle-3", Date.now() - 60_000)
       await page.evaluate(async () => {
         const { db } = await import("/src/lib/db.ts")
+        const at = Date.now()
         await db.messages.put({
           id: "clv-work-msg",
           conversationId: "clv-working",
           role: "assistant",
           content: "Working on it.",
           status: "streaming",
-          createdAt: Date.now(),
+          createdAt: at,
         })
+        await db.conversations.update("clv-working", { updatedAt: at })
       })
       await until(async () => (await group(page, "Working").count()) > 0, 15_000,
         `the working group at ${look}`)

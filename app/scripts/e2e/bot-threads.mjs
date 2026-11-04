@@ -38,6 +38,13 @@ const OLDER_THREAD = "Keep the gate open"
 
 const count = (page, selector) => page.locator(selector).count()
 
+/**
+ * A card's way into its thread. The link's words are "View thread" but its accessible name is what
+ * it names — `View <thread title>`, which is what a reader hears — so a card is asked for by that.
+ */
+const viewLink = (card, title) =>
+  card.getByRole("link", { name: title ? new RegExp(`^View ${title}`) : /^View / })
+
 function sequence(page) {
   return page.evaluate(
     (messages) => {
@@ -205,6 +212,10 @@ function watchFrames(page, { lanes }) {
               ? Math.round(mine.at(-1)?.getBoundingClientRect().bottom ?? 0)
               : 0,
           count: mine.length,
+          // How tall the chat's content is in this frame. The first paintings of a chat whose items
+          // are still at their `content-visibility` estimate answer a different height from the one
+          // it lands on, and the scroller has not settled until that number stops changing.
+          height: content ? Math.round(content.getBoundingClientRect().height) : 0,
         }
       }
       const same = (one, other) =>
@@ -318,11 +329,16 @@ function assertSwitchFrames(frames, { what }) {
       .map((frame) => `${frame.scrollTop} of ${frame.count}`)
       .join(", ")})`,
   )
-  const bottoms = after.map((frame) => frame.bottom)
+  // Measured across the frames that hold the height the chat settles at: a frame still answering an
+  // estimate is the chat arriving, not the chat moving, and the reader never saw it painted.
+  const settledHeight = after.at(-1)?.height
+  const steady = after.filter((frame) => frame.height === settledHeight)
+  assert.ok(steady.length > 1, `${what}: the settled chat was sampled more than once`)
+  const bottoms = steady.map((frame) => frame.bottom)
   const drift = Math.max(...bottoms) - Math.min(...bottoms)
   assert.ok(
     drift <= 1,
-    `${what}: the scroller's position never moves after the first content frame (last item at ${bottoms.join(" → ")})`,
+    `${what}: the settled chat never moves (last item at ${bottoms.join(" → ")})`,
   )
   return { scrollTop: after[0].scrollTop, frames: frames.length }
 }
@@ -387,6 +403,19 @@ async function sampleSwitch(page, { chats, pane = "route", act, what, also = [] 
     { pane, says: chats[1].says },
     { timeout: 15_000 },
   )
+  // A lane swaps with the pane it sits beside, and on its own slower clock: the sampling stops only
+  // once every lane holds the chat it was asked for, or the last frame read is one of the frames
+  // before the switch landed, and the assertion blames the app for the flow's own timing.
+  for (const lane of also)
+    await page.waitForFunction(
+      ({ pane, title }) =>
+        document
+          .querySelector(`[data-pane="${pane}"]`)
+          ?.querySelector('[data-slot="header-title"]')
+          ?.textContent?.trim() === title,
+      { pane: lane.pane, title: lane.chats[1].title },
+      { timeout: 15_000 },
+    )
   await settled(page)
   await page.waitForFunction((tail) => window.__quiet >= tail, SETTLED_FRAMES, {
     timeout: 15_000,
@@ -547,7 +576,7 @@ await flow(
         { title: THREADS[0].title, says: LONG_NOTE },
       ],
       what: "a card's thread opens",
-      act: () => card.getByRole("link", { name: /View thread/ }).click(),
+      act: () => viewLink(card, THREADS[0].title).click(),
     })
     await page.waitForURL(`**/c/${THREADS[0].id}`, { timeout: 15_000 })
     await page.getByText(THREADS[0].opener).first().waitFor({ timeout: 15_000 })
@@ -790,7 +819,7 @@ await flow(
     )
     // The started thread's card, in the Main that stays on screen beside whatever the pane holds.
     const startedCard = cardOf(page, threadId)
-    await startedCard.getByRole("link", { name: /View thread/ }).click()
+    await viewLink(startedCard).click()
     await page.waitForURL(`**/c/${threadId}`, { timeout: 15_000 })
     await until(
       async () => (await count(page, '[data-pane="thread"] [data-slot="header-title"]')) === 1,
@@ -813,7 +842,7 @@ await flow(
     const held = await page.locator('[data-slot="header-row"]').nth(1).elementHandle()
     // Naming the same thread from its card again — which is what a tap on a thread that is already
     // the screen does — must draw no new pane: redrawing it is what made the thread flicker.
-    await startedCard.getByRole("link", { name: /View thread/ }).click()
+    await viewLink(startedCard).click()
     await settled(page)
     assert.equal(
       new URL(page.url()).pathname,
