@@ -144,7 +144,7 @@ import type { DiagReadFailure } from "@/lib/read-failure"
 import { describeReadFailure, formatReadFailure } from "@/lib/read-failure"
 import { reportUnreadThread } from "@/lib/sentry"
 import { isUnsent } from "@/chat-next/unsent"
-import { HeaderBack } from "@/components/chat/header-back"
+import { BackButton } from "@/components/back-button"
 import { useSessionLeave } from "@/components/chat/session-leave"
 import { announceMove } from "@/lib/triage"
 import { useMainFlow } from "@/components/chat/main-flow"
@@ -474,9 +474,15 @@ function NextChat({
                 // Beside Main the bot is on screen with the thread; below `xl` the thread leads back.
                 // A session leads back to Code, unless it is drawn beside Code's list.
                 mainPath && !besideMain ? (
-                  <HeaderBack label={`Back to ${bot.name || "bot"}`} onClick={() => up(mainPath)} />
+                  <BackButton
+                    label={`Back to ${bot.name || "bot"}`}
+                    onClick={() => up(mainPath)}
+                    floating
+                  />
                 ) : (
-                  underCode && <HeaderBack label="Back to Code" onClick={() => void leave()} />
+                  underCode && (
+                    <BackButton label="Back to Code" onClick={() => void leave()} floating />
+                  )
                 )
               }
             />
@@ -1401,12 +1407,13 @@ function CurrentChatPage({ chatId, paneThread, slot }: ChatPageProps) {
               // the pane keeps the thread wherever the address goes. Below `xl` it is a screen over
               // Main, and leads back to it.
               !besideMain && (
-                <HeaderBack
+                <BackButton
                   label={`Back to ${profile?.name ?? "bot"}`}
                   onClick={() => up(mainPath)}
+                  floating
                 />
               )
-            : underCode && <HeaderBack label="Back to Code" onClick={() => void leave()} />
+            : underCode && <BackButton label="Back to Code" onClick={() => void leave()} floating />
         }
       />
 

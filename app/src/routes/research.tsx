@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { Navigate, useLocation, useNavigate, useParams } from "react-router"
 import {
-  ArrowLeftIcon,
   ArrowUpIcon,
   BookAIcon,
   BookMarkedIcon,
@@ -108,6 +107,7 @@ import {
 } from "@/lib/research"
 import { useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
+import { BackButton } from "@/components/back-button"
 
 const FORMAT_ICONS: Record<OutputFormat, typeof BookOpenTextIcon> = {
   guide: BookOpenTextIcon,
@@ -731,17 +731,7 @@ function MissionHeader({
   return (
     <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
       <div className="flex items-center gap-3">
-        {onBack && (
-          <Button
-            variant="outline"
-            size="icon-lg"
-            className="size-11 shrink-0 rounded-full"
-            onClick={onBack}
-            aria-label="Back to Research"
-          >
-            <ArrowLeftIcon />
-          </Button>
-        )}
+        {onBack && <BackButton label="Back to Research" onClick={onBack} />}
         <div className="flex min-w-0 flex-1 flex-col">
           <h1 className="truncate text-base font-semibold tracking-tight">{mission.title}</h1>
           <p className="truncate text-xs text-muted-foreground">

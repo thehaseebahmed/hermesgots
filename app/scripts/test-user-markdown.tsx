@@ -5,7 +5,6 @@
  * the whole text is drawn at once; the Moved marker repeats the same words through the same bubble.
  */
 import assert from "node:assert/strict"
-import type { ReactNode } from "react"
 import { MemoryRouter } from "react-router"
 import test from "node:test"
 
@@ -13,27 +12,13 @@ import { MessageItem } from "@/components/chat/message-item"
 import { MovedMarker } from "@/components/chat/moved-marker"
 import type { Move } from "@/lib/hermes"
 import { ask, reply } from "./openui-kit.tsx"
-import { find, mount, settle } from "./component-kit.tsx"
-
-/** The renderer is a lazy chunk: warm it so a case is about the drawing, not about the landing. */
-async function warmed() {
-  await import("@/components/chat/markdown-renderer")
-  await settle()
-}
-
-async function mounted(element: ReactNode, body: () => void) {
-  await warmed()
-  await mount(element, async () => {
-    await settle()
-    body()
-  })
-}
+import { find, mountMarkdown } from "./component-kit.tsx"
 
 const bubble = () => find("[data-slot=bubble-content]")
 const codeIn = (root: Element | null) => root?.querySelector("[data-md-code]") ?? null
 
 test("a user's message draws its emphasis and its code span, not their syntax", async () => {
-  await mounted(
+  await mountMarkdown(
     <MessageItem message={ask("Ship **this** one, then run `npm test`")} showStats />,
     () => {
       const words = bubble()
@@ -49,7 +34,7 @@ test("a user's message draws its emphasis and its code span, not their syntax", 
 })
 
 test("a user's message draws a fenced block as a block of code", async () => {
-  await mounted(
+  await mountMarkdown(
     <MessageItem message={ask("This fails:\n\n```ts\nconst x = 1\n```")} showStats />,
     () => {
       const block = bubble()?.querySelector("div[data-md-code]")
@@ -61,7 +46,7 @@ test("a user's message draws a fenced block as a block of code", async () => {
 })
 
 test("the code on a bubble is drawn on the bubble's own colour, not the page's", async () => {
-  await mounted(<MessageItem message={ask("Run `npm test`")} showStats />, () => {
+  await mountMarkdown(<MessageItem message={ask("Run `npm test`")} showStats />, () => {
     const block = codeIn(bubble())
     assert.ok(block?.className.includes("bg-current/15"), "a wash of the words' own colour")
     assert.ok(
@@ -72,7 +57,7 @@ test("the code on a bubble is drawn on the bubble's own colour, not the page's",
 })
 
 test("the typed line breaks ride the elements, not the blank lines between them", async () => {
-  await mounted(<MessageItem message={ask("one\ntwo\n\nthree")} showStats />, () => {
+  await mountMarkdown(<MessageItem message={ask("one\ntwo\n\nthree")} showStats />, () => {
     // jsdom lays nothing out, so what a case can hold is the chain the rule lives in: the wrapper
     // normalises, so react-markdown's newline between blocks paints nothing, and every element
     // under it keeps pre-wrap, so the break the reader typed stays in the paragraph. The pixels
@@ -91,21 +76,20 @@ test("the typed line breaks ride the elements, not the blank lines between them"
 })
 
 test("a bubble's bullets sit tight, and a reply's keep the page's rhythm", async () => {
-  await mounted(<MessageItem message={ask("- one\n- two\n- three")} showStats />, () => {
+  await mountMarkdown(<MessageItem message={ask("- one\n- two\n- three")} showStats />, () => {
     const words = find("[data-slot=markdown]")
     assert.match(words?.className ?? "", /\[&_li\]:my-0\b/, "bullets on their line height alone")
     assert.match(words?.className ?? "", /\[&_ul\]:my-0/, "and no block gap of their own")
     assert.equal(words?.querySelectorAll("li").length, 3, "the list is drawn")
   })
-  await mount(<MessageItem message={reply("r-2", "- one\n- two")} showStats />, async () => {
-    await settle()
+  await mountMarkdown(<MessageItem message={reply("r-2", "- one\n- two")} showStats />, () => {
     const page = find("[data-slot=markdown]")
     assert.match(page?.className ?? "", /\[&_li\]:my-1/, "a reply keeps the page's item spacing")
   })
 })
 
 test("a reply's code keeps the page's fill, so the two tones can disagree", async () => {
-  await mounted(<MessageItem message={reply("r-1", "Run `npm test`")} showStats />, () => {
+  await mountMarkdown(<MessageItem message={reply("r-1", "Run `npm test`")} showStats />, () => {
     const block = codeIn(find("[data-slot=markdown]"))
     assert.ok(block?.className.includes("bg-muted"), "the reply is drawn on the page")
     assert.ok(!block?.className.includes("bg-current/15"), "and not on a bubble's wash")
@@ -113,7 +97,7 @@ test("a reply's code keeps the page's fill, so the two tones can disagree", asyn
 })
 
 test("a control: a message with no markdown draws as the one paragraph it is", async () => {
-  await mounted(<MessageItem message={ask("Just words")} showStats />, () => {
+  await mountMarkdown(<MessageItem message={ask("Just words")} showStats />, () => {
     assert.equal(
       bubble()?.querySelector("p")?.textContent,
       "Just words",
@@ -132,7 +116,7 @@ test("the Moved marker repeats the message through the same bubble", async () =>
     undoable: true,
     new: false,
   }
-  await mounted(
+  await mountMarkdown(
     <MemoryRouter initialEntries={["/c/c-1"]}>
       <MovedMarker move={move} profileId="bot-1" title="A thread" />
     </MemoryRouter>,
@@ -151,7 +135,7 @@ test("the Moved marker repeats the message through the same bubble", async () =>
 test("a steer draws its words through the same bubble", async () => {
   const steered = reply("r-2", "Before the steer. After it.")
   steered.steers = [{ id: "steer-1", text: "Stop **there**", contentOffset: 18, at: 3 }]
-  await mounted(<MessageItem message={steered} showStats />, () => {
+  await mountMarkdown(<MessageItem message={steered} showStats />, () => {
     const said = find("[data-slot=bubble-content]")
     assert.ok(said?.querySelector("strong"), "the steer's words are drawn as markdown")
     assert.equal(said?.querySelector("p")?.textContent, "Stop there", "and not their syntax")

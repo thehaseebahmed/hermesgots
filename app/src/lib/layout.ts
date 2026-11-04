@@ -18,3 +18,9 @@ export const COLUMN_BOX = "mx-auto w-full max-w-3xl"
  * (ADR 0058). A card fills COLUMN_BOX to its own gutters instead (ADR 0047).
  */
 export const REPLY_INSET = "px-1"
+
+/** The reply's edge as a whole, so every part of a reply and the thread draw one column. */
+export const REPLY_EDGE = `${REPLY_INSET} ${COLUMN}`
+
+/** The size a reply's words are drawn at — the measure a screen copying the look must share. */
+export const REPLY_TEXT = "text-[15px] leading-relaxed"

@@ -4,7 +4,6 @@ import { useTheme } from "next-themes"
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router"
 import {
   ActivityIcon,
-  ArrowLeftIcon,
   AudioLinesIcon,
   BellIcon,
   BellRingIcon,
@@ -39,6 +38,7 @@ import {
 import { toast } from "sonner"
 
 import { AccountSettings } from "@/components/account-settings"
+import { BackButton } from "@/components/back-button"
 import { CommunitySettings } from "@/components/community-settings"
 import { BotSettingsList, BotSettingsPage } from "@/components/bot-settings"
 import type { BotSub } from "@/lib/bot-subs"
@@ -46,6 +46,7 @@ import { botPageOf, botPath, botTabOf, botTabPath, type BotPage } from "@/lib/bo
 import { botSubOf, botSubPath } from "@/lib/bot-subs"
 import { Banner } from "@/components/banner"
 import { NetworkLogScreen } from "@/components/network-log"
+import { DeveloperOnly } from "@/components/developer-only"
 import { Bot } from "@/components/bot"
 import { OnlineDot } from "@/components/bot-card"
 import { LinkSheet } from "@/components/link-bots"
@@ -122,9 +123,12 @@ const SECTIONS: Record<string, { title: string; render: () => ReactNode }> = {
   community: { title: "Community", render: () => <CommunitySettings /> },
   notifications: { title: NOTIFICATION_SETTINGS, render: () => <NotificationTypes /> },
   data: { title: "Local data", render: () => <DataSettings /> },
-  developer: { title: "Developer", render: () => <DeveloperSettings /> },
-  network: { title: "Network log", render: () => <DeveloperOnly /> },
+  developer: { title: "Developer", render: () => developerOnly(<DeveloperSettings />) },
+  network: { title: "Network log", render: () => developerOnly(<NetworkLogScreen />) },
 }
+
+/** A section behind Developer's switch: Developer itself, and what it holds. */
+const developerOnly = (section: ReactNode) => <DeveloperOnly>{section}</DeveloperOnly>
 
 /** Which section the menu shows as open, and whether picking one swaps it in place. */
 const MenuContext = createContext<{ active?: string; replace: boolean }>({ replace: false })
@@ -206,6 +210,7 @@ export function SettingsPage() {
           className="w-90 flex-none border-r min-[1200px]:w-103"
           leading={
             <BackButton
+              label="Back"
               onClick={() => navigate("/settings", { replace: true, state: { quiet: true } })}
             />
           }
@@ -228,7 +233,7 @@ export function SettingsPage() {
           }
           leading={
             botSub && botTab ? (
-              <BackButton onClick={() => up(botTabPath(bot.id, botTab))} />
+              <BackButton label="Back" onClick={() => up(botTabPath(bot.id, botTab))} />
             ) : undefined
           }
           className="duration-200 ease-out motion-safe:animate-in motion-safe:fade-in-0"
@@ -270,7 +275,10 @@ function BotListScreen({
 }) {
   const { up } = useNav()
   return (
-    <Screen title={profile.name} leading={<BackButton onClick={() => up("/settings")} />}>
+    <Screen
+      title={profile.name}
+      leading={<BackButton label="Back" onClick={() => up("/settings")} />}
+    >
       <BotSettingsList profile={profile} canDelete={canDelete} onDeleted={onDeleted} />
     </Screen>
   )
@@ -281,7 +289,10 @@ function BotPageScreen({ profile, page, sub }: { profile: Profile; page: BotPage
   const { up } = useNav()
   const back = sub ? botTabPath(profile.id, page.segment) : botPath(profile.id)
   return (
-    <Screen title={sub?.title ?? page.title} leading={<BackButton onClick={() => up(back)} />}>
+    <Screen
+      title={sub?.title ?? page.title}
+      leading={<BackButton label="Back" onClick={() => up(back)} />}
+    >
       <BotSettingsPage profile={profile} tab={page.segment} sub={sub} />
     </Screen>
   )
@@ -688,14 +699,6 @@ export function DeveloperSettings() {
   )
 }
 
-/** The log behind Developer's switch: its section is not reachable by URL with the switch off. */
-function DeveloperOnly() {
-  const settings = useLiveQuery(getSettings, [])
-  // Nothing drawn while the device's settings are still being read: a redirect then would be a guess.
-  if (!settings) return null
-  return settings.developer ? <NetworkLogScreen /> : <Navigate to="/settings" replace />
-}
-
 function TestPushRow() {
   const { on } = usePush()
   const [busy, setBusy] = useState(false)
@@ -756,25 +759,10 @@ function SectionScreen({ section }: { section: string }) {
   return (
     <Screen
       title={SECTIONS[section].title}
-      leading={<BackButton onClick={() => up("/settings")} />}
+      leading={<BackButton label="Back" onClick={() => up("/settings")} />}
     >
       {SECTIONS[section].render()}
     </Screen>
-  )
-}
-
-/** The round back control every pushed Settings screen wears. */
-function BackButton({ onClick }: { onClick: () => void }) {
-  return (
-    <Button
-      variant="outline"
-      size="icon-lg"
-      className="size-11 rounded-full"
-      onClick={onClick}
-      aria-label="Back"
-    >
-      <ArrowLeftIcon />
-    </Button>
   )
 }
 

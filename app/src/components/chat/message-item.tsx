@@ -36,7 +36,7 @@ import type { Compaction } from "@/lib/hermes"
 import type { FootLine } from "@/lib/thinking"
 import { describeActivity, formatCount, formatDuration, WAITING_FOR_APPROVAL } from "@/lib/format"
 import { NOT_SENT } from "@/lib/words"
-import { COLUMN, REPLY_INSET } from "@/lib/layout"
+import { COLUMN, REPLY_EDGE, REPLY_INSET, REPLY_TEXT } from "@/lib/layout"
 import { mediaCell, mediaKind, type MediaCell } from "@/lib/media-kind"
 import { mediaImages } from "@/lib/media-parts"
 import { attachmentSources, mediaRead, useMediaSources } from "@/lib/media-source"
@@ -840,7 +840,7 @@ function AssistantRow({
   children?: ReactNode
 }) {
   // Every part but a card stands on the reply's edge; a card fills its own gutters (ADR 0047).
-  const edge = cn(REPLY_INSET, COLUMN)
+  const edge = REPLY_EDGE
   return (
     <MessageRow align="start">
       {/* Above the reply's own flow, not in it: a routine's line belongs to the words under it, so
@@ -907,7 +907,7 @@ function AssistantRow({
                 </div>
               )
             return (
-              <Markdown key={part.at} className={cn(edge, "text-[15px] leading-relaxed")}>
+              <Markdown key={part.at} className={cn(edge, REPLY_TEXT)}>
                 {part.text}
               </Markdown>
             )

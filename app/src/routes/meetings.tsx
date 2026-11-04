@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router"
 import {
-  ArrowLeftIcon,
   ArrowUpIcon,
   AudioLinesIcon,
   CheckIcon,
@@ -126,6 +125,7 @@ import { createSignal } from "@/lib/store"
 import { useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { Chip } from "@/components/chip"
+import { BackButton } from "@/components/back-button"
 
 const message = (error: unknown, fallback: string) =>
   error instanceof Error && error.message ? error.message : fallback
@@ -167,20 +167,6 @@ function Header({
         {actions}
       </div>
     </header>
-  )
-}
-
-function BackButton({ onClick, label }: { onClick: () => void; label: string }) {
-  return (
-    <Button
-      variant="outline"
-      size="icon-lg"
-      className="size-11 shrink-0 rounded-full"
-      onClick={onClick}
-      aria-label={label}
-    >
-      <ArrowLeftIcon />
-    </Button>
   )
 }
 

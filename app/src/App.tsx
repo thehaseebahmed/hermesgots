@@ -49,6 +49,9 @@ const SettingsPage = lazy(() =>
 const ChatNextPage = lazy(() =>
   import("@/chat-next/page").then((m) => ({ default: m.ChatNextPage })),
 )
+const MarkdownDemoPage = lazy(() =>
+  import("@/routes/demos/markdown").then((m) => ({ default: m.MarkdownDemoPage })),
+)
 
 /** Computed colours come back as oklch(), which browser chrome may not parse; hex always works. */
 function toHex(color: string) {
@@ -122,6 +125,7 @@ function AppRoutes() {
         <Route path="settings/:section?/:botId?/:tab?/:sub?/:leaf?" element={<SettingsPage />} />
         <Route path="bots" element={<BotsPage />} />
         <Route path="share" element={<SharePage />} />
+        <Route path="demos/markdown" element={<MarkdownDemoPage />} />
         {import.meta.env.DEV ? <Route path="next" element={<ChatNextPage />} /> : null}
         <Route path="*" element={<ChatPage slot="route" />} />
       </Route>

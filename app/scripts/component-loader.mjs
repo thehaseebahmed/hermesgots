@@ -57,12 +57,24 @@ export async function resolve(specifier, context, next) {
   // Both its spellings count — a package's (`leaflet/dist/leaflet.css`) and its own (`./map.css`),
   // which would otherwise resolve to a file Node has no loader for.
   if (specifier.endsWith(".css")) return { url: "data:text/javascript,", shortCircuit: true }
-  const found = locate(specifier, context.parentURL ? fileURLToPath(context.parentURL) : root)
+  const parent = context.parentURL ? fileURLToPath(context.parentURL) : root
+  // `?raw` is Vite's: an asset imported as the string it holds.
+  if (specifier.endsWith("?raw")) {
+    const found = locate(specifier.slice(0, -"?raw".length), parent)
+    if (found) return { url: `${pathToFileURL(found).href}?raw`, shortCircuit: true }
+    return next(specifier, context)
+  }
+  const found = locate(specifier, parent)
   if (found) return { url: pathToFileURL(found).href, shortCircuit: true }
   return next(specifier, context)
 }
 
 export async function load(url, context, next) {
+  // `fileURLToPath` drops the query, so the read is of the file the specifier named.
+  if (url.startsWith("file:") && url.endsWith("?raw")) {
+    const text = await readFile(fileURLToPath(url), "utf8")
+    return { format: "module", source: `export default ${JSON.stringify(text)}`, shortCircuit: true }
+  }
   if (!url.startsWith("file:") || !/\.(ts|tsx)$/.test(url)) return next(url, context)
   const filename = fileURLToPath(url)
   const raw = await readFile(filename, "utf8")

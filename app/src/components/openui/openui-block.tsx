@@ -2,6 +2,7 @@ import { memo, useEffect, useRef } from "react"
 import { Renderer } from "@openuidev/react-lang"
 
 import { Markdown } from "@/components/chat/markdown"
+import { REPLY_TEXT } from "@/lib/layout"
 import { INFO } from "@/lib/openui-block.ts"
 import type { InterfaceDraw } from "@/lib/openui-thread.ts"
 import { noteFailure } from "@/lib/report"
@@ -63,8 +64,7 @@ function OpenUIBlock(props: Props) {
     noteFailure("openui block", failure)
   }, [props.streaming, answer, failure])
   if (answer === "nothing") return null
-  if (answer === "code")
-    return <Markdown className="text-[15px] leading-relaxed">{fenced(props.source)}</Markdown>
+  if (answer === "code") return <Markdown className={REPLY_TEXT}>{fenced(props.source)}</Markdown>
   return (
     <Renderer.Root response={props.source} library={library} isStreaming={props.streaming}>
       <Renderer.Content className="w-full min-w-0 space-y-3" />

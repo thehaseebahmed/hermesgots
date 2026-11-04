@@ -982,3 +982,13 @@ export function afkHost({
   const state = () => ({ chosen, words, source })
   return { calls, fetch, library, state }
 }
+
+export async function warmMarkdown() {
+  await import("@/components/chat/markdown-renderer")
+  await settle()
+}
+
+export async function mountMarkdown(element: React.ReactNode, body: () => Promise<void>) {
+  await warmMarkdown()
+  await mount(element, body)
+}

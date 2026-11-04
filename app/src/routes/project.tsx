@@ -3,7 +3,6 @@ import { useLiveQuery } from "dexie-react-hooks"
 import {
   ArchiveIcon,
   ArchiveRestoreIcon,
-  ArrowLeftIcon,
   ChevronUpIcon,
   EllipsisIcon,
   MoonStarIcon,
@@ -64,6 +63,7 @@ import { usePoll } from "@/lib/poll"
 import { deleteProject, updateProject, type HermesProject } from "@/lib/hermes"
 import { readProjects, useProjects } from "@/lib/projects"
 import { projectRepos } from "@/lib/workspace"
+import { BackButton } from "@/components/back-button"
 
 /**
  * One Hermes Project: its goal and repos, then its library, pull requests and usage. Its sessions
@@ -170,19 +170,7 @@ export function ProjectPage() {
         title={project?.name ?? ""}
         subtitle={subtitle}
         showBot={false}
-        leading={
-          beside ? null : (
-            <Button
-              variant="outline"
-              size="icon-lg"
-              className="size-11 rounded-full"
-              onClick={back}
-              aria-label="Back to Projects"
-            >
-              <ArrowLeftIcon />
-            </Button>
-          )
-        }
+        leading={beside ? null : <BackButton label="Back to Projects" onClick={back} />}
         actions={
           ready && (
             <DropdownMenu>
