@@ -452,6 +452,10 @@ _Avoid_: issues, comments, results
 A task whose pull request is open and waiting on the user.
 _Avoid_: pending, awaiting merge, PR open
 
+**Watermark**:
+The one line Gots leaves at the bottom of every pull request description it writes, naming Gots, its site, and that it is a Hermes plugin. The tool writes it, not the model.
+_Avoid_: footer, signature, attribution block, branding, co-author line, byline
+
 **gots-got-it**:
 The mark Gots leaves on a task it has claimed.
 _Avoid_: claimed, in-progress, assigned, taken

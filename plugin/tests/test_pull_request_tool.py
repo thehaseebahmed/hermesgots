@@ -56,6 +56,48 @@ class _Base(unittest.TestCase):
         ):
             return json.loads(ship.handle(args, task_id="s1", session_id="s1"))
 
+    def _ship(self, body=None, task=None, repo_root=None):
+        """The payload a ship POSTs to GitHub, and the notify mock, from a fake host."""
+        sent = []
+
+        def request(path, auth, method="GET", data=None):
+            sent.append((path, method, data))
+            return {"number": 7, "html_url": "https://github.com/o/r/pull/7", "state": "open", "draft": True}
+
+        record = _record(self.tmp)
+        record["task"] = task
+        if repo_root:
+            record["repos"][0] = {**record["repos"][0], "repo_root": repo_root}
+        with (
+            patch("plugin.ship.status", return_value=[_state(changed=True)]),
+            patch("plugin.ship._commit", return_value="abc1234"),
+            patch("plugin.ship._repo_status", return_value=_state(changed=True)),
+            patch("plugin.ship._push"),
+            patch("plugin.ship._lock") as lock,
+            patch("plugin.github.pull_request", return_value=None),
+            patch("plugin.github.token", return_value=("tok", "u")),
+            patch("plugin.github.origin_repo", return_value=repo_root or "o/r"),
+            patch("plugin.github._request", side_effect=request),
+            patch("plugin.push.notify") as notify,
+        ):
+            lock.return_value.acquire.return_value = True
+            ship.ship(Path(self.tmp), "s1", record, "msg", "T", body, True, False)
+        created = [call for call in sent if call[0].endswith("/pulls") and call[1] == "POST"]
+        return (created[0][2] if created else None), notify
+
+    def _updated(self, title=None, body=None, record=None):
+        """The body an update sends to GitHub."""
+        pr = {"number": 7, "state": "open", "title": "old", "url": "u"}
+        with (
+            patch("plugin.github.token", return_value=("tok", "u")),
+            patch("plugin.github.origin_repo", return_value="o/r"),
+            patch("plugin.github.pull_request", return_value=pr),
+            patch("plugin.github.update_pull_request", return_value=pr) as upd,
+            patch("plugin.github.forget_pull_request"),
+        ):
+            ship.update(Path(self.tmp), record or _record(self.tmp), title, body)
+        return upd.call_args.args[3]
+
 
 class DraftTests(_Base):
     def test_open_pr_is_always_a_draft_even_if_asked_otherwise(self):
@@ -188,34 +230,6 @@ TASK = {
 
 
 class AfkTaskTests(_Base):
-    def _ship(self, task=None, repo_root=None, body=None):
-        sent = []
-
-        def request(path, auth, method="GET", data=None):
-            sent.append((path, method, data))
-            return {"number": 7, "html_url": "https://github.com/o/r/pull/7", "state": "open", "draft": True}
-
-        record = _record(self.tmp)
-        record["task"] = task
-        if repo_root:
-            record["repos"][0] = {**record["repos"][0], "repo_root": repo_root}
-        with (
-            patch("plugin.ship.status", return_value=[_state(changed=True)]),
-            patch("plugin.ship._commit", return_value="abc1234"),
-            patch("plugin.ship._repo_status", return_value=_state(changed=True)),
-            patch("plugin.ship._push"),
-            patch("plugin.ship._lock") as lock,
-            patch("plugin.github.pull_request", return_value=None),
-            patch("plugin.github.token", return_value=("tok", "u")),
-            patch("plugin.github.origin_repo", return_value=repo_root or "o/r"),
-            patch("plugin.github._request", side_effect=request),
-            patch("plugin.push.notify") as notify,
-        ):
-            lock.return_value.acquire.return_value = True
-            ship.ship(Path(self.tmp), "s1", record, "msg", "T", body, True, False)
-        created = [call for call in sent if call[0].endswith("/pulls") and call[1] == "POST"]
-        return (created[0][2] if created else None), notify
-
     def test_the_task_its_repository_works_is_closed_by_the_merge(self):
         data, _ = self._ship(task=TASK)
         self.assertIs(data["draft"], True, "the pull request stays a draft")
@@ -251,48 +265,21 @@ class AfkTaskTests(_Base):
 
 
 class AfkUpdateTests(_Base):
-    def test_updating_the_body_keeps_the_task_reference(self):
-        pr = {"number": 7, "state": "open", "title": "old", "url": "u"}
+    def _task_record(self, task=TASK):
         record = _record(self.tmp)
-        record["task"] = TASK
-        with (
-            patch("plugin.github.token", return_value=("tok", "u")),
-            patch("plugin.github.origin_repo", return_value="o/r"),
-            patch("plugin.github.pull_request", return_value=pr),
-            patch("plugin.github.update_pull_request", return_value=pr) as upd,
-            patch("plugin.github.forget_pull_request"),
-        ):
-            ship.update(Path(self.tmp), record, "new", "Body.")
-        self.assertIn("Closes #265", upd.call_args.args[3])
+        record["task"] = task
+        return record
+
+    def test_updating_the_body_keeps_the_task_reference(self):
+        self.assertIn("Closes #265", self._updated("new", "Body.", self._task_record()))
 
     def test_updating_a_body_that_already_names_the_task_does_not_say_it_twice(self):
-        pr = {"number": 7, "state": "open", "title": "old", "url": "u"}
-        record = _record(self.tmp)
-        record["task"] = TASK
-        with (
-            patch("plugin.github.token", return_value=("tok", "u")),
-            patch("plugin.github.origin_repo", return_value="o/r"),
-            patch("plugin.github.pull_request", return_value=pr),
-            patch("plugin.github.update_pull_request", return_value=pr) as upd,
-            patch("plugin.github.forget_pull_request"),
-        ):
-            ship.update(Path(self.tmp), record, None, "Body.\n\nCloses #265")
-        self.assertEqual(upd.call_args.args[3].count("Closes #265"), 1)
-
+        body = self._updated(None, "Body.\n\nCloses #265", self._task_record())
+        self.assertEqual(body.count("Closes #265"), 1)
 
     def test_a_body_closing_a_longer_number_still_closes_this_task(self):
-        pr = {"number": 7, "state": "open", "title": "old", "url": "u"}
-        record = _record(self.tmp)
-        record["task"] = {**TASK, "number": 26}
-        with (
-            patch("plugin.github.token", return_value=("tok", "u")),
-            patch("plugin.github.origin_repo", return_value="o/r"),
-            patch("plugin.github.pull_request", return_value=pr),
-            patch("plugin.github.update_pull_request", return_value=pr) as upd,
-            patch("plugin.github.forget_pull_request"),
-        ):
-            ship.update(Path(self.tmp), record, None, "Body.\n\nCloses #265")
-        self.assertIn("Closes #26", upd.call_args.args[3].splitlines())
+        record = self._task_record({**TASK, "number": 26})
+        self.assertIn("Closes #26", self._updated(None, "Body.\n\nCloses #265", record).splitlines())
 
 
 class UpdateTests(_Base):
@@ -306,7 +293,8 @@ class UpdateTests(_Base):
             patch("plugin.github.forget_pull_request"),
         ):
             results = ship.update(Path(self.tmp), _record(self.tmp), "new", "body")
-        upd.assert_called_once_with("o/r", 7, "new", "body", "tok")
+        self.assertEqual(upd.call_args.args[:3], ("o/r", 7, "new"))
+        self.assertTrue(upd.call_args.args[3].endswith(ship.PR_MARK))
         self.assertEqual(results[0]["pr"]["title"], "new")
 
     def test_update_without_open_pr_says_so(self):
@@ -321,6 +309,162 @@ class UpdateTests(_Base):
     def test_update_needs_title_or_body(self):
         data = self._call({"action": "update"})
         self.assertIn("needs a title or a body", data["error"])
+
+
+class WatermarkTests(_Base):
+    """The mark a description ends with is the tool's to write, on both paths that write one."""
+
+    def _created(self, body=None, task=None):
+        return self._ship(body=body, task=task)[0]["body"]
+
+    def _rules(self, body):
+        return [line.strip() for line in body.splitlines() if line.strip() in ("---", "***", "___")]
+
+    def test_every_description_ends_with_the_mark_under_its_own_rule(self):
+        body = self._created("## Summary\n\nWork.")
+        self.assertTrue(body.endswith(f"---\n\n{ship.PR_MARK}"))
+        self.assertEqual(body.count(ship.PR_MARK), 1)
+
+    def test_a_mark_the_run_wrote_is_replaced_not_kept_beside_the_tools(self):
+        body = self._created("## Summary\n\nWork.\n\nGenerated by Gots <someone@example.com>")
+        self.assertEqual(body.count(ship.PR_MARK), 1)
+        self.assertNotIn("someone@example.com", body)
+        self.assertTrue(body.endswith(ship.PR_MARK))
+
+    def test_prose_that_names_the_product_is_left_alone(self):
+        said = "Generated by Gots during the migration of the auth module."
+        body = self._created(f"## Summary\n\n{said}\n\nWork.")
+        self.assertIn(said, body)
+        self.assertEqual(body.count(ship.PR_MARK), 1)
+
+    def test_a_mark_the_body_bulleted_is_replaced(self):
+        body = self._created(f"## Summary\n\nWork.\n\n- {ship.PR_MARK}")
+        self.assertEqual(body.count(ship.PR_MARK), 1)
+        self.assertTrue(body.endswith(ship.PR_MARK))
+
+    def test_the_mark_lands_outside_an_unterminated_fence(self):
+        body = self._created("## Summary\n\n```python\nx = 1")
+        self.assertTrue(body.endswith(f"```\n\n---\n\n{ship.PR_MARK}"))
+
+    def test_the_mark_lands_outside_an_unclosed_comment(self):
+        body = self._created("## Summary\n\n<!-- a note for the reviewer")
+        self.assertTrue(body.endswith(f"-->\n\n---\n\n{ship.PR_MARK}"))
+
+    def test_a_fenced_example_of_the_mark_is_left_alone(self):
+        body = self._created(f"## Summary\n\nWork.\n\n```\n{ship.PR_MARK}\n```")
+        self.assertEqual(body.count(ship.PR_MARK), 2)
+        self.assertTrue(body.endswith(ship.PR_MARK))
+
+    def test_the_older_mark_is_replaced_rather_than_stacked(self):
+        older = "Generated by [Gots Code](https://hermesgots.dev), a Hermes plugin."
+        body = self._created(f"## Summary\n\nWork.\n\n---\n\n{older}")
+        self.assertNotIn("Gots Code", body)
+        self.assertEqual(body.count(ship.PR_MARK), 1)
+
+    def test_a_description_that_already_carries_the_mark_keeps_only_one(self):
+        body = self._created(f"## Summary\n\nWork.\n\n---\n\n{ship.PR_MARK}")
+        self.assertEqual(body.count(ship.PR_MARK), 1)
+        self.assertTrue(body.endswith(ship.PR_MARK))
+        self.assertEqual(self._rules(body), ["---"])
+
+    def test_the_closing_line_stands_above_the_mark(self):
+        body = self._created("Work.", task=TASK)
+        self.assertLess(body.index("Closes #265"), body.index(ship.PR_MARK))
+        self.assertTrue(body.endswith(ship.PR_MARK))
+
+    def test_the_closing_line_comes_under_no_second_rule(self):
+        body = self._created("Work.\n\n---", task=TASK)
+        self.assertEqual(self._rules(body), ["---"])
+        self.assertLess(body.index("Closes #265"), body.index(ship.PR_MARK))
+
+    def test_a_mark_the_run_wrote_without_brackets_is_taken_out(self):
+        body = self._created("## Summary\n\nWork.\n\nGenerated by Gots someone@example.com")
+        self.assertNotIn("someone@example.com", body)
+        self.assertEqual(body.count(ship.PR_MARK), 1)
+
+    def test_a_mark_buried_mid_paragraph_is_left_as_text(self):
+        """The rule reads lines: a copy inside a sentence is prose, and the description then has two."""
+        body = self._created(f"Work. {ship.PR_MARK} and more.")
+        self.assertEqual(body.count(ship.PR_MARK), 2)
+
+    def test_prose_that_mentions_a_fence_is_not_closed_for_it(self):
+        body = self._created("## Summary\n\nUse ``` to open a fence in markdown.")
+        self.assertEqual(body.count("```"), 1)
+        self.assertTrue(body.endswith(ship.PR_MARK))
+
+    def test_a_tilde_fence_is_a_fence_too(self):
+        body = self._created(f"## Summary\n\n~~~\n{ship.PR_MARK}\n~~~")
+        self.assertEqual(body.count(ship.PR_MARK), 2)
+
+    def test_an_update_carries_the_mark_too(self):
+        body = self._updated(body="Body.")
+        self.assertTrue(body.endswith(ship.PR_MARK))
+        self.assertEqual(body.count(ship.PR_MARK), 1)
+
+    def test_a_title_only_update_leaves_the_body_alone(self):
+        self.assertIsNone(self._updated(title="new"))
+
+    def test_the_mark_carries_no_address(self):
+        body = self._created("Work.")
+        self.assertNotIn("@", body)
+        self.assertNotIn("noreply", body)
+        self.assertTrue(body.endswith(ship.PR_MARK))
+
+
+class CoAuthorTests(_Base):
+    """Gots is credited as a co-author on the commits it writes, beside the person who authors them."""
+
+    def _message(self, config_email):
+        sent = []
+
+        def fake_run(tree, args, env=None):
+            sent.append(args)
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        def fake_git(tree, *args):
+            value = config_email if args[:2] == ("config", "user.email") else "Haseeb Ahmed"
+            return MagicMock(returncode=0, stdout=f"{value}\n", stderr="")
+
+        with (
+            patch("plugin.ship._git", side_effect=fake_git),
+            patch("plugin.ship._run", side_effect=fake_run),
+        ):
+            ship._commit(Path(self.tmp), self.tmp, "feat: a change")
+        commit = [args for args in sent if args and args[0] == "commit"][0]
+        return commit[commit.index("-m") + 1]
+
+    def test_the_person_authors_and_gots_is_named_beside_them(self):
+        message = self._message("haseeb@example.com")
+        self.assertEqual(
+            message,
+            "feat: a change\n\nCo-authored-by: Gots <342030690+gotsfather@users.noreply.github.com>",
+        )
+
+    def test_the_trailer_does_not_depend_on_the_hosts_account(self):
+        """No token, no API call: the credit is the plugin's own, so a server that can't read its
+        account still writes it."""
+        with patch("plugin.ship._account") as account:
+            message = self._message("haseeb@example.com")
+        account.assert_not_called()
+        self.assertIn(ship.CO_AUTHOR_EMAIL, message)
+
+    def test_a_commit_the_account_authors_itself_names_no_co_author(self):
+        message = self._message(ship.CO_AUTHOR_EMAIL)
+        self.assertEqual(message, "feat: a change")
+
+    def test_a_second_credit_changes_nothing(self):
+        once = ship._credit("feat: x", "someone@example.com")
+        self.assertEqual(ship._credit(once, "someone@example.com").count("Co-authored-by"), 1)
+
+    def test_a_stale_credit_is_replaced_rather_than_kept_beside_the_tools(self):
+        message = ship._credit("feat: x\n\nCo-authored-by: Gots Code <old@example.com>", "someone@example.com")
+        self.assertNotIn("old@example.com", message)
+        self.assertEqual(message.count("Co-authored-by"), 1)
+
+    def test_a_credit_naming_another_account_keeps_its_line(self):
+        message = ship._credit("feat: x\n\nCo-authored-by: Gotsfather <o@example.com>", "someone@example.com")
+        self.assertIn("Gotsfather", message)
+        self.assertEqual(message.count("Co-authored-by"), 2)
 
 
 class RefusalTests(_Base):
